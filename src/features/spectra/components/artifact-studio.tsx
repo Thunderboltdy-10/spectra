@@ -181,35 +181,50 @@ import {
   formatShortDate,
   linkedArtifacts,
 } from "./spectra-view-model";
-const DocumentStudio = dynamic(() =>
-  import("./document-studio").then((module) => module.DocumentStudio),
+function StudioTypePlaceholder() {
+  return <div className="min-h-0 min-w-0 flex-1" aria-hidden />;
+}
+
+const DocumentStudio = dynamic(
+  () => import("./document-studio").then((module) => module.DocumentStudio),
+  { loading: StudioTypePlaceholder },
 );
-const FlashcardStudio = dynamic(() =>
-  import("./flashcard-studio").then((module) => module.FlashcardStudio),
+const FlashcardStudio = dynamic(
+  () => import("./flashcard-studio").then((module) => module.FlashcardStudio),
+  { loading: StudioTypePlaceholder },
 );
-const QuizStudio = dynamic(() =>
-  import("./quiz-studio").then((module) => module.QuizStudio),
+const QuizStudio = dynamic(
+  () => import("./quiz-studio").then((module) => module.QuizStudio),
+  { loading: StudioTypePlaceholder },
 );
-const PlanStudio = dynamic(() =>
-  import("./plan-studio").then((module) => module.PlanStudio),
+const PlanStudio = dynamic(
+  () => import("./plan-studio").then((module) => module.PlanStudio),
+  { loading: StudioTypePlaceholder },
 );
-const SheetsStudio = dynamic(() =>
-  import("./sheets-studio").then((module) => module.SheetsStudio),
+const SheetsStudio = dynamic(
+  () => import("./sheets-studio").then((module) => module.SheetsStudio),
+  { loading: StudioTypePlaceholder },
 );
-const CodeStudio = dynamic(() =>
-  import("./code-studio").then((module) => module.CodeStudio),
+const CodeStudio = dynamic(
+  () => import("./code-studio").then((module) => module.CodeStudio),
+  { loading: StudioTypePlaceholder },
 );
-const PresentationStudio = dynamic(() =>
-  import("./presentation-studio").then((module) => module.PresentationStudio),
+const PresentationStudio = dynamic(
+  () =>
+    import("./presentation-studio").then((module) => module.PresentationStudio),
+  { loading: StudioTypePlaceholder },
 );
-const WhiteboardStudio = dynamic(() =>
-  import("./whiteboard-studio").then((module) => module.WhiteboardStudio),
+const WhiteboardStudio = dynamic(
+  () => import("./whiteboard-studio").then((module) => module.WhiteboardStudio),
+  { loading: StudioTypePlaceholder },
 );
-const TimetableStudio = dynamic(() =>
-  import("./timetable-studio").then((module) => module.TimetableStudio),
+const TimetableStudio = dynamic(
+  () => import("./timetable-studio").then((module) => module.TimetableStudio),
+  { loading: StudioTypePlaceholder },
 );
-const AgentFoundry = dynamic(() =>
-  import("./agent-foundry").then((module) => module.AgentFoundry),
+const AgentFoundry = dynamic(
+  () => import("./agent-foundry").then((module) => module.AgentFoundry),
+  { loading: StudioTypePlaceholder },
 );
 
 const WAVE_C_BLUEPRINTS = new Set([
@@ -2979,7 +2994,7 @@ export function ArtifactStudio({
         </div>
       </div>
     ) : (
-      <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+      <div className="flex h-full min-h-0 flex-col bg-transparent">
         <ArtifactStudioEditor
           // Editor identity must remain stable while its clean/dirty state
           // changes. A key derived from `dirtyIds` remounted this tree on the
@@ -3100,6 +3115,42 @@ function ArtifactStudioEditor({
     }),
     [artifact.content, artifact.summary, artifact.tags, artifact.title],
   );
+  useEffect(() => {
+    switch (artifact.blueprintKey) {
+      case "document":
+        void import("./document-studio");
+        break;
+      case "flashcard_deck":
+        void import("./flashcard-studio");
+        break;
+      case "quiz":
+        void import("./quiz-studio");
+        break;
+      case "planner_task":
+        void import("./plan-studio");
+        break;
+      case "sheets":
+        void import("./sheets-studio");
+        break;
+      case "code":
+        void import("./code-studio");
+        break;
+      case "presentation":
+        void import("./presentation-studio");
+        break;
+      case "whiteboard":
+        void import("./whiteboard-studio");
+        break;
+      case "timetable":
+        void import("./timetable-studio");
+        break;
+      case "agent":
+        void import("./agent-foundry");
+        break;
+      default:
+        break;
+    }
+  }, [artifact.blueprintKey]);
   const live = useArtifactLiveModel(
     artifact._id,
     artifact.blueprintKey,
@@ -3185,7 +3236,6 @@ function ArtifactStudioEditor({
     artifact.blueprintKey !== "planner_task" &&
     artifact.blueprintKey !== "thread_reference";
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const detailsPinnedRef = useRef(false);
   const [aiHighlightDismissed, setAiHighlightDismissed] = useState(false);
   const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
@@ -4645,6 +4695,7 @@ function ArtifactStudioEditor({
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
       if (
         target &&
@@ -4654,12 +4705,11 @@ function ArtifactStudioEditor({
       ) {
         return;
       }
-      // Escape dismisses one layer at a time. Anything transient that is open
-      // takes it first: closing the whole work because a dropdown had focus is
-      // how a keystroke turned into data loss.
+      // Capture while overlays still exist. A bubble listener runs after Radix
+      // closes the menu, so Escape on More would close the whole studio.
       if (
         document.querySelector(
-          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"], [role="dialog"][data-state="open"], details[open], [aria-expanded="true"][aria-haspopup]',
+          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus]',
         )
       ) {
         return;
@@ -4681,14 +4731,14 @@ function ArtifactStudioEditor({
     }
     window.addEventListener("spectra:request-artifact-close", requestClose);
     window.addEventListener("beforeunload", beforeUnload);
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     return () => {
       window.removeEventListener(
         "spectra:request-artifact-close",
         requestClose,
       );
       window.removeEventListener("beforeunload", beforeUnload);
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
     };
     // closeAfterSynchronization is declared later; dirty/panel flags already retrigger this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close handler closes over latest studio state
@@ -4990,11 +5040,7 @@ function ArtifactStudioEditor({
   const showDetails =
     detailsOpen && !compact && artifact.blueprintKey !== "planner_task";
   const contentMode = compact ? ("split" as const) : mode;
-  const editorLayoutClass = showDetails
-    ? mode === "tab"
-      ? "mx-auto grid w-[calc(100%+10px)] max-w-[1690px] gap-3 xl:grid-cols-[minmax(0,1fr)_302px]"
-      : "grid gap-3 min-[560px]:grid-cols-[minmax(0,1fr)_min(240px,38%)]"
-    : "block";
+  const editorLayoutClass = "block";
   // The scrollport's padding lives in CSS so one rule can reserve room for the
   // fixed composer for every type at once (`--spectra-composer-safe-area`).
   const mainClass = "min-h-0 flex-1";
@@ -5400,17 +5446,12 @@ function ArtifactStudioEditor({
                 icon={Maximize2}
               />
             ) : null}
-            <WorkbarMore
-              open={headerMoreOpen}
-              onOpenChange={setHeaderMoreOpen}
-              label="More work actions"
-            >
+            <WorkbarMore label="More work actions">
               {onShare ? (
                 <button
                   type="button"
                   className={workbarMenuItemClass()}
                   onClick={() => {
-                    setHeaderMoreOpen(false);
                     onShare();
                   }}
                 >
@@ -5420,10 +5461,9 @@ function ArtifactStudioEditor({
               <button
                 type="button"
                 className={workbarMenuItemClass()}
-                onClick={() => {
-                  setHeaderMoreOpen(false);
-                  setEmbedsOpen(true);
-                }}
+                  onClick={() => {
+                    setEmbedsOpen(true);
+                  }}
               >
                 <Link2 className="h-4 w-4" /> References
               </button>
@@ -5432,7 +5472,6 @@ function ArtifactStudioEditor({
                   type="button"
                   className={workbarMenuItemClass()}
                   onClick={() => {
-                    setHeaderMoreOpen(false);
                     detailsPinnedRef.current = true;
                     setDetailsOpen((open) => !open);
                   }}
@@ -5444,10 +5483,9 @@ function ArtifactStudioEditor({
               <button
                 type="button"
                 className={workbarMenuItemClass()}
-                onClick={() => {
-                  setHeaderMoreOpen(false);
-                  loadVersionHistory();
-                }}
+                  onClick={() => {
+                    loadVersionHistory();
+                  }}
               >
                 <History className="h-4 w-4" /> Version history
               </button>
@@ -5753,14 +5791,16 @@ function ArtifactStudioEditor({
             </StudioContractProvider>
           </section>
           {showDetails ? (
-            <StudioDetails
-              artifact={artifact}
-              artifacts={artifacts}
-              tagDraft={tagDraft}
-              onTagDraftChange={(value) => changeBase({ tagDraft: value })}
-              onArchive={onArchive}
-              onOpenArtifact={onOpenArtifact}
-            />
+            <div className="spectra-studio-inspector-overlay">
+              <StudioDetails
+                artifact={artifact}
+                artifacts={artifacts}
+                tagDraft={tagDraft}
+                onTagDraftChange={(value) => changeBase({ tagDraft: value })}
+                onArchive={onArchive}
+                onOpenArtifact={onOpenArtifact}
+              />
+            </div>
           ) : null}
         </div>
       </section>
@@ -5967,6 +6007,7 @@ export function RichTextFormatBar({
   disabled,
   label = "Text formatting",
   withTextStyle = false,
+  inserts = true,
   trailing,
 }: {
   editor: TiptapEditor | null;
@@ -5974,6 +6015,11 @@ export function RichTextFormatBar({
   label?: string;
   /** Adds the Text/Heading 1-3 selector. Documents have headings; captions do not. */
   withTextStyle?: boolean;
+  /**
+   * Equation and other insert verbs. Field-attached bars keep these; a
+   * selection toolbar does not, because slash and the block handle insert.
+   */
+  inserts?: boolean;
   /** Type-specific inserts (tables, callouts). Kept after the shared verbs. */
   trailing?: ReactNode;
 }) {
@@ -6042,13 +6088,15 @@ export function RichTextFormatBar({
           >
             <UnderlineIcon className="h-3.5 w-3.5" />
           </ToolbarTextButton>
-          <ToolbarTextButton
-            label="Strikethrough"
-            onClick={() => editor?.chain().focus().toggleStrike().run()}
-            active={editor?.isActive("strike")}
-          >
-            <span className="text-caption font-semibold line-through">S</span>
-          </ToolbarTextButton>
+          {inserts ? (
+            <ToolbarTextButton
+              label="Strikethrough"
+              onClick={() => editor?.chain().focus().toggleStrike().run()}
+              active={editor?.isActive("strike")}
+            >
+              <span className="text-caption font-semibold line-through">S</span>
+            </ToolbarTextButton>
+          ) : null}
           <ToolbarButton
             label="Bullet list"
             icon={List}
@@ -6061,18 +6109,24 @@ export function RichTextFormatBar({
             active={editor?.isActive("orderedList")}
             onClick={() => editor?.chain().focus().toggleOrderedList().run()}
           />
-          <ToolbarButton
-            label="Quote"
-            icon={MessageSquare}
-            active={editor?.isActive("blockquote")}
-            onClick={() => editor?.chain().focus().toggleBlockquote().run()}
-          />
-          <ToolbarButton
-            label="Inline code"
-            icon={Code2}
-            active={editor?.isActive("code")}
-            onClick={() => editor?.chain().focus().toggleCode().run()}
-          />
+          {inserts ? (
+            <>
+              <ToolbarButton
+                label="Quote"
+                icon={MessageSquare}
+                active={editor?.isActive("blockquote")}
+                onClick={() =>
+                  editor?.chain().focus().toggleBlockquote().run()
+                }
+              />
+              <ToolbarButton
+                label="Inline code"
+                icon={Code2}
+                active={editor?.isActive("code")}
+                onClick={() => editor?.chain().focus().toggleCode().run()}
+              />
+            </>
+          ) : null}
           <ToolbarButton
             label="Link"
             icon={Link2}
@@ -6084,41 +6138,45 @@ export function RichTextFormatBar({
               setLinkOpen((open) => !open);
             }}
           />
-          <ToolbarButton
-            label="Inline equation"
-            icon={Sigma}
-            active={editor?.isActive("inlineEquation")}
-            onClick={() =>
-              editor
-                ?.chain()
-                .focus()
-                .insertContent({
-                  type: "inlineEquation",
-                  attrs: { latex: "x" },
-                })
-                .run()
-            }
-          />
-          <ToolbarTextButton
-            label="Block equation"
-            onClick={() =>
-              editor
-                ?.chain()
-                .focus()
-                .insertContent({
-                  type: "equation",
-                  attrs: {
-                    latex: "x",
-                    display: "block",
-                    alignment: "center",
-                  },
-                })
-                .run()
-            }
-            active={editor?.isActive("equation")}
-          >
-            <span className="text-micro font-semibold">fx</span>
-          </ToolbarTextButton>
+          {inserts ? (
+            <>
+              <ToolbarButton
+                label="Inline equation"
+                icon={Sigma}
+                active={editor?.isActive("inlineEquation")}
+                onClick={() =>
+                  editor
+                    ?.chain()
+                    .focus()
+                    .insertContent({
+                      type: "inlineEquation",
+                      attrs: { latex: "x" },
+                    })
+                    .run()
+                }
+              />
+              <ToolbarTextButton
+                label="Block equation"
+                onClick={() =>
+                  editor
+                    ?.chain()
+                    .focus()
+                    .insertContent({
+                      type: "equation",
+                      attrs: {
+                        latex: "x",
+                        display: "block",
+                        alignment: "center",
+                      },
+                    })
+                    .run()
+                }
+                active={editor?.isActive("equation")}
+              >
+                <span className="text-micro font-semibold">fx</span>
+              </ToolbarTextButton>
+            </>
+          ) : null}
           {trailing}
         </div>
       </fieldset>

@@ -8,6 +8,7 @@ import {
   Bold,
   ChevronDown,
   Copy,
+  Download,
   Filter,
   Italic,
   Palette,
@@ -82,7 +83,8 @@ import {
   type SheetsContent,
   type WorkbookSheet,
 } from "../sheets/model";
-import { importOds } from "../sheets/ods";
+import { exportOds, importOds } from "../sheets/ods";
+import { downloadDocumentBlob, downloadDocumentText } from "./artifact-studio-file-utils";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -115,7 +117,53 @@ const ROW_HEADER_WIDTH = 46;
 const COLUMN_HEADER_HEIGHT = 30;
 const MIN_COLUMN_WIDTH = 34;
 const MIN_ROW_HEIGHT = 20;
+const MAX_COLUMN_WIDTH = 480;
+const MAX_ROW_HEIGHT = 220;
+const CELL_INLINE_PAD = 20;
+const CELL_BLOCK_PAD = 10;
 const CHART_COLORS = ["#169b69", "#7066ed", "#db7b27", "#2f8fd2", "#b85d7a"];
+
+let sheetMeasureContext: CanvasRenderingContext2D | null | undefined;
+
+function measureSheetText(text: string, font: string) {
+  if (!text) return 0;
+  if (typeof document === "undefined") {
+    return text.length * 7;
+  }
+  if (sheetMeasureContext === undefined) {
+    sheetMeasureContext = document.createElement("canvas").getContext("2d");
+  }
+  if (!sheetMeasureContext) return text.length * 7;
+  sheetMeasureContext.font = font;
+  return sheetMeasureContext.measureText(text).width;
+}
+
+function fittedColumnWidth(contentWidth: number, hasContent: boolean) {
+  if (!hasContent) return COLUMN_WIDTH;
+  return Math.round(
+    Math.min(
+      MAX_COLUMN_WIDTH,
+      Math.max(MIN_COLUMN_WIDTH, contentWidth + CELL_INLINE_PAD),
+    ),
+  );
+}
+
+function fittedRowHeight(
+  lineCount: number,
+  fontSize: number,
+  hasContent: boolean,
+) {
+  if (!hasContent) return ROW_HEIGHT;
+  return Math.round(
+    Math.min(
+      MAX_ROW_HEIGHT,
+      Math.max(
+        MIN_ROW_HEIGHT,
+        Math.ceil(lineCount * fontSize * 1.35 + CELL_BLOCK_PAD),
+      ),
+    ),
+  );
+}
 
 /** The registry owns the empty-state words, so every surface says the same one. */
 const emptyState = getWorkDefinition("sheets").emptyState;
@@ -293,6 +341,75 @@ function usedBounds(sheet: WorkbookSheet) {
   };
 }
 
+function csvEscape(value: string) {
+  return /[",\n\r]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+}
+
+function occupiedBounds(sheet: WorkbookSheet) {
+  let rows = 1;
+  let columns = 1;
+  for (const address of Object.keys(sheet.cells)) {
+    const coordinate = parseAddress(address);
+    if (!coordinate) continue;
+    rows = Math.max(rows, coordinate.row + 1);
+    columns = Math.max(columns, coordinate.column + 1);
+  }
+  return { rows, columns };
+}
+
+function cellIsOccupied(cell?: SheetCell) {
+  return Boolean(
+    cell?.formula ||
+      (cell?.value !== undefined && cell?.value !== null && cell?.value !== ""),
+  );
+}
+
+function currentRegion(
+  sheet: WorkbookSheet,
+  origin: CellCoordinate,
+): CellRange {
+  const occupied = new Set<string>();
+  for (const [address, cell] of Object.entries(sheet.cells)) {
+    if (cellIsOccupied(cell)) occupied.add(address);
+  }
+  const originAddress = coordinateToAddress(origin);
+  if (!occupied.has(originAddress)) {
+    return { start: origin, end: origin };
+  }
+  const seen = new Set<string>();
+  const queue: CellCoordinate[] = [origin];
+  let minRow = origin.row;
+  let maxRow = origin.row;
+  let minColumn = origin.column;
+  let maxColumn = origin.column;
+  while (queue.length) {
+    const current = queue.pop()!;
+    const key = coordinateToAddress(current);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    minRow = Math.min(minRow, current.row);
+    maxRow = Math.max(maxRow, current.row);
+    minColumn = Math.min(minColumn, current.column);
+    maxColumn = Math.max(maxColumn, current.column);
+    for (const rowDelta of [-1, 0, 1]) {
+      for (const columnDelta of [-1, 0, 1]) {
+        if (rowDelta === 0 && columnDelta === 0) continue;
+        const next = {
+          row: current.row + rowDelta,
+          column: current.column + columnDelta,
+        };
+        if (next.row < 0 || next.column < 0) continue;
+        const nextKey = coordinateToAddress(next);
+        if (occupied.has(nextKey) && !seen.has(nextKey)) queue.push(next);
+      }
+    }
+  }
+  return {
+    start: { row: minRow, column: minColumn },
+    end: { row: maxRow, column: maxColumn },
+  };
+}
+
 function rangesOverlap(left: CellRange, right: CellRange) {
   const a = normalizeRange(left);
   const b = normalizeRange(right);
@@ -324,6 +441,34 @@ function interpolateHexColor(start: string, end: string, amount: number) {
     .join("")}`;
 }
 
+function chartCellValue(
+  sheet: WorkbookSheet,
+  calculated: ReturnType<typeof calculateWorkbook>,
+  row: number,
+  column: number,
+) {
+  const address = coordinateToAddress({ row, column });
+  return (
+    calculated.get(`${sheet.id}:${address}`)?.value ??
+    sheet.cells[address]?.value ??
+    null
+  );
+}
+
+function chartFirstRowIsHeader(
+  sheet: WorkbookSheet,
+  range: CellRange,
+  calculated: ReturnType<typeof calculateWorkbook>,
+) {
+  for (let column = range.start.column; column <= range.end.column; column += 1) {
+    const value = chartCellValue(sheet, calculated, range.start.row, column);
+    if (typeof value === "number") continue;
+    if (value !== null && value !== undefined && String(value).trim() !== "")
+      return true;
+  }
+  return false;
+}
+
 export function chartDataset(
   sheet: WorkbookSheet,
   chart: SheetChart,
@@ -332,49 +477,85 @@ export function chartDataset(
   const range = parseRange(chart.sourceRange.split("!").at(-1) ?? "");
   if (!range) return { data: [], keys: [] as string[], category: "Category" };
   const normalized = normalizeRange(range);
+  const hasHeader = chartFirstRowIsHeader(sheet, normalized, calculated);
   const headers: string[] = [];
   for (
     let column = normalized.start.column;
     column <= normalized.end.column;
     column += 1
   ) {
-    const address = coordinateToAddress({ row: normalized.start.row, column });
-    headers.push(
-      formatCalculatedCell(
-        sheet.cells[address],
-        calculated.get(`${sheet.id}:${address}`),
-        "en-US",
-      ) || columnName(column),
-    );
+    if (hasHeader) {
+      const address = coordinateToAddress({
+        row: normalized.start.row,
+        column,
+      });
+      headers.push(
+        formatCalculatedCell(
+          sheet.cells[address],
+          calculated.get(`${sheet.id}:${address}`),
+          "en-US",
+        ) || columnName(column),
+      );
+    } else {
+      headers.push(
+        normalized.end.column === normalized.start.column
+          ? "Value"
+          : columnName(column),
+      );
+    }
   }
   const singleSeries = headers.length === 1;
   const data = [];
-  for (
-    let row = normalized.start.row + 1;
-    row <= normalized.end.row;
-    row += 1
-  ) {
-    const entry: Record<string, string | number> = singleSeries
-      ? { Category: String(row - normalized.start.row) }
-      : {};
+  const dataStart = hasHeader ? normalized.start.row + 1 : normalized.start.row;
+  const rowCount = Math.max(0, normalized.end.row - dataStart + 1);
+  let labelColumn = -1;
+  if ((singleSeries || !hasHeader) && rowCount) {
+    for (
+      let column = normalized.start.column - 1;
+      column >= 0;
+      column -= 1
+    ) {
+      let textCount = 0;
+      for (let row = dataStart; row <= normalized.end.row; row += 1) {
+        const value = chartCellValue(sheet, calculated, row, column);
+        if (typeof value === "string" && value.trim() !== "") textCount += 1;
+      }
+      if (textCount >= Math.ceil(rowCount / 2)) {
+        labelColumn = column;
+        break;
+      }
+    }
+  }
+  for (let row = dataStart; row <= normalized.end.row; row += 1) {
+    const side =
+      labelColumn >= 0
+        ? chartCellValue(sheet, calculated, row, labelColumn)
+        : null;
+    const categoryLabel =
+      typeof side === "string" && side.trim()
+        ? side
+        : String(row - dataStart + 1);
+    const entry: Record<string, string | number> =
+      singleSeries || !hasHeader ? { Category: categoryLabel } : {};
     for (
       let column = normalized.start.column;
       column <= normalized.end.column;
       column += 1
     ) {
-      const address = coordinateToAddress({ row, column });
-      const value =
-        calculated.get(`${sheet.id}:${address}`)?.value ??
-        sheet.cells[address]?.value ??
-        null;
+      const value = chartCellValue(sheet, calculated, row, column);
       entry[headers[column - normalized.start.column]!] =
         typeof value === "number" ? value : String(value ?? "");
     }
     data.push(entry);
   }
-  return singleSeries
-    ? { data, category: "Category", keys: headers }
-    : { data, category: headers[0] ?? "Category", keys: headers.slice(1) };
+  if (singleSeries) return { data, category: "Category", keys: headers };
+  if (hasHeader)
+    return {
+      data,
+      category: headers[0] ?? "Category",
+      keys: headers.slice(1),
+    };
+  return { data, category: "Category", keys: headers };
 }
 
 function chartSummary(
@@ -420,9 +601,10 @@ function numericValuesForRange(
   const range = parseRange(chart.sourceRange.split("!").at(-1) ?? "");
   if (!range) return [];
   const normalized = normalizeRange(range);
+  const hasHeader = chartFirstRowIsHeader(sheet, normalized, calculated);
   const values: number[] = [];
   for (
-    let row = normalized.start.row + 1;
+    let row = hasHeader ? normalized.start.row + 1 : normalized.start.row;
     row <= normalized.end.row;
     row += 1
   ) {
@@ -477,6 +659,14 @@ function histogramDataset(
   }));
 }
 
+function formatChartTick(value: string | number) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  }
+  const text = String(value ?? "");
+  return text.length > 10 ? `${text.slice(0, 9)}…` : text;
+}
+
 function SheetsChartView({
   sheet,
   chart,
@@ -487,28 +677,55 @@ function SheetsChartView({
   calculated: ReturnType<typeof calculateWorkbook>;
 }) {
   const dataset = chartDataset(sheet, chart, calculated);
+  const tick = {
+    fontSize: 10,
+    fill: "var(--text-secondary)",
+    fontFamily: "inherit",
+  };
+  const axisStroke = { stroke: "var(--border-default)" };
   const common = {
     data: dataset.data,
-    margin: { top: 8, right: 16, left: 0, bottom: 4 },
+    margin: { top: 8, right: 10, left: 2, bottom: 4 },
   };
-  const axes = (
-    <>
-      <CartesianGrid stroke="var(--border-subtle)" vertical={false} />
-      <XAxis
-        dataKey={dataset.category}
-        tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
-        tickLine={false}
-        axisLine={{ stroke: "var(--border-default)" }}
-      />
-      <YAxis
-        tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
-        tickLine={false}
-        axisLine={false}
-      />
-      <ChartTooltip />
-      <Legend wrapperStyle={{ fontSize: 10 }} />
-    </>
-  );
+  const chartAxes = [
+    <CartesianGrid
+      key="grid"
+      stroke="color-mix(in oklab, var(--text-primary) 14%, transparent)"
+      vertical={false}
+    />,
+    <XAxis
+      key="x"
+      dataKey={dataset.category}
+      tick={tick}
+      tickFormatter={formatChartTick}
+      tickLine={axisStroke}
+      axisLine={axisStroke}
+      interval="preserveStartEnd"
+      angle={dataset.data.length > 5 ? -36 : 0}
+      textAnchor={dataset.data.length > 5 ? "end" : "middle"}
+      height={dataset.data.length > 5 ? 48 : 28}
+      minTickGap={12}
+    />,
+    <YAxis
+      key="y"
+      width={44}
+      tick={tick}
+      tickFormatter={formatChartTick}
+      tickLine={axisStroke}
+      axisLine={axisStroke}
+      allowDecimals
+      domain={["auto", "auto"]}
+    />,
+    <ChartTooltip
+      key="tip"
+      formatter={(value) =>
+        typeof value === "number" ? formatChartTick(value) : value
+      }
+    />,
+    dataset.keys.length > 1 ? (
+      <Legend key="legend" wrapperStyle={{ fontSize: 10, paddingTop: 4 }} />
+    ) : null,
+  ];
   if (chart.type === "histogram") {
     const histogram = histogramDataset(sheet, chart, calculated);
     return (
@@ -518,18 +735,27 @@ function SheetsChartView({
           margin={{ top: 8, right: 16, left: 0, bottom: 4 }}
           barCategoryGap={1}
         >
-          <CartesianGrid stroke="var(--border-subtle)" vertical={false} />
+          <CartesianGrid
+            stroke="var(--border-subtle)"
+            vertical={false}
+            strokeDasharray="3 4"
+          />
           <XAxis
             dataKey="bucket"
-            tick={{ fontSize: 9, fill: "var(--text-tertiary)" }}
-            tickLine={false}
-            axisLine={{ stroke: "var(--border-default)" }}
+            tick={tick}
+            tickLine={axisStroke}
+            axisLine={axisStroke}
+            interval={0}
+            angle={dataset.data.length > 6 ? -24 : 0}
+            textAnchor={dataset.data.length > 6 ? "end" : "middle"}
+            height={dataset.data.length > 6 ? 40 : 28}
           />
           <YAxis
+            width={36}
             allowDecimals={false}
-            tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
-            tickLine={false}
-            axisLine={false}
+            tick={tick}
+            tickLine={axisStroke}
+            axisLine={axisStroke}
           />
           <ChartTooltip />
           <Bar dataKey="count" name="Frequency" fill={CHART_COLORS[0]} />
@@ -543,22 +769,33 @@ function SheetsChartView({
     return (
       <ResponsiveContainer width="100%" height="100%">
         <ScatterChart {...common}>
-          <CartesianGrid stroke="var(--border-subtle)" />
+          <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 4" />
           <XAxis
             type="number"
             dataKey={xKey}
             name={xKey}
-            tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
-            tickLine={false}
+            tick={tick}
+            tickFormatter={formatChartTick}
+            tickLine={axisStroke}
+            axisLine={axisStroke}
+            height={28}
           />
           <YAxis
             type="number"
             dataKey={yKey}
             name={yKey}
-            tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
-            tickLine={false}
+            width={44}
+            tick={tick}
+            tickFormatter={formatChartTick}
+            tickLine={axisStroke}
+            axisLine={axisStroke}
           />
-          <ChartTooltip cursor={{ strokeDasharray: "3 3" }} />
+          <ChartTooltip
+            cursor={{ strokeDasharray: "3 3" }}
+            formatter={(value) =>
+              typeof value === "number" ? formatChartTick(value) : value
+            }
+          />
           <Scatter
             name={yKey || chart.title}
             data={dataset.data}
@@ -572,7 +809,7 @@ function SheetsChartView({
     return (
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart {...common}>
-          {axes}
+          {chartAxes}
           {dataset.keys[0] ? (
             <Bar
               dataKey={dataset.keys[0]}
@@ -628,7 +865,7 @@ function SheetsChartView({
           {...common}
           layout={chart.type === "bar" ? "vertical" : "horizontal"}
         >
-          {axes}
+          {chartAxes}
           {dataset.keys.map((key, index) => (
             <Bar
               key={key}
@@ -644,7 +881,7 @@ function SheetsChartView({
     return (
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart {...common}>
-          {axes}
+          {chartAxes}
           {dataset.keys.map((key, index) => (
             <Area
               key={key}
@@ -661,7 +898,7 @@ function SheetsChartView({
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart {...common}>
-        {axes}
+        {chartAxes}
         {dataset.keys.map((key, index) => (
           <Line
             key={key}
@@ -717,12 +954,12 @@ function SheetsTrackGrip({
   axis,
   label,
   onBegin,
-  onReset,
+  onFit,
 }: {
   axis: "column" | "row";
   label: string;
   onBegin: (event: ReactPointerEvent) => void;
-  onReset: () => void;
+  onFit: () => void;
 }) {
   return (
     <span
@@ -730,21 +967,32 @@ function SheetsTrackGrip({
       role="separator"
       aria-orientation={axis === "column" ? "vertical" : "horizontal"}
       aria-label={label}
-      title={`${label}. Double click to reset.`}
+      title={`${label}. Double-click to fit.`}
+      data-axis={axis}
       onPointerDown={(event) => {
+        event.stopPropagation();
+        if (event.detail > 1) {
+          event.preventDefault();
+          return;
+        }
+        event.preventDefault();
+        onBegin(event);
+      }}
+      onClick={(event) => {
+        if (event.detail !== 2) return;
         event.preventDefault();
         event.stopPropagation();
-        onBegin(event);
+        onFit();
       }}
       onDoubleClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
-        onReset();
+        onFit();
       }}
       className={
         axis === "column"
-          ? "absolute inset-y-0 right-0 z-10 w-[7px] cursor-col-resize"
-          : "absolute inset-x-0 bottom-0 z-10 h-[7px] cursor-row-resize"
+          ? "sheets-track-grip absolute inset-y-0 right-0 z-10 w-2"
+          : "sheets-track-grip absolute inset-x-0 bottom-0 z-10 h-2"
       }
     />
   );
@@ -984,6 +1232,17 @@ export function SheetsStudio({
     }
   }, []);
 
+  /**
+   * Which sheet you are looking at is navigation, not authorship. It persists
+   * to content when you may write (so a reload and the AI land on the same
+   * sheet) and stays local until that write is acknowledged. Clearing the local
+   * override on every `activeSheetId` echo let a stale snapshot yank the view
+   * back to the previous sheet the moment you pressed Next.
+   */
+  const [localSheetId, setLocalSheetId] = useState<string | null>(null);
+  const localSheetIdRef = useRef<string | null>(null);
+  localSheetIdRef.current = localSheetId;
+
   useEffect(() => {
     rangeRef.current = range;
   }, [range]);
@@ -1012,16 +1271,16 @@ export function SheetsStudio({
       recentEmittedKeysRef.current.delete(incomingKey)
     )
       return;
-    setWorkbook(incoming);
+    const viewed = localSheetIdRef.current;
+    setWorkbook(
+      viewed &&
+        viewed !== incoming.activeSheetId &&
+        incoming.sheets.some((sheet) => sheet.id === viewed)
+        ? { ...incoming, activeSheetId: viewed }
+        : incoming,
+    );
   }, [incoming]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /**
-   * Which sheet you are looking at is navigation, not authorship. It persists to
-   * content when you may write (so it follows the artifact and the AI sees the
-   * same sheet you do) and stays local when you may not, because a read-only
-   * viewer who cannot leave sheet one has lost a capability every role holds.
-   */
-  const [localSheetId, setLocalSheetId] = useState<string | null>(null);
   const activeSheet =
     workbook.sheets.find(
       (sheet) => sheet.id === (localSheetId ?? workbook.activeSheetId),
@@ -1031,11 +1290,14 @@ export function SheetsStudio({
   const activeSheetIndex = workbook.sheets.findIndex(
     (sheet) => sheet.id === activeSheet.id,
   );
-  useEffect(() => {
-    setLocalSheetId(null);
-  }, [workbook.activeSheetId]);
   const bounds = useMemo(() => usedBounds(activeSheet), [activeSheet]);
   const calculated = useMemo(() => calculateWorkbook(workbook), [workbook]);
+  const activeSheetRef = useRef(activeSheet);
+  activeSheetRef.current = activeSheet;
+  const calculatedRef = useRef(calculated);
+  calculatedRef.current = calculated;
+  const localeRef = useRef(workbook.workbook.locale);
+  localeRef.current = workbook.workbook.locale;
   const mergedCellMap = useMemo(() => {
     const map = new Map<
       string,
@@ -1243,10 +1505,17 @@ export function SheetsStudio({
   const showSheet = useCallback(
     (sheetId: string) => {
       setLocalSheetId(sheetId);
-      commit({ ...workbook, activeSheetId: sheetId }, false);
       setRange({ start: { row: 0, column: 0 }, end: { row: 0, column: 0 } });
+      if (locked) return;
+      setWorkbook((current) => {
+        if (current.activeSheetId === sheetId) return current;
+        const next = { ...current, activeSheetId: sheetId };
+        rememberEmitted(next);
+        onChange(next);
+        return next;
+      });
     },
-    [commit, workbook],
+    [locked, onChange, rememberEmitted],
   );
 
   const updateActiveSheet = useCallback(
@@ -1345,6 +1614,10 @@ export function SheetsStudio({
   }
 
   function commitInput(address: string, value: string) {
+    if (cellInput(activeSheet.cells[address]) === value) {
+      setEditingAddress(null);
+      return;
+    }
     const parsed = parseCellInput(value);
     const validation = activeSheet.cells[address]?.validation;
     if (validation && !parsed.formula) {
@@ -1377,6 +1650,7 @@ export function SheetsStudio({
   }
 
   function formatSelection(patch: Partial<NonNullable<SheetCell["format"]>>) {
+    const convertPercent = patch.numberFormat === "percent";
     updateActiveSheet((sheet) => ({
       ...sheet,
       cells: Object.fromEntries(
@@ -1388,11 +1662,22 @@ export function SheetsStudio({
               sheet.cells[address] ?? {},
             ]),
           ),
-        }).map(([address, cell]) =>
-          selectedAddresses.includes(address)
-            ? [address, { ...cell, format: { ...cell.format, ...patch } }]
-            : [address, cell],
-        ),
+        }).map(([address, cell]) => {
+          if (!selectedAddresses.includes(address)) return [address, cell];
+          const next: SheetCell = {
+            ...cell,
+            format: { ...cell.format, ...patch },
+          };
+          if (
+            convertPercent &&
+            !next.formula &&
+            typeof next.value === "number" &&
+            Math.abs(next.value) > 1
+          ) {
+            next.value = next.value / 100;
+          }
+          return [address, next];
+        }),
       ),
     }));
   }
@@ -1759,6 +2044,11 @@ export function SheetsStudio({
       setTrackGesture(null);
       if (!gesture) return;
       const stored = Math.round(gesture.size / zoom);
+      const original =
+        axis === "column"
+          ? (activeSheet.columnWidths?.[String(index)] ?? COLUMN_WIDTH)
+          : (activeSheet.rowHeights?.[String(index)] ?? ROW_HEIGHT);
+      if (stored === original) return;
       updateActiveSheet((sheet) =>
         axis === "column"
           ? {
@@ -1775,15 +2065,67 @@ export function SheetsStudio({
     window.addEventListener("pointerup", stop);
   }
 
-  function resetTrackSize(axis: "column" | "row", index: number) {
-    updateActiveSheet((sheet) => {
-      if (axis === "column") {
-        const { [String(index)]: _removed, ...rest } = sheet.columnWidths ?? {};
-        return { ...sheet, columnWidths: rest };
+  function fitTrackSize(axis: "column" | "row", index: number) {
+    const sheet = activeSheetRef.current;
+    const calculatedCells = calculatedRef.current;
+    const locale = localeRef.current;
+    const sample =
+      gridRef.current?.querySelector(".sheets-cell") ?? gridRef.current;
+    const family = sample
+      ? getComputedStyle(sample).fontFamily
+      : "Manrope, ui-sans-serif, system-ui, sans-serif";
+    const displayedText = (address: string, cell: SheetCell | undefined) =>
+      formatCalculatedCell(
+        cell,
+        calculatedCells.get(`${sheet.id}:${address}`),
+        locale,
+      );
+    if (axis === "column") {
+      let widest = 0;
+      let hasContent = false;
+      const limit = Math.max(bounds.rows, occupiedBounds(sheet).rows);
+      for (let row = 0; row < limit; row += 1) {
+        const address = coordinateToAddress({ row, column: index });
+        const cell = sheet.cells[address];
+        const text = displayedText(address, cell);
+        if (!text) continue;
+        hasContent = true;
+        const size = cell?.format?.fontSize ?? 11;
+        const weight = cell?.format?.bold ? 600 : 400;
+        widest = Math.max(
+          widest,
+          measureSheetText(text, `${weight} ${size}px ${family}`),
+        );
       }
-      const { [String(index)]: _removed, ...rest } = sheet.rowHeights ?? {};
-      return { ...sheet, rowHeights: rest };
-    });
+      const width = fittedColumnWidth(widest, hasContent);
+      const current = sheet.columnWidths?.[String(index)] ?? COLUMN_WIDTH;
+      if (width === current) return;
+      updateActiveSheet((next) => ({
+        ...next,
+        columnWidths: { ...next.columnWidths, [String(index)]: width },
+      }));
+      return;
+    }
+    let tallest = ROW_HEIGHT;
+    let hasContent = false;
+    const limit = Math.max(bounds.columns, occupiedBounds(sheet).columns);
+    for (let column = 0; column < limit; column += 1) {
+      const address = coordinateToAddress({ row: index, column });
+      const cell = sheet.cells[address];
+      const text = displayedText(address, cell);
+      if (!text && !cell?.format?.fontSize) continue;
+      hasContent = true;
+      const size = cell?.format?.fontSize ?? 11;
+      const lines = Math.max(1, text.split(/\r?\n/).length);
+      tallest = Math.max(tallest, fittedRowHeight(lines, size, true));
+    }
+    const height = hasContent ? tallest : ROW_HEIGHT;
+    const current = sheet.rowHeights?.[String(index)] ?? ROW_HEIGHT;
+    if (height === current) return;
+    updateActiveSheet((next) => ({
+      ...next,
+      rowHeights: { ...next.rowHeights, [String(index)]: height },
+    }));
   }
 
   function selectCell(coordinate: CellCoordinate, event: ReactPointerEvent) {
@@ -1879,18 +2221,28 @@ export function SheetsStudio({
     // A new chart lands just past the selection it was made from, so the
     // relationship between the numbers and the picture is visible without
     // scrolling anywhere (§11F).
-    const anchorColumn = normalizedSelection.end.column + 1;
-    const anchorRow = normalizedSelection.start.row;
+    const view = gridRef.current;
+    const viewWidth = view?.clientWidth ?? 480;
+    const viewHeight = view?.clientHeight ?? 320;
+    const width = Math.min(440, Math.max(280, viewWidth - 36));
+    const height = Math.min(320, Math.max(220, viewHeight - 24));
+    const preferredX =
+      (normalizedSelection.end.column + 1) * COLUMN_WIDTH + 16;
+    const preferredY = normalizedSelection.start.row * ROW_HEIGHT;
+    const minX = viewport.scrollLeft + 12;
+    const minY = viewport.scrollTop + 12;
+    const maxX = viewport.scrollLeft + Math.max(12, viewWidth - width - 12);
+    const maxY = viewport.scrollTop + Math.max(12, viewHeight - height - 12);
     const chart: SheetChart = {
       id: `chart-${crypto.randomUUID()}`,
       type: "line",
       sourceRange: rangeLabel(normalizedSelection),
       title: `${activeSheet.name} chart`,
       position: {
-        x: anchorColumn * COLUMN_WIDTH + 16,
-        y: anchorRow * ROW_HEIGHT,
-        width: 420,
-        height: 260,
+        x: Math.min(Math.max(preferredX, minX), maxX),
+        y: Math.min(Math.max(preferredY, minY), maxY),
+        width,
+        height,
       },
     };
     updateActiveSheet((sheet) => ({
@@ -1898,6 +2250,7 @@ export function SheetsStudio({
       charts: [...sheet.charts, chart],
     }));
     setSelectedChartId(chart.id);
+    setSheetMode("grid");
   }
 
   function patchChart(chartId: string, patch: Partial<SheetChart>) {
@@ -1958,7 +2311,17 @@ export function SheetsStudio({
   }
 
   function toggleTable() {
-    const label = selectionLabel;
+    const isPoint =
+      normalizedSelection.start.row === normalizedSelection.end.row &&
+      normalizedSelection.start.column === normalizedSelection.end.column;
+    const isSingleColumn =
+      normalizedSelection.start.column === normalizedSelection.end.column;
+    const region =
+      isPoint || isSingleColumn
+        ? currentRegion(activeSheet, normalizedSelection.start)
+        : normalizedSelection;
+    const label = rangeLabel(region);
+    if (label !== selectionLabel) setRange(region);
     updateActiveSheet((sheet) => {
       const existing = sheet.tables.find((table) => table.range === label);
       return {
@@ -1980,14 +2343,32 @@ export function SheetsStudio({
 
   function sortSelection(direction: "asc" | "desc") {
     if (locked) return;
-    const selectedRange = normalizeRange(range);
+    let selectedRange = normalizeRange(range);
+    const sortColumn = selectedRange.start.column;
+    const isPoint =
+      selectedRange.start.row === selectedRange.end.row &&
+      selectedRange.start.column === selectedRange.end.column;
+    const isSingleColumn =
+      selectedRange.start.column === selectedRange.end.column;
+    if (isPoint || isSingleColumn) {
+      selectedRange = currentRegion(activeSheet, selectedRange.start);
+      setRange(selectedRange);
+    }
     const matchingTable = activeSheet.tables.find(
       (table) => table.range === rangeLabel(selectedRange),
     );
-    const dataStartRow = matchingTable
+    const headerRow = chartFirstRowIsHeader(
+      activeSheet,
+      selectedRange,
+      calculated,
+    );
+    const dataStartRow = matchingTable || headerRow
       ? selectedRange.start.row + 1
       : selectedRange.start.row;
-    const rows = [] as Array<Record<number, SheetCell | undefined>>;
+    const rows = [] as Array<{
+      values: Record<number, SheetCell | undefined>;
+      key: SheetScalar | "";
+    }>;
     for (let row = dataStartRow; row <= selectedRange.end.row; row += 1) {
       const values: Record<number, SheetCell | undefined> = {};
       for (
@@ -1997,12 +2378,18 @@ export function SheetsStudio({
       )
         values[column] =
           activeSheet.cells[coordinateToAddress({ row, column })];
-      rows.push(values);
+      const address = coordinateToAddress({ row, column: sortColumn });
+      rows.push({
+        values,
+        key:
+          calculated.get(`${activeSheet.id}:${address}`)?.value ??
+          values[sortColumn]?.value ??
+          "",
+      });
     }
-    const firstColumn = selectedRange.start.column;
     rows.sort((left, right) => {
-      const a = left[firstColumn]?.value ?? "";
-      const b = right[firstColumn]?.value ?? "";
+      const a = left.key;
+      const b = right.key;
       const comparison =
         typeof a === "number" && typeof b === "number"
           ? a - b
@@ -2011,8 +2398,8 @@ export function SheetsStudio({
     });
     updateActiveSheet((sheet) => {
       const cells = { ...sheet.cells };
-      rows.forEach((values, rowOffset) =>
-        Object.entries(values).forEach(([column, value]) => {
+      rows.forEach((entry, rowOffset) =>
+        Object.entries(entry.values).forEach(([column, value]) => {
           const address = coordinateToAddress({
             row: dataStartRow + rowOffset,
             column: Number(column),
@@ -2030,7 +2417,7 @@ export function SheetsStudio({
                 ? {
                     ...table,
                     sort: {
-                      column: firstColumn,
+                      column: sortColumn,
                       direction,
                     },
                   }
@@ -2379,6 +2766,92 @@ export function SheetsStudio({
     }
   }
 
+  async function exportWorkbook(format: "xlsx" | "csv" | "ods") {
+    const safeTitle = (activeSheet.name || "Sheet").replace(
+      /[<>:"/\\|?*]/g,
+      "-",
+    );
+    if (format === "csv") {
+      const extent = occupiedBounds(activeSheet);
+      const lines: string[] = [];
+      for (let row = 0; row < extent.rows; row += 1) {
+        const columns: string[] = [];
+        for (let column = 0; column < extent.columns; column += 1) {
+          const address = coordinateToAddress({ row, column });
+          const cell = activeSheet.cells[address];
+          columns.push(
+            csvEscape(
+              formatCalculatedCell(
+                cell,
+                calculated.get(`${activeSheet.id}:${address}`),
+                workbook.workbook.locale,
+              ),
+            ),
+          );
+        }
+        lines.push(columns.join(","));
+      }
+      downloadDocumentText(
+        `${safeTitle}.csv`,
+        "text/csv;charset=utf-8",
+        lines.join("\n"),
+      );
+      setImportNotice(`Exported ${activeSheet.name} as CSV.`);
+      return;
+    }
+    if (format === "ods") {
+      downloadDocumentBlob(
+        `${safeTitle}.ods`,
+        new Blob([exportOds(workbook)], {
+          type: "application/vnd.oasis.opendocument.spreadsheet",
+        }),
+      );
+      setImportNotice(`Exported ${workbook.sheets.length} sheet${workbook.sheets.length === 1 ? "" : "s"} as OpenDocument.`);
+      return;
+    }
+    const ExcelJS = await import("exceljs");
+    const book = new ExcelJS.Workbook();
+    for (const sheet of workbook.sheets) {
+      const worksheet = book.addWorksheet(sheet.name);
+      for (const [address, cell] of Object.entries(sheet.cells)) {
+        const excelCell = worksheet.getCell(address);
+        const calculatedCell = calculated.get(`${sheet.id}:${address}`);
+        if (cell.formula) {
+          excelCell.value = {
+            formula: cell.formula.replace(/^=/, ""),
+            result: calculatedCell?.value ?? null,
+          };
+        } else if (cell.value !== undefined) excelCell.value = cell.value;
+        if (cell.format?.bold) excelCell.font = { ...excelCell.font, bold: true };
+        if (cell.format?.italic)
+          excelCell.font = { ...excelCell.font, italic: true };
+        if (cell.format?.numberFormat === "percent")
+          excelCell.numFmt = "0.00%";
+        else if (cell.format?.numberFormat === "currency")
+          excelCell.numFmt = '"$"#,##0.00';
+      }
+      if ((sheet.frozenRows ?? 0) > 0 || (sheet.frozenColumns ?? 0) > 0) {
+        worksheet.views = [
+          {
+            state: "frozen",
+            xSplit: sheet.frozenColumns ?? 0,
+            ySplit: sheet.frozenRows ?? 0,
+          },
+        ];
+      }
+    }
+    const buffer = await book.xlsx.writeBuffer();
+    downloadDocumentBlob(
+      `${safeTitle}.xlsx`,
+      new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    setImportNotice(
+      `Exported ${workbook.sheets.length} sheet${workbook.sheets.length === 1 ? "" : "s"} as Excel.`,
+    );
+  }
+
   const scrollingRows = visibleRowIndices
     .slice(viewport.rowStart, viewport.rowEnd + 1)
     .map((row, index) => ({ row, position: viewport.rowStart + index }));
@@ -2542,11 +3015,11 @@ export function SheetsStudio({
   const toggleInspector = (panel: NonNullable<typeof inspector>) =>
     setInspector((current) => (current === panel ? null : panel));
   /**
-   * One rail, one open panel. Analysis is a mode rather than an inspector, so it
-   * is the resting content of the rail in that view and an inspector opened on
-   * top of it wins — there is never a second panel beside it.
+   * Inspectors overlay the grid. Analysis is a peer view of the same cells, so
+   * it occupies the frame instead of covering it — Grid and Analysis are modes,
+   * not a rail stacked on the numbers they describe.
    */
-  const panelMode = inspector ?? (analysing ? "analysis" : null);
+  const panelMode = inspector;
   const panelTitle = {
     format: `Format ${selectionLabel}`,
     name: `Name ${selectionLabel}`,
@@ -2557,8 +3030,7 @@ export function SheetsStudio({
     filter: filterEditor
       ? `Filter ${columnName(filterEditor.column)}`
       : "Filter",
-    analysis: `Analysis of ${selectionLabel}`,
-  }[panelMode ?? "analysis"];
+  }[panelMode ?? "find"];
   /**
    * Character emphasis and cell alignment, declared once so the row cannot grow
    * a seventh toggle with a seventh button treatment. Every entry writes a real
@@ -2683,17 +3155,12 @@ export function SheetsStudio({
       icon: Snowflake,
       requires: "edit",
       active: frozenRowCount > 0,
-      hint:
-        frozenRowCount === freezeRowTarget
-          ? "Unfreeze"
-          : `Through row ${freezeRowTarget}`,
+      hint: frozenRowCount > 0 ? "Unfreeze" : `Through row ${freezeRowTarget}`,
       onSelect: () =>
         updateActiveSheet((sheet) => ({
           ...sheet,
           frozenRows:
-            frozenRowCount === freezeRowTarget
-              ? 0
-              : Math.min(100, freezeRowTarget),
+            (sheet.frozenRows ?? 0) > 0 ? 0 : Math.min(100, freezeRowTarget),
         })),
     },
     {
@@ -2704,14 +3171,14 @@ export function SheetsStudio({
       requires: "edit",
       active: frozenColumnCount > 0,
       hint:
-        frozenColumnCount === freezeColumnTarget
+        frozenColumnCount > 0
           ? "Unfreeze"
-          : `Through column ${columnName(normalizedSelection.start.column)}`,
+          : `Through column ${columnName(freezeColumnTarget - 1)}`,
       onSelect: () =>
         updateActiveSheet((sheet) => ({
           ...sheet,
           frozenColumns:
-            frozenColumnCount === freezeColumnTarget
+            (sheet.frozenColumns ?? 0) > 0
               ? 0
               : Math.min(50, freezeColumnTarget),
         })),
@@ -2876,6 +3343,27 @@ export function SheetsStudio({
           : "Finish synchronizing first",
       onSelect: () => importRef.current?.click(),
     },
+    {
+      id: "export-xlsx",
+      label: "Export Excel",
+      icon: Download,
+      priority: "advanced",
+      onSelect: () => void exportWorkbook("xlsx"),
+    },
+    {
+      id: "export-csv",
+      label: "Export CSV",
+      icon: Download,
+      priority: "advanced",
+      onSelect: () => void exportWorkbook("csv"),
+    },
+    {
+      id: "export-ods",
+      label: "Export OpenDocument",
+      icon: Download,
+      priority: "advanced",
+      onSelect: () => void exportWorkbook("ods"),
+    },
   ];
 
   return (
@@ -2884,6 +3372,12 @@ export function SheetsStudio({
       className="spectra-sheets-studio flex min-w-0 flex-col overflow-hidden"
       data-compact={mode === "split" || undefined}
       data-sheets-density={density}
+      onKeyDown={(event) => {
+        const command = event.metaKey || event.ctrlKey;
+        if (!command || event.key.toLowerCase() !== "f") return;
+        event.preventDefault();
+        setInspector("find");
+      }}
     >
       {/* One bar. Modes, the sheet selector, the selection readout and every
           action come from the shared contract, so this type no longer owns a
@@ -2891,7 +3385,14 @@ export function SheetsStudio({
       {contract ? (
         <ArtifactWorkbar
           label="Sheet tools"
-          modes={{ registry: true, value: sheetMode, onChange: setSheetMode }}
+          modes={{
+            registry: true,
+            value: sheetMode,
+            onChange: (next) => {
+              setSheetMode(next);
+              if (next === "analysis") setInspector(null);
+            },
+          }}
           selector={
             /* Two hooks, nested, both in the DOM: `/sheets` is the collection a
                per-sheet path falls back to, and `/activeSheetId` is the control
@@ -2899,16 +3400,17 @@ export function SheetsStudio({
                nothing for `/activeSheetId`, so that declared control could never
                resolve. Neither may move inside the portaled list. */
             <div
-              className="flex min-w-0 flex-1 items-center"
+              className="flex min-w-0 items-center"
               {...targetAttrs("/sheets")}
             >
               <div
-                className="flex min-w-0 flex-1 items-center"
+                className="flex min-w-0 items-center"
                 {...targetAttrs("/activeSheetId")}
               >
                 <WorkbarItemSelector
                   ariaLabel="Sheet"
                   itemNoun="sheet"
+                  className="max-w-[22ch]"
                   items={workbook.sheets.map((sheet) => ({
                     value: sheet.id,
                     label: sheet.name,
@@ -2919,13 +3421,17 @@ export function SheetsStudio({
               </div>
             </div>
           }
-          context={dimensionLabel}
+          context={
+            mode === "split" || analysing || summaryLabel
+              ? undefined
+              : dimensionLabel
+          }
           trailing={
-            summaryLabel ? (
+            analysing || !summaryLabel ? undefined : (
               <span className="spectra-workbar-count max-w-[24ch]">
                 {summaryLabel}
               </span>
-            ) : undefined
+            )
           }
           actions={actions}
         />
@@ -2947,12 +3453,7 @@ export function SheetsStudio({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            const parsed = parseRange(formulaDraft);
-            if (parsed && !formulaDraft.startsWith("=")) {
-              setRange(parsed);
-              return;
-            }
-            commitInput(activeAddress, formulaDraft);
+            if (!locked) commitInput(activeAddress, formulaDraft);
           }}
           className="contents"
         >
@@ -3007,6 +3508,19 @@ export function SheetsStudio({
               }`,
             )}
             onChange={(event) => setFormulaDraft(event.target.value)}
+            onBlur={() => {
+              if (!locked) commitInput(activeAddress, formulaDraft);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                if (!locked) commitInput(activeAddress, formulaDraft);
+              }
+              if (event.key === "Escape") {
+                setFormulaDraft(cellInput(activeCell));
+                event.currentTarget.blur();
+              }
+            }}
             className="sheets-formula-input"
           />
         </form>
@@ -3026,6 +3540,7 @@ export function SheetsStudio({
           none, so a short pane shrinks the grid rather than overflowing it. */}
       <div
         className="sheets-grid-frame"
+        data-analysis={analysing || undefined}
         style={
           {
             "--sheet-row-header": `${ROW_HEADER_WIDTH}px`,
@@ -3036,7 +3551,103 @@ export function SheetsStudio({
             minHeight: mode === "split" ? 0 : "max(420px, 52dvh)",
           } as CSSProperties
         }
-      >
+        >
+        {analysing ? (
+          <div
+            className="sheets-analysis-canvas"
+            aria-label={`Analysis of ${selectionLabel}`}
+          >
+            <p className="text-caption text-[var(--text-secondary)]">
+              {selectionLabel}
+              <span aria-hidden="true"> · </span>
+              {activeSheet.name}
+            </p>
+            {analysis ? (
+              <>
+                <dl className="mt-4 max-w-[28rem]">
+                  {(
+                    [
+                      ["Numbers", String(analysis.count)],
+                      ["Blank cells", String(analysis.blanks)],
+                      ["Sum", numberText(analysis.sum)],
+                      ["Mean", numberText(analysis.mean)],
+                      ["Minimum", numberText(analysis.minimum)],
+                      ["Maximum", numberText(analysis.maximum)],
+                      [
+                        "Range",
+                        numberText(analysis.maximum - analysis.minimum),
+                      ],
+                      [
+                        "Standard deviation",
+                        analysis.count > 1
+                          ? numberText(analysis.deviation)
+                          : "Needs two or more values",
+                      ],
+                    ] as const
+                  ).map(([term, value]) => (
+                    <div key={term} className="sheets-analysis-stat">
+                      <dt className="min-w-0 truncate text-caption text-[var(--text-secondary)]">
+                        {term}
+                      </dt>
+                      <dd className="shrink-0 text-ui tabular-nums font-semibold text-[var(--text-primary)]">
+                        {value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="mt-4 max-w-[36rem] text-caption text-[var(--text-secondary)]">
+                  Measured from the current selection after the workbook
+                  recalculated. Return to Grid to change the range.
+                </p>
+                {activeSheet.charts.length ? (
+                  <div className="mt-5">
+                    <span className={PANEL_LABEL}>Charts on this sheet</span>
+                    <ul className="flex flex-col gap-1">
+                      {activeSheet.charts.map((chart) => (
+                        <li key={chart.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedChartId(chart.id);
+                              const parsed = parseRange(
+                                chart.sourceRange.split("!").at(-1) ?? "",
+                              );
+                              if (parsed) setRange(parsed);
+                              setSheetMode("grid");
+                            }}
+                            className="flex w-full max-w-[28rem] items-baseline justify-between gap-2 rounded-chip px-1 py-1 text-left text-caption hover:bg-[var(--bg-hover)]"
+                          >
+                            <span className="min-w-0 truncate text-[var(--text-primary)]">
+                              {chart.title}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-[var(--text-secondary)]">
+                              {chart.sourceRange}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {locked ? null : (
+                  <button
+                    type="button"
+                    className={`${PANEL_BUTTON} mt-5`}
+                    onClick={createChart}
+                  >
+                    Chart this range
+                  </button>
+                )}
+              </>
+            ) : (
+              <p className="mt-4 max-w-[36rem] text-caption text-[var(--text-secondary)]">
+                {selectionLabel} holds no numbers, so there is nothing to
+                measure yet. Return to Grid, select cells with values, then
+                open Analysis again.
+              </p>
+            )}
+          </div>
+        ) : null}
         <div className="sheets-grid-corner" />
         <div className="sheets-column-headers">
           <div
@@ -3087,7 +3698,7 @@ export function SheetsStudio({
                     onBegin={(event) =>
                       beginTrackResize("column", column, event)
                     }
-                    onReset={() => resetTrackSize("column", column)}
+                    onFit={() => fitTrackSize("column", column)}
                   />
                 )}
               </button>
@@ -3132,7 +3743,7 @@ export function SheetsStudio({
                     axis="row"
                     label={`Resize row ${row + 1}`}
                     onBegin={(event) => beginTrackResize("row", row, event)}
-                    onReset={() => resetTrackSize("row", row)}
+                    onFit={() => fitTrackSize("row", row)}
                   />
                 )}
               </button>
@@ -3525,10 +4136,11 @@ export function SheetsStudio({
                   </footer>
                   <p className="sr-only">
                     {chart.title} uses {chart.sourceRange}. It contains{" "}
-                    {statistics.count} observations, with mean{" "}
-                    {statistics.mean ?? "no"}, minimum {statistics.min ?? "no"},
-                    maximum {statistics.max ?? "no"}, and standard deviation{" "}
-                    {statistics.standardDeviation ?? "no"} value.
+                    {statistics.count}{" "}
+                    {statistics.count === 1 ? "observation" : "observations"}
+                    {statistics.mean === null
+                      ? "."
+                      : `, with mean ${numberText(statistics.mean)}, minimum ${numberText(statistics.min ?? 0)}, maximum ${numberText(statistics.max ?? 0)}, and standard deviation ${numberText(statistics.standardDeviation ?? 0)}.`}
                   </p>
 
                   {locked ? null : (
@@ -3551,7 +4163,11 @@ export function SheetsStudio({
         {panelMode ? (
           <aside
             aria-label={panelTitle}
-            className="absolute inset-y-0 right-0 z-[45] flex w-[min(312px,calc(100%-44px))] flex-col gap-3 overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
+            className={
+              mode === "split"
+                ? "absolute inset-x-0 bottom-0 z-[45] flex max-h-[min(46%,380px)] flex-col gap-3 overflow-y-auto border-t border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
+                : "absolute inset-y-0 right-0 z-[45] flex w-[min(312px,calc(100%-44px))] flex-col gap-3 overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
+            }
           >
             <header className="flex items-center gap-2">
               <h2 className="min-w-0 flex-1 truncate text-caption font-semibold text-[var(--text-primary)]">
@@ -4176,96 +4792,12 @@ export function SheetsStudio({
                 </div>
               </>
             ) : null}
-
-            {panelMode === "analysis" ? (
-              analysis ? (
-                <>
-                  <dl className="flex flex-col gap-1.5">
-                    {(
-                      [
-                        ["Numbers", String(analysis.count)],
-                        ["Blank cells", String(analysis.blanks)],
-                        ["Sum", numberText(analysis.sum)],
-                        ["Mean", numberText(analysis.mean)],
-                        ["Minimum", numberText(analysis.minimum)],
-                        ["Maximum", numberText(analysis.maximum)],
-                        ["Range", numberText(analysis.maximum - analysis.minimum)],
-                        [
-                          "Standard deviation",
-                          analysis.count > 1
-                            ? numberText(analysis.deviation)
-                            : "Needs two or more values",
-                        ],
-                      ] as const
-                    ).map(([term, value]) => (
-                      <div
-                        key={term}
-                        className="flex items-baseline justify-between gap-3 text-caption"
-                      >
-                        <dt className="min-w-0 truncate text-[var(--text-secondary)]">
-                          {term}
-                        </dt>
-                        <dd className="shrink-0 tabular-nums font-semibold text-[var(--text-primary)]">
-                          {value}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <p className="text-caption text-[var(--text-secondary)]">
-                    Measured from {selectionLabel} after the workbook
-                    recalculated. {dimensionLabel}.
-                  </p>
-                  {activeSheet.charts.length ? (
-                    <div>
-                      <span className={PANEL_LABEL}>Charts on this sheet</span>
-                      <ul className="flex flex-col gap-1">
-                        {activeSheet.charts.map((chart) => (
-                          <li key={chart.id}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedChartId(chart.id);
-                                const parsed = parseRange(
-                                  chart.sourceRange.split("!").at(-1) ?? "",
-                                );
-                                if (parsed) setRange(parsed);
-                              }}
-                              className="flex w-full items-baseline justify-between gap-2 rounded-chip px-1 py-1 text-left text-caption hover:bg-[var(--bg-hover)]"
-                            >
-                              <span className="min-w-0 truncate text-[var(--text-primary)]">
-                                {chart.title}
-                              </span>
-                              <span className="shrink-0 tabular-nums text-[var(--text-secondary)]">
-                                {chart.sourceRange}
-                              </span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  <button
-                    type="button"
-                    className={PANEL_BUTTON}
-                    onClick={createChart}
-                  >
-                    Chart this range
-                  </button>
-                </>
-              ) : (
-                <p className="text-caption text-[var(--text-secondary)]">
-                  {selectionLabel} holds no numbers, so there is nothing to
-                  measure yet. Select cells with values and the statistics
-                  appear here.
-                </p>
-              )
-            ) : null}
           </aside>
         ) : null}
 
         {/* The empty state invites rather than blocks: the grid underneath is
             live, so the first keystroke lands in A1. */}
-        {sheetIsEmpty && !importing ? (
+        {sheetIsEmpty && !importing && !analysing ? (
           <div className="pointer-events-none absolute inset-x-0 top-[34%] z-[44] flex justify-center px-6">
             <div className="pointer-events-auto max-w-[302px] text-center">
               <p className="text-subhead font-semibold text-[var(--text-primary)]">

@@ -28,6 +28,7 @@ import {
   ChevronDown,
   CircleSlash,
   FlaskConical,
+  Gauge,
   Loader2,
   Lock,
   Plus,
@@ -94,7 +95,7 @@ import {
 } from "../data/api";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
-import { ArtifactWorkbar, type WorkbarActionSpec } from "./artifact-workbar";
+import { ArtifactWorkbar, type WorkbarActionSpec, WorkbarItemSelector } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
 
@@ -197,13 +198,15 @@ function CompetenceLedger({
   skills,
   evidence,
   extraGaps,
-  startCollapsed,
+  open,
+  onClose,
 }: {
   content: AgentFoundryContent;
   skills: SpectraSkill[];
   evidence: EvidenceBinding[];
   extraGaps: string[];
-  startCollapsed: boolean;
+  open: boolean;
+  onClose: () => void;
 }) {
   const weights = useMemo(
     () => planFacetWeights(content.foundry.mission),
@@ -214,9 +217,9 @@ function CompetenceLedger({
     [content.foundry.mission, content.foundry.state],
   );
   const evidenceSummary = useMemo(() => summarizeEvidence(evidence), [evidence]);
-  const [open, setOpen] = useState(!startCollapsed);
   const [allGaps, setAllGaps] = useState(false);
-  useEffect(() => setOpen(!startCollapsed), [startCollapsed]);
+
+  if (!open) return null;
 
   const rows = sufficiency.pursuedFacets
     .map((facet) => ({
@@ -263,34 +266,23 @@ function CompetenceLedger({
           {established}
           <span className="foundry-ledger-unit"> of {rows.length || 0}</span>
         </span>
+        <button
+          type="button"
+          className="foundry-icon-button"
+          aria-label="Hide competence"
+          onClick={onClose}
+        >
+          <X size={13} />
+        </button>
       </header>
 
       <p className="foundry-ledger-note">
         {rows.length === 0
           ? "This mission pursues no facets yet."
           : `${established} of ${rows.length} facets established. ${gaps.length} thing${gaps.length === 1 ? "" : "s"} it cannot do yet.`}
-        {startCollapsed ? (
-          <>
-            {" "}
-            <button
-              type="button"
-              className="foundry-text-button"
-              aria-expanded={open}
-              onClick={() => setOpen((value) => !value)}
-            >
-              <ChevronDown
-                size={13}
-                style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
-              />
-              {open ? "Hide the detail" : "Show the detail"}
-            </button>
-          </>
-        ) : null}
       </p>
 
-      {open ? (
-        <>
-          <ul className="foundry-ledger-rows">
+      <ul className="foundry-ledger-rows">
             {rows.map((row) => (
               <li
                 key={row.facet}
@@ -379,8 +371,6 @@ function CompetenceLedger({
               </>
             )}
           </section>
-        </>
-      ) : null}
     </aside>
   );
 }
@@ -1032,12 +1022,6 @@ export function AgentFoundry({
   // `readOnly` and `contract.readOnly` are the same fact from the same shell
   // resolution; both are read so a future divergence fails closed.
   const canEdit = contract.can("edit") && !readOnly;
-  /* Below the width where the ledger and the stream stop fitting side by side,
-     the stylesheet moves the ledger above the workbar. That is what deleted the
-     authoring surface at 850: a 400px status panel arrived first and pushed the
-     mission, the open question and Save and continue off the pane. The ledger
-     collapses to its headline here instead. */
-  const compressLedger = contract.density !== "comfortable";
 
   const normalized = useMemo(() => normalizeFoundryContent(content), [content]);
   const [agent, setAgent] = useState(normalized);
@@ -1062,6 +1046,8 @@ export function AgentFoundry({
   const [currentHash, setCurrentHash] = useState("");
   const [showDismissed, setShowDismissed] = useState(false);
   const [showBrief, setShowBrief] = useState(false);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [activeQuestionId, setActiveQuestionId] = useState("");
   const [analytics, setAnalytics] = useState<SpectraAgentAnalytics | null>(null);
   const [analyticsState, setAnalyticsState] = useState<
     "idle" | "loading" | "ready" | "failed"
@@ -1638,6 +1624,50 @@ export function AgentFoundry({
   const dismissed = foundry.state.sections.filter(
     (section) => section.status === "dismissed",
   );
+  const sufficiency = assessSufficiency(foundry.mission, foundry.state);
+  const questionItems = established
+    ? [...answered, ...open]
+        .slice()
+        .sort((left, right) => left.order - right.order || left.createdAt - right.createdAt)
+        .map((section) => ({
+          value: section.id,
+          label: section.prompt.replace(/\s+/g, " ").trim() || FACET_LABEL[section.facet],
+        }))
+    : [
+        {
+          value: "foundation-objective",
+          label: `What should ${artifactTitle.trim() || "this agent"} do?`,
+        },
+        {
+          value: "foundation-interaction",
+          label: "How should it feel to work with?",
+        },
+      ];
+  const currentQuestionId =
+    questionItems.some((item) => item.value === activeQuestionId)
+      ? activeQuestionId
+      : (questionItems[0]?.value ?? "");
+
+  function focusQuestion(id: string) {
+    setActiveQuestionId(id);
+    const node = document.querySelector<HTMLElement>(
+      `[data-foundry-question="${CSS.escape(id)}"]`,
+    );
+    node?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
+  const progressReadout =
+    established && view === "build" ? (
+      <span
+        className="spectra-workbar-progress"
+        title={`${Math.round(sufficiency.coverage * 100)}% of the mission is established`}
+      >
+        <span className="spectra-workbar-progress-track">
+          <span style={{ width: `${Math.round(sufficiency.coverage * 100)}%` }} />
+        </span>
+        <span>{Math.round(sufficiency.coverage * 100)}%</span>
+      </span>
+    ) : null;
 
   /* `newest` is what the creator last released, private or not, because that is
      the state the bar has to report. `serving` is what anyone else actually
@@ -1652,9 +1682,6 @@ export function AgentFoundry({
   const newest = highest(published);
   const serving = highest(
     published.filter((release) => release.rollout !== "internal_test"),
-  );
-  const syncReadout = (
-    <span className="foundry-block-count">{contract.sync.label}</span>
   );
 
   /* Usage under the S8 rule: a number is drawn only where a measurement exists.
@@ -1755,7 +1782,15 @@ export function AgentFoundry({
           label="Agent"
           modes={[]}
           context="New agent"
-          trailing={syncReadout}
+          selector={
+            <WorkbarItemSelector
+              ariaLabel="Current question"
+              itemNoun="question"
+              value={currentQuestionId}
+              onChange={focusQuestion}
+              items={questionItems}
+            />
+          }
         />
         <div className="foundry-foundation">
           <p className="foundry-eyebrow">Foundation</p>
@@ -1764,7 +1799,7 @@ export function AgentFoundry({
             decided by what you write here, so there is no fixed set of steps.
           </p>
 
-          <label className="foundry-question">
+          <label className="foundry-question" data-foundry-question="foundation-objective">
             <span className="foundry-question-prompt">
               What should {artifactTitle.trim() || "this agent"} do?
             </span>
@@ -1780,7 +1815,7 @@ export function AgentFoundry({
             />
           </label>
 
-          <label className="foundry-question">
+          <label className="foundry-question" data-foundry-question="foundation-interaction">
             <span className="foundry-question-prompt">
               How should it feel to work with?
             </span>
@@ -1863,6 +1898,14 @@ export function AgentFoundry({
                 },
               ]
             : []),
+          {
+            id: "competence",
+            label: ledgerOpen ? "Hide competence" : "Competence",
+            icon: Gauge,
+            priority: "secondary" as const,
+            active: ledgerOpen,
+            onSelect: () => setLedgerOpen((open) => !open),
+          },
         ]
       : view === "checks"
         ? [
@@ -1875,6 +1918,14 @@ export function AgentFoundry({
               disabled: busy !== null,
               onSelect: () => void reloadRuns(),
             },
+            {
+              id: "competence",
+              label: ledgerOpen ? "Hide competence" : "Competence",
+              icon: Gauge,
+              priority: "secondary" as const,
+              active: ledgerOpen,
+              onSelect: () => setLedgerOpen((open) => !open),
+            },
           ]
         : [
             {
@@ -1884,6 +1935,14 @@ export function AgentFoundry({
               priority: "secondary",
               active: showBrief,
               onSelect: () => setShowBrief((value) => !value),
+            },
+            {
+              id: "competence",
+              label: ledgerOpen ? "Hide competence" : "Competence",
+              icon: Gauge,
+              priority: "secondary" as const,
+              active: ledgerOpen,
+              onSelect: () => setLedgerOpen((open) => !open),
             },
             {
               id: "private",
@@ -1937,9 +1996,20 @@ export function AgentFoundry({
         label="Agent"
         modes={{ registry: true, value: view, onChange: setView }}
         context={newest ? `v${newest.releaseNumber} ${releaseLabel(newest)}` : "Not released"}
+        selector={
+          view === "build" && questionItems.length ? (
+            <WorkbarItemSelector
+              ariaLabel="Current question"
+              itemNoun="question"
+              value={currentQuestionId}
+              onChange={focusQuestion}
+              items={questionItems}
+            />
+          ) : undefined
+        }
         actions={barActions}
         primary={barPrimary}
-        trailing={syncReadout}
+        trailing={progressReadout}
         /* Below 1020px the stylesheet stacks the grid and gives the ledger
            `order: -1`, which put a status panel above the control row. The bar
            is ordered ahead of both, so the sequence stays bar, ledger headline,
@@ -1993,6 +2063,7 @@ export function AgentFoundry({
             <article
               key={section.id}
               className="foundry-section is-answered"
+              data-foundry-question={section.id}
               {...targetAttrs(`/foundry/sections/${section.id}`)}
             >
               <div className="foundry-section-head">
@@ -2050,6 +2121,7 @@ export function AgentFoundry({
           <article
             key={section.id}
             className="foundry-section is-open"
+            data-foundry-question={section.id}
             {...targetAttrs(`/foundry/sections/${section.id}`)}
           >
             <div className="foundry-section-head">
@@ -2086,6 +2158,7 @@ export function AgentFoundry({
             <Button
               variant="primary"
               size="sm"
+              className="self-start"
               disabled={
                 !canEdit || isEmptyValue(drafts[section.id] ?? section.value)
               }
@@ -2637,7 +2710,8 @@ export function AgentFoundry({
         skills={foundry.skills}
         evidence={foundry.evidenceBindings}
         extraGaps={ledgerGaps}
-        startCollapsed={compressLedger}
+        open={ledgerOpen}
+        onClose={() => setLedgerOpen(false)}
       />
     </div>
   );

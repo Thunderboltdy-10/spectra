@@ -128,15 +128,6 @@ function workspaceHref(workspaceId: string) {
   return `/workspace/${encodeURIComponent(workspaceId)}`;
 }
 
-function ActiveRailMarker() {
-  return (
-    <span
-      aria-hidden="true"
-      className="absolute -left-2 h-6 w-[3px] rounded-r-full bg-[var(--brand-primary)]"
-    />
-  );
-}
-
 function ShellNavigation() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -450,6 +441,34 @@ function ShellNavigation() {
     );
   }, [pathname, selectedWorkspaceId, coreDestinations]);
 
+  const navRef = useRef<HTMLElement>(null);
+  const [railMarker, setRailMarker] = useState({ top: 6, height: 22, visible: false });
+
+  const placeRailMarker = useCallback((element: HTMLElement | null) => {
+    const nav = navRef.current;
+    if (!nav || !element) {
+      setRailMarker((current) => ({ ...current, visible: false }));
+      return;
+    }
+    const navBox = nav.getBoundingClientRect();
+    const box = element.getBoundingClientRect();
+    const height = Math.max(16, Math.round(box.height * 0.62));
+    setRailMarker({
+      top: box.top - navBox.top + (box.height - height) / 2,
+      height,
+      visible: true,
+    });
+  }, []);
+
+  const snapRailMarkerToActive = useCallback(() => {
+    const active = navRef.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    placeRailMarker(active ?? null);
+  }, [placeRailMarker]);
+
+  useLayoutEffect(() => {
+    snapRailMarkerToActive();
+  }, [activeCoreHref, sidebarCollapsed, snapRailMarkerToActive]);
+
   return (
     <>
       <aside
@@ -460,35 +479,37 @@ function ShellNavigation() {
           sidebarCollapsed ? "w-[76px]" : "w-[240px]",
         )}
       >
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="absolute right-3 top-4 z-10 grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          {sidebarCollapsed ? (
-            <PanelLeftOpen size={14} />
-          ) : (
-            <PanelLeftClose size={14} />
-          )}
-        </button>
-        <Link
-          href="/workspace?home=1"
-          className="mx-4 mt-3 flex h-8 items-center gap-2 rounded-[6px] px-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
-          aria-label="Spectra home"
-        >
-          <SpectraLogo size={20} />
-          <span
-            data-sidebar-expanded=""
-            className={cn(
-              "font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513] transition-opacity",
-              sidebarCollapsed && "pointer-events-none opacity-0",
-            )}
+        <div className="mt-3 flex h-8 shrink-0 items-center gap-1 px-2">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="grid size-8 shrink-0 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
-            spectra
-          </span>
-        </Link>
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={14} />
+            ) : (
+              <PanelLeftClose size={14} />
+            )}
+          </button>
+          <Link
+            href="/workspace?home=1"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+            aria-label="Spectra home"
+          >
+            <SpectraLogo size={20} />
+            <span
+              data-sidebar-expanded=""
+              className={cn(
+                "font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513] transition-opacity",
+                sidebarCollapsed && "pointer-events-none opacity-0",
+              )}
+            >
+              spectra
+            </span>
+          </Link>
+        </div>
         <label
           data-sidebar-expanded=""
           className={cn(
@@ -509,9 +530,20 @@ function ShellNavigation() {
           </span>
         </label>
         <nav
+          ref={navRef}
           aria-label="Main destinations"
-          className="mt-2.5 flex flex-col gap-px px-3"
+          className="spectra-shell-nav relative mt-2.5 flex flex-col gap-px px-3"
+          onMouseLeave={snapRailMarkerToActive}
         >
+          <span
+            aria-hidden="true"
+            className="spectra-shell-rail-marker"
+            data-visible={railMarker.visible || undefined}
+            style={{
+              height: railMarker.height,
+              transform: `translateY(${railMarker.top}px)`,
+            }}
+          />
           {coreDestinations.map(({ href, label, icon: Icon }) => {
             const active = activeCoreHref === href;
             return (
@@ -529,6 +561,7 @@ function ShellNavigation() {
                     );
                   }
                 }}
+                onMouseEnter={(event) => placeRailMarker(event.currentTarget)}
                 aria-current={active ? "page" : undefined}
                 title={
                   sidebarCollapsed
@@ -545,7 +578,6 @@ function ShellNavigation() {
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                 )}
               >
-                {active ? <ActiveRailMarker /> : null}
                 <Icon size={15} strokeWidth={active ? 2.05 : 1.65} />
                 <span
                   data-sidebar-expanded=""

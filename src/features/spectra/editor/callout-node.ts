@@ -19,7 +19,12 @@ export const Callout = Node.create({
   addAttributes() {
     return { type: { default: "info", parseHTML: (element) => element.getAttribute("data-callout-type") ?? "info", renderHTML: ({ type }) => ({ "data-callout-type": type }) } };
   },
-  parseHTML() { return [{ tag: "aside[data-spectra-callout]" }]; },
+  parseHTML() {
+    return [
+      { tag: "aside[data-spectra-callout]" },
+      { tag: "div[data-callout]" },
+    ];
+  },
   renderHTML({ HTMLAttributes }) { return ["aside", mergeAttributes(HTMLAttributes, { "data-spectra-callout": "true", class: `callout callout-${HTMLAttributes["data-callout-type"] ?? "info"}` }), 0]; },
   addCommands() {
     return {

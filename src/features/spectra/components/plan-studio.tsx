@@ -6,7 +6,6 @@ import {
   AlertCircle,
   CalendarClock,
   Check,
-  ChevronRight,
   Download,
   FileSpreadsheet,
   Import,
@@ -472,6 +471,7 @@ export function PlanStudio({
           },
         ]}
       />
+      <div className="spectra-editor-body">
       {readOnly ? null : (
         <input
           ref={importRef}
@@ -1414,6 +1414,7 @@ export function PlanStudio({
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }

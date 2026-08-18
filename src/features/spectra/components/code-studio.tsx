@@ -63,7 +63,6 @@ import {
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import {
-  OverflowMenu,
   type OverflowItem,
 } from "@/components/ui/dropdown-menu";
 import { SelectField } from "@/components/ui/select";
@@ -130,9 +129,12 @@ import {
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import {
   ArtifactWorkbar,
+  WorkbarItemSelector,
   type WorkbarActionSpec,
+  type WorkbarModeSpec,
 } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
+import { StudioItemRail } from "./studio-item-rail";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { codeFileText } from "../work/models/yjs/code-adapter";
 
@@ -169,7 +171,7 @@ type TestResult = {
   message?: string;
 };
 
-type CodeSurface = "preview" | "code" | "split" | "settings";
+type CodeSurface = "preview" | "code" | "split";
 
 /**
  * The registry owns which views exist and who may enter them, so the studio
@@ -180,13 +182,11 @@ const SURFACE_BY_MODE_ID: Record<string, CodeSurface> = {
   code: "code",
   visualisation: "preview",
   both: "split",
-  settings: "settings",
 };
 const MODE_ID_BY_SURFACE: Record<CodeSurface, string> = {
   code: "code",
   preview: "visualisation",
   split: "both",
-  settings: "settings",
 };
 
 const MAX_CONSOLE_ENTRIES = 180;
@@ -235,7 +235,7 @@ function languageExtension(file: CodeFile) {
   return [];
 }
 
-function fileIcon(file: CodeFile) {
+function _fileIcon(file: CodeFile) {
   if (file.language === "json") return FileJson;
   if (
     ["html", "css", "javascript", "typescript", "python"].includes(
@@ -475,7 +475,7 @@ export function CodeStudio({
   );
   const [sourceMode, setSourceMode] = useState<"code" | "parameters">("code");
   const [fileQuery, setFileQuery] = useState("");
-  const [fileSearchMode, setFileSearchMode] = useState<"paths" | "content">(
+  const [fileSearchMode, _setFileSearchMode] = useState<"paths" | "content">(
     "paths",
   );
   const [pendingSearchTarget, setPendingSearchTarget] = useState<{
@@ -483,19 +483,25 @@ export function CodeStudio({
     line: number;
     column: number;
   } | null>(null);
-  const [fileRailOpen, setFileRailOpen] = useState(false);
-  const [newFileOpen, setNewFileOpen] = useState(false);
+  const [fileRailPreference, setFileRailPreference] = useState<
+    "auto" | "open" | "closed"
+  >("auto");
+  const fileRailOpen =
+    contract.surface === "full" &&
+    (fileRailPreference === "auto"
+      ? contract.density !== "tight"
+      : fileRailPreference === "open");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [_newFileOpen, setNewFileOpen] = useState(false);
   const [newFilePath, setNewFilePath] = useState("");
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
+  const [renameDraft, _setRenameDraft] = useState("");
   const [deleteFileId, setDeleteFileId] = useState<string | null>(null);
   const [panel, setPanel] = useState<"console" | "problems" | "tests" | null>(
     null,
   );
   const [runState, setRunState] = useState<RunState>("idle");
-  const [runMessage, setRunMessage] = useState(
-    "Run the current source to build a safe preview.",
-  );
+  const [runMessage, setRunMessage] = useState("");
   const [previewFiles, setPreviewFiles] = useState<CodeFile[] | null>(null);
   const [previewTests, setPreviewTests] = useState<CodeTest[]>([]);
   const [previewNonce, setPreviewNonce] = useState(0);
@@ -573,7 +579,7 @@ export function CodeStudio({
   const filteredFiles = workbook.files.filter((file) =>
     file.path.toLowerCase().includes(fileQuery.trim().toLowerCase()),
   );
-  const projectSearchResults = useMemo(() => {
+  const _projectSearchResults = useMemo(() => {
     const query = fileQuery.trim().toLocaleLowerCase();
     if (fileSearchMode !== "content" || !query) return [];
     const matches: Array<{
@@ -629,7 +635,7 @@ export function CodeStudio({
       ),
     ].sort((left, right) => left - right);
   }, [activeIndex, aiChangedPaths]);
-  const sourceBytes = useMemo(
+  const _sourceBytes = useMemo(
     () =>
       workbook.files.reduce(
         (total, file) =>
@@ -942,7 +948,7 @@ export function CodeStudio({
     });
   }
 
-  function createFile() {
+  function _createFile() {
     if (!newFilePath.trim()) return;
     try {
       const path = normalizeCodePath(newFilePath);
@@ -974,7 +980,7 @@ export function CodeStudio({
     }
   }
 
-  function renameFile() {
+  function _renameFile() {
     const id = renamingFileId;
     if (!id) return;
     try {
@@ -1017,7 +1023,7 @@ export function CodeStudio({
     setDeleteFileId(null);
   }
 
-  function duplicateFile(id: string) {
+  function _duplicateFile(id: string) {
     const source = workbook.files.find((file) => file.id === id);
     if (!source || readOnly) return;
     const dot = source.path.lastIndexOf(".");
@@ -1047,7 +1053,7 @@ export function CodeStudio({
     setActiveFileId(nextId);
   }
 
-  function setEntryFile(id: string) {
+  function _setEntryFile(id: string) {
     if (readOnly || workbook.entryFileId === id) return;
     mutate((draft) => {
       draft.entryFileId = id;
@@ -1059,7 +1065,7 @@ export function CodeStudio({
    * a menu rather than a hover-only glyph is what makes them available to the
    * keyboard and to touch.
    */
-  function fileRowActions(file: CodeFile) {
+  function _fileRowActions(file: CodeFile) {
     const isEntry = workbook.entryFileId === file.id;
     return [
       { key: "rename" as const, label: "Rename", icon: Pencil },
@@ -2302,7 +2308,7 @@ export function CodeStudio({
   }, [activeAiLineIndexes, activeFile.source]);
 
   const preview = (
-    <div className="code-preview-surface relative flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
+    <div className="code-preview-surface relative flex min-h-0 flex-1 flex-col bg-transparent">
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-3">
         {/* When the run failed, the status line is the way into the detail:
             without it, the Visualisation view can report a failure it gives you
@@ -2418,28 +2424,24 @@ export function CodeStudio({
             onEvent={handleSandboxEvent}
             onStatusChange={handleRuntimeStatus}
           />
-        ) : workbook.runtime === "python" &&
-          (runState === "loading" || runState === "running") ? (
-          <RuntimeWaiting
-            icon={Loader2}
-            title="Python is working in isolation"
-            detail="The disposable worker has no document, cookies, ambient secrets, or artifact network access."
-            spinning
-          />
+        ) : runState === "building" ||
+          runState === "loading" ||
+          runState === "running" ? (
+          <div className="grid min-h-0 flex-1 place-items-center">
+            <Loader2 className="h-4 w-4 animate-spin text-[var(--text-tertiary)] motion-reduce:animate-none" />
+          </div>
         ) : (
-          <RuntimeWaiting
-            icon={Eye}
-            title={
-              workbook.runtime === "none"
-                ? "Source-only artifact"
-                : "Preview is ready when you are"
-            }
-            detail={
-              workbook.runtime === "python"
-                ? "Run Python to view standard output or render safe HTML with spectra.render(...)."
-                : "Run the current source. Auto-run can be controlled in Settings."
-            }
-          />
+          <div className="grid min-h-0 flex-1 place-items-center">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-45"
+              onClick={() => void run()}
+              disabled={!canExecute || workbook.runtime === "none"}
+            >
+              <Play className="h-3.5 w-3.5" />
+              Run
+            </button>
+          </div>
         )}
       </div>
       <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border-subtle)] px-3 py-2 text-micro text-[var(--text-secondary)]">
@@ -2496,6 +2498,35 @@ export function CodeStudio({
   );
 
   const sourcePaneVisible = surface === "code" || surface === "split";
+  const isFullscreen = contract.surface === "full";
+  // Side-by-side Both is a fullscreen orientation. In the panel it must not
+  // mount the visualisation at all — not beside the source, and not stacked
+  // under it — or the preview's min-content blows the panel across the library.
+  const splitPreviewOpen = surface === "split" && isFullscreen;
+  const selectSurface = (next: CodeSurface) => {
+    setSurface(next);
+    setSettingsOpen(false);
+    mutate((draft) => {
+      draft.visualisation.openMode =
+        next === "code" ? "source" : next === "preview" ? "preview" : "split";
+    });
+  };
+  const panelModes: WorkbarModeSpec[] = [
+    {
+      id: "code",
+      label: "Code",
+      active: surface !== "preview",
+      onSelect: () => {
+        if (surface === "preview") selectSurface("code");
+      },
+    },
+    {
+      id: "visualisation",
+      label: "Visualisation",
+      active: surface === "preview",
+      onSelect: () => selectSurface("preview"),
+    },
+  ];
   const editingSource = sourcePaneVisible && sourceMode === "code";
   const running =
     runState === "building" || runState === "loading" || runState === "running";
@@ -2523,14 +2554,19 @@ export function CodeStudio({
       : []),
     ...(editingSource
       ? [
-          {
-            id: "files",
-            label: "Files",
-            icon: FolderOpen,
-            priority: "essential" as const,
-            active: fileRailOpen,
-            onSelect: () => setFileRailOpen((value) => !value),
-          },
+          ...(contract.surface === "full"
+            ? [
+                {
+                  id: "files",
+                  label: fileRailOpen ? "Hide files" : "Show files",
+                  icon: FolderOpen,
+                  priority: "essential" as const,
+                  active: fileRailOpen,
+                  onSelect: () =>
+                    setFileRailPreference(fileRailOpen ? "closed" : "open"),
+                },
+              ]
+            : []),
           {
             id: "find",
             label: "Find",
@@ -2558,6 +2594,15 @@ export function CodeStudio({
             : []),
         ]
       : []),
+    {
+      id: "settings",
+      label: "Settings",
+      icon: Settings2,
+      priority: "secondary" as const,
+      active: settingsOpen,
+      hint: "Runtime, access, and connections",
+      onSelect: () => setSettingsOpen((open) => !open),
+    },
     {
       id: "publish",
       label:
@@ -2687,38 +2732,45 @@ export function CodeStudio({
   ];
 
   return (
-    <div className="code-studio w-full overflow-hidden">
+    <div className="code-studio min-h-0 w-full min-w-0">
       {/* The legacy `code-workbar` hook is deliberately not passed: it carried
           the transitional `overflow-x: auto` rail, and the shared bar must not
           scroll. */}
       <ArtifactWorkbar
         label="Code actions"
-        modes={{
-          registry: true,
-          value: MODE_ID_BY_SURFACE[surface],
-          onChange: (modeId) => {
-            const next = SURFACE_BY_MODE_ID[modeId];
-            if (!next) return;
-            setSurface(next);
-            if (next !== "settings")
-              mutate((draft) => {
-                draft.visualisation.openMode =
-                  next === "code"
-                    ? "source"
-                    : next === "preview"
-                      ? "preview"
-                      : "split";
-              });
-          },
-        }}
+        modes={
+          isFullscreen
+            ? {
+                registry: true,
+                value: MODE_ID_BY_SURFACE[surface],
+                onChange: (modeId) => {
+                  const next = SURFACE_BY_MODE_ID[modeId];
+                  if (!next) return;
+                  selectSurface(next);
+                },
+              }
+            : panelModes
+        }
         context={
-          editingSource
-            ? workbook.entryFileId === activeFile.id
-              ? `${activeFile.path} · entry`
-              : activeFile.path
+          editingSource && workbook.entryFileId === activeFile.id
+            ? "Entry file"
             : undefined
         }
         actions={workbarActions}
+        selector={
+          workbook.files.length ? (
+            <WorkbarItemSelector
+              ariaLabel="File"
+              itemNoun="file"
+              value={activeFile.id}
+              onChange={setActiveFileId}
+              items={workbook.files.map((file) => ({
+                value: file.id,
+                label: file.path,
+              }))}
+            />
+          ) : undefined
+        }
         primary={{
           label: running ? "Stop" : "Run",
           icon: running ? CircleStop : Play,
@@ -2747,7 +2799,7 @@ export function CodeStudio({
         onChange={(event) => void handleImport(event.target.files)}
       />
 
-      <div className="spectra-editor-body">
+      <div className="spectra-editor-body relative min-h-0">
       {importing ? (
         <div
           role="status"
@@ -2816,25 +2868,34 @@ export function CodeStudio({
         </Notice>
       ) : null}
 
-      {surface === "settings" ? (
+      {settingsOpen ? (
         <CodeSettings
+          overlay
           artifactId={artifactId}
           artifacts={artifacts}
           content={workbook}
           readOnly={readOnly}
           onRuntimeChange={setRuntime}
           onChange={mutate}
+          onClose={() => setSettingsOpen(false)}
         />
       ) : null}
       {surface === "preview" ? (
-        <div className="flex min-h-[650px] flex-col p-3">{preview}</div>
+        <div
+          className={`flex min-h-0 flex-1 flex-col p-3 ${
+            isFullscreen ? "min-h-[650px]" : ""
+          }`}
+        >
+          {preview}
+        </div>
       ) : null}
       {surface === "code" || surface === "split" ? (
         <>
           <div
-            className={`code-editor-grid ${
-              surface === "code" ? "is-code-only" : ""
+            className={`code-editor-grid min-w-0 ${
+              splitPreviewOpen ? "" : "is-code-only"
             }`}
+            data-code-split={splitPreviewOpen ? "true" : "false"}
             style={
               { "--code-split": `${splitPercent}%` } as React.CSSProperties
             }
@@ -2859,260 +2920,45 @@ export function CodeStudio({
               {sourceMode === "code" ? (
                 <div
                   className={`code-source-body grid min-h-0 flex-1 ${
-                    fileRailOpen ? "is-files-open" : ""
+                    contract.surface === "full" && fileRailOpen
+                      ? "is-files-open"
+                      : ""
                   }`}
                 >
-                  <aside
-                    data-files-open={fileRailOpen || undefined}
-                    className="flex min-h-0 flex-col border-r border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-secondary)_72%,var(--bg-primary))]"
-                  >
-                    <div className="flex h-10 items-center gap-1.5 border-b border-[var(--border-subtle)] px-2">
-                      <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-[6px] bg-[var(--bg-primary)] px-2">
-                        <Search className="h-3 w-3 shrink-0 text-[var(--text-tertiary)]" />
-                        <input
-                          value={fileQuery}
-                          onChange={(event) => setFileQuery(event.target.value)}
-                          placeholder={
-                            fileSearchMode === "content"
-                              ? "Search source"
-                              : "Filter files"
-                          }
-                          aria-label={
-                            fileSearchMode === "content"
-                              ? "Search all source files"
-                              : "Filter files by path"
-                          }
-                          className="h-7 min-w-0 flex-1 bg-transparent text-micro outline-none"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        className={`code-icon-action h-7 w-7 ${fileSearchMode === "content" ? "bg-[var(--bg-primary)] text-[var(--accent-cyan)] shadow-[0_1px_4px_rgba(30,25,20,.06)]" : ""}`}
-                        onClick={() => {
-                          setFileSearchMode((mode) =>
-                            mode === "paths" ? "content" : "paths",
-                          );
-                          setFileQuery("");
-                        }}
-                        aria-label={
-                          fileSearchMode === "content"
-                            ? "Switch to file filtering"
-                            : "Search across project source"
-                        }
-                        title={
-                          fileSearchMode === "content"
-                            ? "Filter file paths"
-                            : "Search source across files"
-                        }
-                      >
-                        {fileSearchMode === "content" ? (
-                          <FileText className="h-3.5 w-3.5" />
-                        ) : (
-                          <Search className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="code-icon-action h-7 w-7"
-                        onClick={() => setNewFileOpen(true)}
-                        disabled={readOnly}
-                        aria-label="Create file"
-                      >
-                        <FilePlus2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-auto px-1.5 py-2">
-                      <div className="mb-1 flex items-center gap-1 px-1.5 py-1 text-micro font-bold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
-                        {fileSearchMode === "content" ? (
-                          <Search className="h-3 w-3" />
-                        ) : (
-                          <FolderOpen className="h-3 w-3" />
-                        )}
-                        {fileSearchMode === "content"
-                          ? "Project search"
-                          : "Artifact source"}{" "}
-                        <span className="ml-auto font-normal tracking-normal">
-                          {fileSearchMode === "content"
-                            ? projectSearchResults.length >= 250
-                              ? "250+"
-                              : projectSearchResults.length
-                            : workbook.files.length}
-                        </span>
-                      </div>
-                      {fileSearchMode === "content" ? (
-                        fileQuery.trim() ? (
-                          projectSearchResults.length ? (
-                            <div className="space-y-0.5">
-                              {projectSearchResults.map((result) => (
-                                <button
-                                  type="button"
-                                  key={result.id}
-                                  className="group block w-full rounded-[6px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-cyan)]"
-                                  onClick={() => {
-                                    setActiveFileId(result.fileId);
-                                    setPendingSearchTarget({
-                                      fileId: result.fileId,
-                                      line: result.line,
-                                      column: result.column,
-                                    });
-                                    setFileRailOpen(false);
-                                  }}
-                                >
-                                  <span className="flex items-center gap-1 text-micro font-semibold text-[var(--text-primary)]">
-                                    <FileCode2 className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
-                                    <span className="min-w-0 flex-1 truncate">
-                                      {result.path}
-                                    </span>
-                                    <span className="shrink-0 font-mono font-normal text-[var(--text-tertiary)]">
-                                      {result.line}:{result.column + 1}
-                                    </span>
-                                  </span>
-                                  <span className="mt-0.5 block truncate font-mono text-micro leading-3 text-[var(--text-secondary)]">
-                                    {result.snippet || "Blank line"}
-                                  </span>
-                                </button>
-                              ))}
-                              {projectSearchResults.length >= 250 ? (
-                                <p className="px-2 py-1 text-micro text-[var(--text-tertiary)]">
-                                  Showing the first 250 matches. Refine the
-                                  search to locate a specific symbol or phrase.
-                                </p>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <EmptyOutput text="No source matches in this artifact." />
-                          )
-                        ) : (
-                          <p className="px-2 py-3 text-micro leading-4 text-[var(--text-tertiary)]">
-                            Search every editable source file. Results open at
-                            the exact line without changing the running preview.
-                          </p>
-                        )
-                      ) : (
-                        filteredFiles.map((file) => {
-                          const Icon = fileIcon(file);
-                          const selected = file.id === activeFile.id;
-                          const fileIndex = workbook.files.findIndex(
-                            (candidate) => candidate.id === file.id,
-                          );
-                          const fileHasAiEffect = pathTouches(
-                            aiChangedPaths,
-                            `/files/${fileIndex}`,
-                          );
-                          return (
-                            <div
-                              key={file.id}
-                              data-ai-region={aiRegionAttr(fileHasAiEffect)}
-                              {...targetAttrs(`/files/${fileIndex}`)}
-                              className={`group flex min-h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-micro ${selected ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(30,25,20,.06)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setActiveFileId(file.id);
-                                  setFileRailOpen(false);
-                                }}
-                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-                              >
-                                <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
-                                {renamingFileId === file.id ? (
-                                  <input
-                                    autoFocus
-                                    value={renameDraft}
-                                    onChange={(event) =>
-                                      setRenameDraft(event.target.value)
-                                    }
-                                    onBlur={renameFile}
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Enter") renameFile();
-                                      if (event.key === "Escape")
-                                        setRenamingFileId(null);
-                                    }}
-                                    onClick={(event) => event.stopPropagation()}
-                                    className="h-5 min-w-0 flex-1 rounded border border-[var(--accent-cyan)] bg-[var(--bg-primary)] px-1 outline-none"
-                                  />
-                                ) : (
-                                  <span className="truncate">{file.path}</span>
-                                )}
-                                {workbook.entryFileId === file.id ? (
-                                  <span
-                                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--success)]"
-                                    title="Entry file"
-                                  />
-                                ) : null}
-                              </button>
-                              {!readOnly && renamingFileId !== file.id ? (
-                                <OverflowMenu
-                                  label={`Actions for ${file.path}`}
-                                  size={24}
-                                  triggerClassName={`shrink-0 transition-opacity motion-reduce:transition-none ${
-                                    selected
-                                      ? ""
-                                      : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-                                  }`}
-                                  items={fileRowActions(file)}
-                                  onSelect={(key) => {
-                                    if (key === "rename") {
-                                      setRenamingFileId(file.id);
-                                      setRenameDraft(file.path);
-                                    } else if (key === "entry")
-                                      setEntryFile(file.id);
-                                    else if (key === "duplicate")
-                                      duplicateFile(file.id);
-                                    else if (key === "delete")
-                                      setDeleteFileId(file.id);
-                                  }}
-                                />
-                              ) : null}
-                            </div>
-                          );
-                        })
-                      )}
-                      {fileSearchMode === "paths" && newFileOpen ? (
-                        <div className="mt-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2">
-                          <label className="text-micro font-semibold text-[var(--text-secondary)]">
-                            New path
-                          </label>
+                  {contract.surface === "full" ? (
+                    <StudioItemRail
+                      label="Files"
+                      count={workbook.files.length}
+                      collapsed={!fileRailOpen}
+                      onToggleCollapsed={() =>
+                        setFileRailPreference(fileRailOpen ? "closed" : "open")
+                      }
+                      items={filteredFiles.map((file) => ({
+                        id: file.id,
+                        title: file.path.split("/").pop() || file.path,
+                        subtitle: file.path.includes("/")
+                          ? file.path.slice(0, file.path.lastIndexOf("/"))
+                          : file.language || undefined,
+                        active: file.id === activeFile.id,
+                      }))}
+                      onSelect={setActiveFileId}
+                      onAdd={readOnly ? undefined : () => setNewFileOpen(true)}
+                      addLabel="Add file"
+                      canEdit={!readOnly}
+                      tools={
+                        <label className="mt-2 flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)]">
+                          <Search className="size-3.5 shrink-0" />
                           <input
-                            autoFocus
-                            value={newFilePath}
-                            onChange={(event) =>
-                              setNewFilePath(event.target.value)
-                            }
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") createFile();
-                              if (event.key === "Escape") setNewFileOpen(false);
-                            }}
-                            placeholder="src/chart.tsx"
-                            className="mt-1 h-7 w-full rounded-[5px] border border-[var(--border-default)] bg-transparent px-2 text-micro outline-none focus:border-[var(--accent-cyan)]"
+                            value={fileQuery}
+                            onChange={(event) => setFileQuery(event.target.value)}
+                            placeholder="Filter files"
+                            aria-label="Filter files by path"
+                            className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none"
                           />
-                          <div className="mt-1.5 flex justify-end gap-1">
-                            <button
-                              type="button"
-                              className="code-small-action"
-                              onClick={() => setNewFileOpen(false)}
-                            >
-                              Cancel
-                            </button>
-                            <button
-                              type="button"
-                              className="code-small-action bg-[var(--text-primary)] text-[var(--bg-primary)]"
-                              onClick={createFile}
-                            >
-                              Create
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="flex min-h-9 items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-2 text-micro text-[var(--text-tertiary)]">
-                      <span>{formatBytes(sourceBytes)}</span>
-                      <span>
-                        {workbook.files.length} file
-                        {workbook.files.length === 1 ? "" : "s"}
-                      </span>
-                    </div>
-                  </aside>
+                        </label>
+                      }
+                    />
+                  ) : null}
                   <div
                     className="relative min-h-[520px] min-w-0 overflow-hidden bg-[var(--bg-primary)]"
                     data-ai-region={aiRegionAttr(activeAiEffect)}
@@ -3165,7 +3011,7 @@ export function CodeStudio({
                 />
               )}
             </section>
-            {surface === "split" ? (
+            {splitPreviewOpen ? (
               <>
                 <button
                   type="button"
@@ -3826,15 +3672,19 @@ function CodeSettings({
   artifacts,
   content,
   readOnly,
+  overlay = false,
   onRuntimeChange,
   onChange,
+  onClose,
 }: {
   artifactId: string;
   artifacts: SpectraArtifact[];
   content: CodeContent;
   readOnly: boolean;
+  overlay?: boolean;
   onRuntimeChange: (runtime: CodeRuntime) => void;
   onChange: (recipe: (draft: CodeContent) => void) => void;
+  onClose: () => void;
 }) {
   const [settingsSection, setSettingsSection] = useState<
     "experience" | "access" | "connections" | "quality"
@@ -4075,11 +3925,22 @@ function CodeSettings({
     },
   ];
   return (
-    <div className="code-settings-shell">
+    <div
+      className="code-settings-shell"
+      data-overlay={overlay || undefined}
+    >
       <nav className="code-settings-nav" aria-label="Code settings sections">
         <div className="code-settings-nav-heading">
           <span>Configuration</span>
           <strong>Code work</strong>
+          <button
+            type="button"
+            className="code-settings-close"
+            aria-label="Hide settings"
+            onClick={onClose}
+          >
+            <X className="size-4" />
+          </button>
         </div>
         {settingsSections.map((section) => {
           const Icon = section.icon;
@@ -4119,11 +3980,11 @@ function CodeSettings({
                 key={option.value}
                 disabled={readOnly}
                 onClick={() => onRuntimeChange(option.value)}
-                className={`rounded-[9px] border p-3 text-left transition ${content.runtime === option.value ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--border-strong)]"}`}
+                className={`rounded-none border-0 px-0 py-2.5 text-left ${content.runtime === option.value ? "bg-[color-mix(in_oklab,var(--text-primary)_5%,transparent)]" : "bg-transparent hover:bg-[var(--bg-hover)]"}`}
               >
                 <span className="flex items-center gap-2 text-[11px] font-semibold text-[var(--text-primary)]">
                   {content.runtime === option.value ? (
-                    <Check className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
+                    <Check className="h-3.5 w-3.5 text-[var(--text-primary)]" />
                   ) : (
                     <Box className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
                   )}
@@ -5347,36 +5208,6 @@ function SecurityRow({ label, value }: { label: string; value: string }) {
         <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
         {value}
       </span>
-    </div>
-  );
-}
-
-function RuntimeWaiting({
-  icon: Icon,
-  title,
-  detail,
-  spinning = false,
-}: {
-  icon: typeof Eye;
-  title: string;
-  detail: string;
-  spinning?: boolean;
-}) {
-  return (
-    <div className="flex min-h-[340px] items-center justify-center rounded-[10px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-secondary)_50%,var(--bg-primary))] p-8 text-center">
-      <div className="max-w-[330px]">
-        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--bg-elevated)] text-[var(--accent-cyan)] shadow-[0_5px_20px_rgba(34,98,140,.09)]">
-          <Icon
-            className={`h-5 w-5 ${spinning ? "animate-spin motion-reduce:animate-none" : ""}`}
-          />
-        </span>
-        <h3 className="mt-4 font-display text-[18px] font-semibold text-[var(--text-primary)]">
-          {title}
-        </h3>
-        <p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">
-          {detail}
-        </p>
-      </div>
     </div>
   );
 }

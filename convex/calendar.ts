@@ -172,41 +172,50 @@ export const overview = query({
           : [],
       ),
     );
-    const projectedTasks = plans
+    const unscheduledPlans = plans
       .filter(
         (plan) =>
           plan.status === "active" &&
           !planArtifactsRepresentedByCalendar.has(String(plan._id)),
       )
-      .flatMap((plan) =>
-        planTasks(plan).map((task) => ({
-          id: `plan:${plan._id}:${task.id}`,
-          kind: "task" as const,
-          title: task.title,
-          notes: task.notes,
-          allDay: false,
-          timezone: "UTC",
-          timePrecision: "unknown" as const,
-          status: "active" as const,
-          sourceLocked: false,
-          planArtifactId: plan._id,
-          planTaskId: task.id,
-          linkedWorkIds: [plan._id],
-          revision: 0,
-          dueAt: task.dueAt,
-        })),
-      );
+      .flatMap((plan) => {
+        const remaining = planTasks(plan).filter(
+          (task) => !scheduledPlanTasks.has(`${plan._id}:${task.id}`),
+        );
+        if (!remaining.length) return [];
+        return [
+          {
+            id: `plan:${plan._id}`,
+            kind: "task" as const,
+            title: text(plan.title) || remaining[0]!.title,
+            notes:
+              remaining.length > 1
+                ? `${remaining.length} unscheduled`
+                : undefined,
+            allDay: false,
+            timezone: "UTC",
+            timePrecision: "unknown" as const,
+            status: "active" as const,
+            sourceLocked: false,
+            planArtifactId: plan._id,
+            planTaskId: remaining[0]!.id,
+            linkedWorkIds: [plan._id],
+            revision: 0,
+            dueAt: remaining[0]!.dueAt,
+          },
+        ];
+      });
     const visible = items.filter(
       (item) =>
         item.startAt === undefined ||
         (item.startAt <= args.to && (item.endAt ?? item.startAt) >= args.from),
     );
     const unscheduledStored = items.filter(
-      (item) => item.kind === "task" && item.startAt === undefined,
-    );
-    const unscheduledPlans = projectedTasks.filter(
-      (task) =>
-        !scheduledPlanTasks.has(`${task.planArtifactId}:${task.planTaskId}`),
+      (item) =>
+        item.kind === "task" &&
+        item.startAt === undefined &&
+        !item.sourceProvider &&
+        !item.planArtifactId,
     );
     const partialTimeItems = items.filter(
       (item) =>

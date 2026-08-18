@@ -114,6 +114,7 @@ export function ArtifactWorkbar({
   actions = [],
   primary,
   trailing,
+  overflow,
   children,
   className,
 }: {
@@ -130,6 +131,12 @@ export function ArtifactWorkbar({
    * counter. Must stay narrow; buttons belong in `actions`.
    */
   trailing?: ReactNode;
+  /**
+   * Extra items rendered inside the same `⋯` menu as shed secondary/advanced
+   * actions. Use this for grouped exports or templates — never for a second
+   * overflow control, and never for a panel that grows the bar.
+   */
+  overflow?: ReactNode;
   /** Legacy inline content. Prefer `actions`; this does not shed. */
   children?: ReactNode;
   className?: string;
@@ -239,7 +246,7 @@ export function ArtifactWorkbar({
             <span>{primary.label}</span>
           </button>
         ) : null}
-        {menuActions.length ? (
+        {menuActions.length || overflow ? (
           <WorkbarMenu
             label={<MoreHorizontal className="size-4" />}
             ariaLabel={`More ${label.toLowerCase()}`}
@@ -249,6 +256,7 @@ export function ArtifactWorkbar({
             {menuActions.map((action) => (
               <WorkbarMenuItem key={action.id} action={action} />
             ))}
+            {overflow}
           </WorkbarMenu>
         ) : null}
       </div>
@@ -431,6 +439,7 @@ export function WorkbarMenu({
 }) {
   return (
     <DropdownMenu
+      modal={false}
       {...(open === undefined ? {} : { open })}
       onOpenChange={onOpenChange}
     >
@@ -480,5 +489,5 @@ export function WorkbarMore({
 }
 
 export function workbarMenuItemClass() {
-  return "flex w-full items-center gap-2 rounded-chip px-2.5 py-1.5 text-left text-ui font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:pointer-events-none disabled:opacity-45";
+  return "flex w-full items-center gap-2 rounded-chip px-2.5 py-1.5 text-left text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:pointer-events-none disabled:opacity-45";
 }

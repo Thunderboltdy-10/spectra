@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
  *   hover         a 1px lift, slightly softened
  *   active        settles back to 0 (a real push)
  *   focus-visible a 2px `--focus-ring-color` ring, offset from the surface
- *   disabled      45% opacity, not-allowed cursor, no lift
+ *   disabled      muted fill (primary) or 45% opacity (other variants), not-allowed cursor, no lift
  *
  * `whitespace-nowrap` is part of the contract, not decoration: a primary CTA
  * label must never wrap. If a label does not fit, shorten the label.
@@ -30,21 +30,21 @@ const buttonVariants = cva(
     // disabled, so the lift needs no `enabled:` guard (which would also skip
     // anchors rendered through `asChild`).
     "hover:-translate-y-px active:translate-y-0",
-    "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45",
+    "disabled:pointer-events-none disabled:cursor-not-allowed",
   ].join(" "),
   {
     variants: {
       variant: {
         /** The one primary. 15.7:1 against its own fill. */
         primary:
-          "border border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90",
+          "border border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90 disabled:border-transparent disabled:bg-[color-mix(in_oklab,var(--text-primary)_72%,var(--bg-elevated))] disabled:text-[var(--bg-primary)]",
         secondary:
-          "border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]",
+          "border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] disabled:opacity-45",
         ghost:
-          "border border-transparent bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+          "border border-transparent bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45",
         /** Destructive confirmation only. Rose stays a local discontinuity. */
         destructive:
-          "border border-[color-mix(in_oklab,var(--danger)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--danger)_80%,var(--text-primary))] hover:bg-[color-mix(in_oklab,var(--danger)_16%,var(--bg-secondary))]",
+          "border border-[color-mix(in_oklab,var(--danger)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--danger)_80%,var(--text-primary))] hover:bg-[color-mix(in_oklab,var(--danger)_16%,var(--bg-secondary))] disabled:opacity-45",
       },
       size: {
         sm: "min-h-8 px-2.5 text-micro",

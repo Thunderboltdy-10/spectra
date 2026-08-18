@@ -33,7 +33,10 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { createDefaultArtifactPayload } from "../components/artifact-blueprint-sheet";
-import { useArtifactStudioState } from "../components/artifact-studio-shell";
+import {
+  StudioSplitPlaceholder,
+  useArtifactStudioState,
+} from "../components/artifact-studio-shell";
 import { CommandBar } from "../components/command-bar";
 import {
   ContextFocusControl,
@@ -61,10 +64,12 @@ import { WorkbenchLiveStack } from "./workbench-live-stack";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
 
-const ArtifactStudio = dynamic(() =>
-  import("../components/artifact-studio").then(
-    (module) => module.ArtifactStudio,
-  ),
+const ArtifactStudio = dynamic(
+  () =>
+    import("../components/artifact-studio").then(
+      (module) => module.ArtifactStudio,
+    ),
+  { loading: () => <StudioSplitPlaceholder /> },
 );
 
 type SortMode = "relevance" | "recent" | "title";

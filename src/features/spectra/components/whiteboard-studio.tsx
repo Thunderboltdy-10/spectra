@@ -25,6 +25,7 @@ import {
   Magnet,
   MousePointer2,
   Package,
+  PanelLeft,
   Plus,
   Presentation,
   Redo2,
@@ -90,8 +91,10 @@ import { getWorkDefinition } from "../work/registry";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { useStudioContract } from "./artifact-studio-shell";
+import { StudioItemRail } from "./studio-item-rail";
 import {
   ArtifactWorkbar,
+  WorkbarItemSelector,
   type WorkbarActionSpec,
 } from "./artifact-workbar";
 
@@ -674,6 +677,7 @@ export function WhiteboardStudio({
   const [panel, setPanel] = useState<
     "none" | "layers" | "outline" | "templates" | "search"
   >("none");
+  const [pageRailCollapsed, setPageRailCollapsed] = useState(false);
   const [search, setSearch] = useState("");
   const [undo, setUndo] = useState<WhiteboardContent[]>([]);
   const [redo, setRedo] = useState<WhiteboardContent[]>([]);
@@ -2647,6 +2651,19 @@ export function WhiteboardStudio({
       hint: "0",
       onSelect: fitToContent,
     },
+    ...(contract.surface === "full"
+      ? [
+          {
+            id: "pages",
+            label: pageRailCollapsed ? "Show pages" : "Hide pages",
+            icon: PanelLeft,
+            priority: "essential" as const,
+            active: !pageRailCollapsed,
+            onSelect: () =>
+              setPageRailCollapsed((collapsed) => !collapsed),
+          },
+        ]
+      : []),
     ...[...menuPalette, ...BOARD_OBJECTS].map(([id, icon, label]) => ({
       id: `tool-${id}`,
       label,
@@ -2751,7 +2768,21 @@ export function WhiteboardStudio({
         // CANON D2/D3: a board has no genuine peer views. Edit and View were a
         // permission printed as a tab pair, which is exactly what D1 forbids.
         modes={[]}
-        context={board.pages.length > 1 ? page.name : undefined}
+        selector={
+          <WorkbarItemSelector
+            ariaLabel="Page"
+            itemNoun="page"
+            value={page.id}
+            onChange={(pageId) =>
+              setViewport((current) => ({ ...current, pageId, x: 0, y: 0 }))
+            }
+            items={board.pages.map((candidate) => ({
+              value: candidate.id,
+              label: candidate.name,
+            }))}
+          />
+        }
+        context={undefined}
         className="mx-3 mt-2.5 shrink-0"
         actions={boardActions}
         trailing={
@@ -2810,8 +2841,37 @@ export function WhiteboardStudio({
       ) : null}
 
       <div className="whiteboard-shell">
-        {panel !== "none" ? (
-          <aside className="whiteboard-panel">
+        {contract.surface === "full" ? (
+          <StudioItemRail
+            label="Pages"
+            count={board.pages.length}
+            collapsed={pageRailCollapsed}
+            onToggleCollapsed={() =>
+              setPageRailCollapsed((collapsed) => !collapsed)
+            }
+            items={board.pages.map((candidate) => ({
+              id: candidate.id,
+              title: candidate.name,
+              subtitle: `${board.nodes.filter((node) => node.pageId === candidate.id).length} objects`,
+              active: candidate.id === page.id,
+            }))}
+            onSelect={(pageId) =>
+              setViewport({ pageId, x: 0, y: 0, zoom: 1 })
+            }
+            onAdd={readOnly ? undefined : addPage}
+            addLabel="Add page"
+            canEdit={!readOnly}
+          />
+        ) : null}
+        {panel !== "none" &&
+        !(contract.surface === "full" && panel === "layers") ? (
+          <aside
+            className={
+              contract.surface === "full"
+                ? "whiteboard-panel spectra-studio-inspector-overlay"
+                : "whiteboard-panel"
+            }
+          >
             <header>
               <strong>
                 {panel === "layers"

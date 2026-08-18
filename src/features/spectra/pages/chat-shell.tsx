@@ -37,7 +37,10 @@ import {
   GlobalSearch,
   type ComposerFocusMode,
 } from "../components/context-controls";
-import { useArtifactStudioState } from "../components/artifact-studio-shell";
+import {
+  StudioSplitPlaceholder,
+  useArtifactStudioState,
+} from "../components/artifact-studio-shell";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import {
   disengageFollow,
@@ -61,10 +64,12 @@ import {
   type SpectraWorkspace,
 } from "../data/api";
 
-const ArtifactStudio = dynamic(() =>
-  import("../components/artifact-studio").then(
-    (module) => module.ArtifactStudio,
-  ),
+const ArtifactStudio = dynamic(
+  () =>
+    import("../components/artifact-studio").then(
+      (module) => module.ArtifactStudio,
+    ),
+  { loading: () => <StudioSplitPlaceholder /> },
 );
 
 export function ChatShell() {

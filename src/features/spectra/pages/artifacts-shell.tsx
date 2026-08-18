@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import {
   BookOpen,
   CalendarCheck2,
@@ -66,6 +65,7 @@ import {
   StudioTabRail,
   useArtifactStudioState,
 } from "../components/artifact-studio-shell";
+import { ArtifactStudio } from "../components/artifact-studio";
 import { ArtifactTileSurface } from "../components/artifact-tile-surface";
 import {
   CommandBar,
@@ -213,12 +213,6 @@ function useOutsideClick<T extends HTMLElement>(
   }, [onClose, open]);
   return ref;
 }
-
-const ArtifactStudio = dynamic(() =>
-  import("../components/artifact-studio").then(
-    (module) => module.ArtifactStudio,
-  ),
-);
 
 export function ArtifactsShell({
   initialArtifactId,
@@ -1514,33 +1508,36 @@ export function ArtifactsShell({
   return (
     <div className="spectra-wave-y flex h-full min-h-0 bg-[var(--bg-primary)]">
       <div className="flex min-w-0 flex-1 flex-col">
-        {studio.mode !== "tab" ? (
-          <StudioTabRail
-            hubTabs={
-              workSetIsolated && activeHubTabId
-                ? hubTabs.map((tab) =>
-                    tab.id === activeHubTabId
-                      ? {
-                          ...tab,
-                          label: `Work set · ${tiledArtifacts.length} objects`,
-                        }
-                      : tab,
-                  )
-                : hubTabs
-            }
-            activeHubTabId={activeHubTabId}
-            artifacts={allArtifacts}
-            tabs={studio.tabs}
-            activeArtifactId={null}
-            dirtyIds={studio.dirtyIds}
-            onActivateHub={activateAllHub}
-            onCloseHub={closeAllHubTab}
-            onAddHub={addAllHubTab}
-            onActivateTab={studio.activateTab}
-            onCloseTab={closeArtifactTab}
-            persistent
-          />
-        ) : null}
+        <StudioTabRail
+          hubTabs={
+            workSetIsolated && activeHubTabId
+              ? hubTabs.map((tab) =>
+                  tab.id === activeHubTabId
+                    ? {
+                        ...tab,
+                        label: `Work set · ${tiledArtifacts.length} objects`,
+                      }
+                    : tab,
+                )
+              : hubTabs
+          }
+          activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
+          artifacts={allArtifacts}
+          tabs={studio.tabs}
+          activeArtifactId={
+            studio.mode === "tab" ? studio.activeArtifactId : null
+          }
+          dirtyIds={studio.dirtyIds}
+          onActivateHub={(tabId) => {
+            if (studio.mode === "tab") returnToAllHub();
+            else activateAllHub(tabId);
+          }}
+          onCloseHub={closeAllHubTab}
+          onAddHub={addAllHubTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={closeArtifactTab}
+          persistent
+        />
         <div className="spectra-workbench-frame relative flex min-h-0 flex-1">
           {pendingCreateType ? (
             <div

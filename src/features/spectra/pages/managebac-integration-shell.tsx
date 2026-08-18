@@ -198,7 +198,7 @@ function EmptyState({
   );
 }
 
-function SummaryMetric({
+function _SummaryMetric({
   label,
   value,
   detail,

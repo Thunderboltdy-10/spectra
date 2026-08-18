@@ -1,8 +1,15 @@
 import type { NextConfig } from "next";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));
+// Pin every bundler to the ESM build. Mixing `yjs.mjs` with `yjs.cjs`
+// redefines constructors and prints "Yjs was already imported".
+// Turbopack on Windows cannot resolve `C:\...` alias targets
+// ("windows imports are not implemented yet"), so the turbopack alias stays
+// a project-relative POSIX path.
+const yjsEsmRelative = "./node_modules/yjs/dist/yjs.mjs";
+const yjsEsmAbsolute = resolve(projectRoot, "node_modules/yjs/dist/yjs.mjs");
 
 const nextConfig: NextConfig = {
   // Browser evidence is taken against the development server, but framework
@@ -12,6 +19,16 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["pdfjs-dist", "@napi-rs/canvas", "esbuild"],
   turbopack: {
     root: projectRoot,
+    resolveAlias: {
+      yjs: yjsEsmRelative,
+    },
+  },
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      yjs: yjsEsmAbsolute,
+    };
+    return config;
   },
   images: {
     remotePatterns: [

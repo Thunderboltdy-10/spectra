@@ -8,7 +8,9 @@ export default async function LibraryWorkPage({ params }: { params: Promise<{ wo
   const { workId } = await params;
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0 overflow-y-auto">
-      <Suspense fallback={null}><ArtifactsShell initialArtifactId={workId} /></Suspense>
+      <Suspense fallback={<div className="h-full min-h-0 bg-[var(--bg-primary)]" />}>
+        <ArtifactsShell initialArtifactId={workId} />
+      </Suspense>
     </AppShell>
   );
 }

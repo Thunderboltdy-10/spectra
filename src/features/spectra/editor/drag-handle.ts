@@ -64,18 +64,17 @@ export const DragHandle = Extension.create({
           hide();
           const add = () => {
             if (!active) return;
-            const paragraph = view.state.schema.nodes.paragraph?.create(
-              null,
-              view.state.schema.text("/"),
-            );
+            const paragraph = view.state.schema.nodes.paragraph?.create();
             if (!paragraph) return;
             const position = active.pos + active.size;
             const transaction = view.state.tr.insert(position, paragraph);
             transaction.setSelection(
-              TextSelection.create(transaction.doc, position + 2),
+              TextSelection.create(transaction.doc, position + 1),
             );
             view.dispatch(transaction.scrollIntoView());
             view.focus();
+            // Insert the slash as typed text so the suggestion plugin opens.
+            view.dispatch(view.state.tr.insertText("/"));
           };
           const drag = (event: DragEvent) => {
             if (!active) return;

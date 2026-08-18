@@ -14,13 +14,13 @@ import {
   Copy,
   Eye,
   EyeOff,
-  GripVertical,
   History,
   ImageIcon,
   Import,
+  List,
   Loader2,
-  PanelLeft,
   Pencil,
+  PanelLeft,
   Plus,
   Radio,
   Shuffle,
@@ -88,6 +88,7 @@ import {
   type WorkbarActionSpec,
 } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
+import { StudioItemRail } from "./studio-item-rail";
 
 /**
  * One name per question type, used by the type control, the question list and
@@ -143,7 +144,7 @@ function QuizExperienceSection({
   const issues = validateQuizExperience(experience);
 
   return (
-    <section className="rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
+    <section className="border-0 bg-transparent p-0">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
           How this quiz is used
@@ -407,6 +408,50 @@ function quizPracticeErrorMessage(error: unknown, fallback: string) {
   return message || fallback;
 }
 
+function QuizResultPie({
+  correct,
+  incorrect,
+  pending,
+}: {
+  correct: number;
+  incorrect: number;
+  pending: number;
+}) {
+  const total = Math.max(1, correct + incorrect + pending);
+  const correctDeg = (correct / total) * 360;
+  const incorrectDeg = (incorrect / total) * 360;
+  return (
+    <div className="flex flex-wrap items-center gap-6 py-4">
+      <div
+        role="img"
+        aria-label={`${correct} right, ${incorrect} wrong${pending ? `, ${pending} awaiting review` : ""}`}
+        className="size-[148px] shrink-0 rounded-full"
+        style={{
+          background: `conic-gradient(var(--success) 0deg ${correctDeg}deg, color-mix(in oklab, var(--danger) 82%, var(--text-primary)) ${correctDeg}deg ${correctDeg + incorrectDeg}deg, var(--bg-secondary) ${correctDeg + incorrectDeg}deg 360deg)`,
+        }}
+      />
+      <ul className="space-y-1.5 text-[13px] text-[var(--text-secondary)]">
+        <li>
+          <span className="font-semibold text-[var(--success)]">{correct}</span>
+          {" · right"}
+        </li>
+        <li>
+          <span className="font-semibold text-[var(--danger)]">{incorrect}</span>
+          {" · wrong"}
+        </li>
+        {pending ? (
+          <li>
+            <span className="font-semibold text-[var(--text-primary)]">
+              {pending}
+            </span>
+            {" · awaiting review"}
+          </li>
+        ) : null}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * Exported as a leaf, on the same terms as `DocumentStudio`: the landing story
  * shows the real quiz view, not a rebuild of it.
@@ -440,6 +485,7 @@ export function QuizStudio({
   );
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
+  const [inspectAttempt, setInspectAttempt] = useState(false);
   const [practiceAttempt, setPracticeAttempt] =
     useState<SpectraQuizPracticeAttempt>();
   const [practiceAttempts, setPracticeAttempts] = useState<
@@ -500,15 +546,11 @@ export function QuizStudio({
    * to go under the editor, one when even the navigator has to stack. Every one
    * of them is fully editable: narrow is not read-only (CANON D4).
    */
-  const threeColumnBuilder = "292px minmax(0,1fr) 210px";
-  const builderColumns =
-    studio.density === "tight"
-      ? undefined
-      : studio.density === "compact"
-        ? `${questionNavigatorOpen ? "228px" : "56px"} minmax(0,1fr)`
-        : questionNavigatorOpen
-          ? threeColumnBuilder
-          : "62px minmax(0,1fr) 210px";
+  const showQuestionRail = studio.surface === "full";
+
+  useEffect(() => {
+    setQuestionNavigatorOpen(studio.surface === "full");
+  }, [studio.surface]);
 
   useEffect(() => {
     const reveal = (event: Event) => {
@@ -976,6 +1018,25 @@ export function QuizStudio({
   const answeredQuestionCount = answeredQuestionIds.size;
   const unansweredQuestionCount =
     displayedQuestions.length - answeredQuestionCount;
+  const isLastDisplayedQuestion =
+    displayedQuestions.length === 0 ||
+    activeDisplayedQuestionIndex >= displayedQuestions.length - 1;
+  const attemptScoreCounts = (() => {
+    let correct = 0;
+    let incorrect = 0;
+    let pending = 0;
+    for (const question of displayedQuestions) {
+      if (practiceAttempt) {
+        const result = revealedPracticeResultByQuestion.get(question.id);
+        if (result?.correct === true) correct += 1;
+        else if (result?.correct === false) incorrect += 1;
+        else pending += 1;
+      } else if (question.type === "long_response") pending += 1;
+      else if (questionCorrect(question)) correct += 1;
+      else incorrect += 1;
+    }
+    return { correct, incorrect, pending };
+  })();
   /** The score as a percentage, from the server for a real attempt. */
   const attemptPercentage =
     practiceAttempt?.status === "submitted"
@@ -1052,6 +1113,7 @@ export function QuizStudio({
       setPracticeClock(undefined);
       setAnswers({});
       setSubmitted(false);
+      setInspectAttempt(false);
       setPracticeFeedback({});
       setView("preview");
       return;
@@ -1083,9 +1145,15 @@ export function QuizStudio({
     setPracticeClock(undefined);
     setAnswers({});
     setSubmitted(false);
+    setInspectAttempt(false);
     setPracticeFeedback({});
     setPracticeError(undefined);
     setView(canEditQuiz ? "builder" : "responses");
+  }
+
+  function goDisplayedQuestion(delta: -1 | 1) {
+    const next = displayedQuestions[activeDisplayedQuestionIndex + delta];
+    if (next) setActiveQuestionId(next.id);
   }
 
   function anchorPracticeClock(remainingMs: number | null | undefined) {
@@ -1110,6 +1178,7 @@ export function QuizStudio({
       ),
     );
     setSubmitted(attempt.status === "submitted");
+    setInspectAttempt(false);
     setPracticeFeedback(
       Object.fromEntries(
         (attempt.results ?? []).map((result) => [result.questionId, result]),
@@ -1492,6 +1561,33 @@ export function QuizStudio({
           // active control returns to authoring.
           onSelect: () => setView(view === "settings" ? "builder" : "settings"),
         },
+        ...(showQuestionRail
+          ? [
+              {
+                id: "questions",
+                label: questionNavigatorOpen
+                  ? "Hide questions"
+                  : "Show questions",
+                icon: PanelLeft,
+                priority: "essential" as const,
+                active: questionNavigatorOpen,
+                onSelect: () =>
+                  setQuestionNavigatorOpen((open) => !open),
+              },
+            ]
+          : []),
+        ...(view === "builder"
+          ? [
+              {
+                id: "question-details",
+                label: "Question details",
+                icon: List,
+                priority: "secondary" as const,
+                active: questionDetailsOpen,
+                onSelect: () => setQuestionDetailsOpen((open) => !open),
+              },
+            ]
+          : []),
         ...(quizModes.includes("responses")
           ? [
               {
@@ -1819,9 +1915,23 @@ export function QuizStudio({
                   <span>{practiceError}</span>
                 </div>
               ) : null}
-              {/* Progress is the answer sheet, not a percentage: every question
-                  is reachable, and each one says whether it is answered and,
-                  once graded, whether it was right. */}
+              {submitted && !inspectAttempt ? (
+                <div className="space-y-4">
+                  <QuizResultPie
+                    correct={attemptScoreCounts.correct}
+                    incorrect={attemptScoreCounts.incorrect}
+                    pending={attemptScoreCounts.pending}
+                  />
+                  <button
+                    type="button"
+                    className="h-9 shrink-0 whitespace-nowrap rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)]"
+                    onClick={() => setInspectAttempt(true)}
+                  >
+                    Inspect answers
+                  </button>
+                </div>
+              ) : (
+              <>
               <div>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
@@ -1847,6 +1957,7 @@ export function QuizStudio({
                     }}
                   />
                 </div>
+                {submitted && inspectAttempt ? (
                 <nav
                   aria-label={
                     practiceAttempt ? "Attempt questions" : "Preview questions"
@@ -1902,16 +2013,40 @@ export function QuizStudio({
                     );
                   })}
                 </nav>
+                ) : null}
               </div>
               {displayedQuestions
                 .filter((_, index) => index === activeDisplayedQuestionIndex)
                 .map((question) => (
                   <div
                     key={question.id}
-                    className={`rounded-[8px] border bg-[var(--bg-primary)] p-4 ${submitted || revealedPracticeResultByQuestion.has(question.id) ? ((practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response") ? "border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))]" : questionCorrect(question) ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]") : "border-[var(--border-default)]"}`}
+                    className={`rounded-[8px] border bg-transparent p-4 ${submitted || revealedPracticeResultByQuestion.has(question.id) ? ((practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response") ? "border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))]" : questionCorrect(question) ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]") : "border-[var(--border-default)]"}`}
                   >
-                    <div className="text-[12px] font-semibold text-[var(--text-secondary)]">
-                      Question {activeDisplayedQuestionIndex + 1}
+                    <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-secondary)]">
+                      <button
+                        type="button"
+                        className={iconButtonClass()}
+                        disabled={activeDisplayedQuestionIndex <= 0}
+                        aria-label="Previous question"
+                        onClick={() => goDisplayedQuestion(-1)}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <span className="min-w-0 flex-1 text-center">
+                        Question {activeDisplayedQuestionIndex + 1}
+                        {displayedQuestions.length
+                          ? ` of ${displayedQuestions.length}`
+                          : ""}
+                      </span>
+                      <button
+                        type="button"
+                        className={iconButtonClass()}
+                        disabled={isLastDisplayedQuestion}
+                        aria-label="Next question"
+                        onClick={() => goDisplayedQuestion(1)}
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
                     </div>
                     <div className="mt-2 text-[15px] font-medium text-[var(--text-primary)]">
                       {plannerDescriptionText(question.prompt) ||
@@ -2222,43 +2357,23 @@ export function QuizStudio({
                     ) : null}
                   </div>
                 ))}
+              </>
+              )}
               <div className="flex flex-wrap items-center gap-2 pt-3">
-                <button
-                  type="button"
-                  className={smallActionClass()}
-                  disabled={activeDisplayedQuestionIndex === 0}
-                  onClick={() =>
-                    setActiveQuestionId(
-                      displayedQuestions[
-                        Math.max(0, activeDisplayedQuestionIndex - 1)
-                      ]?.id ?? "",
-                    )
-                  }
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className={smallActionClass()}
-                  disabled={
-                    activeDisplayedQuestionIndex >=
-                    displayedQuestions.length - 1
-                  }
-                  onClick={() =>
-                    setActiveQuestionId(
-                      displayedQuestions[
-                        Math.min(
-                          displayedQuestions.length - 1,
-                          activeDisplayedQuestionIndex + 1,
-                        )
-                      ]?.id ?? "",
-                    )
-                  }
-                >
-                  Next
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
+                {submitted && !inspectAttempt ? null : (
+                <WorkbarItemSelector
+                  ariaLabel="Current question"
+                  itemNoun="question"
+                  value={activeQuestion?.id ?? ""}
+                  onChange={setActiveQuestionId}
+                  items={displayedQuestions.map((question) => ({
+                    value: question.id,
+                    label:
+                      plannerDescriptionText(question.prompt) ||
+                      "Untitled question",
+                  }))}
+                />
+                )}
                 {practiceSyncing.length ? (
                   <span className="ml-auto inline-flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -2283,13 +2398,14 @@ export function QuizStudio({
                         return;
                       }
                       setSubmitted(false);
+                      setInspectAttempt(false);
                       setAnswers({});
                       setPracticeFeedback({});
                     }}
                   >
                     {practiceAttempt ? "Close result" : "Try again"}
                   </button>
-                ) : (
+                ) : isLastDisplayedQuestion ? (
                   <div className="flex items-center gap-2">
                     {unansweredQuestionCount > 0 ? (
                       <span className="text-micro text-[var(--text-secondary)]">
@@ -2317,6 +2433,12 @@ export function QuizStudio({
                           : "Check answers"}
                     </button>
                   </div>
+                ) : (
+                  <span className="text-micro text-[var(--text-secondary)]">
+                    {unansweredQuestionCount > 0
+                      ? `${unansweredQuestionCount} still blank`
+                      : null}
+                  </span>
                 )}
               </div>
             </div>
@@ -2695,175 +2817,36 @@ export function QuizStudio({
             )}
           </div>
         ) : (
-          // Columns come from the pane's measured density, never from the
-          // viewport: a quiz in a 420px right-hand panel is the same editor, and
-          // it stays fully editable (CANON D4).
-          <div
-            className="grid"
-            style={
-              builderColumns
-                ? { gridTemplateColumns: builderColumns, paddingRight: 10 }
-                : undefined
-            }
-          >
-            <aside
-              data-quiz-panel="questions"
-              className={`${builderColumns ? "border-r p-3" : "border-b px-4 py-2.5"} border-[var(--border-default)]`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  className={`flex min-w-0 items-center gap-2 text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${builderColumns && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
-                  onClick={() => setQuestionNavigatorOpen((open) => !open)}
-                  aria-expanded={questionNavigatorOpen}
-                  aria-label={
-                    questionNavigatorOpen
-                      ? "Collapse question navigator"
-                      : "Browse questions"
-                  }
-                >
-                  <PanelLeft className="h-3.5 w-3.5 shrink-0" />
-                  {builderColumns && !questionNavigatorOpen ? null : (
-                    // Position is stated once, in the workbar. This is the
-                    // panel's own name and how much is in it.
-                    <span className="truncate">
-                      Questions · {questions.length}
-                    </span>
-                  )}
-                </button>
-                {canEditQuiz && questionNavigatorOpen ? (
-                  <button
-                    type="button"
-                    className={smallActionClass()}
-                    onClick={addQuestion}
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add question
-                  </button>
-                ) : null}
-              </div>
-              {questionNavigatorOpen ? (
-                <ul className="mt-2 max-h-[min(46vh,440px)] space-y-1 overflow-y-auto pr-0.5">
-                  {questions.map((question, index) => (
-                    <li
-                      key={question.id}
-                      draggable={canEditQuiz}
-                      onDragStart={(event) => {
-                        setDraggingQuestionId(question.id);
-                        event.dataTransfer.effectAllowed = "move";
-                        event.dataTransfer.setData("text/plain", question.id);
-                      }}
-                      onDragEnd={() => setDraggingQuestionId(undefined)}
-                      onDragOver={(event) => {
-                        if (!canEditQuiz || !draggingQuestionId) return;
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = "move";
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        const movedId =
-                          event.dataTransfer.getData("text/plain") ||
-                          draggingQuestionId;
-                        setDraggingQuestionId(undefined);
-                        if (!movedId) return;
-                        moveQuestion(
-                          questions.findIndex(
-                            (candidate) => candidate.id === movedId,
-                          ),
-                          index,
-                        );
-                      }}
-                      className={
-                        draggingQuestionId === question.id ? "opacity-50" : ""
-                      }
-                    >
-                      <button
-                        type="button"
-                        className={`grid min-h-11 w-full grid-cols-[26px_minmax(0,1fr)_14px] items-center gap-2 rounded-[8px] border px-2 py-1.5 text-left ${
-                          activeQuestion?.id === question.id
-                            ? "border-[var(--brand-primary)] bg-[color-mix(in_oklab,var(--brand-primary)_6%,var(--bg-primary))]"
-                            : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]"
-                        }`}
-                        onClick={() => setActiveQuestionId(question.id)}
-                        onKeyDown={(event) => {
-                          if (!canEditQuiz || !event.altKey) return;
-                          if (event.key === "ArrowUp") {
-                            event.preventDefault();
-                            moveQuestion(index, index - 1);
-                          }
-                          if (event.key === "ArrowDown") {
-                            event.preventDefault();
-                            moveQuestion(index, index + 1);
-                          }
-                        }}
-                        data-ai-region={aiRegionAttr(
-                          pathTouches(aiChangedPaths, `/questions/${index}`),
-                        )}
-                        {...targetAttrs(`/questions/${index}`)}
-                      >
-                        <span className="text-center text-[12px] tabular-nums text-[var(--text-secondary)]">
-                          {index + 1}
-                        </span>
-                        {/* Title first and on its own line: at 292px a type chip
-                            beside it truncated every prompt to a few words. */}
-                        <span className="min-w-0">
-                          <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">
-                            {plannerDescriptionText(question.prompt) ||
-                              "Untitled question"}
-                          </span>
-                          <span className="mt-0.5 block truncate text-micro text-[var(--text-secondary)]">
-                            {QUIZ_TYPE_LABELS[question.type]} ·{" "}
-                            {question.points ?? 1} point
-                            {(question.points ?? 1) === 1 ? "" : "s"}
-                          </span>
-                        </span>
-                        {canEditQuiz ? (
-                          <GripVertical
-                            aria-hidden="true"
-                            className="h-3.5 w-3.5 text-[var(--text-tertiary)]"
-                          />
-                        ) : (
-                          <span />
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : builderColumns ? (
-                <div className="mt-2 grid gap-1">
-                  {questions.map((question, index) => (
-                    <button
-                      key={question.id}
-                      type="button"
-                      aria-label={`Open question ${index + 1}`}
-                      title={
-                        plannerDescriptionText(question.prompt) ||
-                        `Question ${index + 1}`
-                      }
-                      onClick={() => setActiveQuestionId(question.id)}
-                      className={`h-8 rounded-[7px] text-micro font-semibold transition ${
-                        activeQuestion?.id === question.id
-                          ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
-                          : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                      }`}
-                    >
-                      {index + 1}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {canEditQuiz && questionNavigatorOpen ? (
-                <button
-                  type="button"
-                  className={`${smallActionClass()} mt-2`}
-                  onClick={addQuestion}
-                >
-                  <Plus className="h-3.5 w-3.5" /> Add question
-                </button>
-              ) : null}
-            </aside>
+          <div className="spectra-quiz-builder min-h-0 flex-1">
+            {showQuestionRail ? (
+              <StudioItemRail
+                label="Questions"
+                count={questions.length}
+                collapsed={!questionNavigatorOpen}
+                onToggleCollapsed={() =>
+                  setQuestionNavigatorOpen((open) => !open)
+                }
+                items={questions.map((question) => ({
+                  id: question.id,
+                  title:
+                    plannerDescriptionText(question.prompt) ||
+                    "Untitled question",
+                  subtitle: `${QUIZ_TYPE_LABELS[question.type]} · ${question.points ?? 1} point${(question.points ?? 1) === 1 ? "" : "s"}`,
+                  active: activeQuestion?.id === question.id,
+                }))}
+                onSelect={setActiveQuestionId}
+                onAdd={canEditQuiz ? addQuestion : undefined}
+                addLabel="Add question"
+                canEdit={canEditQuiz}
+                draggingId={draggingQuestionId}
+                onDragStart={setDraggingQuestionId}
+                onDragEnd={() => setDraggingQuestionId(undefined)}
+                onMove={moveQuestion}
+              />
+            ) : null}
             <section
               data-quiz-panel="editor"
-              className={`min-w-0 ${builderColumns === threeColumnBuilder ? "border-r" : "border-b"} border-[var(--border-default)] p-4`}
+              className="min-w-0 flex-1 overflow-auto border-[var(--border-default)] p-4"
             >
               {activeQuestion ? (
                 <QuestionEditor
@@ -2903,29 +2886,12 @@ export function QuizStudio({
                 />
               ) : null}
             </section>
+            {questionDetailsOpen ? (
             <aside
               data-quiz-panel="settings"
-              className="min-w-0 p-3"
-              style={
-                builderColumns === threeColumnBuilder
-                  ? undefined
-                  : { gridColumn: "1 / -1" }
-              }
+              className="spectra-studio-inspector-overlay min-w-0 p-3"
             >
-              {builderColumns === threeColumnBuilder ? null : (
-                <button
-                  type="button"
-                  className="mb-2 flex w-full items-center justify-between rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-left text-[11px] font-semibold text-[var(--text-primary)]"
-                  onClick={() => setQuestionDetailsOpen((open) => !open)}
-                  aria-expanded={questionDetailsOpen}
-                >
-                  Question details
-                  <ChevronDown
-                    className={`h-3.5 w-3.5 transition-transform motion-reduce:transition-none ${questionDetailsOpen ? "rotate-180" : ""}`}
-                  />
-                </button>
-              )}
-              {builderColumns === threeColumnBuilder || questionDetailsOpen ? (
+              {
                 activeQuestion ? (
                   <div className="grid gap-3">
                     <Field
@@ -3213,8 +3179,9 @@ export function QuizStudio({
                     </div>
                   </div>
                 ) : null
-              ) : null}
+              }
             </aside>
+            ) : null}
           </div>
         )}
         <section className="spectra-quiz-print-sheet" aria-hidden="true">

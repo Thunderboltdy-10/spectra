@@ -103,6 +103,38 @@ describe("Calendar, School, and administration V2", () => {
     ).toThrow("CALENDAR_OFFICIAL_DEADLINE_UNLOCKED");
   });
 
+  it("places date-only school events on the day without hiding them", () => {
+    const dated = calendarItemFromWire({
+      id: "assembly",
+      kind: "official_event",
+      title: "Year group assembly",
+      sourceLocked: true,
+      startAt: Date.parse("2026-08-17T00:00:00.000Z"),
+      endAt: Date.parse("2026-08-18T00:00:00.000Z"),
+      allDay: false,
+      timezone: "UTC",
+      timePrecision: "date_only",
+      status: "active",
+      linkedWorkIds: [],
+      revision: 1,
+    });
+    const untimedStart = calendarItemFromWire({
+      id: "match",
+      kind: "official_event",
+      title: "Football fixture",
+      sourceLocked: true,
+      startAt: Date.parse("2026-08-17T14:00:00.000Z"),
+      allDay: false,
+      timezone: "UTC",
+      timePrecision: "unknown",
+      status: "active",
+      linkedWorkIds: [],
+      revision: 1,
+    });
+    expect(dated.allDay).toBe(true);
+    expect(untimedStart.allDay).toBe(true);
+  });
+
   it("normalizes flexible Plans idempotently and rejects dependency cycles", () => {
     const migrated = normalizePlanContent({
       taskTitle: "Prepare launch",

@@ -91,8 +91,9 @@ async function resolveSourceTime(
   if (exactStart !== undefined)
     return {
       startAt: exactStart,
+      endAt: exactStart + 24 * 60 * 60_000,
       timezone: text(normalized.timezone, 100) || "UTC",
-      precision: "unknown" as const,
+      precision: "date_only" as const,
     };
   if (dueAt !== undefined)
     return {

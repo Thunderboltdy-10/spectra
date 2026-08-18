@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import {
   BarChart3,
   BookOpen,
@@ -23,8 +22,6 @@ import {
   MessageSquare,
   Maximize2,
   Minus,
-  PanelRight,
-  PanelRightClose,
   PanelTop,
   PencilLine,
   Pin,
@@ -71,6 +68,7 @@ import {
   StudioTabRail,
   useArtifactStudioState,
 } from "../components/artifact-studio-shell";
+import { ArtifactStudio } from "../components/artifact-studio";
 import { ArtifactTileSurface } from "../components/artifact-tile-surface";
 import {
   CommandBar,
@@ -96,7 +94,7 @@ import {
   isProgrammaticFollowOpen,
 } from "../collaboration/follow";
 import { ShareDialog } from "../components/share-dialog";
-import { ObjectLibrary, type LibraryMode } from "../components/object-library";
+import { type LibraryMode } from "../components/object-library";
 import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
 import { previewText } from "../components/preview-text";
 import { ProductEmptyState } from "../components/product-state";
@@ -117,7 +115,6 @@ import {
   getSpectraOverview,
   getSpectraRunDetail,
   getSpectraThread,
-  getSpectraThreads,
   peekSpectraWorkspace,
   getSpectraWorkspace,
   postSpectra,
@@ -588,7 +585,7 @@ function WorkspaceHome({
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [dropWorkspaceId, setDropWorkspaceId] = useState<string | null>(null);
   const router = useRouter();
-  const now = useNow(60_000);
+  const _now = useNow(60_000);
   useEffect(() => {
     setPinnedOpen(
       window.localStorage.getItem("spectra.home.pinned.open") !== "false",
@@ -1314,10 +1311,7 @@ function WorkspaceLibraryToolbar({
 
 function WorkspaceContentSkeleton() {
   return (
-    <div
-      className="absolute inset-0 z-20 bg-[var(--bg-primary)] px-8 pt-6"
-      aria-label="Loading workspace"
-    >
+    <div className="px-1 pt-2" aria-label="Loading workspace">
       <div className="ml-auto h-9 w-[520px] max-w-full animate-pulse rounded-[9px] bg-[var(--bg-secondary)]" />
       <div className="mt-7 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 6 }, (_, index) => (
@@ -2835,12 +2829,6 @@ function _PinnedArtifactShelf({
     </div>
   );
 }
-
-const ArtifactStudio = dynamic(() =>
-  import("../components/artifact-studio").then(
-    (module) => module.ArtifactStudio,
-  ),
-);
 
 export function WorkspaceShell({
   initialWorkspaceId,

@@ -5,7 +5,6 @@ import {
   AlertCircle,
   Archive,
   BookOpen,
-  Check,
   CheckCircle2,
   ChevronDown,
   Copy,
@@ -13,15 +12,11 @@ import {
   Focus,
   FolderPlus,
   Gauge,
-  Grid3X3,
-  GripVertical,
   ImageIcon,
   Import,
   LayoutTemplate,
-  List,
   Loader2,
   PanelLeft,
-  Pencil,
   Play,
   Plus,
   Printer,
@@ -86,6 +81,7 @@ import {
   downloadDocumentText,
 } from "./artifact-studio-file-utils";
 import { useStudioContract } from "./artifact-studio-shell";
+import { StudioItemRail } from "./studio-item-rail";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
@@ -94,11 +90,7 @@ import {
 import {
   Select,
   SelectContent,
-  SelectField,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
-  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -165,11 +157,11 @@ export function FlashcardStudio({
   const [activeSection, setActiveSection] = useState(
     cards[0]?.section ?? "Section 1",
   );
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
+  const [_collapsedSections, _setCollapsedSections] = useState<Set<string>>(
     () => new Set(),
   );
   const [deckSearch, setDeckSearch] = useState("");
-  const [deckFilter, setDeckFilter] = useState<
+  const [deckFilter, _setDeckFilter] = useState<
     | "all"
     | "incomplete"
     | "duplicate"
@@ -181,12 +173,12 @@ export function FlashcardStudio({
     | "struggling"
     | "changed"
   >("all");
-  const [railView, setRailView] = useState<"list" | "grid">("list");
+  const [_railView, _setRailView] = useState<"list" | "grid">("list");
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [draggedCardId, setDraggedCardId] = useState<string>();
-  const [renamingSection, setRenamingSection] = useState<string>();
+  const [_renamingSection, setRenamingSection] = useState<string>();
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deckTagDraft, setDeckTagDraft] = useState("");
@@ -664,7 +656,7 @@ export function FlashcardStudio({
     });
   }
 
-  function updateDeckSettings(
+  function _updateDeckSettings(
     patch: Partial<{
       shuffle: boolean;
       revealMode: "click" | "type";
@@ -875,7 +867,7 @@ export function FlashcardStudio({
     focusCardIdRef.current = card.id;
   }
 
-  function toggleCardSelection(cardId: string) {
+  function _toggleCardSelection(cardId: string) {
     setSelectedCardIds((current) => {
       const next = new Set(current);
       if (next.has(cardId)) next.delete(cardId);
@@ -884,7 +876,7 @@ export function FlashcardStudio({
     });
   }
 
-  function moveSelectedCards(section: string) {
+  function _moveSelectedCards(section: string) {
     if (!selectedCardIds.size) return;
     commit(
       cards.map((card) =>
@@ -925,7 +917,7 @@ export function FlashcardStudio({
     );
   }
 
-  function deleteSelectedCards() {
+  function _deleteSelectedCards() {
     if (!selectedCardIds.size) return;
     const removed = cards.filter((card) => selectedCardIds.has(card.id));
     const remaining = cards.filter((card) => !selectedCardIds.has(card.id));
@@ -948,7 +940,7 @@ export function FlashcardStudio({
     setSelectedCardIds(new Set());
   }
 
-  function setSelectedDifficulty(difficulty: "easy" | "medium" | "hard") {
+  function _setSelectedDifficulty(difficulty: "easy" | "medium" | "hard") {
     if (!selectedCardIds.size) return;
     commit(
       cards.map((card) =>
@@ -993,7 +985,7 @@ export function FlashcardStudio({
     setActiveCardId(cardId);
   }
 
-  function renameSection(section: string, requestedName = sectionNameDraft) {
+  function _renameSection(section: string, requestedName = sectionNameDraft) {
     const proposed = requestedName.trim();
     if (!proposed || proposed === section) return;
     if (sections.includes(proposed)) {
@@ -1967,12 +1959,8 @@ export function FlashcardStudio({
   // The rail and the card editor are the two authoring panes. Browse and
   // Progress read the deck, so they get the whole width instead of inheriting a
   // 300px track that nothing occupies.
-  const twoPane = mode === "tab" && activeView === "build";
-  const spanBoth = twoPane ? "lg:col-span-2" : "";
-  const selectAllLabel =
-    filteredCards.length === cards.length
-      ? "Select every card"
-      : `Select the ${filteredCards.length} cards shown`;
+  const showItemRail =
+    contract.surface === "full" && activeView === "build";
   const studyPrimaryLabel = studyStateLoading
     ? "Study"
     : dueStudyCount
@@ -2011,7 +1999,7 @@ export function FlashcardStudio({
       hint: "Ctrl or Cmd and Enter",
       onSelect: () => addCard(),
     },
-    ...(activeView === "build"
+    ...(activeView === "build" && contract.surface === "full"
       ? ([
           {
             id: "rail",
@@ -2020,17 +2008,6 @@ export function FlashcardStudio({
             priority: "essential",
             active: !railCollapsed,
             onSelect: () => setRailCollapsed((collapsed) => !collapsed),
-          },
-          {
-            // One control for one binary choice, named after what it does next
-            // rather than two buttons competing to look selected.
-            id: "rail-view",
-            label:
-              railView === "list" ? "Show cards as a grid" : "Show cards as a list",
-            icon: railView === "list" ? Grid3X3 : List,
-            disabled: railCollapsed,
-            onSelect: () =>
-              setRailView(railView === "list" ? "grid" : "list"),
           },
         ] satisfies WorkbarActionSpec[])
       : []),
@@ -2152,7 +2129,7 @@ export function FlashcardStudio({
   return (
     <div
       ref={studioRef}
-      className={`spectra-flashcard-studio ml-2.5 grid min-w-0 gap-3 ${twoPane ? "lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]" : "grid-cols-1"}`}
+      className="spectra-flashcard-studio ml-2.5 flex min-h-0 min-w-0 flex-col overflow-hidden" 
       data-studio-view={activeView}
       data-rail-collapsed={railCollapsed || undefined}
       onKeyDown={onStudioKeyDown}
@@ -2162,7 +2139,6 @@ export function FlashcardStudio({
           the owner might get stuck (CANON D2, D3). */}
       <ArtifactWorkbar
         label="Deck"
-        className={spanBoth}
         modes={[]}
         selector={
           activeView === "progress" || !cards.length ? undefined : (
@@ -2187,9 +2163,10 @@ export function FlashcardStudio({
         }}
         actions={deckActions}
       />
+      <div className="spectra-editor-body">
       {deckUpdateNotice ? (
         <div
-          className={`spectra-deck-update-notice ${spanBoth}`}
+          className="spectra-deck-update-notice"
           role="status"
         >
           <RefreshCw className="h-3.5 w-3.5" />
@@ -2336,7 +2313,7 @@ export function FlashcardStudio({
       ) : null}
       {deckImportReport || deckImportError || deckActionError ? (
         <div
-          className={`spectra-deck-import-report ${spanBoth}`}
+          className="spectra-deck-import-report"
           data-error={Boolean(deckImportError || deckActionError) || undefined}
           role="status"
         >
@@ -2386,441 +2363,51 @@ export function FlashcardStudio({
           if (file) void importCards(file);
         }}
       />
-      <aside className="min-w-0 overflow-hidden rounded-card">
-        {/* A `header`, not a `div`: the shared stylesheet hides the rail's first
-            child when it is a div, which is why the audited build had a rail
-            with no heading and an unreachable Add button. */}
-        <header className="flex items-baseline justify-between gap-2 px-3 pb-2 pt-3">
-          <h3 className="text-ui font-semibold text-[var(--text-primary)]">
-            Cards
-          </h3>
-          <p className="text-caption text-[var(--text-secondary)]">
-            {filteredCards.length === cards.length
-              ? `${cards.length} ${cards.length === 1 ? "card" : "cards"}${
-                  sections.length > 1 ? ` in ${sections.length} sections` : ""
-                }`
-              : `${filteredCards.length} of ${cards.length} shown`}
-          </p>
-        </header>
-        <div
-          className={`grid items-center gap-1.5 border-b border-[var(--border-subtle)] px-2 pb-2 ${
-            canEdit
-              ? "grid-cols-[minmax(0,1fr)_minmax(96px,0.8fr)_auto]"
-              : "grid-cols-[minmax(0,1fr)_minmax(96px,0.8fr)]"
-          }`}
-        >
-          <label className="flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)] focus-within:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))]">
-            <Search className="size-3.5 shrink-0" />
-            <input
-              value={deckSearch}
-              onChange={(event) => setDeckSearch(event.target.value)}
-              placeholder="Find cards"
-              aria-label="Find cards"
-              className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]"
-            />
-          </label>
-          {/* Filtering by your own recall is a different question from filtering
-              the deck's contents, so the list says which is which instead of
-              flattening ten options into one run. */}
-          <Select
-            value={deckFilter}
-            onValueChange={(next) =>
-              setDeckFilter(next as typeof deckFilter)
-            }
-          >
-            <SelectTrigger size="sm" aria-label="Filter cards" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectLabel>This deck</SelectLabel>
-                <SelectItem value="all">All cards</SelectItem>
-                <SelectItem value="incomplete">Incomplete</SelectItem>
-                <SelectItem value="duplicate">Duplicates</SelectItem>
-              </SelectGroup>
-              <SelectSeparator />
-              <SelectGroup>
-                <SelectLabel>Difficulty</SelectLabel>
-                <SelectItem value="easy">Easy</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="hard">Hard</SelectItem>
-              </SelectGroup>
-              {/* These four read your recorded reviews. Without the capability
-                  to record one there is nothing behind them, so they are absent
-                  rather than always empty. */}
-              {canRecordStudy ? (
-                <>
-                  <SelectSeparator />
-                  <SelectGroup>
-                    <SelectLabel>Your progress</SelectLabel>
-                    <SelectItem value="due">Due now</SelectItem>
-                    <SelectItem value="unstudied">Not studied yet</SelectItem>
-                    <SelectItem value="struggling">
-                      Giving you trouble
-                    </SelectItem>
-                    <SelectItem value="changed">
-                      Changed since you studied
-                    </SelectItem>
-                  </SelectGroup>
-                </>
-              ) : null}
-            </SelectContent>
-          </Select>
-          {/* Selecting cards exists to act on them in bulk, which is an edit. */}
-          {canEdit ? (
-            <button
-              type="button"
-              onClick={() =>
-                setSelectedCardIds(new Set(filteredCards.map((card) => card.id)))
-              }
-              disabled={!filteredCards.length}
-              aria-label={selectAllLabel}
-              title={selectAllLabel}
-              className="grid size-8 place-items-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40"
-            >
-              <Check className="size-3.5" />
-            </button>
-          ) : null}
-        </div>
-        {selectedCardIds.size ? (
-          <div
-            className="spectra-deck-bulkbar"
-            role="toolbar"
-            aria-label="Bulk card actions"
-          >
-            <strong>
-              {selectedCardIds.size} of {cards.length} selected
-            </strong>
-            {canEdit ? (
-              <>
-                <SelectField
-                  ariaLabel="Move selected cards to section"
-                  size="sm"
-                  placeholder="Move to"
-                  value=""
-                  onChange={moveSelectedCards}
-                  options={sections.map((section) => ({
-                    value: section,
-                    label: section,
-                  }))}
+      <div className="spectra-item-rail-stage min-h-0 flex-1">
+      {showItemRail ? (
+        <StudioItemRail
+          label="Cards"
+          count={cards.length}
+          collapsed={railCollapsed}
+          onToggleCollapsed={() => setRailCollapsed((open) => !open)}
+          items={filteredCards.map((card) => ({
+            id: card.id,
+            title: plannerDescriptionText(card.front) || "Untitled card",
+            subtitle: `${card.section || "Section 1"} · ${card.difficulty ?? "medium"}`,
+            active: card.id === activeCard?.id,
+          }))}
+          onSelect={(id) => {
+            setActiveCardId(id);
+            const card = cards.find((item) => item.id === id);
+            if (card?.section) setActiveSection(card.section);
+          }}
+          onAdd={canEdit ? () => addCard() : undefined}
+          addLabel="Add card"
+          canEdit={canEdit}
+          draggingId={draggedCardId}
+          onDragStart={setDraggedCardId}
+          onDragEnd={() => setDraggedCardId(undefined)}
+          onMove={(from, to) => {
+            const moved = filteredCards[from];
+            const target = filteredCards[to];
+            if (moved && target) reorderCard(moved.id, target.id);
+          }}
+          tools={
+            <div className="mt-2 grid gap-1.5">
+              <label className="flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)]">
+                <Search className="size-3.5 shrink-0" />
+                <input
+                  value={deckSearch}
+                  onChange={(event) => setDeckSearch(event.target.value)}
+                  placeholder="Find cards"
+                  aria-label="Find cards"
+                  className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]"
                 />
-                <SelectField
-                  ariaLabel="Set the difficulty of the selected cards"
-                  size="sm"
-                  placeholder="Difficulty"
-                  value=""
-                  onChange={(next) =>
-                    setSelectedDifficulty(next as "easy" | "medium" | "hard")
-                  }
-                  options={[
-                    { value: "easy", label: "Easy" },
-                    { value: "medium", label: "Medium" },
-                    { value: "hard", label: "Hard" },
-                  ]}
-                />
-                <button type="button" onClick={deleteSelectedCards}>
-                  <Trash2 className="size-3.5" /> Delete
-                </button>
-              </>
-            ) : null}
-            <button type="button" onClick={() => setSelectedCardIds(new Set())}>
-              Clear
-            </button>
-          </div>
-        ) : null}
-        <div
-          className="max-h-[min(68vh,660px)] overflow-y-auto px-2 pb-2"
-          data-rail-view={railView}
-        >
-          {sections.map((section) => (
-            <section key={section} className="mb-2">
-              <div className="spectra-deck-section-header">
-                {renamingSection === section ? (
-                  <form
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      renameSection(section);
-                    }}
-                  >
-                    <input
-                      autoFocus
-                      value={sectionNameDraft}
-                      onChange={(event) =>
-                        setSectionNameDraft(event.target.value)
-                      }
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") {
-                          setRenamingSection(undefined);
-                          setSectionNameDraft("");
-                        }
-                      }}
-                      aria-label={`Rename ${section}`}
-                    />
-                    <button type="submit">Save</button>
-                  </form>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      aria-expanded={!collapsedSections.has(section)}
-                      onClick={() => {
-                        setActiveSection(section);
-                        setCollapsedSections((current) => {
-                          const next = new Set(current);
-                          if (next.has(section)) next.delete(section);
-                          else next.add(section);
-                          return next;
-                        });
-                      }}
-                    >
-                      <span>
-                        {section}
-                        <small>
-                          {(() => {
-                            const count = cards.filter(
-                              (card) =>
-                                (card.section || "Section 1") === section,
-                            ).length;
-                            return `${count} ${count === 1 ? "card" : "cards"}`;
-                          })()}
-                        </small>
-                      </span>
-                      <ChevronDown
-                        className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform ${collapsedSections.has(section) ? "-rotate-90" : ""}`}
-                      />
-                    </button>
-                    {canEdit ? (
-                      <button
-                        type="button"
-                        aria-label={`Rename ${section}`}
-                        title="Rename section"
-                        onClick={() => {
-                          setRenamingSection(section);
-                          setSectionNameDraft(section);
-                        }}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                    ) : null}
-                  </>
-                )}
-              </div>
-              {!collapsedSections.has(section) ? (
-                <div className="space-y-px">
-                  {cards
-                    .filter(
-                      (card) =>
-                        (card.section || "Section 1") === section &&
-                        filteredCards.some(
-                          (candidate) => candidate.id === card.id,
-                        ),
-                    )
-                    .map((card, index) => {
-                      const canonicalIndex = cards.findIndex(
-                        (item) => item.id === card.id,
-                      );
-                      const aiChanging = pathTouches(
-                        aiChangedPaths,
-                        `/cards/${canonicalIndex}`,
-                      );
-                      const incomplete =
-                        !card.front.trim() || !card.back.trim();
-                      const duplicate = duplicateKeys.has(
-                        `${card.front.trim().toLocaleLowerCase()}|${card.back.trim().toLocaleLowerCase()}`,
-                      );
-                      const active = card.id === activeCard?.id;
-                      const confidence =
-                        cardConfidence[card.confidence ?? "unknown"];
-                      return (
-                        <button
-                          key={card.id}
-                          type="button"
-                          draggable={canEdit}
-                          data-bulk-selected={
-                            selectedCardIds.has(card.id) || undefined
-                          }
-                          data-invalid={incomplete || undefined}
-                          data-duplicate={duplicate || undefined}
-                          aria-current={active || undefined}
-                          /* Selection is a tint and an edge, not a box: 28
-                             outlined pills in a 300px rail read as 28 competing
-                             objects rather than one list. */
-                          className={`group grid w-full grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 rounded-control px-2 py-1.5 text-left ${
-                            active
-                              ? "bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-primary))] shadow-[inset_2px_0_0_var(--brand-primary)]"
-                              : "hover:bg-[var(--bg-hover)]"
-                          }`}
-                          onClick={(event) => {
-                            if (event.ctrlKey || event.metaKey) {
-                              toggleCardSelection(card.id);
-                              return;
-                            }
-                            if (event.shiftKey && activeCard) {
-                              const anchorIndex = cards.findIndex(
-                                (item) => item.id === activeCard.id,
-                              );
-                              const start = Math.min(
-                                anchorIndex,
-                                canonicalIndex,
-                              );
-                              const end = Math.max(anchorIndex, canonicalIndex);
-                              setSelectedCardIds(
-                                new Set(
-                                  cards
-                                    .slice(start, end + 1)
-                                    .map((item) => item.id),
-                                ),
-                              );
-                              return;
-                            }
-                            setActiveCardId(card.id);
-                            setActiveSection(section);
-                          }}
-                          onDragStart={(event) => {
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData("text/plain", card.id);
-                            setDraggedCardId(card.id);
-                          }}
-                          onDragOver={(event) => {
-                            if (draggedCardId && draggedCardId !== card.id)
-                              event.preventDefault();
-                          }}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            const dragged =
-                              draggedCardId ||
-                              event.dataTransfer.getData("text/plain");
-                            if (dragged) reorderCard(dragged, card.id);
-                          }}
-                          onDragEnd={() => setDraggedCardId(undefined)}
-                          data-ai-region={aiChanging || undefined}
-                        >
-                          {/* The position doubles as the drag handle, so the
-                              grip appears where the hand already is without
-                              adding a column the grid view has to absorb. */}
-                          <span className="relative grid h-4 place-items-center text-caption text-[var(--text-secondary)]">
-                            <span
-                              className={
-                                canEdit
-                                  ? "transition-opacity group-hover:opacity-0 motion-reduce:transition-none"
-                                  : undefined
-                              }
-                            >
-                              {index + 1}
-                            </span>
-                            {canEdit ? (
-                              <GripVertical
-                                aria-hidden="true"
-                                className="pointer-events-none absolute size-3.5 opacity-0 transition-opacity group-hover:opacity-100 motion-reduce:transition-none"
-                              />
-                            ) : null}
-                          </span>
-                          <span className="spectra-deck-card-front min-w-0 truncate text-caption font-medium text-[var(--text-primary)]">
-                            {plannerDescriptionText(card.front) ||
-                              "Untitled card"}
-                          </span>
-                          {/* The grid earns its slot by showing the answer.
-                              Two columns of the same truncated question the
-                              list already shows, at ragged heights, fits fewer
-                              cards on screen and tells the reader less. */}
-                          {railView === "grid" ? (
-                            <span className="spectra-deck-card-back min-w-0 text-micro text-[var(--text-secondary)]">
-                              {plannerDescriptionText(card.back) ||
-                                "No answer yet"}
-                            </span>
-                          ) : null}
-                          {incomplete ? (
-                            <AlertCircle
-                              className="spectra-deck-card-flag size-3.5 text-[var(--danger)]"
-                              aria-label="Incomplete card"
-                            />
-                          ) : duplicate ? (
-                            <Copy
-                              className="spectra-deck-card-flag size-3.5 text-[var(--warning)]"
-                              aria-label="Duplicate card"
-                            />
-                          ) : (
-                            <span
-                              aria-label={confidence.label}
-                              title={confidence.label}
-                              className={`spectra-deck-card-flag size-1.5 rounded-full ${confidence.tone}`}
-                            />
-                          )}
-                        </button>
-                      );
-                    })}
-                </div>
-              ) : null}
-            </section>
-          ))}
-          {!filteredCards.length ? (
-            <div className="spectra-deck-empty-filter">
-              <Search className="h-5 w-5" />
-              <strong>No matching cards</strong>
-              <span>
-                {cards.length
-                  ? "Change the search or filter without altering the deck."
-                  : "This deck has no cards yet."}
-              </span>
+              </label>
             </div>
-          ) : null}
-          {canEdit ? (
-            <button
-              type="button"
-              className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-control border border-dashed border-[var(--border-default)] text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              onClick={() => addCard()}
-            >
-              <Plus className="size-3.5" />
-              Add card
-            </button>
-          ) : null}
-        </div>
-        {canEdit ? (
-          <footer className="border-t border-[var(--border-subtle)] px-3 py-3">
-            <h4 className="text-caption font-semibold text-[var(--text-primary)]">
-              Study settings
-            </h4>
-            <p className="mt-0.5 text-micro text-[var(--text-secondary)]">
-              These apply to everyone who studies this deck, not only you.
-            </p>
-            <label className="mt-2 flex items-center gap-2 text-caption text-[var(--text-secondary)]">
-              <input
-                type="checkbox"
-                className="size-3.5 accent-[var(--brand-primary)]"
-                checked={deckSettings.shuffle !== false}
-                onChange={(event) =>
-                  updateDeckSettings({ shuffle: event.target.checked })
-                }
-              />
-              Shuffle each due queue
-            </label>
-            <label className="mt-1.5 flex items-center gap-2 text-caption text-[var(--text-secondary)]">
-              <input
-                type="checkbox"
-                className="size-3.5 accent-[var(--brand-primary)]"
-                checked={deckSettings.showHints !== false}
-                onChange={(event) =>
-                  updateDeckSettings({ showHints: event.target.checked })
-                }
-              />
-              Show hints before the answer
-            </label>
-            <SelectField
-              label="Recall style"
-              size="sm"
-              className="mt-2"
-              value={deckSettings.revealMode === "type" ? "type" : "click"}
-              onChange={(next) =>
-                updateDeckSettings({ revealMode: next as "click" | "type" })
-              }
-              options={[
-                { value: "click", label: "Reveal the answer" },
-                { value: "type", label: "Type the answer" },
-              ]}
-            />
-          </footer>
-        ) : null}
-      </aside>
+          }
+        />
+      ) : null}
       <section className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
         {activeCard ? (
           <div>
@@ -3569,6 +3156,7 @@ export function FlashcardStudio({
           </div>
         ) : null}
       </section>
+      </div>
       {studyOpen && studyQueue.length && typeof document !== "undefined"
         ? createPortal(
             <div
@@ -3986,6 +3574,7 @@ export function FlashcardStudio({
           </div>
         ))}
       </section>
+      </div>
     </div>
   );
 }

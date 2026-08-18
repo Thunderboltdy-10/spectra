@@ -18,6 +18,7 @@ import {
   type ReactNode,
 } from "react";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import { StudioSplitPlaceholder } from "./artifact-studio-shell";
 import type { SpectraArtifact } from "../data/api";
 import { getWorkDefinition } from "../work/registry";
 import { isArtifactTypeKey } from "../artifacts/registry";
@@ -52,8 +53,9 @@ type ArtifactTileSurfaceProps = {
   onContinueThread?: (threadId: string, title: string) => void;
 };
 
-const ArtifactStudio = dynamic(() =>
-  import("./artifact-studio").then((module) => module.ArtifactStudio),
+const ArtifactStudio = dynamic(
+  () => import("./artifact-studio").then((module) => module.ArtifactStudio),
+  { loading: () => <StudioSplitPlaceholder /> },
 );
 
 export function ArtifactTileSurface({

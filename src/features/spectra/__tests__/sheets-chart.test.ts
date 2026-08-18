@@ -41,4 +41,39 @@ describe("Sheets chart datasets", () => {
       ],
     });
   });
+
+  it("charts a numeric column without treating the first value as a header", () => {
+    const workbook = normalizeSheetsContent({
+      activeSheetId: "sheet-1",
+      sheets: [
+        {
+          id: "sheet-1",
+          name: "Means",
+          cells: {
+            E4: { value: 24.1 },
+            E5: { value: 23.95 },
+            E6: { value: 24.25 },
+          },
+        },
+      ],
+    });
+    const sheet = workbook.sheets[0]!;
+    const chart = {
+      id: "chart-2",
+      title: "Means",
+      type: "line",
+      sourceRange: "E4:E6",
+      position: { x: 0, y: 0, width: 420, height: 260 },
+    } satisfies SheetChart;
+
+    expect(chartDataset(sheet, chart, calculateWorkbook(workbook))).toEqual({
+      category: "Category",
+      keys: ["Value"],
+      data: [
+        { Category: "1", Value: 24.1 },
+        { Category: "2", Value: 23.95 },
+        { Category: "3", Value: 24.25 },
+      ],
+    });
+  });
 });

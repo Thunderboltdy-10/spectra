@@ -38,7 +38,6 @@ import {
   Underline,
   Undo2,
   Ungroup,
-  Unlock,
   Upload,
   X,
   type LucideIcon,
@@ -98,6 +97,7 @@ import {
   type WorkbarActionSpec,
 } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
+import { StudioItemRail } from "./studio-item-rail";
 import { SelectField } from "@/components/ui/select";
 import {
   calculateWorkbook,
@@ -114,7 +114,7 @@ import {
 type PresentationSurface = "slides" | "notes";
 /** Sections of the type's own inspector pane, not modes. */
 type InspectorSection = "slide" | "insert" | "design" | "sources" | "files";
-type ResizeHandle = "nw" | "ne" | "sw" | "se";
+type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 type DragState = {
   mode: "move" | "resize";
   handle?: ResizeHandle;
@@ -282,7 +282,7 @@ const OBJECT_FORMAT_TOOLS: ReadonlyArray<{
 const INSPECTOR_BUTTON =
   "inline-flex min-h-8 items-center justify-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-40";
 const INSPECTOR_ICON_BUTTON =
-  "grid size-8 shrink-0 place-items-center rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40";
+  "grid size-8 shrink-0 place-items-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40";
 /** Remembers whether the presenter wants notes on this device, not in the deck. */
 const PRESENTER_NOTES_KEY = "spectra:presentation:presenter-notes";
 
@@ -579,6 +579,7 @@ function PresentationObjectView({
     <div
       className="presentation-object"
       {...(path ? targetAttrs(path) : {})}
+      data-spectra-part={selected && !compact ? "grip" : undefined}
       data-selected={selected || undefined}
       data-locked={object.locked || undefined}
       data-overflow={textOverflow || undefined}
@@ -757,13 +758,15 @@ function PresentationObjectView({
       ) : null}
       {selected && !compact ? (
         <>
-          {(["nw", "ne", "sw", "se"] as const).map((handle) => (
+          {(
+            ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const
+          ).map((handle) => (
             <button
               key={handle}
               type="button"
               className={`presentation-object-handle is-${handle}`}
               data-spectra-part={`handle:${handle}`}
-              aria-label={`Resize from ${handle.toUpperCase()} corner`}
+              aria-label={`Resize from ${handle.toUpperCase()}`}
               onPointerDown={(event) => onResizePointerDown(handle, event)}
             />
           ))}
@@ -829,6 +832,7 @@ function SlideCanvas({
   return (
     <div
       className="presentation-canvas"
+      data-authoring={!compact || undefined}
       data-transition={
         animateObjects && slide.transition?.kind !== "none"
           ? slide.transition?.kind
@@ -838,8 +842,14 @@ function SlideCanvas({
         {
           aspectRatio:
             deck.settings?.aspectRatio === "4:3" ? "4 / 3" : "16 / 9",
-          background: slide.background || tokens.background || "#fbfaf5",
+          background: compact
+            ? slide.background || tokens.background || "#fbfaf5"
+            : "var(--bg-primary)",
           color: tokens.body || "#324b43",
+          animationDuration:
+            animateObjects && slide.transition?.durationMs
+              ? `${slide.transition.durationMs}ms`
+              : undefined,
           "--presentation-heading-font": deck.theme.fonts?.heading
             ? `"${deck.theme.fonts.heading}"`
             : "var(--font-display)",
@@ -1298,7 +1308,7 @@ export function PresentationStudio({
   const [layerSelection, setLayerSelection] = useState<string[]>([]);
   const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
   const [draggingSlideId, setDraggingSlideId] = useState<string>();
-  const [dropTargetSlideId, setDropTargetSlideId] = useState<string>();
+  const [_dropTargetSlideId, setDropTargetSlideId] = useState<string>();
   const [undoStack, setUndoStack] = useState<PresentationContent[]>([]);
   const [redoStack, setRedoStack] = useState<PresentationContent[]>([]);
   const [presentedDeck, setPresentedDeck] = useState<PresentationContent>();
@@ -1306,8 +1316,13 @@ export function PresentationStudio({
   const [presentStartedAt, setPresentStartedAt] = useState(0);
   const [presentElapsed, setPresentElapsed] = useState(0);
   const [slideElapsed, setSlideElapsed] = useState(0);
-  const [presenterNotesVisible, setPresenterNotesVisible] = useState(false);
+  const [presenterNotesVisible, setPresenterNotesVisible] = useState(true);
   const [presentBlackout, setPresentBlackout] = useState(false);
+  const [presentLayout, setPresentLayout] = useState<"audience" | "speaker">(
+    "audience",
+  );
+  const [presentChrome, setPresentChrome] = useState(true);
+  const presentChromeHideRef = useRef(0);
   const [rehearsalMode, setRehearsalMode] = useState(false);
   const [rehearsalReport, setRehearsalReport] = useState<{
     slideDurations: number[];
@@ -1317,13 +1332,18 @@ export function PresentationStudio({
   // previews while the pane is at its preferred size and collapses to the
   // shared slide selector below it. The studio no longer runs its own observer
   // against a private 880px threshold.
-  const roomForRail = contract.density === "comfortable";
+  const roomForRail =
+    contract.surface === "full" && contract.density === "comfortable";
+  const inspectorOverlays = true;
   const slideRailOpen =
-    slideRailPreference === "auto"
+    contract.surface === "full" &&
+    (slideRailPreference === "auto"
       ? roomForRail
-      : slideRailPreference === "open";
+      : slideRailPreference === "open");
   const inspectorOpen =
-    inspectorPreference === "auto" ? roomForRail : inspectorPreference === "open";
+    inspectorPreference === "auto"
+      ? !inspectorOverlays && roomForRail
+      : inspectorPreference === "open";
 
   const presentIndexRef = useRef(0);
   const presentSlideStartedAtRef = useRef(0);
@@ -1451,7 +1471,7 @@ export function PresentationStudio({
     // so a mirrored display cannot reveal them by default.
     try {
       setPresenterNotesVisible(
-        window.localStorage.getItem(PRESENTER_NOTES_KEY) === "visible",
+        window.localStorage.getItem(PRESENTER_NOTES_KEY) !== "hidden",
       );
     } catch {
       // Private browsing denies storage; the safe default already applies.
@@ -1528,6 +1548,12 @@ export function PresentationStudio({
     return () =>
       document.removeEventListener("fullscreenchange", fullscreenChange);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stopPresenting declared below
+  }, [presentedDeck]);
+  useEffect(() => {
+    if (!presentedDeck) return;
+    revealPresentChrome();
+    return () => window.clearTimeout(presentChromeHideRef.current);
+     
   }, [presentedDeck]);
 
   const emit = useCallback(
@@ -2281,7 +2307,10 @@ export function PresentationStudio({
     } else {
       const minimumWidth = 40;
       const minimumHeight = 32;
-      if (drag.handle?.includes("w")) {
+      const handle = drag.handle ?? "se";
+      const resizeX = handle.includes("e") || handle.includes("w");
+      const resizeY = handle.includes("n") || handle.includes("s");
+      if (resizeX && handle.includes("w")) {
         x = Math.max(
           0,
           Math.min(
@@ -2290,13 +2319,13 @@ export function PresentationStudio({
           ),
         );
         width = drag.startWidth + (drag.startX - x);
-      } else {
+      } else if (resizeX) {
         width = Math.max(
           minimumWidth,
           Math.min(1_000 - drag.startX, drag.startWidth + deltaX),
         );
       }
-      if (drag.handle?.includes("n")) {
+      if (resizeY && handle.includes("n")) {
         y = Math.max(
           0,
           Math.min(
@@ -2305,7 +2334,7 @@ export function PresentationStudio({
           ),
         );
         height = drag.startHeight + (drag.startY - y);
-      } else {
+      } else if (resizeY) {
         height = Math.max(
           minimumHeight,
           Math.min(canvasHeight - drag.startY, drag.startHeight + deltaY),
@@ -2708,7 +2737,12 @@ export function PresentationStudio({
     setPresentBlackout(false);
     // Rehearsing is private by definition, so the presenter panel opens with
     // the notes already showing; a live run keeps whatever this device chose.
-    if (rehearse) setPresenterNotesVisible(true);
+    const extended =
+      typeof screen !== "undefined" &&
+      Boolean((screen as Screen & { isExtended?: boolean }).isExtended);
+    setPresentLayout(rehearse || extended ? "speaker" : "audience");
+    if (rehearse || extended) setPresenterNotesVisible(true);
+    setPresentChrome(true);
     void document.documentElement.requestFullscreen?.().catch(() => undefined);
   }
   function stopPresenting() {
@@ -2737,6 +2771,14 @@ export function PresentationStudio({
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => undefined);
     }
+  }
+  function revealPresentChrome() {
+    setPresentChrome(true);
+    window.clearTimeout(presentChromeHideRef.current);
+    presentChromeHideRef.current = window.setTimeout(
+      () => setPresentChrome(false),
+      2400,
+    );
   }
   const formatElapsed = `${Math.floor(presentElapsed / 60_000)}:${Math.floor(
     (presentElapsed % 60_000) / 1_000,
@@ -2773,9 +2815,10 @@ export function PresentationStudio({
   // canvas keeps the room. Both widths come from the shared density, not from a
   // breakpoint this studio invented.
   const workspaceColumns = [
-    slideRailOpen ? (contract.density === "comfortable" ? "186px" : "132px") : "",
+    contract.surface === "full" && surface === "slides" && slideRailOpen
+      ? "292px"
+      : "",
     "minmax(0, 1fr)",
-    inspectorOpen ? "minmax(232px, 296px)" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -2789,22 +2832,26 @@ export function PresentationStudio({
     // toggles are absent on the notes page rather than present and inert.
     ...(surface === "slides"
       ? ([
-          {
-            id: "previews",
-            label: slideRailOpen
-              ? "Hide slide previews"
-              : "Show slide previews",
-            icon: LayoutTemplate,
-            priority: "essential",
-            active: slideRailOpen,
-            onSelect: () =>
-              setSlideRailPreference(slideRailOpen ? "closed" : "open"),
-          },
+          ...(contract.surface === "full"
+            ? [
+                {
+                  id: "previews",
+                  label: slideRailOpen
+                    ? "Hide slide previews"
+                    : "Show slide previews",
+                  icon: LayoutTemplate,
+                  priority: "essential" as const,
+                  active: slideRailOpen,
+                  onSelect: () =>
+                    setSlideRailPreference(slideRailOpen ? "closed" : "open"),
+                },
+              ]
+            : []),
           {
             id: "inspector",
             label: inspectorOpen ? "Hide inspector" : "Show inspector",
             icon: SlidersHorizontal,
-            priority: "essential",
+            priority: "essential" as const,
             active: inspectorOpen,
             hint: "Slide, objects, design, sources and files",
             onSelect: () =>
@@ -2956,9 +3003,7 @@ export function PresentationStudio({
         // reach them, which is what `contract.modes` and `requires` below read.
         modes={[]}
         selector={
-          // Stated once: the rail already names every slide when it is open,
-          // and the notes page lists all of them.
-          slideRailOpen || surface !== "slides" ? undefined : (
+          surface !== "slides" ? undefined : (
             <WorkbarItemSelector
               ariaLabel="Slide"
               itemNoun="slide"
@@ -3038,80 +3083,28 @@ export function PresentationStudio({
           <div
             className="presentation-workspace"
             data-rail-collapsed={!slideRailOpen || undefined}
+            data-inspector-overlay={
+              inspectorOverlays && inspectorOpen ? true : undefined
+            }
             style={{ gridTemplateColumns: workspaceColumns }}
           >
-            {slideRailOpen ? (
-              <aside className="presentation-slide-rail" aria-label="Slides">
-                {deck.slides.map((slide, index) => (
-                  <button
-                    type="button"
-                    key={slide.id}
-                    data-active={slide.id === activeSlide.id || undefined}
-                    data-dragging={draggingSlideId === slide.id || undefined}
-                    data-ai-region={aiRegionAttr(
-                      pathTouches(aiChangedPaths, `/slides/${index}`),
-                    )}
-                    {...targetAttrs(`/slides/${index}`)}
-                    // Reorder has to work without a mouse, so the same move the
-                    // drag performs is on Alt with an arrow key.
-                    title={`Slide ${index + 1}. Alt with an arrow key reorders it.`}
-                    style={
-                      dropTargetSlideId === slide.id &&
-                      draggingSlideId &&
-                      draggingSlideId !== slide.id
-                        ? { boxShadow: "inset 0 3px 0 0 var(--brand-primary)" }
-                        : undefined
-                    }
-                    draggable={!readOnly}
-                    onDragStart={(event) => {
-                      setDraggingSlideId(slide.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData(
-                        "application/x-spectra-slide",
-                        slide.id,
-                      );
-                    }}
-                    onDragEnd={() => {
-                      setDraggingSlideId(undefined);
-                      setDropTargetSlideId(undefined);
-                    }}
-                    onDragEnter={() => setDropTargetSlideId(slide.id)}
-                    onDragOver={(event) => {
-                      if (!readOnly) event.preventDefault();
-                    }}
-                    onDragLeave={() =>
-                      setDropTargetSlideId((current) =>
-                        current === slide.id ? undefined : current,
-                      )
-                    }
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      setDropTargetSlideId(undefined);
-                      moveSlideBefore(slide.id);
-                    }}
-                    onKeyDown={(event) => {
-                      if (
-                        readOnly ||
-                        !event.altKey ||
-                        (event.key !== "ArrowUp" && event.key !== "ArrowDown")
-                      )
-                        return;
-                      event.preventDefault();
-                      setActiveSlideId(slide.id);
-                      moveSlideBy(index, event.key === "ArrowUp" ? -1 : 1);
-                    }}
-                    onClick={() => selectSlide(slide.id)}
-                  >
-                    <span>{index + 1}</span>
-                    <div
-                      // The rail is a visual preview, not a second editable
-                      // presentation surface. Its canvas deliberately reuses the
-                      // same semantic paths as the real slide, so exclude it from
-                      // presence geometry: otherwise an AI or collaborator cursor
-                      // lands in the thumbnail while the operation trace animates
-                      // on the native canvas.
-                      data-spectra-hidden-target="true"
-                    >
+            {contract.surface === "full" && surface === "slides" ? (
+              <StudioItemRail
+                label="Slides"
+                count={deck.slides.length}
+                collapsed={!slideRailOpen}
+                onToggleCollapsed={() =>
+                  setSlideRailPreference(slideRailOpen ? "closed" : "open")
+                }
+                items={deck.slides.map((slide, index) => ({
+                  id: slide.id,
+                  title: slide.title || `Slide ${index + 1}`,
+                  subtitle: slide.speakerNotes
+                    ? "Has speaker notes"
+                    : undefined,
+                  active: slide.id === activeSlide.id,
+                  preview: (
+                    <div className="spectra-item-rail-preview" data-spectra-hidden-target="true">
                       <SlideCanvas
                         slide={slide}
                         deck={deck}
@@ -3130,18 +3123,27 @@ export function PresentationStudio({
                         onTextBlur={() => undefined}
                       />
                     </div>
-                    <strong>{slide.title}</strong>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="presentation-add-slide"
-                  onClick={addSlide}
-                  disabled={readOnly}
-                >
-                  <Plus className="h-3.5 w-3.5" /> Add slide
-                </button>
-              </aside>
+                  ),
+                }))}
+                onSelect={selectSlide}
+                onAdd={readOnly ? undefined : addSlide}
+                addLabel="Add slide"
+                canEdit={!readOnly}
+                draggingId={draggingSlideId}
+                onDragStart={setDraggingSlideId}
+                onDragEnd={() => {
+                  setDraggingSlideId(undefined);
+                  setDropTargetSlideId(undefined);
+                }}
+                onMove={(from, to) => {
+                  const moved = deck.slides[from];
+                  const target = deck.slides[to];
+                  if (moved && target) {
+                    setActiveSlideId(moved.id);
+                    moveSlideBefore(target.id);
+                  }
+                }}
+              />
             ) : null}
             <div className="presentation-stage">
               <SlideCanvas
@@ -3164,7 +3166,10 @@ export function PresentationStudio({
                 onTextFocus={beginText}
                 onTextBlur={finishText}
               />
-              <section className="presentation-notes">
+              <section
+                className="presentation-notes"
+                data-open={notesOpen || undefined}
+              >
                 <button
                   type="button"
                   className="presentation-notes-toggle"
@@ -3196,6 +3201,7 @@ export function PresentationStudio({
                         `/slides/${activeSlideIndex}/speakerNotes`,
                       )}
                       placeholder="Add private speaking prompts, source reminders, or rehearsal cues."
+                      className="presentation-notes-field"
                       onFocus={() =>
                         onActiveRegionChange?.(`${activeSlide.id}:notes`)
                       }
@@ -3207,23 +3213,15 @@ export function PresentationStudio({
                       }
                       textareaClassName="w-full"
                     />
-                    <span>
-                      {(activeSlide.speakerNotes ?? "").length} characters
-                    </span>
                   </>
                 ) : null}
               </section>
             </div>
             {inspectorOpen ? (
               <aside
-                className="presentation-inspector min-w-0 overflow-y-auto"
+                className="presentation-inspector"
+                data-overlay={inspectorOverlays || undefined}
                 aria-label="Presentation inspector"
-                style={{
-                  borderLeft: "1px solid var(--border-default)",
-                  background:
-                    "color-mix(in oklab, var(--bg-secondary) 45%, var(--bg-primary))",
-                  padding: "12px",
-                }}
               >
                 <div className="mb-3 flex items-center gap-2">
                   <SelectField
@@ -3246,14 +3244,7 @@ export function PresentationStudio({
                     <X className="size-4" />
                   </button>
                 </div>
-                <div
-                  className="presentation-settings-grid"
-                  style={{
-                    gridTemplateColumns: "minmax(0, 1fr)",
-                    maxWidth: "none",
-                    margin: 0,
-                  }}
-                >
+                <div className="presentation-settings-grid">
                   {inspectorSection === "slide" ? (
                     <>
                       <section>
@@ -3346,7 +3337,7 @@ export function PresentationStudio({
                                   | "push"
                                   | "dissolve",
                                 durationMs:
-                                  activeSlide.transition?.durationMs ?? 350,
+                                  activeSlide.transition?.durationMs ?? 720,
                               };
                             })
                           }
@@ -4216,29 +4207,51 @@ export function PresentationStudio({
         ? createPortal(
             <div
               className="presentation-presenter"
+              data-layout={presentLayout}
+              data-chrome={presentChrome || undefined}
+              data-notes={
+                presentLayout === "speaker" && presenterNotesVisible
+                  ? true
+                  : undefined
+              }
               role="dialog"
               aria-modal="true"
               aria-label={
                 rehearsalMode ? "Rehearsal mode" : "Presentation mode"
               }
+              onMouseMove={revealPresentChrome}
             >
               <header>
                 <span>
                   <Clock3 className="h-4 w-4" /> {formatElapsed}
-                  <span
-                    style={{ color: "#8d8f88" }}
-                    title="Time on this slide"
-                  >
-                    slide {durationLabel(slideElapsed)}
+                  <span title="Time on this slide">
+                    · slide {durationLabel(slideElapsed)}
                   </span>
                   {rehearsalMode ? " · Rehearsal" : ""}
                 </span>
                 <strong>{presentedDeck.slides[presentIndex]!.title}</strong>
-                <span className="flex items-center gap-2">
-                  {/* Notes are the presenter's, and a browser tab is often
-                      mirrored onto the projector, so they stay off until this
-                      device asks for them. The choice is remembered per device,
-                      never written into the deck. */}
+                <span className="presentation-presenter-actions">
+                  <button
+                    type="button"
+                    aria-pressed={presentLayout === "audience"}
+                    onClick={() => setPresentLayout("audience")}
+                    title="Audience: the slide fills this screen"
+                  >
+                    <MonitorPlay className="h-4 w-4" />
+                    Audience
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={presentLayout === "speaker"}
+                    onClick={() => {
+                      setPresentLayout("speaker");
+                      setPresenterNotesVisible(true);
+                    }}
+                    title="Speaker: this slide, the next slide, and notes"
+                  >
+                    <Layers3 className="h-4 w-4" />
+                    Speaker
+                  </button>
                   <button
                     type="button"
                     aria-pressed={presenterNotesVisible}
@@ -4246,7 +4259,7 @@ export function PresentationStudio({
                     title="Show or hide speaker notes. Shortcut: S"
                   >
                     <StickyNote className="h-4 w-4" />
-                    {presenterNotesVisible ? "Hide notes" : "Show notes"}
+                    Notes
                   </button>
                   <button
                     type="button"
@@ -4261,47 +4274,83 @@ export function PresentationStudio({
                   </button>
                 </span>
               </header>
-              <main>
-                {presentBlackout ? (
-                  <button
-                    type="button"
-                    onClick={() => setPresentBlackout(false)}
-                    aria-label="Return to the slide"
-                    style={{
-                      display: "grid",
-                      placeItems: "center",
-                      width: "100%",
-                      height: "100%",
-                      background: "#000",
-                      color: "#6f716b",
-                      fontSize: "11px",
-                    }}
-                  >
-                    Press any key to return to the slide
-                  </button>
-                ) : (
-                  <SlideCanvas
-                    key={presentedDeck.slides[presentIndex]!.id}
-                    slide={presentedDeck.slides[presentIndex]!}
-                    deck={presentedDeck}
-                    assets={assets}
-                    artifacts={artifacts}
-                    readOnly
-                    compact
-                    animateObjects
-                    showSlideNumber
-                    aiChangedPaths={[]}
-                    onSelectObject={() => undefined}
-                    onPointerDown={() => undefined}
-                    onResizePointerDown={() => undefined}
-                    onPointerMove={() => undefined}
-                    onPointerUp={() => undefined}
-                    onTextChange={() => undefined}
-                    onTextFocus={() => undefined}
-                    onTextBlur={() => undefined}
-                  />
-                )}
-              </main>
+              {presentBlackout ? (
+                <button
+                  type="button"
+                  className="presentation-presenter-blackout"
+                  onClick={() => setPresentBlackout(false)}
+                  aria-label="Return to the slide"
+                >
+                  Press any key to return to the slide
+                </button>
+              ) : (
+                <>
+                  <main className="presentation-presenter-current">
+                    <SlideCanvas
+                      key={presentedDeck.slides[presentIndex]!.id}
+                      slide={presentedDeck.slides[presentIndex]!}
+                      deck={presentedDeck}
+                      assets={assets}
+                      artifacts={artifacts}
+                      readOnly
+                      compact
+                      animateObjects
+                      showSlideNumber={presentLayout === "audience"}
+                      aiChangedPaths={[]}
+                      onSelectObject={() => undefined}
+                      onPointerDown={() => undefined}
+                      onResizePointerDown={() => undefined}
+                      onPointerMove={() => undefined}
+                      onPointerUp={() => undefined}
+                      onTextChange={() => undefined}
+                      onTextFocus={() => undefined}
+                      onTextBlur={() => undefined}
+                    />
+                  </main>
+                  {presentLayout === "speaker" ? (
+                    <>
+                      <aside className="presentation-presenter-next">
+                        <span>
+                          Next
+                          {presentIndex < presentedDeck.slides.length - 1
+                            ? ` · ${presentIndex + 2}`
+                            : " · last slide"}
+                        </span>
+                        {presentIndex < presentedDeck.slides.length - 1 ? (
+                          <SlideCanvas
+                            slide={presentedDeck.slides[presentIndex + 1]!}
+                            deck={presentedDeck}
+                            assets={assets}
+                            artifacts={artifacts}
+                            readOnly
+                            compact
+                            aiChangedPaths={[]}
+                            onSelectObject={() => undefined}
+                            onPointerDown={() => undefined}
+                            onResizePointerDown={() => undefined}
+                            onPointerMove={() => undefined}
+                            onPointerUp={() => undefined}
+                            onTextChange={() => undefined}
+                            onTextFocus={() => undefined}
+                            onTextBlur={() => undefined}
+                          />
+                        ) : (
+                          <p>End of deck</p>
+                        )}
+                      </aside>
+                      {presenterNotesVisible ? (
+                        <section className="presentation-presenter-notes">
+                          <strong>Notes</strong>
+                          <p>
+                            {presentedDeck.slides[presentIndex]!.speakerNotes ||
+                              "No speaker notes for this slide."}
+                          </p>
+                        </section>
+                      ) : null}
+                    </>
+                  ) : null}
+                </>
+              )}
               <footer>
                 <button
                   type="button"
@@ -4311,58 +4360,9 @@ export function PresentationStudio({
                 >
                   <ChevronLeft className="h-5 w-5" />
                 </button>
-                <div>
-                  <span>
-                    {presentIndex + 1} / {presentedDeck.slides.length}
-                  </span>
-                  {presenterNotesVisible ? (
-                    <p
-                      // Real notes run to several lines, so the presenter panel
-                      // wraps and scrolls them instead of truncating to one.
-                      style={{
-                        maxHeight: "68px",
-                        overflowY: "auto",
-                        whiteSpace: "pre-wrap",
-                        textOverflow: "clip",
-                        textAlign: "left",
-                      }}
-                    >
-                      {presentedDeck.slides[presentIndex]!.speakerNotes ||
-                        "No speaker notes for this slide."}
-                    </p>
-                  ) : (
-                    <p style={{ color: "#8d8f88" }}>
-                      Notes hidden. Press S to show them on this device.
-                    </p>
-                  )}
-                </div>
-                {presenterNotesVisible &&
-                presentIndex < presentedDeck.slides.length - 1 ? (
-                  <div
-                    style={{ flex: "none", width: "132px", textAlign: "left" }}
-                  >
-                    <span>Next</span>
-                    <div data-spectra-hidden-target="true">
-                      <SlideCanvas
-                        slide={presentedDeck.slides[presentIndex + 1]!}
-                        deck={presentedDeck}
-                        assets={assets}
-                        artifacts={artifacts}
-                        readOnly
-                        compact
-                        aiChangedPaths={[]}
-                        onSelectObject={() => undefined}
-                        onPointerDown={() => undefined}
-                        onResizePointerDown={() => undefined}
-                        onPointerMove={() => undefined}
-                        onPointerUp={() => undefined}
-                        onTextChange={() => undefined}
-                        onTextFocus={() => undefined}
-                        onTextBlur={() => undefined}
-                      />
-                    </div>
-                  </div>
-                ) : null}
+                <span>
+                  {presentIndex + 1} / {presentedDeck.slides.length}
+                </span>
                 <button
                   type="button"
                   disabled={presentIndex === presentedDeck.slides.length - 1}

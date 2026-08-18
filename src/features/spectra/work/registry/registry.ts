@@ -115,11 +115,12 @@ const modes = {
   // read-only viewer lost the source view entirely and was left with the
   // rendered output. Running is not a mode: it is an action gated on `execute`,
   // reached from the primary verb, not a peer tab beside authoring (D2/D3).
+  // Settings is the same class of thing: configuration, reached from the bar,
+  // never a fourth peer tab that crushes the file selector.
   code: [
     ["Code", "view"],
     ["Visualisation", "interact"],
     ["Both", "view"],
-    ["Settings", "edit"],
   ],
   // A board has one surface: the canvas. `Edit` and `View` were a permission
   // printed as a tab pair, which is what D1 rules out — an owner edits in place

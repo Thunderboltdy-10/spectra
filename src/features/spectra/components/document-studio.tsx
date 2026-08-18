@@ -16,36 +16,30 @@ import { TaskList } from "@tiptap/extension-task-list";
 import TextAlign from "@tiptap/extension-text-align";
 import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import {
   AlertCircle,
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
   BookOpen,
-  CheckCircle2,
   ChevronDown,
   Eye,
   FileDown,
   FileText,
   Focus,
+  Highlighter,
   Import,
   LayoutTemplate,
   ListOrdered,
   Loader2,
   Minus,
-  PanelLeft,
   Pencil,
   Plus,
   Printer,
   Search,
-  Sigma,
-  SlidersHorizontal,
-  Sparkles,
-  Table2,
   Trash2,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type * as Y from "yjs";
 import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
@@ -89,6 +83,11 @@ import type { SourceRecord } from "../sources/records/source-record";
 import { createDocumentRelativeSelection } from "../work/models/yjs";
 import { availableWorkModes } from "../work/registry";
 import {
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
   RichTextFormatBar,
   ToolbarButton,
   blocksFromJson,
@@ -103,7 +102,11 @@ import {
   markdownToDocumentHtml,
   sanitizeDocumentHtml,
 } from "./artifact-studio-file-utils";
-import { ArtifactWorkbar } from "./artifact-workbar";
+import {
+  ArtifactWorkbar,
+  WorkbarSelect,
+  workbarMenuItemClass,
+} from "./artifact-workbar";
 
 function documentMarkdown(json: JSONContent) {
   const renderInline = (node: JSONContent): string => {
@@ -155,6 +158,31 @@ function documentMarkdown(json: JSONContent) {
   return render(json).trim();
 }
 
+function DocumentOverflowItem({
+  icon: Icon,
+  label,
+  onSelect,
+  disabled,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onSelect: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <DropdownMenuItem
+      disabled={disabled}
+      className={workbarMenuItemClass()}
+      onSelect={onSelect}
+    >
+      <span className="grid size-4 shrink-0 place-items-center text-[var(--text-secondary)]">
+        <Icon className="size-3.5" />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+    </DropdownMenuItem>
+  );
+}
+
 type DocumentMode = "write" | "read" | "review" | "focus";
 
 /**
@@ -189,7 +217,6 @@ export function DocumentStudio({
   );
   const [, refreshToolbar] = useState(0);
   const [importing, setImporting] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findDraft, setFindDraft] = useState("");
@@ -213,6 +240,9 @@ export function DocumentStudio({
   );
   const [importReport, setImportReport] = useState<string>();
   const [importError, setImportError] = useState<string>();
+  const [pendingTemplate, setPendingTemplate] = useState<
+    "notes" | "essay" | "lab" | null
+  >(null);
   const importRef = useRef<HTMLInputElement>(null);
   const editorReadyForUserChanges = useRef(false);
   const editorJsonKeyRef = useRef(JSON.stringify(initialContent));
@@ -297,7 +327,7 @@ export function DocumentStudio({
         attributes: {
           "data-work-id": artifactId,
           class:
-            "min-h-[620px] px-2 pb-24 pt-2 outline-none font-serif text-[19px] leading-8 text-[var(--text-primary)]",
+            "min-h-[620px] px-2 pb-24 pt-2 outline-none text-[var(--text-primary)]",
         },
         handlePaste: (view, event) => {
           const target = parseSpectraWorkUrl(
@@ -530,16 +560,10 @@ export function DocumentStudio({
     );
   }, [aiChangedPaths, collaborationDocument, editor, incomingEditorJson]);
 
-  const equationActive = editor?.isActive("equation") ?? false;
-  const equationAttrs = equationActive
-    ? (editor?.getAttributes("equation") ?? {})
-    : {};
-
   const editorText = editor?.getText({ blockSeparator: "\n" }) ?? "";
   const wordCount = editorText.trim()
     ? editorText.trim().split(/\s+/).length
     : 0;
-  const readingMinutes = Math.max(1, Math.ceil(wordCount / 220));
   // Outline, find and the source navigator all read the live ProseMirror
   // document rather than a JSON copy, so their positions are the editor's own
   // and stay correct through collaborative edits (§11A).
@@ -720,13 +744,12 @@ export function DocumentStudio({
     if (!editor || readOnly) return;
     const template =
       kind === "notes"
-        ? `<h1>Study notes</h1><div data-callout="true"><p>Key idea</p></div><h2>Core concepts</h2><ul><li>Add the first important concept</li><li>Connect it to prior knowledge</li></ul><h2>Questions</h2><ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>What still needs clarification?</p></li></ul>`
+        ? `<h1>Study notes</h1><aside data-spectra-callout="true" data-callout-type="info"><p>Key idea</p></aside><h2>Core concepts</h2><ul><li>Add the first important concept</li><li>Connect it to prior knowledge</li></ul><h2>Questions</h2><ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>What still needs clarification?</p></li></ul>`
         : kind === "essay"
           ? `<h1>Essay title</h1><p><em>State the central argument in one precise sentence.</em></p><h2>Introduction</h2><p>Establish context and your thesis.</p><h2>Argument</h2><p>Develop evidence and analysis.</p><h2>Counterargument</h2><p>Address the strongest alternative interpretation.</p><h2>Conclusion</h2><p>Synthesize the argument without repeating it.</p>`
           : `<h1>Lab report</h1><h2>Research question</h2><p>What are you investigating?</p><h2>Hypothesis</h2><p>State a testable prediction.</p><h2>Method</h2><ol><li>Describe the procedure.</li></ol><h2>Results</h2><table><tbody><tr><th><p>Variable</p></th><th><p>Observation</p></th></tr><tr><td><p></p></td><td><p></p></td></tr></tbody></table><h2>Conclusion</h2><p>Interpret the evidence and limitations.</p>`;
     editorReadyForUserChanges.current = true;
     editor.commands.setContent(template);
-    setToolsOpen(false);
   }
 
   async function exportDocument(
@@ -808,7 +831,6 @@ export function DocumentStudio({
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 0);
     }
-    setToolsOpen(false);
   }
 
   async function importDocument(file: File) {
@@ -1037,6 +1059,12 @@ export function DocumentStudio({
     }
   }
 
+  const sourcesHaveWork = Boolean(
+    sourceNavigator.entries.length ||
+      sourceNavigator.unresolved.length ||
+      sourceNavigator.uncited.length,
+  );
+
   return (
     <div
       className="spectra-document-studio bg-[var(--bg-primary)]"
@@ -1046,36 +1074,23 @@ export function DocumentStudio({
       data-layout={pageLayout}
     >
       {!focusMode ? header : null}
-      {/* One bar. Document's registry modes are Edit and Preview as reader, and
-          reader preview is an activity, not a peer view (CANON D3) — so it is
-          declared as an action, not as a mode tab. */}
+      {/* One bar. Off-default activities (Page canvas, Focus) stay in the bar
+          with the active treatment so the writer can see they left continuous. */}
       <ArtifactWorkbar
         label="Document tools"
         modes={[]}
-        context={
-          docMode === "read"
-            ? `Reading · ${wordCount.toLocaleString()} words`
-            : `${wordCount.toLocaleString()} words · ${readingMinutes} min read`
-        }
-        {...(docMode === "write"
-          ? {}
-          : {
+        context={docMode === "read" ? "Reading" : undefined}
+        {...(docMode === "read" || docMode === "review"
+          ? {
               primary: {
                 label: "Back to editing",
                 icon: Pencil,
                 requires: "edit" as const,
                 onSelect: () => setDocMode("write"),
               },
-            })}
+            }
+          : {})}
         actions={[
-          {
-            id: "outline",
-            label: "Outline",
-            icon: FileText,
-            priority: "essential",
-            active: outlineOpen,
-            onSelect: () => setOutlineOpen((open) => !open),
-          },
           {
             id: "find",
             label: "Find",
@@ -1085,88 +1100,294 @@ export function DocumentStudio({
             onSelect: () => setFindOpen((open) => !open),
           },
           {
-            id: "sources",
-            label: "Sources",
-            icon: BookOpen,
+            id: "outline",
+            label: "Outline",
+            icon: FileText,
             priority: "essential",
-            active: sourcesOpen,
-            onSelect: () => setSourcesOpen((open) => !open),
+            active: outlineOpen,
+            onSelect: () => setOutlineOpen((open) => !open),
           },
-          {
-            id: "import",
-            label: importing ? "Importing…" : "Import",
-            icon: importing ? Loader2 : Import,
-            priority: "secondary",
-            disabled: importing,
-            requires: "edit",
-            onSelect: () => importRef.current?.click(),
-          },
-          {
-            id: "options",
-            label: "Document options",
-            icon: SlidersHorizontal,
-            priority: "advanced",
-            active: toolsOpen,
-            hint: "Layout, templates, text appearance",
-            onSelect: () => setToolsOpen((open) => !open),
-          },
+          ...(pageLayout === "page"
+            ? [
+                {
+                  id: "page-canvas",
+                  label: "Page canvas",
+                  icon: FileText,
+                  priority: "essential" as const,
+                  active: true,
+                  onSelect: () => setPageLayout("continuous"),
+                },
+              ]
+            : []),
+          ...(focusMode
+            ? [
+                {
+                  id: "focus",
+                  label: "Focus",
+                  icon: Focus,
+                  priority: "essential" as const,
+                  active: true,
+                  onSelect: () => setDocMode("write"),
+                },
+              ]
+            : []),
+          ...(sourcesHaveWork
+            ? [
+                {
+                  id: "sources",
+                  label: "Sources",
+                  icon: BookOpen,
+                  priority: "secondary" as const,
+                  active: sourcesOpen,
+                  onSelect: () => setSourcesOpen((open) => !open),
+                  ...(sourceNavigator.unresolved.length
+                    ? {
+                        hint: `${sourceNavigator.unresolved.length} to resolve`,
+                      }
+                    : {}),
+                },
+              ]
+            : []),
         ]}
-      />
-      {/* Formatting belongs to the text, so it sits with the page rather than
-          becoming a second navbar under the workbar. Same component as every
-          other rich-text field in the product. */}
-      {docMode === "write" ? (
-        <div className="spectra-document-format-bar spectra-rich-text-editor">
+        overflow={
+          <>
+            <DropdownMenuLabel>Document</DropdownMenuLabel>
+            <div className={workbarMenuItemClass()} role="note">
+              <span className="grid size-4 shrink-0 place-items-center text-[var(--text-secondary)]">
+                <FileText className="size-3.5" />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-left">
+                {wordCount.toLocaleString()}{" "}
+                {wordCount === 1 ? "word" : "words"}
+              </span>
+            </div>
+            <DropdownMenuSeparator />
+            {!sourcesHaveWork ? (
+              <>
+                <DropdownMenuLabel>Cite</DropdownMenuLabel>
+                <DocumentOverflowItem
+                  icon={BookOpen}
+                  label="Sources"
+                  onSelect={() => setSourcesOpen((open) => !open)}
+                />
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
+            {!readOnly ? (
+              <>
+                <DropdownMenuLabel>View</DropdownMenuLabel>
+                {canPreviewAsReader ? (
+                  <DocumentOverflowItem
+                    icon={Eye}
+                    label="Preview as reader"
+                    onSelect={() => setDocMode("read")}
+                  />
+                ) : null}
+                <DocumentOverflowItem
+                  icon={Focus}
+                  label="Focus"
+                  onSelect={() => {
+                    setDocMode("focus");
+                    setOutlineOpen(false);
+                    setSourcesOpen(false);
+                    setFindOpen(false);
+                  }}
+                />
+                <DocumentOverflowItem
+                  icon={FileText}
+                  label={
+                    pageLayout === "page"
+                      ? "Continuous canvas"
+                      : "Page canvas"
+                  }
+                  onSelect={() =>
+                    setPageLayout(
+                      pageLayout === "page" ? "continuous" : "page",
+                    )
+                  }
+                />
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
+            <DropdownMenuLabel>File</DropdownMenuLabel>
+            <DocumentOverflowItem
+              icon={importing ? Loader2 : Import}
+              label={importing ? "Importing…" : "Import"}
+              disabled={importing || readOnly}
+              onSelect={() => importRef.current?.click()}
+            />
+            {(
+              [
+                ["docx", "Export Word"],
+                ["pdf", "Export PDF"],
+                ["md", "Export Markdown"],
+                ["html", "Export HTML"],
+                ["txt", "Export text"],
+              ] as const
+            ).map(([format, label]) => (
+              <DocumentOverflowItem
+                key={format}
+                icon={FileDown}
+                label={label}
+                onSelect={() => void exportDocument(format)}
+              />
+            ))}
+            <DocumentOverflowItem
+              icon={Printer}
+              label="Print"
+              onSelect={() => window.print()}
+            />
+            {!readOnly ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Replace with a template</DropdownMenuLabel>
+                <DocumentOverflowItem
+                  icon={LayoutTemplate}
+                  label="Study notes"
+                  onSelect={() => setPendingTemplate("notes")}
+                />
+                <DocumentOverflowItem
+                  icon={LayoutTemplate}
+                  label="Essay"
+                  onSelect={() => setPendingTemplate("essay")}
+                />
+                <DocumentOverflowItem
+                  icon={LayoutTemplate}
+                  label="Lab report"
+                  onSelect={() => setPendingTemplate("lab")}
+                />
+              </>
+            ) : null}
+          </>
+        }
+      >
+        {docMode === "write" && editor ? (
           <RichTextFormatBar
             editor={editor}
             disabled={readOnly}
             label="Document formatting"
             withTextStyle
+            inserts={false}
             trailing={
               <>
-                <ToolbarButton
-                  label="Task list"
-                  onClick={() => editor?.chain().focus().toggleTaskList().run()}
-                  active={editor?.isActive("taskList")}
-                  icon={CheckCircle2}
-                />
-                <ToolbarButton
-                  label="Insert callout"
-                  icon={Sparkles}
-                  onClick={() =>
-                    editor
-                      ?.chain()
-                      .focus()
-                      .insertContent({
-                        type: "callout",
-                        attrs: { tone: "info" },
-                        content: [
-                          {
-                            type: "paragraph",
-                            content: [{ type: "text", text: "Key idea" }],
-                          },
-                        ],
-                      })
-                      .run()
+                <WorkbarSelect
+                  ariaLabel="Alignment"
+                  className="w-[5.75rem] shrink-0"
+                  value={
+                    editor.isActive({ textAlign: "center" })
+                      ? "center"
+                      : editor.isActive({ textAlign: "right" })
+                        ? "right"
+                        : "left"
+                  }
+                  options={[
+                    { value: "left", label: "Left" },
+                    { value: "center", label: "Center" },
+                    { value: "right", label: "Right" },
+                  ]}
+                  onChange={(alignment) =>
+                    editor.chain().focus().setTextAlign(alignment).run()
                   }
                 />
                 <ToolbarButton
-                  label="Insert table"
-                  icon={Table2}
+                  label={
+                    editor.isActive("highlight")
+                      ? "Remove highlight"
+                      : "Highlight"
+                  }
+                  icon={Highlighter}
+                  active={editor.isActive("highlight")}
                   onClick={() =>
-                    editor
-                      ?.chain()
-                      .focus()
-                      .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-                      .run()
+                    editor.isActive("highlight")
+                      ? editor.chain().focus().unsetHighlight().run()
+                      : editor
+                          .chain()
+                          .focus()
+                          .toggleHighlight({ color: "#dff3ed" })
+                          .run()
                   }
                 />
-                {editor?.isActive("table") ? (
+              </>
+            }
+          />
+        ) : null}
+      </ArtifactWorkbar>
+      {docMode === "write" && editor ? (
+        <BubbleMenu
+          editor={editor}
+          appendTo={() => document.body}
+          options={{ placement: "top", offset: 10, flip: true, shift: true }}
+          shouldShow={({ editor: current, state }) => {
+            if (!current.isEditable || readOnly) return false;
+            if (document.querySelector(".slash-command-portal")) return false;
+            const selectedNode = (
+              state.selection as { node?: { type: { name: string } } }
+            ).node;
+            if (
+              selectedNode &&
+              selectedNode.type.name !== "table" &&
+              selectedNode.type.name !== "tableRow"
+            ) {
+              return false;
+            }
+            if (current.isActive("table")) return true;
+            return !state.selection.empty;
+          }}
+          className="spectra-document-selection-toolbar"
+        >
+          <RichTextFormatBar
+            editor={editor}
+            disabled={readOnly}
+            label="Document formatting"
+            withTextStyle
+            inserts={false}
+            trailing={
+              <>
+                <WorkbarSelect
+                  ariaLabel="Alignment"
+                  className="w-[5.75rem] shrink-0"
+                  value={
+                    editor.isActive({ textAlign: "center" })
+                      ? "center"
+                      : editor.isActive({ textAlign: "right" })
+                        ? "right"
+                        : "left"
+                  }
+                  options={[
+                    { value: "left", label: "Left" },
+                    { value: "center", label: "Center" },
+                    { value: "right", label: "Right" },
+                  ]}
+                  onChange={(alignment) =>
+                    editor.chain().focus().setTextAlign(alignment).run()
+                  }
+                />
+                <ToolbarButton
+                  label={
+                    editor.isActive("highlight")
+                      ? "Remove highlight"
+                      : "Highlight"
+                  }
+                  icon={Highlighter}
+                  active={editor.isActive("highlight")}
+                  onClick={() =>
+                    editor.isActive("highlight")
+                      ? editor.chain().focus().unsetHighlight().run()
+                      : editor
+                          .chain()
+                          .focus()
+                          .toggleHighlight({ color: "#dff3ed" })
+                          .run()
+                  }
+                />
+                {editor.isActive("table") ? (
                   <>
                     <ToolbarButton
                       label="Add table row"
                       icon={Plus}
-                      onClick={() => editor.chain().focus().addRowAfter().run()}
+                      onClick={() =>
+                        editor.chain().focus().addRowAfter().run()
+                      }
                     />
                     <ToolbarButton
                       label="Add table column"
@@ -1178,24 +1399,30 @@ export function DocumentStudio({
                     <ToolbarButton
                       label="Delete table row"
                       icon={Minus}
-                      onClick={() => editor.chain().focus().deleteRow().run()}
+                      onClick={() =>
+                        editor.chain().focus().deleteRow().run()
+                      }
                     />
                     <ToolbarButton
                       label="Delete table column"
                       icon={X}
-                      onClick={() => editor.chain().focus().deleteColumn().run()}
+                      onClick={() =>
+                        editor.chain().focus().deleteColumn().run()
+                      }
                     />
                     <ToolbarButton
                       label="Delete table"
                       icon={Trash2}
-                      onClick={() => editor.chain().focus().deleteTable().run()}
+                      onClick={() =>
+                        editor.chain().focus().deleteTable().run()
+                      }
                     />
                   </>
                 ) : null}
               </>
             }
           />
-        </div>
+        </BubbleMenu>
       ) : null}
       <input
         ref={importRef}
@@ -1208,250 +1435,6 @@ export function DocumentStudio({
         }}
       />
       <div className="spectra-editor-body">
-        {toolsOpen ? (
-          <div className="spectra-document-tools-popover">
-            {!readOnly ? (
-              <section>
-                <strong>View</strong>
-                {canPreviewAsReader ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDocMode("read");
-                      setToolsOpen(false);
-                    }}
-                  >
-                    <Eye className="h-4 w-4" />
-                    <span>
-                      <strong>Preview as reader</strong>
-                      <small>Check the document without editing controls</small>
-                    </span>
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDocMode("focus");
-                    setOutlineOpen(false);
-                    setSourcesOpen(false);
-                    setFindOpen(false);
-                    setToolsOpen(false);
-                  }}
-                >
-                  <Focus className="h-4 w-4" />
-                  <span>
-                    <strong>Focus</strong>
-                    <small>Keep the page and writing tools quiet</small>
-                  </span>
-                </button>
-              </section>
-            ) : null}
-            <section>
-              <strong>Navigate & write</strong>
-              <button
-                type="button"
-                onClick={() => {
-                  setOutlineOpen(!outlineOpen);
-                  setToolsOpen(false);
-                }}
-              >
-                <FileText className="h-4 w-4" />
-                <span>
-                  <strong>Document outline</strong>
-                  <small>{outlineEntries.length} sections</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFindOpen(!findOpen);
-                  setToolsOpen(false);
-                }}
-              >
-                <Search className="h-4 w-4" />
-                <span>
-                  <strong>Find & replace</strong>
-                  <small>Search this document</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSourcesOpen(!sourcesOpen);
-                  setToolsOpen(false);
-                }}
-              >
-                <BookOpen className="h-4 w-4" />
-                <span>
-                  <strong>Sources</strong>
-                  <small>
-                    {sourceNavigator.unresolved.length
-                      ? `${sourceNavigator.unresolved.length} citation${sourceNavigator.unresolved.length === 1 ? "" : "s"} to resolve`
-                      : `${sourceNavigator.entries.length} cited`}
-                  </small>
-                </span>
-              </button>
-            </section>
-            <section>
-              <strong>Layout & templates</strong>
-              <button
-                type="button"
-                onClick={() => {
-                  setPageLayout(pageLayout === "page" ? "continuous" : "page");
-                  setToolsOpen(false);
-                }}
-              >
-                <PanelLeft className="h-4 w-4" />
-                <span>
-                  <strong>
-                    {pageLayout === "page"
-                      ? "Continuous canvas"
-                      : "Page canvas"}
-                  </strong>
-                  <small>Change editor representation</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                disabled={readOnly}
-                onClick={() => applyDocumentTemplate("notes")}
-              >
-                <LayoutTemplate className="h-4 w-4" />
-                <span>
-                  <strong>Study notes template</strong>
-                  <small>Key ideas, concepts, questions</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                disabled={readOnly}
-                onClick={() => applyDocumentTemplate("essay")}
-              >
-                <LayoutTemplate className="h-4 w-4" />
-                <span>
-                  <strong>Essay template</strong>
-                  <small>Argument-led academic structure</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                disabled={readOnly}
-                onClick={() => applyDocumentTemplate("lab")}
-              >
-                <LayoutTemplate className="h-4 w-4" />
-                <span>
-                  <strong>Lab report template</strong>
-                  <small>Method, results, conclusion</small>
-                </span>
-              </button>
-            </section>
-            <section>
-              <strong>Text appearance</strong>
-              {(
-                [
-                  ["left", "Align left", AlignLeft],
-                  ["center", "Align center", AlignCenter],
-                  ["right", "Align right", AlignRight],
-                ] as const
-              ).map(([alignment, label, Icon]) => (
-                <button
-                  key={alignment}
-                  type="button"
-                  disabled={readOnly}
-                  data-active={
-                    editor?.isActive({ textAlign: alignment }) || undefined
-                  }
-                  onClick={() =>
-                    editor?.chain().focus().setTextAlign(alignment).run()
-                  }
-                >
-                  <Icon className="h-4 w-4" />
-                  <span>
-                    <strong>{label}</strong>
-                    <small>Apply to the current paragraph or heading</small>
-                  </span>
-                </button>
-              ))}
-              {(
-                [
-                  ["#dff3ed", "Mint highlight"],
-                  ["#eee9ff", "Violet highlight"],
-                  ["#fff0db", "Amber highlight"],
-                ] as const
-              ).map(([color, label]) => (
-                <button
-                  key={color}
-                  type="button"
-                  disabled={readOnly}
-                  data-active={
-                    editor?.isActive("highlight", { color }) || undefined
-                  }
-                  onClick={() =>
-                    editor?.chain().focus().toggleHighlight({ color }).run()
-                  }
-                >
-                  <span
-                    className="spectra-document-highlight-swatch"
-                    style={{ backgroundColor: color }}
-                    aria-hidden="true"
-                  />
-                  <span>
-                    <strong>{label}</strong>
-                    <small>Toggle a restrained Spectra emphasis</small>
-                  </span>
-                </button>
-              ))}
-              <button
-                type="button"
-                disabled={readOnly}
-                onClick={() => editor?.chain().focus().unsetHighlight().run()}
-              >
-                <X className="h-4 w-4" />
-                <span>
-                  <strong>Remove highlight</strong>
-                  <small>Keep text and clear its background</small>
-                </span>
-              </button>
-            </section>
-            <section>
-              <strong>Export</strong>
-              {(
-                [
-                  ["docx", "Word document"],
-                  ["pdf", "PDF"],
-                  ["md", "Markdown"],
-                  ["html", "HTML"],
-                  ["txt", "Plain text"],
-                ] as const
-              ).map(([format, label]) => (
-                <button
-                  key={format}
-                  type="button"
-                  onClick={() => void exportDocument(format)}
-                >
-                  <FileDown className="h-4 w-4" />
-                  <span>
-                    <strong>{label}</strong>
-                    <small>Download an editable or portable copy</small>
-                  </span>
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setToolsOpen(false);
-                  window.print();
-                }}
-              >
-                <Printer className="h-4 w-4" />
-                <span>
-                  <strong>Print</strong>
-                  <small>Use the page-optimized layout</small>
-                </span>
-              </button>
-            </section>
-          </div>
-        ) : null}
         {findOpen ? (
           <div className="spectra-document-findbar">
             <Search className="h-4 w-4" />
@@ -1530,6 +1513,7 @@ export function DocumentStudio({
               <ChevronDown className="h-4 w-4" />
             </button>
             <input
+              data-find-replace=""
               value={replaceDraft}
               disabled={readOnly}
               onChange={(event) => setReplaceDraft(event.target.value)}
@@ -1538,6 +1522,7 @@ export function DocumentStudio({
             />
             <button
               type="button"
+              data-find-replace=""
               disabled={!findMatches.length || readOnly}
               onClick={replaceAllMatches}
             >
@@ -1575,69 +1560,31 @@ export function DocumentStudio({
             </button>
           </div>
         ) : null}
-        {equationActive && !readOnly ? (
-          <div
-            className="flex flex-wrap items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] px-4 py-2"
-            data-equation-toolbar="true"
-          >
-            <Sigma className="h-4 w-4 text-[var(--accent-cyan)]" />
-            <span className="text-[11px] font-semibold text-[var(--text-secondary)]">
-              LaTeX
+        {pendingTemplate ? (
+          <div className="spectra-document-confirm" role="status">
+            <span>
+              <strong>Replace this document?</strong>
+              <small>
+                {(pendingTemplate === "notes"
+                  ? "Study notes"
+                  : pendingTemplate === "essay"
+                    ? "Essay"
+                    : "Lab report") + " will replace the current pages."}
+              </small>
             </span>
-            <input
-              value={
-                typeof equationAttrs.latex === "string"
-                  ? equationAttrs.latex
-                  : ""
-              }
-              onChange={(event) =>
-                editor
-                  ?.chain()
-                  .focus()
-                  .updateAttributes("equation", { latex: event.target.value })
-                  .run()
-              }
-              className="h-8 min-w-[220px] flex-1 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none"
-              placeholder="E = mc^2"
-            />
-            <ToolbarButton
-              label="Align left"
-              icon={AlignLeft}
-              active={equationAttrs.alignment === "left"}
-              onClick={() =>
-                editor
-                  ?.chain()
-                  .focus()
-                  .updateAttributes("equation", { alignment: "left" })
-                  .run()
-              }
-            />
-            <ToolbarButton
-              label="Align center"
-              icon={AlignCenter}
-              active={
-                !equationAttrs.alignment || equationAttrs.alignment === "center"
-              }
-              onClick={() =>
-                editor
-                  ?.chain()
-                  .focus()
-                  .updateAttributes("equation", { alignment: "center" })
-                  .run()
-              }
-            />
-            <ToolbarButton
-              label="Align right"
-              icon={AlignRight}
-              active={equationAttrs.alignment === "right"}
-              onClick={() =>
-                editor
-                  ?.chain()
-                  .focus()
-                  .updateAttributes("equation", { alignment: "right" })
-                  .run()
-              }
-            />
+            <button type="button" onClick={() => setPendingTemplate(null)}>
+              Keep writing
+            </button>
+            <button
+              type="button"
+              data-confirm-replace=""
+              onClick={() => {
+                applyDocumentTemplate(pendingTemplate);
+                setPendingTemplate(null);
+              }}
+            >
+              Replace
+            </button>
           </div>
         ) : null}
         <div className="spectra-document-canvas-shell">
@@ -1747,15 +1694,6 @@ export function DocumentStudio({
             </aside>
           ) : null}
           <main>
-            {focusMode ? (
-              <button
-                type="button"
-                className="spectra-document-exit-focus"
-                onClick={() => setDocMode("write")}
-              >
-                <X className="h-3.5 w-3.5" /> Exit focus
-              </button>
-            ) : null}
             {/* The hint row that used to sit here carried the word count and
                 the slash-command tip, and CSS hid it outright — so the one
                 number a writer checks constantly was in the DOM and invisible.

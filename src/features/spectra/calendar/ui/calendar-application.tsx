@@ -1,29 +1,40 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import {
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Clock3,
   ExternalLink,
-  GripVertical,
+  Layers3,
   Link2,
   LoaderCircle,
   LockKeyhole,
-  Layers3,
+  PanelLeft,
   Plus,
   RefreshCw,
   Search,
   Sparkles,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ProductErrorState } from "../../components/product-state";
-import { AuxiliaryRail, AuxiliaryRailTrigger } from "../../components/auxiliary-rail";
+import { ProductPageHeader } from "../../components/product-page-header";
+import {
+  StudioSplitPlaceholder,
+  useArtifactStudioState,
+} from "../../components/artifact-studio-shell";
+import { StudioItemRail } from "../../components/studio-item-rail";
 import { spectraBus } from "../../events";
-import { CapabilityTruthBadge, CapabilityTruthState } from "../../integrations/status/capability-truth";
+import { getSpectraArtifact, syncSpectraManageBac, type SpectraArtifact } from "../../data/api";
 import {
   CALENDAR_LAYERS,
   calendarItemFromWire,
@@ -32,12 +43,37 @@ import {
   type CalendarOverview,
 } from "../domain/model";
 
+const ArtifactStudio = dynamic(
+  () =>
+    import("../../components/artifact-studio").then((module) => module.ArtifactStudio),
+  { loading: () => <StudioSplitPlaceholder /> },
+);
+
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
-const START_HOUR = 7;
-const END_HOUR = 22;
+const HOUR_PX = 48;
+const HOURS = 24;
+const MIN_DAYS = 1;
+const MAX_DAYS = 10;
+const EXTEND_DAYS = 7;
+const MAX_LOADED_DAYS = 42;
+const SCROLL_LOAD_PX = 280;
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
-function startOfWeek(value: Date) {
+function startOfWeek(value: Date | number) {
   const result = new Date(value);
   result.setHours(0, 0, 0, 0);
   const day = result.getDay() || 7;
@@ -45,11 +81,18 @@ function startOfWeek(value: Date) {
   return result;
 }
 
-function daysForWeek(anchor: Date) {
-  const start = startOfWeek(anchor);
-  return Array.from({ length: 7 }, (_, index) =>
-    new Date(start.getTime() + index * DAY),
-  );
+function startOfDayMs(value: Date | number) {
+  const result = new Date(value);
+  result.setHours(0, 0, 0, 0);
+  return result.getTime();
+}
+
+function weekStartMs(value: Date | number) {
+  return startOfWeek(value).getTime();
+}
+
+function daysAround(center: number, before = EXTEND_DAYS, after = EXTEND_DAYS * 2) {
+  return Array.from({ length: before + after + 1 }, (_, index) => center + (index - before) * DAY);
 }
 
 function formatTime(value: number, timezone: string) {
@@ -60,13 +103,210 @@ function formatTime(value: number, timezone: string) {
   }).format(value);
 }
 
-function formatFreshness(value?: number) {
-  if (!value) return "No successful update yet";
-  return `Updated ${new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(value)}`;
+function formatRange(rangeStart: number, span: number) {
+  const start = new Date(rangeStart);
+  const end = new Date(rangeStart + (span - 1) * DAY);
+  if (span === 1) {
+    return new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(start);
+  }
+  const startLabel = new Intl.DateTimeFormat("en-GB", {
+    month: "short",
+    day: "numeric",
+  }).format(start);
+  const endLabel = new Intl.DateTimeFormat("en-GB", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(end);
+  return `${startLabel} · ${endLabel}`;
+}
+
+function monthCells(year: number, month: number) {
+  const first = new Date(year, month, 1);
+  const offset = (first.getDay() || 7) - 1;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const prevDays = new Date(year, month, 0).getDate();
+  const cells: Array<{ date: Date; muted: boolean }> = [];
+  for (let index = offset - 1; index >= 0; index -= 1) {
+    cells.push({ date: new Date(year, month - 1, prevDays - index), muted: true });
+  }
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push({ date: new Date(year, month, day), muted: false });
+  }
+  while (cells.length % 7 !== 0) {
+    const last = cells[cells.length - 1]!.date;
+    cells.push({
+      date: new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1),
+      muted: true,
+    });
+  }
+  return cells;
+}
+
+function CalendarDatePicker({
+  value,
+  onChange,
+  label,
+}: {
+  value: number;
+  onChange: (date: Date) => void;
+  label: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [level, setLevel] = useState<"days" | "months" | "years">("days");
+  const [cursor, setCursor] = useState(() => new Date(value));
+  useEffect(() => {
+    if (!open) return;
+    setCursor(new Date(value));
+    setLevel("days");
+  }, [open, value]);
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+  const selected = startOfDayMs(value);
+  const today = startOfDayMs(Date.now());
+  const years = Array.from({ length: 21 }, (_, index) => year - 10 + index);
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="spectra-calendar-week-label max-w-[16rem] rounded-[8px] px-2 py-1 text-left hover:bg-[var(--bg-hover)]"
+          aria-label="Choose a date"
+          title="Choose a date"
+        >
+          {label}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-[280px] p-3">
+        <div className="mb-2 flex items-center gap-1">
+          <button
+            type="button"
+            className="spectra-calendar-week-step"
+            aria-label={level === "days" ? "Previous month" : "Previous year"}
+            onClick={() =>
+              setCursor(
+                new Date(
+                  year - (level === "years" ? 21 : 0),
+                  month - (level === "days" ? 1 : 0),
+                  1,
+                ),
+              )
+            }
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <button
+            type="button"
+            className="min-w-0 flex-1 truncate rounded-[8px] px-2 py-1 text-center text-[13px] font-semibold hover:bg-[var(--bg-hover)]"
+            onClick={() =>
+              setLevel((current) => (current === "days" ? "months" : "years"))
+            }
+          >
+            {level === "years" ? `${years[0]} · ${years[years.length - 1]}` : `${MONTHS[month]} ${year}`}
+          </button>
+          <button
+            type="button"
+            className="spectra-calendar-week-step"
+            aria-label={level === "days" ? "Next month" : "Next year"}
+            onClick={() =>
+              setCursor(
+                new Date(
+                  year + (level === "years" ? 21 : 0),
+                  month + (level === "days" ? 1 : 0),
+                  1,
+                ),
+              )
+            }
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+        {level === "years" ? (
+          <div className="grid grid-cols-3 gap-1">
+            {years.map((entry) => (
+              <button
+                key={entry}
+                type="button"
+                className={cn(
+                  "h-9 rounded-[8px] text-[12px] font-semibold hover:bg-[var(--bg-hover)]",
+                  entry === year && "bg-[var(--text-primary)] text-[var(--bg-primary)]",
+                )}
+                onClick={() => {
+                  setCursor(new Date(entry, month, 1));
+                  setLevel("months");
+                }}
+              >
+                {entry}
+              </button>
+            ))}
+          </div>
+        ) : level === "months" ? (
+          <div className="grid grid-cols-3 gap-1">
+            {MONTHS.map((name, index) => (
+              <button
+                key={name}
+                type="button"
+                className={cn(
+                  "h-9 rounded-[8px] text-[12px] font-semibold hover:bg-[var(--bg-hover)]",
+                  index === month && "bg-[var(--text-primary)] text-[var(--bg-primary)]",
+                )}
+                onClick={() => {
+                  setCursor(new Date(year, index, 1));
+                  setLevel("days");
+                }}
+              >
+                {name.slice(0, 3)}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="spectra-calendar-date-grid mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+              {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
+                <span key={`${day}-${index}`} className="grid h-6 place-items-center">
+                  {day}
+                </span>
+              ))}
+            </div>
+            <div className="spectra-calendar-date-grid">
+              {monthCells(year, month).map((cell) => {
+                const stamp = startOfDayMs(cell.date);
+                return (
+                  <button
+                    key={stamp + (cell.muted ? "-m" : "")}
+                    type="button"
+                    className={cn(
+                      "spectra-calendar-date-cell",
+                      cell.muted && "is-muted",
+                      stamp === today && "is-today",
+                      stamp === selected && "is-selected",
+                    )}
+                    onClick={() => {
+                      onChange(cell.date);
+                      setOpen(false);
+                    }}
+                  >
+                    {cell.date.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function planSubtitle(item: CalendarItem) {
+  const notes = item.notes?.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (notes && notes.length <= 48 && !notes.includes("**")) return notes;
+  return "Plan";
 }
 
 function layerFor(item: CalendarItem): CalendarLayerKey {
@@ -82,6 +322,57 @@ function dayKey(value: number) {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
+function minutesOnDay(value: number) {
+  const date = new Date(value);
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function isDayItem(item: CalendarItem) {
+  return Boolean(
+    item.startAt !== undefined &&
+      (item.allDay ||
+        item.timePrecision === "date_only" ||
+        (item.timePrecision === "unknown" && item.endAt === undefined)),
+  );
+}
+
+function isTimedItem(item: CalendarItem) {
+  return Boolean(
+    item.startAt !== undefined &&
+      item.endAt !== undefined &&
+      !isDayItem(item) &&
+      item.timePrecision !== "unknown",
+  );
+}
+
+function planWorkId(item: CalendarItem) {
+  return item.planArtifactId || (item.planTaskId ? item.linkedWorkIds[0] : undefined);
+}
+
+function mergeById(current: CalendarItem[], incoming: CalendarItem[]) {
+  const next = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) next.set(item.id, item);
+  return [...next.values()];
+}
+
+function parseOverview(data: Record<string, unknown>): CalendarOverview {
+  return {
+    timezone: String(data.timezone ?? "UTC"),
+    range: data.range as CalendarOverview["range"],
+    items: Array.isArray(data.items) ? data.items.map(calendarItemFromWire) : [],
+    unscheduledTasks: Array.isArray(data.unscheduledTasks)
+      ? data.unscheduledTasks.map(calendarItemFromWire)
+      : [],
+    partialTimeItems: Array.isArray(data.partialTimeItems)
+      ? data.partialTimeItems.map(calendarItemFromWire)
+      : [],
+    sourceState: data.sourceState as CalendarOverview["sourceState"],
+    lastUpdatedAt:
+      typeof data.lastUpdatedAt === "number" ? data.lastUpdatedAt : undefined,
+    migration: data.migration as CalendarOverview["migration"],
+  };
+}
+
 async function calendarPost(body: Record<string, unknown>) {
   const response = await fetch("/api/spectra/calendar", {
     method: "POST",
@@ -94,8 +385,16 @@ async function calendarPost(body: Record<string, unknown>) {
   return payload.data;
 }
 
+async function fetchOverview(from: number, to: number) {
+  const response = await fetch(`/api/spectra/calendar?from=${from}&to=${to}`);
+  const payload = await response.json();
+  if (!response.ok)
+    throw new Error(payload?.error?.message ?? "Could not load Calendar.");
+  return parseOverview(payload.data as Record<string, unknown>);
+}
+
 type DragPayload =
-  | { type: "task"; item: CalendarItem; grabOffsetMinutes: number }
+  | { type: "plan"; item: CalendarItem; grabOffsetMinutes: number }
   | { type: "block"; item: CalendarItem; grabOffsetMinutes: number };
 
 type GesturePreview = {
@@ -115,108 +414,230 @@ type ResizeGesture = {
 };
 
 export function CalendarApplication() {
-  const [anchor, setAnchor] = useState(() => new Date());
+  const initialStart = weekStartMs(Date.now());
+  const [daySpan, setDaySpanState] = useState(7);
+  const [days, setDays] = useState(() => daysAround(initialStart));
+  const [focusedStart, setFocusedStart] = useState(initialStart);
   const [overview, setOverview] = useState<CalendarOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<CalendarItem | null>(null);
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [visibleLayers, setVisibleLayers] = useState<Set<CalendarLayerKey>>(
     () => new Set(CALENDAR_LAYERS.map((layer) => layer.key)),
   );
-  const [sideOpen, setSideOpen] = useState(true);
+  const [plansOpen, setPlansOpen] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
-  const [taskQuery, setTaskQuery] = useState("");
+  const [planQuery, setPlanQuery] = useState("");
+  const [draggingPlanId, setDraggingPlanId] = useState<string>();
   const [gesturePreview, setGesturePreview] = useState<GesturePreview | null>(null);
   const [resizeGesture, setResizeGesture] = useState<ResizeGesture | null>(null);
   const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(() => new Set());
+  const [openedArtifacts, setOpenedArtifacts] = useState<SpectraArtifact[]>([]);
+  const [panelWidth, setPanelWidth] = useState(780);
   const dragRef = useRef<DragPayload | null>(null);
-  const days = useMemo(() => daysForWeek(anchor), [anchor]);
-  const range = useMemo(
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const loadLockRef = useRef(false);
+  const scrollWeekRef = useRef<number | null>(initialStart);
+  const staleSyncRef = useRef(false);
+  const ignoreScrollRef = useRef(true);
+  const zoomAccumRef = useRef(0);
+  const daySpanRef = useRef(daySpan);
+  daySpanRef.current = daySpan;
+  const dayWidthRef = useRef(140);
+  const daysRef = useRef(days);
+  daysRef.current = days;
+  const focusedStartRef = useRef(focusedStart);
+  focusedStartRef.current = focusedStart;
+  const loadRef = useRef<(
+    mode?: "replace" | "merge",
+    from?: number,
+    to?: number,
+    showRefresh?: boolean,
+  ) => Promise<void>>(async () => undefined);
+  const studio = useArtifactStudioState("spectra.calendar.studio", openedArtifacts);
+  const visibleRange = useMemo(
     () => ({
-      from: days[0]!.getTime(),
-      to: days[6]!.getTime() + DAY - 1,
+      from: days[0]!,
+      to: days[days.length - 1]! + DAY - 1,
     }),
     [days],
   );
 
-  const load = useCallback(async (showRefresh = false) => {
-    if (showRefresh) setRefreshing(true);
-    else setLoading(true);
-    setError("");
-    try {
-      const response = await fetch(
-        `/api/spectra/calendar?from=${range.from}&to=${range.to}`,
-      );
-      const payload = await response.json();
-      if (!response.ok)
-        throw new Error(payload?.error?.message ?? "Could not load Calendar.");
-      const data = payload.data as Record<string, unknown>;
-      setOverview({
-        timezone: String(data.timezone ?? "UTC"),
-        range: data.range as CalendarOverview["range"],
-        items: Array.isArray(data.items)
-          ? data.items.map(calendarItemFromWire)
-          : [],
-        unscheduledTasks: Array.isArray(data.unscheduledTasks)
-          ? data.unscheduledTasks.map(calendarItemFromWire)
-          : [],
-        partialTimeItems: Array.isArray(data.partialTimeItems)
-          ? data.partialTimeItems.map(calendarItemFromWire)
-          : [],
-        sourceState: data.sourceState as CalendarOverview["sourceState"],
-        lastUpdatedAt:
-          typeof data.lastUpdatedAt === "number" ? data.lastUpdatedAt : undefined,
-        migration: data.migration as CalendarOverview["migration"],
+  const applyOverview = useCallback(
+    (incoming: CalendarOverview, mode: "replace" | "merge") => {
+      setOverview((current) => {
+        if (!current || mode === "replace") return incoming;
+        const retainFrom = visibleRange.from - EXTEND_DAYS * DAY;
+        const retainTo = visibleRange.to + EXTEND_DAYS * DAY;
+        return {
+          ...incoming,
+          items: mergeById(current.items, incoming.items).filter(
+            (item) =>
+              item.id.startsWith("pending:") ||
+              item.startAt === undefined ||
+              (item.startAt <= retainTo && (item.endAt ?? item.startAt) >= retainFrom),
+          ),
+          unscheduledTasks: incoming.unscheduledTasks,
+        };
       });
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Could not load Calendar.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [range.from, range.to]);
+    },
+    [visibleRange.from, visibleRange.to],
+  );
+
+  const load = useCallback(
+    async (mode: "replace" | "merge" = "replace", from?: number, to?: number, showRefresh = false) => {
+      if (showRefresh) setRefreshing(true);
+      setError("");
+      try {
+        const data = await fetchOverview(from ?? visibleRange.from, to ?? visibleRange.to);
+        applyOverview(data, mode);
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : "Could not load Calendar.");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [applyOverview, visibleRange.from, visibleRange.to],
+  );
+  loadRef.current = load;
 
   useEffect(() => {
     let cancelled = false;
     void calendarPost({ action: "ensureMigration" })
       .catch(() => undefined)
       .finally(() => {
-        if (!cancelled) void load();
+        if (!cancelled) void loadRef.current("replace");
       });
     return () => {
       cancelled = true;
     };
-  }, [load]);
+  }, []);
+
+  useEffect(() => {
+    if (overview?.sourceState.kind !== "stale" || staleSyncRef.current) return;
+    staleSyncRef.current = true;
+    void syncSpectraManageBac("manual")
+      .then(() => load("merge", visibleRange.from, visibleRange.to))
+      .catch(() => {
+        staleSyncRef.current = false;
+      });
+  }, [load, overview?.sourceState.kind, visibleRange.from, visibleRange.to]);
+
+  useEffect(() => {
+    const target = scrollWeekRef.current;
+    const scroller = scrollerRef.current;
+    if (target === null || !scroller) return;
+    const index = days.findIndex((day) => day === target);
+    if (index < 0) return;
+    ignoreScrollRef.current = true;
+    scroller.scrollLeft = index * dayWidthRef.current;
+    scrollWeekRef.current = null;
+    window.requestAnimationFrame(() => {
+      ignoreScrollRef.current = false;
+    });
+  }, [days, overview, daySpan]);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const measure = () => {
+      const width = Math.max(88, (scroller.clientWidth - 54) / daySpanRef.current);
+      const previous = dayWidthRef.current;
+      dayWidthRef.current = width;
+      scroller.style.setProperty("--day-width", `${width}px`);
+      scroller.style.setProperty("--loaded-days", String(daysRef.current.length));
+      if (loadLockRef.current || Math.abs(previous - width) < 0.5) return;
+      const index = daysRef.current.findIndex((day) => day === focusedStartRef.current);
+      if (index < 0) return;
+      ignoreScrollRef.current = true;
+      scroller.scrollLeft = index * width;
+      window.requestAnimationFrame(() => {
+        ignoreScrollRef.current = false;
+      });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [daySpan, days.length, error, plansOpen, studio.mode]);
 
   const timezone = overview?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const positioned = useMemo(
+  const timedItems = useMemo(
     () =>
       (overview?.items ?? []).filter(
-        (item) =>
-          item.startAt !== undefined &&
-          item.endAt !== undefined &&
-          item.timePrecision !== "unknown" &&
-          visibleLayers.has(layerFor(item)),
+        (item) => isTimedItem(item) && visibleLayers.has(layerFor(item)),
       ),
     [overview?.items, visibleLayers],
   );
+  const dayItems = useMemo(
+    () =>
+      (overview?.items ?? []).filter(
+        (item) => isDayItem(item) && visibleLayers.has(layerFor(item)),
+      ),
+    [overview?.items, visibleLayers],
+  );
+  const unscheduledPlans = useMemo(
+    () =>
+      (overview?.unscheduledTasks ?? []).filter(
+        (item) =>
+          Boolean(item.planArtifactId) &&
+          item.title.toLocaleLowerCase().includes(planQuery.trim().toLocaleLowerCase()),
+      ),
+    [overview?.unscheduledTasks, planQuery],
+  );
+
+  function upsertItem(nextItem: CalendarItem, removeUnscheduled?: CalendarItem) {
+    setOverview((current) => {
+      if (!current) return current;
+      const exists = current.items.some((item) => item.id === nextItem.id);
+      const items = exists
+        ? current.items.map((item) => (item.id === nextItem.id ? nextItem : item))
+        : [...current.items, nextItem];
+      return {
+        ...current,
+        items,
+        unscheduledTasks: current.unscheduledTasks.filter((item) => {
+          if (removeUnscheduled && item.id === removeUnscheduled.id) return false;
+          if (nextItem.planArtifactId && item.planArtifactId === nextItem.planArtifactId)
+            return false;
+          if (nextItem.taskItemId && item.id === nextItem.taskItemId) return false;
+          return true;
+        }),
+      };
+    });
+  }
+
+  function replacePending(pendingId: string, nextItem: CalendarItem) {
+    setOverview((current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.some((item) => item.id === pendingId)
+              ? current.items.map((item) => (item.id === pendingId ? nextItem : item))
+              : [...current.items.filter((item) => item.id !== pendingId), nextItem],
+          }
+        : current,
+    );
+  }
 
   async function commit(action: Record<string, unknown>) {
     try {
       const wire = await calendarPost(action);
       if (wire && typeof wire === "object" && typeof (wire as Record<string, unknown>).id === "string") {
         const nextItem = calendarItemFromWire(wire as Record<string, unknown>);
-        replaceOverviewItem(nextItem);
-        setSelected((current) => current?.id === nextItem.id ? nextItem : current);
+        upsertItem(nextItem);
+        setSelected((current) => (current?.id === nextItem.id ? nextItem : current));
       } else {
-        await load(true);
+        await load("merge", visibleRange.from, visibleRange.to, true);
       }
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
       if (message.includes("CALENDAR_GESTURE_CONFLICT")) {
-        await load(true);
+        await load("replace", visibleRange.from, visibleRange.to, true);
         setSelected(null);
         toast.error("Calendar changed, so the latest block position was restored. Open it again to continue.");
       } else {
@@ -225,17 +646,10 @@ export function CalendarApplication() {
     }
   }
 
-  function replaceOverviewItem(nextItem: CalendarItem) {
-    setOverview((current) => current ? {
-      ...current,
-      items: current.items.map((item) => item.id === nextItem.id ? nextItem : item),
-    } : current);
-  }
-
   async function commitWorkGesture(item: CalendarItem, startAt: number, endAt: number) {
     if (pendingItemIds.has(item.id)) return;
     const optimistic = { ...item, startAt, endAt };
-    replaceOverviewItem(optimistic);
+    upsertItem(optimistic);
     setPendingItemIds((current) => new Set(current).add(item.id));
     try {
       const wire = await calendarPost({
@@ -245,12 +659,12 @@ export function CalendarApplication() {
         endAt,
         expectedRevision: item.revision,
       });
-      replaceOverviewItem(calendarItemFromWire(wire as Record<string, unknown>));
+      upsertItem(calendarItemFromWire(wire as Record<string, unknown>));
     } catch (nextError) {
-      replaceOverviewItem(item);
+      upsertItem(item);
       const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
       if (message.includes("CALENDAR_GESTURE_CONFLICT")) {
-        await load(true);
+        await load("replace", visibleRange.from, visibleRange.to, true);
         toast.error("The block changed elsewhere, so Calendar restored its latest position.");
       } else {
         toast.error(message);
@@ -265,14 +679,56 @@ export function CalendarApplication() {
     }
   }
 
+  async function schedulePlan(item: CalendarItem, startAt: number, endAt: number) {
+    const pendingId = `pending:${item.id}:${startAt}`;
+    const optimistic: CalendarItem = {
+      ...item,
+      id: pendingId,
+      kind: "scheduled_work_block",
+      startAt,
+      endAt,
+      allDay: false,
+      timePrecision: "exact",
+      sourceLocked: false,
+      revision: 0,
+    };
+    upsertItem(optimistic, item);
+    try {
+      const wire = await calendarPost({
+        action: "scheduleTask",
+        taskItemId: item.id.startsWith("plan:") ? undefined : item.id,
+        planArtifactId: item.planArtifactId,
+        planTaskId: item.planTaskId,
+        startAt,
+        endAt,
+        timezone,
+      });
+      replacePending(pendingId, calendarItemFromWire(wire as Record<string, unknown>));
+      void load("merge", visibleRange.from, visibleRange.to);
+    } catch (nextError) {
+      setOverview((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.filter((entry) => entry.id !== pendingId),
+              unscheduledTasks: [item, ...current.unscheduledTasks],
+            }
+          : current,
+      );
+      toast.error(nextError instanceof Error ? nextError.message : "Could not place this plan.");
+    } finally {
+      setGesturePreview(null);
+    }
+  }
+
   function resolveDrop(event: React.DragEvent<HTMLDivElement>, day: Date) {
     const bounds = event.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
-    const cursorMinutes = START_HOUR * 60 + ratio * (END_HOUR - START_HOUR) * 60;
+    const cursorMinutes = ratio * HOURS * 60;
     const minutes = Math.max(
-      START_HOUR * 60,
+      0,
       Math.min(
-        END_HOUR * 60 - 15,
+        HOURS * 60 - 15,
         Math.round((cursorMinutes - (dragRef.current?.grabOffsetMinutes ?? 0)) / 15) * 15,
       ),
     );
@@ -285,22 +741,18 @@ export function CalendarApplication() {
     event.preventDefault();
     const payload = dragRef.current;
     dragRef.current = null;
+    setDraggingPlanId(undefined);
     setGesturePreview(null);
     if (!payload) return;
     const startAt = resolveDrop(event, day);
-    if (payload.type === "task") {
-      void commit({
-        action: "scheduleTask",
-        taskItemId: payload.item.id.startsWith("plan:") ? undefined : payload.item.id,
-        planArtifactId: payload.item.planArtifactId,
-        planTaskId: payload.item.planTaskId,
-        startAt,
-        endAt: startAt + HOUR,
-        timezone,
-      });
+    if (payload.type === "plan") {
+      void schedulePlan(payload.item, startAt, startAt + HOUR);
       return;
     }
-    const duration = Math.max(15 * 60_000, (payload.item.endAt ?? startAt + HOUR) - (payload.item.startAt ?? startAt));
+    const duration = Math.max(
+      15 * 60_000,
+      (payload.item.endAt ?? startAt + HOUR) - (payload.item.startAt ?? startAt),
+    );
     void commitWorkGesture(payload.item, startAt, startAt + duration);
   }
 
@@ -309,9 +761,13 @@ export function CalendarApplication() {
     const payload = dragRef.current;
     if (!payload) return;
     const startAt = resolveDrop(event, day);
-    const duration = payload.type === "task"
-      ? HOUR
-      : Math.max(15 * 60_000, (payload.item.endAt ?? startAt + HOUR) - (payload.item.startAt ?? startAt));
+    const duration =
+      payload.type === "plan"
+        ? HOUR
+        : Math.max(
+            15 * 60_000,
+            (payload.item.endAt ?? startAt + HOUR) - (payload.item.startAt ?? startAt),
+          );
     setGesturePreview({
       itemId: payload.type === "block" ? payload.item.id : undefined,
       title: payload.item.title,
@@ -326,7 +782,8 @@ export function CalendarApplication() {
     item: CalendarItem,
     edge: "start" | "end",
   ) {
-    if (item.startAt === undefined || item.endAt === undefined || pendingItemIds.has(item.id)) return;
+    if (item.startAt === undefined || item.endAt === undefined || pendingItemIds.has(item.id))
+      return;
     event.preventDefault();
     event.stopPropagation();
     const gesture: ResizeGesture = {
@@ -337,9 +794,9 @@ export function CalendarApplication() {
       endAt: item.endAt,
     };
     setResizeGesture(gesture);
-
     const resolve = (clientY: number) => {
-      const delta = Math.round((((clientY - gesture.originY) / 52) * 60) / 15) * 15 * 60_000;
+      const delta =
+        Math.round((((clientY - gesture.originY) / HOUR_PX) * 60) / 15) * 15 * 60_000;
       return edge === "start"
         ? { startAt: Math.min(gesture.endAt - 15 * 60_000, gesture.startAt + delta), endAt: gesture.endAt }
         : { startAt: gesture.startAt, endAt: Math.max(gesture.startAt + 15 * 60_000, gesture.endAt + delta) };
@@ -367,177 +824,1024 @@ export function CalendarApplication() {
     window.addEventListener("pointerup", up, { once: true });
   }
 
-  const sourceBlocked = Boolean(
-    overview &&
-      [
-        "not_connected",
-        "permission_denied",
-        "unsupported",
-        "schema_incompatible",
-        "unavailable",
-      ].includes(overview.sourceState.kind),
-  );
-  const visibleUnscheduledTasks = (overview?.unscheduledTasks ?? []).filter((task) =>
-    task.title.toLocaleLowerCase().includes(taskQuery.trim().toLocaleLowerCase()),
-  );
+  function openWork(workId: string) {
+    setActivePlanId(workId);
+    setSelected(null);
+    void (async () => {
+      try {
+        let artifact = openedArtifacts.find((entry) => entry._id === workId);
+        if (!artifact) {
+          const result = await getSpectraArtifact(workId);
+          artifact = result.artifact;
+          setOpenedArtifacts((current) =>
+            current.some((entry) => entry._id === artifact!._id)
+              ? current
+              : [...current, artifact!],
+          );
+        }
+        studio.openSplit(artifact);
+      } catch (nextError) {
+        toast.error(
+          nextError instanceof Error ? nextError.message : "Could not open this work.",
+        );
+      }
+    })();
+  }
+
+  function openItem(item: CalendarItem) {
+    const workId = planWorkId(item);
+    if (workId) {
+      openWork(workId);
+      return;
+    }
+    setSelected(item);
+  }
+
+  function jumpTo(date: Date) {
+    const start = startOfDayMs(date);
+    setDays(daysAround(start));
+    setFocusedStart(start);
+    scrollWeekRef.current = start;
+    void load("replace", start - EXTEND_DAYS * DAY, start + EXTEND_DAYS * 2 * DAY - 1);
+  }
+
+  const changeDaySpan = useCallback((next: number) => {
+    const span = Math.max(MIN_DAYS, Math.min(MAX_DAYS, next));
+    if (span === daySpanRef.current) return;
+    setDaySpanState(span);
+    const scroller = scrollerRef.current;
+    const index = daysRef.current.findIndex((day) => day === focusedStartRef.current);
+    requestAnimationFrame(() => {
+      if (!scroller) return;
+      const width = Math.max(88, (scroller.clientWidth - 54) / span);
+      dayWidthRef.current = width;
+      scroller.style.setProperty("--day-width", `${width}px`);
+      if (index >= 0) scroller.scrollLeft = index * width;
+    });
+  }, []);
+
+  async function extendDays(direction: "before" | "after") {
+    if (loadLockRef.current) return;
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const current = daysRef.current;
+    const edge =
+      direction === "before"
+        ? current[0]! - EXTEND_DAYS * DAY
+        : current[current.length - 1]! + DAY;
+    const incoming = Array.from({ length: EXTEND_DAYS }, (_, index) =>
+      direction === "before" ? edge + index * DAY : edge + index * DAY,
+    );
+    loadLockRef.current = true;
+    const dayWidth = dayWidthRef.current;
+    const overflow = current.length + incoming.length - MAX_LOADED_DAYS;
+    const trimmed = overflow > 0 ? overflow : 0;
+    setDays((existing) => {
+      const next =
+        direction === "before" ? [...incoming, ...existing] : [...existing, ...incoming];
+      return next.length > MAX_LOADED_DAYS
+        ? direction === "before"
+          ? next.slice(0, MAX_LOADED_DAYS)
+          : next.slice(next.length - MAX_LOADED_DAYS)
+        : next;
+    });
+    try {
+      await load(
+        "merge",
+        incoming[0]!,
+        incoming[incoming.length - 1]! + DAY - 1,
+      );
+      ignoreScrollRef.current = true;
+      requestAnimationFrame(() => {
+        if (direction === "before") scroller.scrollLeft += incoming.length * dayWidth;
+        else if (trimmed > 0) scroller.scrollLeft -= trimmed * dayWidth;
+        requestAnimationFrame(() => {
+          ignoreScrollRef.current = false;
+        });
+      });
+    } finally {
+      loadLockRef.current = false;
+    }
+  }
+
+  function onScrollerScroll() {
+    const scroller = scrollerRef.current;
+    if (!scroller || ignoreScrollRef.current) return;
+    const width = dayWidthRef.current || 140;
+    const index = Math.max(
+      0,
+      Math.min(daysRef.current.length - 1, Math.round(scroller.scrollLeft / width)),
+    );
+    const next = daysRef.current[index];
+    if (next !== undefined && next !== focusedStart) setFocusedStart(next);
+    if (scroller.scrollLeft < SCROLL_LOAD_PX) void extendDays("before");
+    if (scroller.scrollWidth - scroller.scrollLeft - scroller.clientWidth < SCROLL_LOAD_PX)
+      void extendDays("after");
+  }
+
+  useEffect(() => {
+    const openSplit = studio.openSplit;
+    const openTab = studio.openTab;
+    return spectraBus.handle("work.open", (command) => {
+      void (async () => {
+        try {
+          setActivePlanId(command.workId);
+          setSelected(null);
+          let artifact = openedArtifacts.find((entry) => entry._id === command.workId);
+          if (!artifact) {
+            const result = await getSpectraArtifact(command.workId);
+            artifact = result.artifact;
+            setOpenedArtifacts((current) =>
+              current.some((entry) => entry._id === artifact!._id)
+                ? current
+                : [...current, artifact!],
+            );
+          }
+          if (command.surface === "full") openTab(artifact);
+          else openSplit(artifact);
+        } catch (nextError) {
+          toast.error(
+            nextError instanceof Error ? nextError.message : "Could not open this work.",
+          );
+        }
+      })();
+    });
+  }, [openedArtifacts, studio.openSplit, studio.openTab]);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      zoomAccumRef.current += event.deltaY;
+      if (Math.abs(zoomAccumRef.current) < 70) return;
+      const direction = zoomAccumRef.current > 0 ? 1 : -1;
+      zoomAccumRef.current = 0;
+      changeDaySpan(daySpanRef.current + direction);
+    };
+    scroller.addEventListener("wheel", onWheel, { passive: false });
+    return () => scroller.removeEventListener("wheel", onWheel);
+  }, [changeDaySpan, error, overview]);
+
+  function closeOpenedTab(artifactId: string) {
+    if (studio.dirtyIds.has(artifactId)) {
+      toast.message("Wait for this work to synchronize before closing it.");
+      return;
+    }
+    studio.closeTab(artifactId);
+  }
+
+  if (studio.mode === "tab" && studio.activeArtifact) {
+    return (
+      <div className="relative h-full min-h-0">
+        <ArtifactStudio
+          mode="tab"
+          artifact={studio.activeArtifact}
+          artifacts={openedArtifacts}
+          tabs={studio.tabs}
+          dirtyIds={studio.dirtyIds}
+          sourceLabel="Calendar"
+          onClose={studio.closeStudio}
+          onExpand={studio.openTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={closeOpenedTab}
+          onDirtyChange={studio.setDirty}
+        />
+      </div>
+    );
+  }
 
   return (
-    <main className="spectra-wave-y flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      <header className="shrink-0 px-5 py-3 lg:px-7">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <h1 className="font-display text-[27px] font-semibold tracking-[-0.03em]">Calendar</h1>
-            {overview && overview.sourceState.kind !== "available" ? (
-              <CapabilityTruthBadge state={overview.sourceState} />
+    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
+      <div className="spectra-calendar-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="shrink-0 px-5 pb-4 pt-6 sm:px-8 lg:px-10">
+        <ProductPageHeader
+          title="Calendar"
+          description="See school time and place Plans on it."
+          actions={
+            <>
+              <button
+                type="button"
+                className={`relative grid size-10 shrink-0 place-items-center rounded-[8px] border transition ${layersOpen ? "border-[var(--text-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                data-active={layersOpen || undefined}
+                aria-pressed={layersOpen}
+                aria-label={layersOpen ? "Hide layers" : "Show layers"}
+                title="Layers"
+                onClick={() => setLayersOpen((open) => !open)}
+              >
+                <Layers3 className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void load("merge", visibleRange.from, visibleRange.to, true)}
+                disabled={refreshing}
+                className="grid size-10 shrink-0 place-items-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                aria-label="Refresh calendar"
+                title="Refresh calendar"
+              >
+                {refreshing ? (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setComposerOpen(true)}
+                className="agent-library-create"
+              >
+                <Plus className="size-3.5" />
+                Add event
+              </button>
+            </>
+          }
+        />
+        <div className="spectra-calendar-toolbar mt-6">
+          <div className="spectra-calendar-week-nav">
+            {!plansOpen ? (
+              <button
+                type="button"
+                className="spectra-calendar-week-step"
+                aria-label="Show plans"
+                title="Show plans"
+                onClick={() => setPlansOpen(true)}
+              >
+                <PanelLeft className="size-4" />
+              </button>
             ) : null}
-          </div>
-          <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
-            <div className="flex items-center gap-0.5">
-              <button type="button" aria-label="Previous week" onClick={() => setAnchor((current) => new Date(current.getTime() - 7 * DAY))} className="grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ChevronLeft className="size-4" /></button>
-              <button type="button" onClick={() => setAnchor(new Date())} className="h-7 rounded-md px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">Today</button>
-              <button type="button" aria-label="Next week" onClick={() => setAnchor((current) => new Date(current.getTime() + 7 * DAY))} className="grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ChevronRight className="size-4" /></button>
-            </div>
-            <p className="truncate font-display text-[15px] font-semibold">
-              {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(days[0])}
-              {" – "}
-              {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(days[6])}
-            </p>
-          </div>
-          <div className="ml-auto flex items-center gap-1.5">
-            <span className="hidden text-[10px] text-[var(--text-tertiary)] xl:inline">{formatFreshness(overview?.lastUpdatedAt)}</span>
-            <button type="button" onClick={() => void load(true)} disabled={refreshing} className="inline-flex size-9 items-center justify-center rounded-lg border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50" aria-label="Refresh calendar" title="Refresh calendar">
-              {refreshing ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+            <button
+              type="button"
+              aria-label="Previous range"
+              onClick={() => jumpTo(new Date(focusedStart - daySpan * DAY))}
+              className="spectra-calendar-week-step"
+            >
+              <ChevronLeft className="size-4" />
             </button>
-            {!sideOpen ? <AuxiliaryRailTrigger label="calendar tasks" onOpen={() => setSideOpen(true)} /> : null}
-            <button type="button" onClick={() => setComposerOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-primary)]">
-              <Plus className="size-3.5" />
-              Add event
+            <CalendarDatePicker
+              value={focusedStart}
+              label={formatRange(focusedStart, daySpan)}
+              onChange={(date) => jumpTo(date)}
+            />
+            <button
+              type="button"
+              aria-label="Next range"
+              onClick={() => jumpTo(new Date(focusedStart + daySpan * DAY))}
+              className="spectra-calendar-week-step"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => jumpTo(new Date())}
+              className="spectra-calendar-today"
+            >
+              Today
+            </button>
+          </div>
+          <div className="spectra-calendar-zoom">
+            <button
+              type="button"
+              className="spectra-calendar-icon"
+              aria-label="Zoom out, show more days"
+              title="Zoom out"
+              disabled={daySpan >= MAX_DAYS}
+              onClick={() => changeDaySpan(daySpan + 1)}
+            >
+              <ZoomOut className="size-4" />
+            </button>
+            <span className="spectra-calendar-zoom-label">
+              {daySpan} {daySpan === 1 ? "day" : "days"}
+            </span>
+            <button
+              type="button"
+              className="spectra-calendar-icon"
+              aria-label="Zoom in, show fewer days"
+              title="Zoom in"
+              disabled={daySpan <= MIN_DAYS}
+              onClick={() => changeDaySpan(daySpan - 1)}
+            >
+              <ZoomIn className="size-4" />
             </button>
           </div>
         </div>
-      </header>
+      </div>
 
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {sideOpen ? <AuxiliaryRail label={`Unscheduled work · ${overview?.unscheduledTasks.length ?? 0}`} onClose={() => setSideOpen(false)} className="order-2 lg:order-2">
-          <p className="px-4 pb-2 pt-1 text-[11px] leading-5 text-[var(--text-secondary)]">Drag a task into the week. Its official deadline stays fixed.</p>
-          <label className="relative mx-3 mb-2 block">
-            <span className="sr-only">Search unscheduled work</span>
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
-            <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="Find a task" className="h-9 w-full rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-8 pr-8 text-[11px] outline-none transition focus:border-[var(--border-strong)]" />
-            {taskQuery ? <button type="button" onClick={() => setTaskQuery("")} className="absolute right-1.5 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-md text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Clear task search"><X className="size-3" /></button> : null}
-          </label>
-          <div className="space-y-1 px-3 py-2">
-            {loading ? <div className="flex items-center gap-2 p-3 text-[11px] text-[var(--text-tertiary)]"><LoaderCircle className="size-3.5 animate-spin" /> Loading tasks…</div> : null}
-            {!loading && !(overview?.unscheduledTasks.length) ? <div className="p-4 text-center text-[11px] leading-5 text-[var(--text-tertiary)]">No unscheduled tasks. Create one here or from a Plan.</div> : null}
-            {!loading && taskQuery && !visibleUnscheduledTasks.length ? <div className="p-4 text-center text-[11px] leading-5 text-[var(--text-tertiary)]">No tasks match “{taskQuery}”.</div> : null}
-            {visibleUnscheduledTasks.map((task) => (
-              <button key={task.id} type="button" title={task.title} draggable onDragStart={() => { dragRef.current = { type: "task", item: task, grabOffsetMinutes: 0 }; }} onDragEnd={() => { dragRef.current = null; setGesturePreview(null); }} onClick={() => setSelected(task)} className="group flex w-full items-start gap-2 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)]">
-                <GripVertical className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" />
-                <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium">{task.title}</span><span className="mt-0.5 block text-micro text-[var(--text-tertiary)]">{task.planArtifactId ? "From Plan" : task.source?.provider ? "From school" : "Personal task"}</span></span>
-              </button>
-            ))}
-          </div>
-          <section className="mt-3 px-3 pb-4">
-            <button type="button" onClick={() => setLayersOpen((open) => !open)} className="flex h-11 w-full items-center gap-2 px-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-expanded={layersOpen}>
-              <Layers3 className="size-3.5" />
-              <span className="flex-1">Layers</span>
-              <ChevronDown className={cn("size-3.5 transition-transform", layersOpen && "rotate-180")} />
-            </button>
-            {layersOpen ? <div className="space-y-1 px-3 pb-3">
-              {CALENDAR_LAYERS.filter((layer) => layer.key !== "shared").map((layer) => (
-                <label key={layer.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-[11px] hover:bg-[var(--bg-hover)]">
-                  <input type="checkbox" checked={visibleLayers.has(layer.key)} onChange={() => setVisibleLayers((current) => { const next = new Set(current); if (next.has(layer.key)) next.delete(layer.key); else next.add(layer.key); return next; })} />
-                  <span className="size-2 rounded-full" style={{ background: layer.color }} />
-                  <span className="flex-1">{layer.label}</span>
-                </label>
-              ))}
-            </div> : null}
-          </section>
-        </AuxiliaryRail> : null}
+      <div className="spectra-item-rail-stage spectra-calendar-body min-h-0 flex-1">
+        <StudioItemRail
+          label="Plans"
+          count={unscheduledPlans.length}
+          collapsed={!plansOpen}
+          onToggleCollapsed={() => setPlansOpen(false)}
+          items={unscheduledPlans.map((item) => ({
+            id: item.id,
+            title: item.title,
+            subtitle: planSubtitle(item),
+            active: Boolean(activePlanId && planWorkId(item) === activePlanId),
+          }))}
+          onSelect={(id) => {
+            const item = unscheduledPlans.find((entry) => entry.id === id);
+            if (item) openItem(item);
+          }}
+          canEdit
+          exportable
+          showIndex={false}
+          draggingId={draggingPlanId}
+          onDragStart={(id) => {
+            const item = (overview?.unscheduledTasks ?? []).find((entry) => entry.id === id);
+            if (!item) return;
+            setDraggingPlanId(id);
+            dragRef.current = { type: "plan", item, grabOffsetMinutes: 0 };
+          }}
+          onDragEnd={() => {
+            setDraggingPlanId(undefined);
+            dragRef.current = null;
+            setGesturePreview(null);
+          }}
+          tools={
+            <div className="mt-2 grid gap-1.5">
+              <label className="flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)]">
+                <Search className="size-3.5 shrink-0" />
+                <input
+                  value={planQuery}
+                  onChange={(event) => setPlanQuery(event.target.value)}
+                  placeholder="Find a plan"
+                  aria-label="Find a plan"
+                  className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]"
+                />
+              </label>
+            </div>
+          }
+          footer={
+            loading ? (
+              <div className="flex items-center gap-2 px-1 py-3 text-[11px] text-[var(--text-tertiary)]">
+                <LoaderCircle className="size-3.5 animate-spin" />
+                Loading plans
+              </div>
+            ) : !unscheduledPlans.length ? (
+              <p className="px-1 py-3 text-[11px] leading-5 text-[var(--text-tertiary)]">
+                {planQuery
+                  ? `No plans match “${planQuery}”.`
+                  : "No unscheduled plans. Create one from Library, then drag it onto a day."}
+              </p>
+            ) : null
+          }
+        />
 
-        <section className="order-1 min-h-[520px] min-w-0 flex-1 overflow-auto lg:order-1 lg:min-h-0">
-          <div className="min-w-[760px] p-3 lg:p-4">
-            {error ? (
+        <section className="relative min-h-0 min-w-0 flex-1">
+          {layersOpen ? (
+            <aside
+              className="spectra-studio-inspector-overlay absolute right-3 top-3 z-20 w-[240px] rounded-[10px] border border-[var(--border-default)] bg-[var(--wave-paper,var(--bg-primary))] p-3 shadow-[0_18px_40px_-28px_rgba(31,27,22,0.35)]"
+              aria-label="Calendar layers"
+            >
+              <p className="px-1 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+                Layers
+              </p>
+              <div className="space-y-1">
+                {CALENDAR_LAYERS.filter((layer) => layer.key !== "shared").map((layer) => (
+                  <label
+                    key={layer.key}
+                    className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-[11px] hover:bg-[var(--bg-hover)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visibleLayers.has(layer.key)}
+                      onChange={() =>
+                        setVisibleLayers((current) => {
+                          const next = new Set(current);
+                          if (next.has(layer.key)) next.delete(layer.key);
+                          else next.add(layer.key);
+                          return next;
+                        })
+                      }
+                    />
+                    <span className="size-2 rounded-full" style={{ background: layer.color }} />
+                    <span className="flex-1">{layer.label}</span>
+                  </label>
+                ))}
+              </div>
+            </aside>
+          ) : null}
+
+          {error ? (
+            <div className="p-4">
               <ProductErrorState
                 title="Calendar could not be loaded"
                 detail={error}
-                action={<button type="button" onClick={() => void load(true)} className="h-9 rounded-lg bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-primary)]">Try again</button>}
+                action={
+                  <button
+                    type="button"
+                    onClick={() => void load("replace", visibleRange.from, visibleRange.to, true)}
+                    className="h-9 rounded-lg bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-primary)]"
+                  >
+                    Try again
+                  </button>
+                }
               />
-            ) : sourceBlocked && overview ? (
-              <CapabilityTruthState state={overview.sourceState} title="School calendar" onRetry={() => void load(true)} />
-            ) : null}
-            {!error ? <div className={cn("grid grid-cols-[54px_repeat(7,minmax(96px,1fr))] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]", sourceBlocked && "mt-3")}>
-              <div className="border-b border-r border-[var(--border-subtle)]" />
-              {days.map((day) => {
-                const today = dayKey(day.getTime()) === dayKey(Date.now());
-                return <div key={day.toISOString()} className={cn("border-b border-r border-[var(--border-subtle)] px-2 py-2 text-center last:border-r-0", today && "bg-emerald-500/7")}><span className="block text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">{new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(day)}</span><span className={cn("mt-0.5 inline-grid size-7 place-items-center rounded-full font-display text-[15px] font-semibold", today && "bg-emerald-700 text-white")}>{day.getDate()}</span></div>;
-              })}
-              <div className="relative border-r border-[var(--border-subtle)]" style={{ height: (END_HOUR - START_HOUR) * 52 }}>
-                {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, index) => <span key={index} className="absolute right-2 -translate-y-1/2 text-micro text-[var(--text-tertiary)]" style={{ top: index * 52 }}>{String(START_HOUR + index).padStart(2, "0")}:00</span>)}
-              </div>
-              {days.map((day) => {
-                const dayItems = positioned.filter((item) => item.startAt !== undefined && dayKey(item.startAt) === dayKey(day.getTime()));
-                const preview = gesturePreview && dayKey(gesturePreview.startAt) === dayKey(day.getTime()) ? gesturePreview : null;
-                return <div key={day.toISOString()} onDragOver={(event) => previewDrop(event, day)} onDrop={(event) => dropOnDay(event, day)} className="relative border-r border-[var(--border-subtle)] last:border-r-0" style={{ height: (END_HOUR - START_HOUR) * 52 }}>
-                  {Array.from({ length: END_HOUR - START_HOUR }, (_, index) => <div key={index} className="absolute inset-x-0 border-t border-[var(--border-subtle)]" style={{ top: index * 52 }} />)}
-                  {preview ? (() => {
-                    const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === preview.layer)!;
-                    const top = Math.max(0, (((new Date(preview.startAt).getHours() + new Date(preview.startAt).getMinutes() / 60) - START_HOUR) / (END_HOUR - START_HOUR)) * 100);
-                    const height = Math.max(24, ((preview.endAt - preview.startAt) / HOUR) * 52);
-                    return <div className="pointer-events-none absolute inset-x-1 z-30 overflow-hidden rounded-lg border-2 border-dashed px-2 py-1.5 text-left shadow-lg" style={{ top: `${top}%`, height, borderColor: layer.color, background: `color-mix(in oklab, ${layer.color} 20%, var(--bg-elevated))`, color: layer.color }}>
-                      <span className="block text-micro font-bold">{formatTime(preview.startAt, timezone)} – {formatTime(preview.endAt, timezone)}</span>
-                      <span className="mt-0.5 block truncate text-micro font-semibold text-[var(--text-primary)]">{preview.title}</span>
-                    </div>;
-                  })() : null}
-                  {dayItems.map((item) => {
-                    const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
-                    const top = Math.max(0, (((new Date(item.startAt!).getHours() + new Date(item.startAt!).getMinutes() / 60) - START_HOUR) / (END_HOUR - START_HOUR)) * 100);
-                    const duration = Math.max(30 * 60_000, item.endAt! - item.startAt!);
-                    const height = Math.max(24, (duration / HOUR) * 52);
-                    const movable = item.kind === "scheduled_work_block";
-                    const previewing = gesturePreview?.itemId === item.id;
-                    return <button key={item.id} type="button" title={item.title} draggable={movable && !pendingItemIds.has(item.id) && !resizeGesture} onDragStart={(event) => { if (movable) { const bounds = event.currentTarget.getBoundingClientRect(); dragRef.current = { type: "block", item, grabOffsetMinutes: Math.round((((event.clientY - bounds.top) / 52) * 60) / 15) * 15 }; } }} onDragEnd={() => { dragRef.current = null; setGesturePreview(null); }} onClick={() => setSelected(item)} className={cn("group absolute inset-x-1 z-10 overflow-hidden rounded-lg border px-2 py-1.5 text-left shadow-sm transition hover:z-20 hover:shadow-md", previewing && "opacity-25", pendingItemIds.has(item.id) && "animate-pulse")} style={{ top: `${top}%`, height, borderColor: `${layer.color}55`, background: `color-mix(in oklab, ${layer.color} 13%, var(--bg-elevated))`, color: layer.color }}>
-                      {movable ? <span role="presentation" onPointerDown={(event) => beginResize(event, item, "start")} className="absolute inset-x-1 top-0 z-20 h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100" /> : null}
-                      <span className="flex items-center gap-1 text-micro font-bold"><span className="truncate">{formatTime(item.startAt!, timezone)}{item.endAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}</span>{item.sourceLocked ? <LockKeyhole className="size-2.5" /> : null}</span>
-                      <span className="mt-0.5 block truncate text-micro font-semibold text-[var(--text-primary)]">{item.title}</span>
-                      {movable ? <span role="presentation" onPointerDown={(event) => beginResize(event, item, "end")} className="absolute inset-x-1 bottom-0 z-20 h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100" /> : null}
-                    </button>;
-                  })}
-                </div>;
-              })}
-            </div> : null}
-
-            {overview?.partialTimeItems.length ? <section className="mt-3 rounded-xl border border-amber-600/20 bg-amber-500/7 p-3"><div className="flex items-center gap-2 text-[11px] font-semibold text-amber-900"><Clock3 className="size-3.5" />Time not supplied by the source</div><div className="mt-2 flex flex-wrap gap-2">{overview.partialTimeItems.map((item) => <button key={item.id} type="button" onClick={() => setSelected(item)} className="rounded-lg border border-amber-700/20 bg-[var(--bg-elevated)] px-2.5 py-1.5 text-micro font-semibold text-[var(--text-primary)]">{item.title} · {item.timePrecision === "unknown" ? "period/date unavailable" : "date only"}</button>)}</div></section> : null}
-          </div>
+            </div>
+          ) : (
+            <div
+              ref={scrollerRef}
+              className="spectra-calendar-scroll"
+              onScroll={onScrollerScroll}
+            >
+              {days.length ? (
+                <WeekGrid
+                  days={days}
+                  timezone={timezone}
+                  timedItems={timedItems}
+                  dayItems={dayItems}
+                  gesturePreview={gesturePreview}
+                  pendingItemIds={pendingItemIds}
+                  resizeGesture={Boolean(resizeGesture)}
+                  onPreview={previewDrop}
+                  onDrop={dropOnDay}
+                  onOpen={openItem}
+                  onBlockDragStart={(item, offset) => {
+                    dragRef.current = { type: "block", item, grabOffsetMinutes: offset };
+                  }}
+                  onBlockDragEnd={() => {
+                    dragRef.current = null;
+                    setGesturePreview(null);
+                  }}
+                  onResizeStart={beginResize}
+                />
+              ) : null}
+            </div>
+          )}
         </section>
       </div>
 
-      {selected ? <CalendarItemPanel item={selected} timezone={timezone} onClose={() => setSelected(null)} onCommit={commit} /> : null}
-      {composerOpen ? <CalendarComposer timezone={timezone} onClose={() => setComposerOpen(false)} onCreated={() => { setComposerOpen(false); void load(true); }} /> : null}
-    </main>
+      {selected ? (
+        <CalendarItemPanel
+          item={selected}
+          timezone={timezone}
+          onClose={() => setSelected(null)}
+          onCommit={commit}
+        />
+      ) : null}
+      {composerOpen ? (
+        <CalendarComposer
+          timezone={timezone}
+          onClose={() => setComposerOpen(false)}
+          onCreated={() => {
+            setComposerOpen(false);
+            void load("merge", visibleRange.from, visibleRange.to, true);
+          }}
+        />
+      ) : null}
+      </div>
+      {studio.mode === "split" && studio.activeArtifact ? (
+        <ArtifactStudio
+          mode="split"
+          artifact={studio.activeArtifact}
+          artifacts={openedArtifacts}
+          tabs={studio.tabs}
+          dirtyIds={studio.dirtyIds}
+          panelWidth={panelWidth}
+          sourceLabel="Calendar"
+          onPanelWidthChange={setPanelWidth}
+          onClose={studio.closeStudio}
+          onExpand={studio.openTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={closeOpenedTab}
+          onDirtyChange={studio.setDirty}
+        />
+      ) : null}
+    </div>
   );
 }
 
-function CalendarItemPanel({ item, timezone, onClose, onCommit }: { item: CalendarItem; timezone: string; onClose: () => void; onCommit: (action: Record<string, unknown>) => Promise<void> }) {
-  const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
-  return <aside className="fixed inset-y-0 right-0 z-[87] w-full max-w-[390px] border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[-20px_0_60px_rgba(31,38,34,.12)]" aria-label={`${item.title} details`}>
-    <div className="flex items-start justify-between gap-3"><div><span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-micro font-bold" style={{ background: `${layer.color}18`, color: layer.color }}>{item.sourceLocked ? <LockKeyhole className="size-3" /> : null}{layer.label}</span><h2 className="mt-3 font-display text-[23px] font-semibold tracking-[-0.02em]">{item.title}</h2></div><button type="button" onClick={onClose} aria-label="Close details" className="grid size-8 place-items-center rounded-lg hover:bg-[var(--bg-hover)]"><X className="size-4" /></button></div>
-    <dl className="mt-5 space-y-3 text-[12px]">
-      <div><dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">Time</dt><dd className="mt-1">{item.startAt !== undefined ? `${formatTime(item.startAt, timezone)}${item.endAt !== undefined && item.endAt !== item.startAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}` : "Exact time unavailable"}</dd></div>
-      {item.location ? <div><dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">Location</dt><dd className="mt-1">{item.location}</dd></div> : null}
-      {item.notes ? <div><dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">Notes</dt><dd className="mt-1 whitespace-pre-wrap leading-5 text-[var(--text-secondary)]">{item.notes}</dd></div> : null}
-    </dl>
-    {item.kind === "scheduled_work_block" && item.endAt !== undefined ? <section className="mt-5 rounded-xl border border-[var(--border-default)] p-3"><p className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">Duration</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => void onCommit({ action: "resizeWorkBlock", itemId: item.id, endAt: Math.max((item.startAt ?? 0) + 15 * 60_000, item.endAt! - 30 * 60_000), expectedRevision: item.revision })} className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold">− 30 min</button><button type="button" onClick={() => void onCommit({ action: "resizeWorkBlock", itemId: item.id, endAt: item.endAt! + 30 * 60_000, expectedRevision: item.revision })} className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold">+ 30 min</button></div></section> : null}
-    {item.linkedWorkIds.length ? <section className="mt-5"><p className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">Linked work</p><div className="mt-2 space-y-2">{item.linkedWorkIds.map((workId) => <button key={workId} type="button" onClick={() => void spectraBus.command("work.open", { workId, surface: "panel" })} className="flex w-full items-center gap-2 rounded-xl border border-[var(--border-default)] px-3 py-2 text-left text-[11px] font-semibold hover:bg-[var(--bg-hover)]"><Link2 className="size-3.5" />Open linked work<ExternalLink className="ml-auto size-3" /></button>)}</div></section> : null}
-    {item.source ? <section className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 p-3"><p className="flex items-center gap-2 text-[11px] font-semibold"><LockKeyhole className="size-3.5" />Official source</p><p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">{item.source.provider} controls the official time and deadline. Schedule your work separately.</p>{item.source.url ? <a href={item.source.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-micro font-semibold underline underline-offset-2">Open source<ExternalLink className="size-3" /></a> : null}</section> : null}
-    <div className="absolute bottom-5 left-5 right-5"><button type="button" className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-default)] py-2.5 text-[11px] font-semibold hover:bg-[var(--bg-hover)]"><Sparkles className="size-3.5" />Ask Spectra about this time</button></div>
-  </aside>;
+function WeekGrid({
+  days,
+  timezone,
+  timedItems,
+  dayItems,
+  gesturePreview,
+  pendingItemIds,
+  resizeGesture,
+  onPreview,
+  onDrop,
+  onOpen,
+  onBlockDragStart,
+  onBlockDragEnd,
+  onResizeStart,
+}: {
+  days: number[];
+  timezone: string;
+  timedItems: CalendarItem[];
+  dayItems: CalendarItem[];
+  gesturePreview: GesturePreview | null;
+  pendingItemIds: Set<string>;
+  resizeGesture: boolean;
+  onPreview: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
+  onDrop: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
+  onOpen: (item: CalendarItem) => void;
+  onBlockDragStart: (item: CalendarItem, grabOffsetMinutes: number) => void;
+  onBlockDragEnd: () => void;
+  onResizeStart: (
+    event: React.PointerEvent<HTMLSpanElement>,
+    item: CalendarItem,
+    edge: "start" | "end",
+  ) => void;
+}) {
+  const dayDates = days.map((stamp) => new Date(stamp));
+  const now = Date.now();
+  const hoursHeight = HOURS * HOUR_PX;
+  const first = dayDates[0];
+  return (
+    <article className="spectra-calendar-week">
+      <div
+        className="spectra-calendar-grid"
+        style={{ ["--loaded-days" as string]: String(days.length) }}
+      >
+        <div className="spectra-calendar-gutter spectra-calendar-week-caption">
+          {first
+            ? new Intl.DateTimeFormat(undefined, { month: "short" }).format(first)
+            : null}
+        </div>
+        {dayDates.map((day) => {
+          const today = dayKey(day.getTime()) === dayKey(now);
+          return (
+            <div
+              key={day.toISOString()}
+              className={cn("spectra-calendar-day-head", today && "is-today")}
+            >
+              <span>{new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(day)}</span>
+              <strong>{day.getDate()}</strong>
+            </div>
+          );
+        })}
+        <div className="spectra-calendar-gutter spectra-calendar-allday-label" />
+        {dayDates.map((day) => {
+          const items = dayItems.filter(
+            (item) => item.startAt !== undefined && dayKey(item.startAt) === dayKey(day.getTime()),
+          );
+          return (
+            <div key={`${day.toISOString()}-allday`} className="spectra-calendar-allday-cell">
+              {items.map((item) => {
+                const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    title={item.title}
+                    onClick={() => onOpen(item)}
+                    className="spectra-calendar-chip"
+                    style={{
+                      borderColor: `${layer.color}55`,
+                      background: `color-mix(in oklab, ${layer.color} 16%, var(--bg-elevated))`,
+                      color: layer.color,
+                    }}
+                  >
+                    {item.title}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+        <div className="spectra-calendar-gutter relative" style={{ height: hoursHeight }}>
+          {Array.from({ length: HOURS }, (_, hour) => (
+            <span
+              key={hour}
+              className="absolute right-2 -translate-y-1/2 text-micro text-[var(--text-tertiary)]"
+              style={{ top: hour * HOUR_PX }}
+            >
+              {String(hour).padStart(2, "0")}:00
+            </span>
+          ))}
+        </div>
+        {dayDates.map((day) => {
+          const columnItems = timedItems.filter(
+            (item) => item.startAt !== undefined && dayKey(item.startAt) === dayKey(day.getTime()),
+          );
+          const preview =
+            gesturePreview && dayKey(gesturePreview.startAt) === dayKey(day.getTime())
+              ? gesturePreview
+              : null;
+          const today = dayKey(day.getTime()) === dayKey(now);
+          const nowTop = today ? (minutesOnDay(now) / 60) * HOUR_PX : null;
+          return (
+            <div
+              key={`${day.toISOString()}-hours`}
+              onDragOver={(event) => onPreview(event, day)}
+              onDrop={(event) => onDrop(event, day)}
+              className="relative border-r border-[var(--border-subtle)] last:border-r-0"
+              style={{ height: hoursHeight }}
+            >
+              {Array.from({ length: HOURS }, (_, hour) => (
+                <div
+                  key={hour}
+                  className="absolute inset-x-0 border-t border-[var(--border-subtle)]"
+                  style={{ top: hour * HOUR_PX }}
+                />
+              ))}
+              {nowTop !== null ? (
+                <span
+                  className="pointer-events-none absolute inset-x-0 z-20 h-px bg-emerald-700"
+                  style={{ top: nowTop }}
+                />
+              ) : null}
+              {preview ? <PreviewBlock preview={preview} timezone={timezone} /> : null}
+              {columnItems.map((item) => (
+                <TimedBlock
+                  key={item.id}
+                  item={item}
+                  timezone={timezone}
+                  previewing={gesturePreview?.itemId === item.id}
+                  pending={pendingItemIds.has(item.id)}
+                  canMove={item.kind === "scheduled_work_block" && !pendingItemIds.has(item.id) && !resizeGesture}
+                  onOpen={() => onOpen(item)}
+                  onDragStart={(offset) => onBlockDragStart(item, offset)}
+                  onDragEnd={onBlockDragEnd}
+                  onResizeStart={(event, edge) => onResizeStart(event, item, edge)}
+                />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
 }
 
-function CalendarComposer({ timezone, onClose, onCreated }: { timezone: string; onClose: () => void; onCreated: () => void }) {
+function PreviewBlock({
+  preview,
+  timezone,
+}: {
+  preview: GesturePreview;
+  timezone: string;
+}) {
+  const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === preview.layer)!;
+  const top = (minutesOnDay(preview.startAt) / 60) * HOUR_PX;
+  const height = Math.max(24, ((preview.endAt - preview.startAt) / HOUR) * HOUR_PX);
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-1 z-30 overflow-hidden rounded-lg border-2 border-dashed px-2 py-1.5 text-left shadow-lg"
+      style={{
+        top,
+        height,
+        borderColor: layer.color,
+        background: `color-mix(in oklab, ${layer.color} 20%, var(--bg-elevated))`,
+        color: layer.color,
+      }}
+    >
+      <span className="block text-micro font-bold">
+        {formatTime(preview.startAt, timezone)} – {formatTime(preview.endAt, timezone)}
+      </span>
+      <span className="mt-0.5 block truncate text-micro font-semibold text-[var(--text-primary)]">
+        {preview.title}
+      </span>
+    </div>
+  );
+}
+
+function TimedBlock({
+  item,
+  timezone,
+  previewing,
+  pending,
+  canMove,
+  onOpen,
+  onDragStart,
+  onDragEnd,
+  onResizeStart,
+}: {
+  item: CalendarItem;
+  timezone: string;
+  previewing: boolean;
+  pending: boolean;
+  canMove: boolean;
+  onOpen: () => void;
+  onDragStart: (grabOffsetMinutes: number) => void;
+  onDragEnd: () => void;
+  onResizeStart: (
+    event: React.PointerEvent<HTMLSpanElement>,
+    edge: "start" | "end",
+  ) => void;
+}) {
+  const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
+  const top = (minutesOnDay(item.startAt!) / 60) * HOUR_PX;
+  const duration = Math.max(30 * 60_000, item.endAt! - item.startAt!);
+  const height = Math.max(24, (duration / HOUR) * HOUR_PX);
+  return (
+    <button
+      type="button"
+      title={item.title}
+      draggable={canMove}
+      onDragStart={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        onDragStart(Math.round((((event.clientY - bounds.top) / HOUR_PX) * 60) / 15) * 15);
+      }}
+      onDragEnd={onDragEnd}
+      onClick={onOpen}
+      className={cn(
+        "group absolute inset-x-1 z-10 overflow-hidden rounded-lg border px-2 py-1.5 text-left shadow-sm transition hover:z-20 hover:shadow-md",
+        previewing && "opacity-25",
+        pending && "animate-pulse",
+      )}
+      style={{
+        top,
+        height,
+        borderColor: `${layer.color}55`,
+        background: `color-mix(in oklab, ${layer.color} 13%, var(--bg-elevated))`,
+        color: layer.color,
+      }}
+    >
+      {canMove ? (
+        <span
+          role="presentation"
+          onPointerDown={(event) => onResizeStart(event, "start")}
+          className="absolute inset-x-1 top-0 z-20 h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
+        />
+      ) : null}
+      <span className="flex items-center gap-1 text-micro font-bold">
+        <span className="truncate">
+          {formatTime(item.startAt!, timezone)}
+          {item.endAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}
+        </span>
+        {item.sourceLocked ? <LockKeyhole className="size-2.5" /> : null}
+      </span>
+      <span className="mt-0.5 block truncate text-micro font-semibold text-[var(--text-primary)]">
+        {item.title}
+      </span>
+      {canMove ? (
+        <span
+          role="presentation"
+          onPointerDown={(event) => onResizeStart(event, "end")}
+          className="absolute inset-x-1 bottom-0 z-20 h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
+        />
+      ) : null}
+    </button>
+  );
+}
+
+function CalendarItemPanel({
+  item,
+  timezone,
+  onClose,
+  onCommit,
+}: {
+  item: CalendarItem;
+  timezone: string;
+  onClose: () => void;
+  onCommit: (action: Record<string, unknown>) => Promise<void>;
+}) {
+  const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
+  return (
+    <aside
+      className="fixed inset-y-0 right-0 z-[87] w-full max-w-[390px] border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[-20px_0_60px_rgba(31,38,34,.12)]"
+      aria-label={`${item.title} details`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-micro font-bold"
+            style={{ background: `${layer.color}18`, color: layer.color }}
+          >
+            {item.sourceLocked ? <LockKeyhole className="size-3" /> : null}
+            {layer.label}
+          </span>
+          <h2 className="mt-3 font-display text-[23px] font-semibold tracking-[-0.02em]">
+            {item.title}
+          </h2>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close details"
+          className="grid size-8 place-items-center rounded-lg hover:bg-[var(--bg-hover)]"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+      <dl className="mt-5 space-y-3 text-[12px]">
+        <div>
+          <dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
+            Time
+          </dt>
+          <dd className="mt-1">
+            {item.allDay
+              ? "All day"
+              : item.startAt !== undefined
+                ? `${formatTime(item.startAt, timezone)}${item.endAt !== undefined && item.endAt !== item.startAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}`
+                : "Date only"}
+          </dd>
+        </div>
+        {item.location ? (
+          <div>
+            <dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
+              Location
+            </dt>
+            <dd className="mt-1">{item.location}</dd>
+          </div>
+        ) : null}
+        {item.notes ? (
+          <div>
+            <dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
+              Notes
+            </dt>
+            <dd className="mt-1 whitespace-pre-wrap leading-5 text-[var(--text-secondary)]">
+              {item.notes}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      {item.kind === "scheduled_work_block" && item.endAt !== undefined ? (
+        <section className="mt-5 rounded-xl border border-[var(--border-default)] p-3">
+          <p className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
+            Duration
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                void onCommit({
+                  action: "resizeWorkBlock",
+                  itemId: item.id,
+                  endAt: Math.max((item.startAt ?? 0) + 15 * 60_000, item.endAt! - 30 * 60_000),
+                  expectedRevision: item.revision,
+                })
+              }
+              className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold"
+            >
+              − 30 min
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                void onCommit({
+                  action: "resizeWorkBlock",
+                  itemId: item.id,
+                  endAt: item.endAt! + 30 * 60_000,
+                  expectedRevision: item.revision,
+                })
+              }
+              className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold"
+            >
+              + 30 min
+            </button>
+          </div>
+        </section>
+      ) : null}
+      {item.linkedWorkIds.length ? (
+        <section className="mt-5">
+          <p className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
+            Linked work
+          </p>
+          <div className="mt-2 space-y-2">
+            {item.linkedWorkIds.map((workId) => (
+              <button
+                key={workId}
+                type="button"
+                onClick={() => void spectraBus.command("work.open", { workId, surface: "panel" })}
+                className="flex w-full items-center gap-2 rounded-xl border border-[var(--border-default)] px-3 py-2 text-left text-[11px] font-semibold hover:bg-[var(--bg-hover)]"
+              >
+                <Link2 className="size-3.5" />
+                Open linked work
+                <ExternalLink className="ml-auto size-3" />
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {item.source ? (
+        <section className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 p-3">
+          <p className="flex items-center gap-2 text-[11px] font-semibold">
+            <LockKeyhole className="size-3.5" />
+            Official source
+          </p>
+          <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
+            {item.source.provider} controls the official time and deadline. Schedule your work separately.
+          </p>
+          {item.source.url ? (
+            <a
+              href={item.source.url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1 text-micro font-semibold underline underline-offset-2"
+            >
+              Open source
+              <ExternalLink className="size-3" />
+            </a>
+          ) : null}
+        </section>
+      ) : null}
+      <div className="absolute bottom-5 left-5 right-5">
+        <button
+          type="button"
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-default)] py-2.5 text-[11px] font-semibold hover:bg-[var(--bg-hover)]"
+        >
+          <Sparkles className="size-3.5" />
+          Ask Spectra about this time
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function CalendarComposer({
+  timezone,
+  onClose,
+  onCreated,
+}: {
+  timezone: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const [title, setTitle] = useState("");
   const [start, setStart] = useState(() => new Date(Date.now() + HOUR).toISOString().slice(0, 16));
   const [end, setEnd] = useState(() => new Date(Date.now() + 2 * HOUR).toISOString().slice(0, 16));
   const [busy, setBusy] = useState(false);
-  return <div className="fixed inset-0 z-[100] grid place-items-center bg-black/25 p-4" role="dialog" aria-modal="true" aria-label="Add personal event"><form onSubmit={(event) => { event.preventDefault(); setBusy(true); void calendarPost({ action: "createPersonalItem", kind: "personal_event", title, startAt: Date.parse(start), endAt: Date.parse(end), timezone }).then(onCreated).catch((error) => toast.error(error instanceof Error ? error.message : "Could not add event.")).finally(() => setBusy(false)); }} className="w-full max-w-[460px] rounded-2xl border border-white/50 bg-[var(--bg-elevated)] p-5 shadow-2xl"><div className="flex items-center justify-between"><h2 className="font-display text-[21px] font-semibold">Add personal event</h2><button type="button" onClick={onClose} aria-label="Close" className="grid size-8 place-items-center rounded-lg hover:bg-[var(--bg-hover)]"><X className="size-4" /></button></div><label className="mt-5 block text-[11px] font-semibold">Title<input autoFocus required value={title} onChange={(event) => setTitle(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] outline-none focus:border-[var(--brand-primary)]" /></label><div className="mt-3 grid grid-cols-2 gap-3"><label className="text-[11px] font-semibold">Starts<input type="datetime-local" required value={start} onChange={(event) => setStart(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[11px]" /></label><label className="text-[11px] font-semibold">Ends<input type="datetime-local" required value={end} onChange={(event) => setEnd(event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[11px]" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onClose} className="h-9 rounded-lg px-3 text-[12px] font-semibold hover:bg-[var(--bg-hover)]">Cancel</button><button type="submit" disabled={busy || !title.trim()} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-primary)] disabled:opacity-40">{busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}Add event</button></div></form></div>;
+  return (
+    <div
+      className="fixed inset-0 z-[100] grid place-items-center bg-black/25 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add personal event"
+    >
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          setBusy(true);
+          void calendarPost({
+            action: "createPersonalItem",
+            kind: "personal_event",
+            title,
+            startAt: Date.parse(start),
+            endAt: Date.parse(end),
+            timezone,
+          })
+            .then(onCreated)
+            .catch((error) =>
+              toast.error(error instanceof Error ? error.message : "Could not add event."),
+            )
+            .finally(() => setBusy(false));
+        }}
+        className="w-full max-w-[460px] rounded-2xl border border-white/50 bg-[var(--bg-elevated)] p-5 shadow-2xl"
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-[21px] font-semibold">Add personal event</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="grid size-8 place-items-center rounded-lg hover:bg-[var(--bg-hover)]"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <label className="mt-5 block text-[11px] font-semibold">
+          Title
+          <input
+            autoFocus
+            required
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] outline-none focus:border-[var(--brand-primary)]"
+          />
+        </label>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <label className="text-[11px] font-semibold">
+            Starts
+            <input
+              type="datetime-local"
+              required
+              value={start}
+              onChange={(event) => setStart(event.target.value)}
+              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[11px]"
+            />
+          </label>
+          <label className="text-[11px] font-semibold">
+            Ends
+            <input
+              type="datetime-local"
+              required
+              value={end}
+              onChange={(event) => setEnd(event.target.value)}
+              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[11px]"
+            />
+          </label>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 rounded-lg px-3 text-[12px] font-semibold hover:bg-[var(--bg-hover)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy || !title.trim()}
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+          >
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+            Add event
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }

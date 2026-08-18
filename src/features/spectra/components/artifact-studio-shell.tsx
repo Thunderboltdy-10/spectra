@@ -480,6 +480,7 @@ export function StudioSplitShell({
       if (cssWidthVariable) host?.style.removeProperty(cssWidthVariable);
     };
   }, [cssWidthVariable, width]);
+  const fittedRef = useRef(false);
   useEffect(() => {
     if (!onWidthChange) return;
     const updateWidth = onWidthChange;
@@ -512,8 +513,6 @@ export function StudioSplitShell({
         floor,
         Math.min(880, hostWidth - siblingWidth - reserve),
       );
-      // Fair share when multiple panels compete: never let one lane take more
-      // than ~46% of the host while another panel is open.
       const fairCap =
         siblingCount > 0
           ? Math.max(floor, Math.floor(hostWidth * 0.46))
@@ -522,10 +521,19 @@ export function StudioSplitShell({
         siblingCount === 0 && hostWidth < 1920
           ? Math.max(floor, Math.floor(hostWidth * 0.5))
           : maximum;
+      // Switching work in an already-open panel must not resize the panel.
+      // Only raise the floor if the new type cannot fit; never snap to a
+      // different type's preferred share of the workbench.
+      if (fittedRef.current) {
+        if (width < floor) updateWidth(floor);
+        else if (width > maximum) updateWidth(maximum);
+        return;
+      }
       const next = Math.max(
         floor,
         Math.min(width, maximum, fairCap, responsiveCap),
       );
+      fittedRef.current = true;
       if (Math.abs(next - width) >= 8) updateWidth(next);
       else if (width > maximum || width > fairCap || width > responsiveCap)
         updateWidth(Math.min(maximum, fairCap, responsiveCap));
@@ -609,8 +617,16 @@ export function StudioSplitShell({
     <aside
       ref={panelRef}
       data-studio-panel
-      className="relative z-40 flex h-full min-w-[280px] max-w-[94vw] shrink-0 border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--bg-secondary)] min-[1920px]:min-w-[300px]"
-      style={{ width, containerType: "inline-size" }}
+      className="spectra-studio-split-panel relative z-40 flex h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
+      style={{
+        width: `${width}px`,
+        flexGrow: 0,
+        flexShrink: 0,
+        flexBasis: `${width}px`,
+        minWidth: 0,
+        contain: "inline-size",
+        containerType: "inline-size",
+      }}
       aria-label={ariaLabel}
     >
       <button
@@ -628,6 +644,30 @@ export function StudioSplitShell({
         {children}
       </div>
     </aside>
+  );
+}
+
+/** Width-stable stand-in while the studio chunk loads, so the library does not
+ *  jump to full width and then get covered by a late-arriving panel. */
+export function StudioSplitPlaceholder({
+  width = 680,
+}: {
+  width?: number;
+}) {
+  return (
+    <aside
+      data-studio-panel
+      aria-hidden
+      className="spectra-studio-split-panel spectra-studio-split-placeholder relative z-40 h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
+      style={{
+        width: `${width}px`,
+        flexGrow: 0,
+        flexShrink: 0,
+        flexBasis: `${width}px`,
+        minWidth: 0,
+        contain: "inline-size",
+      }}
+    />
   );
 }
 

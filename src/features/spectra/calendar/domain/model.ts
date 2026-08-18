@@ -75,7 +75,7 @@ export const CALENDAR_LAYERS: ReadonlyArray<{
   },
   {
     key: "tasks",
-    label: "Tasks",
+    label: "Plans",
     itemKinds: ["task", "milestone", "reminder"],
     color: "#a67420",
   },
@@ -130,7 +130,10 @@ export function calendarItemFromWire(value: unknown): CalendarItem {
     notes: typeof row.notes === "string" ? row.notes : undefined,
     startAt: Number.isFinite(row.startAt) ? Number(row.startAt) : undefined,
     endAt: Number.isFinite(row.endAt) ? Number(row.endAt) : undefined,
-    allDay: row.allDay === true,
+    allDay:
+      row.allDay === true ||
+      row.timePrecision === "date_only" ||
+      (row.timePrecision === "unknown" && Number.isFinite(row.startAt)),
     timezone: typeof row.timezone === "string" ? row.timezone : "UTC",
     timePrecision:
       row.timePrecision === "verified_period" ||

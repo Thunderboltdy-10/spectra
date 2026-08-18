@@ -7,7 +7,9 @@ export const dynamic = "force-dynamic";
 export default function LibraryPage() {
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0 overflow-y-auto">
-      <Suspense fallback={null}><ArtifactsShell /></Suspense>
+      <Suspense fallback={<div className="h-full min-h-0 bg-[var(--bg-primary)]" />}>
+        <ArtifactsShell />
+      </Suspense>
     </AppShell>
   );
 }

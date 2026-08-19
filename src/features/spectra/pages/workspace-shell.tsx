@@ -426,17 +426,19 @@ function mergeLiveAiOverview(
   };
 }
 
+/* A thing has one name. The work or thread it points at is the live source of
+   that name; the node's own copy is the fallback for a row whose target has not
+   loaded yet. There is no per-workspace override to shadow either of them. */
 function workspaceEntryTitle(entry: WorkspaceEntry) {
   return (
-    entry.item.viewData.titleOverride ??
     entry.artifact?.title ??
     entry.thread?.title ??
+    entry.item.name ??
     "Untitled object"
   );
 }
 function workspaceEntrySummary(entry: WorkspaceEntry) {
   return (
-    entry.item.viewData.compactSummary ??
     entry.artifact?.summary ??
     entry.thread?.summaryShort ??
     "No summary yet."
@@ -981,7 +983,7 @@ function WorkspaceHeader({
   );
   const artifactCount = items.filter((item) => item.artifact).length;
   const threadCount = workspaceThreadCount(items);
-  const cardCount = items.filter((item) => item.viewData.pinned).length;
+  const cardCount = items.filter((item) => item.pinned).length;
   const persistedActiveRuns = runs.filter(
     (run) =>
       run.status === "running" ||
@@ -1412,7 +1414,7 @@ function WorkspaceEntryCard({
       <ThreadCard
         thread={entry.thread}
         workspaceLabel="Workspace"
-        pinned={entry.item.viewData.pinned}
+        pinned={entry.item.pinned}
         continued={continuedThreadId === entry.thread._id}
         selected={contextSelected || selected}
         selectionMode={selectionMode}
@@ -1465,7 +1467,7 @@ function CardsView({
   }
 
   const pinned = entries
-    .filter((entry) => entry.item.viewData.pinned)
+    .filter((entry) => entry.item.pinned)
     .slice(0, 5);
   const activeEntries = (pinned.length > 0 ? pinned : entries).slice(0, 5);
   const documents = entries
@@ -1498,7 +1500,7 @@ function CardsView({
               selected={
                 (selected?.type === "artifact" ||
                   selected?.type === "thread") &&
-                selected.itemId === activeEntries[0].item._id
+                selected.itemId === activeEntries[0].item.nodeId
               }
               onSelect={onSelect}
             />
@@ -1506,23 +1508,23 @@ function CardsView({
           <div className="grid gap-3 sm:grid-cols-2">
             {activeEntries.slice(1, 5).map((entry) => (
               <WorkspaceEntryCard
-                key={entry.item._id}
+                key={entry.item.nodeId}
                 entry={entry}
                 selected={
                   (selected?.type === "artifact" ||
                     selected?.type === "thread") &&
-                  selected.itemId === entry.item._id
+                  selected.itemId === entry.item.nodeId
                 }
                 onSelect={onSelect}
                 actions={
                   <button
                     type="button"
                     className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
-                    onClick={() => onHide(entry.item._id)}
+                    onClick={() => onHide(entry.item.nodeId)}
                     aria-label="Remove from workspace"
                     title="Remove from workspace"
                   >
-                    {busy === `hide:${entry.item._id}` ? (
+                    {busy === `hide:${entry.item.nodeId}` ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <Trash2 className="h-3.5 w-3.5" />
@@ -1581,12 +1583,12 @@ function CompactShelf({
           const Icon = meta.icon;
           return (
             <button
-              key={entry.item._id}
+              key={entry.item.nodeId}
               type="button"
               data-spectra-card="artifact"
               data-card-state={
                 selected?.type === "artifact" &&
-                selected.itemId === entry.item._id
+                selected.itemId === entry.item.nodeId
                   ? "focused"
                   : entry.card.aiState === "creating"
                     ? "creating"
@@ -1684,7 +1686,7 @@ function _TimelineView({
         ? ("artifact" as const)
         : ("edit" as const);
     return {
-      id: `${kind === "thread" ? "thread" : "artifact"}:${entry.item._id}`,
+      id: `${kind === "thread" ? "thread" : "artifact"}:${entry.item.nodeId}`,
       kind,
       entry,
       title:
@@ -1792,7 +1794,7 @@ function _TimelineView({
                       "awaiting_confirmation",
                       "awaiting_resolution",
                     ].includes(row.run.status)
-                  : Boolean(entry?.item.viewData.pinned);
+                  : Boolean(entry?.item.pinned);
               const hierarchy =
                 row.kind === "thread"
                   ? "min-h-[78px] border-l-[3px] border-l-[#8b6ff0]"
@@ -1922,7 +1924,7 @@ function LibraryView({
   onRemove: _onRemove,
   onDelete: _onDelete,
   onMoveArtifactToWorkspace: _onMoveArtifactToWorkspace,
-  onMoveArtifactToInbox: _onMoveArtifactToInbox,
+  onMoveArtifactToGeneral: _onMoveArtifactToGeneral,
   busy: _busy,
   onCreateArtifact: _onCreateArtifact,
   selectionMode,
@@ -1944,7 +1946,7 @@ function LibraryView({
     artifact: SpectraArtifact,
     workspaceId: string,
   ) => void;
-  onMoveArtifactToInbox: (artifact: SpectraArtifact) => void;
+  onMoveArtifactToGeneral: (artifact: SpectraArtifact) => void;
   selectionMode: boolean;
   selectedContextIds: Set<string>;
   selectedObjectKeys: Set<string>;
@@ -2082,7 +2084,7 @@ function LibraryView({
                   if (entry.artifact && entry.card) {
                     return (
                       <ArtifactCard
-                        key={entry.item._id}
+                        key={entry.item.nodeId}
                         artifact={entry.card}
                         quiet
                         className="spectra-card--board"
@@ -2101,7 +2103,7 @@ function LibraryView({
                   }
                   return (
                     <button
-                      key={entry.item._id}
+                      key={entry.item.nodeId}
                       type="button"
                       onClick={() =>
                         selectionMode ? onToggleContext(entry) : onSelect(entry)
@@ -2164,7 +2166,7 @@ function WorkspaceTypeGroupRow({
     const aiState = visibleArtifactCardAiState(entry.artifact, aiClock);
     return (
       <button
-        key={entry.item._id}
+        key={entry.item.nodeId}
         type="button"
         data-spectra-card={entry.thread ? "thread" : "artifact"}
         data-card-state={contextSelected ? "multi-selected" : aiState}
@@ -2249,7 +2251,7 @@ function WorkspacePinnedShelf({
   workspaceTitle: string;
   onSelect: (entry: WorkspaceEntry) => void;
 }) {
-  const pinned = entries.filter((entry) => entry.item.viewData.pinned);
+  const pinned = entries.filter((entry) => entry.item.pinned);
   const storageKey = `spectra.workspace.pinned.${workspaceTitle}.open`;
   const [open, setOpen] = useState(true);
   useEffect(() => {
@@ -2284,7 +2286,7 @@ function WorkspacePinnedShelf({
         <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
           {pinned.map((entry) => (
             <WorkspaceEntryCard
-              key={entry.item._id}
+              key={entry.item.nodeId}
               entry={entry}
               compact
               onSelect={onSelect}
@@ -2446,14 +2448,14 @@ function CanvasView({
                   const objectKey = `${entry.thread ? "thread" : "artifact"}:${entry.thread?._id ?? entry.artifact?._id ?? ""}`;
                   return (
                     <WorkspaceEntryCard
-                      key={entry.item._id}
+                      key={entry.item.nodeId}
                       entry={entry}
                       compact
                       selected={
                         selectedObjectKeys.has(objectKey) ||
                         ((selected?.type === "artifact" ||
                           selected?.type === "thread") &&
-                          selected.itemId === entry.item._id)
+                          selected.itemId === entry.item.nodeId)
                       }
                       onSelect={selectionMode ? onToggleContext : onSelect}
                     />
@@ -3390,7 +3392,7 @@ export function WorkspaceShell({
         const card = workspaceItemToCard(item);
         if (item.artifact && card)
           return [{ item, artifact: item.artifact, card }];
-        if (item.sourceType === "thread" && item.thread)
+        if (item.kind === "thread" && item.thread)
           return [{ item, thread: item.thread }];
         return [];
       }),
@@ -3420,7 +3422,7 @@ export function WorkspaceShell({
   );
   const selectedArtifact =
     selection?.type === "artifact"
-      ? (entries.find((entry) => entry.item._id === selection.itemId)
+      ? (entries.find((entry) => entry.item.nodeId === selection.itemId)
           ?.artifact ?? null)
       : null;
   const selectedRun =
@@ -4117,7 +4119,7 @@ export function WorkspaceShell({
     if (entry.thread) {
       setSelection({
         type: "thread",
-        itemId: entry.item._id,
+        itemId: entry.item.nodeId,
         threadId: entry.thread._id,
       });
       openThreadPanel(entry.thread);
@@ -4126,7 +4128,7 @@ export function WorkspaceShell({
     if (entry.artifact) {
       setSelection({
         type: "artifact",
-        itemId: entry.item._id,
+        itemId: entry.item.nodeId,
         artifactId: entry.artifact._id,
       });
       openArtifactPanel(entry.artifact);
@@ -4595,8 +4597,13 @@ export function WorkspaceShell({
     }
   }
 
-  async function hideWorkspaceItem(workspaceItemId: string) {
-    setBusyKey(`hide:${workspaceItemId}`);
+  /**
+   * Taking something out of a workspace moves it to General. Nothing is hidden
+   * and nothing is deleted, so the row leaves this workspace optimistically and
+   * reappears in General on the next read.
+   */
+  async function moveItemToGeneral(nodeId: string) {
+    setBusyKey(`hide:${nodeId}`);
     const previousOverview = overview;
     setOverview((current) =>
       current?.workspace
@@ -4605,17 +4612,17 @@ export function WorkspaceShell({
             workspace: {
               ...current.workspace,
               items: current.workspace.items.filter(
-                (item) => item._id !== workspaceItemId,
+                (item) => item.nodeId !== nodeId,
               ),
             },
           }
         : current,
     );
     try {
-      await postSpectra({ action: "hideWorkspaceItem", workspaceItemId });
-      toast.success("Removed from workspace. Artifact remains in library.");
+      await postSpectra({ action: "removeFromWorkspace", nodeId });
+      toast.success("Moved back to General.");
       setSelection((current) =>
-        current?.type === "artifact" && current.itemId === workspaceItemId
+        current?.type === "artifact" && current.itemId === nodeId
           ? null
           : current,
       );
@@ -4623,7 +4630,7 @@ export function WorkspaceShell({
     } catch (error) {
       setOverview(previousOverview);
       toast.error(
-        describeFailure(error, { fallback: "Could not remove workspace card." })
+        describeFailure(error, { fallback: "Could not move this out." })
           .message,
       );
     } finally {
@@ -4679,19 +4686,19 @@ export function WorkspaceShell({
     }
   }
 
-  async function moveArtifactToInbox(artifact: SpectraArtifact) {
+  async function moveArtifactToGeneral(artifact: SpectraArtifact) {
     setBusyKey(`move:${artifact._id}`);
     try {
       await postSpectra({
-        action: "moveArtifactToInbox",
+        action: "moveArtifactToGeneral",
         artifactId: artifact._id,
       });
-      toast.success("Moved to Inbox.");
+      toast.success("Moved to General.");
       if (selectedWorkspaceId) await loadWorkspace(selectedWorkspaceId, true);
       else await loadOverview(undefined, true);
     } catch (error) {
       toast.error(
-        describeFailure(error, { fallback: "Could not move object to Inbox." })
+        describeFailure(error, { fallback: "Could not move object to General." })
           .message,
       );
     } finally {
@@ -4700,12 +4707,12 @@ export function WorkspaceShell({
   }
 
   async function toggleWorkspaceItemPin(item: SpectraWorkspaceItem) {
-    setBusyKey(`pin:item:${item._id}`);
+    setBusyKey(`pin:item:${item.nodeId}`);
     try {
       await postSpectra({
-        action: "setWorkspaceItemPinned",
-        workspaceItemId: item._id,
-        pinned: !item.viewData.pinned,
+        action: "setNodePinned",
+        nodeId: item.nodeId,
+        pinned: !item.pinned,
       });
       if (selectedWorkspaceId) await loadWorkspace(selectedWorkspaceId, true);
     } catch (error) {
@@ -5599,7 +5606,7 @@ export function WorkspaceShell({
                               void toggleWorkspaceItemPin(item)
                             }
                             onRemove={(item) =>
-                              void hideWorkspaceItem(item._id)
+                              void moveItemToGeneral(item.nodeId)
                             }
                             onDelete={(artifact) =>
                               void permanentlyDeleteArtifact(artifact)
@@ -5613,8 +5620,8 @@ export function WorkspaceShell({
                                 workspaceId,
                               )
                             }
-                            onMoveArtifactToInbox={(artifact) =>
-                              void moveArtifactToInbox(artifact)
+                            onMoveArtifactToGeneral={(artifact) =>
+                              void moveArtifactToGeneral(artifact)
                             }
                             busy={busyKey}
                             onCreateArtifact={openCreateArtifact}
@@ -5648,7 +5655,7 @@ export function WorkspaceShell({
                     onClose={() => setSelection(null)}
                     onHide={() => {
                       if (selection?.type === "artifact")
-                        void hideWorkspaceItem(selection.itemId);
+                        void moveItemToGeneral(selection.itemId);
                     }}
                     onOpenArtifact={openArtifactPanel}
                   />

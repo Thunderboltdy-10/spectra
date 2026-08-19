@@ -72,7 +72,7 @@ export function workspaceArtifactCount(workspace: SpectraWorkspace, artifacts: S
 }
 
 export function workspaceThreadCount(items: SpectraWorkspaceItem[]) {
-  return items.filter((item) => item.sourceType === "thread" && item.thread).length;
+  return items.filter((item) => item.kind === "thread" && item.thread).length;
 }
 
 export function workspaceDocumentCount(items: SpectraWorkspaceItem[]) {
@@ -134,10 +134,10 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
   const meta = demoMeta(item.artifact);
   return {
     id: item.artifact._id,
-    title: item.viewData.titleOverride ?? item.artifact.title,
+    title: item.name,
     blueprintKey: item.artifact.blueprintKey,
-    summary: previewText(item.artifact.aiPreview?.effectTitle ?? item.viewData.compactSummary ?? item.artifact.summary, "No summary yet."),
-    meta: item.viewData.pinned ? "Pinned" : formatRelativeTime(item.updatedAt),
+    summary: previewText(item.artifact.aiPreview?.effectTitle ?? item.artifact.summary, "No summary yet."),
+    meta: item.pinned ? "Pinned" : formatRelativeTime(item.updatedAt),
     placement: "workspace",
     shared: item.artifact.isShared,
     accessLevel: item.artifact.accessLevel ?? undefined,
@@ -148,8 +148,7 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
       : undefined,
     updatedAt: item.updatedAt,
     aiStateExpiresAt: item.artifact.aiStateExpiresAt,
-    pinned: item.viewData.pinned,
-    variant: item.viewData.cardVariant,
+    pinned: item.pinned,
     metrics: meta.metrics,
     aiState:
       item.artifact.aiState === "edited" &&

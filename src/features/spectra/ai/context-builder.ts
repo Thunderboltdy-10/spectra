@@ -47,7 +47,7 @@ function placements(artifact: ArtifactRecord) {
         return {
           workspaceId: row.workspaceId,
           workspaceTitle: row.workspaceTitle,
-          workspaceItemId: row.workspaceItemId,
+          nodeId: row.nodeId,
           pinned: row.pinned === true,
         };
       })

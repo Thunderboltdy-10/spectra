@@ -292,12 +292,10 @@ const artifactLinkInputSchema = z
 const workspaceItemAddInputSchema = z
   .object({ artifactId: idText, workspaceId: idText })
   .strict();
-const workspaceItemHideInputSchema = z
-  .object({ workspaceItemId: idText })
-  .strict();
+const workspaceItemHideInputSchema = z.object({ nodeId: idText }).strict();
 const workspaceItemSetPinnedInputSchema = z
   .object({
-    workspaceItemId: idText,
+    nodeId: idText,
     pinned: z.boolean(),
     exclusive: z.boolean(),
   })
@@ -1424,8 +1422,8 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
               input: {
                 type: "object",
                 additionalProperties: false,
-                required: ["workspaceItemId"],
-                properties: { workspaceItemId: { type: "string" } },
+                required: ["nodeId"],
+                properties: { nodeId: { type: "string" } },
               },
             },
           },
@@ -1438,9 +1436,9 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
               input: {
                 type: "object",
                 additionalProperties: false,
-                required: ["workspaceItemId", "pinned", "exclusive"],
+                required: ["nodeId", "pinned", "exclusive"],
                 properties: {
-                  workspaceItemId: { type: "string" },
+                  nodeId: { type: "string" },
                   pinned: { type: "boolean" },
                   exclusive: { type: "boolean" },
                 },

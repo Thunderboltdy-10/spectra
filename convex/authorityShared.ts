@@ -1,6 +1,7 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
+import { findNodesForSource, workspaceContextNodes } from "./orgTreeShared";
 
 export type AuthorityCtx = QueryCtx | MutationCtx;
 export type ResourceType = "workspace" | "artifact" | "agent";
@@ -76,16 +77,16 @@ async function inheritedArtifactAccess(ctx: AuthorityCtx, actor: NonNullable<Awa
   const override = await ctx.db.query("artifactAccessOverrides").withIndex("by_artifact_account", (q) => q.eq("artifactId", artifactId).eq("accountId", actor.accountId)).unique();
   if (override?.effect === "deny") return { level: null, denied: true, sources: [] as Array<{ kind: "workspace"; workspaceId: Id<"spectraWorkspaces">; grantId: Id<"accessGrants">; level: AccessLevel }> };
 
-  const [artifact, placements] = await Promise.all([
+  const [artifact, nodes] = await Promise.all([
     ctx.db.get(artifactId),
-    ctx.db.query("spectraWorkspaceItems").withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", artifactId)).collect(),
+    findNodesForSource(ctx, "work", artifactId),
   ]);
   let level: AccessLevel | null = null;
   const sources: Array<{ kind: "workspace"; workspaceId: Id<"spectraWorkspaces">; grantId: Id<"accessGrants">; level: AccessLevel }> = [];
   const now = Date.now();
-  for (const placement of placements) {
-    if (placement.viewData.hidden) continue;
-    const workspace = await ctx.db.get(placement.workspaceId);
+  for (const placement of nodes) {
+    if (placement.deletedAt !== undefined || !placement.workspaceContextId) continue;
+    const workspace = await ctx.db.get(placement.workspaceContextId);
     if (!workspace || workspace.status !== "active" || workspace.schoolId !== actor.schoolId) continue;
     // A recipient may organize an accepted shared artifact in any workspace
     // they can modify. That personal placement must not silently re-share the
@@ -191,10 +192,10 @@ export async function bumpPolicyVersion(ctx: MutationCtx, resourceType: Resource
     const workspaceId = ctx.db.normalizeId("spectraWorkspaces", resourceId);
     const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
     if (workspace) {
-      const placements = await ctx.db.query("spectraWorkspaceItems").withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id)).collect();
+      const placements = await workspaceContextNodes(ctx, workspace._id, "work");
       const affectedArtifactIds = new Set<Id<"spectraArtifacts">>();
       for (const placement of placements) {
-        if (placement.sourceType !== "artifact" || placement.viewData.hidden) continue;
+        if (!placement.sourceId) continue;
         const artifactId = ctx.db.normalizeId("spectraArtifacts", placement.sourceId);
         const artifact = artifactId ? await ctx.db.get(artifactId) : null;
         if (!artifact || artifact.status === "deleted" || artifact.schoolId !== workspace.schoolId) continue;

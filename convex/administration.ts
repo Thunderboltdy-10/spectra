@@ -2686,13 +2686,13 @@ export const buildLifecycleExport = internalQuery({
       )
     ).filter(Boolean);
     const workspaces = [...workspacesActive, ...workspacesArchived];
-    const workspaceItems = (
+    const orgNodes = (
       await Promise.all(
         workspaces.map((workspace) =>
           ctx.db
-            .query("spectraWorkspaceItems")
-            .withIndex("by_workspace", (q) =>
-              q.eq("workspaceId", workspace._id),
+            .query("orgNodes")
+            .withIndex("by_workspace_context", (q) =>
+              q.eq("workspaceContextId", workspace._id),
             )
             .collect(),
         ),
@@ -2751,7 +2751,7 @@ export const buildLifecycleExport = internalQuery({
       },
       product: {
         workspaces,
-        workspaceItems,
+        orgNodes,
         artifacts,
         artifactVersions,
         threads,
@@ -3120,7 +3120,7 @@ const PURGE_DEPENDENT_TABLES = [
   "quizPracticeResponses",
   "artifactCommentPreferences",
   "artifactCommentNotifications",
-  "spectraWorkspaceItems",
+  "orgNodes",
   "spectraRunAttachments",
   "spectraOperations",
   "spectraResultCards",
@@ -3192,7 +3192,7 @@ const PURGE_SCHOOL_TABLES = [
   "spectraMessages",
   "spectraAiRuns",
   "spectraThreads",
-  "spectraWorkspaceItems",
+  "orgNodes",
   "workspaceImportJobs",
   "spectraArtifacts",
   "spectraWorkspaces",
@@ -3221,9 +3221,14 @@ async function rowBelongsToPurgedSchool(
     const artifact = await ctx.db.get(row.artifactId as Id<"spectraArtifacts">);
     return artifact?.schoolId === schoolId;
   }
-  if (table === "spectraWorkspaceItems") {
+  if (table === "orgNodes") {
+    /* A node carries its school directly when it was created with one. Older
+       rows fall back to the workspace holding them, so a purge cannot leave a
+       school's tree behind. */
+    if (row.schoolId) return row.schoolId === schoolId;
+    if (!row.workspaceContextId) return false;
     const workspace = await ctx.db.get(
-      row.workspaceId as Id<"spectraWorkspaces">,
+      row.workspaceContextId as Id<"spectraWorkspaces">,
     );
     return workspace?.schoolId === schoolId;
   }
@@ -3320,8 +3325,8 @@ async function purgeSchoolRows(
       deletedRows: 0,
       deletedStorageObjects: 0,
     };
-  if (table === "spectraWorkspaceItems") {
-    // Workspace items were already removed through the parent-aware pass.
+  if (table === "orgNodes") {
+    // Tree nodes were already removed through the parent-aware pass.
     return {
       stage: progress.stage,
       tableIndex: progress.tableIndex + 1,

@@ -22,7 +22,7 @@ function artifact(id: string, overrides: Record<string, unknown> = {}) {
       {
         workspaceId: "workspace-1",
         workspaceTitle: "Biology",
-        workspaceItemId: `item-${id}`,
+        nodeId: `item-${id}`,
         pinned: id === "a",
       },
     ],

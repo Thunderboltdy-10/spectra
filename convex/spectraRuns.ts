@@ -15,6 +15,7 @@ import {
   isTerminalRunStatus,
   requireCurrentExecution,
 } from "./spectraRunLifecycle";
+import { findPrimaryNode, renameSourceNodes } from "./orgTreeShared";
 import { releaseClaimsForRun } from "./regionClaims";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { recordAgentInvocation, settleAgentInvocation } from "./agents";
@@ -244,26 +245,26 @@ export const beginRun = mutation({
     }
     let requestedWorkspaceId = args.workspaceId;
     if (!thread && !requestedWorkspaceId && effectiveArtifactId) {
-      const placements = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceType", "artifact").eq("sourceId", effectiveArtifactId),
-        )
-        .collect();
-      for (const placement of placements
-        .filter((item) => item.viewData.hidden !== true)
-        .sort((a, b) => b.updatedAt - a.updatedAt)) {
-        const workspace = await ctx.db.get(placement.workspaceId);
-        if (
-          workspace &&
-          workspace.ownerAccountId === actor._id &&
-          workspace.schoolId === actor.schoolId &&
-          workspace.status === "active"
-        ) {
-          requestedWorkspaceId = workspace._id;
-          break;
-        }
-      }
+      /* The work lives in exactly one place, so a conversation about it
+         starts there rather than guessing between competing rows. */
+      const node = await findPrimaryNode(
+        ctx,
+        actor._id,
+        "work",
+        effectiveArtifactId,
+      );
+      const context =
+        node && node.deletedAt === undefined
+          ? node.workspaceContextId
+          : undefined;
+      const workspace = context ? await ctx.db.get(context) : null;
+      if (
+        workspace &&
+        workspace.ownerAccountId === actor._id &&
+        workspace.schoolId === actor.schoolId &&
+        workspace.status === "active"
+      )
+        requestedWorkspaceId = workspace._id;
     }
     if (requestedWorkspaceId) {
       const workspace = await ctx.db.get(requestedWorkspaceId);
@@ -332,7 +333,7 @@ export const beginRun = mutation({
       });
       thread = await ctx.db.get(threadId);
     }
-    const workspaceItemId = await ensureThreadWorkspacePlacement(ctx, {
+    const nodeId = await ensureThreadWorkspacePlacement(ctx, {
       threadId,
       ownerAccountId: actor._id,
       workspaceId,
@@ -460,7 +461,7 @@ export const beginRun = mutation({
       executionId,
       sequence: 1,
       type: "run_created",
-      payload: { threadId, resultCardId, workspaceItemId, title },
+      payload: { threadId, resultCardId, nodeId, title },
       createdAt: now,
     });
     await incrementOperationalCounter(ctx, {
@@ -480,7 +481,7 @@ export const beginRun = mutation({
       resultCardId,
       threadId,
       executionId,
-      workspaceItemId,
+      nodeId,
       created: true,
     };
   },
@@ -686,28 +687,7 @@ export const updateStatus = mutation({
 
     if (terminal && run.threadId) {
       const thread = await ctx.db.get(run.threadId);
-      const placements = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceType", "thread").eq("sourceId", run.threadId!),
-        )
-        .collect();
-      const summary =
-        args.finalSummary?.slice(0, 240) ??
-        args.resultSummary?.slice(0, 240) ??
-        thread?.summaryShort;
-      await Promise.all(
-        placements.map((placement) =>
-          ctx.db.patch(placement._id, {
-            viewData: {
-              ...placement.viewData,
-              titleOverride: thread?.title,
-              compactSummary: summary,
-            },
-            updatedAt: now,
-          }),
-        ),
-      );
+      if (thread) await renameSourceNodes(ctx, "thread", thread._id, thread.title);
     }
     if (args.status === "failed" && run.status !== "failed")
       await incrementOperationalCounter(ctx, {

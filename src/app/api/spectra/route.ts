@@ -318,7 +318,7 @@ export async function GET(request: NextRequest) {
       const workspaceId = params.get("workspaceId");
       if (!workspaceId) return badRequest("Choose a workspace first.");
       const workspace = await spectraQuery(
-        "spectraWorkspaceItems:listForWorkspacePublic",
+        "orgTree:listWorkspaceContentsPublic",
         {
           workspaceId,
         },
@@ -585,7 +585,7 @@ export async function GET(request: NextRequest) {
       })) as Array<{ _id: string }>;
       const requestedWorkspaceId = params.get("workspaceId") ?? undefined;
       const workspace = requestedWorkspaceId
-        ? await spectraQuery("spectraWorkspaceItems:listForWorkspacePublic", {
+        ? await spectraQuery("orgTree:listWorkspaceContentsPublic", {
             workspaceId: requestedWorkspaceId,
           })
         : null;
@@ -1527,71 +1527,40 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "addArtifactToWorkspace") {
-      const result = await spectraMutation(
-        "spectraWorkspaceItems:addArtifact",
-        {
-          workspaceId: requireString(body.workspaceId, "workspaceId"),
-          artifactId: requireString(body.artifactId, "artifactId"),
-        },
-      );
-      return ok(result);
-    }
-
-    if (action === "moveArtifactToWorkspace") {
-      const artifactId = requireString(body.artifactId, "artifactId");
-      const workspaceId = requireString(body.workspaceId, "workspaceId");
-      const artifact = (await spectraQuery("spectraArtifacts:get", {
-        artifactId,
-      })) as {
-        placements?: Array<{ workspaceId?: string; workspaceItemId?: string }>;
-      };
-      const result = await spectraMutation(
-        "spectraWorkspaceItems:addArtifact",
-        { workspaceId, artifactId },
-      );
-      await Promise.all(
-        (artifact.placements ?? [])
-          .filter(
-            (placement) =>
-              placement.workspaceId !== workspaceId &&
-              typeof placement.workspaceItemId === "string",
-          )
-          .map((placement) =>
-            spectraMutation("spectraWorkspaceItems:hide", {
-              workspaceItemId: placement.workspaceItemId!,
-            }),
-          ),
-      );
-      return ok(result);
-    }
-
-    if (action === "moveArtifactToInbox") {
-      const artifactId = requireString(body.artifactId, "artifactId");
-      const artifact = (await spectraQuery("spectraArtifacts:get", {
-        artifactId,
-      })) as { placements?: Array<{ workspaceItemId?: string }> };
-      const hidden = await Promise.all(
-        (artifact.placements ?? [])
-          .filter((placement) => typeof placement.workspaceItemId === "string")
-          .map((placement) =>
-            spectraMutation("spectraWorkspaceItems:hide", {
-              workspaceItemId: placement.workspaceItemId!,
-            }),
-          ),
-      );
-      return ok({ artifactId, hidden });
-    }
-
-    if (action === "hideWorkspaceItem") {
-      const result = await spectraMutation("spectraWorkspaceItems:hide", {
-        workspaceItemId: requireString(body.workspaceItemId, "workspaceItemId"),
+      const result = await spectraMutation("orgTree:placeWork", {
+        workspaceId: requireString(body.workspaceId, "workspaceId"),
+        artifactId: requireString(body.artifactId, "artifactId"),
       });
       return ok(result);
     }
 
-    if (action === "setWorkspaceItemPinned") {
-      const result = await spectraMutation("spectraWorkspaceItems:setPinned", {
-        workspaceItemId: requireString(body.workspaceItemId, "workspaceItemId"),
+    if (action === "moveArtifactToWorkspace") {
+      // One home per work, so a move is a single transaction rather than an
+      // add here and a hide everywhere else.
+      const result = await spectraMutation("orgTree:placeWork", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+        workspaceId: requireString(body.workspaceId, "workspaceId"),
+      });
+      return ok(result);
+    }
+
+    if (action === "moveArtifactToGeneral") {
+      const result = await spectraMutation("orgTree:placeWork", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+      });
+      return ok(result);
+    }
+
+    if (action === "removeFromWorkspace") {
+      const result = await spectraMutation("orgTree:removeFromWorkspace", {
+        nodeId: requireString(body.nodeId, "nodeId"),
+      });
+      return ok(result);
+    }
+
+    if (action === "setNodePinned") {
+      const result = await spectraMutation("orgTree:setPinned", {
+        nodeId: requireString(body.nodeId, "nodeId"),
         pinned: body.pinned === true,
       });
       return ok(result);
@@ -1681,11 +1650,10 @@ export async function POST(request: NextRequest) {
             ];
           })
         : undefined;
+      void localMessages;
       const result = await spectraMutation("spectraThreads:createFromRun", {
         runId: requireString(body.runId, "runId"),
         placeInWorkspace: body.placeInWorkspace === true,
-        createReference: body.createReference !== false,
-        localMessages,
       });
       return ok(result);
     }
@@ -1694,7 +1662,6 @@ export async function POST(request: NextRequest) {
       const kept = await spectraMutation("spectraThreads:createFromRun", {
         runId: requireString(body.runId, "runId"),
         placeInWorkspace: true,
-        createReference: true,
       });
       return ok(kept);
     }

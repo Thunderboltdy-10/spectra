@@ -1,0 +1,244 @@
+uid=2_0 RootWebArea "Spectra — The AI School Platform" url="http://localhost:3000/workspace"
+  uid=2_1 link "Skip to content" url="http://localhost:3000/workspace#main-content"
+    uid=2_2 StaticText "Skip to content"
+  uid=2_3 generic
+    uid=2_4 complementary "Spectra navigation"
+      uid=2_5 button "Expand sidebar" description="Expand sidebar"
+      uid=2_6 link "Spectra home" url="http://localhost:3000/workspace?home=1"
+        uid=2_7 image "Spectra"
+      uid=2_8 navigation "Main destinations"
+        uid=2_9 link "Chat" url="http://localhost:3000/chat"
+        uid=2_10 link "Workspace" url="http://localhost:3000/workspace?home=1"
+        uid=2_11 link "Library" url="http://localhost:3000/library"
+        uid=2_12 link "Calendar" url="http://localhost:3000/calendar"
+        uid=2_13 link "Agents" url="http://localhost:3000/agents"
+        uid=2_14 link "School" url="http://localhost:3000/school"
+        uid=2_15 link "Analytics" url="http://localhost:3000/analytics"
+        uid=2_16 link "Admin" url="http://localhost:3000/admin"
+        uid=2_17 link "Super Admin" url="http://localhost:3000/superadmin"
+      uid=2_18 link url="http://localhost:3000/chat"
+      uid=2_19 button "Share current page"
+      uid=2_20 button "Notifications"
+      uid=2_21 button "Settings"
+      uid=2_22 button "Manage account"
+    uid=2_23 main
+      uid=2_24 button "Go back" description="Go back" disableable disabled
+      uid=2_25 button "Go forward" description="Go forward" disableable disabled
+      uid=2_26 button "Home Close Home"
+        uid=2_27 button "Close Home"
+      uid=2_28 button "Open a new home view" description="Open a new home view"
+      uid=2_29 button "Import a Spectra workspace manifest" value="No file chosen"
+      uid=2_30 main
+        uid=2_31 heading "Workspace" level="1"
+        uid=2_32 StaticText "Move between active spaces, recent work, and conversations."
+        uid=2_33 heading "Workspace at a glance" level="2"
+        uid=2_34 button "Scroll workspaces left"
+        uid=2_35 button "Scroll workspaces right"
+        uid=2_36 button "Open M4 QA — Artifact Rebuild workspace"
+        uid=2_37 StaticText "M4 QA — Artifact Rebuild"
+        uid=2_38 StaticText "Primary workspace"
+        uid=2_39 StaticText "Controlled M4 test data for the artifact editor rebuild. Safe to delete at mission close."
+        uid=2_40 StaticText "10"
+        uid=2_41 StaticText " work items"
+        uid=2_42 StaticText "Updated"
+        uid=2_43 StaticText " "
+        uid=2_44 StaticText "12h ago"
+        uid=2_45 button "Open ManageBac class workspace"
+        uid=2_46 StaticText "ManageBac class"
+        uid=2_47 StaticText "Secondary"
+        uid=2_48 StaticText "· Source-linked from ManageBac"
+        uid=2_49 StaticText "0"
+        uid=2_50 StaticText " work items"
+        uid=2_51 StaticText "Updated"
+        uid=2_52 StaticText " "
+        uid=2_53 StaticText "6d ago"
+        uid=2_54 button "Open Spectra Launch Studio workspace"
+        uid=2_55 StaticText "Spectra Launch Studio"
+        uid=2_56 StaticText "Secondary"
+        uid=2_57 StaticText "A production acceptance workspace for documents, quizzes, decks, tasks, threads, and live AI work."
+        uid=2_58 StaticText "2"
+        uid=2_59 StaticText " work items"
+        uid=2_60 StaticText "Updated"
+        uid=2_61 StaticText " "
+        uid=2_62 StaticText "7d ago"
+        uid=2_63 button "Open Start here workspace"
+        uid=2_64 StaticText "Start here"
+        uid=2_65 StaticText "Secondary"
+        uid=2_66 StaticText "A quiet place to try Spectra. Add a question, document, or study task when you are ready."
+        uid=2_67 StaticText "0"
+        uid=2_68 StaticText " work items"
+        uid=2_69 StaticText "Updated"
+        uid=2_70 StaticText " "
+        uid=2_71 StaticText "57d ago"
+        uid=2_72 button "New workspace Create a new workspace"
+        uid=2_73 heading "Recent activity" level="2"
+        uid=2_74 button "View all work"
+        uid=2_75 button "Photosynthesis — Unit 4 study notes Updated document 5h ago"
+        uid=2_76 button "Photosynthesis — end of unit quiz Updated quiz 3d ago"
+        uid=2_77 button "New Board Updated board 3d ago"
+        uid=2_78 button "New Deck Updated flashcards 3d ago"
+        uid=2_79 button "M1 edit evidence — 2026-08-12 Updated document 3d ago"
+        uid=2_80 button "Rates of reaction — Lesson 3 Updated presentation 3d ago"
+        uid=2_81 button "Titration results — class data Updated sheet 3d ago"
+        uid=2_82 button "Chemistry IA — analysis and evaluation Updated plan 3d ago"
+        uid=2_83 button "IB Biology HL coach Updated agent 3d ago"
+        uid=2_84 button "Unit 4 concept map Created board 3d ago"
+      uid=2_85 complementary "Work studio"
+        uid=2_86 button "Resize Work studio"
+        uid=2_87 StaticText "DOCUMENT"
+        uid=2_88 textbox "Untitled work" multiline value="Photosynthesis — Unit 4 study notes"
+        uid=2_89 textbox "Short useful summary" multiline value="Structured revision notes with headings, a worked practical and an equation."
+        uid=2_90 button "Comments"
+        uid=2_91 button "Open as tab"
+        uid=2_92 button "More work actions" expandable haspopup="menu"
+        uid=2_93 button "Close"
+        uid=2_94 region "Work surface"
+          uid=2_95 combobox "Text style" expandable haspopup="listbox" value="Text"
+          uid=2_96 button "Bold"
+          uid=2_97 button "Italic"
+          uid=2_98 button "Underline"
+          uid=2_99 button "Bullet list"
+          uid=2_100 button "Numbered list"
+          uid=2_101 button "Link"
+          uid=2_102 combobox "Alignment" expandable haspopup="listbox" value="Left"
+          uid=2_103 button "Highlight"
+          uid=2_104 button "Find"
+          uid=2_105 button "Outline"
+          uid=2_106 button "More document tools" expandable haspopup="menu"
+          uid=2_107 main
+            uid=2_108 generic value="Photosynthesis — end of unit quiz
+Photosynthesis — Unit 4 study notes
+
+Photosynthesis converts light energy into chemical energy stored in glucose. In IB Biology HL you are expected to explain both the light-dependent reactions in the thylakoid membranes and the light-independent Calvin cycle in the stroma, and to interpret experimental data on limiting factors. N1 flow check 2026-08-19.
+
+Examiner note: candidates lose marks by describing the Calvin cycle as "dark reactions". Use light-independent.
+
+Light-dependent reactions
+
+Photosystem II absorbs a photon at 680 nm, exciting an electron that passes along the electron transport chain to plastoquinone, the cytochrome complex, and plastocyanin before reaching photosystem I. Photolysis of water replaces the lost electron and releases oxygen as a by-product.
+
+Photolysis of water in the thylakoid lumen
+
+Chemiosmosis through ATP synthase
+
+Reduction of NADP+ to NADPH
+
+Light-independent reactions
+
+Ribulose bisphosphate carboxylase fixes carbon dioxide onto RuBP, producing two molecules of glycerate-3-phosphate. ATP and NADPH from the light-dependent stage reduce these to triose phosphate, of which five sixths regenerate RuBP.
+
+No single limiting factor explains a field measurement; always state the factor you controlled.
+
+Practical: limiting factors
+
+Using pondweed in a sodium bicarbonate solution, count oxygen bubbles per minute at 10 cm, 20 cm, 30 cm and 40 cm from the lamp. Repeat three times and plot mean rate against light intensity, remembering the inverse square relationship.
+
+rate
+∝
+1
+𝑑
+2
+rate∝
+d
+2
+1
+	​
+
+
+At high light intensity the curve plateaus because carbon dioxide concentration becomes limiting. Increasing temperature beyond the enzyme optimum denatures rubisco and the rate falls sharply rather than plateauing.
+
+/"
+              uid=2_109 group "Photosynthesis — end of unit quiz, collapsed"
+                uid=2_110 StaticText "Photosynthesis — end of unit quiz"
+              uid=2_111 heading "Photosynthesis — Unit 4 study notes" level="1"
+              uid=2_112 paragraph
+                uid=2_113 StaticText "Photosynthesis converts light energy into chemical energy stored in glucose. In IB Biology HL you are expected to explain both the light-dependent reactions in the thylakoid membranes and the light-independent Calvin cycle in the stroma, and to interpret experimental data on limiting factors. N1 flow check 2026-08-19."
+              uid=2_114 generic
+                uid=2_115 paragraph
+                  uid=2_116 StaticText "Examiner note: candidates lose marks by describing the Calvin cycle as "dark reactions". Use light-independent."
+              uid=2_117 heading "Light-dependent reactions" level="2"
+              uid=2_118 paragraph
+                uid=2_119 StaticText "Photosystem II absorbs a photon at 680 nm, exciting an electron that passes along the electron transport chain to plastoquinone, the cytochrome complex, and plastocyanin before reaching photosystem I. Photolysis of water replaces the lost electron and releases oxygen as a by-product."
+              uid=2_120 list
+                uid=2_121 listitem level="1"
+                  uid=2_122 paragraph
+                    uid=2_123 StaticText "Photolysis of water in the thylakoid lumen"
+              uid=2_124 list
+                uid=2_125 listitem level="1"
+                  uid=2_126 paragraph
+                    uid=2_127 StaticText "Chemiosmosis through ATP synthase"
+              uid=2_128 list
+                uid=2_129 listitem level="1"
+                  uid=2_130 paragraph
+                    uid=2_131 StaticText "Reduction of NADP+ to NADPH"
+              uid=2_132 heading "Light-independent reactions" level="2"
+              uid=2_133 paragraph
+                uid=2_134 StaticText "Ribulose bisphosphate carboxylase fixes carbon dioxide onto RuBP, producing two molecules of glycerate-3-phosphate. ATP and NADPH from the light-dependent stage reduce these to triose phosphate, of which five sixths regenerate RuBP."
+              uid=2_135 blockquote
+                uid=2_136 paragraph
+                  uid=2_137 StaticText "No single limiting factor explains a field measurement; always state the factor you controlled."
+              uid=2_138 heading "Practical: limiting factors" level="2"
+              uid=2_139 paragraph
+                uid=2_140 StaticText "Using pondweed in a sodium bicarbonate solution, count oxygen bubbles per minute at 10 cm, 20 cm, 30 cm and 40 cm from the lamp. Repeat three times and plot mean rate against light intensity, remembering the inverse square relationship."
+              uid=2_141 StaticText "rate"
+              uid=2_142 StaticText "∝"
+              uid=2_143 StaticText "1"
+              uid=2_144 StaticText "𝑑"
+              uid=2_145 StaticText "2"
+              uid=2_146 paragraph
+                uid=2_147 StaticText "At high light intensity the curve plateaus because carbon dioxide concentration becomes limiting. Increasing temperature beyond the enzyme optimum denatures rubisco and the rate falls sharply rather than plateauing."
+              uid=2_148 paragraph
+                uid=2_149 StaticText "/"
+            uid=2_150 button "Add block below"
+            uid=2_151 button "Drag block"
+      uid=2_152 region "Live Dock"
+        uid=2_153 button "Start a new thread" description="New thread"
+        uid=2_154 generic live="polite" relevant="additions text"
+          uid=2_155 button "Photosynthesis Limiting Factors Cancelled Stopped by you. Partial work from this run may already be visible — review it before retrying." description="Photosynthesis Limiting Factors"
+          uid=2_156 button "Open Photosynthesis Limiting Factors conversation" description="Open conversation"
+          uid=2_157 button "Close Photosynthesis Limiting Factors" description="Close tab"
+      uid=2_158 button "Open actions" description="Add or attach" expandable
+      uid=2_159 button "Choose AI focus: Photosynthesis — Unit 4 study notes · 1 context" description="Photosynthesis — Unit 4 study notes" expandable
+      uid=2_160 generic live="polite" relevant="additions text"
+        uid=2_161 StaticText "Continuing Photosynthesis Limiting Factors. "
+        uid=2_162 StaticText "1"
+        uid=2_163 StaticText " context object"
+        uid=2_164 StaticText " included."
+      uid=2_165 textbox "Continue Photosynthesis Limiting Factors..." multiline
+      uid=2_166 button "Send command" description="Send" disableable disabled
+      uid=2_167 complementary "Live thread"
+        uid=2_168 button "Resize Live thread"
+        uid=2_169 StaticText "Photosynthesis Limiting Factors"
+        uid=2_170 StaticText "LIVE CONVERSATION"
+        uid=2_171 button "Follow the AI as it works" description="Spectate the AI: open and reveal whatever it is working on"
+        uid=2_172 button "Stop continuing this thread in the Live Dock" description="Remove this thread from the Live Dock and start fresh next time" pressed
+        uid=2_173 button "Close live thread"
+        uid=2_174 StaticText "List three limiting factors of photosynthesis in one short sentence each."
+        uid=2_175 StaticText "P MD · 5:04"
+        uid=2_176 button "Thought" expandable
+        uid=2_177 StaticText "Light intensity limits photosynthesis when insufficient light reduces the energy available for the light-dependent reactions."
+        uid=2_178 StaticText "Carbon dioxide concentration limits photosynthesis because CO₂ is needed for carbon fixation in the Calvin cycle."
+        uid=2_179 StaticText "Temperature limits photosynthesis because temperatures that are too low slow enzyme activity, while temperatures that are too high can denature enzymes."
+        uid=2_180 StaticText "Spectra · 5:04"
+        uid=2_181 StaticText "Now write a long detailed explanation, at least eight paragraphs, of how each limiting factor interacts with the others across a full school day in a greenhouse."
+        uid=2_182 StaticText "P MD · 5:10"
+        uid=2_183 button "Thought" expandable
+        uid=2_184 StaticText "Photosynthesis in a greenhouse is controlled by light intensity, carbon dioxide concentration and temperature. The rate is usually limited by whichever factor is furthest from its optimum, and that limiting factor can change throughout the day."
+        uid=2_185 StaticText "Early in the morning, light is often the main limitation because the Sun is low and less energy reaches the leaves. Even if carbon dioxide is plentiful, the light-dependent reactions produce limited ATP and reduced NADP, so the Calvin cycle cannot make carbohydrates rapidly. Low temperature may strengthen this limitation by slowing the enzymes involved in carbon fixation."
+        uid=2_186 StaticText "As light increases during the morning, photosynthesis accelerates. Plants then remove carbon dioxide from the greenhouse air more quickly. If ventilation is limited, the concentration falls and carbon dioxide may become the new limiting factor. Increasing light after this point produces little additional photosynthesis because the plant lacks enough carbon dioxide to use the extra energy."
+        uid=2_187 StaticText "Temperature usually rises with increasing sunlight. A moderate rise toward the optimum speeds enzyme-controlled reactions in the Calvin cycle. However, temperature does not help indefinitely. Excessive heat increases water loss, and plants may close their stomata to conserve water. Because carbon dioxide enters through open stomata, closure reduces carbon dioxide uptake and can create an indirect carbon dioxide limitation."
+        uid=2_188 StaticText "Near midday, strong light may be available, but the rate may still be restricted by depleted carbon dioxide or excessive temperature. If the greenhouse is too hot, enzymes may work less effectively and heat stress may damage cell processes. Adding carbon dioxide will have limited benefit if high temperature remains the main problem; cooling will likewise have little effect if carbon dioxide is still scarce."
+        uid=2_189 StaticText "Ventilation can alter the factors together. Opening vents may bring in fresh carbon dioxide and lower the temperature, potentially increasing photosynthesis. However, ventilation can also reduce humidity and increase water loss. If the plant becomes short of water, stomata may close, so the apparent benefit of extra external carbon dioxide may be reduced."
+        uid=2_190 StaticText "In the afternoon, light intensity gradually declines, while the greenhouse may remain warm because its structure has stored heat. Carbon dioxide may still be low after prolonged uptake. Cooling and ventilation can improve temperature and carbon dioxide availability, but declining light eventually limits how much additional carbon dioxide the plant can use. Carbon dioxide enrichment is therefore more effective when sufficient light is present."
+        uid=2_191 StaticText "Late in the day, light commonly becomes the main limitation again. As photosynthesis slows, carbon dioxide may begin to accumulate, while falling temperature can further reduce enzyme activity. Overall, light supplies energy, carbon dioxide supplies carbon for sugar production, and temperature controls the enzyme reactions linking the processes. Managing a greenhouse successfully requires balancing all three rather than maximising one factor in isolation."
+        uid=2_192 StaticText "Spectra · 5:11"
+        uid=2_193 StaticText "Write a very long twenty paragraph essay about every single environmental variable that affects plant growth, with worked numeric examples throughout."
+        uid=2_194 StaticText "P MD · 5:26"
+        uid=2_195 button "Thought" expandable
+        uid=2_196 StaticText "Spectra paused this run"
+        uid=2_197 StaticText "Spectra returned an incomplete response plan. Your work is unchanged — try again in a moment."
+        uid=2_198 button "Retry"
+        uid=2_199 StaticText "Write an extremely long thirty paragraph treatise on greenhouse climate control engineering with detailed calculations."
+        uid=2_200 StaticText "P MD · 5:34"
+    uid=2_201 region "Notifications alt+T" live="polite" relevant="additions text"
+  uid=2_202 alert atomic live="assertive" relevant="additions text"

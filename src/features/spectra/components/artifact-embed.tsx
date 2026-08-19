@@ -35,8 +35,40 @@ function records(value: unknown) {
   return Array.isArray(value) ? value.map(record) : [];
 }
 
+/* Rich fields (quiz prompts, option text, card faces) are stored as HTML by
+   their studios. An embed preview is a *summary*, so it renders text — never
+   injected markup and never the raw tags the reader would otherwise see. */
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+function plainTextFromRichValue(source: string) {
+  return source
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(?:script|style)[\s\S]*?<\/(?:script|style)>/gi, " ")
+    .replace(/<(?:br|\/p|\/div|\/li|\/h[1-6])\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity: string) => {
+      if (entity.startsWith("#")) {
+        const code = entity[1]?.toLowerCase() === "x"
+          ? Number.parseInt(entity.slice(2), 16)
+          : Number.parseInt(entity.slice(1), 10);
+        return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : match;
+      }
+      return HTML_ENTITIES[entity.toLowerCase()] ?? match;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function textFrom(value: unknown, limit = 360): string {
-  if (typeof value === "string") return value.slice(0, limit);
+  if (typeof value === "string")
+    return (/<[a-z!/][^>]*>/i.test(value) ? plainTextFromRichValue(value) : value).slice(0, limit);
   if (Array.isArray(value))
     return value
       .map((entry) => textFrom(entry, limit))
@@ -520,6 +552,12 @@ export function ArtifactEmbed({
   onUseLiveVersion?: () => void;
 }) {
   const rootRef = useRef<HTMLElement | null>(null);
+  /* A drag on the native resize grip is the only thing that may persist a size.
+     Reading the box on any pointer-up would save a size the reader never chose
+     — a plain click, a text selection, or a pane resize would silently pin the
+     card. So we remember the box when the pointer goes down and write only if
+     that same interaction actually changed it. */
+  const dragOriginRef = useRef<{ width: number; height: number } | null>(null);
   const motionLevel = useSpectraMotion();
   const meta = embed.source ? blueprintMeta[embed.source.blueprintKey] : null;
   const Icon = meta?.icon ?? FileQuestion;
@@ -659,25 +697,33 @@ export function ArtifactEmbed({
             }
           : undefined
       }
-      onPointerUp={() => {
-        if (!onResize || embed.mode !== "expanded" || !rootRef.current) return;
+      onPointerDown={() => {
+        if (!onResize || embed.mode !== "expanded" || !rootRef.current) {
+          dragOriginRef.current = null;
+          return;
+        }
         const bounds = rootRef.current.getBoundingClientRect();
-        const priorWidth =
-          typeof embed.displayPreferences?.width === "number"
-            ? embed.displayPreferences.width
-            : 0;
-        const priorHeight =
-          typeof embed.displayPreferences?.height === "number"
-            ? embed.displayPreferences.height
-            : 0;
+        dragOriginRef.current = {
+          width: Math.round(bounds.width),
+          height: Math.round(bounds.height),
+        };
+      }}
+      onPointerCancel={() => {
+        dragOriginRef.current = null;
+      }}
+      onPointerUp={() => {
+        const origin = dragOriginRef.current;
+        dragOriginRef.current = null;
+        if (!onResize || embed.mode !== "expanded" || !rootRef.current || !origin)
+          return;
+        const bounds = rootRef.current.getBoundingClientRect();
+        const width = Math.round(bounds.width);
+        const height = Math.round(bounds.height);
         if (
-          Math.abs(bounds.width - priorWidth) > 3 ||
-          Math.abs(bounds.height - priorHeight) > 3
+          Math.abs(width - origin.width) > 3 ||
+          Math.abs(height - origin.height) > 3
         )
-          onResize({
-            width: Math.round(bounds.width),
-            height: Math.round(bounds.height),
-          });
+          onResize({ width, height });
       }}
     >
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5 sm:px-4">
@@ -689,11 +735,11 @@ export function ArtifactEmbed({
         >
           <Icon className="h-4 w-4" />
         </span>
-        <div className="min-w-[140px] flex-1">
+        <div className="min-w-[140px] flex-1 basis-[min(100%,220px)]">
           <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">
             {embed.source.title}
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
             <span>{meta.label}</span>
             <span>·</span>
             <span>{embed.mode === "compact" ? "Compact" : "Expanded"}</span>

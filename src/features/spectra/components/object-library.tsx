@@ -84,7 +84,7 @@ const threadMeta = {
 
 function objectId(entry: ObjectLibraryEntry) {
   return (
-    entry.artifact?._id ?? entry.thread?._id ?? entry.item?._id ?? "unknown"
+    entry.artifact?._id ?? entry.thread?._id ?? entry.item?.nodeId ?? "unknown"
   );
 }
 function objectTitle(entry: ObjectLibraryEntry) {
@@ -293,8 +293,8 @@ export function ObjectLibrary({
       .sort((a, b) => {
         if (sort === "pinned")
           return (
-            Number(Boolean(b.item?.viewData.pinned)) -
-              Number(Boolean(a.item?.viewData.pinned)) ||
+            Number(Boolean(b.item?.pinned)) -
+              Number(Boolean(a.item?.pinned)) ||
             objectUpdatedAt(b) - objectUpdatedAt(a)
           );
         if (sort === "workspace")
@@ -448,7 +448,7 @@ export function ObjectLibrary({
   }
 
   function actions(entry: ObjectLibraryEntry) {
-    const pinned = Boolean(entry.item?.viewData.pinned);
+    const pinned = Boolean(entry.item?.pinned);
     return (
       <div className="flex items-center gap-2">
         <IconAction
@@ -466,13 +466,13 @@ export function ObjectLibrary({
         ) : null}
         {onRemove && entry.item ? (
           <IconAction
-            icon={busyKey === `hide:${entry.item._id}` ? Loader2 : X}
-            label="Remove from workspace; the artifact remains available"
+            icon={busyKey === `hide:${entry.item.nodeId}` ? Loader2 : X}
+            label="Move back to General; nothing is deleted"
             danger
-            disabled={busyKey === `hide:${entry.item._id}`}
+            disabled={busyKey === `hide:${entry.item.nodeId}`}
             onClick={() => onRemove(entry)}
             className={
-              busyKey === `hide:${entry.item._id}` ? "animate-spin" : undefined
+              busyKey === `hide:${entry.item.nodeId}` ? "animate-spin" : undefined
             }
           />
         ) : null}
@@ -1050,7 +1050,7 @@ export function ObjectLibrary({
                         ) ?? selectedContextIds?.has(id);
                       return (
                         <div
-                          key={`${group.key}:${entry.item?._id ?? id}`}
+                          key={`${group.key}:${entry.item?.nodeId ?? id}`}
                           data-object-row="true"
                           data-card-state={
                             draggingArtifactId === entry.artifact?._id
@@ -1208,7 +1208,7 @@ export function ObjectLibrary({
                           ) ?? selectedContextIds?.has(id);
                         return (
                           <button
-                            key={`${group.key}:${entry.item?._id ?? id}`}
+                            key={`${group.key}:${entry.item?.nodeId ?? id}`}
                             type="button"
                             data-spectra-card="board"
                             data-card-state={

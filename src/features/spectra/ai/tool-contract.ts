@@ -11,7 +11,7 @@ export const SPECTRA_TOOL_CONTRACT: readonly SpectraToolCapability[] = [
   { type: "artifact.update", purpose: "Update one owned artifact when the user identifies or clearly refers to it.", execution: "immediate", availability: "wave5", batchable: false },
   { type: "artifact.archive", purpose: "Archive one owned artifact only when the user explicitly requests it; always pause for confirmation.", execution: "confirmation", availability: "wave5", batchable: true },
   { type: "workspaceItem.add", purpose: "Place an owned artifact in an owned workspace only when placement is requested.", execution: "immediate", availability: "wave5", batchable: true },
-  { type: "workspaceItem.hide", purpose: "Hide a requested workspace placement without deleting the source object.", execution: "immediate", availability: "wave5", batchable: true },
+  { type: "workspaceItem.hide", purpose: "Move a requested item out of its workspace and back to General. The item is not deleted.", execution: "immediate", availability: "wave5", batchable: true },
   { type: "workspaceItem.setPinned", purpose: "Pin or unpin an owned workspace item. Use exclusive=true only when the user says only this item should remain pinned.", execution: "immediate", availability: "wave5", batchable: true },
   { type: "workspace.create", purpose: "Create a workspace after explicit confirmation.", execution: "confirmation", availability: "wave5", batchable: false },
   { type: "workspace.update", purpose: "Update the name, description, icon, or color of an owned workspace when explicitly requested.", execution: "immediate", availability: "wave5", batchable: false },

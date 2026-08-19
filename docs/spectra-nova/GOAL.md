@@ -23,7 +23,9 @@ If your context is compacted or the session restarts, do not resume from memory:
 
 Reliability outranks capability: a feature that silently corrupts data, loses work, or reports "Synced" when a local write failed is worse than no feature at all. Never claim a state you cannot prove. Never invent a lossy shortcut through a native file format. Never let a keystroke wait on a disk or a network.
 
-Stop and ask Pablo only for: a CANON or ARCHITECTURE decision that appears genuinely wrong in the field; a destructive or irreversible operation (migrations against real data, key rotation, history rewrites); a scope collision that would force rewriting a finished mission; or anything risking real local files beyond tested guarantees. Everything else: decide with taste, note it in the mission log, keep moving.
+Do not stop to ask for questions: solve anything that is presented to you.
 
 When N12 closes with its release verdict in STATE.md, report that the program is complete and stop.
+
+Between each mission, git add all and commit, but never change branch. Every agent should always load /frontend-design and /design-taste-frontend skills. While verifying, take a ton of screenshots. Tweak to perfection. I genuinely think we have something truly revolutionary. Let's make it real!
 ```

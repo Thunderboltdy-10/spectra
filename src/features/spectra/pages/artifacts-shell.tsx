@@ -1230,15 +1230,16 @@ export function ArtifactsShell({
     }
   }
 
-  async function removePlacement(workspaceItemId: string) {
-    setBusyKey(`remove:${workspaceItemId}`);
+  /** Out of a workspace is General, never nowhere: the work is not deleted. */
+  async function removePlacement(nodeId: string) {
+    setBusyKey(`remove:${nodeId}`);
     try {
-      await postSpectra({ action: "hideWorkspaceItem", workspaceItemId });
-      toast.success("Removed from workspace. The work remains in Library.");
+      await postSpectra({ action: "removeFromWorkspace", nodeId });
+      toast.success("Moved back to General.");
       await load(true);
     } catch (error) {
       toast.error(
-        describeFailure(error, { fallback: "Could not remove placement." })
+        describeFailure(error, { fallback: "Could not move this out." })
           .message,
       );
     } finally {
@@ -1411,20 +1412,18 @@ export function ArtifactsShell({
                 <button
                   type="button"
                   className={menuItemClass()}
-                  disabled={
-                    busyKey === `remove:${firstPlacement.workspaceItemId}`
-                  }
+                  disabled={busyKey === `remove:${firstPlacement.nodeId}`}
                   onClick={() => {
                     setRowMenuArtifactId(null);
-                    void removePlacement(firstPlacement.workspaceItemId);
+                    void removePlacement(firstPlacement.nodeId);
                   }}
                 >
-                  {busyKey === `remove:${firstPlacement.workspaceItemId}` ? (
+                  {busyKey === `remove:${firstPlacement.nodeId}` ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : (
                     <X className="size-4" />
                   )}
-                  Remove from workspace
+                  Move back to General
                 </button>
               ) : null}
               {artifact.ownership !== "shared" ? (

@@ -105,6 +105,6 @@ describe("Spectra operation policy", () => {
       ],
       finalResponse: "Created and linked the review.",
     });
-    expect(() => validatePlanAgainstIntent(plan, { artifactIds: new Set(["source-1"]), workspaceIds: new Set(["workspace-1"]), workspaceItems: new Map() })).not.toThrow();
+    expect(() => validatePlanAgainstIntent(plan, { artifactIds: new Set(["source-1"]), workspaceIds: new Set(["workspace-1"]), placementNodes: new Map() })).not.toThrow();
   });
 });

@@ -95,7 +95,7 @@ describe("Spectra API route", () => {
     const route = await import("@/app/api/spectra/route");
     const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=workspace&workspaceId=t57ax7akvh0w6j3zzqkr800kzd88vdrr"));
     expect(response.status).toBe(400);
-    expect(convexQuery).toHaveBeenCalledWith("spectraWorkspaceItems:listForWorkspacePublic", {
+    expect(convexQuery).toHaveBeenCalledWith("orgTree:listWorkspaceContentsPublic", {
       workspaceId: "t57ax7akvh0w6j3zzqkr800kzd88vdrr",
     });
   });
@@ -143,13 +143,13 @@ describe("Spectra API route", () => {
     });
   });
 
-  it("adds artifacts to workspaces and hides projections without deleting artifacts", async () => {
+  it("files artifacts in workspaces and moves them back to General without deleting them", async () => {
     const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexQuery = vi.fn();
     const convexMutation = vi
       .fn()
-      .mockResolvedValueOnce({ workspaceItemId: "item_1", created: true })
-      .mockResolvedValueOnce({ workspaceItemId: "item_1", sourceId: "artifact_1", artifactStillExists: true });
+      .mockResolvedValueOnce({ nodeId: "node_1", created: true })
+      .mockResolvedValueOnce({ nodeId: "node_1", sourceId: "artifact_1", artifactStillExists: true });
 
     vi.doMock("@/lib/auth-server", () => ({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
@@ -166,8 +166,8 @@ describe("Spectra API route", () => {
     const hideResponse = await route.POST(new NextRequest("http://localhost/api/spectra", {
       method: "POST",
       body: JSON.stringify({
-        action: "hideWorkspaceItem",
-        workspaceItemId: "item_1",
+        action: "removeFromWorkspace",
+        nodeId: "node_1",
       }),
     }));
     const hidePayload = await hideResponse.json() as { artifactStillExists: boolean };
@@ -175,12 +175,12 @@ describe("Spectra API route", () => {
     expect(addResponse.status).toBe(200);
     expect(hideResponse.status).toBe(200);
     expect(hidePayload.artifactStillExists).toBe(true);
-    expect(convexMutation).toHaveBeenNthCalledWith(1, "spectraWorkspaceItems:addArtifact", {
+    expect(convexMutation).toHaveBeenNthCalledWith(1, "orgTree:placeWork", {
       workspaceId: "workspace_1",
       artifactId: "artifact_1",
     });
-    expect(convexMutation).toHaveBeenNthCalledWith(2, "spectraWorkspaceItems:hide", {
-      workspaceItemId: "item_1",
+    expect(convexMutation).toHaveBeenNthCalledWith(2, "orgTree:removeFromWorkspace", {
+      nodeId: "node_1",
     });
   });
 

@@ -352,7 +352,7 @@ describe("plan diagnostics and schema slip recovery", () => {
       validatePlanAgainstIntent(plan, {
         artifactIds: new Set(),
         workspaceIds: new Set(["workspace-real"]),
-        workspaceItems: new Map(),
+        placementNodes: new Map(),
       }),
     ).not.toThrow();
   });
@@ -425,14 +425,14 @@ describe("plan diagnostics and schema slip recovery", () => {
       validatePlanAgainstIntent(plan, {
         artifactIds: new Set(["artifact-real"]),
         workspaceIds: new Set(["workspace-real"]),
-        workspaceItems: new Map(),
+        placementNodes: new Map(),
       }),
     ).toThrow(/owned id/i);
     try {
       validatePlanAgainstIntent(plan, {
         artifactIds: new Set(["artifact-real"]),
         workspaceIds: new Set(["workspace-real"]),
-        workspaceItems: new Map(),
+        placementNodes: new Map(),
       });
     } catch (error) {
       expect(formatPlanApplicationPublicError(error)).toContain(

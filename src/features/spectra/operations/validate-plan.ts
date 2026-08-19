@@ -4,7 +4,7 @@ export type OwnedOperationReferences = {
   artifactIds: ReadonlySet<string>;
   artifactBlueprints?: ReadonlyMap<string, string>;
   workspaceIds: ReadonlySet<string>;
-  workspaceItems: ReadonlyMap<string, { artifactId?: string; workspaceId: string }>;
+  placementNodes: ReadonlyMap<string, { artifactId?: string; workspaceId: string }>;
   threadIds?: ReadonlySet<string>;
 };
 
@@ -74,7 +74,7 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
     }
     if (operation.type === "workspaceItem.hide") {
       if (intent.mode !== "remove_placement" && intent.mode !== "mixed") throw new Error("The proposed placement removal is unrelated to the interpreted request.");
-      const item = references.workspaceItems.get(operation.input.workspaceItemId);
+      const item = references.placementNodes.get(operation.input.nodeId);
       if (!item) throw new Error("Invalid workspace item reference. Synthetic operation keys cannot be used as database ids.");
       if (intent.targetArtifactId && item.artifactId !== intent.targetArtifactId) throw new Error("The placement removal target does not match the interpreted request.");
       if (intent.targetWorkspaceId && item.workspaceId !== intent.targetWorkspaceId) throw new Error("The placement removal workspace does not match the interpreted request.");
@@ -86,7 +86,7 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
     }
     if (operation.type === "workspaceItem.setPinned") {
       if (intent.mode !== "place" && intent.mode !== "update" && intent.mode !== "mixed") throw new Error("The proposed pin change is unrelated to the interpreted request.");
-      if (!references.workspaceItems.has(operation.input.workspaceItemId)) throw new Error("Invalid workspace item reference. Pinning requires an owned workspace item id.");
+      if (!references.placementNodes.has(operation.input.nodeId)) throw new Error("Invalid workspace item reference. Pinning requires an owned workspace item id.");
     }
     if (operation.type === "workspace.create" && intent.mode !== "create_workspace" && intent.mode !== "mixed") {
       throw new Error("The proposed workspace creation is unrelated to the interpreted request.");

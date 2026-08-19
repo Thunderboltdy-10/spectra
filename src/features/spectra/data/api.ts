@@ -325,8 +325,9 @@ export type SpectraWorkspacePortableManifest = {
     artifactId: string;
     title: string;
     blueprintKey: SpectraBlueprintKey;
-    viewData: Record<string, unknown>;
-    layout: Record<string, unknown>;
+    /** Folder names inside the workspace, outermost first. */
+    path?: string[];
+    pinned?: boolean;
   }>;
 };
 
@@ -371,7 +372,7 @@ export type SpectraArtifact = {
   placements?: Array<{
     workspaceId: string;
     workspaceTitle: string;
-    workspaceItemId: string;
+    nodeId: string;
     pinned?: boolean;
   }>;
   placementStatus?: "inbox" | "shared" | "workspace";
@@ -470,25 +471,20 @@ export type SpectraArtifactVersion = {
   createdAt: number;
 };
 
+/**
+ * One thing inside a workspace: the tree node that puts it there, plus the work
+ * or thread it points at. There is exactly one node per item, so a title and a
+ * pin are properties of the item itself rather than of a per-view row.
+ */
 export type SpectraWorkspaceItem = {
-  _id: string;
+  nodeId: string;
   workspaceId: string;
-  sourceType: "artifact" | "thread" | "task" | "widget" | "custom";
+  parentId: string | null;
+  kind: "work" | "thread";
   sourceId: string;
-  viewData: {
-    titleOverride?: string;
-    compactSummary?: string;
-    cardVariant?: string;
-    pinned?: boolean;
-    hidden?: boolean;
-  };
-  layout: {
-    view: "cards" | "canvas" | "timeline";
-    position?: { x: number; y: number };
-    size?: { w: number; h: number };
-    zIndex?: number;
-    collapsed?: boolean;
-  };
+  name: string;
+  pinned: boolean;
+  orderKey: string;
   artifact: SpectraArtifact | null;
   thread?: SpectraThread | null;
   createdAt: number;
@@ -2540,12 +2536,9 @@ export function workspaceItemToArtifactCardView(
   if (!item.artifact) return null;
   return {
     id: item.artifact._id,
-    title: item.viewData.titleOverride ?? item.artifact.title,
+    title: item.name,
     blueprintKey: item.artifact.blueprintKey,
-    summary:
-      item.viewData.compactSummary ??
-      item.artifact.summary ??
-      "No summary yet.",
+    summary: item.artifact.summary ?? "No summary yet.",
     meta: "Workspace card",
     placement: "workspace",
     updatedAt: item.artifact.updatedAt,

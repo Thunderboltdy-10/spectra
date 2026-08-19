@@ -9,8 +9,21 @@ import {
   evaluateAccess,
   listDirectlyGrantedResourceIds,
 } from "./authorityShared";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { incrementOperationalCounter } from "./operationalCounters";
+import {
+  createFolderNode,
+  createLinkNode,
+  dissolveWorkspaceNode,
+  ensureWorkspaceNode,
+  findPrimaryNode,
+  isGeneralWorkspace,
+  listChildNodes,
+  placeSourceNode,
+  relativeFolderPath,
+  renameSourceNodes,
+  workspaceContextNodes,
+} from "./orgTreeShared";
 
 const vDefaultView = v.union(
   v.literal("cards"),
@@ -34,51 +47,6 @@ function boundedText(value: unknown, max: number) {
   return typeof value === "string" && value.trim()
     ? value.trim().slice(0, max)
     : undefined;
-}
-
-function finiteNumber(value: unknown, min: number, max: number) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.min(max, Math.max(min, value))
-    : undefined;
-}
-
-function sanitizeViewData(value: unknown) {
-  const data = recordValue(value);
-  return {
-    titleOverride: boundedText(data?.titleOverride, 160),
-    compactSummary: boundedText(data?.compactSummary, 500),
-    cardVariant: boundedText(data?.cardVariant, 48),
-    pinned: typeof data?.pinned === "boolean" ? data.pinned : undefined,
-    hidden: typeof data?.hidden === "boolean" ? data.hidden : undefined,
-  };
-}
-
-function sanitizeLayout(value: unknown): {
-  view: "cards" | "canvas" | "timeline";
-  position?: { x: number; y: number };
-  size?: { w: number; h: number };
-  zIndex?: number;
-  collapsed?: boolean;
-} {
-  const layout = recordValue(value);
-  const position = recordValue(layout?.position);
-  const size = recordValue(layout?.size);
-  const view =
-    layout?.view === "canvas" || layout?.view === "timeline"
-      ? layout.view
-      : "cards";
-  const x = finiteNumber(position?.x, -1_000_000, 1_000_000);
-  const y = finiteNumber(position?.y, -1_000_000, 1_000_000);
-  const w = finiteNumber(size?.w, 80, 10_000);
-  const h = finiteNumber(size?.h, 60, 10_000);
-  return {
-    view,
-    position: x !== undefined && y !== undefined ? { x, y } : undefined,
-    size: w !== undefined && h !== undefined ? { w, h } : undefined,
-    zIndex: finiteNumber(layout?.zIndex, -100_000, 100_000),
-    collapsed:
-      typeof layout?.collapsed === "boolean" ? layout.collapsed : undefined,
-  };
 }
 
 function liveWorkspace<
@@ -230,6 +198,10 @@ export const create = mutation({
       updatedAt: now,
       lastActivityAt: now,
     });
+    /* A workspace *is* a place in the tree, so it appears there at creation
+       rather than on the next read (D32). */
+    const workspace = await ctx.db.get(workspaceId);
+    if (workspace) await ensureWorkspaceNode(ctx, workspace);
     await incrementOperationalCounter(ctx, {
       schoolId: actor.schoolId,
       category: "workspace_created",
@@ -299,6 +271,13 @@ export const update = mutation({
     if (args.color !== undefined) patch.color = args.color.trim() || undefined;
     if (args.defaultView !== undefined) patch.defaultView = args.defaultView;
     await ctx.db.patch(args.workspaceId, patch);
+    if (patch.title !== undefined)
+      await renameSourceNodes(
+        ctx,
+        "workspace",
+        args.workspaceId,
+        patch.title,
+      );
     return { workspaceId: args.workspaceId };
   },
 });
@@ -341,6 +320,8 @@ export const createPending = mutation({
       updatedAt: now,
       lastActivityAt: now,
     });
+    const pending = await ctx.db.get(workspaceId);
+    if (pending) await ensureWorkspaceNode(ctx, pending);
     await incrementOperationalCounter(ctx, {
       schoolId: actor.schoolId,
       category: "workspace_created",
@@ -393,6 +374,12 @@ export const finalizePending = mutation({
       updatedAt: now,
       lastActivityAt: now,
     });
+    await renameSourceNodes(
+      ctx,
+      "workspace",
+      args.workspaceId,
+      args.title.trim() || workspace.title,
+    );
     return { workspaceId: args.workspaceId };
   },
 });
@@ -583,6 +570,13 @@ export const archive = mutation({
       args.workspaceId,
       "delete",
     );
+    /* General is the floor everything falls back to; archiving it would leave
+       work with nowhere to be (D31). Its node stays in the tree either way, so
+       archiving another workspace never orphans what is inside it. */
+    if (isGeneralWorkspace(workspace))
+      throw new Error(
+        "General cannot be archived — it is where work with no other home lives.",
+      );
     await ctx.db.patch(args.workspaceId, {
       status: "archived",
       updatedAt: Date.now(),
@@ -610,6 +604,10 @@ export const permanentlyDelete = mutation({
       args.workspaceId,
       "delete",
     );
+    if (isGeneralWorkspace(workspace))
+      throw new Error(
+        "General cannot be deleted — it is where work with no other home lives.",
+      );
     const expected = `Remove ${workspace.title} permanently`;
     if (args.confirmation !== expected)
       throw new Error(`Type “${expected}” to confirm`);
@@ -622,22 +620,19 @@ export const permanentlyDelete = mutation({
       actor.accountId,
     );
 
-    const items = await ctx.db
-      .query("spectraWorkspaceItems")
-      .withIndex("by_workspace", (q) => q.eq("workspaceId", args.workspaceId))
-      .collect();
-    const artifactIds = Array.from(
-      new Set(
-        items
-          .filter((item) => item.sourceType === "artifact")
-          .map((item) => item.sourceId),
-      ),
+    const workNodes = await workspaceContextNodes(
+      ctx,
+      args.workspaceId,
+      "work",
     );
+    const artifactIds = Array.from(
+      new Set(workNodes.map((node) => node.sourceId).filter(Boolean)),
+    ) as string[];
 
     // Workspaces organize artifacts; they never own their content. Removing a
-    // workspace therefore detaches placements and provenance instead of
-    // cascading into artifacts, history, links, AI runs, or collaborators'
-    // work. Unplaced owned artifacts naturally return to Inbox.
+    // workspace therefore detaches provenance instead of cascading into
+    // artifacts, history, links, AI runs, or collaborators' work. Everything
+    // inside moves to General, which is where work with no other home lives.
     for (const sourceId of artifactIds) {
       const artifact = ctx.db.normalizeId("spectraArtifacts", sourceId);
       if (artifact) {
@@ -650,12 +645,7 @@ export const permanentlyDelete = mutation({
       }
     }
 
-    await Promise.all(
-      items.map(async (item) => {
-        const current = await ctx.db.get(item._id);
-        if (current) await ctx.db.delete(item._id);
-      }),
-    );
+    await dissolveWorkspaceNode(ctx, workspace);
 
     const [threads, runs] = await Promise.all([
       ctx.db
@@ -727,17 +717,17 @@ export const exportPortableManifest = query({
       args.workspaceId,
       "read",
     );
-    const items = await ctx.db
-      .query("spectraWorkspaceItems")
-      .withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id))
-      .collect();
+    const contents = await workspaceContextNodes(ctx, workspace._id);
+    const items = contents.filter(
+      (node) => node.kind === "work" || node.kind === "thread",
+    );
     const placements: Array<Record<string, unknown>> = [];
     const unsupported = new Set<string>();
     let inaccessible = 0;
 
     for (const item of items.slice(0, MAX_WORKSPACE_MANIFEST_PLACEMENTS)) {
-      if (item.sourceType !== "artifact") {
-        unsupported.add(item.sourceType);
+      if (item.kind !== "work" || !item.sourceId) {
+        unsupported.add(item.kind);
         continue;
       }
       const artifactId = ctx.db.normalizeId("spectraArtifacts", item.sourceId);
@@ -755,8 +745,10 @@ export const exportPortableManifest = query({
         artifactId: String(artifact._id),
         title: artifact.title,
         blueprintKey: artifact.blueprintKey,
-        viewData: sanitizeViewData(item.viewData),
-        layout: sanitizeLayout(item.layout),
+        /* The folders a reader built are part of the workspace, so they travel
+           with it. An older importer ignores this field harmlessly. */
+        path: await relativeFolderPath(ctx, item),
+        pinned: item.pinned === true,
       });
     }
 
@@ -889,11 +881,61 @@ export const importPortableManifest = mutation({
       lastActivityAt: now,
     });
 
+    const imported = await ctx.db.get(workspaceId);
+    const workspaceNode = imported
+      ? await ensureWorkspaceNode(ctx, imported)
+      : null;
+
     let placed = 0;
     let skipped = 0;
+    let referenced = 0;
     const unsupported = new Set<string>();
     const warnings: string[] = [];
     const seen = new Set<string>();
+    /* Folders are rebuilt once per distinct path, so a repeated path reuses the
+       folder already made instead of stacking duplicates. */
+    const folders = new Map<string, Id<"orgNodes"> | null>();
+    const folderFor = async (raw: unknown) => {
+      if (!workspaceNode) return null;
+      const segments = (Array.isArray(raw) ? raw : [])
+        .map((part) => boundedText(part, 200))
+        .filter((part): part is string => Boolean(part))
+        .slice(0, 8);
+      let parentId: Id<"orgNodes"> | null = workspaceNode._id;
+      let key = "";
+      for (const segment of segments) {
+        key = key ? key + "/" + segment : segment;
+        const known = folders.get(key);
+        if (known !== undefined) {
+          parentId = known;
+          continue;
+        }
+        const siblings = await listChildNodes(ctx, actor._id, parentId);
+        const existing = siblings.find(
+          (row) => row.kind === "folder" && row.name === segment,
+        );
+        let next: Id<"orgNodes"> | null;
+        try {
+          next = existing
+            ? existing._id
+            : (
+                await createFolderNode(ctx, {
+                  accountId: actor._id,
+                  schoolId: actor.schoolId,
+                  name: segment,
+                  parentId,
+                })
+              )._id;
+        } catch {
+          /* An unusable folder name must not cost the reader the artifact, so
+             the item lands at the workspace root instead. */
+          next = parentId;
+        }
+        folders.set(key, next);
+        parentId = next;
+      }
+      return parentId;
+    };
     for (const rawPlacement of safePlacements) {
       const placement = recordValue(rawPlacement);
       const artifactIdText = boundedText(placement?.artifactId, 100);
@@ -919,19 +961,43 @@ export const importPortableManifest = mutation({
       }
       const sourceType = boundedText(placement?.sourceType, 32);
       if (sourceType && sourceType !== "artifact") unsupported.add(sourceType);
-      await ctx.db.insert("spectraWorkspaceItems", {
-        workspaceId,
-        sourceType: "artifact",
-        sourceId: String(artifact._id),
-        placedByAccountId: actor._id,
-        accessProjection: false,
-        viewData: sanitizeViewData(placement?.viewData),
-        layout: sanitizeLayout(placement?.layout),
-        createdAt: now,
-        updatedAt: now,
-      });
+      const parentId = await folderFor(placement?.path);
+      /* An artifact already filed somewhere keeps that home: an import adds a
+         place to find it, it never moves a reader's work (I1, D30). */
+      const existingNode = await findPrimaryNode(
+        ctx,
+        actor._id,
+        "work",
+        artifact._id,
+      );
+      if (existingNode && existingNode.deletedAt === undefined) {
+        await createLinkNode(ctx, {
+          accountId: actor._id,
+          schoolId: actor.schoolId,
+          targetNodeId: existingNode._id,
+          parentId,
+        });
+        referenced += 1;
+      } else
+        await placeSourceNode(ctx, {
+          accountId: actor._id,
+          schoolId: actor.schoolId,
+          kind: "work",
+          sourceId: artifact._id,
+          name: artifact.title,
+          target: { parentId },
+          placedByAccountId: actor._id,
+          pinned: placement?.pinned === true ? true : undefined,
+        });
       placed += 1;
     }
+    if (referenced)
+      warnings.push(
+        referenced === 1
+          ? "1 artifact was added as a reference because it is already filed elsewhere."
+          : referenced +
+              " artifacts were added as references because they are already filed elsewhere.",
+      );
     if (skipped)
       warnings.push(
         `${skipped} inaccessible, stale, duplicate, or malformed artifact reference${skipped === 1 ? " was" : "s were"} skipped.`,

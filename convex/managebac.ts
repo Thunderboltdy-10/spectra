@@ -5,6 +5,11 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { writeAuditEvent } from "./auditShared";
 import {
+  dissolveWorkspaceNode,
+  findPrimaryNode,
+  placeSourceNode,
+} from "./orgTreeShared";
+import {
   getAccountByClerkId,
   getActorForAccountId,
   getAuthenticatedActor,
@@ -1886,22 +1891,16 @@ async function ensurePlannerProjection(
     source.providerClassId,
     source.academicPeriodKey,
   );
-  if (workspaceId)
-    await ctx.db.insert("spectraWorkspaceItems", {
-      workspaceId,
-      sourceType: "artifact",
-      sourceId: artifactId,
-      viewData: {
-        compactSummary: "ManageBac source · user overlay preserved",
-        pinned: false,
-        hidden: false,
-      },
-      layout: { view: "cards" },
-      placedByAccountId: accountId,
-      accessProjection: true,
-      createdAt: now,
-      updatedAt: now,
-    });
+  await placeSourceNode(ctx, {
+    accountId,
+    schoolId: integration.schoolId,
+    kind: "work",
+    sourceId: artifactId,
+    name: title,
+    target: workspaceId ? { workspaceId } : {},
+    placedByAccountId: accountId,
+    accessProjection: true,
+  });
   const projectionId = await ctx.db.insert("externalProjections", {
     integrationId: integration._id,
     schoolId: integration.schoolId,
@@ -1992,43 +1991,10 @@ async function ensureResourceProjection(
   );
   const now = Date.now();
   const sourceId = `managebac:${source._id}`;
-  if (workspaceId) {
-    const placed = await ctx.db
-      .query("spectraWorkspaceItems")
-      .withIndex("by_workspace_source", (q) =>
-        q
-          .eq("workspaceId", workspaceId)
-          .eq("sourceType", "custom")
-          .eq("sourceId", sourceId),
-      )
-      .unique();
-    if (!placed)
-      await ctx.db.insert("spectraWorkspaceItems", {
-        workspaceId,
-        sourceType: "custom",
-        sourceId,
-        viewData: {
-          titleOverride: text(
-            normalized.title ?? normalized.name,
-            240,
-            "ManageBac resource",
-          ),
-          compactSummary: text(
-            normalized.description ?? normalized.fileName,
-            500,
-            "ManageBac source resource",
-          ),
-          cardVariant: "source-resource",
-          pinned: false,
-          hidden: false,
-        },
-        layout: { view: "cards" },
-        placedByAccountId: accountId,
-        accessProjection: true,
-        createdAt: now,
-        updatedAt: now,
-      });
-  }
+  /* The projection below is the record of this resource. It gets no tree node:
+     the tree holds identities, and a provider resource has none here until it
+     becomes a real artifact. */
+  void workspaceId;
   if (existing) {
     await ctx.db.patch(existing._id, {
       recordId: source._id,
@@ -3464,45 +3430,31 @@ export const listMyClassCandidates = query({
   },
 });
 
-async function ensureClassWorkspaceItem(
+/**
+ * File a projected school artifact in its class workspace. Returns whether this
+ * call is what put it there, so the caller can report honest counts.
+ */
+async function ensureClassWorkPlacement(
   ctx: MutationCtx,
   workspaceId: Id<"spectraWorkspaces">,
   accountId: Id<"accounts">,
-  sourceType: "artifact" | "custom",
-  sourceId: string,
-  viewData: {
-    titleOverride?: string;
-    compactSummary?: string;
-    cardVariant?: string;
-  } = {},
+  schoolId: Id<"schools">,
+  artifactId: Id<"spectraArtifacts">,
 ) {
-  const existing = await ctx.db
-    .query("spectraWorkspaceItems")
-    .withIndex("by_workspace_source", (q) =>
-      q
-        .eq("workspaceId", workspaceId)
-        .eq("sourceType", sourceType)
-        .eq("sourceId", sourceId),
-    )
-    .unique();
-  if (existing) return false;
-  const now = Date.now();
-  await ctx.db.insert("spectraWorkspaceItems", {
-    workspaceId,
-    sourceType,
-    sourceId,
-    viewData: {
-      ...viewData,
-      pinned: false,
-      hidden: false,
-    },
-    layout: { view: "cards" },
+  const artifact = await ctx.db.get(artifactId);
+  if (!artifact) return false;
+  const before = await findPrimaryNode(ctx, accountId, "work", artifactId);
+  await placeSourceNode(ctx, {
+    accountId,
+    schoolId,
+    kind: "work",
+    sourceId: artifactId,
+    name: artifact.title,
+    target: { workspaceId },
     placedByAccountId: accountId,
     accessProjection: true,
-    createdAt: now,
-    updatedAt: now,
   });
-  return true;
+  return before === null || before.workspaceContextId !== workspaceId;
 }
 
 export const materializeClassWorkspaces = mutation({
@@ -3635,13 +3587,12 @@ export const materializeClassWorkspaces = mutation({
           );
           if (
             taskId &&
-            (await ensureClassWorkspaceItem(
+            (await ensureClassWorkPlacement(
               ctx,
               workspaceId,
               actor.accountId,
-              "artifact",
-              String(taskId),
-              { compactSummary: "School source task · personal planning remains separate" },
+              integration.schoolId,
+              taskId,
             ))
           )
             projected += 1;
@@ -3657,32 +3608,10 @@ export const materializeClassWorkspaces = mutation({
           projected += 1;
           continue;
         }
-        const normalized = record(relatedRecord.normalized);
-        if (
-          await ensureClassWorkspaceItem(
-            ctx,
-            workspaceId,
-            actor.accountId,
-            "custom",
-            `managebac:${relatedRecord._id}`,
-            {
-              titleOverride: text(
-                normalized.title ?? normalized.name ?? normalized.subject,
-                240,
-                relatedRecord.recordType === "discussion"
-                  ? "Class discussion"
-                  : "Class announcement",
-              ),
-              compactSummary: plainText(
-                normalized.description ?? normalized.body ?? normalized.message,
-                500,
-                "Source-linked class update",
-              ),
-              cardVariant: `school-${relatedRecord.recordType}`,
-            },
-          )
-        )
-          projected += 1;
+        /* Discussions and announcements have no local identity, so there is
+           nothing to file in the tree. They are counted as skipped rather than
+           reported as projected content that a reader cannot open. */
+        skipped += 1;
       }
     }
     return { created, refreshed, projected, skipped, requested: selected.length };
@@ -3718,11 +3647,9 @@ export const purgeAutoCreatedClassWorkspaces = mutation({
     const now = Date.now();
     let removed = 0;
     for (const workspace of owned) {
-      const items = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id))
-        .collect();
-      for (const item of items) await ctx.db.delete(item._id);
+      /* Removing an auto-created shelf must not remove the work on it: the
+         contents move to General (D31). */
+      await dissolveWorkspaceNode(ctx, workspace);
       await ctx.db.delete(workspace._id);
       removed += 1;
     }

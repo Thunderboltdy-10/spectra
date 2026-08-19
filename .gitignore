@@ -42,3 +42,7 @@ yarn-error.log*
 next-env.d.ts
 
 /ai-education-workspace-landing-page
+# Local-only: pre-migration Convex snapshots and scratch working files.
+# Never commit user data.
+/.backups/
+/.tmp-n1/

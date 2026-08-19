@@ -1,0 +1,272 @@
+uid=1_0 RootWebArea "Spectra — The AI School Platform" url="http://localhost:3000/library"
+  uid=1_1 link "Skip to content" url="http://localhost:3000/library#main-content"
+    uid=1_2 StaticText "Skip to content"
+  uid=1_3 generic
+    uid=1_4 complementary "Spectra navigation"
+      uid=1_5 button "Expand sidebar" description="Expand sidebar"
+      uid=1_6 link "Spectra home" url="http://localhost:3000/workspace?home=1"
+        uid=1_7 image "Spectra"
+      uid=1_8 navigation "Main destinations"
+        uid=1_9 link "Chat" url="http://localhost:3000/chat"
+        uid=1_10 link "Workspace" url="http://localhost:3000/workspace?home=1"
+        uid=1_11 link "Library" url="http://localhost:3000/library"
+        uid=1_12 link "Calendar" url="http://localhost:3000/calendar"
+        uid=1_13 link "Agents" url="http://localhost:3000/agents"
+        uid=1_14 link "School" url="http://localhost:3000/school"
+        uid=1_15 link "Analytics" url="http://localhost:3000/analytics"
+        uid=1_16 link "Admin" url="http://localhost:3000/admin"
+        uid=1_17 link "Super Admin" url="http://localhost:3000/superadmin"
+      uid=1_18 link url="http://localhost:3000/chat"
+      uid=1_19 button "Share current page"
+      uid=1_20 button "Notifications"
+      uid=1_21 button "Settings"
+      uid=1_22 button "Manage account"
+    uid=1_23 main
+      uid=1_24 button "All Close All"
+        uid=1_25 button "Close All"
+      uid=1_26 button "Open a new home view" description="Open a new home view"
+      uid=1_27 heading "Library" level="1"
+      uid=1_28 textbox "Search work"
+      uid=1_29 button "All workspaces"
+      uid=1_30 button "New work"
+      uid=1_31 navigation "Library collections"
+        uid=1_32 button "All work, 80" description="All work"
+        uid=1_33 button "Threads, 200" description="Threads"
+        uid=1_34 button "Unplaced, 65" description="Unplaced"
+        uid=1_35 button "Shared with me" description="Shared with me"
+        uid=1_36 button "Recent, 80" description="Recent"
+        uid=1_37 button "More Library collections" description="More Library collections" expandable haspopup="menu"
+      uid=1_38 button "All" expandable haspopup="menu"
+      uid=1_39 button "Recently updated"
+      uid=1_40 button "List"
+      uid=1_41 button "Board"
+      uid=1_42 button "Canvas"
+      uid=1_43 heading "Unplaced work" level="2"
+      uid=1_44 StaticText "65"
+      uid=1_45 StaticText "Work not yet placed in a workspace."
+      uid=1_46 button "New Board A collaborative spatial canvas for thinking together. Board 2d ago"
+      uid=1_47 button "More actions for New Board" description="More actions" expandable haspopup="menu"
+      uid=1_48 button "New Deck Active-recall cards and spaced practice. Flashcards 2d ago"
+      uid=1_49 button "More actions for New Deck" description="More actions" expandable haspopup="menu"
+      uid=1_50 button "M1 edit evidence — 2026-08-12 Structured writing, notes, and authored resources. Document 2d ago"
+      uid=1_51 button "More actions for M1 edit evidence — 2026-08-12" description="More actions" expandable haspopup="menu"
+      uid=1_52 button "Latest AI Models & Labs — Timetable A timetable-style comparison of major AI labs and their frontier model families, with release checkpoints, access modes, strengths, and official lab links. The board clearly marks its evidence snapshot so version labels can be checked before use. AI machine-learning Board 5d ago"
+      uid=1_53 button "More actions for Latest AI Models & Labs — Timetable" description="More actions" expandable haspopup="menu"
+      uid=1_54 button "Tides Quiz A short, formative two-question quiz about what causes tides and when high and low tides occur. tides earth-science Quiz 7d ago"
+      uid=1_55 button "More actions for Tides Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_56 button "Clouds Quiz A short, formative two-question quiz for age 10 about how clouds form and what different cloud shapes can tell us about the weather. clouds weather Quiz 7d ago"
+      uid=1_57 button "More actions for Clouds Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_58 button "Volcanoes Quiz A short, formative two-question quiz about volcanoes for age 12, with explanations and feedback to support review. volcanoes age-12 Quiz 7d ago"
+      uid=1_59 button "More actions for Volcanoes Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_60 button "Light Basics Quiz A short, formative two-question quiz for an 11-year-old about how light travels and how shadows form. light age-11 Quiz 7d ago"
+      uid=1_61 button "More actions for Light Basics Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_62 button "Sound Quiz 2-question quiz about Sound Quiz. Quiz 7d ago"
+      uid=1_63 button "More actions for Sound Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_64 button "Moon Quiz 2-question quiz about Moon Quiz. Quiz 7d ago"
+      uid=1_65 button "More actions for Moon Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_66 button "Friction Quiz 2-question quiz about Friction Quiz. Quiz 7d ago"
+      uid=1_67 button "More actions for Friction Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_68 button "Magnets Quiz A two-question multiple-choice quiz about magnets for an 11-year-old. magnets age-11 Quiz 7d ago"
+      uid=1_69 button "More actions for Magnets Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_70 button "Water Cycle Quiz A three-question multiple-choice quiz about the water cycle for a 13-year-old, with four options and a one-sentence explanation for each correct answer. Quiz 7d ago"
+      uid=1_71 button "More actions for Water Cycle Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_72 button "Study Physics Review and practise core Physics concepts. Plan 7d ago"
+      uid=1_73 button "More actions for Study Physics" description="More actions" expandable haspopup="menu"
+      uid=1_74 button "New Whiteboard A collaborative spatial canvas for thinking together. Board 7d ago"
+      uid=1_75 button "More actions for New Whiteboard" description="More actions" expandable haspopup="menu"
+      uid=1_76 button "New Sheet Workbooks, formulas, structured analysis, and charts. Sheet 7d ago"
+      uid=1_77 button "More actions for New Sheet" description="More actions" expandable haspopup="menu"
+      uid=1_78 button "New Presentation Spectra-native visual storytelling and presenting. Presentation 7d ago"
+      uid=1_79 button "More actions for New Presentation" description="More actions" expandable haspopup="menu"
+      uid=1_80 button "New Task Actionable work connected to time and resources. Plan 7d ago"
+      uid=1_81 button "More actions for New Task" description="More actions" expandable haspopup="menu"
+      uid=1_82 button "Show 47 more"
+      uid=1_83 heading "In workspaces" level="2"
+      uid=1_84 StaticText "Work that has been added to your workspaces."
+      uid=1_85 StaticText "M4 QA — Artifact Rebuild"
+      uid=1_86 StaticText "10"
+      uid=1_87 button "Photosynthesis — Unit 4 study notes Structured revision notes with headings, a worked practical and an equation. biology unit-4 Document 7h ago"
+      uid=1_88 button "More actions for Photosynthesis — Unit 4 study notes" description="More actions" expandable haspopup="menu"
+      uid=1_89 button "Photosynthesis — end of unit quiz Twelve mixed questions with explanations, timing and shuffled options. biology assessment Quiz 2d ago"
+      uid=1_90 button "More actions for Photosynthesis — end of unit quiz" description="More actions" expandable haspopup="menu"
+      uid=1_91 button "Rates of reaction — Lesson 3 Eight-slide lesson deck with speaker notes and a botanical theme. chemistry lesson Presentation 2d ago"
+      uid=1_92 button "More actions for Rates of reaction — Lesson 3" description="More actions" expandable haspopup="menu"
+      uid=1_93 button "Titration results — class data Ten students, three trials, live formulas, frozen headers and a named range. chemistry data Sheet 3d ago"
+      uid=1_94 button "More actions for Titration results — class data" description="More actions" expandable haspopup="menu"
+      uid=1_95 button "Chemistry IA — analysis and evaluation Planner task artifact with status and links. Plan 3d ago"
+      uid=1_96 button "More actions for Chemistry IA — analysis and evaluation" description="More actions" expandable haspopup="menu"
+      uid=1_97 button "IB Biology HL coach A configured agent with scope, instructions, three skills and routing examples. biology agent Agent 3d ago"
+      uid=1_98 button "More actions for IB Biology HL coach" description="More actions" expandable haspopup="menu"
+      uid=1_99 button "Unit 4 concept map Two pages, three layers, a frame, sticky notes and labelled connectors. biology revision Board 3d ago"
+      uid=1_100 button "More actions for Unit 4 concept map" description="More actions" expandable haspopup="menu"
+      uid=1_101 button "Projectile motion visualiser Three files with a live canvas visualisation and slider controls. physics interactive Code 3d ago"
+      uid=1_102 button "More actions for Projectile motion visualiser" description="More actions" expandable haspopup="menu"
+      uid=1_103 button "Show 2 more"
+      uid=1_104 StaticText "Spectra Launch Studio"
+      uid=1_105 StaticText "5"
+      uid=1_106 button "Enzyme Fundamentals Quiz A 10-question formative quiz covering enzyme basics: active site and substrate binding, activation energy, induced fit, cofactors vs. coenzymes, Michaelis-Menten kinetics (Km and Vmax), competitive vs. non-competitive inhibition, and allosteric regulation. Multiple-choice and true/false items with immediate feedback. enzymes biochemistry Quiz 7d ago"
+      uid=1_107 button "More actions for Enzyme Fundamentals Quiz" description="More actions" expandable haspopup="menu"
+      uid=1_108 button "New Task Actionable work connected to time and resources. Plan 7d ago"
+      uid=1_109 button "More actions for New Task" description="More actions" expandable haspopup="menu"
+      uid=1_110 button "Glycolysis Revision — This Week A one-week glycolysis revision timetable with daily study blocks covering the energy investment phase, cleavage and energy payoff phase, key enzymes and regulation, substrate-level phosphorylation, NAD+ regeneration, and connections to the Krebs cycle. Each session includes focused review, active recall, and practice w glycolysis biology Calendar 7d ago"
+      uid=1_111 button "More actions for Glycolysis Revision — This Week" description="More actions" expandable haspopup="menu"
+      uid=1_112 button "Enzyme Revision — This Week A one-week enzyme revision timetable with daily study blocks covering enzyme structure, kinetics, inhibition, regulation, and clinical applications. Each session includes focused review, active recall, and practice with the Enzyme Inhibitors Quiz and related flashcards. enzymes biochemistry Calendar 7d ago"
+      uid=1_113 button "More actions for Enzyme Revision — This Week" description="More actions" expandable haspopup="menu"
+      uid=1_114 button "Weekly Study Timetable Plan classes, deep work, tasks, and study sessions in one place. calendar-migrated Calendar 7d ago"
+      uid=1_115 button "More actions for Weekly Study Timetable" description="More actions" expandable haspopup="menu"
+      uid=1_116 complementary "Work studio"
+        uid=1_117 button "Resize Work studio"
+        uid=1_118 StaticText "DOCUMENT"
+        uid=1_119 textbox "Untitled work" multiline value="Photosynthesis — Unit 4 study notes"
+        uid=1_120 textbox "Short useful summary" multiline value="Structured revision notes with headings, a worked practical and an equation."
+        uid=1_121 button "Comments"
+        uid=1_122 button "Open as tab"
+        uid=1_123 button "More work actions" expandable haspopup="menu"
+        uid=1_124 button "Close"
+        uid=1_125 region "Work surface"
+          uid=1_126 combobox "Text style" expandable haspopup="listbox" value="Heading 1"
+          uid=1_127 button "Bold"
+          uid=1_128 button "Italic"
+          uid=1_129 button "Underline"
+          uid=1_130 button "Bullet list"
+          uid=1_131 button "Numbered list"
+          uid=1_132 button "Link"
+          uid=1_133 combobox "Alignment" expandable haspopup="listbox" value="Left"
+          uid=1_134 button "Highlight"
+          uid=1_135 button "Find"
+          uid=1_136 button "Outline"
+          uid=1_137 button "More document tools" expandable haspopup="menu"
+          uid=1_138 main
+            uid=1_139 generic value="Photosynthesis — Unit 4 study notes
+
+Photosynthesis converts light energy into chemical energy stored in glucose. In IB Biology HL you are expected to explain both the light-dependent reactions in the thylakoid membranes and the light-independent Calvin cycle in the stroma, and to interpret experimental data on limiting factors. N1 flow check 2026-08-19.
+
+Examiner note: candidates lose marks by describing the Calvin cycle as "dark reactions". Use light-independent.
+
+Light-dependent reactions
+
+Photosystem II absorbs a photon at 680 nm, exciting an electron that passes along the electron transport chain to plastoquinone, the cytochrome complex, and plastocyanin before reaching photosystem I. Photolysis of water replaces the lost electron and releases oxygen as a by-product.
+
+Photolysis of water in the thylakoid lumen
+
+Chemiosmosis through ATP synthase
+
+Reduction of NADP+ to NADPH
+
+Light-independent reactions
+
+Ribulose bisphosphate carboxylase fixes carbon dioxide onto RuBP, producing two molecules of glycerate-3-phosphate. ATP and NADPH from the light-dependent stage reduce these to triose phosphate, of which five sixths regenerate RuBP.
+
+No single limiting factor explains a field measurement; always state the factor you controlled.
+
+Practical: limiting factors
+
+Using pondweed in a sodium bicarbonate solution, count oxygen bubbles per minute at 10 cm, 20 cm, 30 cm and 40 cm from the lamp. Repeat three times and plot mean rate against light intensity, remembering the inverse square relationship.
+
+rate
+∝
+1
+𝑑
+2
+rate∝
+d
+2
+1
+	​
+
+
+At high light intensity the curve plateaus because carbon dioxide concentration becomes limiting. Increasing temperature beyond the enzyme optimum denatures rubisco and the rate falls sharply rather than plateauing.
+
+/"
+              uid=1_140 heading "Photosynthesis — Unit 4 study notes" level="1"
+              uid=1_141 paragraph
+                uid=1_142 StaticText "Photosynthesis converts light energy into chemical energy stored in glucose. In IB Biology HL you are expected to explain both the light-dependent reactions in the thylakoid membranes and the light-independent Calvin cycle in the stroma, and to interpret experimental data on limiting factors. N1 flow check 2026-08-19."
+              uid=1_143 generic
+                uid=1_144 paragraph
+                  uid=1_145 StaticText "Examiner note: candidates lose marks by describing the Calvin cycle as "dark reactions". Use light-independent."
+              uid=1_146 heading "Light-dependent reactions" level="2"
+              uid=1_147 paragraph
+                uid=1_148 StaticText "Photosystem II absorbs a photon at 680 nm, exciting an electron that passes along the electron transport chain to plastoquinone, the cytochrome complex, and plastocyanin before reaching photosystem I. Photolysis of water replaces the lost electron and releases oxygen as a by-product."
+              uid=1_149 list
+                uid=1_150 listitem level="1"
+                  uid=1_151 paragraph
+                    uid=1_152 StaticText "Photolysis of water in the thylakoid lumen"
+              uid=1_153 list
+                uid=1_154 listitem level="1"
+                  uid=1_155 paragraph
+                    uid=1_156 StaticText "Chemiosmosis through ATP synthase"
+              uid=1_157 list
+                uid=1_158 listitem level="1"
+                  uid=1_159 paragraph
+                    uid=1_160 StaticText "Reduction of NADP+ to NADPH"
+              uid=1_161 heading "Light-independent reactions" level="2"
+              uid=1_162 paragraph
+                uid=1_163 StaticText "Ribulose bisphosphate carboxylase fixes carbon dioxide onto RuBP, producing two molecules of glycerate-3-phosphate. ATP and NADPH from the light-dependent stage reduce these to triose phosphate, of which five sixths regenerate RuBP."
+              uid=1_164 blockquote
+                uid=1_165 paragraph
+                  uid=1_166 StaticText "No single limiting factor explains a field measurement; always state the factor you controlled."
+              uid=1_167 heading "Practical: limiting factors" level="2"
+              uid=1_168 paragraph
+                uid=1_169 StaticText "Using pondweed in a sodium bicarbonate solution, count oxygen bubbles per minute at 10 cm, 20 cm, 30 cm and 40 cm from the lamp. Repeat three times and plot mean rate against light intensity, remembering the inverse square relationship."
+              uid=1_170 StaticText "rate"
+              uid=1_171 StaticText "∝"
+              uid=1_172 StaticText "1"
+              uid=1_173 StaticText "𝑑"
+              uid=1_174 StaticText "2"
+              uid=1_175 paragraph
+                uid=1_176 StaticText "At high light intensity the curve plateaus because carbon dioxide concentration becomes limiting. Increasing temperature beyond the enzyme optimum denatures rubisco and the rate falls sharply rather than plateauing."
+              uid=1_177 paragraph
+                uid=1_178 StaticText "/"
+            uid=1_179 button "Add block below"
+            uid=1_180 button "Drag block"
+      uid=1_181 region "Live Dock"
+        uid=1_182 button "Start a new thread" description="New thread"
+        uid=1_183 generic live="polite" relevant="additions text"
+          uid=1_184 button "Photosynthesis Limiting Factors Cancelled Stopped by you. Partial work from this run may already be visible — review it before retrying." description="Photosynthesis Limiting Factors"
+          uid=1_185 button "Open Photosynthesis Limiting Factors conversation" description="Open conversation"
+          uid=1_186 button "Close Photosynthesis Limiting Factors" description="Close tab"
+      uid=1_187 button "Open actions" description="Add or attach" expandable
+      uid=1_188 button "Choose AI focus: Photosynthesis Limiting Factors + 2 focus items · 1 context" description="Photosynthesis Limiting Factors + 2 focus items" expandable
+      uid=1_189 generic live="polite" relevant="additions text"
+        uid=1_190 StaticText "Continuing Photosynthesis Limiting Factors. "
+        uid=1_191 StaticText "1"
+        uid=1_192 StaticText " context object"
+        uid=1_193 StaticText " included."
+      uid=1_194 textbox "Continue Photosynthesis Limiting Factors..." multiline
+      uid=1_195 button "Send command" description="Send" disableable disabled
+      uid=1_196 complementary "Live thread"
+        uid=1_197 button "Resize Live thread"
+        uid=1_198 StaticText "Photosynthesis Limiting Factors"
+        uid=1_199 StaticText "LIVE CONVERSATION"
+        uid=1_200 button "Follow the AI as it works" description="Spectate the AI: open and reveal whatever it is working on"
+        uid=1_201 button "Stop continuing this thread in the Live Dock" description="Remove this thread from the Live Dock and start fresh next time" pressed
+        uid=1_202 button "Close live thread"
+        uid=1_203 StaticText "List three limiting factors of photosynthesis in one short sentence each."
+        uid=1_204 StaticText "P MD · 5:04"
+        uid=1_205 button "Thought" expandable
+        uid=1_206 StaticText "Light intensity limits photosynthesis when insufficient light reduces the energy available for the light-dependent reactions."
+        uid=1_207 StaticText "Carbon dioxide concentration limits photosynthesis because CO₂ is needed for carbon fixation in the Calvin cycle."
+        uid=1_208 StaticText "Temperature limits photosynthesis because temperatures that are too low slow enzyme activity, while temperatures that are too high can denature enzymes."
+        uid=1_209 StaticText "Spectra · 5:04"
+        uid=1_210 StaticText "Now write a long detailed explanation, at least eight paragraphs, of how each limiting factor interacts with the others across a full school day in a greenhouse."
+        uid=1_211 StaticText "P MD · 5:10"
+        uid=1_212 button "Thought" expandable
+        uid=1_213 StaticText "Photosynthesis in a greenhouse is controlled by light intensity, carbon dioxide concentration and temperature. The rate is usually limited by whichever factor is furthest from its optimum, and that limiting factor can change throughout the day."
+        uid=1_214 StaticText "Early in the morning, light is often the main limitation because the Sun is low and less energy reaches the leaves. Even if carbon dioxide is plentiful, the light-dependent reactions produce limited ATP and reduced NADP, so the Calvin cycle cannot make carbohydrates rapidly. Low temperature may strengthen this limitation by slowing the enzymes involved in carbon fixation."
+        uid=1_215 StaticText "As light increases during the morning, photosynthesis accelerates. Plants then remove carbon dioxide from the greenhouse air more quickly. If ventilation is limited, the concentration falls and carbon dioxide may become the new limiting factor. Increasing light after this point produces little additional photosynthesis because the plant lacks enough carbon dioxide to use the extra energy."
+        uid=1_216 StaticText "Temperature usually rises with increasing sunlight. A moderate rise toward the optimum speeds enzyme-controlled reactions in the Calvin cycle. However, temperature does not help indefinitely. Excessive heat increases water loss, and plants may close their stomata to conserve water. Because carbon dioxide enters through open stomata, closure reduces carbon dioxide uptake and can create an indirect carbon dioxide limitation."
+        uid=1_217 StaticText "Near midday, strong light may be available, but the rate may still be restricted by depleted carbon dioxide or excessive temperature. If the greenhouse is too hot, enzymes may work less effectively and heat stress may damage cell processes. Adding carbon dioxide will have limited benefit if high temperature remains the main problem; cooling will likewise have little effect if carbon dioxide is still scarce."
+        uid=1_218 StaticText "Ventilation can alter the factors together. Opening vents may bring in fresh carbon dioxide and lower the temperature, potentially increasing photosynthesis. However, ventilation can also reduce humidity and increase water loss. If the plant becomes short of water, stomata may close, so the apparent benefit of extra external carbon dioxide may be reduced."
+        uid=1_219 StaticText "In the afternoon, light intensity gradually declines, while the greenhouse may remain warm because its structure has stored heat. Carbon dioxide may still be low after prolonged uptake. Cooling and ventilation can improve temperature and carbon dioxide availability, but declining light eventually limits how much additional carbon dioxide the plant can use. Carbon dioxide enrichment is therefore more effective when sufficient light is present."
+        uid=1_220 StaticText "Late in the day, light commonly becomes the main limitation again. As photosynthesis slows, carbon dioxide may begin to accumulate, while falling temperature can further reduce enzyme activity. Overall, light supplies energy, carbon dioxide supplies carbon for sugar production, and temperature controls the enzyme reactions linking the processes. Managing a greenhouse successfully requires balancing all three rather than maximising one factor in isolation."
+        uid=1_221 StaticText "Spectra · 5:11"
+        uid=1_222 StaticText "Write a very long twenty paragraph essay about every single environmental variable that affects plant growth, with worked numeric examples throughout."
+        uid=1_223 StaticText "P MD · 5:26"
+        uid=1_224 button "Thought" expandable
+        uid=1_225 StaticText "Spectra paused this run"
+        uid=1_226 StaticText "Spectra returned an incomplete response plan. Your work is unchanged — try again in a moment."
+        uid=1_227 button "Retry"
+        uid=1_228 StaticText "Write an extremely long thirty paragraph treatise on greenhouse climate control engineering with detailed calculations."
+        uid=1_229 StaticText "P MD · 5:34"
+    uid=1_230 region "Notifications alt+T" live="polite" relevant="additions text"
+  uid=1_231 alert atomic live="assertive" relevant="additions text"

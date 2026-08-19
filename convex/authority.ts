@@ -15,6 +15,11 @@ import {
   getAuthenticatedActor,
 } from "./identityShared";
 import { writeAuditEvent } from "./auditShared";
+import {
+  findNodesForSource,
+  purgeAccountSourceNodes,
+  workspaceContextNodes,
+} from "./orgTreeShared";
 import { releaseClaimsForAccount } from "./regionClaims";
 import {
   projectQuizContentForLearner,
@@ -507,20 +512,12 @@ export const revoke = mutation({
           args.resourceId,
         );
         if (artifactId) {
-          const placements = await ctx.db
-            .query("spectraWorkspaceItems")
-            .withIndex("by_source", (q) =>
-              q.eq("sourceType", "artifact").eq("sourceId", artifactId),
-            )
-            .collect();
-          await Promise.all(
-            placements
-              .filter(
-                (placement) =>
-                  placement.placedByAccountId === inviteeAccountId &&
-                  placement.accessProjection !== true,
-              )
-              .map((placement) => ctx.db.delete(placement._id)),
+          await purgeAccountSourceNodes(
+            ctx,
+            inviteeAccountId,
+            "work",
+            artifactId,
+            { keepProjecting: true },
           );
           await releaseClaimsForAccount(ctx, artifactId, inviteeAccountId, now);
         }
@@ -652,12 +649,7 @@ export const artifactInheritedAudience = query({
       args.artifactId,
       "share",
     );
-    const placements = await ctx.db
-      .query("spectraWorkspaceItems")
-      .withIndex("by_source", (q) =>
-        q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
-      )
-      .collect();
+    const placements = await findNodesForSource(ctx, "work", args.artifactId);
     const now = Date.now();
     const audience = new Map<
       string,
@@ -673,8 +665,9 @@ export const artifactInheritedAudience = query({
     >();
 
     for (const placement of placements) {
-      if (placement.viewData.hidden) continue;
-      const workspace = await ctx.db.get(placement.workspaceId);
+      if (placement.deletedAt !== undefined || !placement.workspaceContextId)
+        continue;
+      const workspace = await ctx.db.get(placement.workspaceContextId);
       if (
         !workspace ||
         workspace.status !== "active" ||
@@ -899,20 +892,12 @@ export const setArtifactException = mutation({
           (!grant.expiresAt || grant.expiresAt > now),
       )
     ) {
-      const personalPlacements = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
-        )
-        .collect();
-      await Promise.all(
-        personalPlacements
-          .filter(
-            (placement) =>
-              placement.placedByAccountId === args.accountId &&
-              placement.accessProjection !== true,
-          )
-          .map((placement) => ctx.db.delete(placement._id)),
+      await purgeAccountSourceNodes(
+        ctx,
+        args.accountId,
+        "work",
+        args.artifactId,
+        { keepProjecting: true },
       );
     }
     await writeAuditEvent(ctx, {
@@ -1224,24 +1209,23 @@ export const publicProjection = query({
       const workspace = loaded.resource;
       if (!("defaultView" in workspace) || workspace.status !== "active")
         return null;
-      const placements = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id))
-        .order("desc")
-        .collect();
+      const placements = await workspaceContextNodes(
+        ctx,
+        workspace._id,
+        "work",
+      );
       const artifacts = (
         await Promise.all(
           placements
             .filter(
               (placement) =>
-                placement.sourceType === "artifact" &&
-                placement.viewData.hidden !== true &&
+                Boolean(placement.sourceId) &&
                 placement.accessProjection !== false,
             )
             .map(async (placement) => {
               const artifactId = ctx.db.normalizeId(
                 "spectraArtifacts",
-                placement.sourceId,
+                placement.sourceId!,
               );
               const artifact = artifactId ? await ctx.db.get(artifactId) : null;
               if (
@@ -1258,8 +1242,8 @@ export const publicProjection = query({
               if (!projectsAccess) return null;
               return {
                 artifactId: artifact._id,
-                title: placement.viewData.titleOverride ?? artifact.title,
-                summary: placement.viewData.compactSummary ?? artifact.summary,
+                title: artifact.title,
+                summary: artifact.summary,
                 blueprintKey: artifact.blueprintKey,
                 content:
                   artifact.blueprintKey === "quiz"

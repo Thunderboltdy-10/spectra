@@ -2531,43 +2531,54 @@ export default defineSchema({
     .index("by_workspace", ["workspaceId", "createdAt"])
     .index("by_pair", ["sourceArtifactId", "targetArtifactId"]),
 
-  spectraWorkspaceItems: defineTable({
-    workspaceId: v.id("spectraWorkspaces"),
-    sourceType: v.union(
-      v.literal("artifact"),
+  // The organizational tree (ARCHITECTURE-STORAGE §3). One tree per account:
+  // Library is the whole tree, a Workspace view is the subtree under a
+  // workspace node. Work and threads have exactly one primary node; every
+  // other appearance is a `link`. Never stores filesystem paths (D27).
+  orgNodes: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.optional(v.id("schools")),
+    parentId: v.union(v.id("orgNodes"), v.null()),
+    kind: v.union(
+      v.literal("folder"),
+      v.literal("workspace"),
+      v.literal("work"),
       v.literal("thread"),
-      v.literal("task"),
-      v.literal("widget"),
-      v.literal("custom"),
+      v.literal("link"),
     ),
-    sourceId: v.string(),
+    // Folders/workspaces own their name; work/thread/link nodes carry a cached
+    // copy of the source title so listings and search need no fan-out read.
+    name: v.string(),
+    // work → spectraArtifacts._id · thread → spectraThreads._id
+    // workspace → spectraWorkspaces._id · link → target orgNodes._id
+    sourceId: v.optional(v.string()),
+    orderKey: v.string(),
+    // Nearest ancestor workspace, maintained transactionally on every move.
+    // Absent = the account's root scope (General is a real workspace, so work
+    // is never contextless).
+    workspaceContextId: v.optional(v.id("spectraWorkspaces")),
     placedByAccountId: v.optional(v.id("accounts")),
     accessProjection: v.optional(v.boolean()),
-    viewData: v.object({
-      titleOverride: v.optional(v.string()),
-      compactSummary: v.optional(v.string()),
-      cardVariant: v.optional(v.string()),
-      pinned: v.optional(v.boolean()),
-      hidden: v.optional(v.boolean()),
-    }),
-    layout: v.object({
-      view: v.union(
-        v.literal("cards"),
-        v.literal("canvas"),
-        v.literal("timeline"),
-      ),
-      position: v.optional(v.object({ x: v.number(), y: v.number() })),
-      size: v.optional(v.object({ w: v.number(), h: v.number() })),
-      zIndex: v.optional(v.number()),
-      collapsed: v.optional(v.boolean()),
-    }),
+    pinned: v.optional(v.boolean()),
+    // Soft delete: the whole subtree is stamped, `trashedRootId` names the node
+    // the user actually deleted so restore is one operation.
+    deletedAt: v.optional(v.number()),
+    trashedRootId: v.optional(v.id("orgNodes")),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_workspace", ["workspaceId"])
-    .index("by_workspace_updated", ["workspaceId", "updatedAt"])
-    .index("by_workspace_source", ["workspaceId", "sourceType", "sourceId"])
-    .index("by_source", ["sourceType", "sourceId"]),
+    .index("by_account_parent_order", ["accountId", "parentId", "orderKey"])
+    .index("by_parent", ["parentId"])
+    .index("by_account_kind_source", ["accountId", "kind", "sourceId"])
+    .index("by_kind_source", ["kind", "sourceId"])
+    .index("by_account_workspace", ["accountId", "workspaceContextId"])
+    .index("by_workspace_context", ["workspaceContextId"])
+    .index("by_account_deleted", ["accountId", "deletedAt"])
+    .index("by_trashed_root", ["trashedRootId"])
+    .searchIndex("search_name", {
+      searchField: "name",
+      filterFields: ["accountId", "kind", "deletedAt"],
+    }),
 
   workspaceImportJobs: defineTable({
     schoolId: v.optional(v.id("schools")),

@@ -6429,7 +6429,7 @@ function StudioDetails({
               {placements.length > 0 ? (
                 placements.map((placement) => (
                   <div
-                    key={placement.workspaceItemId}
+                    key={placement.nodeId}
                     className="rounded-[7px] px-1 py-1 text-[12px] font-medium text-[var(--text-primary)]"
                   >
                     {placement.workspaceTitle}

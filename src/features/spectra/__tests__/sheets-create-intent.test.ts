@@ -118,7 +118,7 @@ describe("vague sheets create intent", () => {
           {
             workspaceId: "workspace-launch",
             workspaceTitle: "Spectra Launch Studio",
-            workspaceItemId: "item-sheet",
+            nodeId: "item-sheet",
           },
         ],
         updatedAt: Date.now(),
@@ -216,7 +216,7 @@ describe("vague sheets create intent", () => {
       validatePlanAgainstIntent(plan, {
         artifactIds: new Set(),
         workspaceIds: new Set(["workspace-launch"]),
-        workspaceItems: new Map(),
+        placementNodes: new Map(),
       }),
     ).not.toThrow();
   });
@@ -264,7 +264,7 @@ describe("vague sheets create intent", () => {
       validatePlanAgainstIntent(plan, {
         artifactIds: new Set(["existing-sheet"]),
         workspaceIds: new Set(["workspace-launch"]),
-        workspaceItems: new Map(),
+        placementNodes: new Map(),
       }),
     ).not.toThrow();
   });

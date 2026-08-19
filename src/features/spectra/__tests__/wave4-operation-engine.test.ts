@@ -43,7 +43,7 @@ function createIntent(count = 1) {
 const references = {
   artifactIds: new Set(["artifact-real"]),
   workspaceIds: new Set(["workspace-real"]),
-  workspaceItems: new Map([
+  placementNodes: new Map([
     [
       "item-real",
       { artifactId: "artifact-real", workspaceId: "workspace-real" },
@@ -290,7 +290,7 @@ describe("Wave 4 controlled operation engine", () => {
         deckOperation(),
         {
           type: "workspaceItem.hide",
-          input: { workspaceItemId: "run:create_artifact:deck-1" },
+          input: { nodeId: "run:create_artifact:deck-1" },
         },
       ],
     });
@@ -311,7 +311,7 @@ describe("Wave 4 controlled operation engine", () => {
       operations: [
         {
           type: "workspaceItem.hide",
-          input: { workspaceItemId: "run:create_artifact:deck-1" },
+          input: { nodeId: "run:create_artifact:deck-1" },
         },
       ],
     });

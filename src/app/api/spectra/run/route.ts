@@ -3741,7 +3741,7 @@ function sanitizeArtifactUserFacingContent(value: unknown, context: unknown) {
   }
   const serializedContext = JSON.stringify(context);
   for (const match of serializedContext.matchAll(
-    /"(?:_?id|artifactId|workspaceId|threadId|sourceId|workspaceItemId)"\s*:\s*"([^"]{12,})"/g,
+    /"(?:_?id|artifactId|workspaceId|threadId|sourceId|nodeId)"\s*:\s*"([^"]{12,})"/g,
   ))
     if (match[1]) ownedIds.add(match[1]);
   const clean = (candidate: unknown, key = ""): unknown => {
@@ -4298,7 +4298,7 @@ function summarizeArtifact(
     placements: rows(artifact.placements).map((placement) => ({
       workspaceId: placement.workspaceId,
       workspaceTitle: placement.workspaceTitle,
-      workspaceItemId: placement.workspaceItemId,
+      nodeId: placement.nodeId,
     })),
     ...(includeContent ? { content: artifact.content } : {}),
   };
@@ -4456,10 +4456,10 @@ async function buildContext(
         }).catch(() => [])
       : Promise.resolve([]),
     body.workspaceId
-      ? query<unknown & object, unknown>(
-          "spectraWorkspaceItems:listForWorkspace",
-          { actorClerkId, workspaceId: body.workspaceId },
-        ).catch(() => null)
+      ? query<unknown & object, unknown>("orgTree:listWorkspaceContents", {
+          actorClerkId,
+          workspaceId: body.workspaceId,
+        }).catch(() => null)
       : Promise.resolve(null),
     body.artifactId
       ? query<unknown & object, unknown>("spectraArtifacts:get", {
@@ -4597,10 +4597,10 @@ async function buildContext(
       )
       .slice(0, 3)
       .map((workspaceId) =>
-        query<unknown & object, unknown>(
-          "spectraWorkspaceItems:listForWorkspace",
-          { actorClerkId, workspaceId },
-        ).catch(() => null),
+        query<unknown & object, unknown>("orgTree:listWorkspaceContents", {
+          actorClerkId,
+          workspaceId,
+        }).catch(() => null),
       ),
   );
   const explicitWorkspaceObjectsById = new Map(
@@ -4617,7 +4617,7 @@ async function buildContext(
             .map((item) =>
               item.artifact && typeof item.artifact === "object"
                 ? summarizeArtifact(item.artifact as Record<string, unknown>)
-                : { type: item.sourceType },
+                : { type: item.kind },
             ),
         ] as const,
       ];
@@ -4871,9 +4871,9 @@ async function buildContext(
             workspaceRecord.workspace as Record<string, unknown> | undefined
           )?.title,
           items: rows(workspaceRecord.items).map((item) => ({
-            id: item._id,
+            id: item.nodeId,
             workspaceId: item.workspaceId,
-            sourceType: item.sourceType,
+            kind: item.kind,
             sourceId: item.sourceId,
             artifact:
               item.artifact && typeof item.artifact === "object"
@@ -4979,7 +4979,7 @@ function ownedReferences(
   const artifactIds = new Set<string>();
   const artifactBlueprints = new Map<string, string>();
   const workspaceIds = new Set<string>();
-  const workspaceItems = new Map<
+  const placementNodes = new Map<
     string,
     { artifactId?: string; workspaceId: string }
   >();
@@ -4995,10 +4995,10 @@ function ownedReferences(
       if (typeof placement.workspaceId === "string")
         workspaceIds.add(placement.workspaceId);
       if (
-        typeof placement.workspaceItemId === "string" &&
+        typeof placement.nodeId === "string" &&
         typeof placement.workspaceId === "string"
       )
-        workspaceItems.set(placement.workspaceItemId, {
+        placementNodes.set(placement.nodeId, {
           artifactId: typeof artifact.id === "string" ? artifact.id : undefined,
           workspaceId: placement.workspaceId,
         });
@@ -5022,9 +5022,9 @@ function ownedReferences(
     workspaceIds.add(context.currentWorkspace.id);
   for (const item of context.currentWorkspace?.items ?? []) {
     if (typeof item.id === "string" && typeof item.workspaceId === "string")
-      workspaceItems.set(item.id, {
+      placementNodes.set(item.id, {
         artifactId:
-          item.sourceType === "artifact" && typeof item.sourceId === "string"
+          item.kind === "work" && typeof item.sourceId === "string"
             ? item.sourceId
             : undefined,
         workspaceId: item.workspaceId,
@@ -5034,7 +5034,7 @@ function ownedReferences(
     artifactIds,
     artifactBlueprints,
     workspaceIds,
-    workspaceItems,
+    placementNodes,
     threadIds: new Set([
       ...context.threads.flatMap((thread) =>
         typeof thread.id === "string" ? [thread.id] : [],
@@ -5135,31 +5135,30 @@ function resolvePlanReferences(
     } else if (operation.type === "workspaceItem.hide") {
       if (
         !context.currentWorkspace?.items.some(
-          (item) => item.id === operation.input.workspaceItemId,
+          (item) => item.id === operation.input.nodeId,
         )
       ) {
-        const artifactId = resolveArtifact(operation.input.workspaceItemId);
+        const artifactId = resolveArtifact(operation.input.nodeId);
         const matches =
           context.currentWorkspace?.items.filter(
-            (item) =>
-              item.sourceType === "artifact" && item.sourceId === artifactId,
+            (item) => item.kind === "work" && item.sourceId === artifactId,
           ) ?? [];
         if (matches.length === 1 && typeof matches[0]!.id === "string")
-          operation.input.workspaceItemId = matches[0]!.id;
+          operation.input.nodeId = matches[0]!.id;
       }
     } else if (operation.type === "workspaceItem.setPinned") {
       if (
         !context.currentWorkspace?.items.some(
-          (item) => item.id === operation.input.workspaceItemId,
+          (item) => item.id === operation.input.nodeId,
         )
       ) {
-        const artifactId = resolveArtifact(operation.input.workspaceItemId);
+        const artifactId = resolveArtifact(operation.input.nodeId);
         const matches =
           context.currentWorkspace?.items.filter(
             (item) => item.sourceId === artifactId,
           ) ?? [];
         if (matches.length === 1 && typeof matches[0]!.id === "string")
-          operation.input.workspaceItemId = matches[0]!.id;
+          operation.input.nodeId = matches[0]!.id;
       }
     } else if (operation.type === "artifact.link") {
       operation.input.sourceArtifactId =
@@ -6449,7 +6448,7 @@ async function executeAgentReadTool(
       if (typeof args.workspaceId !== "string")
         return { ok: false, code: "workspace_id_required" };
       const workspace = await query<unknown & object, unknown>(
-        "spectraWorkspaceItems:listForWorkspace",
+        "orgTree:listWorkspaceContents",
         { actorClerkId, workspaceId: args.workspaceId },
       ).catch(() => null);
       return workspace
@@ -8729,7 +8728,7 @@ function operationLabel(operation: ModelOperation) {
   if (operation.type === "workspaceItem.add")
     return "Adding workspace placement";
   if (operation.type === "workspaceItem.hide")
-    return "Removing requested workspace placement";
+    return "Moving item back to General";
   if (operation.type === "workspace.update") return "Updating workspace";
   if (operation.type === "artifact.link") return "Linking artifacts";
   return "Creating workspace";
@@ -8973,8 +8972,8 @@ function safeOperationPreview(operation: ModelOperation) {
   if (operation.type === "workspaceItem.hide")
     return {
       action: "remove" as const,
-      title: "Removing workspace placement",
-      targetId: operation.input.workspaceItemId,
+      title: "Moving item back to General",
+      targetId: operation.input.nodeId,
     };
   return {
     action: "workspace" as const,
@@ -9345,11 +9344,11 @@ async function executeOperation(
             ? context.workspaceId
             : undefined));
     let pendingArtifactId = context.pendingArtifactId;
-    let pendingWorkspaceItemId: string | undefined;
+    let pendingNodeId: string | undefined;
     if (!pendingArtifactId) {
       const pending = await mutate<
         unknown & object,
-        { artifactId: string; workspaceItemId?: string }
+        { artifactId: string; nodeId?: string }
       >("spectraArtifacts:createPending", {
         actorClerkId,
         blueprintKey: input.blueprintKey,
@@ -9360,7 +9359,7 @@ async function executeOperation(
         executionId: context.executionId,
       });
       pendingArtifactId = pending.artifactId;
-      pendingWorkspaceItemId = pending.workspaceItemId;
+      pendingNodeId = pending.nodeId;
     }
     const mutationResult = await applyAiArtifactMutation({
       artifactId: pendingArtifactId,
@@ -9457,16 +9456,15 @@ async function executeOperation(
       }
       if (finalizeError) throw finalizeError;
     }
-    if (!output.workspaceItemId && pendingWorkspaceItemId)
-      output.workspaceItemId = pendingWorkspaceItemId;
+    if (!output.nodeId && pendingNodeId) output.nodeId = pendingNodeId;
     if (typeof output.artifactId === "string")
       affected.push({ type: "artifact", id: output.artifactId });
-    if (typeof output.workspaceItemId === "string")
-      affected.push({ type: "workspaceItem", id: output.workspaceItemId });
-    if (typeof output.workspaceItemId === "string" && input.pinned) {
-      await mutate("spectraWorkspaceItems:setPinned", {
+    if (typeof output.nodeId === "string")
+      affected.push({ type: "workspaceItem", id: output.nodeId });
+    if (typeof output.nodeId === "string" && input.pinned) {
+      await mutate("orgTree:setPinned", {
         actorClerkId,
-        workspaceItemId: output.workspaceItemId,
+        nodeId: output.nodeId,
         pinned: true,
         exclusive: input.exclusivePin,
       });
@@ -9578,7 +9576,7 @@ async function executeOperation(
     })) as Record<string, unknown>;
     affected = [{ type: "artifact", id: operation.input.artifactId }];
   } else if (operation.type === "workspaceItem.add") {
-    output = (await mutate("spectraWorkspaceItems:addArtifact", {
+    output = (await mutate("orgTree:placeWork", {
       actorClerkId,
       ...operation.input,
     })) as Record<string, unknown>;
@@ -9587,21 +9585,23 @@ async function executeOperation(
       { type: "workspace", id: operation.input.workspaceId },
     ];
   } else if (operation.type === "workspaceItem.hide") {
-    output = (await mutate("spectraWorkspaceItems:hide", {
+    output = (await mutate("orgTree:removeFromWorkspace", {
       actorClerkId,
-      workspaceItemId: operation.input.workspaceItemId,
+      nodeId: operation.input.nodeId,
     })) as Record<string, unknown>;
-    affected = [{ type: "workspaceItem", id: operation.input.workspaceItemId }];
+    affected = [{ type: "workspaceItem", id: operation.input.nodeId }];
     if (typeof output.workspaceId === "string")
       affected.push({ type: "workspace", id: output.workspaceId });
-    if (typeof output.sourceId === "string" && output.sourceType === "artifact")
+    if (typeof output.generalWorkspaceId === "string")
+      affected.push({ type: "workspace", id: output.generalWorkspaceId });
+    if (typeof output.sourceId === "string" && output.kind === "work")
       affected.push({ type: "artifact", id: output.sourceId });
   } else if (operation.type === "workspaceItem.setPinned") {
-    output = (await mutate("spectraWorkspaceItems:setPinned", {
+    output = (await mutate("orgTree:setPinned", {
       actorClerkId,
       ...operation.input,
     })) as Record<string, unknown>;
-    affected = [{ type: "workspaceItem", id: operation.input.workspaceItemId }];
+    affected = [{ type: "workspaceItem", id: operation.input.nodeId }];
   } else if (operation.type === "workspace.create") {
     const workspaceId = context.pendingWorkspaceId
       ? (

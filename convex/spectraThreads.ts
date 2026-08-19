@@ -7,6 +7,12 @@ import {
   requireArtifactCapability,
   requireWorkspaceCapability,
 } from "./spectraShared";
+import {
+  findPrimaryNode,
+  placeSourceNode,
+  purgeSourceNodes,
+  renameSourceNodes,
+} from "./orgTreeShared";
 import { incrementOperationalCounter } from "./operationalCounters";
 
 const vOrigin = v.union(
@@ -429,41 +435,31 @@ export const update = mutation({
         ? thread.workspaceId
         : (args.workspaceId ?? undefined);
     const now = Date.now();
+    const title =
+      args.title === undefined ? thread.title : cleanTitle(args.title);
     await ctx.db.patch(args.threadId, {
-      title: args.title === undefined ? thread.title : cleanTitle(args.title),
+      title,
       pinned: args.pinned ?? thread.pinned,
       workspaceId: nextWorkspaceId,
       status: args.status ?? thread.status,
       updatedAt: now,
     });
-    if (
-      args.workspaceId !== undefined &&
-      nextWorkspaceId !== thread.workspaceId
-    ) {
-      const placements = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceType", "thread").eq("sourceId", args.threadId),
-        )
-        .collect();
-      await Promise.all(
-        placements.map((placement) =>
-          ctx.db.patch(placement._id, {
-            viewData: {
-              ...placement.viewData,
-              hidden: placement.workspaceId !== nextWorkspaceId,
-            },
-            updatedAt: now,
-          }),
-        ),
-      );
-      await ensureThreadWorkspacePlacement(ctx, {
-        threadId: args.threadId,
-        workspaceId: nextWorkspaceId,
-        summary: thread.summaryShort,
-        pinned: args.pinned ?? thread.pinned,
-      });
-    }
+    /* The tree is what the reader sees, so the new name, pin and home land there
+       in this same transaction. A changed workspace moves the thread's one node
+       (I1, I4) instead of hiding a row here and inserting one there; clearing the
+       workspace moves it to General, because a thread is never homeless (D31). */
+    await placeSourceNode(ctx, {
+      accountId: thread.ownerAccountId,
+      schoolId: thread.schoolId,
+      kind: "thread",
+      sourceId: args.threadId,
+      name: title,
+      target: nextWorkspaceId ? { workspaceId: nextWorkspaceId } : {},
+      relocate:
+        args.workspaceId !== undefined &&
+        nextWorkspaceId !== thread.workspaceId,
+      pinned: args.pinned ?? thread.pinned,
+    });
     return { threadId: args.threadId };
   },
 });
@@ -507,24 +503,8 @@ export const applyGeneratedMetadata = mutation({
       summaryShort: summary,
       updatedAt: now,
     });
-    const placements = await ctx.db
-      .query("spectraWorkspaceItems")
-      .withIndex("by_source", (q) =>
-        q.eq("sourceType", "thread").eq("sourceId", args.threadId),
-      )
-      .collect();
-    await Promise.all(
-      placements.map((placement) =>
-        ctx.db.patch(placement._id, {
-          viewData: {
-            ...placement.viewData,
-            titleOverride: title,
-            compactSummary: summary,
-          },
-          updatedAt: now,
-        }),
-      ),
-    );
+    if (title !== thread.title)
+      await renameSourceNodes(ctx, "thread", args.threadId, title);
     return { threadId: args.threadId };
   },
 });
@@ -552,7 +532,7 @@ export const createFromRun = mutation({
       thread.status === "deleted"
     )
       throw new Error("Thread not found");
-    const workspaceItemId = args.placeInWorkspace
+    const nodeId = args.placeInWorkspace
       ? await ensureThreadWorkspacePlacement(ctx, {
           threadId: thread._id,
           workspaceId: thread.workspaceId,
@@ -560,7 +540,7 @@ export const createFromRun = mutation({
           pinned: true,
         })
       : undefined;
-    return { threadId: thread._id, workspaceItemId };
+    return { threadId: thread._id, nodeId };
   },
 });
 
@@ -583,12 +563,14 @@ export const migrateLegacyThreadReferences = internalMutation({
           ? ctx.db.normalizeId("spectraThreads", rawThreadId)
           : null;
       const thread = threadId ? await ctx.db.get(threadId) : null;
-      const placements = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceType", "artifact").eq("sourceId", artifact._id),
-        )
-        .collect();
+      /* The reference artifact's own node tells us where a reader had filed it,
+         which is where the real thread should end up. */
+      const referenceNode = await findPrimaryNode(
+        ctx,
+        artifact.ownerAccountId,
+        "work",
+        artifact._id,
+      );
       if (
         thread &&
         thread.ownerAccountId === artifact.ownerAccountId &&
@@ -596,8 +578,7 @@ export const migrateLegacyThreadReferences = internalMutation({
         thread.status !== "deleted"
       ) {
         const destination =
-          thread.workspaceId ??
-          placements.find((item) => item.viewData.hidden !== true)?.workspaceId;
+          thread.workspaceId ?? referenceNode?.workspaceContextId;
         if (destination && !thread.workspaceId)
           await ctx.db.patch(thread._id, {
             workspaceId: destination,
@@ -607,7 +588,7 @@ export const migrateLegacyThreadReferences = internalMutation({
           threadId: thread._id,
           workspaceId: destination,
           summary: thread.summaryShort ?? artifact.summary,
-          pinned: placements.some((item) => item.viewData.pinned),
+          pinned: referenceNode?.pinned === true,
         });
         migrated += 1;
       }
@@ -632,8 +613,8 @@ export const migrateLegacyThreadReferences = internalMutation({
           [...outgoing, ...incoming].map((link) => [link._id, link]),
         ).values(),
       ];
+      await purgeSourceNodes(ctx, "work", artifact._id);
       await Promise.all([
-        ...placements.map((placement) => ctx.db.delete(placement._id)),
         ...versions.map((version) => ctx.db.delete(version._id)),
         ...links.map((link) => ctx.db.delete(link._id)),
       ]);

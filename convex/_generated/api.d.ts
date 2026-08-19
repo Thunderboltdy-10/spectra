@@ -42,6 +42,9 @@ import type * as memoryEmbedding from "../memoryEmbedding.js";
 import type * as metering from "../metering.js";
 import type * as operationalCounters from "../operationalCounters.js";
 import type * as operatorSessions from "../operatorSessions.js";
+import type * as orgTree from "../orgTree.js";
+import type * as orgTreeIntegrity from "../orgTreeIntegrity.js";
+import type * as orgTreeShared from "../orgTreeShared.js";
 import type * as plannerReminders from "../plannerReminders.js";
 import type * as quizPractice from "../quizPractice.js";
 import type * as quizPrivacy from "../quizPrivacy.js";
@@ -57,7 +60,6 @@ import type * as spectraRuns from "../spectraRuns.js";
 import type * as spectraRuntimeBuilds from "../spectraRuntimeBuilds.js";
 import type * as spectraShared from "../spectraShared.js";
 import type * as spectraThreads from "../spectraThreads.js";
-import type * as spectraWorkspaceItems from "../spectraWorkspaceItems.js";
 import type * as spectraWorkspaces from "../spectraWorkspaces.js";
 import type * as timetableReminders from "../timetableReminders.js";
 
@@ -102,6 +104,9 @@ declare const fullApi: ApiFromModules<{
   metering: typeof metering;
   operationalCounters: typeof operationalCounters;
   operatorSessions: typeof operatorSessions;
+  orgTree: typeof orgTree;
+  orgTreeIntegrity: typeof orgTreeIntegrity;
+  orgTreeShared: typeof orgTreeShared;
   plannerReminders: typeof plannerReminders;
   quizPractice: typeof quizPractice;
   quizPrivacy: typeof quizPrivacy;
@@ -117,7 +122,6 @@ declare const fullApi: ApiFromModules<{
   spectraRuntimeBuilds: typeof spectraRuntimeBuilds;
   spectraShared: typeof spectraShared;
   spectraThreads: typeof spectraThreads;
-  spectraWorkspaceItems: typeof spectraWorkspaceItems;
   spectraWorkspaces: typeof spectraWorkspaces;
   timetableReminders: typeof timetableReminders;
 }>;

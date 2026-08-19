@@ -26,6 +26,15 @@ import {
   listDirectlyGrantedResourceIds,
 } from "./authorityShared";
 import {
+  findPrimaryNode,
+  placementStatusFor,
+  placementsByWorkspaceScan,
+  placementsForSource,
+  placeSourceNode,
+  purgeSourceNodes,
+  renameSourceNodes,
+} from "./orgTreeShared";
+import {
   hydrateVersionSafely,
   loadVersionAfter,
   releaseSnapshotObject,
@@ -181,35 +190,36 @@ async function versionSnapshotFields(
   };
 }
 
+/**
+ * Where an artifact lives, read from the tree and filtered to the workspaces
+ * this caller may see. A placement in a workspace the caller cannot open stays
+ * invisible rather than leaking a title.
+ */
 async function listPlacementsForArtifact(
   ctx: Parameters<typeof requireSpectraActor>[0],
   artifactId: Id<"spectraArtifacts">,
 ) {
-  const items = await ctx.db
-    .query("spectraWorkspaceItems")
-    .withIndex("by_source", (q) =>
-      q.eq("sourceType", "artifact").eq("sourceId", artifactId),
+  const nodes = await ctx.db
+    .query("orgNodes")
+    .withIndex("by_kind_source", (q) =>
+      q.eq("kind", "work").eq("sourceId", artifactId),
     )
     .collect();
-
-  const visibleItems = items.filter((item) => item.viewData.hidden !== true);
-  const placements = await Promise.all(
-    visibleItems.map(async (item) => {
-      const decision = await evaluateAccess(ctx, "workspace", item.workspaceId);
-      const workspace = decision.allowed ? decision.loaded.resource : null;
-      if (!workspace || workspace.status !== "active") return null;
-      return {
-        workspaceId: workspace._id,
-        workspaceTitle: workspace.title,
-        workspaceItemId: item._id,
-        pinned: item.viewData.pinned === true,
-      };
-    }),
-  );
-  return placements.filter(
-    (placement): placement is NonNullable<typeof placement> =>
-      Boolean(placement),
-  );
+  const visible = new Map<string, Doc<"spectraWorkspaces">>();
+  for (const node of nodes) {
+    if (node.deletedAt !== undefined || !node.workspaceContextId) continue;
+    if (visible.has(node.workspaceContextId)) continue;
+    const decision = await evaluateAccess(
+      ctx,
+      "workspace",
+      node.workspaceContextId,
+    );
+    if (!decision.allowed) continue;
+    const workspace = decision.loaded.resource as Doc<"spectraWorkspaces">;
+    if (workspace.status !== "active") continue;
+    visible.set(workspace._id, workspace);
+  }
+  return placementsForSource(ctx, "work", artifactId, visible);
 }
 
 export const list = query({
@@ -313,40 +323,13 @@ export const list = query({
         ]),
       ).values(),
     ];
-    const placementRows = (
-      await Promise.all(
-        activeWorkspaces
-          .filter((workspace) => workspace.schoolId === actor.schoolId)
-          .map(async (workspace) => ({
-            workspace,
-            items: await ctx.db
-              .query("spectraWorkspaceItems")
-              .withIndex("by_workspace", (q) =>
-                q.eq("workspaceId", workspace._id),
-              )
-              .collect(),
-          })),
-      )
-    ).flatMap(({ workspace, items }) =>
-      items
-        .filter(
-          (item) =>
-            item.sourceType === "artifact" && item.viewData.hidden !== true,
-        )
-        .map((item) => ({
-          sourceId: item.sourceId,
-          workspaceId: workspace._id,
-          workspaceTitle: workspace.title,
-          workspaceItemId: item._id,
-          pinned: item.viewData.pinned === true,
-        })),
+    const placementsByArtifact = await placementsByWorkspaceScan(
+      ctx,
+      activeWorkspaces.filter(
+        (workspace) => workspace.schoolId === actor.schoolId,
+      ),
+      "work",
     );
-    const placementsByArtifact = new Map<string, typeof placementRows>();
-    for (const placement of placementRows)
-      placementsByArtifact.set(placement.sourceId, [
-        ...(placementsByArtifact.get(placement.sourceId) ?? []),
-        placement,
-      ]);
 
     const candidateArtifacts = rows
       .filter((artifact) => artifact.schoolId === actor.schoolId)
@@ -437,12 +420,7 @@ export const list = query({
           // Shared is the recipient's accepted-but-not-yet-organized landing
           // state. Once placed, it behaves like any normal workspace artifact,
           // while `ownership` keeps it discoverable in the Shared collection.
-          placementStatus:
-            placements.length > 0
-              ? ("workspace" as const)
-              : ownership === "shared"
-                ? ("shared" as const)
-                : ("inbox" as const),
+          placementStatus: placementStatusFor(placements, ownership),
         };
       }),
     );
@@ -508,12 +486,7 @@ export const get = query({
               ),
             ).size
           : undefined,
-      placementStatus:
-        placements.length > 0
-          ? "workspace"
-          : ownership === "shared"
-            ? "shared"
-            : "inbox",
+      placementStatus: placementStatusFor(placements, ownership),
     };
   },
 });
@@ -1688,24 +1661,20 @@ export const create = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    let workspaceItemId: Id<"spectraWorkspaceItems"> | undefined;
+    /* Every created work is placed. With no workspace named it lands in
+       General, so the Library never has to invent an "unplaced" state (D31). */
+    const placementNode = await placeSourceNode(ctx, {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      kind: "work",
+      sourceId: artifactId,
+      name: title,
+      target: args.workspaceId ? { workspaceId: args.workspaceId } : {},
+      placedByAccountId: actor.accountId,
+      accessProjection: true,
+    });
+    const nodeId = placementNode._id;
     if (args.workspaceId) {
-      workspaceItemId = await ctx.db.insert("spectraWorkspaceItems", {
-        workspaceId: args.workspaceId,
-        sourceType: "artifact",
-        sourceId: artifactId,
-        placedByAccountId: actor.accountId,
-        accessProjection: true,
-        viewData: {
-          compactSummary: summary,
-          hidden: false,
-        },
-        layout: {
-          view: "cards",
-        },
-        createdAt: now,
-        updatedAt: now,
-      });
       await ctx.db.patch(args.workspaceId, {
         updatedAt: now,
         lastActivityAt: now,
@@ -1750,7 +1719,7 @@ export const create = mutation({
       occurredAt: now,
     });
 
-    return { artifactId, workspaceItemId };
+    return { artifactId, nodeId };
   },
 });
 
@@ -1816,19 +1785,20 @@ export const createPending = mutation({
         await ctx.db.patch(thread._id, { artifactId, updatedAt: now });
       }
     }
-    let workspaceItemId: Id<"spectraWorkspaceItems"> | undefined;
+    /* A pending artifact is placed at creation like any other, so a run that
+       fails part-way still leaves the work findable rather than nowhere. */
+    const pendingNode = await placeSourceNode(ctx, {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      kind: "work",
+      sourceId: artifactId,
+      name: title,
+      target: args.workspaceId ? { workspaceId: args.workspaceId } : {},
+      placedByAccountId: actor.accountId,
+      accessProjection: true,
+    });
+    const nodeId = pendingNode._id;
     if (args.workspaceId) {
-      workspaceItemId = await ctx.db.insert("spectraWorkspaceItems", {
-        workspaceId: args.workspaceId,
-        sourceType: "artifact",
-        sourceId: artifactId,
-        placedByAccountId: actor.accountId,
-        accessProjection: true,
-        viewData: { compactSummary: summary, hidden: false },
-        layout: { view: "cards" },
-        createdAt: now,
-        updatedAt: now,
-      });
       await ctx.db.patch(args.workspaceId, {
         updatedAt: now,
         lastActivityAt: now,
@@ -1840,7 +1810,7 @@ export const createPending = mutation({
       dimension: args.blueprintKey,
       occurredAt: now,
     });
-    return { artifactId, workspaceItemId };
+    return { artifactId, nodeId };
   },
 });
 
@@ -1877,15 +1847,14 @@ export const finalizePendingLive = mutation({
       // Convex mutations are atomic, but a caller can lose the response after
       // the commit and retry the exact operation. Treat that retry as success
       // instead of turning already-saved work into a user-visible failure.
-      const placements = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
-        )
-        .collect();
-      const workspaceItemId = placements[0]?._id;
-      return workspaceItemId
-        ? { artifactId: args.artifactId, workspaceItemId }
+      const node = await findPrimaryNode(
+        ctx,
+        actor.accountId,
+        "work",
+        args.artifactId,
+      );
+      return node
+        ? { artifactId: args.artifactId, nodeId: node._id }
         : { artifactId: args.artifactId };
     }
     if (
@@ -1950,23 +1919,17 @@ export const finalizePendingLive = mutation({
       aiEffects: settlingEffects.length ? settlingEffects : undefined,
       updatedAt: now,
     });
-    const placements = await ctx.db
-      .query("spectraWorkspaceItems")
-      .withIndex("by_source", (q) =>
-        q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
-      )
-      .collect();
-    await Promise.all(
-      placements.map((placement) =>
-        ctx.db.patch(placement._id, {
-          viewData: { ...placement.viewData, compactSummary: summary },
-          updatedAt: now,
-        }),
-      ),
+    /* The tree caches the work's name so listings need no fan-out read; a
+       finalize can have retitled it. */
+    await renameSourceNodes(ctx, "work", args.artifactId, artifact.title);
+    const node = await findPrimaryNode(
+      ctx,
+      actor.accountId,
+      "work",
+      args.artifactId,
     );
-    const workspaceItemId = placements[0]?._id;
-    return workspaceItemId
-      ? { artifactId: args.artifactId, workspaceItemId }
+    return node
+      ? { artifactId: args.artifactId, nodeId: node._id }
       : { artifactId: args.artifactId };
   },
 });
@@ -2347,15 +2310,7 @@ export const discardPendingForRun = mutation({
             !artifact.currentVersionId)),
     );
     for (const artifact of pending) {
-      const placements = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceType", "artifact").eq("sourceId", artifact._id),
-        )
-        .collect();
-      await Promise.all(
-        placements.map((placement) => ctx.db.delete(placement._id)),
-      );
+      await purgeSourceNodes(ctx, "work", artifact._id);
       await ctx.db.delete(artifact._id);
     }
     return { discarded: pending.length };
@@ -2444,15 +2399,7 @@ export const failPendingForRun = mutation({
           artifact.content,
         );
         if ((artifact.aiProgress ?? 0) <= 0.05 || hollowDefaults) {
-          const placements = await ctx.db
-            .query("spectraWorkspaceItems")
-            .withIndex("by_source", (q) =>
-              q.eq("sourceType", "artifact").eq("sourceId", artifact._id),
-            )
-            .collect();
-          await Promise.all(
-            placements.map((placement) => ctx.db.delete(placement._id)),
-          );
+          await purgeSourceNodes(ctx, "work", artifact._id);
           await ctx.db.delete(artifact._id);
           removed += 1;
           return;
@@ -2893,14 +2840,10 @@ export const permanentlyDelete = mutation({
       actor.accountId,
     );
 
-    const placements = await ctx.db
-      .query("spectraWorkspaceItems")
-      .withIndex("by_source", (q) =>
-        q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
-      )
-      .collect();
-    await Promise.all(
-      placements.map((placement) => ctx.db.delete(placement._id)),
+    const purgedPlacements = await purgeSourceNodes(
+      ctx,
+      "work",
+      args.artifactId,
     );
     const userStates = await ctx.db
       .query("artifactUserStates")
@@ -3103,7 +3046,7 @@ export const permanentlyDelete = mutation({
     await ctx.db.delete(args.artifactId);
     return {
       artifactId: args.artifactId,
-      placementCount: placements.length,
+      placementCount: purgedPlacements,
       runCount: runs.length,
     };
   },

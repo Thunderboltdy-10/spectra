@@ -98,7 +98,7 @@ function setup(
     summary: "A focused deck.",
     content: deckPlan().operations[0].input.content,
     tags: ["biology"],
-    placements: [{ workspaceId: "workspace-real", workspaceTitle: "Biology", workspaceItemId: "item-real" }],
+    placements: [{ workspaceId: "workspace-real", workspaceTitle: "Biology", nodeId: "node-real" }],
     updatedAt: 1,
     ...savedArtifactOverride,
   };
@@ -108,7 +108,7 @@ function setup(
     if (name.includes("spectraArtifacts:get")) return savedArtifact;
     if (name.includes("spectraArtifacts:list")) return [];
     if (name.includes("spectraWorkspaces:list")) return [{ _id: "workspace-real", title: "Biology" }];
-    if (name.includes("spectraWorkspaceItems:listForWorkspace")) return { workspace: { _id: "workspace-real", title: "Biology" }, items: [] };
+    if (name.includes("orgTree:listWorkspaceContents")) return { workspace: { _id: "workspace-real", title: "Biology" }, items: [] };
     if (name.includes("spectraThreads:get")) return { threadId: "thread-real", title: "New thread", messages: [], traces: [] };
     if (name.includes("identity:me") || name.includes("identity:get")) {
       return {
@@ -189,7 +189,7 @@ function setup(
         blueprintKey: (args.blueprintKey as string) ?? savedArtifact.blueprintKey,
         title: args.title as string,
       };
-      return { artifactId: "artifact-pending", workspaceItemId: "item-pending" };
+      return { artifactId: "artifact-pending", nodeId: "node-pending" };
     }
     if (name.includes("spectraArtifacts:finalizePendingLive") || name.includes("spectraArtifacts:finalizePending")) {
       savedArtifact = {
@@ -204,9 +204,9 @@ function setup(
         currentVersionId: "version-real",
         liveStateVectorHash: "hash-real",
       };
-      return { artifactId: "artifact-real", workspaceItemId: "item-real" };
+      return { artifactId: "artifact-real", nodeId: "node-real" };
     }
-    if (name.includes("spectraArtifacts:create")) return { artifactId: "artifact-real", workspaceItemId: "item-real" };
+    if (name.includes("spectraArtifacts:create")) return { artifactId: "artifact-real", nodeId: "node-real" };
     if (name.includes("spectraArtifacts:update")) {
       savedArtifact = {
         ...savedArtifact,
@@ -231,7 +231,7 @@ function setup(
     if (name.includes("spectraRuns:appendEvent") || name.includes("spectraRuns:appendEvents") || name.includes("spectraRuns:markTraceDegraded")) return {};
     if (name.includes("spectraArtifacts:patchPendingContent") || name.includes("spectraArtifacts:stageAiPatch") || name.includes("spectraArtifacts:discardPendingForRun") || name.includes("spectraArtifacts:failPendingForRun") || name.includes("spectraArtifacts:settleStagedForRun") || name.includes("spectraWorkspaces:settleForRun")) return {};
     if (name.includes("spectraArtifacts:setAiEffects") || name.includes("spectraArtifacts:clearAiEffects") || name.includes("spectraArtifacts:queueAiEffect")) return {};
-    if (name.includes("spectraWorkspaceItems:setPinned") || name.includes("spectraWorkspaceItems:hide") || name.includes("spectraWorkspaceItems:add")) return {};
+    if (name.includes("orgTree:setPinned") || name.includes("orgTree:removeFromWorkspace") || name.includes("orgTree:placeWork")) return {};
     if (name.includes("spectraArtifactLinks:create") || name.includes("spectraArtifactLinks:remove")) return {};
     if (name.includes("metering:") || name.includes("operationalCounters:") || name.includes("audit:")) return {};
     if (name.includes("memory:")) return {};
@@ -714,7 +714,7 @@ describe("Spectra run route", () => {
     const createCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraArtifacts:finalizePending"));
     expect(createCall).toBeTruthy();
     expect((getSavedArtifact().content as { cards: unknown[] }).cards).toHaveLength(6);
-    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraWorkspaceItems:hide"))).toBe(false);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("orgTree:removeFromWorkspace"))).toBe(false);
     const beginRunCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraRuns:beginRun"));
     expect(beginRunCall?.[1]).toMatchObject({ sourceSurface: "workspace", workspaceId: "workspace-real" });
     expect(events.some((event) => event.type === "confirmation_required")).toBe(false);

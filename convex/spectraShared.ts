@@ -3,6 +3,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireCapability, type Capability } from "./authorityShared";
 import { getAuthenticatedActor } from "./identityShared";
+import { placeSourceNode } from "./orgTreeShared";
 
 export const vBlueprintKey = v.union(
   v.literal("document"),
@@ -730,8 +731,13 @@ export async function resolveThreadWorkspaceId(
   );
 }
 
+/**
+ * A thread is placed in the tree the moment it exists (D31). With no workspace
+ * named it lands in General, so a conversation is never homeless — the state
+ * the old placement table allowed and the Library could not describe.
+ */
 export async function ensureThreadWorkspacePlacement(
-  ctx: Pick<MutationCtx, "db">,
+  ctx: MutationCtx,
   params: {
     threadId: Id<"spectraThreads">;
     ownerAccountId?: Id<"accounts">;
@@ -743,51 +749,23 @@ export async function ensureThreadWorkspacePlacement(
   const thread = await ctx.db.get(params.threadId);
   if (!thread || thread.status === "deleted") return undefined;
   const workspaceId = params.workspaceId ?? thread.workspaceId;
-  if (!workspaceId) return undefined;
-  if (thread.workspaceId !== workspaceId) {
+  if (workspaceId && thread.workspaceId !== workspaceId)
     await ctx.db.patch(params.threadId, {
       workspaceId,
       updatedAt: Date.now(),
     });
-  }
-  const now = Date.now();
-  const existing = await ctx.db
-    .query("spectraWorkspaceItems")
-    .withIndex("by_workspace_source", (q) =>
-      q
-        .eq("workspaceId", workspaceId)
-        .eq("sourceType", "thread")
-        .eq("sourceId", params.threadId),
-    )
-    .first();
-  if (existing) {
-    await ctx.db.patch(existing._id, {
-      viewData: {
-        ...existing.viewData,
-        compactSummary: params.summary ?? existing.viewData.compactSummary,
-        pinned: params.pinned ?? existing.viewData.pinned,
-        hidden: false,
-      },
-      updatedAt: now,
-    });
-    return existing._id;
-  }
-  return ctx.db.insert("spectraWorkspaceItems", {
-    workspaceId,
-    sourceType: "thread",
+  const node = await placeSourceNode(ctx, {
+    accountId: thread.ownerAccountId,
+    schoolId: thread.schoolId,
+    kind: "thread",
     sourceId: params.threadId,
-    viewData: {
-      compactSummary: params.summary,
-      // Importance is an explicit user choice. Every creation path, including
-      // direct thread creation and run-backed creation, starts unpinned unless
-      // the caller deliberately promotes the item.
-      pinned: params.pinned ?? false,
-      hidden: false,
-    },
-    layout: { view: "cards" },
-    createdAt: now,
-    updatedAt: now,
+    name: thread.title,
+    target: workspaceId ? { workspaceId } : {},
+    placedByAccountId: params.ownerAccountId ?? thread.ownerAccountId,
+    // Importance is an explicit user choice; creation paths never promote.
+    pinned: params.pinned,
   });
+  return node._id;
 }
 
 export function buildArtifactTextIndex(params: {

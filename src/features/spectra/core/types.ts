@@ -87,24 +87,14 @@ export type ArtifactBlueprint = {
 };
 
 export type WorkspaceItem = {
-  id: SpectraId<"workspaceItems">;
+  nodeId: SpectraId<"orgNodes">;
   workspaceId: SpectraId<"workspaces">;
-  sourceType: "artifact" | "thread" | "task" | "widget" | "custom";
+  parentId: SpectraId<"orgNodes"> | null;
+  kind: "work" | "thread";
   sourceId: string;
-  viewData: {
-    titleOverride?: string;
-    compactSummary?: string;
-    cardVariant?: string;
-    pinned?: boolean;
-    hidden?: boolean;
-  };
-  layout: {
-    view: Exclude<WorkspaceView, "library">;
-    position?: { x: number; y: number };
-    size?: { w: number; h: number };
-    zIndex?: number;
-    collapsed?: boolean;
-  };
+  name: string;
+  pinned: boolean;
+  orderKey: string;
   createdAt: TimestampMs;
   updatedAt: TimestampMs;
 };

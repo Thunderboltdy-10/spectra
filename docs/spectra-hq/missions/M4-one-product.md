@@ -1,5 +1,7 @@
 # M4 — ONE PRODUCT
 
+> **M1-M4 era. Historical record.** M4 delivered most of its substance in commits `M4`/`M4+`/`M4++` but was never formally closed; Nova mission **N1** reconciles it into `docs/spectra-nova/STATE.md` and appends the missing mission log here. Current operating truth: `docs/spectra-nova/`.
+
 **Agent:** Builder · **Prerequisites:** M3 verified
 
 ## Objective

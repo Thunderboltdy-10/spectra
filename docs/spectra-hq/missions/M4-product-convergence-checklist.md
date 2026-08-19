@@ -1,5 +1,7 @@
 # M4 product convergence checklist
 
+> **M1-M4 era. Historical record.** Its §9 direction was largely delivered by `M4++`; unfinished items were triaged into `docs/spectra-nova/STATE.md` §1 and N1/N2. Current operating truth: `docs/spectra-nova/`.
+
 This file is the durable visual and product-quality ledger for M4. It supplements
 `M4-one-product.md`; it does not replace or narrow that mission. An item is only
 complete after implementation and direct Chrome screenshot inspection at the

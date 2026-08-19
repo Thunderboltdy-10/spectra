@@ -84,7 +84,10 @@ import {
   type WorkbookSheet,
 } from "../sheets/model";
 import { exportOds, importOds } from "../sheets/ods";
-import { downloadDocumentBlob, downloadDocumentText } from "./artifact-studio-file-utils";
+import {
+  downloadDocumentBlob,
+  downloadDocumentText,
+} from "./artifact-studio-file-utils";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -360,7 +363,7 @@ function occupiedBounds(sheet: WorkbookSheet) {
 function cellIsOccupied(cell?: SheetCell) {
   return Boolean(
     cell?.formula ||
-      (cell?.value !== undefined && cell?.value !== null && cell?.value !== ""),
+    (cell?.value !== undefined && cell?.value !== null && cell?.value !== ""),
   );
 }
 
@@ -460,7 +463,11 @@ function chartFirstRowIsHeader(
   range: CellRange,
   calculated: ReturnType<typeof calculateWorkbook>,
 ) {
-  for (let column = range.start.column; column <= range.end.column; column += 1) {
+  for (
+    let column = range.start.column;
+    column <= range.end.column;
+    column += 1
+  ) {
     const value = chartCellValue(sheet, calculated, range.start.row, column);
     if (typeof value === "number") continue;
     if (value !== null && value !== undefined && String(value).trim() !== "")
@@ -510,11 +517,7 @@ export function chartDataset(
   const rowCount = Math.max(0, normalized.end.row - dataStart + 1);
   let labelColumn = -1;
   if ((singleSeries || !hasHeader) && rowCount) {
-    for (
-      let column = normalized.start.column - 1;
-      column >= 0;
-      column -= 1
-    ) {
+    for (let column = normalized.start.column - 1; column >= 0; column -= 1) {
       let textCount = 0;
       for (let row = dataStart; row <= normalized.end.row; row += 1) {
         const value = chartCellValue(sheet, calculated, row, column);
@@ -1972,7 +1975,10 @@ export function SheetsStudio({
     if (!element) return;
     // Offsets, not division: a column the user widened makes the window past it
     // narrower, and dividing by a nominal 122px would render the wrong range.
-    const rowStart = Math.max(0, trackAtOffset(rowOffsets, element.scrollTop) - 3);
+    const rowStart = Math.max(
+      0,
+      trackAtOffset(rowOffsets, element.scrollTop) - 3,
+    );
     const columnStart = Math.max(
       0,
       trackAtOffset(columnOffsets, element.scrollLeft) - 2,
@@ -2009,7 +2015,6 @@ export function SheetsStudio({
     return () => observer.disconnect();
   }, [updateViewport]);
 
-
   /**
    * Column and row resizing, persisted. The drag paints from local state so the
    * pointer never waits on a commit, and writes the final size once on release
@@ -2024,9 +2029,10 @@ export function SheetsStudio({
     const startPointer = axis === "column" ? event.clientX : event.clientY;
     const startSize =
       axis === "column"
-        ? ((activeSheet.columnWidths?.[String(index)] ?? COLUMN_WIDTH) * zoom)
-        : ((activeSheet.rowHeights?.[String(index)] ?? ROW_HEIGHT) * zoom);
-    const minimum = (axis === "column" ? MIN_COLUMN_WIDTH : MIN_ROW_HEIGHT) * zoom;
+        ? (activeSheet.columnWidths?.[String(index)] ?? COLUMN_WIDTH) * zoom
+        : (activeSheet.rowHeights?.[String(index)] ?? ROW_HEIGHT) * zoom;
+    const minimum =
+      (axis === "column" ? MIN_COLUMN_WIDTH : MIN_ROW_HEIGHT) * zoom;
     setTrackGesture({ axis, index, size: startSize });
     const move = (pointer: PointerEvent) => {
       const delta =
@@ -2226,8 +2232,7 @@ export function SheetsStudio({
     const viewHeight = view?.clientHeight ?? 320;
     const width = Math.min(440, Math.max(280, viewWidth - 36));
     const height = Math.min(320, Math.max(220, viewHeight - 24));
-    const preferredX =
-      (normalizedSelection.end.column + 1) * COLUMN_WIDTH + 16;
+    const preferredX = (normalizedSelection.end.column + 1) * COLUMN_WIDTH + 16;
     const preferredY = normalizedSelection.start.row * ROW_HEIGHT;
     const minX = viewport.scrollLeft + 12;
     const minY = viewport.scrollTop + 12;
@@ -2362,9 +2367,10 @@ export function SheetsStudio({
       selectedRange,
       calculated,
     );
-    const dataStartRow = matchingTable || headerRow
-      ? selectedRange.start.row + 1
-      : selectedRange.start.row;
+    const dataStartRow =
+      matchingTable || headerRow
+        ? selectedRange.start.row + 1
+        : selectedRange.start.row;
     const rows = [] as Array<{
       values: Record<number, SheetCell | undefined>;
       key: SheetScalar | "";
@@ -2806,7 +2812,9 @@ export function SheetsStudio({
           type: "application/vnd.oasis.opendocument.spreadsheet",
         }),
       );
-      setImportNotice(`Exported ${workbook.sheets.length} sheet${workbook.sheets.length === 1 ? "" : "s"} as OpenDocument.`);
+      setImportNotice(
+        `Exported ${workbook.sheets.length} sheet${workbook.sheets.length === 1 ? "" : "s"} as OpenDocument.`,
+      );
       return;
     }
     const ExcelJS = await import("exceljs");
@@ -2819,14 +2827,14 @@ export function SheetsStudio({
         if (cell.formula) {
           excelCell.value = {
             formula: cell.formula.replace(/^=/, ""),
-            result: calculatedCell?.value ?? null,
+            result: calculatedCell?.value ?? undefined,
           };
         } else if (cell.value !== undefined) excelCell.value = cell.value;
-        if (cell.format?.bold) excelCell.font = { ...excelCell.font, bold: true };
+        if (cell.format?.bold)
+          excelCell.font = { ...excelCell.font, bold: true };
         if (cell.format?.italic)
           excelCell.font = { ...excelCell.font, italic: true };
-        if (cell.format?.numberFormat === "percent")
-          excelCell.numFmt = "0.00%";
+        if (cell.format?.numberFormat === "percent") excelCell.numFmt = "0.00%";
         else if (cell.format?.numberFormat === "currency")
           excelCell.numFmt = '"$"#,##0.00';
       }
@@ -3266,7 +3274,12 @@ export function SheetsStudio({
       requires: "edit",
       onSelect: () =>
         updateActiveSheet((sheet) =>
-          mutateSheetAxis(sheet, "column", normalizedSelection.start.column, -1),
+          mutateSheetAxis(
+            sheet,
+            "column",
+            normalizedSelection.start.column,
+            -1,
+          ),
         ),
     },
     {
@@ -3551,7 +3564,7 @@ export function SheetsStudio({
             minHeight: mode === "split" ? 0 : "max(420px, 52dvh)",
           } as CSSProperties
         }
-        >
+      >
         {analysing ? (
           <div
             className="sheets-analysis-canvas"
@@ -3642,8 +3655,8 @@ export function SheetsStudio({
             ) : (
               <p className="mt-4 max-w-[36rem] text-caption text-[var(--text-secondary)]">
                 {selectionLabel} holds no numbers, so there is nothing to
-                measure yet. Return to Grid, select cells with values, then
-                open Analysis again.
+                measure yet. Return to Grid, select cells with values, then open
+                Analysis again.
               </p>
             )}
           </div>
@@ -3660,7 +3673,9 @@ export function SheetsStudio({
               <button
                 type="button"
                 key={column}
-                {...targetAttrs(`/sheets/${activeSheetIndex}/columns/${column}`)}
+                {...targetAttrs(
+                  `/sheets/${activeSheetIndex}/columns/${column}`,
+                )}
                 onClick={() =>
                   setRange({
                     start: { row: 0, column },
@@ -3873,7 +3888,10 @@ export function SheetsStudio({
                         : columnSpan(column),
                       height: merged
                         ? rowOffsets[
-                            position + merged.range.end.row - merged.range.start.row + 1
+                            position +
+                              merged.range.end.row -
+                              merged.range.start.row +
+                              1
                           ]! - rowOffsets[position]!
                         : rowSpan(position),
                       zIndex:
@@ -4014,7 +4032,9 @@ export function SheetsStudio({
                 rather than in a separate section underneath the data (§11F). */}
             {activeSheet.charts.map((chart) => {
               const position =
-                chartGesture?.id === chart.id ? chartGesture.position : chart.position;
+                chartGesture?.id === chart.id
+                  ? chartGesture.position
+                  : chart.position;
               const selectedChart = selectedChartId === chart.id;
               const statistics = chartSummary(activeSheet, chart, calculated);
               return (
@@ -4249,11 +4269,13 @@ export function SheetsStudio({
                 <div>
                   <span className={PANEL_LABEL}>Emphasis and alignment</span>
                   <div className="flex items-center gap-1">
-                    {emphasisControls.map(({ label, icon: Icon, ...control }) => (
-                      <ToolbarButton key={label} label={label} {...control}>
-                        <Icon />
-                      </ToolbarButton>
-                    ))}
+                    {emphasisControls.map(
+                      ({ label, icon: Icon, ...control }) => (
+                        <ToolbarButton key={label} label={label} {...control}>
+                          <Icon />
+                        </ToolbarButton>
+                      ),
+                    )}
                   </div>
                 </div>
                 <SelectField
@@ -4473,8 +4495,10 @@ export function SheetsStudio({
                           ? Number(maximumText)
                           : undefined;
                         if (
-                          (minimum !== undefined && !Number.isFinite(minimum)) ||
-                          (maximum !== undefined && !Number.isFinite(maximum)) ||
+                          (minimum !== undefined &&
+                            !Number.isFinite(minimum)) ||
+                          (maximum !== undefined &&
+                            !Number.isFinite(maximum)) ||
                           (minimum !== undefined &&
                             maximum !== undefined &&
                             minimum > maximum)

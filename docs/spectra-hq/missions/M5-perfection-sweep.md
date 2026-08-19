@@ -1,5 +1,7 @@
 # M5 — PERFECTION SWEEP
 
+> **SUPERSEDED 2026-08-19 by `docs/spectra-nova/missions/N10-convergence.md`**, which inherits this mission's depth and quality bar and applies it to the post-transformation product. Do not run this brief.
+
 **Agent:** Builder · **Prerequisites:** M4 verified (all Golden Flows green)
 
 ## Objective

@@ -1,5 +1,7 @@
 # M9 — MULTIPLAYER FINALE
 
+> **SUPERSEDED 2026-08-19 by `docs/spectra-nova/missions/N12-multiplayer-and-reliability-finale.md`**, which keeps the dual-profile method and adds replicas, external Office saves, Bridge chaos and multi-AI contention. Do not run this brief.
+
 **Agent:** Builder (Designer on call for field/motion tuning) · **Prerequisites:** M8 verified
 
 ## Objective

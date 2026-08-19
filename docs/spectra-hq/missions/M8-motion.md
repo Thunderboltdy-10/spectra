@@ -1,5 +1,7 @@
 # M8 — MOTION
 
+> **SUPERSEDED 2026-08-19 by `docs/spectra-nova/missions/N11-identity-field-prism-motion-landing.md`** (W3), extended with AI navigation, organizational motion, sync-state transitions and command-surface motion. Do not run this brief.
+
 **Agent:** Designer · **Prerequisites:** M7 verified
 
 ## Objective

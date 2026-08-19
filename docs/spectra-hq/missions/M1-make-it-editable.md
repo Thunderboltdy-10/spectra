@@ -1,5 +1,7 @@
 # M1 — MAKE IT EDITABLE
 
+> **CLOSED (M1-M4 era). Historical record.** Current operating truth: `docs/spectra-nova/`.
+
 **Agent:** Builder · **Prerequisites:** none · **This is the foundation mission. Nothing else matters until an owner can open their own work and type.**
 
 ## Objective

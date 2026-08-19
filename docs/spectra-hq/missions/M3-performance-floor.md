@@ -1,5 +1,7 @@
 # M3 — PERFORMANCE FLOOR
 
+> **CLOSED (M1-M4 era). Historical record.** Current operating truth: `docs/spectra-nova/`.
+
 **Agent:** Builder · **Prerequisites:** M2 verified
 
 ## Objective

@@ -1,6 +1,8 @@
 # SPECTRA CANON
 
-**Binding. Short on purpose. If an instruction anywhere conflicts with this document, this document wins. If you believe the canon itself is wrong, stop and ask Pablo — do not silently deviate.**
+> **STILL BINDING, VIA NOVA.** Decisions D1-D23 below remain in force and are incorporated by reference (with amendments) into `docs/spectra-nova/CANON.md` §0, which adds D24-D40 and wins on any conflict. Read the Nova canon first.
+
+**Binding. Short on purpose. If an instruction anywhere conflicts with this document, this document wins — except `docs/spectra-nova/CANON.md`, which supersedes it where the two differ (see the banner above). If you believe the canon itself is wrong, stop and ask Pablo — do not silently deviate.**
 
 ---
 

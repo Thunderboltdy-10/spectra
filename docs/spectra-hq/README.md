@@ -1,4 +1,18 @@
-# Spectra HQ — the operating system for all Spectra work
+# Spectra HQ — SUPERSEDED (historical record of the M1-M4 era)
+
+> **SUPERSEDED 2026-08-19 by `docs/spectra-nova/`.**
+>
+> Spectra HQ ran M1-M4 and its operating model worked: evidence culture, one truth ledger, self-contained missions, Golden Flows, subtraction pressure. Those laws survive - they were carried forward into `docs/spectra-nova/README.md` and extended.
+>
+> **No agent takes orders from this directory any more.** The product direction expanded far beyond what M5-M9 were written for (local files, the Spectra Bridge, one work identity with several replicas, Office fidelity, a product-wide AI operating plane, Library as a real filesystem). The Nova program replaces the M5-M9 tail: **M5 -> N10**, **M6-M8 -> N11**, **M9 -> N12**, with the new foundations as N1-N9.
+>
+> What remains authoritative here: **`CANON.md` decisions D1-D23**, incorporated by reference (with amendments) into `docs/spectra-nova/CANON.md` §0. Everything else in this directory is history: `STATE.md` describes the pre-Nova world, mission briefs M1-M4 hold the closed record of that era, and M5-M9 are superseded by the Nova briefs.
+>
+> Start at **`docs/spectra-nova/README.md`**. If you are launching work, use `docs/spectra-nova/LAUNCH_PROMPTS.md` or `docs/spectra-nova/GOAL.md`.
+
+---
+
+## Original front matter (kept for the record)
 
 **This directory supersedes all prior planning systems as the operational source of truth.**
 The old documents remain valuable as *reference material* (see the doc trust table in `STATE.md`), but no agent takes marching orders from them anymore.

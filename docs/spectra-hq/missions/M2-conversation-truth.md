@@ -1,5 +1,7 @@
 # M2 — CONVERSATION TRUTH
 
+> **CLOSED (M1-M4 era). Historical record.** Current operating truth: `docs/spectra-nova/`.
+
 **Agent:** Builder · **Prerequisites:** M1 verified in STATE.md
 
 ## Objective

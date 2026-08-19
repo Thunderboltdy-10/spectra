@@ -1,5 +1,7 @@
 # M7 — PRISM & LANDING
 
+> **SUPERSEDED 2026-08-19 by `docs/spectra-nova/missions/N11-identity-field-prism-motion-landing.md`** (W2 and W4). The prism-family intent survives; the landing narrative is deliberately rebuilt around the Nova product. Do not run this brief.
+
 **Agent:** Designer · **Prerequisites:** M6 verified
 
 ## Objective

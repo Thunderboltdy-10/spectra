@@ -1,5 +1,7 @@
 # M6 — THE FIELD
 
+> **SUPERSEDED 2026-08-19 by `docs/spectra-nova/missions/N11-identity-field-prism-motion-landing.md`** (W1), which carries the one-field-system intent forward with file/sync/AI-anywhere signals. Do not run this brief.
+
 **Agent:** Designer · **Prerequisites:** M5 verified
 
 ## Objective

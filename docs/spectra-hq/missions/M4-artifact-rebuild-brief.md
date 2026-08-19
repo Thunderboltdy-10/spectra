@@ -1,5 +1,7 @@
 # M4 artifact and product rebuild brief
 
+> **M1-M4 era. Historical record** (still the best account of the artifact-system seams as of 2026-08-18; its round-2/3 tables are void as status). Current operating truth: `docs/spectra-nova/`.
+
 **Durable coordination file. Re-read this after every compaction, together with
 `M4-one-product.md` and `M4-product-convergence-checklist.md` §9.** Conversational
 memory is not the coordination mechanism for work of this size.

@@ -32,7 +32,7 @@ import {
   placementsForSource,
   placeSourceNode,
   purgeSourceNodes,
-  renameSourceNodes,
+  syncSourceNodes,
 } from "./orgTreeShared";
 import {
   hydrateVersionSafely,
@@ -1587,6 +1587,13 @@ export const create = mutation({
     tags: v.optional(v.array(v.string())),
     source: v.optional(vCreatedFromSource),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
+    /**
+     * Exact destination in the tree. Wins over `workspaceId` when both come.
+     * `"root"` is the account's top level, spelled the same way every other
+     * tree call spells it — without it, a work created while the reader is at
+     * the top of their Library would silently land in General instead.
+     */
+    parentNodeId: v.optional(v.union(v.id("orgNodes"), v.literal("root"))),
     runId: v.optional(v.id("spectraAiRuns")),
     executionId: v.optional(v.string()),
     threadId: v.optional(v.id("spectraThreads")),
@@ -1669,7 +1676,11 @@ export const create = mutation({
       kind: "work",
       sourceId: artifactId,
       name: title,
-      target: args.workspaceId ? { workspaceId: args.workspaceId } : {},
+      target: args.parentNodeId
+        ? { parentId: args.parentNodeId === "root" ? null : args.parentNodeId }
+        : args.workspaceId
+          ? { workspaceId: args.workspaceId }
+          : {},
       placedByAccountId: actor.accountId,
       accessProjection: true,
     });
@@ -1921,7 +1932,7 @@ export const finalizePendingLive = mutation({
     });
     /* The tree caches the work's name so listings need no fan-out read; a
        finalize can have retitled it. */
-    await renameSourceNodes(ctx, "work", args.artifactId, artifact.title);
+    await syncSourceNodes(ctx, "work", args.artifactId, artifact.title);
     const node = await findPrimaryNode(
       ctx,
       actor.accountId,

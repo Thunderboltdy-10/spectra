@@ -1,14 +1,16 @@
 import { Suspense } from "react";
 import { AppShell } from "@/components/layout/app-shell";
-import { ArtifactsShell } from "@/features/spectra/pages/artifacts-shell";
+import { SpectraShell } from "@/features/spectra/pages/spectra-shell";
 
 export const dynamic = "force-dynamic";
 
 export default function LibraryPage() {
   return (
-    <AppShell fullBleed noScroll contentClassName="!p-0 overflow-y-auto">
-      <Suspense fallback={<div className="h-full min-h-0 bg-[var(--bg-primary)]" />}>
-        <ArtifactsShell />
+    <AppShell fullBleed noScroll contentClassName="!p-0">
+      <Suspense
+        fallback={<div className="h-full min-h-0 bg-[var(--bg-primary)]" />}
+      >
+        <SpectraShell surface="library" />
       </Suspense>
     </AppShell>
   );

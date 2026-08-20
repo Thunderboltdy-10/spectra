@@ -21,7 +21,7 @@ import {
   listChildNodes,
   placeSourceNode,
   relativeFolderPath,
-  renameSourceNodes,
+  syncSourceNodes,
   workspaceContextNodes,
 } from "./orgTreeShared";
 
@@ -272,7 +272,7 @@ export const update = mutation({
     if (args.defaultView !== undefined) patch.defaultView = args.defaultView;
     await ctx.db.patch(args.workspaceId, patch);
     if (patch.title !== undefined)
-      await renameSourceNodes(
+      await syncSourceNodes(
         ctx,
         "workspace",
         args.workspaceId,
@@ -374,7 +374,7 @@ export const finalizePending = mutation({
       updatedAt: now,
       lastActivityAt: now,
     });
-    await renameSourceNodes(
+    await syncSourceNodes(
       ctx,
       "workspace",
       args.workspaceId,

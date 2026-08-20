@@ -34,10 +34,10 @@ function source(overrides: Partial<LiveDockTabSource> = {}): LiveDockTabSource {
 describe("Live Dock V2", () => {
   it("keeps send and panel visibility independent", () => {
     expect(shouldAutoOpenConversationAfterSend()).toBe(false);
-    const workspace = read("src/features/spectra/pages/workspace-shell.tsx");
-    const ready = workspace.slice(
-      workspace.indexOf("onThreadReady:"),
-      workspace.indexOf("onContinuationConflict:"),
+    const shell = read("src/features/spectra/pages/spectra-shell.tsx");
+    const ready = shell.slice(
+      shell.indexOf("onThreadReady:"),
+      shell.indexOf("onContinuationConflict:"),
     );
     expect(ready).not.toContain("setLiveThread(");
     const dock = read("src/features/spectra/components/live-dock.tsx");
@@ -145,13 +145,13 @@ describe("Live Dock V2", () => {
     expect(dock).toContain('aria-label="Start a new thread"');
     expect(dock).toContain("> Respond");
     expect(dock).toContain("visible.length === 0) return null");
-    const workspace = read("src/features/spectra/pages/workspace-shell.tsx");
-    expect(workspace).toContain("function startFreshComposerThread() ");
-    expect(workspace).toContain(
+    const shell = read("src/features/spectra/pages/spectra-shell.tsx");
+    expect(shell).toContain("function startFreshComposerThread() ");
+    expect(shell).toContain(
       "skipAutoContinueThreadIdRef.current = liveThread.id",
     );
-    expect(workspace).toContain("threadId: composerThread?.id ?? null");
-    expect(workspace).toContain("width={liveThreadPanelWidth}");
+    expect(shell).toContain("threadId: composerThread?.id ?? null");
+    expect(shell).toContain("width={liveThreadPanelWidth}");
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
     expect(runHook).toContain("options?.threadId === null");
     expect(dock).toContain("group-focus-within:block");
@@ -159,26 +159,32 @@ describe("Live Dock V2", () => {
     expect(dock).toContain("data-mobile-sheet");
   });
 
-  it("keeps Live Dock tabs off /chat and on Workspace and Library", () => {
+  it("keeps Live Dock tabs off /chat and on the work surfaces", () => {
+    // /chat is the conversation, so a floating rail of running conversations
+    // would restate the page. Library and Workspace are one shell now, and it
+    // mounts the dock through WorkbenchDockShell; the routes that own no
+    // workbench of their own get it from GlobalRouteWorkbench instead.
     const chat = read("src/features/spectra/pages/chat-shell.tsx");
-    const workspace = read("src/features/spectra/pages/workspace-shell.tsx");
-    const library = read("src/features/spectra/pages/artifacts-shell.tsx");
-    expect(chat).not.toContain("<LiveDock");
-    expect(workspace).toContain("<LiveDock");
-    expect(library).toContain("<LiveDock");
+    const shell = read("src/features/spectra/pages/spectra-shell.tsx");
+    const global = read(
+      "src/features/spectra/components/global-route-workbench.tsx",
+    );
+    expect(chat).not.toContain("LiveDock");
+    expect(shell).toContain("<WorkbenchDockShell");
+    expect(global).toContain("<LiveDock");
+    expect(global).toContain('"/library"');
+    expect(global).toContain('"/workspace"');
   });
 
   it("keeps side-panel display separate from composer history and restores saved threads by id", () => {
     const context = read("src/features/spectra/hooks/use-spectra-context.ts");
     expect(context).toContain("{ threadId: next.id }");
-    const library = read("src/features/spectra/pages/artifacts-shell.tsx");
-    expect(library).not.toContain("if (!liveThread) return;");
-    expect(library).toContain(
-      'studio.activeArtifact?.blueprintKey !== "thread_reference"',
-    );
-    expect(library).toContain('artifact.blueprintKey !== "thread_reference"');
-    expect(library).toContain('label: "Threads"');
-    expect(library).toContain("count: libraryThreads.length");
+    // Opening a thread is not opening a work: the shell routes a thread
+    // reference to the side panel and never into the studio, so the panel and
+    // the composer's own history stay separate surfaces.
+    const shell = read("src/features/spectra/pages/spectra-shell.tsx");
+    expect(shell).toContain('if (artifact.blueprintKey === "thread_reference")');
+    expect(shell).toContain("setLiveThread({ id: threadId, title: artifact.title })");
     const panel = read("src/features/spectra/components/live-thread-panel.tsx");
     expect(panel).toContain("Continue this thread in the Live Dock");
   });

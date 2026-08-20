@@ -6,6 +6,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { writeAuditEvent } from "./auditShared";
 import {
   dissolveWorkspaceNode,
+  ensureWorkspaceNode,
   findPrimaryNode,
   placeSourceNode,
 } from "./orgTreeShared";
@@ -1759,6 +1760,12 @@ async function ensureClassWorkspace(
     updatedAt: now,
     lastActivityAt: now,
   });
+  /* A projected class is a workspace like any other, so it is a place in the
+     tree from the moment it exists (D32). Without this the class is real but
+     unreachable: nothing in the Library or on the board can show a workspace
+     that has no node. */
+  const projected = await ctx.db.get(workspaceId);
+  if (projected) await ensureWorkspaceNode(ctx, projected);
   if (existing) {
     await ctx.db.patch(existing._id, {
       recordId: source._id,

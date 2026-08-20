@@ -61,6 +61,13 @@ export type ArtifactCardView = {
   summary: string;
   meta: string;
   placement: "inbox" | "shared" | "workspace";
+  /**
+   * What the card's footer says instead of its placement. A surface that already
+   * shows where a work lives — the board shows the folder path in `meta` — would
+   * otherwise repeat itself, and "In workspace" under a card filed at the top
+   * level is simply untrue.
+   */
+  footer?: string;
   shared?: boolean;
   accessLevel?: "read" | "modify";
   accessExplanation?: string;
@@ -353,10 +360,19 @@ export function ArtifactCard({
                 <Share2 className="h-3 w-3" aria-hidden="true" />
               </span>
             ) : null}
-            <span className="spectra-artifact-card-meta shrink-0 text-micro text-[var(--text-tertiary)]">•</span>
-            <span className="spectra-artifact-card-meta min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
-              {artifact.meta}
-            </span>
+            {/* No meta, no separator. A surface that has nothing to add beyond
+                the type — a board column that already named the folder — would
+                otherwise leave a bullet pointing at nothing. */}
+            {artifact.meta ? (
+              <>
+                <span className="spectra-artifact-card-meta shrink-0 text-micro text-[var(--text-tertiary)]">
+                  •
+                </span>
+                <span className="spectra-artifact-card-meta min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
+                  {artifact.meta}
+                </span>
+              </>
+            ) : null}
           </div>
           {interactive ? (
             <button
@@ -454,7 +470,8 @@ export function ArtifactCard({
           ) : null}
           <div className="mt-2.5 flex min-h-7 min-w-0 items-end justify-between gap-2">
             <div className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
-              {artifact.placement === "workspace" ? "In workspace" : "General"}
+              {artifact.footer ??
+                (artifact.placement === "workspace" ? "In workspace" : "General")}
             </div>
             {actions ? (
               <div

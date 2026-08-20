@@ -6,7 +6,7 @@ import { internal } from "./_generated/api";
 import { commitChangeGroup, HUMAN_CHANGE_IDLE_MS } from "./changeGroups";
 import { timetableContentContainsPersonalState } from "./quizPrivacy";
 import { changedArtifactRegionIds } from "../src/features/spectra/collaboration/artifact-yjs-model";
-import { renameSourceNodes } from "./orgTreeShared";
+import { syncSourceNodes } from "./orgTreeShared";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import { claimAuthorizesGatewayUpdate } from "./collaborationClaimAuthorization";
 
@@ -374,8 +374,10 @@ export const bootstrapNative = internalMutation({
         lastSynchronizedAt: now,
       }),
     ]);
-    if (projection.title !== artifact.title)
-      await renameSourceNodes(ctx, "work", artifact._id, projection.title);
+    /* Every commit is activity, whether or not the title moved: the tree caches
+       both the name and the moment, so a recency-ordered column can be an
+       indexed window instead of a scan (D42, D40). */
+    await syncSourceNodes(ctx, "work", artifact._id, projection.title);
     return { sequence: args.expectedNextSequence, duplicate: false };
   },
 });
@@ -744,9 +746,10 @@ export const append = internalMutation({
     });
     /* A title typed in the editor is a rename. The tree caches names so a
        Library row never has to fan out — which means it has to follow here, in
-       the same transaction, not on the next full read (D40). */
-    if (projection && projection.title !== artifact.title)
-      await renameSourceNodes(ctx, "work", artifact._id, projection.title);
+       the same transaction, not on the next full read (D40). The same write
+       records that the work was touched, which is what recency-ordered columns
+       page against (D42). */
+    if (projection) await syncSourceNodes(ctx, "work", artifact._id, projection.title);
     if (projection) {
       // Every open human session must point at a renderable global state, even
       // when another collaborator changed a non-overlapping region afterward.

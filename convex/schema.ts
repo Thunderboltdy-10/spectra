@@ -2553,6 +2553,16 @@ export default defineSchema({
     // workspace → spectraWorkspaces._id · link → target orgNodes._id
     sourceId: v.optional(v.string()),
     orderKey: v.string(),
+    // The kind of thing this is, as a reader would name it: a work's blueprint
+    // key, or the node kind for threads, folders, workspaces and links. Cached
+    // here so a board column of one type is an indexed range rather than a scan
+    // of the account (CANON D42).
+    typeKey: v.optional(v.string()),
+    // When the thing itself last changed — a content commit, a retitle, a run
+    // finishing — as distinct from `updatedAt`, which is when its *placement*
+    // last changed. Every recency-ordered surface reads this, and it is indexed
+    // so those surfaces can page instead of collecting.
+    activityAt: v.optional(v.number()),
     // Nearest ancestor workspace, maintained transactionally on every move.
     // Absent = the account's root scope (General is a real workspace, so work
     // is never contextless).
@@ -2575,6 +2585,30 @@ export default defineSchema({
     .index("by_workspace_context", ["workspaceContextId"])
     .index("by_account_deleted", ["accountId", "deletedAt"])
     .index("by_trashed_root", ["trashedRootId"])
+    /* The board's windows. `deletedAt` sits in each one so a trashed subtree is
+       excluded by the range rather than filtered out of it, which keeps a page
+       of results exactly a page of reads. */
+    .index("by_account_live_activity", ["accountId", "deletedAt", "activityAt"])
+    .index("by_account_live_type_activity", [
+      "accountId",
+      "deletedAt",
+      "typeKey",
+      "activityAt",
+    ])
+    .index("by_account_live_workspace_activity", [
+      "accountId",
+      "deletedAt",
+      "workspaceContextId",
+      "activityAt",
+    ])
+    .index("by_account_live_workspace_type_activity", [
+      "accountId",
+      "deletedAt",
+      "workspaceContextId",
+      "typeKey",
+      "activityAt",
+    ])
+    .index("by_parent_live_activity", ["parentId", "deletedAt", "activityAt"])
     .searchIndex("search_name", {
       searchField: "name",
       filterFields: ["accountId", "kind", "deletedAt"],

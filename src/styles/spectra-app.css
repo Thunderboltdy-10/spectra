@@ -296,30 +296,6 @@ body {
   line-height: 1.28;
 }
 
-/* Mission Control reference geometry (05_home.png).
-   Full-bleed paper: a scrolling primary column beside a 320px operational
-   rail separated by a hairline, both beneath the global action bar. */
-.spectra-mission-control {
-  --mission-paper: #fdfcf9;
-  --mission-rail: #faf8f2;
-  background: var(--mission-paper) !important;
-}
-
-.spectra-mission-control-workspaces .spectra-workspace-card-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-}
-
-.spectra-mission-control-workspaces [data-spectra-card="workspace"] {
-  border-color: var(--border-default);
-  background: #fffefa;
-  box-shadow: 0 8px 22px -22px rgba(53, 39, 24, 0.42);
-}
-
-.spectra-mission-control-workspaces [data-spectra-card="workspace"]::before,
-.spectra-mission-control-workspaces [data-spectra-card="workspace"]::after {
-  content: none;
-}
-
 .spectra-object-flat-toolbar {
   display: grid !important;
   grid-template-columns: minmax(0, 1fr);
@@ -358,18 +334,6 @@ body {
   border-radius: 0 !important;
   border-inline: 0 !important;
   border-bottom: 0 !important;
-}
-
-@media (max-width: 1280px) {
-  .spectra-mission-control-workspaces .spectra-workspace-card-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-}
-
-@media (max-width: 660px) {
-  .spectra-mission-control-workspaces .spectra-workspace-card-grid {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
 }
 
 /* Shared workspace shell geometry from references 06â€“09. */
@@ -15576,75 +15540,6 @@ body {
   width: max-content;
 }
 
-.spectra-workspace-shell-controls {
-  position: absolute !important;
-  z-index: 40 !important;
-  top: 152px !important;
-  right: 24px !important;
-  width: max-content !important;
-}
-
-.spectra-workspace-shell-controls--board .spectra-workspace-toolbar > div,
-.spectra-workspace-shell-controls--timeline .spectra-workspace-toolbar > div,
-.spectra-workspace-shell-controls--canvas
-  .spectra-workspace-toolbar
-  > :not(nav) {
-  display: none !important;
-}
-
-.spectra-workspace-canvas > .sticky:first-child {
-  position: absolute !important;
-  z-index: 45 !important;
-  top: -41px !important;
-  right: 24px !important;
-  margin: 0 !important;
-}
-
-.spectra-workspace-canvas > .sticky:first-child > button:first-child,
-.spectra-workspace-canvas > .sticky:first-child > span:last-child,
-.spectra-workspace-canvas > .sticky:first-child > span:nth-last-child(2) {
-  display: none !important;
-}
-
-.spectra-workspace-canvas [data-spectra-card] {
-  height: 102px !important;
-  min-height: 102px !important;
-  overflow: hidden !important;
-  padding: 10px !important;
-}
-
-.spectra-workspace-canvas [data-spectra-card] p {
-  display: none !important;
-}
-
-/* The canvas lives beside the workspace details rail, so viewport breakpoints
-   alone can select a three-column cluster layout with too little real space. */
-.spectra-workspace-canvas {
-  container-type: inline-size;
-}
-
-@container (max-width: 980px) {
-  .spectra-workspace-canvas > div:nth-child(2) {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-
-  .spectra-workspace-canvas > div:nth-child(2) > section {
-    grid-column: auto !important;
-    margin-top: 0 !important;
-  }
-
-  .spectra-workspace-canvas > div:nth-child(2) > section > div {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-}
-
-@container (max-width: 620px) {
-  .spectra-workspace-canvas > div:nth-child(2),
-  .spectra-workspace-canvas > div:nth-child(2) > section > div {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-}
-
 /* Shared Spectra redesign polish â€” transitions, composer, rails. */
 .spectra-workbench-live-stack {
   position: fixed !important;
@@ -15709,7 +15604,6 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spectra-mission-control-primary,
   .spectra-workspace-header,
   .spectra-artifact-identity,
   .spectra-wave-y [data-spectra-card]:hover {

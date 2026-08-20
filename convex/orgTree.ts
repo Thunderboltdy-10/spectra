@@ -30,6 +30,7 @@ import {
   workspaceContextNodes,
   type OrgNode,
 } from "./orgTreeShared";
+import { hydrateNodes, type OrgNodeView } from "./orgTreeViews";
 
 /**
  * The tree's public surface. Reads are account-scoped; every write validates
@@ -44,107 +45,6 @@ const vNodeKind = v.union(
   v.literal("thread"),
   v.literal("link"),
 );
-
-export type OrgNodeView = {
-  nodeId: Id<"orgNodes">;
-  parentId: Id<"orgNodes"> | null;
-  kind: OrgNode["kind"];
-  name: string;
-  sourceId?: string;
-  orderKey: string;
-  workspaceContextId?: Id<"spectraWorkspaces">;
-  pinned: boolean;
-  isContainer: boolean;
-  childCount?: number;
-  createdAt: number;
-  updatedAt: number;
-  trashedAt?: number;
-  /** For links: what they point at, resolved for display. */
-  target?: {
-    nodeId: Id<"orgNodes">;
-    kind: OrgNode["kind"];
-    name: string;
-    sourceId?: string;
-    available: boolean;
-  };
-  /** Workspace nodes carry their own state so a row can render without a join. */
-  workspace?: {
-    workspaceId: Id<"spectraWorkspaces">;
-    title: string;
-    icon?: string;
-    color?: string;
-    status: "active" | "archived";
-    starterKey?: string;
-  };
-};
-
-function baseView(node: OrgNode): OrgNodeView {
-  return {
-    nodeId: node._id,
-    parentId: node.parentId,
-    kind: node.kind,
-    name: node.name,
-    sourceId: node.sourceId,
-    orderKey: node.orderKey,
-    workspaceContextId: node.workspaceContextId,
-    pinned: node.pinned === true,
-    isContainer: isContainerKind(node.kind),
-    createdAt: node.createdAt,
-    updatedAt: node.updatedAt,
-    trashedAt: node.deletedAt,
-  };
-}
-
-async function hydrateNodes(
-  ctx: Parameters<typeof requireSpectraActor>[0],
-  nodes: OrgNode[],
-  options?: { withChildCounts?: boolean },
-) {
-  const views: OrgNodeView[] = [];
-  for (const node of nodes) {
-    const view = baseView(node);
-    if (node.kind === "workspace" && node.sourceId) {
-      const workspaceId = ctx.db.normalizeId(
-        "spectraWorkspaces",
-        node.sourceId,
-      );
-      const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
-      if (workspace)
-        view.workspace = {
-          workspaceId: workspace._id,
-          title: workspace.title,
-          icon: workspace.icon,
-          color: workspace.color,
-          status: workspace.status,
-          starterKey: workspace.starterKey,
-        };
-    }
-    if (node.kind === "link" && node.sourceId) {
-      const targetId = ctx.db.normalizeId("orgNodes", node.sourceId);
-      const target = targetId ? await ctx.db.get(targetId) : null;
-      view.target = target
-        ? {
-            nodeId: target._id,
-            kind: target.kind,
-            name: target.name,
-            sourceId: target.sourceId,
-            available: target.deletedAt === undefined,
-          }
-        : undefined;
-    }
-    if (options?.withChildCounts && isContainerKind(node.kind)) {
-      const children = await ctx.db
-        .query("orgNodes")
-        .withIndex("by_parent", (q) => q.eq("parentId", node._id))
-        .collect();
-      view.childCount = children.filter(
-        (child) => child.deletedAt === undefined,
-      ).length;
-    }
-    views.push(view);
-  }
-  return views;
-}
 
 async function resolveParentId(
   ctx: Parameters<typeof requireSpectraActor>[0],
@@ -185,7 +85,11 @@ export const listChildren = query({
       : result.page.filter((row) => row.deletedAt === undefined);
     return {
       ...result,
-      page: await hydrateNodes(ctx, rows, { withChildCounts: true }),
+      page: await hydrateNodes(ctx, rows, {
+        withChildCounts: true,
+        withSource: true,
+        accountId: actor.accountId,
+      }),
     };
   },
 });
@@ -208,8 +112,15 @@ export const subtree = query({
     });
     const limited = nodes.slice(0, Math.min(args.limit ?? 2000, 5000));
     return {
-      root: (await hydrateNodes(ctx, [node]))[0]!,
-      nodes: await hydrateNodes(ctx, limited.slice(1)),
+      root: (await hydrateNodes(ctx, [node], {
+        withSource: true,
+        accountId: actor.accountId,
+      }))[0]!,
+      nodes: await hydrateNodes(ctx, limited.slice(1), {
+        withChildCounts: true,
+        withSource: true,
+        accountId: actor.accountId,
+      }),
       truncated: limited.length < nodes.length,
       total: nodes.length,
     };
@@ -240,7 +151,11 @@ export const listWorkspaceContext = query({
     const live = rows.filter((row) => row.deletedAt === undefined);
     return {
       workspace: decision.loaded.resource as Doc<"spectraWorkspaces">,
-      nodes: await hydrateNodes(ctx, live, { withChildCounts: true }),
+      nodes: await hydrateNodes(ctx, live, {
+        withChildCounts: true,
+        withSource: true,
+        accountId: actor.accountId,
+      }),
       accountScoped: live.every((row) => row.accountId === actor.accountId),
     };
   },
@@ -266,6 +181,112 @@ export const path = query({
 });
 
 /**
+ * The containers under a parent — what a navigation rail needs and nothing more.
+ * Unpaginated on purpose: a rail that loaded folders in pages would collapse and
+ * re-open as the reader scrolled, and a folder with 500 subfolders is not a
+ * shape this product asks anyone to live with.
+ */
+export const listContainers = query({
+  args: { parentId: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const parentId = await resolveParentId(ctx, args.parentId ?? null);
+    if (args.parentId && args.parentId !== "root" && !parentId)
+      return { nodes: [] };
+    const rows = await listChildNodes(ctx, actor.accountId, parentId);
+    const containers = rows
+      .filter((row) => isContainerKind(row.kind))
+      .slice(0, 500);
+    return {
+      nodes: await hydrateNodes(ctx, containers, {
+        withChildCounts: true,
+        withSource: true,
+        accountId: actor.accountId,
+      }),
+    };
+  },
+});
+
+/**
+ * The survivals from the old Library, as views over the same tree rather than
+ * as rival organizational systems: Recent is activity order, Favorites is the
+ * pin, Shared is who else can see it. Each returns nodes with their folder path
+ * so a flat list stays navigable.
+ */
+export const quickView = query({
+  args: {
+    view: v.union(
+      v.literal("recent"),
+      v.literal("favorites"),
+      v.literal("shared"),
+    ),
+    kinds: v.optional(v.array(vNodeKind)),
+    limit: v.optional(v.number()),
+    /** Same contract as `search`: inside a scope, a quick view is that scope's. */
+    scopeNodeId: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const limit = Math.min(args.limit ?? 200, 1000);
+    const all = await ctx.db
+      .query("orgNodes")
+      .withIndex("by_account_deleted", (q) => q.eq("accountId", actor.accountId))
+      .collect();
+    const byId = new Map(all.map((row) => [row._id as string, row]));
+    const scopeId =
+      args.scopeNodeId && args.scopeNodeId !== "root"
+        ? ctx.db.normalizeId("orgNodes", args.scopeNodeId)
+        : null;
+    const inScope = (row: OrgNode) => {
+      if (!scopeId) return true;
+      let current = row.parentId ? byId.get(row.parentId) : undefined;
+      for (let depth = 0; depth < MAX_TREE_DEPTH && current; depth += 1) {
+        if (current._id === scopeId) return true;
+        current = current.parentId ? byId.get(current.parentId) : undefined;
+      }
+      return false;
+    };
+    const kinds = args.kinds;
+    let live = all.filter(
+      (row) =>
+        row.deletedAt === undefined &&
+        row.kind !== "link" &&
+        (!kinds || kinds.includes(row.kind)) &&
+        inScope(row),
+    );
+    if (args.view === "favorites") live = live.filter((row) => row.pinned === true);
+    const hydrated = await hydrateNodes(ctx, live, {
+      withSource: true,
+      withChildCounts: true,
+      accountId: actor.accountId,
+    });
+    let selected = hydrated;
+    if (args.view === "shared")
+      selected = hydrated.filter((row) => row.source?.shared === true);
+    /* Recent means "last touched", which for a work is its own activity, not
+       when its row happened to be re-stamped. */
+    const activityOf = (row: OrgNodeView) => row.source?.updatedAt ?? row.updatedAt;
+    const ordered =
+      args.view === "favorites"
+        ? selected.sort((a, b) => a.name.localeCompare(b.name))
+        : selected.sort((a, b) => activityOf(b) - activityOf(a));
+    const page = ordered.slice(0, limit);
+    return {
+      nodes: page.map((row) => {
+        const parentPath: string[] = [];
+        let current = byId.get(row.parentId ?? "");
+        for (let depth = 0; depth < MAX_TREE_DEPTH && current; depth += 1) {
+          parentPath.unshift(current.name);
+          current = byId.get(current.parentId ?? "");
+        }
+        return { ...row, parentPath };
+      }),
+      total: ordered.length,
+    };
+  },
+});
+
+/**
  * Name search over the tree. One surface, deliberately provider-shaped: the
  * ranked ids come from here, so a semantic provider can replace the retrieval
  * step later without changing any caller (N-series).
@@ -275,31 +296,48 @@ export const search = query({
     term: v.string(),
     kinds: v.optional(v.array(vNodeKind)),
     limit: v.optional(v.number()),
+    /**
+     * Confine the search to one subtree. A reader inside a workspace is inside
+     * its context (D32), so searching there means searching it — not the account
+     * with the results mostly somewhere else.
+     */
+    scopeNodeId: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
     const term = args.term.trim();
     if (!term) return { results: [], provider: "name" as const };
+    const scopeId =
+      args.scopeNodeId && args.scopeNodeId !== "root"
+        ? ctx.db.normalizeId("orgNodes", args.scopeNodeId)
+        : null;
     const limit = Math.min(args.limit ?? 40, 200);
     const matches = await ctx.db
       .query("orgNodes")
       .withSearchIndex("search_name", (q) =>
         q.search("name", term).eq("accountId", actor.accountId),
       )
-      .take(limit * 2);
+      .take(limit * (scopeId ? 6 : 2));
     const kinds = args.kinds;
-    const filtered = matches
+    const candidates = matches
       .filter((row) => row.deletedAt === undefined)
-      .filter((row) => !kinds || kinds.includes(row.kind))
-      .slice(0, limit);
-    const results = await hydrateNodes(ctx, filtered);
-    /* Breadcrumbs make a flat result list navigable. */
-    const withPaths = await Promise.all(
-      filtered.map(async (row, index) => ({
-        ...results[index]!,
-        parentPath: (await breadcrumbNodes(ctx, row)).map((node) => node.name),
-      })),
-    );
+      .filter((row) => !kinds || kinds.includes(row.kind));
+    /* Breadcrumbs make a flat result list navigable, and they are also how a
+       scope is enforced: a hit belongs if the scope is one of its ancestors. */
+    const withPaths: Array<OrgNodeView & { parentPath: string[] }> = [];
+    for (const row of candidates) {
+      if (withPaths.length >= limit) break;
+      const ancestors = await breadcrumbNodes(ctx, row);
+      if (scopeId && !ancestors.some((node) => node._id === scopeId)) continue;
+      const view = (
+        await hydrateNodes(ctx, [row], {
+          withChildCounts: true,
+          withSource: true,
+          accountId: actor.accountId,
+        })
+      )[0]!;
+      withPaths.push({ ...view, parentPath: ancestors.map((node) => node.name) });
+    }
     return { results: withPaths, provider: "name" as const };
   },
 });
@@ -319,14 +357,24 @@ export const listTrash = query({
       .filter((row) => row.deletedAt !== undefined && row.trashedRootId === row._id)
       .sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0))
       .slice(0, Math.min(args.limit ?? 100, 500));
-    return { nodes: await hydrateNodes(ctx, roots, { withChildCounts: true }) };
+    return {
+      nodes: await hydrateNodes(ctx, roots, {
+        withChildCounts: true,
+        withSource: true,
+        accountId: actor.accountId,
+      }),
+    };
   },
 });
 
-/** Where a given work or thread lives right now. */
+/** Where a given work, thread or workspace lives right now. */
 export const placementForSource = query({
   args: {
-    kind: v.union(v.literal("work"), v.literal("thread")),
+    kind: v.union(
+      v.literal("work"),
+      v.literal("thread"),
+      v.literal("workspace"),
+    ),
     sourceId: v.string(),
   },
   handler: async (ctx, args) => {
@@ -473,6 +521,41 @@ export const setPinned = mutation({
           await ctx.db.patch(sibling._id, { pinned: false, updatedAt: now });
     await ctx.db.patch(node._id, { pinned: args.pinned, updatedAt: now });
     return { nodeId: node._id, pinned: args.pinned };
+  },
+});
+
+/**
+ * Pin by source id rather than by node.
+ *
+ * Favorites used to be a list of artifact ids in one browser's localStorage, so
+ * they were invisible on every other device and to everyone else. They are now
+ * `pinned` on the node, which is one source of truth — and this is how the old
+ * per-browser list is carried over on first load without asking the client to
+ * resolve each id to a node first.
+ */
+export const pinSources = mutation({
+  args: {
+    kind: v.union(v.literal("work"), v.literal("thread")),
+    sourceIds: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    if (args.sourceIds.length > 500)
+      throw new Error("Pin at most 500 items at a time.");
+    const now = Date.now();
+    let pinned = 0;
+    for (const sourceId of new Set(args.sourceIds)) {
+      const node = await findPrimaryNode(
+        ctx,
+        actor.accountId,
+        args.kind,
+        sourceId,
+      );
+      if (!node || node.deletedAt !== undefined || node.pinned === true) continue;
+      await ctx.db.patch(node._id, { pinned: true, updatedAt: now });
+      pinned += 1;
+    }
+    return { pinned };
   },
 });
 

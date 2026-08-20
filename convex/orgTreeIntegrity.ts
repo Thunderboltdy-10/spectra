@@ -3,7 +3,9 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
   GENERAL_STARTER_KEY,
+  ensureWorkspaceNode,
   isContainerKind,
+  typeKeyFor,
   type OrgNode,
 } from "./orgTreeShared";
 
@@ -98,6 +100,25 @@ export const verify = internalQuery({
       )
       .map((node) => node._id);
 
+    /* The board's columns are index ranges on these two fields, so a live row
+       missing `typeKey` is not ordered oddly — it is absent from every type
+       column. That makes this a correctness check, not a tidiness one. */
+    const missingTypeKey = live
+      .filter((node) => node.typeKey === undefined)
+      .map((node) => node._id);
+    const missingActivityAt = live
+      .filter((node) => node.activityAt === undefined)
+      .map((node) => node._id);
+    const wrongTypeKey = live
+      .filter(
+        (node) =>
+          node.kind !== "work" &&
+          node.kind !== "link" &&
+          node.typeKey !== undefined &&
+          node.typeKey !== node.kind,
+      )
+      .map((node) => node._id);
+
     const artifacts: Doc<"spectraArtifacts">[] = await ctx.db
       .query("spectraArtifacts")
       .collect();
@@ -131,6 +152,29 @@ export const verify = internalQuery({
       await ctx.db.query("spectraWorkspaces").collect()
     ).filter((row) => row.starterKey === GENERAL_STARTER_KEY);
 
+    /**
+     * A workspace with no node is a place that exists and cannot be reached: it
+     * shows in the workspace switcher but not in the Library, not on the board,
+     * and nothing can be filed into it through the tree. Every creation path
+     * calls `ensureWorkspaceNode`, so this only ever catches rows written before
+     * the tree existed or by a path that forgot — which is precisely why it is
+     * checked here and not trusted.
+     */
+    const workspaceNodeKeys = new Set(
+      live
+        .filter((node) => node.kind === "workspace")
+        .map((node) => `${node.accountId}:${node.sourceId}`),
+    );
+    const unplacedWorkspaces = (
+      await ctx.db.query("spectraWorkspaces").collect()
+    )
+      .filter(
+        (row) =>
+          row.status === "active" &&
+          !workspaceNodeKeys.has(`${row.ownerAccountId}:${row._id}`),
+      )
+      .map((row) => row._id);
+
     const contextlessWork = live
       .filter(
         (node) =>
@@ -148,7 +192,11 @@ export const verify = internalQuery({
       brokenLinks.length === 0 &&
       unplacedArtifacts.length === 0 &&
       unplacedThreads.length === 0 &&
-      contextlessWork.length === 0;
+      unplacedWorkspaces.length === 0 &&
+      contextlessWork.length === 0 &&
+      missingTypeKey.length === 0 &&
+      missingActivityAt.length === 0 &&
+      wrongTypeKey.length === 0;
 
     return {
       pass,
@@ -179,8 +227,16 @@ export const verify = internalQuery({
         unplacedArtifactCount: unplacedArtifacts.length,
         unplacedThreads: unplacedThreads.slice(0, 20),
         unplacedThreadCount: unplacedThreads.length,
+        unplacedWorkspaces: unplacedWorkspaces.slice(0, 20),
+        unplacedWorkspaceCount: unplacedWorkspaces.length,
         contextlessWork: contextlessWork.slice(0, 20),
         contextlessWorkCount: contextlessWork.length,
+        missingTypeKey: missingTypeKey.slice(0, 20),
+        missingTypeKeyCount: missingTypeKey.length,
+        missingActivityAt: missingActivityAt.slice(0, 20),
+        missingActivityAtCount: missingActivityAt.length,
+        wrongTypeKey: wrongTypeKey.slice(0, 20),
+        wrongTypeKeyCount: wrongTypeKey.length,
       },
     };
   },
@@ -205,5 +261,106 @@ export const restampContexts = internalMutation({
       patched += 1;
     }
     return { patched };
+  },
+});
+
+/**
+ * Backfill for the board's two denormalized facets, `typeKey` and `activityAt`.
+ *
+ * Every write path sets them now (`orgTreeShared`), so this exists for rows
+ * written before they did. It matters more than most backfills: the board's
+ * columns are index ranges keyed on these fields, and a row missing `typeKey` is
+ * not merely ordered oddly — it is *absent* from every type column. So this runs
+ * to completion before the windowed board is trusted, and `verify` reports what
+ * is left.
+ *
+ * Paged and idempotent: pass the returned cursor back until `done`.
+ */
+export const backfillBoardFacets = internalMutation({
+  args: { cursor: v.optional(v.string()), batch: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const batch = Math.min(Math.max(args.batch ?? 400, 1), 2000);
+    const result = await ctx.db.query("orgNodes").paginate({
+      cursor: args.cursor ?? null,
+      numItems: batch,
+    });
+    let patched = 0;
+    for (const node of result.page) {
+      const patch: Record<string, unknown> = {};
+      if (node.typeKey === undefined) {
+        if (node.kind === "work" && node.sourceId) {
+          const artifactId = ctx.db.normalizeId(
+            "spectraArtifacts",
+            node.sourceId,
+          );
+          const artifact = artifactId ? await ctx.db.get(artifactId) : null;
+          patch.typeKey = typeKeyFor("work", artifact?.blueprintKey);
+        } else if (node.kind === "link" && node.sourceId) {
+          const targetId = ctx.db.normalizeId("orgNodes", node.sourceId);
+          const target = targetId ? await ctx.db.get(targetId) : null;
+          patch.typeKey =
+            target?.typeKey ?? typeKeyFor(target?.kind ?? "link");
+        } else {
+          patch.typeKey = typeKeyFor(node.kind);
+        }
+      }
+      /* Seeded from the source's own recency where there is one, because that is
+         what the field means and what the card already displays. */
+      if (node.activityAt === undefined) {
+        let activity = node.updatedAt;
+        if (node.kind === "work" && node.sourceId) {
+          const artifactId = ctx.db.normalizeId(
+            "spectraArtifacts",
+            node.sourceId,
+          );
+          const artifact = artifactId ? await ctx.db.get(artifactId) : null;
+          if (artifact) activity = artifact.updatedAt;
+        } else if (node.kind === "thread" && node.sourceId) {
+          const threadId = ctx.db.normalizeId("spectraThreads", node.sourceId);
+          const thread = threadId ? await ctx.db.get(threadId) : null;
+          if (thread) activity = thread.updatedAt;
+        }
+        patch.activityAt = activity;
+      }
+      if (Object.keys(patch).length === 0) continue;
+      /* No `updatedAt` bump: nothing about the placement changed, and stamping it
+         would make every row look freshly moved. */
+      await ctx.db.patch(node._id, patch);
+      patched += 1;
+    }
+    return {
+      patched,
+      scanned: result.page.length,
+      done: result.isDone,
+      cursor: result.isDone ? null : result.continueCursor,
+    };
+  },
+});
+
+/**
+ * Repair pass for workspaces that have no node. Every creation path places one
+ * now, so this exists for rows written before the tree — and as the answer to
+ * `verify`'s `unplacedWorkspaces`, which is how such a row is ever noticed.
+ */
+export const placeOrphanWorkspaces = internalMutation({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const nodes: OrgNode[] = await ctx.db.query("orgNodes").collect();
+    const placed = new Set(
+      nodes
+        .filter((node) => node.kind === "workspace" && node.deletedAt === undefined)
+        .map((node) => `${node.accountId}:${node.sourceId}`),
+    );
+    const workspaces = await ctx.db.query("spectraWorkspaces").collect();
+    const limit = Math.min(args.limit ?? 500, 2000);
+    const created: string[] = [];
+    for (const workspace of workspaces) {
+      if (created.length >= limit) break;
+      if (workspace.status !== "active") continue;
+      if (placed.has(`${workspace.ownerAccountId}:${workspace._id}`)) continue;
+      await ensureWorkspaceNode(ctx, workspace);
+      created.push(workspace.title);
+    }
+    return { created: created.length, titles: created.slice(0, 20) };
   },
 });

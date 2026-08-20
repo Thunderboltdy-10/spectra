@@ -15,7 +15,7 @@ import {
   isTerminalRunStatus,
   requireCurrentExecution,
 } from "./spectraRunLifecycle";
-import { findPrimaryNode, renameSourceNodes } from "./orgTreeShared";
+import { findPrimaryNode, syncSourceNodes } from "./orgTreeShared";
 import { releaseClaimsForRun } from "./regionClaims";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { recordAgentInvocation, settleAgentInvocation } from "./agents";
@@ -687,7 +687,7 @@ export const updateStatus = mutation({
 
     if (terminal && run.threadId) {
       const thread = await ctx.db.get(run.threadId);
-      if (thread) await renameSourceNodes(ctx, "thread", thread._id, thread.title);
+      if (thread) await syncSourceNodes(ctx, "thread", thread._id, thread.title);
     }
     if (args.status === "failed" && run.status !== "failed")
       await incrementOperationalCounter(ctx, {

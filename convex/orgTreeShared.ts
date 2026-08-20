@@ -49,6 +49,38 @@ export const GENERAL_WORKSPACE_DESCRIPTION =
 const RESERVED_NAME_CHARACTERS = /[/\\:*?"<>|]/;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
 
+/**
+ * What a reader would call this thing. Work carries its blueprint key; every
+ * other kind is its own type, because a folder is a folder and a thread is a
+ * thread whatever it contains.
+ *
+ * Cached on the node so a board column of one type is an indexed range instead
+ * of a scan of the account (CANON D42). A link reports the type it points at,
+ * so a reference to a quiz files under quizzes.
+ */
+export function typeKeyFor(kind: OrgNodeKind, blueprintKey?: unknown) {
+  if (kind !== "work") return kind;
+  return typeof blueprintKey === "string" && blueprintKey.length > 0
+    ? blueprintKey
+    : "document";
+}
+
+/**
+ * The blueprint key of a work source, read once at placement time. Threads and
+ * containers need no read: their kind *is* their type.
+ */
+export async function typeKeyForSource(
+  ctx: OrgCtx,
+  kind: OrgNodeKind,
+  sourceId: string,
+) {
+  if (kind !== "work") return typeKeyFor(kind);
+  const artifactId = ctx.db.normalizeId("spectraArtifacts", sourceId);
+  if (!artifactId) return typeKeyFor(kind);
+  const artifact = await ctx.db.get(artifactId);
+  return typeKeyFor(kind, artifact?.blueprintKey);
+}
+
 export function isContainerKind(kind: OrgNodeKind) {
   return CONTAINER_KINDS.includes(kind);
 }
@@ -461,6 +493,8 @@ export async function ensureWorkspaceNode(
     kind: "workspace",
     name: sanitizeNodeName(workspace.title, GENERAL_WORKSPACE_TITLE),
     sourceId: workspace._id,
+    typeKey: typeKeyFor("workspace"),
+    activityAt: now,
     orderKey: await appendOrderKey(ctx, accountId, null),
     workspaceContextId: workspace._id,
     placedByAccountId: accountId,
@@ -537,6 +571,12 @@ export type PlaceSourceParams = {
   /** Leave an existing placement where it is; only create when absent. */
   keepExistingPlacement?: boolean;
   /**
+   * The source's type, when the caller already knows it. Omitted, it is read
+   * from the source once — placement is rare, so the read is cheap and being
+   * wrong here would file the work in the wrong board column forever.
+   */
+  typeKey?: string;
+  /**
    * The source's home genuinely changed, so an existing node moves rather than
    * standing pat. Naming no workspace then means General, not "wherever it is".
    */
@@ -580,6 +620,11 @@ export async function placeSourceNode(
   if (existing && keepInPlace) {
     const patch: Record<string, unknown> = { updatedAt: now };
     if (existing.name !== name) patch.name = name;
+    if (existing.typeKey === undefined)
+      patch.typeKey =
+        params.typeKey ??
+        (await typeKeyForSource(ctx, params.kind, params.sourceId));
+    if (existing.activityAt === undefined) patch.activityAt = now;
     if (params.accessProjection === true && existing.accessProjection !== true)
       patch.accessProjection = true;
     if (params.pinned !== undefined && existing.pinned !== params.pinned)
@@ -598,12 +643,18 @@ export async function placeSourceNode(
   );
   assertParentAcceptsChild(parent, params.kind);
   const context = workspaceContextForParent(parent);
+  const typeKey =
+    params.typeKey ??
+    existing?.typeKey ??
+    (await typeKeyForSource(ctx, params.kind, params.sourceId));
 
   if (existing) {
     await assertNoCycle(ctx, existing._id, parent?._id ?? null);
     await ctx.db.patch(existing._id, {
       parentId: parent?._id ?? null,
       name,
+      typeKey,
+      activityAt: existing.activityAt ?? now,
       workspaceContextId: context,
       orderKey:
         existing.parentId === (parent?._id ?? null) &&
@@ -628,6 +679,8 @@ export async function placeSourceNode(
     kind: params.kind,
     name,
     sourceId: params.sourceId,
+    typeKey,
+    activityAt: now,
     orderKey: await appendOrderKey(ctx, params.accountId, parent?._id ?? null),
     workspaceContextId: context,
     placedByAccountId: params.placedByAccountId ?? params.accountId,
@@ -640,7 +693,21 @@ export async function placeSourceNode(
 }
 
 /** Keep a node's cached name in step with its source (W5 relies on this). */
-export async function renameSourceNodes(
+/**
+ * Push a source's current truth onto its nodes: the cached title, and the fact
+ * that something happened to it just now.
+ *
+ * Every caller is a real event — a content commit, a retitle, a run finishing —
+ * so `activityAt` is stamped whether or not the title moved. That is the whole
+ * point: a document edited all morning without being renamed must still rise to
+ * the top of a recency-ordered column, and the column reads an index, not the
+ * source rows (CANON D42). `updatedAt` stays what it says it is, the moment the
+ * *placement* last changed.
+ *
+ * W5 relies on the name half of this: a rename is one write that every open
+ * surface sees, because they are all subscribed to these rows.
+ */
+export async function syncSourceNodes(
   ctx: OrgWriteCtx,
   kind: OrgNodeKind,
   sourceId: string,
@@ -650,12 +717,20 @@ export async function renameSourceNodes(
   const nodes = await findNodesForSource(ctx, kind, sourceId);
   const now = Date.now();
   for (const node of nodes) {
-    if (node.name === name) continue;
-    await ctx.db.patch(node._id, { name, updatedAt: now });
-    /* References show the target's name, so they follow it. */
+    const patch: Record<string, unknown> = { activityAt: now };
+    if (node.name !== name) patch.name = name;
+    if (node.typeKey === undefined) patch.typeKey = typeKeyFor(node.kind);
+    if (patch.name !== undefined) patch.updatedAt = now;
+    await ctx.db.patch(node._id, patch);
+    /* References show the target's name and its activity, so they follow both. */
     for (const link of await findNodesForSource(ctx, "link", node._id))
-      if (link.name !== name)
-        await ctx.db.patch(link._id, { name, updatedAt: now });
+      await ctx.db.patch(link._id, {
+        ...(link.name === name ? {} : { name, updatedAt: now }),
+        ...(link.typeKey === undefined
+          ? { typeKey: node.typeKey ?? typeKeyFor(node.kind) }
+          : {}),
+        activityAt: now,
+      });
   }
   return name;
 }
@@ -683,6 +758,8 @@ export async function createFolderNode(
     parentId: parent?._id ?? null,
     kind: "folder",
     name,
+    typeKey: typeKeyFor("folder"),
+    activityAt: now,
     orderKey: await appendOrderKey(ctx, params.accountId, parent?._id ?? null),
     workspaceContextId: workspaceContextForParent(parent),
     placedByAccountId: params.accountId,
@@ -730,6 +807,10 @@ export async function createLinkNode(
     kind: "link",
     name: target.name,
     sourceId: target._id,
+    /* A reference files under whatever it points at, so a link to a quiz sits in
+       the quizzes column rather than in a column of links. */
+    typeKey: target.typeKey ?? typeKeyFor(target.kind),
+    activityAt: now,
     orderKey: await appendOrderKey(ctx, params.accountId, parent?._id ?? null),
     workspaceContextId: workspaceContextForParent(parent),
     placedByAccountId: params.accountId,

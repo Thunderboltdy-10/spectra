@@ -11,7 +11,7 @@ import {
   findPrimaryNode,
   placeSourceNode,
   purgeSourceNodes,
-  renameSourceNodes,
+  syncSourceNodes,
 } from "./orgTreeShared";
 import { incrementOperationalCounter } from "./operationalCounters";
 
@@ -504,7 +504,7 @@ export const applyGeneratedMetadata = mutation({
       updatedAt: now,
     });
     if (title !== thread.title)
-      await renameSourceNodes(ctx, "thread", args.threadId, title);
+      await syncSourceNodes(ctx, "thread", args.threadId, title);
     return { threadId: args.threadId };
   },
 });

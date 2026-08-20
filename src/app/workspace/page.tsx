@@ -1,12 +1,17 @@
+import { Suspense } from "react";
 import { AppShell } from "@/components/layout/app-shell";
-import { WorkspaceShell } from "@/features/spectra/pages/workspace-shell";
+import { SpectraShell } from "@/features/spectra/pages/spectra-shell";
 
 export const dynamic = "force-dynamic";
 
 export default function WorkspacePage() {
   return (
     <AppShell fullBleed noScroll contentClassName="!p-0">
-      <WorkspaceShell />
+      <Suspense
+        fallback={<div className="h-full min-h-0 bg-[var(--bg-primary)]" />}
+      >
+        <SpectraShell surface="workspace" />
+      </Suspense>
     </AppShell>
   );
 }

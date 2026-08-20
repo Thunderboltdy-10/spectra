@@ -25,7 +25,7 @@ The defining experiences, in order:
 4. **Everything is connected and truthful.** Storage states, sync states, capabilities, counts: all real.
 5. **The workspace feels alive.** Quiet by default, responsive when things happen.
 
-## 2. New binding decisions (D24–D40)
+## 2. New binding decisions (D24–D44)
 
 ### Identity, replicas and truth
 
@@ -58,6 +58,15 @@ The defining experiences, in order:
 ### Continuity
 
 - **D40. Migrate, never reset.** Existing artifacts, placements, threads, history, embeds, permissions, settings and share links survive every Nova mission. Existing cloud work becomes the "cloud-only replica" case of the new model. Live surfaces update in place when identity-stable things change (extends D24): no remount, no lost scroll, no broken splits when work is renamed, moved, re-policied, or edited elsewhere.
+
+### Surfaces: reuse, cost, framing
+
+These four are the ones missions get wrong most often. They are binding, not stylistic.
+
+- **D41. One capability, one implementation, one name.** When two surfaces offer the same capability they offer it through the *same component*, under the same label, with the same geometry and the same interaction. A reader who learns a control on one view has learned it everywhere. Divergence is a defect, not a variant — two search boxes for one scope, a filter that is a segmented row on one view and a dropdown on another, one control named "All types" here and "Type filter" there, two dropdowns in one row that open in two different visual styles, or a second "New" button in a row that already has one: each is a bug to be closed, never a design choice to be defended. Controls that genuinely belong to one view stay in that view — a board's grouping, a list's inline rename — but *"it is a different view" never justifies re-implementing, re-naming or re-styling something that already exists*. When a shared control needs a per-view difference it takes a prop; it does not fork. The corollary is a duty, not a favour: **before building a control, look for it.**
+- **D42. Never load a collection to draw a screen.** Every surface reads a bounded window — what the viewport can show plus a small margin — and asks for more as the reader moves. Counts come from server-side counts, never from the length of a fetched array. Grouping, filtering and sorting the server can do, the server does. A surface that feels fine on a small account and fetches thousands of rows on a large one is **broken now, not later**: it spends the user's money and battery, it makes the surface slow to open, and it silently caps how large a real account Spectra can hold. Fetch-everything is forbidden even behind a spinner, even when the data is "already in memory", and a switch between two views of the same data must not re-fetch that data at all.
+- **D43. Creation inherits the context that created it.** A create affordance knows where it is. Whatever its position already fixes — the folder it sits in, the workspace it belongs to, the type its column represents — is never asked for again. It asks only for what its position genuinely leaves open, and it lands the new work exactly where the reader made it.
+- **D44. The viewport is the frame.** A work surface fits the window: the page itself never scrolls, chrome stays put, and scrolling belongs to the region that owns the content. Regions size to the frame, not to their contents — a column, rail or list grows a scrollbar of its own rather than pushing the layout past the edge of the screen.
 
 ## 3. How Spectra must feel (unchanged core, one addition)
 

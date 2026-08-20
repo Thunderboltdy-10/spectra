@@ -33,15 +33,21 @@ Every later mission depends on where things live: the Bridge needs a tree to pro
 1. One primary hierarchical view replacing the collections-and-cards model: real folder navigation (tree rail + row surface, or an equally serious single-surface design — your taste, Spectra's language), breadcrumbs, drag-move, inline rename, multi-select, keyboard navigation (arrows/Enter/F2-equivalent/Delete), context menus, new-folder/new-work-here.
 2. Workspaces render as distinct folder-like nodes (workspace icon/state), movable, nestable; opening one enters its context (D32). Threads appear as placeable items.
 3. Useful survivals from the old Library (Recent, Shared, Favorites, type filtering) become filters/quick views over the tree, not competing organizational systems.
-4. Search: name/title/metadata over the tree, presented so semantic retrieval can later slot in without redesign (one search surface, provider-swappable behind it). Semantic search itself is **out of scope**.
-5. Virtualize; N1 gate at 2k nodes without jank.
+4. Search: name/title/metadata over the tree, presented so semantic retrieval can later slot in without redesign (one search surface, provider-swappable behind it). Semantic search itself is **out of scope**. "One search surface" is literal: **one component**, used by Library, Workspace List and Board alike (D41) — not one design reimplemented per view.
+5. Virtualize **and** page (D42): the surface asks the server for a window of children and pages as the reader scrolls. Opening a folder of hundreds of items costs one page, not the folder. N1 gate at 2k nodes without jank, with the request count to prove the 2k were never all fetched.
 
 ### W4 — Workspace List + Board; Canvas removed (Tier P)
 
 1. List = the workspace's subtree, same interaction grammar as Library (it *is* the same underlying world, scoped).
 2. Board = cross-hierarchy visual view: at `/workspace` root grouped by workspace; inside one workspace, all its work regardless of folder path, with the current board's useful filtering/grouping (by type, updated, etc.) preserved/improved after inspection. Child-workspace contents never merge into the parent (D32); the child appears as one entry.
+   - **Columns are windowed queries, one per column** (D42, ARCHITECTURE-STORAGE §12): each column asks for its own first page with a server-side count for its header, and pages independently as it is scrolled. Changing the grouping changes the queries; it never re-partitions a fetched array. Switching List⇄Board over one scope re-fetches nothing.
+   - **Columns fit the frame** (D44): the board row fills the viewport height, each column scrolls its own cards, and the page never scrolls. Cards size to their content (`grid-auto-rows: max-content` — an `auto` row in a definite-height overflowing container collapses to min-content).
+   - **Each column carries its own identity colour**, derived from what the column *is* (the workspace's colour, the type's colour from the work registry, the folder's accent) so the grouping is legible at a glance — accent, not decoration.
+   - **Each column ends in a create affordance that inherits the column** (D43): in a board grouped by type, the type is already decided, so it asks only where to file the new work; grouped by workspace or folder, the location is decided, so it asks only for the type. Neither ever asks for both, and the new work appears in that column.
 3. Remove Canvas as an organization mode everywhere (Library + Workspace): delete `WorkspaceCanvasView`, `ArtifactsCanvas`, canvas layout fields' UI paths (schema fields may remain tombstoned for migration cleanliness — note in log). Persisted view prefs migrate canvas→list.
 4. One shell: the new Library/Workspace surfaces share one implementation with route-level scoping; `workspace-shell.tsx` and `artifacts-shell.tsx` are deleted or reduced to thin route configs. Session continuity (tabs, splits, open threads, running AI) survives Library⇄Workspace exactly as today or better (P10).
+5. **One chrome for both views** (D41). List and Board are two views of one scope, so they share one toolbar row containing the same components in the same places: the view switch, the search, the type filter, the grouping control, the create menu, the selection toggle, and the rail/sidebar collapse — available from both views, named once. A control that exists on only one view (inline rename, board grouping) stays there and is named in the log. Specifically forbidden: a second search box, a second "New", the same job under two names, or two dropdowns in one row with two different visual treatments.
+
 
 ### W5 — Live identity everywhere (Tier P)
 
@@ -49,7 +55,7 @@ Rename/move/metadata changes propagate to every open surface in place — open a
 
 ## Invariants to uphold
 
-I1 (no duplicate identities), I4 (moves are metadata transactions), I5 (no cycles), D29–D32, D40. Typing path untouched (D20).
+I1 (no duplicate identities), I4 (moves are metadata transactions), I5 (no cycles), D29–D32, **D41–D44 (one chrome, bounded reads, inheriting creation, viewport framing)**, D40. Typing path untouched (D20).
 
 ## Out of scope
 
@@ -64,4 +70,7 @@ Bridge/local files (N3) · sync policies beyond the schema stub (N6) · command 
 5. Canvas gone; List/Board only; board grouping evidence at root and inside a workspace.
 6. Session continuity evidence (P10) across the new shells.
 7. 2k-node Library scroll/navigation smooth (P12 note + trace if suspicious).
-8. STATE updated (including §1 reconciliation complete); mission log ≤40 lines; close-out checks green.
+8. **One chrome (D41):** the reuse audit from PLAYBOOK §5 is in the mission log — every control on List and Board inventoried, each shared one named as a single component, each view-only one justified. Screenshot evidence shows the same toolbar row on both views with the switch in the same position, and the sidebar collapse reachable from both.
+9. **Bounded reads (D42):** Network-panel evidence for Library, List and Board at first paint, on scroll, and across a List⇄Board switch on the largest available workspace — request count and largest payload recorded in the log, no request returning a whole collection, no re-fetch on view switch, counts served by aggregates.
+10. **Board columns (D43/D44):** evidence of full-height columns with independent scrolling and no page overflow, per-column identity colours, and the per-column create affordance used twice — once on a type-grouped board (asks location only) and once on a workspace-grouped board (asks type only), with the new work landing in that column.
+11. STATE updated (including §1 reconciliation complete); mission log ≤40 lines; close-out checks green.

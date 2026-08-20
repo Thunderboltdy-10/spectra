@@ -28,8 +28,10 @@ M1–M3 closed with evidence. M4 was expanded mid-flight into the artifact/produ
 ## New laws Nova adds
 
 6. **Reliability outranks capability.** A capability that occasionally corrupts, silently loses data, or lies about sync state is worse than not shipping that capability. Preservation-critical code (Bridge, sync, Office lenses) is Tier R and gates on brutal automated evidence, not screenshots.
-7. **Verification is calibrated, not ritualized.** Deep verification at meaningful gates; no whole-project typecheck/lint/build loops after tiny edits; no screenshot marathons per micro-change. See PLAYBOOK §3.
+7. **Verification is calibrated, not ritualized.** Deep verification at meaningful gates; no whole-project typecheck/lint/build loops after tiny edits; no screenshot marathons per micro-change. **The mission is the unit of verification, not the workstream** — workstreams break a mission down for *building*, they are not small missions each owed its own acceptance pass. Build W1→Wn with light targeted checks, then verify the whole thing once, deeply, at the end. See PLAYBOOK §3.
 8. **The durable reasoning lives here, not in mission output.** Mission agents write code, a concise mission log, and STATE updates. They do not produce new planning documents unless a Nova doc is factually wrong (then they fix that doc).
+9. **Shared before special (CANON D41).** Before building a control, look for it. Two views of the same data get one search, one filter, one grouping control, one vocabulary — the same components, not siblings that resemble each other. Divergence between views is a defect to close, never a variant to justify. Subtraction (law 5) applies inside a screen, not only across files.
+10. **Bounded by the viewport (CANON D42/D44).** No surface loads a collection to draw itself, and no surface pushes the page past the window. Both are correctness properties, checked in the Network panel and at the frame edge — not polish deferred to N10.
 
 ## The files
 

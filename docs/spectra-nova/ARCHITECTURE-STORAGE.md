@@ -199,3 +199,15 @@ Computed from replica states by one shared selector (used by artifact header, Li
 - Tree queries paginated + indexed by `parentId`; Library virtualizes rows; target: 10k nodes browsable without jank (N1 gate at 2k, N10 revisits at 10k).
 - Replica/status selectors are subscription-driven, no polling beyond existing visible-only refresh patterns (M3 discipline).
 - Journal tables are append-mostly with periodic compaction (verified ops older than N days fold into a checkpoint).
+
+### The surface read contract (CANON D42 — binding on every consumer of this model)
+
+Pagination in the API is worthless if the UI above it asks for everything anyway. So the contract runs both ways:
+
+- **Surfaces consume windows only.** A list, board, grid or tree reads a page of `orgNodes` (or of work rows) bounded by what the viewport shows plus a margin, and requests the next page as the reader scrolls. No surface fetches a whole subtree, an account's whole artifact set, or "all work in this workspace" in order to group, filter, count or draw it.
+- **Board is a windowed query per column, not a client-side regroup of everything.** Grouping is a server-side dimension: the board asks for *this column's* first page, ordered, and pages it independently. Changing the grouping changes the queries, it does not re-partition a fetched array. This is what keeps a board over a 250-item workspace as cheap to open as one over 12.
+- **Counts are aggregates.** Column headers, folder row counts and badges read a count query. Fetching rows to display `rows.length` is forbidden — it is the most common way an unbounded read hides in a UI that looks paginated.
+- **Switching views of the same scope costs nothing.** List and Board over one scope share the same windowed source and the same cache; a view switch is a re-render, never a re-fetch. A "slow to render" view is nearly always a view that is quietly re-loading data the other view already had.
+- **The same rule holds for search.** Search returns a bounded, ranked page from the server; it never filters a client-side copy of the account.
+- Every new surface built on this model records its first-paint request count and largest payload in its mission log (PLAYBOOK §5 bounded-read audit). Unbounded reads found in existing surfaces are defects to fix in the mission that touches them, not inherited behaviour to preserve.
+

@@ -65,7 +65,7 @@ A feature is finished when: it is a registered command with honest availability,
 
 ## Invariants to uphold
 
-C1, C2, D25 (promotions never break preservation), D34 (one command surface), D36 (profiles gate what is offered), D20/I2 (typing and recalculation never block each other), D40.
+C1, C2, D25 (promotions never break preservation), D34 (one command surface), D36 (profiles gate what is offered), D20/I2 (typing and recalculation never block each other), D40, **D41 (three editors, one set of shared controls — a find bar, a zoom control, an outline panel is written once and used by Document, Sheets and Presentation alike), D42 (a sheet, deck or long document renders the window it shows, never the whole file)**.
 
 ## Out of scope
 

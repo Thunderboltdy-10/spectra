@@ -57,7 +57,7 @@ Every later surface hangs off this. N7 depth is impossible without a place to pu
 
 ## Invariants to uphold
 
-C1 (one execute per operation), C2 (availability parity), D33–D35, D40 (live in-place updates). Typing path untouched (D20). No parallel settings store, no parallel registry, no second workbar.
+C1 (one execute per operation), C2 (availability parity), D33–D35, D40 (live in-place updates), **D41 (one control, one component — the registry is the enforcement mechanism: a command rendered on two surfaces is one component with one label, never two look-alikes), D42/D44 (bounded reads and viewport framing for every menu, palette and picker you build)**. Typing path untouched (D20). No parallel settings store, no parallel registry, no second workbar.
 
 ## Out of scope
 

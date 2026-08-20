@@ -75,7 +75,7 @@ A surface passes when: it works at realistic density; every state it can show is
 
 ## Invariants to uphold
 
-Every CANON decision, everywhere — this mission is where CANON is enforced product-wide. Especially D14-class honesty, D26 (no lying states), D29–D32 (organization), D34 (one command surface), D40 (live identity). Nothing is fixed by hiding it.
+Every CANON decision, everywhere — this mission is where CANON is enforced product-wide. Especially D14-class honesty, D26 (no lying states), D29–D32 (organization), D34 (one command surface), D40 (live identity), **D41–D44 (run PLAYBOOK §5's reuse and bounded-read audits across the whole product, not just what you changed: this is the mission that finds the last duplicated control and the last unbounded query)**. Nothing is fixed by hiding it.
 
 ## Out of scope
 

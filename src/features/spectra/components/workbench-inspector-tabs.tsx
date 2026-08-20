@@ -168,7 +168,7 @@ export function WorkbenchInspectorTabs({
     void spectraBus.command("work.revealAnchor", {
       anchor: semanticAnchor ?? {
         workId: work._id,
-        workType: work.blueprintKey === "thread_reference" ? "document" : work.blueprintKey,
+        workType: work.blueprintKey === "thread_reference" || work.blueprintKey === "resource" ? "document" : work.blueprintKey,
         kind: "comment",
         path: [comment.anchor.regionId],
         fallbackExcerpt: comment.anchor.fallbackExcerpt,

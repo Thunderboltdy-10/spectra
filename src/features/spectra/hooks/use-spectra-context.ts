@@ -279,7 +279,7 @@ export function useSpectraContext(
         label: thread.title,
         workspaceId: thread.workspaceId,
       })),
-    ]);
+    ], { completeTypes: ["workspace"] });
     if (
       continuation &&
       threadsLoaded &&

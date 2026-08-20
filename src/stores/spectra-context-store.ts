@@ -76,7 +76,7 @@ type SpectraContextState = {
   clearExplicit: () => void;
   setVisible: (objects: SpectraContextObject[]) => void;
   toggleVisibleExclusion: (type: SpectraContextObjectType, id: string) => void;
-  reconcile: (available: Array<{ type: SpectraContextObjectType; id: string; label?: string; workspaceId?: string }>) => void;
+  reconcile: (available: Array<{ type: SpectraContextObjectType; id: string; label?: string; workspaceId?: string }>, options?: { completeTypes?: SpectraContextObjectType[] }) => void;
   setObjectAvailability: (type: SpectraContextObjectType, id: string, available?: { label?: string; workspaceId?: string }) => void;
   openObject: (object: SpectraOpenObject) => void;
   focusObject: (type: SpectraOpenObjectType, id: string) => boolean;
@@ -182,11 +182,15 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
     };
   }),
   toggleVisibleExclusion: (type, id) => set((state) => { const key = `${type}:${id}`; return { excludedVisibleKeys: state.excludedVisibleKeys.includes(key) ? state.excludedVisibleKeys.filter((row) => row !== key) : [...state.excludedVisibleKeys, key], revision: state.revision + 1 }; }),
-  reconcile: (available) => set((state) => {
+  reconcile: (available, options) => set((state) => {
     const byKey = new Map(available.map((row) => [`${row.type}:${row.id}`, row]));
     const providedTypes = new Set(available.map((row) => row.type));
+    const completeTypes = new Set(options?.completeTypes ?? providedTypes);
     const reconcileRows = (rows: SpectraContextObject[]) => rows.flatMap((row) => {
-      if (!providedTypes.has(row.type)) return [row];
+      if (!providedTypes.has(row.type) || !completeTypes.has(row.type)) {
+        const next = byKey.get(`${row.type}:${row.id}`);
+        return next ? [{ ...row, label: next.label ?? row.label, workspaceId: next.workspaceId ?? row.workspaceId, stale: false }] : [row];
+      }
       const next = byKey.get(`${row.type}:${row.id}`);
       return next ? [{ ...row, label: next.label ?? row.label, workspaceId: next.workspaceId ?? row.workspaceId, stale: false }] : row.source === "explicit" ? [{ ...row, stale: true }] : [];
     });
@@ -198,7 +202,7 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
         row.type === "run" ||
         row.presentation === "thread-panel" ||
         row.presentation === "run-panel" ||
-        !providedTypes.has(row.type)
+        !completeTypes.has(row.type)
       ) {
         return [row];
       }
@@ -214,7 +218,7 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
       visible: reconcileRows(state.visible),
       openObjects: reconcileOpenObjects,
       activeOpenObjectKey: state.activeOpenObjectKey && openKeys.has(state.activeOpenObjectKey) ? state.activeOpenObjectKey : null,
-      dirtyArtifactIds: state.dirtyArtifactIds.filter((id) => !providedTypes.has("artifact") || byKey.has(`artifact:${id}`)),
+      dirtyArtifactIds: state.dirtyArtifactIds.filter((id) => !completeTypes.has("artifact") || byKey.has(`artifact:${id}`)),
       tileArtifactIds,
       tileSizes: Object.fromEntries(Object.entries(state.tileSizes).filter(([id]) => openTileIds.has(id))),
       tilesIsolated: tileArtifactIds.length ? state.tilesIsolated : false,

@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Code2,
   FileText,
+  File,
   HelpCircle,
   MessageSquare,
   Presentation,
@@ -15,12 +16,13 @@ import {
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "./types";
 import { requireArtifactTypeManifest } from "./registry";
 
-export type PresentedWorkType = ArtifactTypeKey | "thread_reference";
+export type PresentedWorkType = ArtifactTypeKey | "thread_reference" | "resource";
 type TypePresentation = { label: string; icon: LucideIcon; color: string; soft: string };
 
 const visuals: Record<PresentedWorkType, Omit<TypePresentation, "label">> = {
   document: { icon: FileText, color: "var(--mode-document)", soft: "color-mix(in oklab, var(--mode-document) 9%, var(--bg-elevated))" },
   thread_reference: { icon: MessageSquare, color: "#8b6ff0", soft: "color-mix(in oklab, #8b6ff0 10%, var(--bg-elevated))" },
+  resource: { icon: File, color: "#516173", soft: "color-mix(in oklab, #516173 9%, var(--bg-elevated))" },
   flashcard_deck: { icon: BookOpen, color: "var(--mode-document)", soft: "color-mix(in oklab, var(--mode-document) 9%, var(--bg-elevated))" },
   quiz: { icon: HelpCircle, color: "var(--mode-quiz)", soft: "color-mix(in oklab, var(--mode-quiz) 9%, var(--bg-elevated))" },
   planner_task: { icon: CalendarCheck2, color: "#d47a16", soft: "color-mix(in oklab, #d47a16 10%, var(--bg-elevated))" },
@@ -38,4 +40,5 @@ export const workTypeMeta = Object.freeze({
     { ...visuals[key], label: requireArtifactTypeManifest(key).identity.displayName },
   ])),
   thread_reference: { ...visuals.thread_reference, label: "Thread" },
+  resource: { ...visuals.resource, label: "File" },
 }) as Record<PresentedWorkType, TypePresentation>;

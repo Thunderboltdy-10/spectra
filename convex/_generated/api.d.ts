@@ -23,6 +23,8 @@ import type * as audit from "../audit.js";
 import type * as auditShared from "../auditShared.js";
 import type * as authority from "../authority.js";
 import type * as authorityShared from "../authorityShared.js";
+import type * as bridge from "../bridge.js";
+import type * as bridgeSync from "../bridgeSync.js";
 import type * as calendar from "../calendar.js";
 import type * as calendarShared from "../calendarShared.js";
 import type * as changeGroups from "../changeGroups.js";
@@ -50,10 +52,12 @@ import type * as orgTreeBoard from "../orgTreeBoard.js";
 import type * as orgTreeIntegrity from "../orgTreeIntegrity.js";
 import type * as orgTreeShared from "../orgTreeShared.js";
 import type * as orgTreeViews from "../orgTreeViews.js";
+import type * as payloads from "../payloads.js";
 import type * as plannerReminders from "../plannerReminders.js";
 import type * as quizPractice from "../quizPractice.js";
 import type * as quizPrivacy from "../quizPrivacy.js";
 import type * as regionClaims from "../regionClaims.js";
+import type * as replicas from "../replicas.js";
 import type * as schools from "../schools.js";
 import type * as secretBridge from "../secretBridge.js";
 import type * as secretStore from "../secretStore.js";
@@ -66,6 +70,7 @@ import type * as spectraRuntimeBuilds from "../spectraRuntimeBuilds.js";
 import type * as spectraShared from "../spectraShared.js";
 import type * as spectraThreads from "../spectraThreads.js";
 import type * as spectraWorkspaces from "../spectraWorkspaces.js";
+import type * as syncPolicy from "../syncPolicy.js";
 import type * as timetableReminders from "../timetableReminders.js";
 
 import type {
@@ -90,6 +95,8 @@ declare const fullApi: ApiFromModules<{
   auditShared: typeof auditShared;
   authority: typeof authority;
   authorityShared: typeof authorityShared;
+  bridge: typeof bridge;
+  bridgeSync: typeof bridgeSync;
   calendar: typeof calendar;
   calendarShared: typeof calendarShared;
   changeGroups: typeof changeGroups;
@@ -117,10 +124,12 @@ declare const fullApi: ApiFromModules<{
   orgTreeIntegrity: typeof orgTreeIntegrity;
   orgTreeShared: typeof orgTreeShared;
   orgTreeViews: typeof orgTreeViews;
+  payloads: typeof payloads;
   plannerReminders: typeof plannerReminders;
   quizPractice: typeof quizPractice;
   quizPrivacy: typeof quizPrivacy;
   regionClaims: typeof regionClaims;
+  replicas: typeof replicas;
   schools: typeof schools;
   secretBridge: typeof secretBridge;
   secretStore: typeof secretStore;
@@ -133,6 +142,7 @@ declare const fullApi: ApiFromModules<{
   spectraShared: typeof spectraShared;
   spectraThreads: typeof spectraThreads;
   spectraWorkspaces: typeof spectraWorkspaces;
+  syncPolicy: typeof syncPolicy;
   timetableReminders: typeof timetableReminders;
 }>;
 

@@ -83,6 +83,20 @@ describe("canonical Spectra client state", () => {
     expect(next.explicit).toEqual([{ type: "artifact", id: "gone", label: "Gone artifact", source: "explicit", stale: true }]);
   });
 
+  it("does not discard an open artifact when a bounded overview omits it", () => {
+    const state = contextStore.getState();
+    state.openObject({ type: "artifact", id: "outside-page", label: "Open work", presentation: "tab" });
+    state.reconcile(
+      [{ type: "artifact", id: "page-one", label: "First page work" }],
+      { completeTypes: ["workspace"] },
+    );
+    expect(contextStore.getState().openObjects).toEqual([
+      { type: "artifact", id: "outside-page", label: "Open work", presentation: "tab" },
+    ]);
+    contextStore.getState().setObjectAvailability("artifact", "outside-page");
+    expect(contextStore.getState().openObjects).toEqual([]);
+  });
+
   it("keeps a just-opened live thread panel while the thread index is still catching up", () => {
     const state = contextStore.getState();
     state.openObject({

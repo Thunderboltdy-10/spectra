@@ -1288,6 +1288,13 @@ export default defineSchema({
   spectraArtifacts: defineTable({
     ownerAccountId: v.id("accounts"),
     schoolId: v.optional(v.id("schools")),
+    resourceClass: v.optional(
+      v.union(v.literal("artifact"), v.literal("resource"), v.literal("thread_reference")),
+    ),
+    nativeFormat: v.optional(v.string()),
+    compatibilityProfile: v.optional(
+      v.union(v.literal("strict-native"), v.literal("enhanced"), v.literal("spectra-native")),
+    ),
     blueprintKey: v.string(),
     title: v.string(),
     summary: v.optional(v.string()),
@@ -1428,6 +1435,141 @@ export default defineSchema({
       searchField: "textIndex",
       filterFields: ["ownerAccountId", "blueprintKey", "status"],
     }),
+
+  bridgeDevices: defineTable({
+    accountId: v.id("accounts"),
+    name: v.string(),
+    platform: v.string(),
+    credentialHash: v.string(),
+    protocolVersion: v.string(),
+    appVersion: v.string(),
+    pairedAt: v.number(),
+    lastSeenAt: v.number(),
+    state: v.union(v.literal("active"), v.literal("revoked"), v.literal("lost")),
+  })
+    .index("by_account_state", ["accountId", "state"])
+    .index("by_credential_hash", ["credentialHash"]),
+
+  bridgePairingChallenges: defineTable({
+    accountId: v.id("accounts"),
+    challengeHash: v.string(),
+    shortCode: v.string(),
+    browserOrigin: v.string(),
+    expiresAt: v.number(),
+    confirmedAt: v.optional(v.number()),
+    consumedAt: v.optional(v.number()),
+  })
+    .index("by_challenge_hash", ["challengeHash"])
+    .index("by_account_expiry", ["accountId", "expiresAt"]),
+
+  bridgeMounts: defineTable({
+    accountId: v.id("accounts"),
+    deviceId: v.id("bridgeDevices"),
+    rootLabel: v.string(),
+    grantId: v.string(),
+    rootOrgNodeId: v.optional(v.id("orgNodes")),
+    policyId: v.optional(v.id("syncPolicies")),
+    state: v.union(v.literal("active"), v.literal("detached"), v.literal("revoked")),
+    fileCount: v.number(),
+    lastScanAt: v.optional(v.number()),
+    doubleSyncRisk: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_state", ["accountId", "state"])
+    .index("by_device_state", ["deviceId", "state"])
+    .index("by_device_grant", ["deviceId", "grantId"]),
+
+  syncPolicies: defineTable({
+    accountId: v.id("accounts"),
+    scopeKind: v.union(v.literal("account"), v.literal("mount"), v.literal("workspace"), v.literal("folder"), v.literal("item")),
+    scopeId: v.string(),
+    preset: v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked")),
+    contentDirection: v.union(v.literal("local-to-spectra"), v.literal("spectra-to-local"), v.literal("bidirectional"), v.literal("manual")),
+    discovery: v.union(v.literal("auto"), v.literal("ask"), v.literal("explicit")),
+    structure: v.union(v.literal("independent"), v.literal("mirror-to-disk"), v.literal("mirror-from-disk"), v.literal("mirror-both"), v.literal("ask")),
+    cloudContent: v.union(v.literal("full"), v.literal("metadata-only"), v.literal("none")),
+    localMirrorGrantId: v.optional(v.string()),
+    includeGlobs: v.array(v.string()),
+    excludeGlobs: v.array(v.string()),
+    timing: v.union(v.literal("continuous"), v.literal("on-save-open"), v.literal("manual")),
+    protectedOriginal: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_scope", ["accountId", "scopeKind", "scopeId"]),
+
+  workReplicas: defineTable({
+    accountId: v.id("accounts"),
+    workId: v.id("spectraArtifacts"),
+    kind: v.union(v.literal("cloud"), v.literal("local")),
+    deviceId: v.optional(v.id("bridgeDevices")),
+    localResourceId: v.optional(v.string()),
+    nativeFormat: v.string(),
+    payloadRef: v.optional(v.string()),
+    revision: v.string(),
+    baseRevision: v.optional(v.string()),
+    contentHash: v.optional(v.string()),
+    state: v.union(v.literal("current"), v.literal("ahead"), v.literal("behind"), v.literal("diverged"), v.literal("pending"), v.literal("error"), v.literal("unavailable")),
+    lastVerifiedAt: v.number(),
+    errorCode: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    errorAt: v.optional(v.number()),
+    unavailableReason: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_work", ["workId"])
+    .index("by_account_state", ["accountId", "state"])
+    .index("by_device_resource", ["deviceId", "localResourceId"])
+    .index("by_work_kind", ["workId", "kind"]),
+
+  syncOperations: defineTable({
+    accountId: v.id("accounts"),
+    workId: v.id("spectraArtifacts"),
+    replicaId: v.optional(v.id("workReplicas")),
+    idempotencyKey: v.string(),
+    direction: v.union(v.literal("local-to-cloud"), v.literal("cloud-to-local"), v.literal("migration"), v.literal("external")),
+    revisionBefore: v.optional(v.string()),
+    revisionAfter: v.optional(v.string()),
+    state: v.union(v.literal("pending"), v.literal("applied"), v.literal("verified"), v.literal("failed"), v.literal("conflicted")),
+    actorKind: v.union(v.literal("user"), v.literal("ai"), v.literal("external-edit"), v.literal("reconciliation"), v.literal("migration"), v.literal("restore")),
+    runId: v.optional(v.id("spectraAiRuns")),
+    errorCode: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_key", ["accountId", "idempotencyKey"])
+    .index("by_work_created", ["workId", "createdAt"])
+    .index("by_state_updated", ["state", "updatedAt"]),
+
+  syncConflicts: defineTable({
+    accountId: v.id("accounts"),
+    workId: v.id("spectraArtifacts"),
+    replicaIds: v.array(v.id("workReplicas")),
+    regionIds: v.array(v.string()),
+    partNames: v.array(v.string()),
+    localRevision: v.string(),
+    spectraRevision: v.string(),
+    state: v.union(v.literal("open"), v.literal("resolved-merged"), v.literal("resolved-local"), v.literal("resolved-spectra"), v.literal("forked")),
+    createdAt: v.number(),
+    resolvedAt: v.optional(v.number()),
+  })
+    .index("by_work_state", ["workId", "state"])
+    .index("by_account_state", ["accountId", "state"]),
+
+  payloadObjects: defineTable({
+    accountId: v.id("accounts"),
+    hash: v.string(),
+    storageId: v.id("_storage"),
+    bytes: v.number(),
+    mediaType: v.string(),
+    refCount: v.number(),
+    state: v.union(v.literal("active"), v.literal("quarantined"), v.literal("released")),
+    createdAt: v.number(),
+    verifiedAt: v.number(),
+  })
+    .index("by_account_hash", ["accountId", "hash"])
+    .index("by_storage", ["storageId"]),
 
   spectraRuntimeBuilds: defineTable({
     artifactId: v.id("spectraArtifacts"),

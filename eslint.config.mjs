@@ -33,6 +33,7 @@ const eslintConfig = defineConfig([
     "v1/**",
     "ai-education-workspace-landing-page/**",
     "workers/**",
+    ".tmp-*/**",
   ]),
 ]);
 

@@ -5,7 +5,7 @@ import type { PublishedCodeBuildProjection } from "../code/published-build";
 import type { QuizExperience } from "../quiz/experience";
 import type { TimetablePersonalState } from "../timetable/model";
 
-export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference";
+export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference" | "resource";
 
 export type SpectraAiEffect = {
   effectId: string;
@@ -343,6 +343,9 @@ export type SpectraWorkspaceManifestReport = {
 export type SpectraArtifact = {
   _id: string;
   blueprintKey: SpectraBlueprintKey;
+  resourceClass?: "artifact" | "resource" | "thread_reference";
+  nativeFormat?: string;
+  compatibilityProfile?: "strict-native" | "enhanced" | "spectra-native";
   title: string;
   summary?: string;
   content?: unknown;

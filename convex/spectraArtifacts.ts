@@ -51,11 +51,21 @@ import {
   projectTimetableSharedContent,
   projectTimetableSnapshot,
 } from "./quizPrivacy";
+import { validateArtifactContent } from "../src/features/spectra/artifacts/registry";
 
 function contentForArtifactStorage(typeKey: string, content: unknown) {
+  const validated = validateArtifactContent(typeKey, content);
+  if (!validated.success) {
+    throw new Error(
+      `ARTIFACT_CONTENT_INVALID: ${validated.error.issues
+        .slice(0, 8)
+        .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+        .join("; ")}`,
+    );
+  }
   return typeKey === "timetable"
-    ? projectTimetableSharedContent(content)
-    : content;
+    ? projectTimetableSharedContent(validated.data)
+    : validated.data;
 }
 
 // Keep editorial ink visible long enough for peers to notice (15 minutes).

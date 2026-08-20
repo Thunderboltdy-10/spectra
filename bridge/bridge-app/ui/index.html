@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Spectra Bridge</title>
+<style>
+  :root { font: 14px/1.45 ui-sans-serif, system-ui; color: #202126; background: #f7f7f4; }
+  body { margin: 0; } main { padding: 24px; } h1 { font-size: 20px; margin: 0; } h2 { font-size: 13px; margin: 24px 0 8px; }
+  p { color: #65666d; } #status { color: #27653a; font-weight: 650; } section { border-top: 1px solid #deded8; }
+  button { border: 1px solid #d3d3cd; border-radius: 7px; background: #fff; padding: 7px 11px; color: inherit; cursor: pointer; }
+  button:disabled { cursor: wait; opacity: .55; } small { display: block; color: #85868c; } .code { font: 600 28px/1 ui-monospace, monospace; letter-spacing: .14em; }
+  #mounts { display: grid; gap: 10px; margin: 12px 0; } .mount { border: 1px solid #deded8; border-radius: 9px; background: #fff; padding: 12px; }
+  .mount-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; } .mount-title { font-weight: 650; }
+  .mount-state { font-size: 11px; color: #65666d; text-transform: capitalize; } .mount-detail { margin: 5px 0 9px; font-size: 12px; }
+  .mount-actions { display: flex; gap: 7px; } .danger { color: #8c3d2a; } progress { width: 100%; height: 5px; margin-bottom: 8px; }
+  #empty { padding: 8px 0; } #global-error { color: #8c3d2a; } .footer { margin-top: 18px; }
+</style>
+<body><main>
+  <h1>Spectra Bridge</h1>
+  <p>Runs quietly on this device.</p>
+  <p id="status">Checking connection…</p>
+  <div id="pair" hidden><p>Confirm this code matches Spectra</p><div class="code" id="code"></div><button id="confirm">Confirm connection</button></div>
+  <section aria-label="Selected folders">
+    <h2>Selected folders</h2>
+    <div id="mounts"></div><p id="empty">No folders selected.</p><p id="global-error" role="status" hidden></p>
+    <button id="add-folder" type="button">Add folder</button>
+  </section>
+  <div class="footer"><button type="button">Open logs</button><small>Version 0.1.0</small></div>
+</main>
+<script>
+const invoke = window.__TAURI__.core.invoke;
+const mountsElement = document.querySelector('#mounts');
+const errorElement = document.querySelector('#global-error');
+let busy = false;
+function showError(reason) { errorElement.textContent = String(reason); errorElement.hidden = false; }
+async function act(action) { if (busy) return; busy = true; errorElement.hidden = true; try { await action(); } catch (reason) { showError(reason); } finally { busy = false; await refresh(); } }
+function renderMounts(mounts) {
+  mountsElement.replaceChildren(); document.querySelector('#empty').hidden = mounts.length > 0;
+  for (const mount of mounts) {
+    const card = document.createElement('article'); card.className = 'mount';
+    const head = document.createElement('div'); head.className = 'mount-head';
+    const title = document.createElement('div'); title.className = 'mount-title'; title.textContent = mount.label;
+    const state = document.createElement('div'); state.className = 'mount-state'; state.textContent = mount.state.replace('-', ' ');
+    head.append(title, state); card.append(head);
+    if (mount.total > 0 && mount.state === 'syncing') { const progress = document.createElement('progress'); progress.max = mount.total; progress.value = mount.synced; card.append(progress); }
+    const detail = document.createElement('p'); detail.className = 'mount-detail'; detail.textContent = mount.total > 0 && mount.state === 'syncing' ? `${mount.detail} ${mount.synced} of ${mount.total}` : mount.detail; card.append(detail);
+    const actions = document.createElement('div'); actions.className = 'mount-actions';
+    if (mount.state === 'error' || mount.state === 'selected') { const retry = document.createElement('button'); retry.textContent = 'Retry'; retry.onclick = () => act(() => invoke('retry_mount', { grantId: mount.id })); actions.append(retry); }
+    const remove = document.createElement('button'); remove.textContent = 'Remove'; remove.className = 'danger'; remove.onclick = () => act(() => invoke('remove_mount', { grantId: mount.id })); actions.append(remove);
+    card.append(actions); mountsElement.append(card);
+  }
+}
+async function refresh() {
+  const code = await invoke('pending_pairing_code'); const [connected, mounts] = await invoke('bridge_status');
+  document.querySelector('#pair').hidden = !code; document.querySelector('#code').textContent = code || '';
+  document.querySelector('#status').textContent = connected ? 'Connected' : 'Disconnected'; renderMounts(mounts);
+}
+document.querySelector('#confirm').onclick = () => act(async () => { await invoke('confirm_pairing', { code: document.querySelector('#code').textContent }); });
+document.querySelector('#add-folder').onclick = () => act(() => invoke('select_mount'));
+// Status reads are safe while a long-running folder sync is in flight. Keeping
+// them running is what makes scanning and per-file progress visible to people.
+setInterval(() => refresh().catch(showError), 750); refresh().catch(showError);
+</script></body></html>

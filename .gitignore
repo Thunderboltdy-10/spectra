@@ -46,3 +46,7 @@ next-env.d.ts
 # Never commit user data.
 /.backups/
 /.tmp-n1/
+/bridge/target/
+/.tmp-n3-*/
+/.tmp-n3-mount/
+/.tmp-n3-updater.key*

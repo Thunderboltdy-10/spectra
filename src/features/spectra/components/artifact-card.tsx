@@ -46,7 +46,7 @@ function resolveCardAiState(
 export type ArtifactCardView = {
   id: string;
   title: string;
-  blueprintKey: ArtifactTypeKey | "thread_reference";
+  blueprintKey: ArtifactTypeKey | "thread_reference" | "resource";
   summary: string;
   meta: string;
   placement: "inbox" | "shared" | "workspace";

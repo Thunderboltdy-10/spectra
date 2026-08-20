@@ -1512,6 +1512,19 @@ export function SpectraShell({
       }),
     [liveIdentityByKey, snapshotArtifacts],
   );
+  useEffect(() => {
+    const known = new Set(allArtifacts.map((artifact) => artifact._id));
+    const missing = [...new Set(openObjects.filter((object) => object.type === "artifact" && !known.has(object.id)).map((object) => object.id))];
+    if (!overview || missing.length === 0) return;
+    let cancelled = false;
+    void Promise.all(missing.map((artifactId) => getSpectraArtifact(artifactId).then(({ artifact }) => ({ artifactId, artifact })).catch(() => ({ artifactId, artifact: null })))).then((loaded) => {
+      if (cancelled) return;
+      for (const item of loaded) if (!item.artifact) setObjectAvailability("artifact", item.artifactId);
+      const artifacts = loaded.map((item) => item.artifact).filter((artifact): artifact is SpectraArtifact => artifact !== null);
+      if (artifacts.length > 0) setOverview((current) => current ? { ...current, artifacts: [...artifacts.filter((artifact) => !current.artifacts.some((item) => item._id === artifact._id)), ...current.artifacts] } : current);
+    });
+    return () => { cancelled = true; };
+  }, [allArtifacts, openObjects, overview, setObjectAvailability]);
   const runs = overview?.runs ?? [];
   const studio = useArtifactStudioState(
     "spectra.shared.artifactStudio",
@@ -2391,13 +2404,12 @@ export function SpectraShell({
       openArtifactPanel(known);
       return;
     }
-    void loadOverview(selectedWorkspaceId, true).then((refreshed) => {
-      const found = refreshed?.artifacts?.find(
-        (item) => item._id === artifactId,
-      );
-      if (found) openArtifactPanel(found);
-      else toast.error("That work could not be opened.");
-    });
+    void getSpectraArtifact(artifactId)
+      .then(({ artifact }) => {
+        setOverview((current) => current && !current.artifacts.some((item) => item._id === artifact._id) ? { ...current, artifacts: [artifact, ...current.artifacts] } : current);
+        openArtifactPanel(artifact);
+      })
+      .catch(() => toast.error("That work could not be opened."));
   }
 
   /**

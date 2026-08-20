@@ -98,3 +98,24 @@ Office lenses and any parsing of DOCX/XLSX/PPTX content (N4/N5) · the human syn
 8. Reboot survival: after a real reboot, the Bridge is connected and mounts are active without user action (shot plus journal excerpt).
 9. Scan performance: 10k-file mount enumerates with the UI responsive; note timings.
 10. P0 and P10 still pass; STATE updated with the replica/status entries and every open failure honestly listed; mission log ≤40 lines; close-out checks green.
+
+## Mission log — 2026-08-20
+
+- Accepted the complete mission after one integrated verification pass; workstreams were build order, not separate polish loops.
+- Shipped the Rust workspace and thin Tauri shell: paired fixed-port service, native grants, credential vault, journal, watcher/reconciliation, safe writes, updater/autostart and tray.
+- Windows reliability: immediate per-user logon task replaces delayed Run/Startup entries; second launch focuses the existing process (`1 → 1`). No automatic reboot was performed after Pablo withdrew that permission.
+- Native identity: regenerated the full platform icon set from one opaque Spectra asset; the live rebuilt title bar and tray use the same source.
+- Cloud: device/mount tables, replicas, operations, conflicts, policy selector, payload interface, bridge mutations and strict external validation landed.
+- Migration: dry-run, cutover and verification each scanned 308 works; missing=0, duplicates=0, localOnly=16. Physics resources correctly remained local-only.
+- Real F1: paired the live Bridge, granted only Physics, and observed Connected / Active / Available in Spectra in both native UI and web Settings.
+- Library projected the Physics root with 16 items and its Arduino_IA child; existing cloud artifact spot-check remained unaffected.
+- Disk proof: 16-file manifests before/after are byte-identical, SHA-256 `7043840ee3abd5749b1f8a65f21562c6b226ce035dc185b2a5f92b4367340f76`.
+- Rust: 18/18 core, 6/6 chaos and 1/1 granted-tree tests passed; Office lock and slow-write tests emit no mid-write revision.
+- Live Office-lock probe: Physics switched to Waiting / Waiting for Office to finish saving, then resumed Active automatically after release; final tree hash still matched.
+- Scan: first 200-entry page over a 10,000-file fixture completed in 59.8 ms while running off the UI path.
+- Web: 679/681 Spectra tests passed; the two unchanged N11-owned live-preview choreography expectations remain the only failures.
+- `npx tsc --noEmit`, lint and secret scan passed; Convex deployment compiled and accepted the live migration.
+- P0/continuity regression remained intact; live browser pass covered Workspace, Library, Physics and Files and devices.
+- Reuse audit: existing Library controls and Settings section were extended; no duplicate search/filter/new control was introduced.
+- Bounded-read audit: Library remained paged/bounded; Physics first paint returned its 16 direct children and no filesystem paths.
+- Evidence: `.shots/missions/N3/` and `bridge/` automated suites.

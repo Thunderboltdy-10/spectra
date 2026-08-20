@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Bot, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Bot, Cable, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
@@ -13,12 +13,14 @@ import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
 import { ProductSectionNav } from "../../components/product-section-nav";
 import { ProductPageHeader } from "../../components/product-page-header";
 import { COMMAND_TABS } from "../../commands";
+import { BridgeSettings } from "../../bridge/bridge-settings";
 
 const SECTIONS = [
   { id: "ai", label: "Conversations", icon: Bot },
   { id: "writing", label: "Writing", icon: Sparkles },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "workbar", label: "Workbars", icon: SlidersHorizontal },
+  { id: "devices", label: "Files and devices", icon: Cable },
   { id: "privacy", label: "Privacy and data", icon: LockKeyhole },
 ] as const;
 
@@ -206,6 +208,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
+    devices: <BridgeSettings />,
     privacy: <PrivacySettings />,
   };
   return (

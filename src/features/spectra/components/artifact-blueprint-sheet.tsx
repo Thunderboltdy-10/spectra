@@ -35,6 +35,7 @@ import { workTypeMeta, type ArtifactCardView } from "./artifact-card";
 import type { SpectraArtifact} from "../data/api";
 import { requireBlueprint, requireArtifactTypeManifest } from "../artifacts/blueprint-catalog";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { isArtifactTypeKey } from "../artifacts/registry";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { SelectField } from "@/components/ui/select";
@@ -285,7 +286,7 @@ export function ArtifactBlueprintSheet({
   onClose: () => void;
   onSubmit: (payload: ArtifactPayload) => Promise<void> | void;
 }) {
-  const artifactBlueprintKey = artifact?.blueprintKey === "thread_reference" ? initialBlueprintKey : artifact?.blueprintKey;
+  const artifactBlueprintKey = artifact && isArtifactTypeKey(artifact.blueprintKey) ? artifact.blueprintKey : initialBlueprintKey;
   const [blueprintKey, setBlueprintKey] = useState<EditableBlueprintKey>(artifactBlueprintKey ?? initialBlueprintKey);
   const [title, setTitle] = useState(artifact?.title ?? defaultArtifactTitle(initialBlueprintKey));
   const [summary, setSummary] = useState(artifact?.summary ?? defaultArtifactSummary(initialBlueprintKey));
@@ -841,6 +842,6 @@ function primaryButtonClass() {
 }
 
 export function blueprintKeyForCard(card: ArtifactCardView): EditableBlueprintKey {
-  if (card.blueprintKey === "thread_reference") throw new Error("Thread artifacts use their conversation surface.");
+  if (!isArtifactTypeKey(card.blueprintKey)) throw new Error("Native resources and threads use their dedicated surfaces.");
   return card.blueprintKey;
 }

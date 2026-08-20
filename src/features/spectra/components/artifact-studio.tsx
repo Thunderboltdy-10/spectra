@@ -1,6 +1,8 @@
 "use client";
 
 import { Tooltip } from "@/components/ui/tooltip";
+import { useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
 import type { Editor as TiptapEditor, JSONContent } from "@tiptap/core";
@@ -56,6 +58,8 @@ import {
   type ReactNode,
 } from "react";
 import { isArtifactTypeKey } from "../artifacts/registry";
+import { ResourceSurface } from "../bridge/resource-surface";
+import { selectSyncTruth } from "../bridge/status";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import {
   codeParameterSnapshot,
@@ -2932,7 +2936,9 @@ export function ArtifactStudio({
       ? String(record(artifact.content).threadId).trim()
       : "";
   const body =
-    artifact.blueprintKey === "thread_reference" ? (
+    artifact.blueprintKey === "resource" ? (
+      <ResourceSurface artifact={artifact} onClose={handleClose} />
+    ) : artifact.blueprintKey === "thread_reference" ? (
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         <header className="flex min-h-[78px] shrink-0 items-center justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -3091,6 +3097,9 @@ function ArtifactStudioEditor({
   onDirtyChange: (dirty: boolean) => void;
   compact: boolean;
 }) {
+  const replicaTruth = useQuery(api.replicas.forWork, {
+    workId: artifact._id as never,
+  });
   const workType = isArtifactTypeKey(artifact.blueprintKey)
     ? artifact.blueprintKey
     : null;
@@ -5080,7 +5089,7 @@ function ArtifactStudioEditor({
     },
     [setActivePresence],
   );
-  const syncLabel = readOnly
+  const legacySyncLabel = readOnly
     ? "Read-only"
     : livePermissionLost
       ? "Reconnecting"
@@ -5097,6 +5106,25 @@ function ArtifactStudioEditor({
         : syncBusy || dirty
           ? "Saving…"
           : "Saved";
+  const syncLabel = readOnly
+    ? "Read-only"
+    : replicaTruth
+      ? selectSyncTruth({
+          replicas: replicaTruth.replicas.map((replica) => ({
+            kind: replica.kind,
+            state: replica.state,
+            lastVerifiedAt: replica.lastVerifiedAt,
+            errorCode: replica.errorCode,
+            unavailableReason: replica.unavailableReason,
+          })),
+          openConflictCount: replicaTruth.openConflictCount,
+          pendingCount:
+            replicaTruth.pendingCount +
+            (syncBusy || dirty || live.unsynchronizedChanges > 0 ? 1 : 0),
+          online: !livePermissionLost,
+          queuedChangeCount: live.unsynchronizedChanges,
+        }).label
+      : legacySyncLabel;
   const artifactSyncMessage = studioSyncMessage(syncLabel);
 
   /* ---- the studio contract ------------------------------------------

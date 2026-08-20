@@ -758,6 +758,7 @@ export async function POST(request: NextRequest) {
         description: optionalString(body.description),
         icon: optionalString(body.icon),
         color: optionalString(body.color),
+        parentNodeId: optionalString(body.parentNodeId),
       });
       return ok({ workspaceId });
     }

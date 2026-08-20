@@ -2574,10 +2574,50 @@ export default defineSchema({
     // the user actually deleted so restore is one operation.
     deletedAt: v.optional(v.number()),
     trashedRootId: v.optional(v.id("orgNodes")),
+    isTrashRoot: v.optional(v.boolean()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_account_parent_order", ["accountId", "parentId", "orderKey"])
+    .index("by_account_parent_live_order", [
+      "accountId",
+      "parentId",
+      "deletedAt",
+      "orderKey",
+    ])
+    .index("by_account_parent_live_type_order", [
+      "accountId",
+      "parentId",
+      "deletedAt",
+      "typeKey",
+      "orderKey",
+    ])
+    .index("by_account_parent_live_name", [
+      "accountId",
+      "parentId",
+      "deletedAt",
+      "name",
+    ])
+    .index("by_account_parent_live_type_name", [
+      "accountId",
+      "parentId",
+      "deletedAt",
+      "typeKey",
+      "name",
+    ])
+    .index("by_account_parent_live_activity", [
+      "accountId",
+      "parentId",
+      "deletedAt",
+      "activityAt",
+    ])
+    .index("by_account_parent_live_type_activity", [
+      "accountId",
+      "parentId",
+      "deletedAt",
+      "typeKey",
+      "activityAt",
+    ])
     .index("by_parent", ["parentId"])
     .index("by_account_kind_source", ["accountId", "kind", "sourceId"])
     .index("by_kind_source", ["kind", "sourceId"])
@@ -2585,10 +2625,21 @@ export default defineSchema({
     .index("by_workspace_context", ["workspaceContextId"])
     .index("by_account_deleted", ["accountId", "deletedAt"])
     .index("by_trashed_root", ["trashedRootId"])
+    .index("by_account_trash_root", [
+      "accountId",
+      "isTrashRoot",
+      "deletedAt",
+    ])
     /* The board's windows. `deletedAt` sits in each one so a trashed subtree is
        excluded by the range rather than filtered out of it, which keeps a page
        of results exactly a page of reads. */
     .index("by_account_live_activity", ["accountId", "deletedAt", "activityAt"])
+    .index("by_account_live_pinned_name", [
+      "accountId",
+      "deletedAt",
+      "pinned",
+      "name",
+    ])
     .index("by_account_live_type_activity", [
       "accountId",
       "deletedAt",

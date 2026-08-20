@@ -5,7 +5,6 @@ import {
   BookOpen,
   CalendarCheck2,
   CheckCircle2,
-  ChevronDown,
   Atom,
   Brain,
   Calculator,
@@ -18,13 +17,10 @@ import {
   HelpCircle,
   Home,
   Library,
-  List,
   Loader2,
   MessageSquare,
-  PanelTop,
   PencilLine,
   Plus,
-  Rows3,
   Share2,
   Sparkles,
   Sprout,
@@ -47,6 +43,7 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { toast } from "sonner";
@@ -73,7 +70,6 @@ import {
 } from "../components/command-bar";
 import {
   ContextFocusControl,
-  GlobalSearch,
   SelectionActionBar,
   type ComposerFocusMode,
 } from "../components/context-controls";
@@ -94,9 +90,9 @@ import { ShareDialog } from "../components/share-dialog";
 import { LibraryOrganizer } from "../organization/library-organizer";
 import type { ContainerTarget } from "../organization/work-board";
 import {
+  useLiveOrgIdentities,
   useTreePlacement,
   type BoardGroupBy,
-  type TreeNode,
 } from "../organization/tree-client";
 import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
 import { previewText } from "../components/preview-text";
@@ -125,7 +121,6 @@ import {
   postSpectra,
   uploadArtifactImportOriginal,
   type SpectraArtifact,
-  type SpectraBlueprintKey,
   type SpectraOverview,
   type SpectraRun,
   type SpectraShareInvitation,
@@ -142,7 +137,6 @@ import {
 } from "../workbench";
 
 type ViewMode = "list" | "board";
-type WorkspaceObjectType = SpectraBlueprintKey | "thread";
 type Selection =
   | { type: "artifact"; itemId: string; artifactId: string }
   | { type: "thread"; itemId: string; threadId: string }
@@ -407,11 +401,6 @@ const createTypes: Array<{
   label: getWorkDefinition(key).userFacingName,
 }));
 
-const viewModes: Array<{ key: ViewMode; label: string; icon: LucideIcon }> = [
-  { key: "list", label: "List", icon: List },
-  { key: "board", label: "Board", icon: PanelTop },
-];
-
 const workspaceIconChoices = [
   ["Sparkles", Sparkles],
   ["BookOpen", BookOpen],
@@ -458,8 +447,6 @@ function WorkspaceHeader({
   runs,
   optimisticActive,
   optimisticRunId,
-  busy,
-  onCreateArtifact,
   onEditWorkspace,
   onShareWorkspace,
   onExportWorkspace,
@@ -470,17 +457,11 @@ function WorkspaceHeader({
   runs: SpectraRun[];
   optimisticActive?: boolean;
   optimisticRunId?: string;
-  busy: string | null;
-  onCreateArtifact: (type: ArtifactTypeKey) => void;
   onEditWorkspace: () => void;
   onShareWorkspace: () => void;
   onExportWorkspace: () => void;
   onArchiveWorkspace: () => void;
 }) {
-  const [createOpen, setCreateOpen] = useState(false);
-  const createRef = useOutsideClick<HTMLDivElement>(createOpen, () =>
-    setCreateOpen(false),
-  );
   const artifactCount = items.filter((item) => item.artifact).length;
   const threadCount = workspaceThreadCount(items);
   const cardCount = items.filter((item) => item.pinned).length;
@@ -526,48 +507,6 @@ function WorkspaceHeader({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative" ref={createRef}>
-            <button
-              type="button"
-              disabled={workspace?.accessLevel === "read"}
-              className={smallButtonClass("dark")}
-              onClick={() => setCreateOpen((open) => !open)}
-            >
-              {busy?.startsWith("artifact:") ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-              New
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-            {createOpen ? (
-              <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[250px] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_18px_42px_rgba(27,20,12,0.14)]">
-                {createTypes.map((type) => {
-                  const Icon = type.icon;
-                  return (
-                    <button
-                      key={type.key}
-                      type="button"
-                      className={menuItemClass()}
-                      disabled={busy === `artifact:${type.key}`}
-                      onClick={() => {
-                        setCreateOpen(false);
-                        onCreateArtifact(type.key);
-                      }}
-                    >
-                      {busy === `artifact:${type.key}` ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Icon className="h-4 w-4" />
-                      )}
-                      New {type.label}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
           {/* People and Settings are compact disclosing actions, not sections:
               they open a dialog, so they do not belong in the work nav. */}
           <button
@@ -623,20 +562,10 @@ function WorkspaceHeader({
 function RootHeader({
   surface,
   workspaceCount,
-  busy,
-  onCreateArtifact,
-  onCreateWorkspace,
 }: {
   surface: "library" | "workspace";
   workspaceCount: number;
-  busy: string | null;
-  onCreateArtifact: (type: ArtifactTypeKey) => void;
-  onCreateWorkspace: () => void;
 }) {
-  const [createOpen, setCreateOpen] = useState(false);
-  const createRef = useOutsideClick<HTMLDivElement>(createOpen, () =>
-    setCreateOpen(false),
-  );
   const Icon = surface === "library" ? Library : Home;
   return (
     <header className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-4 pt-4">
@@ -658,158 +587,8 @@ function RootHeader({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative" ref={createRef}>
-            <button
-              type="button"
-              className={smallButtonClass("dark")}
-              onClick={() => setCreateOpen((open) => !open)}
-            >
-              {busy?.startsWith("artifact:") ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-              New
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-            {createOpen ? (
-              <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[250px] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_18px_42px_rgba(27,20,12,0.14)]">
-                {createTypes.map((type) => {
-                  const Icon = type.icon;
-                  return (
-                    <button
-                      key={type.key}
-                      type="button"
-                      className={menuItemClass()}
-                      disabled={busy === `artifact:${type.key}`}
-                      onClick={() => {
-                        setCreateOpen(false);
-                        onCreateArtifact(type.key);
-                      }}
-                    >
-                      {busy === `artifact:${type.key}` ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Icon className="h-4 w-4" />
-                      )}
-                      New {type.label}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={onCreateWorkspace}
-            className="flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-          >
-            <Sprout className="size-3.5 text-[var(--text-secondary)]" />
-            New workspace
-          </button>
-        </div>
       </div>
     </header>
-  );
-}
-
-/**
- * Which view the surface is showing.
- *
- * It sits at the left end of the surface's one toolbar row and stays there in
- * both views. A switch that moved when you used it would be a switch you had to
- * find again.
- */
-function ViewSwitch({
-  viewMode,
-  onViewModeChange,
-}: {
-  viewMode: ViewMode;
-  onViewModeChange: (mode: ViewMode) => void;
-}) {
-  return (
-    <nav
-      className="flex shrink-0 items-center gap-1 rounded-[9px] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] p-1"
-      aria-label="View"
-    >
-      {viewModes.map((view) => {
-        const Icon = view.icon;
-        return (
-          <button
-            key={view.key}
-            type="button"
-            aria-pressed={viewMode === view.key}
-            className={`flex h-7 items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] font-medium transition ${viewMode === view.key ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
-            onClick={() => onViewModeChange(view.key)}
-          >
-            <Icon className="size-3.5" />
-            {view.label}
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
-
-/**
- * Narrow the board to one type of work. Only the board has this: the List view
- * carries its own filter, in its own toolbar, right beside the rows it hides.
- */
-function BoardTypeFilter({
-  type,
-  onTypeChange,
-}: {
-  type: "all" | WorkspaceObjectType;
-  onTypeChange: (type: "all" | WorkspaceObjectType) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useOutsideClick<HTMLDivElement>(open, () => setOpen(false));
-  const types: Array<{ key: "all" | WorkspaceObjectType; label: string }> = [
-    { key: "all", label: "All types" },
-    { key: "document", label: "Documents" },
-    { key: "flashcard_deck", label: "Decks" },
-    { key: "quiz", label: "Quizzes" },
-    { key: "planner_task", label: "Tasks" },
-    { key: "agent", label: "Agents" },
-    { key: "presentation", label: "Presentations" },
-    { key: "sheets", label: "Sheets" },
-    { key: "code", label: "Code" },
-    { key: "whiteboard", label: "Whiteboards" },
-    { key: "thread", label: "Threads" },
-  ];
-  return (
-    <div className="relative shrink-0" ref={ref}>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
-      >
-        <Rows3 className="size-3.5" />
-        {types.find((option) => option.key === type)?.label ?? "All types"}
-      </button>
-      {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-40 w-[180px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
-          {types.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              className={menuItemClass()}
-              onClick={() => {
-                onTypeChange(option.key);
-                setOpen(false);
-              }}
-            >
-              {option.label}
-              {type === option.key ? (
-                <CheckCircle2 className="ml-auto size-3.5 text-[var(--success)]" />
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -1224,13 +1003,12 @@ export function SpectraShell({
   /* Set when the reader jumps from a board column to the folder it names, so the
      List view opens there instead of at the top of the workspace. */
   const [boardFolderNodeId, setBoardFolderNodeId] = useState<string | null>(null);
-  const [workspaceType, setWorkspaceType] = useState<
-    "all" | WorkspaceObjectType
-  >("all");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [, setLoading] = useState(true);
   const [, setWorkspaceLoading] = useState(false);
   const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
+  const [workspaceCreateParentNodeId, setWorkspaceCreateParentNodeId] =
+    useState<string | null>(null);
   const [newWorkspaceTitle, setNewWorkspaceTitle] = useState("");
   const [newWorkspaceDescription, setNewWorkspaceDescription] = useState("");
   const [newWorkspaceIcon, setNewWorkspaceIcon] = useState("Sparkles");
@@ -1331,13 +1109,71 @@ export function SpectraShell({
     useState("");
   const workspaceCreateRef = useOutsideClick<HTMLDivElement>(
     workspaceCreateOpen,
-    () => setWorkspaceCreateOpen(false),
+    () => {
+      setWorkspaceCreateOpen(false);
+      setWorkspaceCreateParentNodeId(null);
+    },
   );
   const workspaceRequestSequence = useRef(0);
   const overviewRequestSequence = useRef(0);
   const restoredViewScope = useRef<string | null>(null);
   const workspaceImportInputRef = useRef<HTMLInputElement | null>(null);
   const openObjects = useSpectraContextStore((state) => state.openObjects);
+  const setObjectAvailability = useSpectraContextStore(
+    (state) => state.setObjectAvailability,
+  );
+  const liveIdentitySources = useMemo(() => {
+    const seen = new Set<string>();
+    const sources: Array<{
+      kind: "work" | "thread" | "workspace";
+      sourceId: string;
+    }> = [];
+    const add = (
+      kind: "work" | "thread" | "workspace",
+      sourceId?: string,
+    ) => {
+      if (!sourceId) return;
+      const key = `${kind}:${sourceId}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      sources.push({ kind, sourceId });
+    };
+    for (const object of openObjects) {
+      if (object.type === "artifact") add("work", object.id);
+      else if (object.type === "thread") add("thread", object.id);
+      else if (object.type === "workspace") add("workspace", object.id);
+    }
+    add("workspace", selectedWorkspaceId);
+    return sources;
+  }, [openObjects, selectedWorkspaceId]);
+  const liveIdentities = useLiveOrgIdentities(liveIdentitySources);
+  const liveIdentityByKey = useMemo(
+    () =>
+      new Map(
+        liveIdentities.map((identity) => [
+          `${identity.kind}:${identity.sourceId}`,
+          identity,
+        ]),
+      ),
+    [liveIdentities],
+  );
+  useEffect(() => {
+    const openByKey = new Map(
+      openObjects.map((object) => [
+        `${object.type === "artifact" ? "work" : object.type}:${object.id}`,
+        object,
+      ]),
+    );
+    for (const identity of liveIdentities) {
+      const object = openByKey.get(`${identity.kind}:${identity.sourceId}`);
+      if (!object || object.label === identity.name) continue;
+      setObjectAvailability(
+        identity.kind === "work" ? "artifact" : identity.kind,
+        identity.sourceId,
+        { label: identity.name },
+      );
+    }
+  }, [liveIdentities, openObjects, setObjectAvailability]);
   const tileArtifactIds = useSpectraContextStore(
     (state) => state.tileArtifactIds,
   );
@@ -1646,7 +1482,36 @@ export function SpectraShell({
       viewMode,
     );
   }, [viewScopeKey, viewMode]);
-  const allArtifacts = overview?.artifacts ?? EMPTY_ARTIFACTS;
+  const snapshotArtifacts = overview?.artifacts ?? EMPTY_ARTIFACTS;
+  const allArtifacts = useMemo(
+    () =>
+      snapshotArtifacts.map((artifact) => {
+        const live = liveIdentityByKey.get(`work:${artifact._id}`);
+        if (!live) return artifact;
+        const placements = live.workspaceContextId
+          ? [
+              {
+                workspaceId: live.workspaceContextId,
+                workspaceTitle:
+                  live.workspaceTitle ??
+                  artifact.placements?.[0]?.workspaceTitle ??
+                  "Workspace",
+                nodeId: live.nodeId,
+                pinned: live.pinned,
+              },
+            ]
+          : [];
+        return {
+          ...artifact,
+          title: live.name,
+          summary: live.summary ?? artifact.summary,
+          updatedAt: live.activityAt,
+          placements,
+          placementStatus: placements.length ? ("workspace" as const) : artifact.placementStatus,
+        };
+      }),
+    [liveIdentityByKey, snapshotArtifacts],
+  );
   const runs = overview?.runs ?? [];
   const studio = useArtifactStudioState(
     "spectra.shared.artifactStudio",
@@ -1733,8 +1598,14 @@ export function SpectraShell({
     ? runs.filter((run) => run.workspaceId === selectedWorkspaceId)
     : runs;
   const workspaces = useMemo(
-    () => sortSpectraWorkspaces(overview?.workspaces ?? []),
-    [overview?.workspaces],
+    () =>
+      sortSpectraWorkspaces(
+        (overview?.workspaces ?? []).map((workspace) => {
+          const live = liveIdentityByKey.get(`workspace:${workspace._id}`);
+          return live ? { ...workspace, title: live.name } : workspace;
+        }),
+      ),
+    [liveIdentityByKey, overview?.workspaces],
   );
   const {
     composerThread,
@@ -1745,7 +1616,6 @@ export function SpectraShell({
     contextArtifactIds,
     explicitContextObjects,
     setSelectedContextIds,
-    toggleSelectedObject,
     commitSelection,
     clearDraftSelection,
     setVisibleObjects,
@@ -2572,39 +2442,14 @@ export function SpectraShell({
    * The board says which of the two it handed over, because it already knows —
    * the shell must not hold a copy of the tree to find out (D42).
    */
-  const openBoardContainerById = useCallback(
-    (target: ContainerTarget) => {
-      if (target.workspaceId) {
-        goToWorkspaceHub(target.workspaceId as Id<"spectraWorkspaces">);
-        return;
-      }
-      setBoardFolderNodeId(target.nodeId);
-      setViewMode("list");
-    },
-    [goToWorkspaceHub],
-  );
-
-  function toggleContextNode(node: TreeNode) {
-    const kind = node.kind === "link" ? (node.target?.kind ?? "work") : node.kind;
-    const sourceId = node.target?.sourceId ?? node.sourceId;
-    if (!sourceId) return;
-    if (kind === "thread") {
-      setMultiSelectMode(true);
-      const result = toggleSelectedObject({
-        type: "thread",
-        id: sourceId,
-        label: node.target?.name ?? node.name,
-        source: "selected",
-        capability: "context",
-      });
-      if (result.atLimit)
-        toast.message("Selection can include up to 24 objects.");
-      setFocusModeOverride("selection");
+  const openBoardContainerById = (target: ContainerTarget) => {
+    if (target.workspaceId) {
+      goToWorkspaceHub(target.workspaceId as Id<"spectraWorkspaces">);
       return;
     }
-    const artifact = allArtifacts.find((item) => item._id === sourceId);
-    if (artifact) toggleContextArtifact(artifact);
-  }
+    setBoardFolderNodeId(target.nodeId);
+    setViewMode("list");
+  };
 
   function clearSelection() {
     clearDraftSelection();
@@ -3232,31 +3077,6 @@ export function SpectraShell({
     }
   }
 
-  async function addArtifactToWorkspace(
-    artifact: SpectraArtifact,
-    workspaceId: string,
-  ) {
-    setBusyKey(`add:${artifact._id}`);
-    try {
-      await postSpectra({
-        action: "addArtifactToWorkspace",
-        artifactId: artifact._id,
-        workspaceId,
-      });
-      toast.success("Added to workspace.");
-      if (selectedWorkspaceId === workspaceId)
-        await loadWorkspace(workspaceId, true);
-    } catch (error) {
-      toast.error(
-        describeFailure(error, {
-          fallback: "Could not add object to workspace.",
-        }).message,
-      );
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
   async function createWorkspace() {
     const title = newWorkspaceTitle.trim();
     if (!title) return;
@@ -3267,9 +3087,11 @@ export function SpectraShell({
         title,
         description: newWorkspaceDescription.trim() || undefined,
         icon: newWorkspaceIcon,
+        parentNodeId: workspaceCreateParentNodeId ?? undefined,
       });
       toast.success("Workspace created.");
       setWorkspaceCreateOpen(false);
+      setWorkspaceCreateParentNodeId(null);
       setNewWorkspaceTitle("");
       setNewWorkspaceDescription("");
       setNewWorkspaceIcon("Sparkles");
@@ -3447,30 +3269,14 @@ export function SpectraShell({
   }
 
   /*
-   * The two actions that belong to the surface rather than to either view: the
-   * account-wide finder, which can also file what it finds into whatever is
-   * open, and the switch that turns rows and cards into a selection the
-   * composer answers from. Built once and handed to whichever view is drawing
-   * the toolbar, because the reader should find them in the same corner either
-   * way. The finder is an icon here: it sits beside the List view's own search
-   * box, and two controls both labelled "Search" is one label too many.
+   * The action that belongs to the surface rather than either view: the switch
+   * that turns rows and cards into a selection the composer answers from.
+   * Search belongs to SurfaceSearch alone. A second global-search icon in this
+   * row was still a second search control, whatever scope its tooltip claimed
+   * (CANON D41).
    */
   const surfaceActions = (
     <>
-      <GlobalSearch
-        trigger="icon"
-        onOpenArtifact={openArtifactPanel}
-        onOpenWorkspace={(target) => goToWorkspaceHub(target._id)}
-        selectedIds={selectedContextIds}
-        onToggleSelected={toggleContextArtifact}
-        placementWorkspaceId={workspace?._id}
-        placementLabel={workspace?.title}
-        onPlaceArtifact={
-          workspace
-            ? (artifact) => void addArtifactToWorkspace(artifact, workspace._id)
-            : undefined
-        }
-      />
       <SelectObjectsButton
         selectionMode={multiSelectMode}
         onToggle={() => {
@@ -3873,7 +3679,10 @@ export function SpectraShell({
                 <button
                   type="button"
                   className={smallButtonClass()}
-                  onClick={() => setWorkspaceCreateOpen(false)}
+                  onClick={() => {
+                    setWorkspaceCreateOpen(false);
+                    setWorkspaceCreateParentNodeId(null);
+                  }}
                 >
                   Cancel
                 </button>
@@ -3966,8 +3775,6 @@ export function SpectraShell({
                         runEngine.liveExchange.status !== "failed",
                       )}
                       optimisticRunId={runEngine.liveExchange?.runId}
-                      busy={busyKey}
-                      onCreateArtifact={openCreateArtifact}
                       onEditWorkspace={openWorkspaceEdit}
                       onShareWorkspace={() => setWorkspaceShareOpen(true)}
                       onExportWorkspace={() => void exportWorkspaceManifest()}
@@ -3980,9 +3787,6 @@ export function SpectraShell({
                     <RootHeader
                       surface={surface}
                       workspaceCount={workspaces.length}
-                      busy={busyKey}
-                      onCreateArtifact={openCreateArtifact}
-                      onCreateWorkspace={() => setWorkspaceCreateOpen(true)}
                     />
                   )}
                   {!scopeReady ? (
@@ -4016,6 +3820,10 @@ export function SpectraShell({
                         busy={Boolean(busyKey?.startsWith("artifact:"))}
                         importing={busyKey === "library:import"}
                         onImportFile={(file) => void importLibraryFile(file)}
+                        onNewWorkspace={(parentNodeId) => {
+                          setWorkspaceCreateParentNodeId(parentNodeId);
+                          setWorkspaceCreateOpen(true);
+                        }}
                         toolbarTrail={surfaceActions}
                         contextIds={selectedContextIds}
                         onOpenWork={openArtifactById}

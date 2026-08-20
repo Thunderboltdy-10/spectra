@@ -42,6 +42,8 @@ import type * as memoryEmbedding from "../memoryEmbedding.js";
 import type * as metering from "../metering.js";
 import type * as operationalCounters from "../operationalCounters.js";
 import type * as operatorSessions from "../operatorSessions.js";
+import type * as orgNodeAggregates from "../orgNodeAggregates.js";
+import type * as orgNodeMutation from "../orgNodeMutation.js";
 import type * as orgTree from "../orgTree.js";
 import type * as orgTreeBoard from "../orgTreeBoard.js";
 import type * as orgTreeIntegrity from "../orgTreeIntegrity.js";
@@ -106,6 +108,8 @@ declare const fullApi: ApiFromModules<{
   metering: typeof metering;
   operationalCounters: typeof operationalCounters;
   operatorSessions: typeof operatorSessions;
+  orgNodeAggregates: typeof orgNodeAggregates;
+  orgNodeMutation: typeof orgNodeMutation;
   orgTree: typeof orgTree;
   orgTreeBoard: typeof orgTreeBoard;
   orgTreeIntegrity: typeof orgTreeIntegrity;
@@ -156,4 +160,8 @@ export declare const internal: FilterApi<
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {};
+export declare const components: {
+  orgNodeCountByType: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"orgNodeCountByType">;
+  orgNodeCountByWorkspace: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"orgNodeCountByWorkspace">;
+  orgNodeCountByParent: import("@convex-dev/aggregate/_generated/component.js").ComponentApi<"orgNodeCountByParent">;
+};

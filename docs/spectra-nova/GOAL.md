@@ -27,5 +27,7 @@ Do not stop to ask for questions: solve anything that is presented to you.
 
 When N12 closes with its release verdict in STATE.md, report that the program is complete and stop.
 
-Between each mission, git add all and commit, but never change branch. Every agent should always load /frontend-design and /design-taste-frontend skills. While verifying, take a ton of screenshots. Tweak to perfection. I genuinely think we have something truly revolutionary. Let's make it real!
+Between each mission, git add all and commit, but never change branch. Do not use sub-agents. Keep `/frontend-design` and `/design-taste-frontend` active when UI is being implemented, including after compaction, but treat them as quality constraints rather than an invitation to redesign or polish repeatedly.
+
+Implementation is the critical path. Complete every workstream in the current mission before beginning the mission-level verification pass. Between workstreams, use only the smallest targeted check needed to avoid building on a functional failure; do not capture evidence, re-run Golden Flows, or iterate on non-blocking visual refinements. When all workstreams are implemented, verify the entire mission once, fix acceptance-blocking defects, capture the smallest set of screenshots that proves the gates, run close-out checks, and close. Do not pursue subjective perfection outside an explicit acceptance gate; N10 and N11 own convergence and visual perfection. Prefer finished, correct missions over immaculate intermediate surfaces. Keep pace high without lowering correctness, reliability, accessibility, or the stated acceptance bar.
 ```

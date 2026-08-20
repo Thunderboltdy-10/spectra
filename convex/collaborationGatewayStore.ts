@@ -1,4 +1,5 @@
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalQuery } from "./_generated/server";
+import { internalMutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId } from "./identityShared";

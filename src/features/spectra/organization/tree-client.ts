@@ -63,6 +63,21 @@ export type TreeNode = {
 
 export type QuickViewKey = "recent" | "favorites" | "shared";
 
+export type LiveIdentity = {
+  kind: "work" | "thread" | "workspace";
+  sourceId: string;
+  nodeId: string;
+  name: string;
+  summary?: string;
+  blueprintKey?: string;
+  activityAt: number;
+  workspaceContextId?: string;
+  workspaceTitle?: string;
+  pinned: boolean;
+};
+
+const EMPTY_LIVE_IDENTITIES: LiveIdentity[] = [];
+
 /** How the board cuts its columns. Mirrors `convex/orgTreeBoard.ts`. */
 export type BoardGroupBy = "type" | "workspace" | "updated" | "folder";
 
@@ -88,6 +103,7 @@ export type BoardColumn = {
     | { kind: "loose" };
   openNodeId?: string;
   fixes: { typeKey?: string; parentNodeId?: string | null };
+  count?: number;
 };
 
 /** A card on the board: a tree row plus the folder it sits in. */
@@ -99,12 +115,25 @@ const nodeArg = (parentId: string | null) => (parentId ?? ROOT) as string;
 /** The children of one folder, paginated so a 2k-item folder still opens fast. */
 export function useTreeChildren(
   parentId: string | null,
-  options?: { enabled?: boolean; pageSize?: number },
+  options?: {
+    enabled?: boolean;
+    pageSize?: number;
+    sortKey?: "manual" | "name" | "updated" | "type";
+    direction?: "asc" | "desc";
+    typeFilter?: string;
+  },
 ) {
   const enabled = options?.enabled ?? true;
   const result = usePaginatedQuery(
     api.orgTree.listChildren,
-    enabled ? { parentId: nodeArg(parentId) } : "skip",
+    enabled
+      ? {
+          parentId: nodeArg(parentId),
+          sortKey: options?.sortKey,
+          direction: options?.direction,
+          typeFilter: options?.typeFilter,
+        }
+      : "skip",
     { initialNumItems: options?.pageSize ?? 150 },
   );
   return {
@@ -196,6 +225,21 @@ export function useTreePlacement(
     node: result.node as unknown as TreeNode,
     ancestors: result.ancestors as unknown as TreeNode[],
   };
+}
+
+/** One bounded subscription for the objects already open in the shell. */
+export function useLiveOrgIdentities(
+  sources: ReadonlyArray<{
+    kind: LiveIdentity["kind"];
+    sourceId: string;
+  }>,
+) {
+  const boundedSources = useMemo(() => sources.slice(0, 64), [sources]);
+  const result = useQuery(
+    api.orgTree.liveIdentities,
+    boundedSources.length ? { sources: boundedSources } : "skip",
+  );
+  return result ? (result.identities as LiveIdentity[]) : EMPTY_LIVE_IDENTITIES;
 }
 
 /**

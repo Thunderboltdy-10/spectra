@@ -328,6 +328,7 @@ export function SurfaceNewMenu({
   disabled,
   importing,
   onNewFolder,
+  onNewWorkspace,
   onNewWork,
   onImport,
   fixedTypeKey,
@@ -335,10 +336,12 @@ export function SurfaceNewMenu({
   placeLabel,
   align = "end",
   trigger,
+  placeChoices,
 }: {
   disabled?: boolean;
   importing?: boolean;
   onNewFolder?: () => void;
+  onNewWorkspace?: () => void;
   onNewWork: (key: BlueprintChoiceKey) => void;
   onImport?: () => void;
   /** Set when the position already fixes the type; the menu then skips asking. */
@@ -349,6 +352,12 @@ export function SurfaceNewMenu({
   align?: "start" | "end";
   /** Replaces the default filled button — used by a column's own affordance. */
   trigger?: ReactNode;
+  /** The only unanswered choice when a board column already fixes the type. */
+  placeChoices?: ReadonlyArray<{
+    key: string;
+    label: string;
+    onSelect: () => void;
+  }>;
 }) {
   const choices = fixedTypeKey
     ? blueprintChoices.filter((choice) => choice.key === fixedTypeKey)
@@ -356,7 +365,14 @@ export function SurfaceNewMenu({
 
   /* The type is settled and there is exactly one thing this button can make, so
      it makes it. A menu of one item asks a question with one answer. */
-  if (fixedTypeKey && choices.length === 1 && !onNewFolder && !onImport) {
+  if (
+    fixedTypeKey &&
+    choices.length === 1 &&
+    !onNewFolder &&
+    !onNewWorkspace &&
+    !onImport &&
+    !placeChoices?.length
+  ) {
     const only = choices[0]!;
     return (
       <button
@@ -382,6 +398,17 @@ export function SurfaceNewMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-[240px]">
+        {fixedTypeKey && placeChoices?.length ? (
+          <>
+            <DropdownMenuLabel>File in</DropdownMenuLabel>
+            {placeChoices.map((place) => (
+              <DropdownMenuItem key={place.key} onSelect={place.onSelect}>
+                <Columns3 className="size-3.5 text-[var(--text-tertiary)]" />
+                {place.label}
+              </DropdownMenuItem>
+            ))}
+          </>
+        ) : null}
         {placeLabel ? (
           <DropdownMenuLabel>Into {placeLabel}</DropdownMenuLabel>
         ) : null}
@@ -389,6 +416,12 @@ export function SurfaceNewMenu({
           <DropdownMenuItem onSelect={onNewFolder}>
             <FolderPlus className="size-3.5 text-[var(--text-tertiary)]" />
             New folder
+          </DropdownMenuItem>
+        ) : null}
+        {onNewWorkspace ? (
+          <DropdownMenuItem onSelect={onNewWorkspace}>
+            <Columns3 className="size-3.5 text-[var(--text-tertiary)]" />
+            New workspace
           </DropdownMenuItem>
         ) : null}
         {onImport ? (
@@ -401,11 +434,13 @@ export function SurfaceNewMenu({
             Import a file
           </DropdownMenuItem>
         ) : null}
-        {onNewFolder || onImport ? <DropdownMenuSeparator /> : null}
-        {placeLabel || !(onNewFolder || onImport) ? null : (
+        {onNewFolder || onNewWorkspace || onImport ? (
+          <DropdownMenuSeparator />
+        ) : null}
+        {placeLabel || !(onNewFolder || onNewWorkspace || onImport) ? null : (
           <DropdownMenuLabel>New work here</DropdownMenuLabel>
         )}
-        {choices.map((choice) => (
+        {!placeChoices?.length && choices.map((choice) => (
           <DropdownMenuItem
             key={choice.key}
             onSelect={() => onNewWork(choice.key)}

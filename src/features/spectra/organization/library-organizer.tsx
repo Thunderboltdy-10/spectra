@@ -10,7 +10,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
-  ArrowDownUp,
   ChevronRight,
   FolderPlus,
   Home,
@@ -18,17 +17,12 @@ import {
   Link2,
   Loader2,
   Pencil,
-  Plus,
   RotateCcw,
   Rows3,
-  Search,
   Share2,
-  SlidersHorizontal,
   Sparkles,
   Star,
   Trash2,
-  Upload,
-  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -38,8 +32,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -74,7 +66,6 @@ import {
 import { useOrganizerDrag } from "./organizer-drag";
 import { OrganizerRail, type OrganizerLocation } from "./organizer-rail";
 import { OrganizerRow, ROW_HEIGHT, type RowCallbacks } from "./organizer-row";
-import { workTypeFilters } from "./node-identity";
 import { WorkBoard } from "./work-board";
 import {
   SurfaceGroupBy,
@@ -115,6 +106,8 @@ export type LibraryOrganizerProps = {
   onToggleContext?: (artifactId: string) => void;
   contextIds?: ReadonlySet<string>;
   onImportFile?: (file: File) => void;
+  /** Create a workspace exactly where this surface is currently standing. */
+  onNewWorkspace?: (parentNodeId: string | null) => void;
   importing?: boolean;
   /** Where to open. Used by a workspace route to scope the surface (D32). */
   initialNodeId?: string | null;
@@ -168,14 +161,6 @@ type MenuState = {
   nodeIds: string[];
 };
 
-const SORT_LABELS: Record<"manual" | SortKey, string> = {
-  manual: "Arrangement",
-  name: "Name",
-  updated: "Recently updated",
-  type: "Type",
-};
-
-const EAGER_SORT_CAP = 4000;
 
 /** The two shapes one scope can take. */
 const VIEW_OPTIONS = [
@@ -190,6 +175,7 @@ export function LibraryOrganizer({
   onToggleContext,
   contextIds,
   onImportFile,
+  onNewWorkspace,
   importing = false,
   initialNodeId = null,
   scope = null,
@@ -251,6 +237,9 @@ export function LibraryOrganizer({
 
   const children = useTreeChildren(currentParentId, {
     enabled: inFolder && !searching,
+    sortKey,
+    direction: sortDirection,
+    typeFilter: filter,
   });
   const search = useTreeSearch(term, undefined, floorId);
   const quick = useTreeQuickView(
@@ -277,8 +266,7 @@ export function LibraryOrganizer({
 
   const rows = useMemo(() => {
     const base = filterRows(source ?? [], filter);
-    if (sortKey === "manual" && !flat) return base;
-    if (sortKey === "manual") return base;
+    if (!flat || sortKey === "manual") return base;
     return sortRows(base, sortKey, sortDirection);
   }, [source, filter, sortKey, sortDirection, flat]);
 
@@ -294,17 +282,7 @@ export function LibraryOrganizer({
     for (const node of nodes) seenRef.current.set(node.nodeId, node);
   }, []);
 
-  /* Sorting by anything other than the reader's own arrangement is a claim
-     about the whole folder, so the whole folder has to be here first. */
-  const settling =
-    sortKey !== "manual" &&
-    inFolder &&
-    !searching &&
-    children.status === "CanLoadMore" &&
-    rows.length < EAGER_SORT_CAP;
-  useEffect(() => {
-    if (settling) children.loadMore(600);
-  }, [settling, children]);
+  const settling = false;
 
   /* Ordinary scrolling loads the next page as the reader approaches the end. */
   useEffect(() => {
@@ -800,6 +778,9 @@ export function LibraryOrganizer({
           disabled={!inFolder || busy}
           importing={importing}
           onNewFolder={createFolderHere}
+          onNewWorkspace={
+            onNewWorkspace ? () => onNewWorkspace(currentParentId) : undefined
+          }
           onNewWork={createWorkHere}
           onImport={onImportFile ? () => importRef.current?.click() : undefined}
         />

@@ -1,12 +1,11 @@
 import {
   internalAction,
-  internalMutation,
   internalQuery,
-  mutation,
   query,
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
+import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";

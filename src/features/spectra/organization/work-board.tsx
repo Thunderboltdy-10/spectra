@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { FolderOpen, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
@@ -161,6 +161,12 @@ export function WorkBoard({
   }) => void;
 }) {
   const board = useBoardColumns(scopeNodeId, groupBy, typeFilter);
+  const placementBoard = useBoardColumns(
+    scopeNodeId,
+    "folder",
+    typeFilter,
+    groupBy === "type",
+  );
 
   /* One clock for the whole board, frozen at mount. A recency band whose
      boundary moved between two pages of one column would drop a card or show it
@@ -220,6 +226,7 @@ export function WorkBoard({
             onOpenContainer={onOpenContainer}
             onToggleContext={onToggleContext}
             onCreate={onCreate}
+            placementColumns={placementBoard.columns}
           />
         ))}
       </div>
@@ -242,6 +249,7 @@ function BoardColumnView({
   onOpenContainer,
   onToggleContext,
   onCreate,
+  placementColumns,
 }: {
   column: BoardColumn;
   color: string;
@@ -260,6 +268,7 @@ function BoardColumnView({
     blueprintKey: BlueprintChoiceKey;
     parentNodeId: string | null;
   }) => void;
+  placementColumns: BoardColumn[];
 }) {
   const page = useBoardColumnCards(
     scopeNodeId,
@@ -328,18 +337,11 @@ function BoardColumnView({
             {label}
           </h3>
         )}
-        {/* What is loaded, and whether there is more. A number that claimed to
-            be the total would have to fetch the column to know it, which is the
-            cost this board exists to avoid — so it says `24+` and means it. */}
         <span
           className="shrink-0 text-[12px] tabular-nums text-[var(--text-tertiary)]"
-          title={
-            page.hasMore
-              ? `${cards.length} loaded, more as you scroll`
-              : `${cards.length} in total`
-          }
+          title={`${column.count ?? cards.length} in total`}
         >
-          {page.loading ? "" : `${cards.length}${page.hasMore ? "+" : ""}`}
+          {page.loading ? "" : (column.count ?? cards.length)}
         </span>
       </header>
       {column.sublabel ? (
@@ -421,6 +423,7 @@ function BoardColumnView({
           busy={busy}
           label={label}
           onCreate={onCreate}
+          placementColumns={placementColumns}
         />
       ) : null}
     </section>
@@ -441,6 +444,7 @@ function ColumnCreate({
   busy,
   label,
   onCreate,
+  placementColumns,
 }: {
   column: BoardColumn;
   busy: boolean;
@@ -449,6 +453,7 @@ function ColumnCreate({
     blueprintKey: BlueprintChoiceKey;
     parentNodeId: string | null;
   }) => void;
+  placementColumns: BoardColumn[];
 }) {
   const fixedType = column.fixes.typeKey;
   /* A type column has no place of its own, so new work goes where the surface
@@ -472,6 +477,25 @@ function ColumnCreate({
         placeLabel={fixedType ? undefined : label}
         label={fixedType ? `New ${label.toLowerCase()}` : "New here"}
         onNewWork={(blueprintKey) => onCreate({ blueprintKey, parentNodeId })}
+        placeChoices={
+          fixedType
+            ? placementColumns.flatMap((place) =>
+                place.fixes.parentNodeId === undefined
+                  ? []
+                  : [
+                      {
+                        key: place.key,
+                        label: columnLabel(place),
+                        onSelect: () =>
+                          onCreate({
+                            blueprintKey: fixedType as BlueprintChoiceKey,
+                            parentNodeId: place.fixes.parentNodeId ?? null,
+                          }),
+                      },
+                    ],
+              )
+            : undefined
+        }
         trigger={
           fixedType ? undefined : (
             <button

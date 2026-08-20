@@ -1,4 +1,5 @@
-import { internalMutation, mutation, query } from "./_generated/server";
+import { query } from "./_generated/server";
+import { internalMutation, mutation } from "./orgNodeMutation";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -1989,19 +1990,11 @@ async function ensureResourceProjection(
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
     .unique();
-  const normalized = record(source.normalized);
-  const workspaceId = await classWorkspaceId(
-    ctx,
-    integration._id,
-    source.providerClassId,
-    source.academicPeriodKey,
-  );
   const now = Date.now();
   const sourceId = `managebac:${source._id}`;
   /* The projection below is the record of this resource. It gets no tree node:
      the tree holds identities, and a provider resource has none here until it
      becomes a real artifact. */
-  void workspaceId;
   if (existing) {
     await ctx.db.patch(existing._id, {
       recordId: source._id,

@@ -969,6 +969,7 @@ export async function trashNode(ctx: OrgWriteCtx, node: OrgNode) {
     await ctx.db.patch(row._id, {
       deletedAt: now,
       trashedRootId: node._id,
+      isTrashRoot: row._id === node._id ? true : undefined,
       updatedAt: now,
     });
     trashed += 1;
@@ -991,6 +992,7 @@ export async function restoreTrashedNode(ctx: OrgWriteCtx, node: OrgNode) {
     const patch: Record<string, unknown> = {
       deletedAt: undefined,
       trashedRootId: undefined,
+      isTrashRoot: undefined,
       updatedAt: now,
     };
     if (row._id === node._id && !parentUsable && node.parentId) {

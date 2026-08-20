@@ -1,4 +1,5 @@
-import { mutation, query } from "./_generated/server";
+import { query } from "./_generated/server";
+import { mutation } from "./orgNodeMutation";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -63,6 +64,11 @@ export const listChildren = query({
     parentId: v.optional(v.union(v.string(), v.null())),
     paginationOpts: paginationOptsValidator,
     includeTrashed: v.optional(v.boolean()),
+    sortKey: v.optional(
+      v.union(v.literal("manual"), v.literal("name"), v.literal("updated"), v.literal("type")),
+    ),
+    direction: v.optional(v.union(v.literal("asc"), v.literal("desc"))),
+    typeFilter: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
@@ -74,18 +80,73 @@ export const listChildren = query({
       if (!parent || parent.accountId !== actor.accountId)
         return { page: [], isDone: true, continueCursor: "" };
     }
-    const result = await ctx.db
-      .query("orgNodes")
-      .withIndex("by_account_parent_order", (q) =>
-        q.eq("accountId", actor.accountId).eq("parentId", parentId),
-      )
-      .paginate(args.paginationOpts);
-    const rows = args.includeTrashed
-      ? result.page
-      : result.page.filter((row) => row.deletedAt === undefined);
+    const sortKey = args.sortKey ?? "manual";
+    const direction = args.direction ?? "asc";
+    const typeFilter =
+      args.typeFilter && args.typeFilter !== "all" ? args.typeFilter : null;
+    const result = args.includeTrashed
+      ? await ctx.db
+          .query("orgNodes")
+          .withIndex("by_account_parent_order", (q) =>
+            q.eq("accountId", actor.accountId).eq("parentId", parentId),
+          )
+          .paginate(args.paginationOpts)
+      : sortKey === "updated"
+        ? typeFilter
+          ? await ctx.db
+              .query("orgNodes")
+              .withIndex("by_account_parent_live_type_activity", (q) =>
+                q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined).eq("typeKey", typeFilter),
+              )
+              .order(direction)
+              .paginate(args.paginationOpts)
+          : await ctx.db
+              .query("orgNodes")
+              .withIndex("by_account_parent_live_activity", (q) =>
+                q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
+              )
+              .order(direction)
+              .paginate(args.paginationOpts)
+        : sortKey === "name" || sortKey === "type"
+          ? typeFilter
+            ? await ctx.db
+                .query("orgNodes")
+                .withIndex("by_account_parent_live_type_name", (q) =>
+                  q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined).eq("typeKey", typeFilter),
+                )
+                .order(direction)
+                .paginate(args.paginationOpts)
+            : sortKey === "type"
+              ? await ctx.db
+                  .query("orgNodes")
+                  .withIndex("by_account_parent_live_type_name", (q) =>
+                    q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
+                  )
+                  .order(direction)
+                  .paginate(args.paginationOpts)
+              : await ctx.db
+                  .query("orgNodes")
+                  .withIndex("by_account_parent_live_name", (q) =>
+                    q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
+                  )
+                  .order(direction)
+                  .paginate(args.paginationOpts)
+          : typeFilter
+            ? await ctx.db
+                .query("orgNodes")
+                .withIndex("by_account_parent_live_type_order", (q) =>
+                  q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined).eq("typeKey", typeFilter),
+                )
+                .paginate(args.paginationOpts)
+            : await ctx.db
+                .query("orgNodes")
+                .withIndex("by_account_parent_live_order", (q) =>
+                  q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
+                )
+                .paginate(args.paginationOpts);
     return {
       ...result,
-      page: await hydrateNodes(ctx, rows, {
+      page: await hydrateNodes(ctx, result.page, {
         withChildCounts: true,
         withSource: true,
         accountId: actor.accountId,
@@ -181,6 +242,71 @@ export const path = query({
 });
 
 /**
+ * Source truth for things that are already open in the shell.
+ *
+ * The caller sends only its open tabs, tiles, splits, thread panel and current
+ * workspace. That keeps this subscription bounded while letting a rename,
+ * move or metadata edit update every open surface in place (D40). Tree rows
+ * and board cards already subscribe through their own windowed reads; they do
+ * not need to join this selector.
+ */
+export const liveIdentities = query({
+  args: {
+    sources: v.array(
+      v.object({
+        kind: v.union(
+          v.literal("work"),
+          v.literal("thread"),
+          v.literal("workspace"),
+        ),
+        sourceId: v.string(),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    if (args.sources.length > 64)
+      throw new Error("Observe at most 64 open objects at a time.");
+    const seen = new Set<string>();
+    const identities = [];
+    for (const source of args.sources) {
+      const key = `${source.kind}:${source.sourceId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const node = await findPrimaryNode(
+        ctx,
+        actor.accountId,
+        source.kind,
+        source.sourceId,
+      );
+      if (!node || node.deletedAt !== undefined) continue;
+      const view = (
+        await hydrateNodes(ctx, [node], {
+          withSource: true,
+          accountId: actor.accountId,
+        })
+      )[0]!;
+      const workspace = view.workspaceContextId
+        ? await ctx.db.get(view.workspaceContextId)
+        : null;
+      identities.push({
+        kind: source.kind,
+        sourceId: source.sourceId,
+        nodeId: view.nodeId,
+        name: view.workspace?.title ?? view.source?.title ?? view.name,
+        summary: view.source?.summary,
+        blueprintKey: view.source?.blueprintKey,
+        activityAt: view.source?.updatedAt ?? view.activityAt,
+        workspaceContextId: view.workspaceContextId,
+        workspaceTitle: workspace?.title,
+        pinned: view.pinned,
+      });
+    }
+    return { identities };
+  },
+});
+
+/**
  * The containers under a parent — what a navigation rail needs and nothing more.
  * Unpaginated on purpose: a rail that loaded folders in pages would collapse and
  * re-open as the reader scrolled, and a folder with 500 subfolders is not a
@@ -193,7 +319,15 @@ export const listContainers = query({
     const parentId = await resolveParentId(ctx, args.parentId ?? null);
     if (args.parentId && args.parentId !== "root" && !parentId)
       return { nodes: [] };
-    const rows = await listChildNodes(ctx, actor.accountId, parentId);
+    const rows = await ctx.db
+      .query("orgNodes")
+      .withIndex("by_account_parent_live_order", (q) =>
+        q
+          .eq("accountId", actor.accountId)
+          .eq("parentId", parentId)
+          .eq("deletedAt", undefined),
+      )
+      .take(500);
     const containers = rows
       .filter((row) => isContainerKind(row.kind))
       .slice(0, 500);
@@ -227,61 +361,52 @@ export const quickView = query({
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
-    const limit = Math.min(args.limit ?? 200, 1000);
-    const all = await ctx.db
-      .query("orgNodes")
-      .withIndex("by_account_deleted", (q) => q.eq("accountId", actor.accountId))
-      .collect();
-    const byId = new Map(all.map((row) => [row._id as string, row]));
+    const limit = Math.min(args.limit ?? 200, 300);
     const scopeId =
       args.scopeNodeId && args.scopeNodeId !== "root"
         ? ctx.db.normalizeId("orgNodes", args.scopeNodeId)
         : null;
-    const inScope = (row: OrgNode) => {
-      if (!scopeId) return true;
-      let current = row.parentId ? byId.get(row.parentId) : undefined;
-      for (let depth = 0; depth < MAX_TREE_DEPTH && current; depth += 1) {
-        if (current._id === scopeId) return true;
-        current = current.parentId ? byId.get(current.parentId) : undefined;
-      }
-      return false;
-    };
     const kinds = args.kinds;
-    let live = all.filter(
-      (row) =>
-        row.deletedAt === undefined &&
-        row.kind !== "link" &&
-        (!kinds || kinds.includes(row.kind)) &&
-        inScope(row),
-    );
-    if (args.view === "favorites") live = live.filter((row) => row.pinned === true);
-    const hydrated = await hydrateNodes(ctx, live, {
-      withSource: true,
-      withChildCounts: true,
-      accountId: actor.accountId,
-    });
-    let selected = hydrated;
-    if (args.view === "shared")
-      selected = hydrated.filter((row) => row.source?.shared === true);
-    /* Recent means "last touched", which for a work is its own activity, not
-       when its row happened to be re-stamped. */
-    const activityOf = (row: OrgNodeView) => row.source?.updatedAt ?? row.updatedAt;
-    const ordered =
+    const readLimit = Math.min(limit * (scopeId ? 6 : 2), 600);
+    const candidates =
       args.view === "favorites"
-        ? selected.sort((a, b) => a.name.localeCompare(b.name))
-        : selected.sort((a, b) => activityOf(b) - activityOf(a));
-    const page = ordered.slice(0, limit);
+        ? await ctx.db
+            .query("orgNodes")
+            .withIndex("by_account_live_pinned_name", (q) =>
+              q
+                .eq("accountId", actor.accountId)
+                .eq("deletedAt", undefined)
+                .eq("pinned", true),
+            )
+            .take(readLimit)
+        : await ctx.db
+            .query("orgNodes")
+            .withIndex("by_account_live_activity", (q) =>
+              q.eq("accountId", actor.accountId).eq("deletedAt", undefined),
+            )
+            .order("desc")
+            .take(readLimit);
+    const page: Array<OrgNodeView & { parentPath: string[] }> = [];
+    for (const row of candidates) {
+      if (page.length >= limit) break;
+      if (row.kind === "link" || (kinds && !kinds.includes(row.kind))) continue;
+      const ancestors = await breadcrumbNodes(ctx, row);
+      if (scopeId && !ancestors.some((ancestor) => ancestor._id === scopeId))
+        continue;
+      const view = (
+        await hydrateNodes(ctx, [row], {
+          withSource: true,
+          withChildCounts: true,
+          accountId: actor.accountId,
+        })
+      )[0]!;
+      if (args.view === "shared" && view.source?.shared !== true) continue;
+      page.push({ ...view, parentPath: ancestors.map((node) => node.name) });
+    }
     return {
-      nodes: page.map((row) => {
-        const parentPath: string[] = [];
-        let current = byId.get(row.parentId ?? "");
-        for (let depth = 0; depth < MAX_TREE_DEPTH && current; depth += 1) {
-          parentPath.unshift(current.name);
-          current = byId.get(current.parentId ?? "");
-        }
-        return { ...row, parentPath };
-      }),
-      total: ordered.length,
+      nodes: page,
+      total: page.length,
+      hasMore: candidates.length === readLimit,
     };
   },
 });
@@ -347,16 +472,13 @@ export const listTrash = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
-    const rows = await ctx.db
+    const roots = await ctx.db
       .query("orgNodes")
-      .withIndex("by_account_deleted", (q) =>
-        q.eq("accountId", actor.accountId),
+      .withIndex("by_account_trash_root", (q) =>
+        q.eq("accountId", actor.accountId).eq("isTrashRoot", true),
       )
-      .collect();
-    const roots = rows
-      .filter((row) => row.deletedAt !== undefined && row.trashedRootId === row._id)
-      .sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0))
-      .slice(0, Math.min(args.limit ?? 100, 500));
+      .order("desc")
+      .take(Math.min(args.limit ?? 100, 500));
     return {
       nodes: await hydrateNodes(ctx, roots, {
         withChildCounts: true,

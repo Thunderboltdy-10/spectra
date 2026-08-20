@@ -19,7 +19,7 @@ import {
   moveNode,
   placeSourceNode,
   purgeAccountSourceNodes,
-  renameSourceNodes,
+  syncSourceNodes,
   restoreTrashedNode,
   trashNode,
   workspaceContextNodes,
@@ -152,7 +152,7 @@ describe("I1 — one primary placement per source", () => {
       parentId: null,
     });
 
-    await renameSourceNodes(ctx, "work", artifactId, "  Photosynthesis  ");
+    await syncSourceNodes(ctx, "work", artifactId, "  Photosynthesis  ");
 
     expect((await db.get(node._id))?.name).toBe("Photosynthesis");
     expect((await db.get(link._id))?.name).toBe("Photosynthesis");

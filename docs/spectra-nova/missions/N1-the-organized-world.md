@@ -74,3 +74,19 @@ Bridge/local files (N3) · sync policies beyond the schema stub (N6) · command 
 9. **Bounded reads (D42):** Network-panel evidence for Library, List and Board at first paint, on scroll, and across a List⇄Board switch on the largest available workspace — request count and largest payload recorded in the log, no request returning a whole collection, no re-fetch on view switch, counts served by aggregates.
 10. **Board columns (D43/D44):** evidence of full-height columns with independent scrolling and no page overflow, per-column identity colours, and the per-column create affordance used twice — once on a type-grouped board (asks location only) and once on a workspace-grouped board (asks type only), with the new work landing in that column.
 11. STATE updated (including §1 reconciliation complete); mission log ≤40 lines; close-out checks green.
+
+## Mission log — 2026-08-20
+
+- Accepted by Pablo after the completed N1 implementation/final surface pass; evidence root `.shots/missions/N1/`.
+- W1: reconciled M4; legacy Timetables remain visible resources with idempotent Calendar migration; Foundry publishes compiled instructions.
+- W2: `orgNodes` is the sole organization model; migration/integrity evidence is `w2-tier-r-evidence.md`; General is deterministic and undeletable.
+- W3: one filesystem organizer supplies tree rail, breadcrumbs, paging, search, quick views, rename, drag/move, trash and creation.
+- W4: List/Board are route scopes of one shell; Canvas UI paths are gone (schema values remain migration tombstones).
+- W5: one bounded `liveIdentities` subscription covers open work, threads and workspaces without remounting editors.
+- D41 inventory: shared `SurfaceViewSwitch`, `SurfaceSearch`, `SurfaceTypeFilter`, `SurfaceNewMenu`, `SurfaceRailToggle`; List-only sort/rename; Board-only grouping.
+- D42: child/filter/sort pages use selective indexes; board columns page independently; exact headers use three transactional Aggregate components.
+- D43: type columns ask destination only; workspace/folder columns ask work type only; workspace creation inherits the active parent.
+- D44: the board owns remaining frame height; horizontal board and vertical columns scroll independently.
+- Aggregate backfill completed idempotently for 569 nodes; future node writes are trigger-maintained in the same transaction.
+- Verification: focused N1 gate 52/52; `tsc`, lint and secret scan green.
+- Full-suite baseline: 720/724; four unrelated failures logged in STATE for N2/N10/N11 rather than expanded into N1.

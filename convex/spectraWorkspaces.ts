@@ -1,4 +1,5 @@
-import { mutation, query } from "./_generated/server";
+import { query } from "./_generated/server";
+import { mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import {
   requireWorkspaceCapability,
@@ -19,6 +20,7 @@ import {
   findPrimaryNode,
   isGeneralWorkspace,
   listChildNodes,
+  moveNode,
   placeSourceNode,
   relativeFolderPath,
   syncSourceNodes,
@@ -181,6 +183,7 @@ export const create = mutation({
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
     defaultView: v.optional(vDefaultView),
+    parentNodeId: v.optional(v.id("orgNodes")),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
@@ -201,7 +204,11 @@ export const create = mutation({
     /* A workspace *is* a place in the tree, so it appears there at creation
        rather than on the next read (D32). */
     const workspace = await ctx.db.get(workspaceId);
-    if (workspace) await ensureWorkspaceNode(ctx, workspace);
+    if (workspace) {
+      const node = await ensureWorkspaceNode(ctx, workspace);
+      if (args.parentNodeId !== undefined)
+        await moveNode(ctx, node, { parentId: args.parentNodeId });
+    }
     await incrementOperationalCounter(ctx, {
       schoolId: actor.schoolId,
       category: "workspace_created",

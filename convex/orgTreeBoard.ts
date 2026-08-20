@@ -5,6 +5,11 @@ import type { Id } from "./_generated/dataModel";
 import { requireSpectraActor } from "./spectraShared";
 import { isContainerKind, type OrgNode } from "./orgTreeShared";
 import { hydrateNodes, type OrgNodeView } from "./orgTreeViews";
+import {
+  orgNodeCountByParent,
+  orgNodeCountByType,
+  orgNodeCountByWorkspace,
+} from "./orgNodeAggregates";
 
 /**
  * The board, as windows.
@@ -85,15 +90,6 @@ function bandRange(key: string, now: number) {
     from: Number.isFinite(outer) ? now - outer : Number.NEGATIVE_INFINITY,
     to: now - inner,
   };
-}
-
-/**
- * A node's place on the activity axis. Rows written before `activityAt` existed
- * fall back to their placement time, which is the best fact available about them
- * and keeps them orderable rather than invisible.
- */
-function activityOf(node: OrgNode) {
-  return node.activityAt ?? node.updatedAt;
 }
 
 /** Board cards are things, not places. Folders are the rail's job. */
@@ -184,7 +180,75 @@ export type BoardColumnDescriptor = {
    * asks where; a workspace or folder column fixes the place and asks what.
    */
   fixes: { typeKey?: string; parentNodeId?: Id<"orgNodes"> | null };
+  /** Exact, reactive aggregate. Never derived by fetching the cards. */
+  count?: number;
 };
+
+async function attachCounts(
+  ctx: Parameters<typeof requireSpectraActor>[0],
+  accountId: Id<"accounts">,
+  groupBy: BoardGroupBy,
+  columns: BoardColumnDescriptor[],
+  scope: BoardScope,
+  filter: string | null,
+) {
+  if (groupBy === "type") {
+    const aggregate = scope.workspaceId
+      ? orgNodeCountByWorkspace
+      : orgNodeCountByType;
+    const counts = await aggregate.countBatch(
+      ctx,
+      columns.map((column) => {
+        const typeKey = column.fixes.typeKey ?? "workspace";
+        return {
+          namespace: accountId,
+          bounds: {
+            prefix: scope.workspaceId
+              ? ["live-card", scope.workspaceId, typeKey]
+              : ["live-card", typeKey],
+          },
+        };
+      }),
+    );
+    return columns.map((column, index) => ({ ...column, count: counts[index] ?? 0 }));
+  }
+  if (groupBy === "workspace") {
+    const counts = await orgNodeCountByWorkspace.countBatch(
+      ctx,
+      columns.map((column) => {
+        const [, value = "root"] = column.key.split(":", 2);
+        return {
+          namespace: accountId,
+          bounds: {
+            prefix: filter
+              ? ["live-card", value === "loose" ? "root" : value, filter]
+              : ["live-card", value === "loose" ? "root" : value],
+          },
+        };
+      }),
+    );
+    return columns.map((column, index) => ({ ...column, count: counts[index] ?? 0 }));
+  }
+  if (groupBy === "folder") {
+    const counts = await orgNodeCountByParent.countBatch(
+      ctx,
+      columns.map((column) => ({
+        namespace: accountId,
+        bounds: {
+          prefix: filter
+            ? [
+                "live-card",
+                column.fixes.parentNodeId ?? "root",
+                filter,
+              ]
+            : ["live-card", column.fixes.parentNodeId ?? "root"],
+        },
+      })),
+    );
+    return columns.map((column, index) => ({ ...column, count: counts[index] ?? 0 }));
+  }
+  return columns;
+}
 
 /**
  * The columns of a board, and nothing inside them.
@@ -230,7 +294,21 @@ export const columns = query({
           identity: { kind: "type", typeKey: "workspace" },
           fixes: {},
         });
-      return { scope: scope.node, scopeDepth: scope.depth, columns };
+      const counted = await attachCounts(
+        ctx,
+        actor.accountId,
+        args.groupBy,
+        columns,
+        scope,
+        filter,
+      );
+      return {
+        scope: scope.node,
+        scopeDepth: scope.depth,
+        columns: counted.filter(
+          (column) => column.identity.kind !== "loose" || column.count !== 0,
+        ),
+      };
     }
 
     if (args.groupBy === "workspace") {
@@ -243,7 +321,7 @@ export const columns = query({
           .withIndex("by_account_kind_source", (q) =>
             q.eq("accountId", actor.accountId).eq("kind", "workspace"),
           )
-          .collect()
+          .take(64)
       ).filter(
         (row) =>
           row.deletedAt === undefined &&
@@ -285,7 +363,21 @@ export const columns = query({
           identity: { kind: "loose" },
           fixes: { parentNodeId: null, typeKey: filter ?? undefined },
         });
-      return { scope: scope.node, scopeDepth: scope.depth, columns };
+      const counted = await attachCounts(
+        ctx,
+        actor.accountId,
+        args.groupBy,
+        columns,
+        scope,
+        filter,
+      );
+      return {
+        scope: scope.node,
+        scopeDepth: scope.depth,
+        columns: counted.filter(
+          (column) => column.identity.kind !== "loose" || column.count !== 0,
+        ),
+      };
     }
 
     if (args.groupBy === "folder") {
@@ -301,13 +393,13 @@ export const columns = query({
                 .eq("accountId", actor.accountId)
                 .eq("parentId", scope.node!.nodeId),
             )
-            .collect()
+            .take(64)
         : await ctx.db
             .query("orgNodes")
             .withIndex("by_account_parent_order", (q) =>
               q.eq("accountId", actor.accountId).eq("parentId", parentId),
             )
-            .collect();
+            .take(64);
       const here = scope.node?.nodeId ?? null;
       columns.push({
         key: `folder:${here ?? "root"}`,
@@ -338,7 +430,11 @@ export const columns = query({
           openNodeId: folder.nodeId,
           fixes: { parentNodeId: folder.nodeId, typeKey: filter ?? undefined },
         });
-      return { scope: scope.node, scopeDepth: scope.depth, columns };
+      return {
+        scope: scope.node,
+        scopeDepth: scope.depth,
+        columns: await attachCounts(ctx, actor.accountId, args.groupBy, columns, scope, filter),
+      };
     }
 
     for (const band of BANDS)

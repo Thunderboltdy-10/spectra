@@ -35,6 +35,17 @@ Add a two-line "historical — see docs/spectra-hq/STATE.md" header to the super
 
 New visual identity (field/prism — M6/M7), motion (M8), multiplayer (M9).
 
+## Historical mission log — reconciled by Nova N1, 2026-08-20
+
+- M4 substance shipped across M4/M4+/M4++; N1 supplied the missing acceptance reconciliation.
+- Product flows P0–P8 are evidenced in `.shots/missions/N1/001–044`; final N1 List/Board pass covered the new shell seam.
+- C8 closed by one `SpectraShell`/`LibraryOrganizer` implementation with Library and Workspace as route scopes.
+- E5 closed for all creatable studios through the registry/work-kernel contract; Timetable is explicitly retired.
+- E9 closed: Foundry derives and publishes the runtime `instructions.text` brief through a server gate.
+- E11 closed by surfacing legacy Timetables and retaining the idempotent Calendar migration; creation stays removed.
+- E13 remains Pablo-owned key rotation; repository secret scan passed 2026-08-20.
+- Current truth and all remaining ownership moved to `docs/spectra-nova/STATE.md`; this is the final HQ write.
+
 ## Acceptance criteria
 
 1. Golden Flows 0–12 all pass — this is the first full-gate mission.

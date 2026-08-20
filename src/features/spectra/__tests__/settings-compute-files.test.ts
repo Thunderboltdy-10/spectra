@@ -42,6 +42,7 @@ describe("Phase 8 settings, compute, files and autocomplete", () => {
       "privacy",
       "integrations",
       "accessibility",
+      "workbar",
     ]);
     expect(PREFERENCE_SCOPE_ORDER).toEqual([
       "account",

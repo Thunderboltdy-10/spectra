@@ -19088,6 +19088,86 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   overflow: hidden;
 }
 
+.spectra-command-tabs {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 1px;
+  overflow: hidden;
+  padding: 1px;
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+
+.spectra-command-tab {
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.spectra-command-custom-row {
+  display: grid;
+  grid-template-columns: minmax(104px, 1fr) repeat(8, 26px);
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.spectra-command-custom-row > span {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spectra-command-custom-row > button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.spectra-command-custom-row > button:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.spectra-command-tab-custom-row {
+  grid-template-columns: minmax(104px, 1fr) repeat(2, 26px);
+}
+
+.spectra-editor-workbar[data-workbar-expanded="true"] {
+  height: 84px;
+  min-height: 84px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 34px 34px;
+  align-items: center;
+  padding-block: 6px;
+}
+
+.spectra-editor-workbar[data-workbar-expanded="true"] .spectra-workbar-lead {
+  grid-column: 1 / -1;
+}
+
+.spectra-editor-workbar[data-workbar-expanded="true"] .spectra-workbar-trail {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  width: 100%;
+}
+
 /* The bounded half. Actions, the primary verb and the one overflow menu. */
 .spectra-workbar-trail {
   display: flex;
@@ -19397,6 +19477,9 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 /* Label shedding. The accessible name stays on the button, so a shed label
    costs nothing to a screen reader or to a pointer with a tooltip. */
 @container artifact-workbar (max-width: 720px) {
+  .spectra-command-tab:not([aria-selected="true"]) {
+    display: none;
+  }
   .spectra-artifact-workbar-action:not([data-workbar-keep-label]) span,
   .code-small-action,
   .presentation-secondary-action {

@@ -4,7 +4,7 @@ import {
   listBlueprints,
   requireBlueprint,
   validateBlueprintContent,
-} from "@/features/spectra/blueprints";
+} from "@/features/spectra/artifacts/blueprint-catalog";
 
 describe("Spectra blueprint registry", () => {
   it("registers only creatable first-class work blueprints", () => {

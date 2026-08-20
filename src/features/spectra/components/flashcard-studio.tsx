@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { currentTimeMs, shuffleInPlace, uniqueToken } from "@/lib/unique-token";
 import {
@@ -85,7 +85,7 @@ import { StudioItemRail } from "./studio-item-rail";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
-  type WorkbarActionSpec,
+  type CommandBinding,
 } from "./artifact-workbar";
 import {
   Select,
@@ -1988,7 +1988,7 @@ export function FlashcardStudio({
   // One declaration of what this type's controls mean. The bar decides which of
   // them survive the pane's width, so the deck can no longer grow a second row
   // under pressure the way the audited build did.
-  const deckActions: WorkbarActionSpec[] = [
+  const deckActions: CommandBinding[] = [
     {
       id: "add-card",
       label: "Add card",
@@ -2009,12 +2009,12 @@ export function FlashcardStudio({
             active: !railCollapsed,
             onSelect: () => setRailCollapsed((collapsed) => !collapsed),
           },
-        ] satisfies WorkbarActionSpec[])
+        ] satisfies CommandBinding[])
       : []),
     // Reading views are toggles, and the one you are inside stays in the bar at
     // every width, so leaving it is never hidden behind a menu (D3). `requires`
     // ties progress to whoever may record a review: no recording, no progress.
-    ...readingViews.flatMap<WorkbarActionSpec>((view) =>
+    ...readingViews.flatMap<CommandBinding>((view) =>
       hasView(view.id)
         ? [
             {
@@ -2048,7 +2048,7 @@ export function FlashcardStudio({
         addCard(section);
       },
     },
-    ...deckTemplates.map<WorkbarActionSpec>((template) => ({
+    ...deckTemplates.map<CommandBinding>((template) => ({
       id: `template-${template.kind}`,
       label: template.label,
       icon: LayoutTemplate,
@@ -2056,7 +2056,7 @@ export function FlashcardStudio({
       requires: "edit",
       onSelect: () => applyDeckTemplate(template.kind),
     })),
-    ...(["csv", "tsv"] as const).map<WorkbarActionSpec>((format) => ({
+    ...(["csv", "tsv"] as const).map<CommandBinding>((format) => ({
       id: `export-${format}`,
       label: `Export as ${format.toUpperCase()}`,
       icon: FileDown,

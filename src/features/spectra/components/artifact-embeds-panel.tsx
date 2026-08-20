@@ -22,7 +22,7 @@ import {
 } from "../data/api";
 import type { ArtifactCommentRegion } from "./artifact-comments-panel";
 import { ArtifactEmbed } from "./artifact-embed";
-import { blueprintMeta } from "./artifact-card";
+import { workTypeMeta } from "./artifact-card";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { getWorkReferenceContract } from "../references";
 import { getWorkDefinition } from "../work/registry";
@@ -444,7 +444,7 @@ export function ArtifactEmbedsPanel({
                   </label>
                   <div className="sm:col-span-2 max-h-32 overflow-y-auto rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1">
                     {candidates.map((artifact) => {
-                      const meta = blueprintMeta[artifact.blueprintKey];
+                      const meta = workTypeMeta[artifact.blueprintKey];
                       const Icon = meta.icon;
                       return (
                         <button

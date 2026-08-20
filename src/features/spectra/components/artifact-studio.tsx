@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Tooltip } from "@/components/ui/tooltip";
 import { describeFailure } from "@/components/ui/truthful-state";
@@ -140,7 +140,7 @@ import {
   resolveAiHighlightPaths,
   updatingHighlightFallbackPaths,
 } from "./ai-region-path";
-import { blueprintMeta } from "./artifact-card";
+import { workTypeMeta } from "./artifact-card";
 import {
   ArtifactCommentsPanel,
   type ArtifactCommentRegion,
@@ -161,10 +161,12 @@ import {
   useComposerSafeArea,
   useStudioContractValue,
   useStudioDensity,
+  useOptionalStudioContract,
   type StudioInspectorPanel,
   type StudioSyncState,
   type StudioTab,
 } from "./artifact-studio-shell";
+import { commandContext, commandForBinding, executeCommand } from "../commands";
 import { tagsFromDraft } from "./artifact-studio-value-utils";
 export { tagsFromDraft } from "./artifact-studio-value-utils";
 import {
@@ -3259,7 +3261,7 @@ function ArtifactStudioEditor({
     regionId?: string;
     queuePosition?: number;
   } | null>(null);
-  const meta = blueprintMeta[artifact.blueprintKey];
+  const meta = workTypeMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const dirtyRef = useRef(dirty);
   // A snapshot difference is not, by itself, evidence of a local edit. Rich
@@ -6266,7 +6268,7 @@ function StudioDetails({
   onArchive?: () => Promise<void> | void;
   onOpenArtifact: (artifactId: string) => void;
 }) {
-  const meta = blueprintMeta[artifact.blueprintKey];
+  const meta = workTypeMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const placements = artifactPlacements(artifact);
   const detailWaveStats = WAVE_C_BLUEPRINTS.has(artifact.blueprintKey)
@@ -6523,7 +6525,7 @@ function StudioDetails({
                 ) : null,
               )}
               {links.slice(0, 4).map(({ artifact: linked }) => {
-                const linkedMeta = blueprintMeta[linked.blueprintKey];
+                const linkedMeta = workTypeMeta[linked.blueprintKey];
                 const LinkedIcon = linkedMeta.icon;
                 return (
                   <div
@@ -6926,13 +6928,28 @@ export function ToolbarButton({
   disabled?: boolean;
   onClick?: () => void;
 }) {
+  const contract = useOptionalStudioContract();
+  const execute = () => {
+    if (!onClick) return;
+    if (!contract) return onClick();
+    const context = commandContext(contract.type, contract.can, contract.role);
+    executeCommand(commandForBinding(contract.type, {
+      id: `format-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`,
+      label,
+      icon: Icon,
+      active,
+      disabled,
+      tab: "Format",
+      onSelect: onClick,
+    }, 0), context);
+  };
   return (
     <Tooltip label={label}>
       <button
         type="button"
         className={toolbarClass()}
         data-active={active || undefined}
-        onClick={onClick}
+        onClick={execute}
         disabled={disabled}
         aria-label={label}
       >
@@ -6953,13 +6970,25 @@ export function ToolbarTextButton({
   onClick?: () => void;
   children: ReactNode;
 }) {
+  const contract = useOptionalStudioContract();
+  const execute = () => {
+    if (!onClick) return;
+    if (!contract) return onClick();
+    executeCommand(commandForBinding(contract.type, {
+      id: `format-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`,
+      label,
+      active,
+      tab: "Format",
+      onSelect: onClick,
+    }, 0), commandContext(contract.type, contract.can, contract.role));
+  };
   return (
     <Tooltip label={label}>
       <button
         type="button"
         className={toolbarClass()}
         data-active={active || undefined}
-        onClick={onClick}
+        onClick={execute}
         aria-label={label}
       >
         {children}

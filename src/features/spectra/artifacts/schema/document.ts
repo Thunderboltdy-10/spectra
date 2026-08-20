@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ArtifactBlueprint } from "../core";
+import type { ArtifactBlueprint } from "../../core";
 
 export const documentContentSchema = z.object({
   blocks: z.array(z.object({

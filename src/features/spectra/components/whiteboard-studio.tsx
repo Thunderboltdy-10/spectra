@@ -95,7 +95,7 @@ import { StudioItemRail } from "./studio-item-rail";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
-  type WorkbarActionSpec,
+  type CommandBinding,
 } from "./artifact-workbar";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
@@ -2605,7 +2605,7 @@ export function WhiteboardStudio({
    * item appears in exactly one of them, which is what kept two overflow menus
    * from being open at the same time in the audit shot.
    */
-  const boardActions: WorkbarActionSpec[] = [
+  const boardActions: CommandBinding[] = [
     {
       id: "undo",
       label: "Undo",
@@ -2765,6 +2765,7 @@ export function WhiteboardStudio({
       />
       <ArtifactWorkbar
         label="Board tools"
+        selectionContext={selectedNode ? "Shape" : undefined}
         // CANON D2/D3: a board has no genuine peer views. Edit and View were a
         // permission printed as a tab pair, which is exactly what D1 forbids.
         modes={[]}
@@ -2784,35 +2785,24 @@ export function WhiteboardStudio({
         }
         context={undefined}
         className="mx-3 mt-2.5 shrink-0"
-        actions={boardActions}
+        actions={[
+          ...boardActions,
+          ...barPalette.map(([id, Icon, label]) => ({
+            id: `tool-${id}`,
+            label,
+            icon: Icon,
+            priority: "essential" as const,
+            active: tool === id,
+            disabled: !canEdit && id !== "select" && id !== "hand",
+            onSelect: () => setTool(id),
+          })),
+        ]}
         trailing={
           <span className="spectra-workbar-count" title="Zoom level">
             {Math.round(viewport.zoom * 100)}%
           </span>
         }
-      >
-        <div
-          className="spectra-artifact-workbar-rail"
-          role="group"
-          aria-label="Object tools"
-        >
-          {barPalette.map(([id, Icon, label]) => (
-            <button
-              key={id}
-              type="button"
-              className="spectra-artifact-workbar-action"
-              data-active={tool === id || undefined}
-              aria-pressed={tool === id}
-              disabled={!canEdit && id !== "select" && id !== "hand"}
-              aria-label={label}
-              title={label}
-              onClick={() => setTool(id)}
-            >
-              <Icon className="size-4 shrink-0" />
-            </button>
-          ))}
-        </div>
-      </ArtifactWorkbar>
+      />
 
       {assetError ? (
         <div className="whiteboard-asset-error" role="status">

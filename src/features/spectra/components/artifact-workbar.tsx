@@ -4,10 +4,12 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Settings2,
+  RotateCcw,
   MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +18,19 @@ import {
 import { SelectField } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { WorkCapability } from "../work/registry";
+import {
+  commandContext,
+  commandForBinding,
+  executeCommand,
+  resolveCommandLayout,
+  tabsFor,
+  type CommandBinding,
+  type CommandLayout,
+} from "../commands";
+import { useSpectraPreferences } from "../settings/preference-store";
 import { useStudioContract } from "./artifact-studio-shell";
+
+export type { CommandBinding } from "../commands";
 
 /**
  * Spectra's one artifact workbar.
@@ -47,23 +61,6 @@ import { useStudioContract } from "./artifact-studio-shell";
  */
 
 export type WorkbarPriority = "essential" | "secondary" | "advanced";
-
-export type WorkbarActionSpec = {
-  id: string;
-  /** Always the accessible name, even when the label is visually shed. */
-  label: string;
-  icon?: LucideIcon;
-  onSelect: () => void;
-  priority?: WorkbarPriority;
-  active?: boolean;
-  disabled?: boolean;
-  /** Keeps its text label at every width. Use for verbs, not for tools. */
-  keepLabel?: boolean;
-  /** Hidden unless the viewer holds this capability. */
-  requires?: WorkCapability;
-  /** Extra tooltip detail. The label alone is the accessible name. */
-  hint?: string;
-};
 
 export type WorkbarModeSpec = {
   id: string;
@@ -96,7 +93,7 @@ export type WorkbarPrimarySpec = {
 
 const MAX_ESSENTIAL_ACTIONS = 5;
 
-function actionTitle(action: WorkbarActionSpec) {
+function actionTitle(action: CommandBinding) {
   return action.hint ? `${action.label} · ${action.hint}` : action.label;
 }
 
@@ -116,6 +113,7 @@ export function ArtifactWorkbar({
   trailing,
   overflow,
   children,
+  selectionContext,
   className,
 }: {
   label: string;
@@ -124,7 +122,7 @@ export function ArtifactWorkbar({
   selector?: ReactNode;
   /** One short context string, e.g. the active file or sheet. Hidden ≤520px. */
   context?: string;
-  actions?: readonly WorkbarActionSpec[];
+  actions?: readonly CommandBinding[];
   primary?: WorkbarPrimarySpec;
   /**
    * Inline stateful readouts that are not actions — a zoom percentage, a page
@@ -139,10 +137,66 @@ export function ArtifactWorkbar({
   overflow?: ReactNode;
   /** Legacy inline content. Prefer `actions`; this does not shed. */
   children?: ReactNode;
+  /** Selection kind activates a registry-declared contextual tab. */
+  selectionContext?: string;
   className?: string;
 }) {
   const contract = useStudioContract();
   const can = contract.can;
+  const { preferences, update } = useSpectraPreferences({ workType: contract.type });
+  const storedLayout = preferences.workbar[contract.type] as CommandLayout | undefined;
+  const [activeTab, setActiveTab] = useState("General");
+  const [customizing, setCustomizing] = useState(false);
+  const commandCtx = useMemo(
+    () => commandContext(contract.type, can, contract.role, selectionContext),
+    [can, contract.role, contract.type, selectionContext],
+  );
+  const commands = useMemo(
+    () => actions.map((binding, index) => ({
+      binding,
+      command: resolveCommandLayout(commandForBinding(contract.type, binding, index), storedLayout),
+    })),
+    [actions, contract.type, storedLayout],
+  );
+  const tabs = useMemo(
+    () => tabsFor(contract.type, selectionContext, storedLayout),
+    [contract.type, selectionContext, storedLayout],
+  );
+  useEffect(() => {
+    if (!tabs.includes(activeTab)) setActiveTab(selectionContext ? tabs.at(-1) ?? "General" : "General");
+  }, [activeTab, selectionContext, tabs]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const match = commands.find(({ command }) => {
+        const shortcut = command.shortcut?.toLowerCase();
+        if (!shortcut) return false;
+        const needsModifier = shortcut.includes("mod+");
+        const needsShift = shortcut.includes("shift+");
+        const key = shortcut.split("+").at(-1);
+        return (!needsModifier || event.metaKey || event.ctrlKey) &&
+          (!needsShift || event.shiftKey) && event.key.toLowerCase() === key;
+      });
+      if (!match) return;
+      event.preventDefault();
+      executeCommand(match.command, commandCtx);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [commandCtx, commands]);
+
+  const saveLayout = (next: CommandLayout) => {
+    update("workbar", { ...preferences.workbar, [contract.type]: next });
+  };
+  const updateCommandLayout = (commandId: string, patch: NonNullable<CommandLayout["commands"]>[string]) => {
+    saveLayout({
+      ...storedLayout,
+      commands: {
+        ...storedLayout?.commands,
+        [commandId]: { ...storedLayout?.commands?.[commandId], ...patch },
+      },
+    });
+  };
 
   const resolvedModes = useMemo<readonly WorkbarModeSpec[]>(() => {
     if (Array.isArray(modes)) return modes;
@@ -159,10 +213,19 @@ export function ArtifactWorkbar({
     }));
   }, [contract.modes, modes]);
 
-  const visibleActions = useMemo(
-    () => actions.filter((action) => !action.requires || can(action.requires)),
-    [actions, can],
-  );
+  const visibleActions = useMemo(() => commands
+    .filter(({ command }) =>
+      !command.hidden &&
+      command.defaultPlacement.tab === activeTab &&
+      command.availability(commandCtx).state !== "hidden")
+    .sort((left, right) => left.command.defaultPlacement.order - right.command.defaultPlacement.order)
+    .map(({ binding, command }) => ({
+      ...binding,
+      id: command.id,
+      label: command.title,
+      disabled: command.availability(commandCtx).state === "disabled",
+      onSelect: () => executeCommand(command, commandCtx),
+    })), [activeTab, commandCtx, commands]);
   const essential = visibleActions.filter(
     (action) => (action.priority ?? "secondary") === "essential",
   );
@@ -197,10 +260,26 @@ export function ArtifactWorkbar({
       aria-label={label}
       aria-orientation="horizontal"
       data-workbar-density={contract.density}
+      data-workbar-expanded={storedLayout?.expanded || undefined}
+      data-workbar-customizing={customizing || undefined}
     >
       {/* Lead zone: the only elastic part of the bar. Everything here may
           shrink or truncate so the right cluster never reaches the edge. */}
       <div className="spectra-workbar-lead">
+        <div className="spectra-command-tabs" role="tablist" aria-label={`${label} categories`}>
+          {tabs.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab}
+              onClick={() => setActiveTab(tab)}
+              className="spectra-command-tab"
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
         {resolvedModes.length > 1 ? (
           <div className="spectra-workbar-modes" role="group" aria-label="View">
             {resolvedModes.map((mode) => (
@@ -238,7 +317,19 @@ export function ArtifactWorkbar({
             type="button"
             className="spectra-workbar-primary spectra-workbar-primary-action"
             disabled={primary.disabled || primary.busy}
-            onClick={primary.onSelect}
+            onClick={() => {
+              const binding: CommandBinding = {
+                id: `primary-${primary.label.toLowerCase().replaceAll(" ", "-")}`,
+                label: primary.label,
+                icon: primary.icon,
+                disabled: primary.disabled || primary.busy,
+                requires: primary.requires,
+                priority: "essential",
+                keepLabel: true,
+                onSelect: primary.onSelect,
+              };
+              executeCommand(commandForBinding(contract.type, binding, -1), commandCtx);
+            }}
           >
             {primary.icon ? (
               <primary.icon className="size-3.5 shrink-0" />
@@ -246,6 +337,60 @@ export function ArtifactWorkbar({
             <span>{primary.label}</span>
           </button>
         ) : null}
+        <WorkbarMenu
+          label={<Settings2 className="size-3.5" />}
+          ariaLabel={`Customize ${label.toLowerCase()}`}
+          align="end"
+          triggerClassName="spectra-workbar-menu-trigger"
+        >
+          <button type="button" role="menuitem" className={workbarMenuItemClass()} onClick={() => setCustomizing((value) => !value)}>
+            <Settings2 className="size-3.5" />
+            <span>{customizing ? "Finish customizing" : "Customize workbar"}</span>
+          </button>
+          <button type="button" role="menuitem" className={workbarMenuItemClass()} onClick={() => saveLayout({ ...storedLayout, expanded: !storedLayout?.expanded })}>
+            <span className="size-3.5" aria-hidden="true">↕</span>
+            <span>{storedLayout?.expanded ? "Collapse workbar" : "Expand workbar"}</span>
+          </button>
+          {customizing ? tabs.map((tab, index) => (
+            <div key={`tab-${tab}`} className="spectra-command-custom-row spectra-command-tab-custom-row" role="group" aria-label={`Reorder ${tab} tab`}>
+              <span>{tab}</span>
+              <button type="button" title="Move tab earlier" disabled={index === 0} onClick={() => {
+                const next = [...tabs];
+                [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                saveLayout({ ...storedLayout, tabOrder: next });
+              }}>←</button>
+              <button type="button" title="Move tab later" disabled={index === tabs.length - 1} onClick={() => {
+                const next = [...tabs];
+                [next[index], next[index + 1]] = [next[index + 1], next[index]];
+                saveLayout({ ...storedLayout, tabOrder: next });
+              }}>→</button>
+            </div>
+          )) : null}
+          {customizing ? commands.filter(({ command }) => command.defaultPlacement.tab === activeTab).map(({ command }, index, list) => {
+            const current = storedLayout?.commands?.[command.id];
+            const tabIndex = tabs.indexOf(command.defaultPlacement.tab);
+            return (
+              <div key={command.id} className="spectra-command-custom-row" role="group" aria-label={`Customize ${command.title}`}>
+                <span title={command.title}>{command.title}</span>
+                <button type="button" title="Move earlier" disabled={index === 0} onClick={() => updateCommandLayout(command.id, { order: command.defaultPlacement.order - 1 })}>←</button>
+                <button type="button" title="Move later" disabled={index === list.length - 1} onClick={() => updateCommandLayout(command.id, { order: command.defaultPlacement.order + 1 })}>→</button>
+                <button type="button" title="Move to previous tab" disabled={tabIndex <= 0} onClick={() => updateCommandLayout(command.id, { tab: tabs[tabIndex - 1] })}>‹</button>
+                <button type="button" title="Move to next tab" disabled={tabIndex < 0 || tabIndex >= tabs.length - 1} onClick={() => updateCommandLayout(command.id, { tab: tabs[tabIndex + 1] })}>›</button>
+                <button type="button" title={current?.pinned ? "Remove from General" : "Pin in General"} onClick={() => updateCommandLayout(command.id, { pinned: !current?.pinned })}>★</button>
+                <button type="button" title="Change density" onClick={() => updateCommandLayout(command.id, { density: current?.density === "compact" ? "medium" : "compact" })}>Aa</button>
+                <button type="button" title="Rename visible label" onClick={() => {
+                  const next = window.prompt("Visible command label", current?.label ?? command.title);
+                  if (next?.trim()) updateCommandLayout(command.id, { label: next.trim() });
+                }}>✎</button>
+                <button type="button" title="Remove command" onClick={() => updateCommandLayout(command.id, { hidden: true })}>×</button>
+              </div>
+            );
+          }) : null}
+          <button type="button" role="menuitem" className={workbarMenuItemClass()} onClick={() => saveLayout({})}>
+            <RotateCcw className="size-3.5" />
+            <span>Reset this workbar</span>
+          </button>
+        </WorkbarMenu>
         {menuActions.length || overflow ? (
           <WorkbarMenu
             label={<MoreHorizontal className="size-4" />}
@@ -264,7 +409,7 @@ export function ArtifactWorkbar({
   );
 }
 
-function WorkbarActionButton({ action }: { action: WorkbarActionSpec }) {
+function WorkbarActionButton({ action }: { action: CommandBinding }) {
   const Icon = action.icon;
   return (
     <button
@@ -284,7 +429,7 @@ function WorkbarActionButton({ action }: { action: WorkbarActionSpec }) {
   );
 }
 
-function WorkbarMenuItem({ action }: { action: WorkbarActionSpec }) {
+function WorkbarMenuItem({ action }: { action: CommandBinding }) {
   const Icon = action.icon;
   return (
     <button

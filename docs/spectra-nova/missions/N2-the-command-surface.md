@@ -73,3 +73,21 @@ Command palette / kbar (trivially derivable later) · AI execution of commands (
 6. M4-E10 closed: one type vocabulary; `blueprints/*` remnants and duplicate label sources deleted (grep evidence).
 7. P0, P1, P2, P8 and P11 pass fresh; keyboard shortcuts still work and now come from the registry.
 8. STATE updated (NV-3 resolved, M4-E8 and M4-E10 closed); mission log ≤40 lines; close-out checks green.
+
+## Mission log — 2026-08-20
+
+- W1: added scoped Convex `accountPreferences`; server Zod validation strips/logs unknown keys and rejects malformed values.
+- W1: v2 cache migration partitions account/device values; localStorage remains first-paint/offline cache; subscriptions preserve `settings.changed`.
+- W1 evidence: published functions produced account + device rows at schema v2; a two-tab write changed the mounted editor in place, then was reset.
+- W2: added the complete durable `Command` record, shared context/availability, one executor, shortcut derivation and namespaced manifest ids.
+- W2 coverage: 178 manifest operation ids (163 creatable + 15 retired timetable); 120 studio workbar bindings migrated; 0 controls deleted.
+- W2 cleanup: zero `WorkbarActionSpec`, `blueprintMeta`, or `features/spectra/blueprints` code references remain.
+- W3: Document, Sheets and Presentation taxonomies plus proportional simple-type tabs; compact/medium forms and expanded layout are registry driven.
+- W3: contextual selection inputs wired for Document, Sheets, Presentation, Whiteboard and Code; appearance/dismissal unit-covered.
+- W4: pin/remove, move/reorder commands/tabs, visible-label rename, density, expand/collapse and reset ship in-workbar and in Settings.
+- W4 evidence: `.shots/missions/N2/001–003`; same Document toolbar stayed mounted while the second tab changed `data-workbar-expanded` live.
+- W5: rich text uses one shared formatter with registry execution; raw Whiteboard palette and Document overflow actions joined command bindings.
+- Reuse audit: one `ArtifactWorkbar`, one command button/menu renderer, one work-type presentation source, one settings store.
+- Bounded-read audit: command/layout menus are local bounded registries; account preference query is indexed by account and returns four matching layers maximum.
+- Automated: N2-focused 100/100; full 728/730 with only the two unchanged N11 motion expectations; tsc/lint/secret scan green.
+- Acceptance data: temporary `New Document` was moved to recoverable Trash; the account workbar preference was restored to collapsed.

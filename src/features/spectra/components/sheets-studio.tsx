@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   AlignCenter,
@@ -105,7 +105,7 @@ import { SelectField } from "@/components/ui/select";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
-  type WorkbarActionSpec,
+  type CommandBinding,
 } from "./artifact-workbar";
 import { getWorkDefinition } from "../work/registry";
 import {
@@ -3094,7 +3094,7 @@ export function SheetsStudio({
    * `requires` is the enforcement: an action a role cannot perform is absent,
    * not disabled.
    */
-  const actions: WorkbarActionSpec[] = [
+  const actions: CommandBinding[] = [
     {
       id: "undo",
       label: "Undo",
@@ -3398,6 +3398,13 @@ export function SheetsStudio({
       {contract ? (
         <ArtifactWorkbar
           label="Sheet tools"
+          selectionContext={
+            selectedChartId
+              ? "Chart"
+              : formulaDraft.startsWith("=") || activeCell?.formula
+                ? "Formula"
+                : undefined
+          }
           modes={{
             registry: true,
             value: sheetMode,

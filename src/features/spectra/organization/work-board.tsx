@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { FolderOpen, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
+import { ArtifactCard, workTypeMeta } from "../components/artifact-card";
 import type { ArtifactCardView } from "../components/artifact-card";
 import {
   useBoardColumnCards,
@@ -61,10 +61,10 @@ function columnColor(column: BoardColumn, index: number) {
   if (identity.kind === "workspace")
     return identity.color ?? COLUMN_HUES[index % COLUMN_HUES.length]!;
   if (identity.kind === "type") {
-    const meta = blueprintMeta[identity.typeKey as keyof typeof blueprintMeta];
+    const meta = workTypeMeta[identity.typeKey as keyof typeof workTypeMeta];
     if (meta) return meta.color;
     if (identity.typeKey === "thread")
-      return blueprintMeta.thread_reference.color;
+      return workTypeMeta.thread_reference.color;
     if (identity.typeKey === "workspace") return "var(--brand-primary)";
   }
   if (identity.kind === "loose") return "var(--text-tertiary)";
@@ -75,9 +75,9 @@ function columnColor(column: BoardColumn, index: number) {
 function columnLabel(column: BoardColumn) {
   if (column.identity.kind !== "type") return column.label;
   const key = column.identity.typeKey;
-  const meta = blueprintMeta[key as keyof typeof blueprintMeta];
+  const meta = workTypeMeta[key as keyof typeof workTypeMeta];
   if (meta) return meta.label;
-  if (key === "thread") return blueprintMeta.thread_reference.label;
+  if (key === "thread") return workTypeMeta.thread_reference.label;
   if (key === "workspace") return "Workspaces";
   return column.label;
 }
@@ -86,7 +86,7 @@ function blueprintOf(node: TreeNode): ArtifactCardView["blueprintKey"] {
   const resolved = node.kind === "link" ? node.target?.kind : node.kind;
   if (resolved === "thread") return "thread_reference";
   const key = node.source?.blueprintKey;
-  return key && key in blueprintMeta
+  return key && key in workTypeMeta
     ? (key as ArtifactCardView["blueprintKey"])
     : "document";
 }

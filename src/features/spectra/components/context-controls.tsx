@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { blueprintMeta } from "./artifact-card";
+import { workTypeMeta } from "./artifact-card";
 import {
   searchSpectra,
   getSpectraThreads,
@@ -514,10 +514,10 @@ export function ContextFocusControl({
                       const isAgent = item.blueprintKey === "agent";
                       const ItemIcon = isAgent
                         ? Bot
-                        : blueprintMeta[item.blueprintKey]?.icon ?? FileText;
+                        : workTypeMeta[item.blueprintKey]?.icon ?? FileText;
                       const itemColor = isAgent
                         ? "var(--brand-primary)"
-                        : blueprintMeta[item.blueprintKey]?.color ?? "#d88922";
+                        : workTypeMeta[item.blueprintKey]?.color ?? "#d88922";
                       return (
                       <button
                         key={item._id}
@@ -893,7 +893,7 @@ export function GlobalSearch({
                       Artifacts
                     </div>
                     {results.artifacts.map((artifact) => {
-                      const meta = blueprintMeta[artifact.blueprintKey];
+                      const meta = workTypeMeta[artifact.blueprintKey];
                       const Icon = meta.icon;
                       const selected = selectedIds.has(artifact._id);
                       return (

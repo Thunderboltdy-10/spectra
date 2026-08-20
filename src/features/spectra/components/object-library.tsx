@@ -26,7 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { RichText } from "@/components/chat/rich-text";
-import { blueprintMeta } from "./artifact-card";
+import { workTypeMeta } from "./artifact-card";
 import { CardTypeIcon, IconAction } from "./card-system";
 import { FloatingMenu } from "./floating-menu";
 import {
@@ -127,7 +127,7 @@ function objectType(entry: ObjectLibraryEntry): ObjectType {
 function objectMeta(entry: ObjectLibraryEntry) {
   return entry.thread
     ? threadMeta
-    : blueprintMeta[entry.artifact?.blueprintKey ?? "document"];
+    : workTypeMeta[entry.artifact?.blueprintKey ?? "document"];
 }
 function objectAiState(entry: ObjectLibraryEntry, now: number) {
   const state = entry.artifact?.aiState;
@@ -359,7 +359,7 @@ export function ObjectLibrary({
           const meta =
             type.key === "thread"
               ? threadMeta
-              : blueprintMeta[type.key as SpectraBlueprintKey];
+              : workTypeMeta[type.key as SpectraBlueprintKey];
           return {
             key: type.key,
             label: type.label,
@@ -588,7 +588,7 @@ export function ObjectLibrary({
                 (type) => type.key !== "thread" && type.key !== "timetable",
               )
               .map((type) => {
-                const meta = blueprintMeta[type.key as SpectraBlueprintKey];
+                const meta = workTypeMeta[type.key as SpectraBlueprintKey];
                 const Icon = meta.icon;
                 return (
                   <button

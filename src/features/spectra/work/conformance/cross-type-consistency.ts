@@ -112,8 +112,6 @@ export function checkPrimaryModes(): readonly CrossTypeIssue[] {
     "document",
     "flashcard_deck",
     "quiz",
-    "agent",
-    "code",
   ]);
   const issues: CrossTypeIssue[] = [];
   for (const type of WORK_TYPE_KEYS) {

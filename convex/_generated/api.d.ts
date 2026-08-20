@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as accountPreferences from "../accountPreferences.js";
 import type * as administration from "../administration.js";
 import type * as agents from "../agents.js";
 import type * as analytics from "../analytics.js";
@@ -74,6 +75,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accountPreferences: typeof accountPreferences;
   administration: typeof administration;
   agents: typeof agents;
   analytics: typeof analytics;

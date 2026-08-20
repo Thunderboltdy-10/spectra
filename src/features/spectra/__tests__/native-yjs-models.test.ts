@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { getBlueprint } from "@/features/spectra/blueprints";
+import { getBlueprint } from "@/features/spectra/artifacts/blueprint-catalog";
 import {
   ARTIFACT_TYPE_KEYS,
   type ArtifactTypeKey,

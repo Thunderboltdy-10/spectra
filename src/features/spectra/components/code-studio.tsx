@@ -130,7 +130,7 @@ import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
-  type WorkbarActionSpec,
+  type CommandBinding,
   type WorkbarModeSpec,
 } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
@@ -2537,7 +2537,7 @@ export function CodeStudio({
    * bar sheds under pressure — an icon tool drops its label, the primary verb
    * keeps its own, and nothing is deleted from the surface at any width.
    */
-  const workbarActions: WorkbarActionSpec[] = [
+  const workbarActions: CommandBinding[] = [
     ...(sourcePaneVisible
       ? [
           {
@@ -2738,6 +2738,7 @@ export function CodeStudio({
           scroll. */}
       <ArtifactWorkbar
         label="Code actions"
+        selectionContext={surface === "preview" ? "Code output" : undefined}
         modes={
           isFullscreen
             ? {

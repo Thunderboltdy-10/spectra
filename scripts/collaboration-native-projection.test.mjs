@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { getBlueprint } from "../src/features/spectra/blueprints/index.ts";
+import { getBlueprint } from "../src/features/spectra/artifacts/blueprint-catalog.ts";
 import {
   codeYjsAdapter,
   documentYjsAdapter,

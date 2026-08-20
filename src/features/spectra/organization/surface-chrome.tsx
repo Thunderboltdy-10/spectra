@@ -29,7 +29,7 @@ import {
   blueprintChoices,
   createDefaultArtifactPayload,
 } from "../components/artifact-blueprint-sheet";
-import { blueprintMeta } from "../components/artifact-card";
+import { workTypeMeta } from "../components/artifact-card";
 import { workTypeFilters } from "./node-identity";
 import type { SortDirection, SortKey, TypeFilter } from "./tree-model";
 
@@ -193,8 +193,8 @@ export function SurfaceTypeFilter({
           <DropdownMenuSeparator />
           {TYPE_FILTERS.map((type) => {
             const Icon =
-              blueprintMeta[type.key as keyof typeof blueprintMeta]?.icon ??
-              blueprintMeta.thread_reference.icon;
+              workTypeMeta[type.key as keyof typeof workTypeMeta]?.icon ??
+              workTypeMeta.thread_reference.icon;
             return (
               <DropdownMenuRadioItem key={type.key} value={type.key}>
                 <Icon className="size-3.5 text-[var(--text-tertiary)]" />

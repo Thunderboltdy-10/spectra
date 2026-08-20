@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { BookOpen, ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
@@ -27,7 +27,7 @@ import {
   type WorkType,
 } from "../work/registry";
 import { projectLegacyWorkSession } from "../work/session/session-controller";
-import { blueprintMeta } from "./artifact-card";
+import { workTypeMeta } from "./artifact-card";
 import { tagsFromDraft } from "./artifact-studio-value-utils";
 
 export type StudioMode = "closed" | "split" | "tab";
@@ -127,6 +127,10 @@ export function useStudioContract(): StudioContract {
       "useStudioContract must be used inside the artifact shell. Render this studio through ArtifactStudio, or wrap it in StudioContractProvider.",
     );
   return contract;
+}
+
+export function useOptionalStudioContract(): StudioContract | null {
+  return useContext(StudioContractContext);
 }
 
 /** Builds the contract from registry truth. The shell's single source. */
@@ -805,7 +809,7 @@ export function StudioTabRail({
             (item) => item._id === tab.artifactId,
           );
           if (!artifact) return null;
-          const meta = blueprintMeta[artifact.blueprintKey];
+          const meta = workTypeMeta[artifact.blueprintKey];
           const Icon = meta.icon;
           const active = activeArtifactId === artifact._id;
           return (

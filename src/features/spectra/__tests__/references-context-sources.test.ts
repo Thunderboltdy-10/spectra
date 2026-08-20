@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getBlueprint } from "../blueprints";
+import { getBlueprint } from "../artifacts/blueprint-catalog";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "../artifacts/types";
 import {
   createWorkAnchorAdapter,

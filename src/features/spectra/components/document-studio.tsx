@@ -39,7 +39,6 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type * as Y from "yjs";
 import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
@@ -83,9 +82,7 @@ import type { SourceRecord } from "../sources/records/source-record";
 import { createDocumentRelativeSelection } from "../work/models/yjs";
 import { availableWorkModes } from "../work/registry";
 import {
-  DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
   RichTextFormatBar,
@@ -156,31 +153,6 @@ function documentMarkdown(json: JSONContent) {
       .join("\n\n");
   };
   return render(json).trim();
-}
-
-function DocumentOverflowItem({
-  icon: Icon,
-  label,
-  onSelect,
-  disabled,
-}: {
-  icon: LucideIcon;
-  label: string;
-  onSelect: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <DropdownMenuItem
-      disabled={disabled}
-      className={workbarMenuItemClass()}
-      onSelect={onSelect}
-    >
-      <span className="grid size-4 shrink-0 place-items-center text-[var(--text-secondary)]">
-        <Icon className="size-3.5" />
-      </span>
-      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-    </DropdownMenuItem>
-  );
 }
 
 type DocumentMode = "write" | "read" | "review" | "focus";
@@ -1078,6 +1050,15 @@ export function DocumentStudio({
           with the active treatment so the writer can see they left continuous. */}
       <ArtifactWorkbar
         label="Document tools"
+        selectionContext={
+          editor?.isActive("table")
+            ? "Table"
+            : editor?.isActive("image")
+              ? "Image"
+              : editor?.isActive("math") || editor?.isActive("equation")
+                ? "Equation"
+                : undefined
+        }
         modes={[]}
         context={docMode === "read" ? "Reading" : undefined}
         {...(docMode === "read" || docMode === "review"
@@ -1148,6 +1129,23 @@ export function DocumentStudio({
                 },
               ]
             : []),
+          ...(!sourcesHaveWork
+            ? [{ id: "sources", label: "Sources", icon: BookOpen, priority: "advanced" as const, tab: "References", onSelect: () => setSourcesOpen((open) => !open) }]
+            : []),
+          ...(canPreviewAsReader
+            ? [{ id: "preview-reader", label: "Preview as reader", icon: Eye, priority: "advanced" as const, tab: "Layout", onSelect: () => setDocMode("read") }]
+            : []),
+          ...(!readOnly
+            ? [
+                { id: "focus", label: "Focus", icon: Focus, priority: "advanced" as const, tab: "Layout", onSelect: () => { setDocMode("focus"); setOutlineOpen(false); setSourcesOpen(false); setFindOpen(false); } },
+                { id: "page-layout", label: pageLayout === "page" ? "Continuous canvas" : "Page canvas", icon: FileText, priority: "advanced" as const, tab: "Layout", onSelect: () => setPageLayout(pageLayout === "page" ? "continuous" : "page") },
+                { id: "import", label: importing ? "Importing…" : "Import", icon: importing ? Loader2 : Import, priority: "advanced" as const, disabled: importing, onSelect: () => importRef.current?.click() },
+                ...(["notes", "essay", "lab"] as const).map((template) => ({ id: `template-${template}`, label: template === "lab" ? "Lab report" : template === "notes" ? "Study notes" : "Essay", icon: LayoutTemplate, priority: "advanced" as const, tab: "Layout", onSelect: () => setPendingTemplate(template) })),
+              ]
+            : []),
+          ...([[
+            "docx", "Export Word"], ["pdf", "Export PDF"], ["md", "Export Markdown"], ["html", "Export HTML"], ["txt", "Export text"]] as const).map(([format, label]) => ({ id: `export-${format}`, label, icon: FileDown, priority: "advanced" as const, onSelect: () => void exportDocument(format) })),
+          { id: "print", label: "Print", icon: Printer, priority: "advanced", onSelect: () => window.print() },
         ]}
         overflow={
           <>
@@ -1161,103 +1159,6 @@ export function DocumentStudio({
                 {wordCount === 1 ? "word" : "words"}
               </span>
             </div>
-            <DropdownMenuSeparator />
-            {!sourcesHaveWork ? (
-              <>
-                <DropdownMenuLabel>Cite</DropdownMenuLabel>
-                <DocumentOverflowItem
-                  icon={BookOpen}
-                  label="Sources"
-                  onSelect={() => setSourcesOpen((open) => !open)}
-                />
-                <DropdownMenuSeparator />
-              </>
-            ) : null}
-            {!readOnly ? (
-              <>
-                <DropdownMenuLabel>View</DropdownMenuLabel>
-                {canPreviewAsReader ? (
-                  <DocumentOverflowItem
-                    icon={Eye}
-                    label="Preview as reader"
-                    onSelect={() => setDocMode("read")}
-                  />
-                ) : null}
-                <DocumentOverflowItem
-                  icon={Focus}
-                  label="Focus"
-                  onSelect={() => {
-                    setDocMode("focus");
-                    setOutlineOpen(false);
-                    setSourcesOpen(false);
-                    setFindOpen(false);
-                  }}
-                />
-                <DocumentOverflowItem
-                  icon={FileText}
-                  label={
-                    pageLayout === "page"
-                      ? "Continuous canvas"
-                      : "Page canvas"
-                  }
-                  onSelect={() =>
-                    setPageLayout(
-                      pageLayout === "page" ? "continuous" : "page",
-                    )
-                  }
-                />
-                <DropdownMenuSeparator />
-              </>
-            ) : null}
-            <DropdownMenuLabel>File</DropdownMenuLabel>
-            <DocumentOverflowItem
-              icon={importing ? Loader2 : Import}
-              label={importing ? "Importing…" : "Import"}
-              disabled={importing || readOnly}
-              onSelect={() => importRef.current?.click()}
-            />
-            {(
-              [
-                ["docx", "Export Word"],
-                ["pdf", "Export PDF"],
-                ["md", "Export Markdown"],
-                ["html", "Export HTML"],
-                ["txt", "Export text"],
-              ] as const
-            ).map(([format, label]) => (
-              <DocumentOverflowItem
-                key={format}
-                icon={FileDown}
-                label={label}
-                onSelect={() => void exportDocument(format)}
-              />
-            ))}
-            <DocumentOverflowItem
-              icon={Printer}
-              label="Print"
-              onSelect={() => window.print()}
-            />
-            {!readOnly ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Replace with a template</DropdownMenuLabel>
-                <DocumentOverflowItem
-                  icon={LayoutTemplate}
-                  label="Study notes"
-                  onSelect={() => setPendingTemplate("notes")}
-                />
-                <DocumentOverflowItem
-                  icon={LayoutTemplate}
-                  label="Essay"
-                  onSelect={() => setPendingTemplate("essay")}
-                />
-                <DocumentOverflowItem
-                  icon={LayoutTemplate}
-                  label="Lab report"
-                  onSelect={() => setPendingTemplate("lab")}
-                />
-              </>
-            ) : null}
           </>
         }
       >

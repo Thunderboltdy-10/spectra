@@ -54,7 +54,7 @@ import {
 } from "../data/api";
 import { CommandBar } from "./command-bar";
 import { ResultCardStack } from "./result-card";
-import { blueprintMeta } from "./artifact-card";
+import { workTypeMeta } from "./artifact-card";
 import { publicSpectraFailureText } from "../runs/live-dock";
 
 function operationLabel(
@@ -1773,7 +1773,7 @@ function ArtifactResult({
 }) {
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const meta = blueprintMeta[artifact.blueprintKey];
+  const meta = workTypeMeta[artifact.blueprintKey];
   const ArtifactIcon = meta?.icon ?? FileText;
   return (
     <div

@@ -70,7 +70,7 @@ const modes = {
     ["Board", "view"],
     ["Timeline", "view"],
   ],
-  // Build is how an agent is read as well as written: it is the mission, the
+  // Overview is how an agent is read: it is the mission, the
   // approved skills and the sources, and declaring it `edit` left a read-only
   // viewer with Releases and no way to see what the agent actually is. Checks
   // is `edit` because the server agrees — `agents.evalRuns` and
@@ -79,7 +79,7 @@ const modes = {
   // Foundry has no single-turn invoke route behind it (the same reasoning that
   // keeps Present off presentation and Run off code).
   agent: [
-    ["Build", "view"],
+    ["Overview", "view"],
     ["Checks", "edit"],
     ["Releases", "view"],
   ],

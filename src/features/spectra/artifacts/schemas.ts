@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { documentContentSchema } from "../blueprints/document";
-import { flashcardDeckContentSchema } from "../blueprints/flashcard-deck";
-import { plannerTaskContentSchema } from "../blueprints/planner-task";
-import { quizContentSchema } from "../blueprints/quiz";
+import { documentContentSchema } from "./schema/document";
+import { flashcardDeckContentSchema } from "./schema/flashcard-deck";
+import { plannerTaskContentSchema } from "./schema/planner-task";
+import { quizContentSchema } from "./schema/quiz";
 import {
   inspectCodeNetworkOrigin,
   MAX_CODE_NETWORK_ORIGINS,

@@ -451,10 +451,10 @@ function checkActions(definition: WorkDefinition): WorkKernelCheck {
   const problems: string[] = [];
   if (!definition.actions.length) problems.push("no semantic actions");
   const inspects = definition.actions.filter((action) =>
-    /^(?:inspect|read|list|check)/.test(action),
+    /(?:^|\.)(?:inspect|read|list|check)(?:\.|$)/.test(action),
   );
   const mutates = definition.actions.filter(
-    (action) => !/^(?:inspect|read|list|check|validate)/.test(action),
+    (action) => !/(?:^|\.)(?:inspect|read|list|check|validate)(?:\.|$)/.test(action),
   );
   if (!inspects.length) problems.push("AI cannot inspect this type");
   if (!mutates.length) problems.push("AI cannot change this type");

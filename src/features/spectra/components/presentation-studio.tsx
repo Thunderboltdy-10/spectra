@@ -94,7 +94,7 @@ import { targetAttrs } from "../collaboration/target-attributes";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
-  type WorkbarActionSpec,
+  type CommandBinding,
 } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
@@ -2827,7 +2827,7 @@ export function PresentationStudio({
    * that used to live in a second 42px row is now either in `⋯` or in the
    * inspector, which is the only split that survives a 560px pane in one row.
    */
-  const workbarActions: WorkbarActionSpec[] = [
+  const workbarActions: CommandBinding[] = [
     // The rail and the inspector are the canvas's two side panes, so their
     // toggles are absent on the notes page rather than present and inert.
     ...(surface === "slides"
@@ -2857,7 +2857,7 @@ export function PresentationStudio({
             onSelect: () =>
               setInspectorPreference(inspectorOpen ? "closed" : "open"),
           },
-        ] satisfies WorkbarActionSpec[])
+        ] satisfies CommandBinding[])
       : []),
     // The notes page exists because the registry declares it, not because this
     // studio decided to have one: drop the mode and the action goes with it.
@@ -2996,6 +2996,13 @@ export function PresentationStudio({
     <section className="presentation-studio">
       <ArtifactWorkbar
         label="Presentation"
+        selectionContext={
+          selectedObject
+            ? "Shape"
+            : activeSlide.transition?.kind && activeSlide.transition.kind !== "none"
+              ? "Transition"
+              : undefined
+        }
         // No mode row. A deck has one place you author it; Present is an
         // activity behind the primary verb and the notes page is a pane behind
         // an action, so neither can read as a peer tab beside the slides

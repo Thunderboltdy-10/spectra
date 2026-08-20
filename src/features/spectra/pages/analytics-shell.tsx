@@ -10,7 +10,7 @@ import {
   RefreshCw,
   ShieldCheck,
 } from "lucide-react";
-import { blueprintMeta } from "@/features/spectra/components/artifact-card";
+import { workTypeMeta } from "@/features/spectra/components/artifact-card";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import {
   CapabilityTruthBadge,
@@ -106,10 +106,10 @@ export function AnalyticsShell() {
       (payload?.byType ?? []).map((row) => ({
         ...row,
         label:
-          blueprintMeta[row.key as keyof typeof blueprintMeta]?.label ??
+          workTypeMeta[row.key as keyof typeof workTypeMeta]?.label ??
           row.key.replaceAll("_", " "),
         color:
-          blueprintMeta[row.key as keyof typeof blueprintMeta]?.color ?? "#64748b",
+          workTypeMeta[row.key as keyof typeof workTypeMeta]?.color ?? "#64748b",
       })),
     [payload?.byType],
   );

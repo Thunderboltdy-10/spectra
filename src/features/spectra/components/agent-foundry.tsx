@@ -95,7 +95,7 @@ import {
 } from "../data/api";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
-import { ArtifactWorkbar, type WorkbarActionSpec, WorkbarItemSelector } from "./artifact-workbar";
+import { ArtifactWorkbar, type CommandBinding, WorkbarItemSelector } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
 
@@ -1863,7 +1863,7 @@ export function AgentFoundry({
      enter. The baseline put `Build | Continue | Compile skills` in one segmented
      control (two modes and a verb, with the verb styled as the active tab) and
      then repeated both verbs as buttons in the body. */
-  const barActions: WorkbarActionSpec[] =
+  const barActions: CommandBinding[] =
     view === "build"
       ? [
           {

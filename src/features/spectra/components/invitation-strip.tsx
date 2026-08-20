@@ -2,7 +2,7 @@
 
 import { ChevronDown, LayoutGrid, Loader2, Mail, Share2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { blueprintMeta } from "./artifact-card";
+import { workTypeMeta } from "./artifact-card";
 import type { SpectraShareInvitation } from "../data/api";
 
 /**
@@ -90,7 +90,7 @@ function InvitationInbox({
         {invitations.map((invitation) => {
           const artifactMeta =
             invitation.resource.typeKey !== "workspace"
-              ? blueprintMeta[invitation.resource.typeKey]
+              ? workTypeMeta[invitation.resource.typeKey]
               : null;
           const Icon = artifactMeta?.icon ?? LayoutGrid;
           const working = busyKey === `invitation:${invitation.invitationId}`;

@@ -56,7 +56,7 @@ import {
   createDefaultArtifactPayload,
   type ArtifactPayload,
 } from "../components/artifact-blueprint-sheet";
-import { blueprintMeta } from "../components/artifact-card";
+import { workTypeMeta } from "../components/artifact-card";
 import {
   StudioTabRail,
   useArtifactStudioState,
@@ -719,7 +719,7 @@ function Inspector({
   }
 
   if (selectedArtifact) {
-    const meta = blueprintMeta[selectedArtifact.blueprintKey];
+    const meta = workTypeMeta[selectedArtifact.blueprintKey];
     const Icon = meta.icon;
     const links = linkedArtifacts(selectedArtifact, artifacts);
     const selectedPlacements = artifactPlacements(selectedArtifact);
@@ -880,7 +880,7 @@ function InspectorSection({
 }
 
 function InspectorObject({ artifact }: { artifact: SpectraArtifact }) {
-  const meta = blueprintMeta[artifact.blueprintKey];
+  const meta = workTypeMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   return (
     <div className="flex items-center gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5">
@@ -2821,7 +2821,7 @@ export function SpectraShell({
     payload: ArtifactPayload,
     targetWorkspaceId = selectedWorkspaceId,
   ) {
-    const label = blueprintMeta[payload.blueprintKey].label;
+    const label = workTypeMeta[payload.blueprintKey].label;
     setBusyKey(`artifact:${payload.blueprintKey}`);
     try {
       const result = await postSpectra<{ artifactId: string }>({
@@ -3357,7 +3357,7 @@ export function SpectraShell({
               >
                 <h2 className="font-display text-[19px] font-semibold text-[var(--text-primary)]">
                   Where should this{" "}
-                  {blueprintMeta[pendingCreateType].label.toLowerCase()} live?
+                  {workTypeMeta[pendingCreateType].label.toLowerCase()} live?
                 </h2>
                 <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
                   Choose a workspace or keep it in General.
@@ -4029,7 +4029,7 @@ export function SpectraShell({
                     composerThread
                       ? `Continue ${composerThread.title}...`
                       : commandFocusArtifact
-                        ? `Ask Spectra anything about this ${blueprintMeta[commandFocusArtifact.blueprintKey]?.label?.toLowerCase() ?? "work"}...`
+                        ? `Ask Spectra anything about this ${workTypeMeta[commandFocusArtifact.blueprintKey]?.label?.toLowerCase() ?? "work"}...`
                         : workspace
                           ? `Ask Spectra anything about this workspace...`
                           : "Ask Spectra anything..."

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { currentTimeMs } from "@/lib/unique-token";
 import {
@@ -85,7 +85,7 @@ import { formatShortDate } from "./spectra-view-model";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
-  type WorkbarActionSpec,
+  type CommandBinding,
 } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
@@ -1534,7 +1534,7 @@ export function QuizStudio({
    * capability each one needs. The bar decides what sheds and what promotes into
    * `⋯`; this type only says what its controls mean.
    */
-  const workbarActions: WorkbarActionSpec[] = canEditQuiz
+  const workbarActions: CommandBinding[] = canEditQuiz
     ? [
         activeQuizMode === "build"
           ? {
@@ -1599,7 +1599,7 @@ export function QuizStudio({
                   view === "summary"
                     ? openQuizMode("build")
                     : openQuizMode("responses"),
-              } as WorkbarActionSpec,
+              } as CommandBinding,
             ]
           : []),
         {
@@ -1627,7 +1627,7 @@ export function QuizStudio({
                 priority: "advanced",
                 hint: "Stops new attempts; attempts already taken keep their own version",
                 onSelect: unpublishQuiz,
-              } as WorkbarActionSpec,
+              } as CommandBinding,
             ]
           : []),
       ]

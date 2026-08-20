@@ -4,7 +4,7 @@ import { useMemo, type CSSProperties } from "react";
 import { ExternalLink, FileText, X } from "lucide-react";
 import type { ResultCardStreamView } from "../ai/stream-events";
 import type { SpectraArtifact } from "../data/api";
-import { blueprintMeta } from "./artifact-card";
+import { workTypeMeta } from "./artifact-card";
 
 function collectMentionedIds(
   content: string | undefined,
@@ -79,7 +79,7 @@ export function ComposerArtifactDock({
       aria-label="Work from this conversation"
     >
       {rows.map((artifact) => {
-        const meta = blueprintMeta[artifact.blueprintKey];
+        const meta = workTypeMeta[artifact.blueprintKey];
         const Icon = meta?.icon ?? FileText;
         return (
           <div

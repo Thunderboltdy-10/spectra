@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { blueprintMeta, type ArtifactCardView } from "./artifact-card";
+import { workTypeMeta, type ArtifactCardView } from "./artifact-card";
 import type { SpectraArtifact} from "../data/api";
 import { requireBlueprint, requireArtifactTypeManifest } from "../artifacts/blueprint-catalog";
 import type { ArtifactTypeKey } from "../artifacts/types";
@@ -124,7 +124,7 @@ export function defaultArtifactSummary(blueprintKey: EditableBlueprintKey) {
 }
 
 export function defaultArtifactTitle(blueprintKey: EditableBlueprintKey) {
-  return `New ${blueprintMeta[blueprintKey].label}`;
+  return `New ${workTypeMeta[blueprintKey].label}`;
 }
 
 export function createDefaultArtifactPayload(blueprintKey: EditableBlueprintKey): ArtifactPayload {
@@ -297,7 +297,7 @@ export function ArtifactBlueprintSheet({
   const [tagDraft, setTagDraft] = useState((artifact?.tags ?? []).join(", "));
   const dialogTitleId = useId();
 
-  const meta = blueprintMeta[blueprintKey];
+  const meta = workTypeMeta[blueprintKey];
   const Icon = meta.icon;
 
   const previewContent = useMemo(() => {
@@ -375,7 +375,7 @@ export function ArtifactBlueprintSheet({
                     className={`min-h-[86px] rounded-[8px] border p-2.5 text-left transition ${selected ? "border-[#8b6ff0] bg-[color-mix(in_oklab,#8b6ff0_5%,var(--bg-elevated))]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)]"}`}
                     onClick={() => selectBlueprint(choice.key)}
                   >
-                    <ChoiceIcon className="h-4 w-4" style={{ color: blueprintMeta[choice.key].color }} />
+                    <ChoiceIcon className="h-4 w-4" style={{ color: workTypeMeta[choice.key].color }} />
                     <div className="mt-2 text-[12px] font-semibold text-[var(--text-primary)]">{choice.label}</div>
                     <div className="mt-1 line-clamp-2 text-micro leading-4 text-[var(--text-secondary)]">{choice.description}</div>
                   </button>

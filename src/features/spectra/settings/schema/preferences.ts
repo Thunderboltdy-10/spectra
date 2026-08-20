@@ -124,6 +124,45 @@ const accessibilitySchema = z.object({
   runStatusAnnouncements: z.enum(["important", "all", "off"]).default("important"),
 });
 
+export const preferenceLayerValuesSchema = z
+  .object({
+    general: generalSchema.partial().optional(),
+    ai: aiSchema.partial().optional(),
+    writing: writingSchema.partial().optional(),
+    collaboration: collaborationSchema.partial().optional(),
+    appearance: appearanceSchema.partial().optional(),
+    compute: computeSchema.partial().optional(),
+    notifications: notificationsSchema.partial().optional(),
+    privacy: privacySchema.partial().optional(),
+    integrations: integrationsSchema.partial().optional(),
+    accessibility: accessibilitySchema.partial().optional(),
+    workbar: z
+      .record(
+        z.string(),
+        z.object({
+          expanded: z.boolean().optional(),
+          tabOrder: z.array(z.string()).optional(),
+          commands: z
+            .record(
+              z.string(),
+              z.object({
+                tab: z.string().optional(),
+                order: z.number().int().optional(),
+                label: z.string().trim().min(1).max(48).optional(),
+                density: z.enum(["compact", "medium"]).optional(),
+                hidden: z.boolean().optional(),
+                pinned: z.boolean().optional(),
+              }),
+            )
+            .optional(),
+        }),
+      )
+      .optional(),
+  })
+  .strip();
+
+export type PreferenceLayerValues = z.infer<typeof preferenceLayerValuesSchema>;
+
 export const spectraPreferencesSchema = z.object({
   version: z.literal(PREFERENCE_SCHEMA_VERSION),
   general: generalSchema.default(generalSchema.parse({})),
@@ -136,12 +175,36 @@ export const spectraPreferencesSchema = z.object({
   privacy: privacySchema.default(privacySchema.parse({})),
   integrations: integrationsSchema.default(integrationsSchema.parse({})),
   accessibility: accessibilitySchema.default(accessibilitySchema.parse({})),
+  workbar: z
+    .record(
+      z.string(),
+      z.object({
+        expanded: z.boolean().optional(),
+        tabOrder: z.array(z.string()).optional(),
+        commands: z
+          .record(
+            z.string(),
+            z.object({
+              tab: z.string().optional(),
+              order: z.number().int().optional(),
+              label: z.string().trim().min(1).max(48).optional(),
+              density: z.enum(["compact", "medium"]).optional(),
+              hidden: z.boolean().optional(),
+              pinned: z.boolean().optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .default({}),
 }).strict();
 
 export type SpectraPreferences = z.infer<typeof spectraPreferencesSchema>;
 export type PreferenceSection = Exclude<keyof SpectraPreferences, "version">;
 type PartialSections = {
-  [K in PreferenceSection]?: Partial<SpectraPreferences[K]>;
+  [K in PreferenceSection]?: K extends "workbar"
+    ? SpectraPreferences[K]
+    : Partial<SpectraPreferences[K]>;
 };
 export type ScopedPreferenceLayer = {
   scope: PreferenceScope;
@@ -220,6 +283,7 @@ export function resolvePreferences(layers: readonly ScopedPreferenceLayer[]): Sp
       privacy: mergeSection(current.privacy, layer.values.privacy),
       integrations: mergeSection(current.integrations, layer.values.integrations),
       accessibility: mergeSection(current.accessibility, layer.values.accessibility),
+      workbar: { ...current.workbar, ...layer.values.workbar },
     }),
     DEFAULT_SPECTRA_PREFERENCES,
   );

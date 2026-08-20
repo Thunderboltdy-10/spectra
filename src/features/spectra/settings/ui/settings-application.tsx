@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Bot, LockKeyhole, Palette, RotateCcw, Sparkles } from "lucide-react";
+import { Bot, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
@@ -12,11 +12,13 @@ import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
 import { ProductSectionNav } from "../../components/product-section-nav";
 import { ProductPageHeader } from "../../components/product-page-header";
+import { COMMAND_TABS } from "../../commands";
 
 const SECTIONS = [
   { id: "ai", label: "Conversations", icon: Bot },
   { id: "writing", label: "Writing", icon: Sparkles },
   { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "workbar", label: "Workbars", icon: SlidersHorizontal },
   { id: "privacy", label: "Privacy and data", icon: LockKeyhole },
 ] as const;
 
@@ -112,6 +114,47 @@ function AppearanceSettings({ p, update }: SectionProps<"appearance">) {
   );
 }
 
+const WORKBAR_TYPES = [
+  "document", "sheets", "presentation", "quiz", "flashcard_deck",
+  "planner_task", "code", "whiteboard", "agent",
+] as const;
+
+function WorkbarSettings({ p, update }: SectionProps<"workbar">) {
+  const [type, setType] = useState<(typeof WORKBAR_TYPES)[number]>("document");
+  const layout = p[type] ?? {};
+  const commandOverrides = Object.entries(layout.commands ?? {});
+  const tabs = layout.tabOrder ?? [...COMMAND_TABS[type]];
+  const save = (next: typeof layout) => update({ ...p, [type]: next });
+  return (
+    <SettingGroup title="Workbar layout" description="Layouts follow your account and update open editors without reloading them.">
+      <SelectRow
+        label="Work type"
+        value={type}
+        options={WORKBAR_TYPES.map((value) => ({ value, label: value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()) }))}
+        onChange={(value) => setType(value as typeof type)}
+      />
+      <ToggleRow label="Expanded workbar" checked={layout.expanded === true} onCheckedChange={(expanded) => save({ ...layout, expanded })} />
+      {tabs.map((tab, index) => (
+        <SettingRow key={tab} label={`${tab} tab`} description="Tab order" control={<div className="flex items-center gap-1"><Button aria-label={`Move ${tab} earlier`} size="sm" variant="ghost" disabled={index === 0} onClick={() => { const next = [...tabs]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; save({ ...layout, tabOrder: next }); }}>←</Button><Button aria-label={`Move ${tab} later`} size="sm" variant="ghost" disabled={index === tabs.length - 1} onClick={() => { const next = [...tabs]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; save({ ...layout, tabOrder: next }); }}>→</Button></div>} />
+      ))}
+      {commandOverrides.map(([commandId, override]) => (
+        <SettingRow
+          key={commandId}
+          label={override.label ?? commandId}
+          description={`${override.tab ?? "Default tab"} · ${override.density ?? "Default density"}`}
+          control={
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="ghost" onClick={() => save({ ...layout, commands: { ...layout.commands, [commandId]: { ...override, pinned: !override.pinned } } })}>{override.pinned ? "Unpin" : "Pin"}</Button>
+              <Button size="sm" variant="ghost" onClick={() => save({ ...layout, commands: { ...layout.commands, [commandId]: { ...override, hidden: !override.hidden } } })}>{override.hidden ? "Restore" : "Remove"}</Button>
+            </div>
+          }
+        />
+      ))}
+      <SettingRow label="Restore the shipped layout" description="Clears renamed labels, moved commands, tab order, densities, and hidden controls for this work type." control={<Button size="sm" variant="secondary" onClick={() => save({})}>Reset workbar</Button>} />
+    </SettingGroup>
+  );
+}
+
 function PrivacySettings() {
   const [busy, setBusy] = useState<"clear" | "export" | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -162,6 +205,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     ai: <ConversationSettings p={preferences.ai} update={updateSection("ai")} />,
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
+    workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
     privacy: <PrivacySettings />,
   };
   return (
@@ -170,7 +214,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
         <ProductPageHeader
           eyebrow="Preferences"
           title="Settings"
-          description="Only controls that change Spectra appear here. Changes save on this device and take effect immediately."
+          description="Only controls that change Spectra appear here. Changes follow your account and take effect immediately on every open surface."
           actions={
             <Button aria-label="Restore defaults" title="Restore defaults" variant="ghost" size="icon" onClick={reset}>
               <RotateCcw className="size-4" />
@@ -178,6 +222,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
           }
         />
         <section
+          aria-label="Settings sections"
           className={`mt-5 min-w-0 transition-opacity ${hydrated ? "opacity-100" : "opacity-70"}`}
           aria-labelledby="settings-section-title"
         >

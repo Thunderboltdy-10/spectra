@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 import { validateBlueprintContent } from "../artifacts/blueprint-catalog";
-import { documentContentSchema } from "../blueprints/document";
-import { flashcardDeckContentSchema } from "../blueprints/flashcard-deck";
-import { plannerTaskContentSchema } from "../blueprints/planner-task";
-import { quizContentSchema } from "../blueprints/quiz";
+import { documentContentSchema } from "../artifacts/schema/document";
+import { flashcardDeckContentSchema } from "../artifacts/schema/flashcard-deck";
+import { plannerTaskContentSchema } from "../artifacts/schema/planner-task";
+import { quizContentSchema } from "../artifacts/schema/quiz";
 import {
   agentContentSchema,
   codeContentSchema,

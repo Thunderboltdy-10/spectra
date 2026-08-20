@@ -47,6 +47,23 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_status_last_seen", ["status", "lastSeenAt"]),
 
+  accountPreferences: defineTable({
+    accountId: v.id("accounts"),
+    scope: v.union(
+      v.literal("account"),
+      v.literal("workspace"),
+      v.literal("work_type"),
+      v.literal("device"),
+    ),
+    scopeKey: v.string(),
+    values: v.any(),
+    schemaVersion: v.number(),
+    migrationNotes: v.optional(v.array(v.string())),
+    updatedAt: v.number(),
+  })
+    .index("by_account", ["accountId"])
+    .index("by_account_scope_key", ["accountId", "scope", "scopeKey"]),
+
   schoolMemberships: defineTable({
     accountId: v.id("accounts"),
     schoolId: v.id("schools"),

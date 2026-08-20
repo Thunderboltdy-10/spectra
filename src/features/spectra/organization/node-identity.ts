@@ -6,13 +6,13 @@ import {
   Layers,
   type LucideIcon,
 } from "lucide-react";
-import { blueprintMeta } from "../components/artifact-card";
+import { workTypeMeta } from "../components/artifact-card";
 import type { ArtifactCardView } from "../components/artifact-card";
 import type { TreeNode } from "./tree-client";
 
 /**
  * What a row looks like and what it is called. Work types keep the identity they
- * already have everywhere else in Spectra — `blueprintMeta` reads its labels
+ * already have everywhere else in Spectra — `workTypeMeta` reads its labels
  * from the work registry, so a quiz is called a quiz here too. Only the four
  * things the registry does not own (folder, workspace, thread, reference) are
  * named in this file.
@@ -74,12 +74,12 @@ export function nodeIdentity(node: TreeNode, open = false): NodeIdentity {
   const key = node.source?.blueprintKey as
     | ArtifactCardView["blueprintKey"]
     | undefined;
-  const meta = key ? blueprintMeta[key] : undefined;
+  const meta = key ? workTypeMeta[key] : undefined;
   return meta ?? { ...FOLDER, icon: Folder, label: "Work" };
 }
 
 /** The set of blueprint keys a type filter can offer, in the order they read. */
-export const workTypeFilters = Object.entries(blueprintMeta)
+export const workTypeFilters = Object.entries(workTypeMeta)
   .filter(([key]) => key !== "thread_reference")
   .map(([key, meta]) => ({ key, label: meta.label, icon: meta.icon }));
 

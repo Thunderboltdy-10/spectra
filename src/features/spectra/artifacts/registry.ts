@@ -1296,7 +1296,9 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
       validity: "continuous",
       minimumPanelWidth: 320,
     },
-    operations: operations[typeKey],
+    operations: operations[typeKey].map((operation) =>
+      `${typeKey}.${operation.replaceAll("_", ".")}`,
+    ),
     regions: regionAdapters[typeKey],
     loadSkill: () => loadSkill(typeKey),
     collaboration: {

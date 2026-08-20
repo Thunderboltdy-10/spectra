@@ -1,5 +1,5 @@
 export * from "./ai";
-export * from "./blueprints";
+export * from "./artifacts/blueprint-catalog";
 export * from "./core";
 export * from "./operations";
 

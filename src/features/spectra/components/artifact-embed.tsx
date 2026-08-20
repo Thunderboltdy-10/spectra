@@ -17,7 +17,7 @@ import {
 import { useRef, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import type { SpectraArtifactEmbed } from "../data/api";
-import { blueprintMeta } from "./artifact-card";
+import { workTypeMeta } from "./artifact-card";
 import { LiveCodeRuntime } from "./live-code-runtime";
 import { PublishedCodeRuntime } from "./published-code-runtime";
 import { isArtifactTypeKey } from "../artifacts/registry";
@@ -559,7 +559,7 @@ export function ArtifactEmbed({
      that same interaction actually changed it. */
   const dragOriginRef = useRef<{ width: number; height: number } | null>(null);
   const motionLevel = useSpectraMotion();
-  const meta = embed.source ? blueprintMeta[embed.source.blueprintKey] : null;
+  const meta = embed.source ? workTypeMeta[embed.source.blueprintKey] : null;
   const Icon = meta?.icon ?? FileQuestion;
   const status =
     embed.state === "no_access" && embed.accessRequest

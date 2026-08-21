@@ -116,11 +116,18 @@ pub struct DiscoveredResource {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredRegistration {
-    pub work_id: String,
-    pub replica_id: String,
-    pub revision: String,
+    #[serde(default)]
+    pub work_id: Option<String>,
+    #[serde(default)]
+    pub replica_id: Option<String>,
+    #[serde(default)]
+    pub revision: Option<String>,
     pub payload_hash: Option<String>,
+    #[serde(default)]
     pub needs_payload: bool,
+    #[serde(default)]
+    pub skipped: bool,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

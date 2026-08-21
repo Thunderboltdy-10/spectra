@@ -1301,6 +1301,10 @@ export default defineSchema({
     content: v.any(),
     schemaVersion: v.optional(v.number()),
     contentHash: v.optional(v.string()),
+    pendingPayloadRef: v.optional(v.string()),
+    pendingContentHash: v.optional(v.string()),
+    pendingBaseRevision: v.optional(v.string()),
+    protectedOriginal: v.optional(v.boolean()),
     currentVersionId: v.optional(v.id("spectraArtifactVersions")),
     syncState: v.optional(
       v.union(
@@ -1523,6 +1527,10 @@ export default defineSchema({
     relativePath: v.optional(v.string()),
     nativeFormat: v.string(),
     payloadRef: v.optional(v.string()),
+    pendingPayloadRef: v.optional(v.string()),
+    pendingContentHash: v.optional(v.string()),
+    pendingBaseRevision: v.optional(v.string()),
+    protectedOriginal: v.optional(v.boolean()),
     preservedCarryVersion: v.optional(v.number()),
     fidelityMap: v.optional(v.any()),
     compatibilityProfile: v.optional(

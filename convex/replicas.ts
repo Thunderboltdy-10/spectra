@@ -10,6 +10,7 @@ import {
   latestActiveWriteForReplica,
 } from "./bridgeIdentity";
 import { bumpPolicyVersion } from "./authorityShared";
+import { computeEffectivePolicy } from "./syncPolicy";
 
 const replicaState = z.enum(["current", "ahead", "behind", "diverged", "pending", "error", "unavailable"]);
 const transitionSchema = z.object({ idempotencyKey: z.string().uuid(), revisionBefore: z.string().min(1).max(200).optional(), revisionAfter: z.string().min(1).max(200).optional(), contentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), state: replicaState, errorCode: z.string().min(1).max(80).optional() }).strict();
@@ -37,6 +38,20 @@ export const payloadForWork = query({
     const work = await ctx.db.get(workId);
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
+    if (prefer !== "local-latest" && work.pendingPayloadRef && work.pendingContentHash) {
+      const pendingId = ctx.db.normalizeId("payloadObjects", work.pendingPayloadRef);
+      const pending = pendingId ? await ctx.db.get(pendingId) : null;
+      const protectedLocal = replicas.find((replica) => replica.kind === "local" && replica.pendingPayloadRef === work.pendingPayloadRef);
+      if (pending && pending.accountId === actor.accountId && pending.state === "active") {
+        return {
+          url: await ctx.storage.getUrl(pending.storageId), bytes: pending.bytes, hash: pending.hash,
+          mediaType: pending.mediaType, payloadRef: String(pending._id), replicaId: protectedLocal?._id,
+          replicaKind: "cloud" as const, revision: work.pendingContentHash, baseRevision: work.pendingBaseRevision,
+          state: "ahead" as const, nativeFormat: protectedLocal?.nativeFormat ?? work.nativeFormat ?? "spectra-pkg",
+          fidelityMap: protectedLocal?.fidelityMap, compatibilityProfile: protectedLocal?.compatibilityProfile ?? work.compatibilityProfile ?? "strict-native",
+        };
+      }
+    }
     const local = replicas
       .filter((replica) => replica.kind === "local" && replica.payloadRef)
       .sort((left, right) => right.updatedAt - left.updatedAt)[0];
@@ -227,6 +242,44 @@ export const queueMaterialization = mutation({
     ]);
     if (!activeReplicaWriteTarget(local, mount, device))
       throw new Error("LOCAL_REPLICA_UNAVAILABLE");
+    const policy = await computeEffectivePolicy(ctx, actor.accountId, {
+      account: String(actor.accountId),
+      mount: String(local.mountId),
+      item: String(args.workId),
+    });
+    if (policy.protectedOriginal) {
+      const now = Date.now();
+      await ctx.db.patch(local._id, {
+        pendingPayloadRef: input.payloadRef,
+        pendingContentHash: input.contentHash,
+        pendingBaseRevision: input.baseRevision,
+        protectedOriginal: true,
+        state: "ahead",
+        updatedAt: now,
+      });
+      await ctx.db.patch(args.workId, {
+        pendingPayloadRef: input.payloadRef,
+        pendingContentHash: input.contentHash,
+        pendingBaseRevision: input.baseRevision,
+        protectedOriginal: true,
+        updatedAt: now,
+      });
+      await ctx.db.insert("syncOperations", {
+        accountId: actor.accountId,
+        workId: args.workId,
+        replicaId: local._id,
+        idempotencyKey: input.idempotencyKey,
+        direction: "cloud-to-local",
+        revisionBefore: input.baseRevision,
+        revisionAfter: input.contentHash,
+        state: "pending",
+        actorKind: "user",
+        errorCode: "protected-original-pending",
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { requestId: "protected-original" as const, state: "protected-pending" as const };
+    }
     if (local.revision !== input.baseRevision && !activeWrite)
       throw new Error("MATERIALIZATION_BASE_STALE");
     const effectiveBaseRevision = activeWrite?.targetRevision ?? local.revision;
@@ -279,6 +332,138 @@ export const queueMaterialization = mutation({
       updatedAt: now,
     });
     return { requestId, state: "pending" as const };
+  },
+});
+
+export const discardProtectedPending = mutation({
+  args: { workId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const work = await ctx.db.get(args.workId);
+    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    const locals = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).take(20);
+    const changed = locals.filter((replica) => replica.pendingPayloadRef).length;
+    await Promise.all(locals.filter((replica) => replica.pendingPayloadRef).map((replica) => ctx.db.patch(replica._id, {
+      pendingPayloadRef: undefined,
+      pendingContentHash: undefined,
+      pendingBaseRevision: undefined,
+      protectedOriginal: true,
+      state: "current",
+      updatedAt: Date.now(),
+    })));
+    const pendingOperations = await ctx.db.query("syncOperations")
+      .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
+      .order("desc")
+      .take(50);
+    await Promise.all(pendingOperations.filter((operation) => operation.errorCode === "protected-original-pending" && operation.state === "pending").map((operation) =>
+      ctx.db.patch(operation._id, { state: "failed", errorCode: "protected-original-discarded", updatedAt: Date.now() }),
+    ));
+    if (changed) {
+      await ctx.db.patch(args.workId, {
+        pendingPayloadRef: undefined,
+        pendingContentHash: undefined,
+        pendingBaseRevision: undefined,
+        protectedOriginal: true,
+        updatedAt: Date.now(),
+      });
+    }
+    return { discarded: changed };
+  },
+});
+
+export const applyProtectedPending = mutation({
+  args: { workId: v.id("spectraArtifacts"), idempotencyKey: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const work = await ctx.db.get(args.workId);
+    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    const local = (await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).take(20))
+      .find((replica) => replica.pendingPayloadRef);
+    if (!local?.pendingPayloadRef || !local.pendingContentHash || !local.pendingBaseRevision || !local.deviceId || !local.mountId || !local.localResourceId || !local.relativePath)
+      throw new Error("PROTECTED_PENDING_NOT_FOUND");
+    const payloadId = ctx.db.normalizeId("payloadObjects", local.pendingPayloadRef);
+    const payload = payloadId ? await ctx.db.get(payloadId) : null;
+    if (!payload || payload.accountId !== actor.accountId || payload.state !== "active" || payload.hash !== local.pendingContentHash)
+      throw new Error("PROTECTED_PENDING_PAYLOAD_INVALID");
+    const existing = await ctx.db.query("bridgeWriteRequests").withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", args.idempotencyKey)).unique();
+    if (existing) return { requestId: existing._id, state: existing.state };
+    const [mount, device] = await Promise.all([ctx.db.get(local.mountId), ctx.db.get(local.deviceId)]);
+    if (!activeReplicaWriteTarget(local, mount, device)) throw new Error("LOCAL_REPLICA_UNAVAILABLE");
+    const now = Date.now();
+    const requestId = await ctx.db.insert("bridgeWriteRequests", {
+      accountId: actor.accountId, workId: args.workId, replicaId: local._id, deviceId: local.deviceId, mountId: local.mountId,
+      localResourceId: local.localResourceId, relativePath: local.relativePath, payloadRef: local.pendingPayloadRef,
+      baseRevision: local.pendingBaseRevision, targetRevision: local.pendingContentHash, contentHash: local.pendingContentHash,
+      idempotencyKey: args.idempotencyKey, regionIds: [], partNames: [], state: "pending", createdAt: now, updatedAt: now,
+    });
+    await ctx.db.patch(local._id, {
+      payloadRef: local.pendingPayloadRef, contentHash: local.pendingContentHash, revision: local.pendingContentHash,
+      baseRevision: local.pendingBaseRevision, pendingPayloadRef: undefined, pendingContentHash: undefined,
+      pendingBaseRevision: undefined, protectedOriginal: false, state: "pending", updatedAt: now,
+    });
+    await ctx.db.patch(args.workId, {
+      pendingPayloadRef: undefined,
+      pendingContentHash: undefined,
+      pendingBaseRevision: undefined,
+      protectedOriginal: false,
+      updatedAt: now,
+    });
+    await ctx.db.insert("syncOperations", {
+      accountId: actor.accountId, workId: args.workId, replicaId: local._id, idempotencyKey: args.idempotencyKey,
+      direction: "cloud-to-local", revisionBefore: local.pendingBaseRevision, revisionAfter: local.pendingContentHash,
+      state: "pending", actorKind: "user", createdAt: now, updatedAt: now,
+    });
+    return { requestId, state: "pending" as const };
+  },
+});
+
+export const forkProtectedPending = mutation({
+  args: { workId: v.id("spectraArtifacts"), title: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const work = await ctx.db.get(args.workId);
+    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    const local = (await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).take(20))
+      .find((replica) => replica.pendingPayloadRef);
+    if (!local?.pendingPayloadRef || !local.pendingContentHash) throw new Error("PROTECTED_PENDING_NOT_FOUND");
+    const payloadId = ctx.db.normalizeId("payloadObjects", local.pendingPayloadRef);
+    const payload = payloadId ? await ctx.db.get(payloadId) : null;
+    if (!payload || payload.accountId !== actor.accountId || payload.state !== "active" || payload.hash !== local.pendingContentHash)
+      throw new Error("PROTECTED_PENDING_PAYLOAD_INVALID");
+    const now = Date.now();
+    const title = (args.title?.trim() || `${work.title} copy`).slice(0, 240);
+    const forkId = await ctx.db.insert("spectraArtifacts", {
+      ownerAccountId: actor.accountId, schoolId: work.schoolId, blueprintKey: work.blueprintKey,
+      resourceClass: work.resourceClass, nativeFormat: work.nativeFormat, compatibilityProfile: work.compatibilityProfile,
+      title, summary: work.summary, content: work.content, schemaVersion: work.schemaVersion,
+      contentHash: local.pendingContentHash, textIndex: work.textIndex, tags: work.tags, status: "active",
+      createdFrom: { source: "manual", sourceArtifactIds: [args.workId] }, createdAt: now, updatedAt: now,
+    });
+    await ctx.db.insert("workReplicas", {
+      accountId: actor.accountId, workId: forkId, kind: "cloud", nativeFormat: local.nativeFormat,
+      payloadRef: local.pendingPayloadRef, revision: local.pendingContentHash, contentHash: local.pendingContentHash,
+      baseRevision: local.pendingBaseRevision, state: "current", lastVerifiedAt: now, updatedAt: now,
+    });
+    await ctx.db.patch(local._id, {
+      pendingPayloadRef: undefined,
+      pendingContentHash: undefined,
+      pendingBaseRevision: undefined,
+      updatedAt: now,
+    });
+    await ctx.db.patch(args.workId, {
+      pendingPayloadRef: undefined,
+      pendingContentHash: undefined,
+      pendingBaseRevision: undefined,
+      protectedOriginal: true,
+      updatedAt: now,
+    });
+    if (work.schoolId) {
+      await placeSourceNode(ctx, { accountId: actor.accountId, schoolId: work.schoolId, kind: "work", sourceId: String(forkId), name: title, target: {}, placedByAccountId: actor.accountId, typeKey: work.blueprintKey });
+    }
+    return { forked: true as const, workId: forkId };
   },
 });
 

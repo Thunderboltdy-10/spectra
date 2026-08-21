@@ -339,8 +339,23 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         let registration = discover_resource(&deployment, &credential, &mount_id, resource)
             .await
             .map_err(|error| error.to_string())?;
+        if registration.skipped {
+            set_mount_status(
+                journal,
+                &grant.id,
+                "waiting",
+                registration.reason.as_deref().unwrap_or("Waiting for approval in Spectra"),
+                index + 1,
+                files.len(),
+            )?;
+            continue;
+        }
         if registration.needs_payload && ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].contains(&resource.native_format.as_str())
         {
+            let replica_id = registration
+                .replica_id
+                .as_deref()
+                .ok_or_else(|| "Bridge registration returned no replica id".to_string())?;
             let relative = std::path::Path::new(&resource.relative_path);
             if relative.is_absolute()
                 || relative.components().any(|part| {
@@ -383,7 +398,7 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             upload_resource_payload(
                 &deployment,
                 &credential,
-                &registration.replica_id,
+                replica_id,
                 &bytes,
                 &hash,
                 media_type,

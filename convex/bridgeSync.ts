@@ -6,6 +6,9 @@ import { createFolderNode, placeSourceNode, purgeSourceNodes, trashNode } from "
 import { z } from "zod";
 import { chooseReplicaContinuity } from "./bridgeIdentity";
 import { activeReplicaWriteTarget } from "./bridgeIdentity";
+import { computeEffectivePolicy } from "./syncPolicy";
+import { policyIncludesPath } from "../shared/sync-policy";
+import { policyAllowsTrigger } from "../shared/sync-policy";
 
 async function digest(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -53,6 +56,8 @@ export const discoverResource = mutation({
     const mount = await ctx.db.get(args.mountId);
     if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || !mount.rootOrgNodeId || mount.state !== "active") throw new Error("MOUNT_NOT_ACTIVE");
     const input = z.object({ localResourceId: z.string().regex(/^lr_[a-f0-9]+$/), relativePath: z.string().min(1).max(1024).refine((value) => !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes("..")), size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), contentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), nativeFormat: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/) }).parse(args);
+    const policy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id) });
+    const nativePayloadAllowed = policy.cloudContent === "full";
     const byResource = await ctx.db.query("workReplicas").withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId)).take(20);
     const byPath = await ctx.db.query("workReplicas").withIndex("by_device_mount_path", (q) => q.eq("deviceId", device._id).eq("mountId", mount._id).eq("relativePath", input.relativePath)).take(20);
     const candidates = [...byResource, ...byPath].filter((candidate, index, all) => all.findIndex((entry) => entry._id === candidate._id) === index);
@@ -67,12 +72,14 @@ export const discoverResource = mutation({
     })));
     if (existingReplica) {
       const changed = Boolean(input.contentHash && input.contentHash !== existingReplica.contentHash);
+      const verifiedAt = Date.now();
       await ctx.db.patch(existingReplica._id, {
         mountId: mount._id,
         localResourceId: input.localResourceId,
         relativePath: input.relativePath,
         ...(changed ? { state: "ahead" as const } : {}),
-        updatedAt: Date.now(),
+        lastVerifiedAt: input.contentHash ? verifiedAt : existingReplica.lastVerifiedAt,
+        updatedAt: verifiedAt,
       });
       for (const duplicate of candidates.filter((candidate) => candidate._id !== existingReplica._id)) {
         const duplicateCloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", duplicate.workId).eq("kind", "cloud")).first();
@@ -86,9 +93,14 @@ export const discoverResource = mutation({
         replicaId: existingReplica._id,
         revision: existingReplica.revision,
         payloadHash: existingReplica.contentHash,
-        needsPayload: ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].includes(input.nativeFormat) &&
+        needsPayload: nativePayloadAllowed && ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].includes(input.nativeFormat) &&
           (!existingReplica.payloadRef || input.contentHash !== existingReplica.contentHash),
       };
+    }
+    if (policy.source.kind !== "default") {
+      if (!policyIncludesPath(policy, input.relativePath)) return { skipped: true as const, reason: "filtered" as const };
+      if (policy.discovery === "explicit") return { skipped: true as const, reason: "explicit-only" as const };
+      if (policy.discovery === "ask") return { skipped: true as const, reason: "approval-required" as const };
     }
     const parts = input.relativePath.replaceAll("\\", "/").split("/").filter(Boolean);
     const title = parts.pop()!;
@@ -102,7 +114,7 @@ export const discoverResource = mutation({
       replicaId,
       revision: input.contentHash ?? `discovered:${input.localResourceId}`,
       payloadHash: undefined,
-      needsPayload: ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].includes(input.nativeFormat),
+      needsPayload: nativePayloadAllowed && ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].includes(input.nativeFormat),
     };
   },
 });
@@ -125,6 +137,9 @@ export const beginPayloadUpload = mutation({
     const replica = await ctx.db.get(args.replicaId);
     if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id)
       throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
+    const policy = await computeEffectivePolicy(ctx, device.accountId, { account: String(device.accountId), mount: replica.mountId ? String(replica.mountId) : undefined, item: String(replica.workId) });
+    if (policy.source.kind !== "default" && policy.cloudContent !== "full")
+      throw new Error(policy.cloudContent === "none" ? "CLOUD_CONTENT_DISABLED" : "CLOUD_CONTENT_METADATA_ONLY");
     const existing = await ctx.db.query("payloadObjects")
       .withIndex("by_account_hash", (q) => q.eq("accountId", device.accountId).eq("hash", input.hash))
       .unique();
@@ -470,14 +485,16 @@ export const reportRevision = mutation({
     const input = z.object({ credential: z.string().min(32).max(256), idempotencyKey: z.string().uuid(), revisionBefore: z.string().min(1).max(200), revisionAfter: z.string().min(1).max(200), contentHash: z.string().regex(/^[a-f0-9]{64}$/) }).parse(args);
     const { device } = await requireDevice(ctx, input.credential);
     const replica = await ctx.db.get(args.replicaId); if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id) throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
+    const policy = await computeEffectivePolicy(ctx, device.accountId, { account: String(device.accountId), mount: replica.mountId ? String(replica.mountId) : undefined, item: String(replica.workId) });
     const existing = await ctx.db.query("syncOperations").withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", input.idempotencyKey)).unique(); if (existing) return { state: existing.state, operationId: existing._id };
     const now = Date.now();
     if (replica.revision !== input.revisionBefore) {
       const operationId = await ctx.db.insert("syncOperations", { accountId: device.accountId, workId: replica.workId, replicaId: replica._id, idempotencyKey: input.idempotencyKey, direction: "local-to-cloud", revisionBefore: input.revisionBefore, revisionAfter: input.revisionAfter, state: "conflicted", actorKind: "external-edit", errorCode: "stale-revision", createdAt: now, updatedAt: now });
       await ctx.db.patch(replica._id, { state: "diverged", updatedAt: now }); return { state: "conflicted" as const, operationId };
     }
-    const operationId = await ctx.db.insert("syncOperations", { accountId: device.accountId, workId: replica.workId, replicaId: replica._id, idempotencyKey: input.idempotencyKey, direction: "local-to-cloud", revisionBefore: input.revisionBefore, revisionAfter: input.revisionAfter, state: "verified", actorKind: "external-edit", createdAt: now, updatedAt: now });
-    await ctx.db.patch(replica._id, { revision: input.revisionAfter, baseRevision: input.revisionBefore, contentHash: input.contentHash, state: "current", lastVerifiedAt: now, updatedAt: now });
-    await ctx.db.patch(device._id, { lastSeenAt: now }); return { state: "verified" as const, operationId };
+    const deferred = policy.source.kind !== "default" && !policyAllowsTrigger(policy.timing, "watch");
+    const operationId = await ctx.db.insert("syncOperations", { accountId: device.accountId, workId: replica.workId, replicaId: replica._id, idempotencyKey: input.idempotencyKey, direction: "local-to-cloud", revisionBefore: input.revisionBefore, revisionAfter: input.revisionAfter, state: deferred ? "pending" : "verified", actorKind: "external-edit", createdAt: now, updatedAt: now });
+    await ctx.db.patch(replica._id, { revision: input.revisionAfter, baseRevision: input.revisionBefore, contentHash: input.contentHash, state: deferred ? "ahead" : "current", lastVerifiedAt: deferred ? replica.lastVerifiedAt : now, updatedAt: now });
+    await ctx.db.patch(device._id, { lastSeenAt: now }); return { state: deferred ? "pending" as const : "verified" as const, operationId };
   },
 });

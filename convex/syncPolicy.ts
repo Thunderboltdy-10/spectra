@@ -189,6 +189,25 @@ export const override = mutation({
   },
 });
 
+export const overrideAccount = mutation({
+  args: { values: v.object(policyValues), idempotencyKey: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const scopeId = String(actor.accountId);
+    const existingChange = await ctx.db.query("syncPolicyChanges").withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", args.idempotencyKey)).unique();
+    if (existingChange) return { changed: false, changeId: existingChange._id };
+    const existing = await ctx.db.query("syncPolicies").withIndex("by_account_scope", (q) => q.eq("accountId", actor.accountId).eq("scopeKind", "account").eq("scopeId", scopeId)).unique();
+    const now = Date.now();
+    const next = { ...args.values, includeGlobs: [...new Set(args.values.includeGlobs.map((glob) => glob.trim()).filter(Boolean))], excludeGlobs: [...new Set(args.values.excludeGlobs.map((glob) => glob.trim()).filter(Boolean))] };
+    const policyId = existing
+      ? (await ctx.db.patch(existing._id, { ...next, updatedAt: now }), existing._id)
+      : await ctx.db.insert("syncPolicies", { accountId: actor.accountId, scopeKind: "account", scopeId, ...next, createdAt: now, updatedAt: now });
+    const changeId = await ctx.db.insert("syncPolicyChanges", { accountId: actor.accountId, scopeKind: "account", scopeId, action: "override", before: policySnapshot(existing), after: policySnapshot(next), actorKind: "user", idempotencyKey: args.idempotencyKey, createdAt: now });
+    return { changed: true, policyId, changeId };
+  },
+});
+
 export const revert = mutation({
   args: { scopeKind, scopeId: v.string(), idempotencyKey: v.string() },
   handler: async (ctx, args) => {

@@ -1273,6 +1273,8 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
       currentVersion:
         typeKey === "document"
           ? 2
+          : typeKey === "sheets"
+            ? 4
           : typeKey === "flashcard_deck" ||
               typeKey === "quiz" ||
               typeKey === "planner_task"

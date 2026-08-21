@@ -46,6 +46,10 @@ export type PresentationSlide = {
   };
   citations?: Array<{ id: string; label: string; url?: string }>;
   accessibility?: { label?: string; readingOrder?: string[] };
+  nativeCompatibility?: {
+    transition?: "preserved";
+    animations?: "preserved";
+  };
 };
 
 export type PresentationContent = {
@@ -67,6 +71,13 @@ export type PresentationContent = {
     defaultTransition?: "none" | "fade" | "push" | "dissolve";
     autoAdvanceSeconds?: number;
     showSlideNumbers?: boolean;
+  };
+  nativeBinding?: {
+    version: 1;
+    format: "pptx" | "pptm" | "potx" | "potm" | "ppsx" | "ppsm" | "ppam";
+    profile: "strict-native" | "enhanced" | "spectra-native";
+    macroEnabled: boolean;
+    semanticDigest: string;
   };
 };
 
@@ -324,9 +335,7 @@ export function normalizePresentationContent(
                   ...(typeof sourceBinding.versionId === "string" &&
                   sourceBinding.versionId.trim()
                     ? {
-                        versionId: sourceBinding.versionId
-                          .trim()
-                          .slice(0, 180),
+                        versionId: sourceBinding.versionId.trim().slice(0, 180),
                       }
                     : {}),
                   ...(typeof sourceBinding.live === "boolean"
@@ -397,6 +406,7 @@ export function normalizePresentationContent(
         delete object.parentId;
     });
     const transition = record(slide.transition);
+    const nativeCompatibility = record(slide.nativeCompatibility);
     const accessibility = record(slide.accessibility);
     const citations = Array.isArray(slide.citations)
       ? slide.citations.flatMap((citation, citationIndex) => {
@@ -477,9 +487,60 @@ export function normalizePresentationContent(
               },
             }
           : {}),
+        ...(nativeCompatibility.transition === "preserved" ||
+        nativeCompatibility.animations === "preserved"
+          ? {
+              nativeCompatibility: {
+                ...(nativeCompatibility.transition === "preserved"
+                  ? { transition: "preserved" as const }
+                  : {}),
+                ...(nativeCompatibility.animations === "preserved"
+                  ? { animations: "preserved" as const }
+                  : {}),
+              },
+            }
+          : {}),
       } satisfies PresentationSlide,
     ];
   });
+  const nativeBindingSource = record(input.nativeBinding);
+  const nativeFormat = [
+    "pptx",
+    "pptm",
+    "potx",
+    "potm",
+    "ppsx",
+    "ppsm",
+    "ppam",
+  ].includes(String(nativeBindingSource.format))
+    ? (nativeBindingSource.format as NonNullable<
+        PresentationContent["nativeBinding"]
+      >["format"])
+    : undefined;
+  const nativeProfile = [
+    "strict-native",
+    "enhanced",
+    "spectra-native",
+  ].includes(String(nativeBindingSource.profile))
+    ? (nativeBindingSource.profile as NonNullable<
+        PresentationContent["nativeBinding"]
+      >["profile"])
+    : undefined;
+  const nativeBinding =
+    nativeBindingSource.version === 1 &&
+    nativeFormat &&
+    nativeProfile &&
+    typeof nativeBindingSource.macroEnabled === "boolean" &&
+    typeof nativeBindingSource.semanticDigest === "string" &&
+    /^[a-f0-9]{64}$/.test(nativeBindingSource.semanticDigest)
+      ? {
+          version: 1 as const,
+          format: nativeFormat,
+          profile: nativeProfile,
+          macroEnabled: nativeBindingSource.macroEnabled,
+          semanticDigest: nativeBindingSource.semanticDigest,
+        }
+      : undefined;
   return {
     theme: {
       id: text(theme.id, "spectra-default"),
@@ -563,5 +624,6 @@ export function normalizePresentationContent(
         : {}),
       showSlideNumbers: settings.showSlideNumbers !== false,
     },
+    ...(nativeBinding ? { nativeBinding } : {}),
   };
 }

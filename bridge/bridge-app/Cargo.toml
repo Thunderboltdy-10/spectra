@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 hex.workspace = true
 reqwest.workspace = true
 sha2.workspace = true

@@ -39,6 +39,30 @@ export const confirmPairing = mutation({
   },
 });
 
+export const resumePairing = mutation({
+  args: { credential: v.string(), challenge: v.string(), shortCode: v.string(), deviceName: v.string(), platform: v.string(), appVersion: v.string(), protocolVersion: v.string() },
+  handler: async (ctx, args) => {
+    const challengeHash = await digest(z.string().min(32).max(256).parse(args.challenge));
+    const credentialHash = await digest(z.string().min(32).max(256).parse(args.credential));
+    const [row, device] = await Promise.all([
+      ctx.db.query("bridgePairingChallenges").withIndex("by_challenge_hash", (q) => q.eq("challengeHash", challengeHash)).unique(),
+      ctx.db.query("bridgeDevices").withIndex("by_credential_hash", (q) => q.eq("credentialHash", credentialHash)).unique(),
+    ]);
+    if (!row || row.expiresAt <= Date.now() || row.consumedAt || row.shortCode !== args.shortCode) throw new Error("PAIRING_CHALLENGE_INVALID");
+    if (!device || device.state !== "active" || device.accountId !== row.accountId) throw new Error("BRIDGE_CREDENTIAL_INVALID");
+    const now = Date.now();
+    await ctx.db.patch(device._id, {
+      name: z.string().trim().min(1).max(80).parse(args.deviceName),
+      platform: z.string().trim().min(1).max(40).parse(args.platform),
+      protocolVersion: z.string().regex(/^\d+\.\d+$/).parse(args.protocolVersion),
+      appVersion: z.string().trim().min(1).max(40).parse(args.appVersion),
+      lastSeenAt: now,
+    });
+    await ctx.db.patch(row._id, { confirmedAt: now, consumedAt: now });
+    return { deviceId: device._id, browserOrigin: row.browserOrigin };
+  },
+});
+
 export const devices = query({ args: {}, handler: async (ctx) => { const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED"); return ctx.db.query("bridgeDevices").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).take(50); } });
 
 export const overview = query({ args: {}, handler: async (ctx) => {
@@ -47,6 +71,23 @@ export const overview = query({ args: {}, handler: async (ctx) => {
   const mounts = await ctx.db.query("bridgeMounts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).take(200);
   return { devices: devices.map(({ credentialHash: _credentialHash, ...device }) => device), mounts };
 } });
+
+export const activeMounts = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const mounts = await ctx.db.query("bridgeMounts")
+      .withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active"))
+      .take(50);
+    const active: typeof mounts = [];
+    for (const mount of mounts) {
+      const device = await ctx.db.get(mount.deviceId);
+      if (device?.state === "active") active.push(mount);
+    }
+    return active;
+  },
+});
 
 export const registerMount = mutation({
   args: { deviceId: v.id("bridgeDevices"), rootLabel: v.string(), grantId: v.string(), fileCount: v.number(), doubleSyncRisk: v.boolean() },
@@ -61,4 +102,22 @@ export const registerMount = mutation({
   },
 });
 
-export const revokeDevice = mutation({ args: { deviceId: v.id("bridgeDevices") }, handler: async (ctx, { deviceId }) => { const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED"); const device = await ctx.db.get(deviceId); if (!device || device.accountId !== actor.accountId) throw new Error("BRIDGE_DEVICE_INVALID"); await ctx.db.patch(deviceId, { state: "revoked", credentialHash: `revoked:${crypto.randomUUID()}`, lastSeenAt: Date.now() }); const replicas = await ctx.db.query("workReplicas").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId)).filter((q) => q.eq(q.field("deviceId"), deviceId)).take(2_000); for (const replica of replicas) await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: "device-revoked", updatedAt: Date.now() }); } });
+export const revokeDevice = mutation({ args: { deviceId: v.id("bridgeDevices") }, handler: async (ctx, { deviceId }) => {
+  const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+  const device = await ctx.db.get(deviceId); if (!device || device.accountId !== actor.accountId) throw new Error("BRIDGE_DEVICE_INVALID");
+  const now = Date.now();
+  await ctx.db.patch(deviceId, { state: "revoked", credentialHash: `revoked:${crypto.randomUUID()}`, lastSeenAt: now });
+  const [replicas, mounts, pending, claimed] = await Promise.all([
+    ctx.db.query("workReplicas").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId)).filter((q) => q.eq(q.field("deviceId"), deviceId)).take(2_000),
+    ctx.db.query("bridgeMounts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).filter((q) => q.eq(q.field("deviceId"), deviceId)).take(500),
+    ctx.db.query("bridgeWriteRequests").withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", "pending")).take(2_000),
+    ctx.db.query("bridgeWriteRequests").withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", "claimed")).take(2_000),
+  ]);
+  for (const replica of replicas) await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: "device-revoked", updatedAt: now });
+  for (const mount of mounts) await ctx.db.patch(mount._id, { state: "revoked", updatedAt: now });
+  for (const request of [...pending, ...claimed]) {
+    await ctx.db.patch(request._id, { state: "failed", errorCode: "device-revoked", errorMessage: "The target Bridge device was revoked.", updatedAt: now });
+    const operation = await ctx.db.query("syncOperations").withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey)).unique();
+    if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "device-revoked", updatedAt: now });
+  }
+} });

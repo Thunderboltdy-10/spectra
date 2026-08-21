@@ -114,17 +114,42 @@ export const ensureRoom = mutation({
         requestedVersion > existing.schemaVersion &&
         capabilities.includes("modify")
       ) {
+        const [updates, snapshots, policyVersion] = await Promise.all([
+          ctx.db
+            .query("collaborationUpdates")
+            .withIndex("by_room_sequence", (q) => q.eq("roomId", existing._id))
+            .collect(),
+          ctx.db
+            .query("collaborationSnapshots")
+            .withIndex("by_room_sequence", (q) => q.eq("roomId", existing._id))
+            .collect(),
+          bumpPolicyVersion(
+            ctx,
+            "artifact",
+            artifact._id,
+            artifact.schoolId,
+            artifact.ownerAccountId,
+          ),
+        ]);
+        await Promise.all([
+          ...updates.map((update) => ctx.db.delete(update._id)),
+          ...snapshots.map((snapshot) => ctx.db.delete(snapshot._id)),
+        ]);
         await ctx.db.patch(existing._id, {
           schemaVersion: requestedVersion,
+          policyVersion,
+          nextSequence: 1,
+          snapshotSequence: 0,
+          uncompactedBytes: 0,
           updatedAt: Date.now(),
         });
         await ctx.db.patch(artifact._id, { schemaVersion: requestedVersion });
         return {
           roomId: existing._id,
           provider: existing.provider,
-          policyVersion: migrationPolicyVersion ?? existing.policyVersion,
+          policyVersion,
           schemaVersion: requestedVersion,
-          nextSequence: existing.nextSequence,
+          nextSequence: 1,
         };
       }
       if (migrated) {

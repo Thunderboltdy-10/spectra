@@ -21,6 +21,7 @@ import {
   Circle,
   Code2,
   Copy,
+  Download,
   Eye,
   FileDown,
   FileText,
@@ -3252,10 +3253,9 @@ function ArtifactStudioEditor({
     !(permissionReadOnly && artifact.blueprintKey === "quiz"),
     artifact.aiState === "edited" && artifact.aiRunId
       ? `${artifact.aiRunId}:${artifact.updatedAt}`
-      : artifact.blueprintKey === "document" &&
-          ["docx", "docm", "dotx", "dotm"].includes(
-            artifact.nativeFormat?.toLowerCase() ?? "",
-          )
+      : ["document", "sheets", "presentation"].includes(
+            artifact.blueprintKey,
+          ) && artifact.nativeFormat
         ? String(artifact.updatedAt)
         : null,
   );
@@ -3362,6 +3362,8 @@ function ArtifactStudioEditor({
     | { state: "pending"; hash: string }
   >();
   const [nativeAttribution, setNativeAttribution] = useState<string>();
+  const [nativeRecoveryBusy, setNativeRecoveryBusy] = useState<"download" | "materialize" | null>(null);
+  const [nativeRecoveryError, setNativeRecoveryError] = useState<string>();
   const [nativeConflict, setNativeConflict] = useState<{
     regionIds: string[];
     message: string;
@@ -3424,11 +3426,25 @@ function ArtifactStudioEditor({
   const reconciliationFrameRef = useRef<number | null>(null);
   const nativeBodyBinding =
     artifact.blueprintKey === "document" || artifact.blueprintKey === "code";
+  const nativeOfficeDocument = [
+    "docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm",
+    "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam",
+  ].includes(artifact.nativeFormat?.toLowerCase() ?? "");
+  const nativePortableArtifact = nativeOfficeDocument || [
+    "flashcard_deck", "quiz", "planner_task", "agent", "whiteboard", "presentation",
+  ].includes(artifact.blueprintKey);
   const nativeWordDocument =
     artifact.blueprintKey === "document" &&
     ["docx", "docm", "dotx", "dotm"].includes(
       artifact.nativeFormat?.toLowerCase() ?? "",
     );
+  const nativeOfficeApplication = nativeWordDocument
+    ? "Word"
+    : artifact.blueprintKey === "sheets"
+      ? "Excel"
+      : artifact.blueprintKey === "presentation"
+        ? "PowerPoint"
+        : "Office";
   const incomingLiveContent = nativeBodyBinding ? null : live.liveValue.content;
   const incomingLiveTagDraft = live.liveValue.tags.join(", ");
   const incomingSnapshot = useMemo(
@@ -3456,11 +3472,14 @@ function ArtifactStudioEditor({
     [content, summary, tagDraft, title],
   );
   useEffect(() => {
-    if (!nativeWordDocument || nativeLensRefreshRef.current === artifact._id)
+    if (!nativeOfficeDocument || nativeLensRefreshRef.current === artifact._id)
       return;
     nativeLensRefreshRef.current = artifact._id;
     let cancelled = false;
-    void fetch("/api/spectra/lenses/docx", {
+    const endpoint = nativeWordDocument
+      ? "/api/spectra/lenses/docx"
+      : "/api/spectra/lenses/office";
+    void fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "open", artifactId: artifact._id }),
@@ -3479,7 +3498,7 @@ function ArtifactStudioEditor({
     return () => {
       cancelled = true;
     };
-  }, [artifact._id, nativeWordDocument]);
+  }, [artifact._id, nativeOfficeDocument, nativeWordDocument]);
   useEffect(() => {
     if (
       !nativeWordDocument ||
@@ -3526,11 +3545,14 @@ function ArtifactStudioEditor({
   ]);
   const queueNativeMaterialization = useCallback(
     async (snapshot: { content?: unknown }) => {
-      if (!nativeWordDocument) return;
+      if (!nativeOfficeDocument) return;
       setNativeMaterialization({ state: "queueing" });
       setNativeWriteError(undefined);
       try {
-        const response = await fetch("/api/spectra/lenses/docx", {
+        const endpoint = nativeWordDocument
+          ? "/api/spectra/lenses/docx"
+          : "/api/spectra/lenses/office";
+        const response = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -3563,8 +3585,53 @@ function ArtifactStudioEditor({
         );
       }
     },
-    [artifact._id, nativeWordDocument],
+    [artifact._id, nativeOfficeDocument, nativeWordDocument],
   );
+  const downloadNativeCopy = useCallback(async () => {
+    if (!nativePortableArtifact) return;
+    setNativeRecoveryBusy("download");
+    setNativeRecoveryError(undefined);
+    try {
+      const response = await fetch(`/api/spectra/native?artifactId=${encodeURIComponent(artifact._id)}`, { cache: "no-store" });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null) as { message?: string } | null;
+        throw new Error(result?.message ?? "The retained native copy is unavailable.");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+      const name = match ? decodeURIComponent(match[1]!) : `${artifact.title}.spectra-pkg`;
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = name;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      setNativeAttribution("Downloaded a verified native copy");
+    } catch (error) {
+      setNativeRecoveryError(error instanceof Error ? error.message : "The retained native copy is unavailable.");
+    } finally {
+      setNativeRecoveryBusy(null);
+    }
+  }, [artifact._id, artifact.title, nativePortableArtifact]);
+  const materializeNativeCopy = useCallback(async () => {
+    if (!nativePortableArtifact) return;
+    setNativeRecoveryBusy("materialize");
+    setNativeRecoveryError(undefined);
+    try {
+      const response = await fetch("/api/spectra/native", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artifactId: artifact._id }),
+      });
+      const result = await response.json().catch(() => null) as { message?: string; state?: string; relativePath?: string } | null;
+      if (!response.ok) throw new Error(result?.message ?? "The native copy could not be queued on this device.");
+      setNativeAttribution(result?.state === "existing" ? "This work already has a local replica" : `Queued a local copy${result?.relativePath ? ` at ${result.relativePath}` : ""}`);
+    } catch (error) {
+      setNativeRecoveryError(error instanceof Error ? error.message : "The native copy could not be queued on this device.");
+    } finally {
+      setNativeRecoveryBusy(null);
+    }
+  }, [artifact._id, nativePortableArtifact]);
   const synchronizeDraft = useCallback(
     async (snapshot = currentSnapshotRef.current) => {
       if (
@@ -3592,16 +3659,11 @@ function ArtifactStudioEditor({
           if (hadPendingTransportUpdate) {
             setBaseline(snapshot);
             setLiveConflict(null);
-            // The user may continue editing while the transport retry is in
-            // flight (spreadsheet paste/data entry makes this easy to hit).
-            // Only clear local intent when the synchronized snapshot is still
-            // the current one; otherwise an older acknowledgement can make a
-            // subsequent remote snapshot erase newer cells.
-            if (
-              snapshotKey(currentSnapshotRef.current) === snapshotKey(snapshot)
-            )
-              userHasEditedRef.current = false;
-            return true;
+            // A successful transport retry only persists the semantic Yjs
+            // update. Native Office files are a separate verified replica and
+            // still need to pass through the lens materializer below. Returning
+            // here left Sheets/Slides visibly edited in Spectra while never
+            // creating the Bridge write request.
           }
         }
         const nextLiveValue = {
@@ -5430,11 +5492,11 @@ function ArtifactStudioEditor({
   }, [artifact.blueprintKey, readOnly, setActivePresence]);
 
   const applyExternalProjection = useCallback(
-    async (projection: unknown, attribution = "Edited in Word") => {
+    async (projection: unknown, attribution = `Edited in ${nativeOfficeApplication}`) => {
       const nextValue = { ...live.liveValue, content: projection };
       const applied = await live.synchronize(nextValue);
       if (applied && "applied" in applied && applied.applied === false)
-        throw new Error("The Word edit overlaps an active collaborator region.");
+        throw new Error(`The ${nativeOfficeApplication} edit overlaps an active collaborator region.`);
       const snapshot = {
         ...currentSnapshotRef.current,
         content: projection,
@@ -5450,20 +5512,32 @@ function ArtifactStudioEditor({
         reconcilingRemoteRef.current = false;
       });
     },
-    [live],
+    [live, nativeOfficeApplication],
   );
 
   const reconcileNativeRevision = useCallback(
     async (resolution?: "word" | "spectra") => {
-      const response = await fetch("/api/spectra/lenses/docx", {
+      const response = await fetch(
+        nativeWordDocument
+          ? "/api/spectra/lenses/docx"
+          : "/api/spectra/lenses/office",
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "reconcile",
           artifactId: artifact._id,
-          ...(resolution ? { resolution } : {}),
+          ...(resolution
+            ? {
+                resolution:
+                  resolution === "word" && !nativeWordDocument
+                    ? "local"
+                    : resolution,
+              }
+            : {}),
         }),
-      });
+      },
+      );
       const result = (await response.json().catch(() => null)) as
         | {
             state?: string;
@@ -5476,19 +5550,19 @@ function ArtifactStudioEditor({
         | null;
       if (!response.ok)
         throw new Error(
-          result?.message ?? "The Word edit could not be reconciled safely.",
+          result?.message ?? `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
         );
       if (result?.state === "applied" && result.projection)
         await applyExternalProjection(
           result.projection,
-          result.attribution ?? "Edited in Word",
+          result.attribution ?? `Edited in ${nativeOfficeApplication}`,
         );
       else if (result?.state === "conflicted")
         setNativeConflict({
           regionIds: result.conflict?.regionIds ?? [],
           message:
             result.conflict?.message ??
-            "Word and Spectra changed the same document region.",
+            `${nativeOfficeApplication} and Spectra changed the same work region.`,
         });
       else if (resolution === "spectra") {
         setNativeConflict(null);
@@ -5498,14 +5572,19 @@ function ArtifactStudioEditor({
       }
       setNativeWriteError(undefined);
     },
-    [applyExternalProjection, artifact._id],
+    [applyExternalProjection, artifact._id, nativeOfficeApplication, nativeWordDocument],
   );
 
-  const nativeLocalReplica = nativeWordDocument
-    ? replicaTruth?.replicas.find((replica) => replica.kind === "local")
+  const nativeLocalReplica = nativeOfficeDocument
+    ? replicaTruth?.replicas
+        .filter(
+          (replica) =>
+            replica.kind === "local" && replica.state !== "unavailable",
+        )
+        .sort((left, right) => right.updatedAt - left.updatedAt)[0]
     : undefined;
   useEffect(() => {
-    if (!nativeWordDocument || !nativeLocalReplica) return;
+    if (!nativeOfficeDocument || !nativeLocalReplica) return;
     const previousRevision = nativeLocalRevisionRef.current;
     nativeLocalRevisionRef.current = nativeLocalReplica.revision;
     if (
@@ -5527,7 +5606,7 @@ function ArtifactStudioEditor({
         setNativeWriteError(
           error instanceof Error
             ? error.message
-            : "The Word edit could not be reconciled safely.",
+            : `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
         );
       });
     }, 360);
@@ -5537,7 +5616,8 @@ function ArtifactStudioEditor({
     live.unsynchronizedChanges,
     nativeLocalReplica,
     nativeMaterialization,
-    nativeWordDocument,
+    nativeOfficeApplication,
+    nativeOfficeDocument,
     reconcileNativeRevision,
   ]);
   useEffect(() => {
@@ -5561,7 +5641,7 @@ function ArtifactStudioEditor({
     nativeLocalReplica?.state === "diverged"
       ? `${nativeLocalReplica.state}:${nativeLocalReplica.revision}`
       : undefined;
-  const persistedNativeConflict = nativeWordDocument
+  const persistedNativeConflict = nativeOfficeDocument
     ? replicaTruth?.conflicts[0]
     : undefined;
   useEffect(() => {
@@ -5572,15 +5652,16 @@ function ArtifactStudioEditor({
       current ?? {
         regionIds: persistedNativeConflict.regionIds,
         message: regionCount
-          ? `Word and Spectra changed ${regionCount === 1 ? "the same document region" : `${regionCount} overlapping document regions`}. Choose which version to keep.`
+          ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same work region" : `${regionCount} overlapping work regions`}. Choose which version to keep.`
           : preservedPartCount
-            ? `Word and Spectra changed the same preserved document content. Choose which version to keep.`
-            : "Word and Spectra changed this document independently. Choose which version to keep.",
+            ? `${nativeOfficeApplication} and Spectra changed the same preserved native content. Choose which version to keep.`
+            : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
       },
     );
-  }, [persistedNativeConflict]);
+  }, [nativeOfficeApplication, persistedNativeConflict]);
   useEffect(() => {
     if (
+      !nativeOfficeDocument ||
       !reconcilableLocalRevision ||
       dirty ||
       live.unsynchronizedChanges > 0 ||
@@ -5593,7 +5674,7 @@ function ArtifactStudioEditor({
         setNativeWriteError(
           error instanceof Error
             ? error.message
-            : "The Word edit could not be reconciled safely.",
+            : `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
         );
       });
     }, 360);
@@ -5603,6 +5684,8 @@ function ArtifactStudioEditor({
     dirty,
     live.unsynchronizedChanges,
     reconcileNativeRevision,
+    nativeOfficeApplication,
+    nativeOfficeDocument,
   ]);
   const nativeFidelity = useMemo(() => {
     const entries = replicaTruth?.replicas.flatMap((replica) => {
@@ -5915,6 +5998,16 @@ function ArtifactStudioEditor({
               />
             ) : null}
             <WorkbarMore label="More work actions">
+              {nativePortableArtifact ? (
+                <>
+                  <button type="button" className={workbarMenuItemClass()} disabled={nativeRecoveryBusy !== null} onClick={() => void downloadNativeCopy()}>
+                    <FileDown className="h-4 w-4" /> {nativeRecoveryBusy === "download" ? "Preparing copy…" : "Download native copy"}
+                  </button>
+                  <button type="button" className={workbarMenuItemClass()} disabled={nativeRecoveryBusy !== null} onClick={() => void materializeNativeCopy()}>
+                    <Download className="h-4 w-4" /> {nativeRecoveryBusy === "materialize" ? "Queueing local copy…" : "Create local replica"}
+                  </button>
+                </>
+              ) : null}
               {onShare ? (
                 <button
                   type="button"
@@ -6075,7 +6168,7 @@ function ArtifactStudioEditor({
                 )
               }
             >
-              Keep Word version
+              Keep {nativeOfficeApplication} version
             </button>
           </div>
         </div>
@@ -6086,9 +6179,14 @@ function ArtifactStudioEditor({
         >
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />
           <span className="min-w-0 flex-1">
-            {nativeWriteError} Your Spectra edit is still saved; the Word file
+            {nativeWriteError} Your Spectra edit is still saved; the {nativeOfficeApplication} file
             has not been reported as updated.
           </span>
+        </div>
+      ) : nativeRecoveryError ? (
+        <div role="alert" className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />
+          <span>{nativeRecoveryError}</span>
         </div>
       ) : nativeAttribution ? (
         <div

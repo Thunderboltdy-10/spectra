@@ -45,6 +45,7 @@ export function useArtifactLiveModel(
     "root",
     manifest?.schemas.currentVersion ?? 1,
     realtimeProviderForWorkType(typeKey),
+    typeKey,
   );
   const model = useMemo(
     () =>

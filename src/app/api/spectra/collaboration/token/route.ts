@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
+  collaborationDocumentName,
   collaborationProtocolVersion,
   signCollaborationSession,
 } from "@/lib/collaboration-token";
@@ -65,7 +66,11 @@ export async function POST(request: NextRequest) {
       throw new Error(
         "COLLABORATION_SESSION_FORBIDDEN: You no longer have access to this artifact.",
       );
-    const documentName = `artifact:${artifactId}:${Buffer.from(partitionKey).toString("base64url")}`;
+    const documentName = collaborationDocumentName(
+      artifactId,
+      partitionKey,
+      artifact.blueprintKey,
+    );
     const token = await signCollaborationSession({
       artifactId,
       roomId: room.roomId,

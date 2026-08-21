@@ -1,0 +1,95 @@
+import type { Id } from "../../../../convex/_generated/dataModel";
+import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { sha256Payload } from "./docx-lens";
+
+export const nativeMediaTypes: Record<string, string> = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  docm: "application/vnd.ms-word.document.macroEnabled.12",
+  dotx: "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+  dotm: "application/vnd.ms-word.template.macroEnabled.12",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
+  xltx: "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+  xltm: "application/vnd.ms-excel.template.macroEnabled.12",
+  xlam: "application/vnd.ms-excel.addin.macroEnabled.12",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  pptm: "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+  potx: "application/vnd.openxmlformats-officedocument.presentationml.template",
+  potm: "application/vnd.ms-powerpoint.template.macroEnabled.12",
+  ppsx: "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+  ppsm: "application/vnd.ms-powerpoint.slideshow.macroEnabled.12",
+  ppam: "application/vnd.ms-powerpoint.addin.macroEnabled.12",
+  "spectra-pkg": "application/vnd.spectra.package+zip",
+};
+
+export type NativePayloadTruth = {
+  url: string | null;
+  bytes: number;
+  hash: string;
+  mediaType: string;
+  payloadRef: string;
+  replicaId: string;
+  replicaKind: "cloud" | "local";
+  revision: string;
+  baseRevision?: string;
+  state: string;
+  nativeFormat: string;
+  fidelityMap?: unknown;
+  compatibilityProfile: "strict-native" | "enhanced" | "spectra-native";
+};
+
+export async function fetchVerifiedNativePayload(
+  workId: Id<"spectraArtifacts">,
+  prefer: "cloud" | "local-latest" = "cloud",
+) {
+  const truth = await convexQuery<
+    { workId: Id<"spectraArtifacts">; prefer: typeof prefer },
+    NativePayloadTruth | null
+  >("replicas:payloadForWork", { workId, prefer });
+  if (!truth?.url) throw new Error("NATIVE_PAYLOAD_UNAVAILABLE");
+  const response = await fetch(truth.url, { cache: "no-store" });
+  if (!response.ok) throw new Error("NATIVE_PAYLOAD_FETCH_FAILED");
+  const payload = new Uint8Array(await response.arrayBuffer());
+  if (
+    payload.byteLength !== truth.bytes ||
+    (await sha256Payload(payload)) !== truth.hash
+  )
+    throw new Error("NATIVE_PAYLOAD_VERIFICATION_FAILED");
+  return { truth, payload };
+}
+
+export async function uploadNativePayload(
+  payload: Uint8Array,
+  hash: string,
+  nativeFormat: string,
+) {
+  const mediaType = nativeMediaTypes[nativeFormat] ?? "application/octet-stream";
+  const uploadUrl = await convexMutation<Record<string, never>, string>(
+    "payloads:issueUpload",
+    {},
+  );
+  const response = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { "Content-Type": mediaType },
+    body: Buffer.from(payload),
+  });
+  const stored = (await response.json().catch(() => null)) as
+    | { storageId?: string }
+    | null;
+  if (!response.ok || !stored?.storageId)
+    throw new Error("NATIVE_PAYLOAD_UPLOAD_FAILED");
+  return convexMutation<
+    {
+      hash: string;
+      storageId: Id<"_storage">;
+      bytes: number;
+      mediaType: string;
+    },
+    { payloadRef: string; deduplicated: boolean }
+  >("payloads:put", {
+    hash,
+    storageId: stored.storageId as Id<"_storage">,
+    bytes: payload.byteLength,
+    mediaType,
+  });
+}

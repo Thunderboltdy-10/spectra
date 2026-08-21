@@ -9,6 +9,10 @@ import {
   sha256Payload,
   type DocxProjection,
 } from "@/features/spectra/lenses/docx-lens";
+import {
+  fetchVerifiedNativePayload,
+  uploadNativePayload,
+} from "@/features/spectra/lenses/native-payload-server";
 
 export const runtime = "nodejs";
 
@@ -25,22 +29,6 @@ const requestSchema = z.discriminatedUnion("action", [
     resolution: z.enum(["word", "spectra"]).optional(),
   }),
 ]);
-
-type PayloadTruth = {
-  url: string | null;
-  bytes: number;
-  hash: string;
-  mediaType: string;
-  payloadRef: string;
-  replicaId: string;
-  replicaKind: "cloud" | "local";
-  revision: string;
-  baseRevision?: string;
-  state: string;
-  nativeFormat: string;
-  fidelityMap?: unknown;
-  compatibilityProfile: "strict-native" | "enhanced" | "spectra-native";
-};
 
 type WorkTruth = {
   replicas: Array<{
@@ -63,23 +51,6 @@ function artifactId(value: string) {
   return value as Id<"spectraArtifacts">;
 }
 
-async function payloadForWork(
-  workId: Id<"spectraArtifacts">,
-  prefer: "cloud" | "local-latest",
-) {
-  const truth = await convexQuery<
-    { workId: Id<"spectraArtifacts">; prefer: typeof prefer },
-    PayloadTruth | null
-  >("replicas:payloadForWork", { workId, prefer });
-  if (!truth?.url) throw new Error("DOCX_PAYLOAD_UNAVAILABLE");
-  const response = await fetch(truth.url, { cache: "no-store" });
-  if (!response.ok) throw new Error("DOCX_PAYLOAD_FETCH_FAILED");
-  const payload = new Uint8Array(await response.arrayBuffer());
-  if (payload.byteLength !== truth.bytes || (await sha256Payload(payload)) !== truth.hash)
-    throw new Error("DOCX_PAYLOAD_VERIFICATION_FAILED");
-  return { truth, payload };
-}
-
 function contentProjection(value: unknown, base: DocxProjection): DocxProjection {
   const parsed = z.object({
     blocks: z.array(z.object({
@@ -96,41 +67,6 @@ function contentProjection(value: unknown, base: DocxProjection): DocxProjection
     outline: parsed.outline ?? base.outline,
     nativeBinding: base.nativeBinding,
   };
-}
-
-async function uploadPayload(payload: Uint8Array, hash: string) {
-  const uploadUrl = await convexMutation<Record<string, never>, string>(
-    "payloads:issueUpload",
-    {},
-  );
-  const response = await fetch(uploadUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type":
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    },
-    body: Buffer.from(payload),
-  });
-  const stored = (await response.json().catch(() => null)) as
-    | { storageId?: string }
-    | null;
-  if (!response.ok || !stored?.storageId)
-    throw new Error("DOCX_PAYLOAD_UPLOAD_FAILED");
-  return convexMutation<
-    {
-      hash: string;
-      storageId: Id<"_storage">;
-      bytes: number;
-      mediaType: string;
-    },
-    { payloadRef: string; deduplicated: boolean }
-  >("payloads:put", {
-    hash,
-    storageId: stored.storageId as Id<"_storage">,
-    bytes: payload.byteLength,
-    mediaType:
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  });
 }
 
 function changedRegions(before: DocxProjection, after: DocxProjection) {
@@ -198,7 +134,7 @@ export async function POST(request: Request) {
     const workId = artifactId(input.artifactId);
 
     if (input.action === "open") {
-      const { truth, payload } = await payloadForWork(workId, "cloud");
+      const { truth, payload } = await fetchVerifiedNativePayload(workId, "cloud");
       const opened = await docxLens.open(payload, "strict-native");
       await convexMutation<
         {
@@ -228,7 +164,7 @@ export async function POST(request: Request) {
 
     if (input.action === "materialize") {
       const [{ truth, payload }, workTruth] = await Promise.all([
-        payloadForWork(workId, "cloud"),
+        fetchVerifiedNativePayload(workId, "cloud"),
         convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
           "replicas:forWork",
           { workId },
@@ -248,8 +184,8 @@ export async function POST(request: Request) {
         docxLens.open(output, "strict-native"),
         comparePackages(payload, output),
       ]);
-      const stored = await uploadPayload(output, hash);
-      const local = workTruth.replicas.find((replica) => replica.kind === "local");
+      const stored = await uploadNativePayload(output, hash, truth.nativeFormat);
+      const local = workTruth.replicas.find((replica) => replica.kind === "local" && replica.state !== "unavailable");
       if (!local) throw new Error("LOCAL_REPLICA_UNAVAILABLE");
       const partNames = comparison.parts
         .filter((part) => part.verdict !== "identical")
@@ -264,6 +200,7 @@ export async function POST(request: Request) {
           fidelityMap: unknown;
           regionIds: string[];
           partNames: string[];
+          localReplicaId?: Id<"workReplicas">;
         },
         { requestId: string; state: string }
       >("replicas:queueMaterialization", {
@@ -275,6 +212,7 @@ export async function POST(request: Request) {
         fidelityMap: next.fidelityMap,
         regionIds,
         partNames,
+        localReplicaId: local._id as Id<"workReplicas">,
       });
       return NextResponse.json({
         state: queued.state,
@@ -285,8 +223,8 @@ export async function POST(request: Request) {
     }
 
     const [cloud, local, artifact] = await Promise.all([
-      payloadForWork(workId, "cloud"),
-      payloadForWork(workId, "local-latest"),
+      fetchVerifiedNativePayload(workId, "cloud"),
+      fetchVerifiedNativePayload(workId, "local-latest"),
       convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>(
         "spectraArtifacts:get",
         { artifactId: workId },
@@ -322,7 +260,7 @@ export async function POST(request: Request) {
         docxLens.open(output, "strict-native"),
         comparePackages(local.payload, output),
       ]);
-      const stored = await uploadPayload(output, hash);
+      const stored = await uploadNativePayload(output, hash, local.truth.nativeFormat);
       const queued = await convexMutation<
         {
           workId: Id<"spectraArtifacts">;
@@ -333,6 +271,7 @@ export async function POST(request: Request) {
           fidelityMap: unknown;
           regionIds: string[];
           partNames: string[];
+          localReplicaId?: Id<"workReplicas">;
         },
         { requestId: string; state: string }
       >("replicas:queueMaterialization", {
@@ -346,6 +285,7 @@ export async function POST(request: Request) {
         partNames: comparison.parts
           .filter((part) => part.verdict !== "identical")
           .map((part) => `/${part.name}`),
+        localReplicaId: local.truth.replicaId as Id<"workReplicas">,
       });
       await convexMutation<
         { workId: Id<"spectraArtifacts">; resolution: "spectra" },

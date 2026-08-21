@@ -54,6 +54,13 @@ pub struct PairingExchange {
     pub device_credential: String,
     pub browser_origin: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingResume {
+    pub device_id: String,
+    pub browser_origin: String,
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ConvexResponse<T> {
@@ -339,6 +346,28 @@ pub async fn exchange_pairing(
                 "challenge": offer.challenge, "shortCode": offer.short_code,
                 "deviceName": device_name, "platform": std::env::consts::OS,
                 "appVersion": env!("CARGO_PKG_VERSION"), "protocolVersion": crate::PROTOCOL_VERSION
+        }),
+    )
+    .await
+}
+
+pub async fn resume_pairing(
+    deployment_url: &str,
+    credential: &str,
+    offer: &PairingOffer,
+    device_name: &str,
+) -> anyhow::Result<PairingResume> {
+    mutation(
+        deployment_url,
+        "bridge:resumePairing",
+        serde_json::json!({
+            "credential": credential,
+            "challenge": offer.challenge,
+            "shortCode": offer.short_code,
+            "deviceName": device_name,
+            "platform": std::env::consts::OS,
+            "appVersion": env!("CARGO_PKG_VERSION"),
+            "protocolVersion": crate::PROTOCOL_VERSION
         }),
     )
     .await

@@ -36,11 +36,21 @@ const CLOSED_DURABILITY: LocalDurabilitySnapshot = {
 };
 const getClosedDurability = () => CLOSED_DURABILITY;
 
+export function artifactCollaborationPersistenceKey(
+  artifactId: string,
+  partitionKey: string,
+  namespace: string,
+  schemaVersion = 1,
+) {
+  return `work:${artifactId}:${partitionKey}:${namespace}:v${schemaVersion}`;
+}
+
 export function useArtifactCollaboration(
   artifactId: string | null | undefined,
   partitionKey = "root",
   schemaVersion = 1,
   providerKind?: RealtimeProviderKind,
+  persistenceNamespace = "artifact",
 ) {
   const [generation, setGeneration] = useState(0);
   // The transport is created inside the effect rather than in useMemo so that
@@ -66,7 +76,12 @@ export function useArtifactCollaboration(
       providerKind,
     );
     const persistence = new BoundedYjsLocalPersistence({
-      key: `work:${artifactId}:${partitionKey}`,
+      key: artifactCollaborationPersistenceKey(
+        artifactId,
+        partitionKey,
+        persistenceNamespace,
+        schemaVersion,
+      ),
       document: next.document,
       modelVersion: schemaVersion,
     });
@@ -87,7 +102,14 @@ export function useArtifactCollaboration(
       setTransport(null);
       setLocalPersistence(null);
     };
-  }, [artifactId, generation, partitionKey, providerKind, schemaVersion]);
+  }, [
+    artifactId,
+    generation,
+    partitionKey,
+    persistenceNamespace,
+    providerKind,
+    schemaVersion,
+  ]);
   const snapshot = useSyncExternalStore(
     transport?.subscribe ?? subscribeClosed,
     transport?.getSnapshot ?? getClosedSnapshot,

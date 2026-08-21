@@ -5,6 +5,7 @@ import { getActorForAccountId } from "./identityShared";
 import { createFolderNode, placeSourceNode, purgeSourceNodes, trashNode } from "./orgTreeShared";
 import { z } from "zod";
 import { chooseReplicaContinuity } from "./bridgeIdentity";
+import { activeReplicaWriteTarget } from "./bridgeIdentity";
 
 async function digest(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -85,7 +86,7 @@ export const discoverResource = mutation({
         replicaId: existingReplica._id,
         revision: existingReplica.revision,
         payloadHash: existingReplica.contentHash,
-        needsPayload: ["docx", "docm"].includes(input.nativeFormat) &&
+        needsPayload: ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].includes(input.nativeFormat) &&
           (!existingReplica.payloadRef || input.contentHash !== existingReplica.contentHash),
       };
     }
@@ -101,7 +102,7 @@ export const discoverResource = mutation({
       replicaId,
       revision: input.contentHash ?? `discovered:${input.localResourceId}`,
       payloadHash: undefined,
-      needsPayload: ["docx", "docm"].includes(input.nativeFormat),
+      needsPayload: ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].includes(input.nativeFormat),
     };
   },
 });
@@ -207,6 +208,20 @@ export const commitPayloadUpload = mutation({
         lastVerifiedAt: now,
         updatedAt: now,
       });
+    } else if (!cloud.payloadRef) {
+      // Replica migration can create the cloud identity before the first
+      // native payload arrives. Attach that retained payload now; never
+      // replace an already-retained divergent cloud version here.
+      await ctx.db.patch(cloud._id, {
+        payloadRef: String(payload._id),
+        preservedCarryVersion: 1,
+        nativeFormat: replica.nativeFormat,
+        revision: input.hash,
+        contentHash: input.hash,
+        state: "current",
+        lastVerifiedAt: now,
+        updatedAt: now,
+      });
     }
     if (externalChange) {
       await ctx.db.insert("syncOperations", {
@@ -235,30 +250,59 @@ export const claimWrite = mutation({
     const now = Date.now();
     const pending = await ctx.db.query("bridgeWriteRequests")
       .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending"))
-      .first();
-    const request = pending ?? (await ctx.db.query("bridgeWriteRequests")
+      .take(20);
+    const abandonedClaims = await ctx.db.query("bridgeWriteRequests")
       .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "claimed"))
       .filter((q) => q.lt(q.field("claimedAt"), now - 60_000))
-      .first());
-    if (!request) return { request: null };
-    const payloadId = ctx.db.normalizeId("payloadObjects", request.payloadRef);
-    const payload = payloadId ? await ctx.db.get(payloadId) : null;
-    const mount = await ctx.db.get(request.mountId);
-    if (!payload || payload.state !== "active" || !mount || mount.deviceId !== device._id)
-      throw new Error("WRITE_PAYLOAD_UNAVAILABLE");
-    await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, updatedAt: now });
-    return { request: {
-      requestId: request._id,
-      replicaId: request.replicaId,
-      grantId: mount.grantId,
-      localResourceId: request.localResourceId,
-      relativePath: request.relativePath,
-      baseRevision: request.baseRevision,
-      targetRevision: request.targetRevision,
-      contentHash: request.contentHash,
-      idempotencyKey: request.idempotencyKey,
-      payloadUrl: await ctx.storage.getUrl(payload.storageId),
-    } };
+      .take(20);
+    for (const request of [...pending, ...abandonedClaims]) {
+      const payloadId = ctx.db.normalizeId("payloadObjects", request.payloadRef);
+      const [payload, mount, replica] = await Promise.all([
+        payloadId ? ctx.db.get(payloadId) : null,
+        ctx.db.get(request.mountId),
+        ctx.db.get(request.replicaId),
+      ]);
+      const targetActive = activeReplicaWriteTarget(replica, mount, device);
+      const requestMatchesTarget = Boolean(
+        replica &&
+          replica._id === request.replicaId &&
+          replica.deviceId === request.deviceId &&
+          replica.mountId === request.mountId,
+      );
+      if (!payload || payload.state !== "active" || !mount || !replica || !targetActive || !requestMatchesTarget) {
+        const errorCode = !payload || payload.state !== "active" ? "payload-unavailable" : "target-unavailable";
+        await ctx.db.patch(request._id, {
+          state: "failed",
+          errorCode,
+          errorMessage: errorCode === "payload-unavailable" ? "The retained payload is unavailable." : "The target Bridge folder or device is unavailable.",
+          updatedAt: now,
+        });
+        const operation = await ctx.db.query("syncOperations")
+          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
+          .unique();
+        if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
+        continue;
+      }
+      const payloadUrl = await ctx.storage.getUrl(payload.storageId);
+      if (!payloadUrl) {
+        await ctx.db.patch(request._id, { state: "failed", errorCode: "payload-unavailable", errorMessage: "The retained payload has no download URL.", updatedAt: now });
+        continue;
+      }
+      await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, updatedAt: now });
+      return { request: {
+        requestId: request._id,
+        replicaId: request.replicaId,
+        grantId: mount.grantId,
+        localResourceId: request.localResourceId,
+        relativePath: request.relativePath,
+        baseRevision: request.baseRevision,
+        targetRevision: request.targetRevision,
+        contentHash: request.contentHash,
+        idempotencyKey: request.idempotencyKey,
+        payloadUrl,
+      } };
+    }
+    return { request: null };
   },
 });
 
@@ -291,6 +335,20 @@ export const completeWrite = mutation({
       return { state: "pending" as const };
     }
     if (args.outcome === "verified") {
+      const [mount, replica] = await Promise.all([
+        ctx.db.get(request.mountId),
+        ctx.db.get(request.replicaId),
+      ]);
+      if (!activeReplicaWriteTarget(replica, mount, device)) {
+        await ctx.db.patch(request._id, {
+          state: "failed",
+          errorCode: "target-unavailable",
+          errorMessage: "The Bridge folder or device became unavailable before verification.",
+          updatedAt: now,
+        });
+        if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "target-unavailable", updatedAt: now });
+        return { state: "failed" as const };
+      }
       await ctx.db.patch(request.replicaId, {
         payloadRef: request.payloadRef,
         baseRevision: request.baseRevision,
@@ -347,11 +405,35 @@ export const detachGrant = mutation({
     const mount = await ctx.db.query("bridgeMounts").withIndex("by_device_grant", (q) => q.eq("deviceId", device._id).eq("grantId", grantId)).unique();
     if (mount && mount.accountId !== actor.accountId) throw new Error("MOUNT_NOT_OWNED_BY_DEVICE");
     if (mount) {
+      const now = Date.now();
       const rootNode = mount.rootOrgNodeId ? await ctx.db.get(mount.rootOrgNodeId) : null;
       if (rootNode && rootNode.accountId === actor.accountId && rootNode.deletedAt === undefined) {
         await trashNode(ctx, rootNode);
       }
-      await ctx.db.patch(mount._id, { state: "detached", updatedAt: Date.now() });
+      const [replicas, pending, claimed] = await Promise.all([
+        ctx.db.query("workReplicas")
+          .withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId))
+          .filter((q) => q.eq(q.field("mountId"), mount._id))
+          .take(2_000),
+        ctx.db.query("bridgeWriteRequests")
+          .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending"))
+          .filter((q) => q.eq(q.field("mountId"), mount._id))
+          .take(2_000),
+        ctx.db.query("bridgeWriteRequests")
+          .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "claimed"))
+          .filter((q) => q.eq(q.field("mountId"), mount._id))
+          .take(2_000),
+      ]);
+      await ctx.db.patch(mount._id, { state: "detached", updatedAt: now });
+      for (const replica of replicas)
+        await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: "mount-detached", updatedAt: now });
+      for (const request of [...pending, ...claimed]) {
+        await ctx.db.patch(request._id, { state: "failed", errorCode: "mount-detached", errorMessage: "The selected Bridge folder was removed.", updatedAt: now });
+        const operation = await ctx.db.query("syncOperations")
+          .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey))
+          .unique();
+        if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "mount-detached", updatedAt: now });
+      }
     }
     return true;
   },

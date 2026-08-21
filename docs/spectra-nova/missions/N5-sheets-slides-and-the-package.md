@@ -71,3 +71,18 @@ Editor depth beyond what the lens requires (N7 owns serious Sheets/Slides capabi
 7. Materialization gate: one cloud-only artifact of each supported type gains a local replica with no duplicate item and no closed surfaces (F6 partial; the full storage-strategy UX gate is N6).
 8. Performance: 200k-cell sheet and 120-slide deck open, edit and materialize within stated budgets; note timings; P12 unaffected.
 9. P2 (every type opens editable) passes with at least one mounted file of each Office family; STATE fidelity section extended per format; mission log ≤40 lines; close-out checks green.
+
+## Mission log — 2026-08-21
+
+- XLSX and PPTX corpora passed through the shared `@ariadng/office` lens contract.
+- Formula honesty, no-literalization, macro preservation and unknown-part carry were asserted.
+- PowerPoint title, object and add-object mutations all preserved transition XML and timing trees.
+- PowerPoint reopen evidence is in `.shots/missions/N5/pptx-before-native-fade.png` and the related after-transition captures.
+- The 200k-cell XLSX run completed in 4.244s open/edit/materialize; the 120-slide PPTX run in 172ms open/edit.
+- `.spectra-pkg` round-trip, manifest upgrade and standalone no-Convex reader passed; output is in `.shots/missions/N5/`.
+- Native download route returned a verified retained payload; Office fixture corpus remained readable after edits.
+- Spectra Files and devices exposes Bridge status, Add folder and native picker ownership; the picker was opened and cancelled safely.
+- The isolated Tauri Bridge reported Connected, closing its window hid it, and the process remained alive until explicitly stopped.
+- Pairing/session continuity and local mount controls are covered by focused bridge identity/contract tests.
+- Close-out: 765/765 Vitest, 53/53 N5-focused tests, Rust workspace and chaos tests, `tsc`, lint, Office harness and secret scan passed.
+- Production Bridge task remained disabled and no production mount or Physics data was touched.

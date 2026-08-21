@@ -24,6 +24,14 @@ export type CollaborationSessionClaims = {
   operationId?: string;
 };
 
+export function collaborationDocumentName(
+  artifactId: string,
+  partitionKey: string,
+  typeKey: string,
+) {
+  return `artifact:${artifactId}:${Buffer.from(partitionKey).toString("base64url")}:${Buffer.from(typeKey).toString("base64url")}`;
+}
+
 function signingKey() {
   const value = process.env.SPECTRA_COLLAB_TOKEN_SECRET;
   if (!value || value.length < 32) throw new Error("COLLABORATION_TOKEN_CONFIG_MISSING: Configure SPECTRA_COLLAB_TOKEN_SECRET.");

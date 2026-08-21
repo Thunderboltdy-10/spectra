@@ -116,7 +116,7 @@ function buildSelectReplaceFrames(before: string, after: string): string[] {
   // though the server technically streamed them. Keep enough meaningful
   // bursts for a short label to be legible, while bounding long prose so the
   // actor remains quick rather than theatrical.
-  const targetFrames = Math.min(9, Math.max(4, Math.ceil(after.length / 12)));
+  const targetFrames = Math.min(12, Math.max(10, Math.ceil(after.length / 12)));
   const stepChars = Math.max(1, Math.floor(after.length / targetFrames));
   for (let typed = stepChars; typed < after.length; typed += stepChars) {
     frames.push(after.slice(0, typed));

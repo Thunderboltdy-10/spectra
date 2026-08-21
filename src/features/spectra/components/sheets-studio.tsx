@@ -1120,6 +1120,12 @@ export function SheetsStudio({
   const analysing = sheetMode === "analysis";
   const incoming = useMemo(() => normalizeSheetsContent(content), [content]);
   const [workbook, setWorkbook] = useState(incoming);
+  // Keep the last committed workbook available to event handlers without
+  // relying on a React state-updater callback. Parent notifications from an
+  // updater run during React's render work and can be dropped or warn when
+  // ArtifactStudioEditor updates in response.
+  const workbookRef = useRef(workbook);
+  workbookRef.current = workbook;
   const [range, setRange] = useState<CellRange>({
     start: { row: 0, column: 0 },
     end: { row: 0, column: 0 },
@@ -1275,13 +1281,14 @@ export function SheetsStudio({
     )
       return;
     const viewed = localSheetIdRef.current;
-    setWorkbook(
+    const next =
       viewed &&
-        viewed !== incoming.activeSheetId &&
-        incoming.sheets.some((sheet) => sheet.id === viewed)
+      viewed !== incoming.activeSheetId &&
+      incoming.sheets.some((sheet) => sheet.id === viewed)
         ? { ...incoming, activeSheetId: viewed }
-        : incoming,
-    );
+        : incoming;
+    workbookRef.current = next;
+    setWorkbook(next);
   }, [incoming]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeSheet =
@@ -1295,6 +1302,18 @@ export function SheetsStudio({
   );
   const bounds = useMemo(() => usedBounds(activeSheet), [activeSheet]);
   const calculated = useMemo(() => calculateWorkbook(workbook), [workbook]);
+  const cachedOnlyFormulaCount = useMemo(
+    () =>
+      workbook.sheets.reduce(
+        (count, sheet) =>
+          count +
+          Object.values(sheet.cells).filter(
+            (cell) => cell.nativeFormulaSupport === "cached-only",
+          ).length,
+        0,
+      ),
+    [workbook.sheets],
+  );
   const activeSheetRef = useRef(activeSheet);
   activeSheetRef.current = activeSheet;
   const calculatedRef = useRef(calculated);
@@ -1489,18 +1508,20 @@ export function SheetsStudio({
       // One gate for every write in this file. A capability that is not granted
       // stops the change here rather than at each of forty call sites.
       if (locked) return;
-      setWorkbook((current) => {
-        if (sameContent(current, next)) return current;
-        if (remember) {
-          undoRef.current = [...undoRef.current.slice(-79), current];
-          redoRef.current = [];
-          setCanUndo(true);
-          setCanRedo(false);
-        }
-        rememberEmitted(next);
-        onChange(next);
-        return next;
-      });
+      const current = workbookRef.current;
+      if (sameContent(current, next)) return;
+      if (remember) {
+        undoRef.current = [...undoRef.current.slice(-79), current];
+        redoRef.current = [];
+        setCanUndo(true);
+        setCanRedo(false);
+      }
+      rememberEmitted(next);
+      workbookRef.current = next;
+      setWorkbook(next);
+      // Notify the parent after the local state transition has been scheduled,
+      // never from inside a React state updater.
+      onChange(next);
     },
     [locked, onChange, rememberEmitted],
   );
@@ -1510,13 +1531,13 @@ export function SheetsStudio({
       setLocalSheetId(sheetId);
       setRange({ start: { row: 0, column: 0 }, end: { row: 0, column: 0 } });
       if (locked) return;
-      setWorkbook((current) => {
-        if (current.activeSheetId === sheetId) return current;
-        const next = { ...current, activeSheetId: sheetId };
-        rememberEmitted(next);
-        onChange(next);
-        return next;
-      });
+      const current = workbookRef.current;
+      if (current.activeSheetId === sheetId) return;
+      const next = { ...current, activeSheetId: sheetId };
+      rememberEmitted(next);
+      workbookRef.current = next;
+      setWorkbook(next);
+      onChange(next);
     },
     [locked, onChange, rememberEmitted],
   );
@@ -1800,6 +1821,7 @@ export function SheetsStudio({
     redoRef.current.push(workbook);
     setCanUndo(undoRef.current.length > 0);
     setCanRedo(true);
+    workbookRef.current = previous;
     setWorkbook(previous);
     rememberEmitted(previous);
     onChange(previous);
@@ -1812,6 +1834,7 @@ export function SheetsStudio({
     undoRef.current.push(workbook);
     setCanUndo(true);
     setCanRedo(redoRef.current.length > 0);
+    workbookRef.current = next;
     setWorkbook(next);
     rememberEmitted(next);
     onChange(next);
@@ -3550,6 +3573,14 @@ export function SheetsStudio({
             className="min-w-0 shrink truncate px-2.5 text-micro text-[var(--text-secondary)]"
           >
             Read-only. Copy and charts are available; cells cannot change.
+          </span>
+        ) : null}
+        {cachedOnlyFormulaCount ? (
+          <span
+            className="min-w-0 shrink truncate px-2.5 text-micro text-[var(--text-secondary)]"
+            title="These formulas are kept as native Excel text and show their cached values until Excel recalculates them."
+          >
+            {cachedOnlyFormulaCount} native formula{cachedOnlyFormulaCount === 1 ? "" : "s"} shown from Excel cache
           </span>
         ) : null}
       </div>

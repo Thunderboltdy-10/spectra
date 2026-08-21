@@ -20,6 +20,7 @@ export type SheetValidation =
 export type SheetCell = {
   value?: SheetScalar;
   formula?: string;
+  nativeFormulaSupport?: "recognized" | "cached-only";
   format?: {
     bold?: boolean;
     italic?: boolean;
@@ -115,6 +116,14 @@ export type SheetsContent = {
   };
   sheets: WorkbookSheet[];
   activeSheetId: string;
+  nativeBinding?: {
+    version: 1;
+    format: "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam";
+    profile: "strict-native" | "enhanced" | "spectra-native";
+    macroEnabled: boolean;
+    semanticDigest: string;
+    recognizedFormulaFunctions: string[];
+  };
 };
 
 export type CellCoordinate = { row: number; column: number };
@@ -317,6 +326,10 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
             {
               ...(scalar !== undefined ? { value: scalar } : {}),
               ...(formula ? { formula } : {}),
+              ...(cell.nativeFormulaSupport === "cached-only" ||
+              cell.nativeFormulaSupport === "recognized"
+                ? { nativeFormulaSupport: cell.nativeFormulaSupport }
+                : {}),
               ...(cell.format && typeof cell.format === "object"
                 ? { format: cell.format as SheetCell["format"] }
                 : {}),
@@ -569,6 +582,45 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
     sheets.some((sheet) => sheet.id === source.activeSheetId)
       ? source.activeSheetId
       : sheets[0]!.id;
+  const nativeBindingSource = record(source.nativeBinding);
+  const nativeFormat = ["xlsx", "xlsm", "xltx", "xltm", "xlam"].includes(
+    String(nativeBindingSource.format),
+  )
+    ? (nativeBindingSource.format as NonNullable<
+        SheetsContent["nativeBinding"]
+      >["format"])
+    : undefined;
+  const nativeProfile = [
+    "strict-native",
+    "enhanced",
+    "spectra-native",
+  ].includes(String(nativeBindingSource.profile))
+    ? (nativeBindingSource.profile as NonNullable<
+        SheetsContent["nativeBinding"]
+      >["profile"])
+    : undefined;
+  const nativeBinding =
+    nativeBindingSource.version === 1 &&
+    nativeFormat &&
+    nativeProfile &&
+    typeof nativeBindingSource.macroEnabled === "boolean" &&
+    typeof nativeBindingSource.semanticDigest === "string" &&
+    /^[a-f0-9]{64}$/.test(nativeBindingSource.semanticDigest) &&
+    Array.isArray(nativeBindingSource.recognizedFormulaFunctions)
+      ? {
+          version: 1 as const,
+          format: nativeFormat,
+          profile: nativeProfile,
+          macroEnabled: nativeBindingSource.macroEnabled,
+          semanticDigest: nativeBindingSource.semanticDigest,
+          recognizedFormulaFunctions:
+            nativeBindingSource.recognizedFormulaFunctions.flatMap((entry) =>
+              typeof entry === "string" && entry.trim()
+                ? [entry.trim().slice(0, 120)]
+                : [],
+            ),
+        }
+      : undefined;
   return {
     workbook: {
       calculationMode:
@@ -590,6 +642,7 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
     },
     sheets,
     activeSheetId,
+    ...(nativeBinding ? { nativeBinding } : {}),
   };
 }
 
@@ -1184,6 +1237,12 @@ export function calculateWorkbook(content: SheetsContent) {
       result.set(key, plain);
       resolving.delete(key);
       return plain;
+    }
+    if (cell.nativeFormulaSupport === "cached-only") {
+      const cached = { value: cell.value ?? null };
+      result.set(key, cached);
+      resolving.delete(key);
+      return cached;
     }
     try {
       if (cell.formula.includes("#REF!")) throw new Error("#REF!");

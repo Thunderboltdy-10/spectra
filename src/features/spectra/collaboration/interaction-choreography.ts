@@ -890,7 +890,7 @@ export function buildArtifactLivePreviewBeats(
       // Stay above the collaboration/editor coalescing window. This is the
       // visible typing cadence, not an artificial post-hoc animation: every
       // beat carries the actor's current caret and speculative native value.
-      delayMs: 104,
+      delayMs: 112,
       value: frame,
       previewGesture: "typing",
       cursorMode: "typing",

@@ -11,6 +11,28 @@ pub struct HealthResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalMountStatus {
+    pub id: String,
+    pub label: String,
+    pub state: String,
+    pub detail: String,
+    pub synced: usize,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalBridgeStatus {
+    pub version: String,
+    pub protocol_version: String,
+    pub paired: bool,
+    pub cloud_connected: bool,
+    pub device_id: Option<String>,
+    pub mounts: Vec<LocalMountStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum BrowserRequest {
     MountsList,

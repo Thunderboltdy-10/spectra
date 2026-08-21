@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { chooseReplicaContinuity } from "../../../../convex/bridgeIdentity";
+import {
+  activeReplicaWriteTarget,
+  chooseReplicaContinuity,
+  latestActiveWriteForReplica,
+} from "../../../../convex/bridgeIdentity";
 
 describe("Bridge Office-save identity continuity", () => {
   it("keeps the established cloud-backed work", () => {
@@ -14,5 +18,29 @@ describe("Bridge Office-save identity continuity", () => {
       { value: "replacement", creationTime: 20, hasCloudReplica: false },
       { value: "original", creationTime: 10, hasCloudReplica: false },
     ])).toBe("original");
+  });
+});
+
+describe("replica-scoped Bridge writes", () => {
+  it("never chains a device write from another replica's pending revision", () => {
+    const requests = [
+      { replicaId: "local-a", state: "pending", createdAt: 10, targetRevision: "a2" },
+      { replicaId: "local-b", state: "claimed", createdAt: 20, targetRevision: "b2" },
+      { replicaId: "local-a", state: "verified", createdAt: 30, targetRevision: "a3" },
+    ];
+    expect(latestActiveWriteForReplica(requests, "local-a")?.targetRevision).toBe("a2");
+    expect(latestActiveWriteForReplica(requests, "local-b")?.targetRevision).toBe("b2");
+  });
+
+  it("requires the replica, mount, and device to remain active and aligned", () => {
+    const replica = { accountId: "account", deviceId: "device", mountId: "mount", state: "current" };
+    const mount = { _id: "mount", accountId: "account", deviceId: "device", state: "active" };
+    const device = { accountId: "account", state: "active" };
+    expect(activeReplicaWriteTarget(replica, mount, device)).toBe(true);
+    expect(activeReplicaWriteTarget({ ...replica, state: "unavailable" }, mount, device)).toBe(false);
+    expect(activeReplicaWriteTarget(replica, { ...mount, state: "detached" }, device)).toBe(false);
+    expect(activeReplicaWriteTarget(replica, mount, { ...device, state: "revoked" })).toBe(false);
+    expect(activeReplicaWriteTarget({ ...replica, deviceId: "other" }, mount, device)).toBe(false);
+    expect(activeReplicaWriteTarget(replica, { ...mount, _id: "other" }, device)).toBe(false);
   });
 });

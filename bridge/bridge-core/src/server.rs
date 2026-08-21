@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use async_trait::async_trait;
 use axum::extract::{Request, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
@@ -12,10 +14,9 @@ use futures_util::StreamExt;
 use rand::RngCore;
 use subtle::ConstantTimeEq;
 
-use crate::protocol::{BrowserResponse, HealthResponse, PairingOffer};
+use crate::protocol::{BrowserResponse, HealthResponse, LocalBridgeStatus, LocalMountStatus, PairingOffer};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
-#[derive(Debug)]
 pub struct ServerState {
     paired: RwLock<bool>,
     allowed_origins: RwLock<HashSet<String>>,
@@ -23,6 +24,18 @@ pub struct ServerState {
     bind_error: RwLock<Option<String>>,
     pending_pairing: RwLock<Option<PairingOffer>>,
     pairing_completion: RwLock<Option<(String, String)>>,
+    device_id: RwLock<Option<String>>,
+    cloud_seen_at: AtomicU64,
+    local_control: RwLock<Option<Arc<dyn LocalBridgeControl>>>,
+}
+
+#[async_trait]
+pub trait LocalBridgeControl: Send + Sync {
+    fn pairing_requested(&self);
+    fn mounts(&self) -> Vec<LocalMountStatus>;
+    async fn select_mount(&self) -> Result<(), String>;
+    async fn retry_mount(&self, grant_id: &str) -> Result<(), String>;
+    async fn remove_mount(&self, grant_id: &str) -> Result<(), String>;
 }
 
 impl ServerState {
@@ -43,7 +56,19 @@ impl ServerState {
             bind_error: RwLock::new(None),
             pending_pairing: RwLock::new(None),
             pairing_completion: RwLock::new(None),
+            device_id: RwLock::new(None),
+            cloud_seen_at: AtomicU64::new(0),
+            local_control: RwLock::new(None),
         }
+    }
+    pub fn install_local_control(&self, control: Arc<dyn LocalBridgeControl>) {
+        *self.local_control.write().unwrap() = Some(control);
+    }
+    pub fn set_device_id(&self, device_id: String) {
+        *self.device_id.write().unwrap() = Some(device_id);
+    }
+    pub fn mark_cloud_seen(&self) {
+        self.cloud_seen_at.store(unix_ms(), Ordering::Relaxed);
     }
     pub fn pair(&self, origin: String) -> String {
         let mut token = vec![0_u8; 32];
@@ -72,6 +97,9 @@ impl ServerState {
             "origin is not configured for Spectra"
         );
         *self.pending_pairing.write().unwrap() = Some(offer);
+        if let Some(control) = self.local_control.read().unwrap().as_ref() {
+            control.pairing_requested();
+        }
         Ok(())
     }
     pub fn confirm_pairing_code(&self, code: &str) -> anyhow::Result<PairingOffer> {
@@ -111,6 +139,17 @@ impl ServerState {
         *self.paired.write().unwrap() = true;
         Ok(())
     }
+    fn local_status(&self) -> LocalBridgeStatus {
+        let cloud_seen_at = self.cloud_seen_at.load(Ordering::Relaxed);
+        LocalBridgeStatus {
+            version: env!("CARGO_PKG_VERSION").into(),
+            protocol_version: crate::PROTOCOL_VERSION.into(),
+            paired: self.is_paired(),
+            cloud_connected: cloud_seen_at > 0 && unix_ms().saturating_sub(cloud_seen_at) <= 15_000,
+            device_id: self.device_id.read().unwrap().clone(),
+            mounts: self.local_control.read().unwrap().as_ref().map(|control| control.mounts()).unwrap_or_default(),
+        }
+    }
     fn take_pairing_completion(&self, challenge: &str) -> Option<String> {
         let mut completion = self.pairing_completion.write().unwrap();
         if completion
@@ -126,6 +165,10 @@ impl ServerState {
 pub fn router(state: Arc<ServerState>) -> Router {
     let protected = Router::new()
         .route("/v1/session", get(session))
+        .route("/v1/status", get(status))
+        .route("/v1/mount/select", post(select_mount))
+        .route("/v1/mount/retry", post(retry_mount))
+        .route("/v1/mount/remove", post(remove_mount))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
     let origins = state
         .allowed_origins
@@ -156,6 +199,47 @@ async fn health(State(state): State<Arc<ServerState>>) -> Json<HealthResponse> {
         port: crate::BRIDGE_PORT,
         bind_error: state.bind_error.read().unwrap().clone(),
     })
+}
+
+async fn status(State(state): State<Arc<ServerState>>) -> Json<LocalBridgeStatus> {
+    Json(state.local_status())
+}
+
+async fn select_mount(State(state): State<Arc<ServerState>>) -> Response {
+    let control = state.local_control.read().unwrap().clone();
+    match control {
+        Some(control) => match control.select_mount().await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => (StatusCode::SERVICE_UNAVAILABLE, "Bridge controls are not ready").into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MountAction { grant_id: String }
+
+async fn retry_mount(State(state): State<Arc<ServerState>>, Json(input): Json<MountAction>) -> Response {
+    let control = state.local_control.read().unwrap().clone();
+    match control {
+        Some(control) => match control.retry_mount(&input.grant_id).await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => (StatusCode::SERVICE_UNAVAILABLE, "Bridge controls are not ready").into_response(),
+    }
+}
+
+async fn remove_mount(State(state): State<Arc<ServerState>>, Json(input): Json<MountAction>) -> Response {
+    let control = state.local_control.read().unwrap().clone();
+    match control {
+        Some(control) => match control.remove_mount(&input.grant_id).await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => (StatusCode::SERVICE_UNAVAILABLE, "Bridge controls are not ready").into_response(),
+    }
 }
 
 async fn pair_offer(

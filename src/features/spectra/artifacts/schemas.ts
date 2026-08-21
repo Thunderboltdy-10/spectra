@@ -11,6 +11,17 @@ import {
 const id = z.string().trim().min(1).max(180);
 const text = z.string().max(250_000);
 const codeSource = z.string().max(900_000);
+const compatibilityProfileSchema = z.enum([
+  "strict-native",
+  "enhanced",
+  "spectra-native",
+]);
+const officeNativeBindingBase = {
+  version: z.literal(1),
+  profile: compatibilityProfileSchema,
+  macroEnabled: z.boolean(),
+  semanticDigest: z.string().regex(/^[a-f0-9]{64}$/),
+};
 
 export {
   documentContentSchema,
@@ -91,10 +102,7 @@ export const agentContentSchema = z
       )
       .max(200),
     releaseNotes: z.string().max(4_000),
-    mission: z
-      .object({ objective: text })
-      .passthrough()
-      .optional(),
+    mission: z.object({ objective: text }).passthrough().optional(),
     foundationSections: z
       .array(
         z
@@ -370,6 +378,13 @@ export const presentationContentSchema = z
               })
               .strict()
               .optional(),
+            nativeCompatibility: z
+              .object({
+                transition: z.literal("preserved").optional(),
+                animations: z.literal("preserved").optional(),
+              })
+              .strict()
+              .optional(),
           })
           .strict(),
       )
@@ -399,6 +414,21 @@ export const presentationContentSchema = z
           .optional(),
         autoAdvanceSeconds: z.number().min(0).max(3_600).optional(),
         showSlideNumbers: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    nativeBinding: z
+      .object({
+        ...officeNativeBindingBase,
+        format: z.enum([
+          "pptx",
+          "pptm",
+          "potx",
+          "potm",
+          "ppsx",
+          "ppsm",
+          "ppam",
+        ]),
       })
       .strict()
       .optional(),
@@ -553,6 +583,7 @@ export const presentationContentSchema = z
 const cellSchema = z.object({
   value: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
   formula: z.string().max(8_000).optional(),
+  nativeFormulaSupport: z.enum(["recognized", "cached-only"]).optional(),
   format: z
     .object({
       bold: z.boolean().optional(),
@@ -690,6 +721,16 @@ export const sheetsContentSchema = z
       )
       .min(1),
     activeSheetId: id,
+    nativeBinding: z
+      .object({
+        ...officeNativeBindingBase,
+        format: z.enum(["xlsx", "xlsm", "xltx", "xltm", "xlam"]),
+        recognizedFormulaFunctions: z
+          .array(z.string().min(1).max(120))
+          .max(500),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

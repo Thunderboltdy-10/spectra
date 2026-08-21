@@ -1518,7 +1518,7 @@ export default defineSchema({
     baseRevision: v.optional(v.string()),
     contentHash: v.optional(v.string()),
     state: v.union(v.literal("current"), v.literal("ahead"), v.literal("behind"), v.literal("diverged"), v.literal("pending"), v.literal("error"), v.literal("unavailable")),
-    lastVerifiedAt: v.number(),
+    lastVerifiedAt: v.optional(v.number()),
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
     errorAt: v.optional(v.number()),

@@ -4,7 +4,12 @@ import type { Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
 import { createFolderNode, placeSourceNode, purgeSourceNodes } from "./orgTreeShared";
 import { z } from "zod";
-import { chooseReplicaContinuity } from "./bridgeIdentity";
+import {
+  activeReplicaWriteTarget,
+  chooseReplicaContinuity,
+  latestActiveWriteForReplica,
+} from "./bridgeIdentity";
+import { bumpPolicyVersion } from "./authorityShared";
 
 const replicaState = z.enum(["current", "ahead", "behind", "diverged", "pending", "error", "unavailable"]);
 const transitionSchema = z.object({ idempotencyKey: z.string().uuid(), revisionBefore: z.string().min(1).max(200).optional(), revisionAfter: z.string().min(1).max(200).optional(), contentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), state: replicaState, errorCode: z.string().min(1).max(80).optional() }).strict();
@@ -32,7 +37,9 @@ export const payloadForWork = query({
     const work = await ctx.db.get(workId);
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
-    const local = replicas.find((replica) => replica.kind === "local" && replica.payloadRef);
+    const local = replicas
+      .filter((replica) => replica.kind === "local" && replica.payloadRef)
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
     const cloud = replicas.find((replica) => replica.kind === "cloud" && replica.payloadRef);
     const selected = prefer === "local-latest" ? local ?? cloud : cloud ?? local;
     if (!selected?.payloadRef) return null;
@@ -65,6 +72,8 @@ export const activateLens = mutation({
     fidelityMap: v.any(),
     semanticDigest: v.string(),
     nativeFormat: v.string(),
+    blueprintKey: v.optional(v.union(v.literal("document"), v.literal("sheets"), v.literal("presentation"))),
+    textIndex: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -72,7 +81,9 @@ export const activateLens = mutation({
     const input = z.object({
       payloadHash: z.string().regex(/^[a-f0-9]{64}$/),
       semanticDigest: z.string().regex(/^[a-f0-9]{64}$/),
-      nativeFormat: z.enum(["docx", "docm", "dotx", "dotm"]),
+      nativeFormat: z.enum(["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam"]),
+      blueprintKey: z.enum(["document", "sheets", "presentation"]).optional(),
+      textIndex: z.string().max(200_000).optional(),
     }).parse(args);
     const work = await ctx.db.get(args.workId);
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
@@ -82,17 +93,71 @@ export const activateLens = mutation({
     if (!cloud || cloud.contentHash !== input.payloadHash || !cloud.payloadRef)
       throw new Error("LENS_BASE_PAYLOAD_CHANGED");
     const now = Date.now();
+    const nextBlueprintKey = input.blueprintKey ?? "document";
+    const changesArtifactType = work.blueprintKey !== nextBlueprintKey;
+    if (changesArtifactType && work.blueprintKey !== "resource")
+      throw new Error("LENS_TYPE_TRANSITION_UNSAFE");
+    const nextSchemaVersion =
+      nextBlueprintKey === "document"
+          ? 2
+          : nextBlueprintKey === "sheets"
+          ? 4
+          : 1;
+    if (changesArtifactType) {
+      const room = await ctx.db.query("collaborationRooms")
+        .withIndex("by_artifact_partition", (q) =>
+          q.eq("artifactId", args.workId).eq("partitionKey", "root"),
+        )
+        .unique();
+      if (room) {
+        const [updates, snapshots] = await Promise.all([
+          ctx.db.query("collaborationUpdates")
+            .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
+            .collect(),
+          ctx.db.query("collaborationSnapshots")
+            .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
+            .collect(),
+        ]);
+        await Promise.all([
+          ...updates.map((update) => ctx.db.delete(update._id)),
+          ...snapshots.map((snapshot) => ctx.db.delete(snapshot._id)),
+        ]);
+        const policyVersion = await bumpPolicyVersion(
+          ctx,
+          "artifact",
+          work._id,
+          work.schoolId,
+          actor.accountId,
+        );
+        await ctx.db.patch(room._id, {
+          typeKey: nextBlueprintKey,
+          schemaVersion: nextSchemaVersion,
+          policyVersion,
+          nextSequence: 1,
+          snapshotSequence: 0,
+          uncompactedBytes: 0,
+          updatedAt: now,
+        });
+      }
+    }
     await ctx.db.patch(args.workId, {
-      blueprintKey: "document",
+      blueprintKey: nextBlueprintKey,
       resourceClass: "artifact",
       nativeFormat: input.nativeFormat,
       compatibilityProfile: "strict-native",
       content: args.content,
-      schemaVersion: 2,
+      schemaVersion: nextSchemaVersion,
       contentHash: input.semanticDigest,
-      textIndex: Array.isArray(args.content?.blocks)
+      syncState: changesArtifactType ? "synchronizing" : work.syncState,
+      liveStateVectorHash: changesArtifactType
+        ? undefined
+        : work.liveStateVectorHash,
+      lastSynchronizedAt: changesArtifactType
+        ? undefined
+        : work.lastSynchronizedAt,
+      textIndex: input.textIndex ?? (Array.isArray(args.content?.blocks)
         ? args.content.blocks.map((block: { text?: unknown }) => typeof block?.text === "string" ? block.text : "").join("\n").slice(0, 200_000)
-        : work.textIndex,
+        : work.textIndex),
       updatedAt: now,
     });
     await ctx.db.patch(cloud._id, {
@@ -115,6 +180,7 @@ export const queueMaterialization = mutation({
     fidelityMap: v.any(),
     regionIds: v.array(v.string()),
     partNames: v.array(v.string()),
+    localReplicaId: v.optional(v.id("workReplicas")),
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -137,19 +203,30 @@ export const queueMaterialization = mutation({
     const payload = payloadId ? await ctx.db.get(payloadId) : null;
     if (!payload || payload.accountId !== actor.accountId || payload.hash !== input.contentHash || payload.state !== "active")
       throw new Error("MATERIALIZATION_PAYLOAD_INVALID");
-    const local = await ctx.db.query("workReplicas")
+    const locals = await ctx.db.query("workReplicas")
       .withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local"))
-      .unique();
+      .take(20);
+    const local = args.localReplicaId
+      ? locals.find((candidate) => candidate._id === args.localReplicaId)
+      : locals.filter((candidate) => candidate.state !== "unavailable").sort((left, right) => right.updatedAt - left.updatedAt)[0];
     const cloud = await ctx.db.query("workReplicas")
       .withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud"))
       .unique();
     if (!local?.deviceId || !local.mountId || !local.localResourceId || !local.relativePath)
       throw new Error("LOCAL_REPLICA_UNAVAILABLE");
-    const activeWrite = (await ctx.db.query("bridgeWriteRequests")
+    const activeWrite = latestActiveWriteForReplica(
+      await ctx.db.query("bridgeWriteRequests")
       .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
       .order("desc")
-      .take(50))
-      .find((request) => request.state === "pending" || request.state === "claimed");
+      .take(50),
+      local._id,
+    );
+    const [mount, device] = await Promise.all([
+      ctx.db.get(local.mountId),
+      ctx.db.get(local.deviceId),
+    ]);
+    if (!activeReplicaWriteTarget(local, mount, device))
+      throw new Error("LOCAL_REPLICA_UNAVAILABLE");
     if (local.revision !== input.baseRevision && !activeWrite)
       throw new Error("MATERIALIZATION_BASE_STALE");
     const effectiveBaseRevision = activeWrite?.targetRevision ?? local.revision;
@@ -202,6 +279,99 @@ export const queueMaterialization = mutation({
       updatedAt: now,
     });
     return { requestId, state: "pending" as const };
+  },
+});
+
+export const createLocalReplica = mutation({
+  args: {
+    workId: v.id("spectraArtifacts"),
+    mountId: v.id("bridgeMounts"),
+    relativePath: v.string(),
+    payloadRef: v.string(),
+    contentHash: v.string(),
+    nativeFormat: v.string(),
+    fidelityMap: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const input = z.object({
+      relativePath: z.string().trim().min(1).max(1024)
+        .refine((value) => !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes("..")),
+      payloadRef: z.string().min(1),
+      contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+      nativeFormat: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/),
+    }).parse(args);
+    const work = await ctx.db.get(args.workId);
+    const mount = await ctx.db.get(args.mountId);
+    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    const device = mount ? await ctx.db.get(mount.deviceId) : null;
+    if (!mount || mount.accountId !== actor.accountId || mount.state !== "active" || !device || device.accountId !== actor.accountId || device.state !== "active") throw new Error("MOUNT_NOT_ACTIVE");
+    const payloadId = ctx.db.normalizeId("payloadObjects", input.payloadRef);
+    const payload = payloadId ? await ctx.db.get(payloadId) : null;
+    if (!payload || payload.accountId !== actor.accountId || payload.state !== "active" || payload.hash !== input.contentHash) throw new Error("MATERIALIZATION_PAYLOAD_INVALID");
+    const locals = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).take(20);
+    const existing = locals.find((candidate) => candidate.mountId === mount._id && candidate.relativePath === input.relativePath);
+    if (existing?.state === "current" && existing.contentHash === input.contentHash)
+      return { state: "existing" as const, replicaId: existing._id, requestId: null };
+    if (existing) {
+      const activeRequest = (await ctx.db.query("bridgeWriteRequests").withIndex("by_work_created", (q) => q.eq("workId", args.workId)).order("desc").take(50))
+        .find((request) => request.replicaId === existing._id && (request.state === "pending" || request.state === "claimed") && request.contentHash === input.contentHash);
+      if (activeRequest) return { state: "pending" as const, replicaId: existing._id, requestId: activeRequest._id };
+    }
+    const now = Date.now();
+    const localResourceId = existing?.localResourceId ?? `lr_${crypto.randomUUID().replaceAll("-", "")}`;
+    const replicaId = existing?._id ?? await ctx.db.insert("workReplicas", {
+      accountId: actor.accountId, workId: args.workId, kind: "local", deviceId: mount.deviceId, mountId: mount._id,
+      localResourceId, relativePath: input.relativePath,
+      nativeFormat: input.nativeFormat, revision: `new:${input.contentHash}`, state: "pending",
+      fidelityMap: args.fidelityMap, preservedCarryVersion: 1, compatibilityProfile: work.compatibilityProfile ?? "strict-native",
+      updatedAt: now,
+    });
+    if (existing) await ctx.db.patch(existing._id, {
+      deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath: input.relativePath,
+      nativeFormat: input.nativeFormat, state: "pending", unavailableReason: undefined, errorCode: undefined, errorMessage: undefined, errorAt: undefined,
+      fidelityMap: args.fidelityMap, preservedCarryVersion: 1, compatibilityProfile: work.compatibilityProfile ?? "strict-native", updatedAt: now,
+    });
+    const idempotencyKey = crypto.randomUUID();
+    const requestId = await ctx.db.insert("bridgeWriteRequests", {
+      accountId: actor.accountId, workId: args.workId, replicaId, deviceId: mount.deviceId, mountId: mount._id,
+      localResourceId, relativePath: input.relativePath, payloadRef: input.payloadRef,
+      baseRevision: existing?.revision ?? `new:${args.workId}`, targetRevision: input.contentHash, contentHash: input.contentHash, idempotencyKey,
+      regionIds: [], partNames: [], state: "pending", createdAt: now, updatedAt: now,
+    });
+    await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: args.workId, replicaId, idempotencyKey, direction: "cloud-to-local", revisionBefore: existing?.revision ?? `new:${args.workId}`, revisionAfter: input.contentHash, state: "pending", actorKind: "restore", createdAt: now, updatedAt: now });
+    return { state: "pending" as const, replicaId, requestId };
+  },
+});
+
+export const attachPortablePayload = mutation({
+  args: {
+    workId: v.id("spectraArtifacts"),
+    payloadRef: v.string(),
+    contentHash: v.string(),
+    nativeFormat: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const input = z.object({
+      payloadRef: z.string().min(1),
+      contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+      nativeFormat: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/),
+    }).parse(args);
+    const work = await ctx.db.get(args.workId);
+    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    const payloadId = ctx.db.normalizeId("payloadObjects", input.payloadRef);
+    const payload = payloadId ? await ctx.db.get(payloadId) : null;
+    if (!payload || payload.accountId !== actor.accountId || payload.state !== "active" || payload.hash !== input.contentHash) throw new Error("PORTABLE_PAYLOAD_INVALID");
+    const now = Date.now();
+    const cloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud")).first();
+    if (cloud) {
+      await ctx.db.patch(cloud._id, { payloadRef: input.payloadRef, baseRevision: cloud.revision, revision: input.contentHash, contentHash: input.contentHash, nativeFormat: input.nativeFormat, state: "current", lastVerifiedAt: now, updatedAt: now });
+      return cloud._id;
+    }
+    return ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: args.workId, kind: "cloud", payloadRef: input.payloadRef, nativeFormat: input.nativeFormat, revision: input.contentHash, contentHash: input.contentHash, state: "current", lastVerifiedAt: now, updatedAt: now });
   },
 });
 

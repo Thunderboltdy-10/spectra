@@ -6,11 +6,12 @@ use spectra_bridge_core::fs::{
 };
 use spectra_bridge_core::journal::Journal;
 use spectra_bridge_core::platform::{HostPlatform, Platform};
-use spectra_bridge_core::server::{ServerState, serve};
+use spectra_bridge_core::protocol::LocalMountStatus;
+use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
     DiscoveredResource, ReplicaMigrationPage, claim_write, complete_write, detach_mount,
     discover_resource, drain_cloud_queue, exchange_pairing, migrate_cloud_replica_page,
-    register_mount, upload_resource_payload,
+    register_mount, resume_pairing, upload_resource_payload,
 };
 use spectra_bridge_core::watcher::{MountWatcher, WatcherConfig, office_locks_present, scan_page};
 use tauri::menu::{Menu, MenuItem};
@@ -22,6 +23,52 @@ use tauri_plugin_dialog::DialogExt;
 struct BridgeRuntime {
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
+}
+
+#[derive(Clone)]
+struct SpectraLocalControl {
+    app: tauri::AppHandle,
+    grants: Arc<GrantRegistry>,
+    journal: Arc<Journal>,
+}
+
+impl SpectraLocalControl {
+    fn mount_views(&self) -> Vec<MountView> {
+        mount_views(&self.grants, &self.journal)
+    }
+}
+
+#[async_trait::async_trait]
+impl LocalBridgeControl for SpectraLocalControl {
+    fn pairing_requested(&self) {
+        if let Some(window) = self.app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
+
+    fn mounts(&self) -> Vec<LocalMountStatus> {
+        self.mount_views().into_iter().map(|mount| LocalMountStatus {
+            id: mount.id,
+            label: mount.label,
+            state: mount.state,
+            detail: mount.detail,
+            synced: mount.synced,
+            total: mount.total,
+        }).collect()
+    }
+
+    async fn select_mount(&self) -> Result<(), String> {
+        select_mount_impl(&self.app, &self.grants, &self.journal).await.map(|_| ())
+    }
+
+    async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
+        retry_mount_impl(grant_id, &self.grants, &self.journal).await
+    }
+
+    async fn remove_mount(&self, grant_id: &str) -> Result<(), String> {
+        remove_mount_impl(grant_id, &self.grants, &self.journal).await
+    }
 }
 
 #[cfg(windows)]
@@ -98,6 +145,24 @@ struct MountView {
     total: usize,
 }
 
+fn mount_views(grants: &GrantRegistry, journal: &Journal) -> Vec<MountView> {
+    grants.device_grants().into_iter().map(|grant| {
+        let value = journal
+            .config(&format!("mount_status:{}", grant.id))
+            .ok().flatten()
+            .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        MountView {
+            id: grant.id,
+            label: grant.label,
+            state: value.get("state").and_then(|v| v.as_str()).unwrap_or("selected").to_owned(),
+            detail: value.get("detail").and_then(|v| v.as_str()).unwrap_or("Selected on this device").to_owned(),
+            synced: value.get("synced").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+            total: value.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+        }
+    }).collect()
+}
+
 fn set_mount_status(
     journal: &Journal,
     grant_id: &str,
@@ -114,6 +179,12 @@ fn deployment_url(journal: &Journal) -> Result<String, String> {
         journal
             .set_config("deployment_url", &url)
             .map_err(|error| error.to_string())?;
+        return Ok(url);
+    }
+    #[cfg(debug_assertions)]
+    if journal.config("deployment_url").map_err(|error| error.to_string())?.is_none() {
+        let url = "https://proper-orca-653.convex.cloud".to_owned();
+        journal.set_config("deployment_url", &url).map_err(|error| error.to_string())?;
         return Ok(url);
     }
     journal
@@ -268,7 +339,7 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         let registration = discover_resource(&deployment, &credential, &mount_id, resource)
             .await
             .map_err(|error| error.to_string())?;
-        if registration.needs_payload && ["docx", "docm"].contains(&resource.native_format.as_str())
+        if registration.needs_payload && ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].contains(&resource.native_format.as_str())
         {
             let relative = std::path::Path::new(&resource.relative_path);
             if relative.is_absolute()
@@ -298,10 +369,16 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                     resource.relative_path
                 ));
             }
-            let media_type = if resource.native_format == "docm" {
-                "application/vnd.ms-word.document.macroEnabled.12"
-            } else {
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            let media_type = match resource.native_format.as_str() {
+                "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "docm" | "dotm" => "application/vnd.ms-word.document.macroEnabled.12",
+                "dotx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+                "xlsx" | "xltx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "xlsm" | "xltm" | "xlam" => "application/vnd.ms-excel.sheet.macroEnabled.12",
+                "pptm" | "potm" | "ppsm" | "ppam" => "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+                "potx" => "application/vnd.openxmlformats-officedocument.presentationml.template",
+                "spectra-pkg" => "application/vnd.spectra.package+zip",
+                _ => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             };
             upload_resource_payload(
                 &deployment,
@@ -532,36 +609,7 @@ fn bridge_status(
     state: tauri::State<'_, Arc<ServerState>>,
     runtime: tauri::State<'_, BridgeRuntime>,
 ) -> (bool, Vec<MountView>) {
-    let mounts = runtime
-        .grants
-        .device_grants()
-        .into_iter()
-        .map(|grant| {
-            let value = runtime
-                .journal
-                .config(&format!("mount_status:{}", grant.id))
-                .ok()
-                .flatten()
-                .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
-                .unwrap_or_else(|| serde_json::json!({}));
-            MountView {
-                id: grant.id,
-                label: grant.label,
-                state: value
-                    .get("state")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("selected")
-                    .to_owned(),
-                detail: value
-                    .get("detail")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Selected on this device")
-                    .to_owned(),
-                synced: value.get("synced").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
-                total: value.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
-            }
-        })
-        .collect();
+    let mounts = mount_views(&runtime.grants, &runtime.journal);
     (state.is_paired(), mounts)
 }
 
@@ -576,17 +624,27 @@ async fn confirm_pairing(
         .map_err(|error| error.to_string())?;
     let deployment = deployment_url(&runtime.journal)?;
     let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "This device".into());
-    let exchange = exchange_pairing(&deployment, &offer, &device_name)
-        .await
-        .map_err(|error| error.to_string())?;
-    HostPlatform
-        .store_credential(&exchange.device_id, &exchange.device_credential)
-        .map_err(|error| error.to_string())?;
+    let existing = runtime.journal.config("device_id").map_err(|error| error.to_string())?
+        .and_then(|device_id| HostPlatform.read_credential(&device_id).ok().flatten().map(|credential| (device_id, credential)));
+    let (device_id, browser_origin) = if let Some((_device_id, credential)) = existing {
+        match resume_pairing(&deployment, &credential, &offer, &device_name).await {
+            Ok(exchange) => (exchange.device_id, exchange.browser_origin),
+            Err(_) => {
+                let exchange = exchange_pairing(&deployment, &offer, &device_name).await.map_err(|error| error.to_string())?;
+                HostPlatform.store_credential(&exchange.device_id, &exchange.device_credential).map_err(|error| error.to_string())?;
+                (exchange.device_id, exchange.browser_origin)
+            }
+        }
+    } else {
+        let exchange = exchange_pairing(&deployment, &offer, &device_name).await.map_err(|error| error.to_string())?;
+        HostPlatform.store_credential(&exchange.device_id, &exchange.device_credential).map_err(|error| error.to_string())?;
+        (exchange.device_id, exchange.browser_origin)
+    };
     runtime
         .journal
-        .set_config("device_id", &exchange.device_id)
+        .set_config("device_id", &device_id)
         .map_err(|error| error.to_string())?;
-    let browser_origin = exchange.browser_origin;
+    state.set_device_id(device_id);
     let session_token = state.complete_pairing(offer.challenge, browser_origin.clone());
     runtime
         .journal
@@ -599,38 +657,28 @@ async fn confirm_pairing(
     Ok(())
 }
 
+async fn select_mount_impl(app: &tauri::AppHandle, grants: &Arc<GrantRegistry>, journal: &Arc<Journal>) -> Result<Option<(String, String)>, String> {
+    let Some(selection) = app.dialog().file().blocking_pick_folder() else { return Ok(None); };
+    let path = selection.into_path().map_err(|error| error.to_string())?;
+    let label = path.file_name().and_then(|name| name.to_str()).unwrap_or("Selected folder").to_owned();
+    let grant = grants.add_native_selection(label.clone(), &path).map_err(|error| error.to_string())?;
+    journal.set_config(&format!("mount:{}", grant.id), &serde_json::json!({ "label": label, "path": grant.device_root() }).to_string()).map_err(|error| error.to_string())?;
+    sync_grant(&grant, journal).await?;
+    spawn_grant_watcher(grant.clone(), grants.clone(), journal.clone());
+    Ok(Some((grant.id, label)))
+}
+
 #[tauri::command]
 async fn select_mount(
     app: tauri::AppHandle,
     runtime: tauri::State<'_, BridgeRuntime>,
 ) -> Result<Option<(String, String)>, String> {
-    let Some(selection) = app.dialog().file().blocking_pick_folder() else {
-        return Ok(None);
-    };
-    let path = selection.into_path().map_err(|error| error.to_string())?;
-    let label = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("Selected folder")
-        .to_owned();
-    let grant = runtime
-        .grants
-        .add_native_selection(label.clone(), &path)
-        .map_err(|error| error.to_string())?;
-    runtime
-        .journal
-        .set_config(
-            &format!("mount:{}", grant.id),
-            &serde_json::json!({ "label": label, "path": grant.device_root() }).to_string(),
-        )
-        .map_err(|error| error.to_string())?;
-    sync_grant(&grant, &runtime.journal).await?;
-    spawn_grant_watcher(
-        grant.clone(),
-        runtime.grants.clone(),
-        runtime.journal.clone(),
-    );
-    Ok(Some((grant.id, label)))
+    select_mount_impl(&app, &runtime.grants, &runtime.journal).await
+}
+
+async fn retry_mount_impl(grant_id: &str, grants: &Arc<GrantRegistry>, journal: &Arc<Journal>) -> Result<(), String> {
+    let grant = grants.device_grants().into_iter().find(|grant| grant.id == grant_id).ok_or_else(|| "Folder grant not found".to_string())?;
+    sync_grant(&grant, journal).await
 }
 
 #[tauri::command]
@@ -638,13 +686,20 @@ async fn retry_mount(
     grant_id: String,
     runtime: tauri::State<'_, BridgeRuntime>,
 ) -> Result<(), String> {
-    let grant = runtime
-        .grants
-        .device_grants()
-        .into_iter()
-        .find(|grant| grant.id == grant_id)
-        .ok_or_else(|| "Folder grant not found".to_string())?;
-    sync_grant(&grant, &runtime.journal).await
+    retry_mount_impl(&grant_id, &runtime.grants, &runtime.journal).await
+}
+
+async fn remove_mount_impl(grant_id: &str, grants: &Arc<GrantRegistry>, journal: &Arc<Journal>) -> Result<(), String> {
+    if let (Ok(deployment), Some(device_id)) = (deployment_url(journal), journal.config("device_id").map_err(|error| error.to_string())?) {
+        if let Some(credential) = HostPlatform.read_credential(&device_id).map_err(|error| error.to_string())? {
+            detach_mount(&deployment, &credential, grant_id).await.map_err(|error| error.to_string())?;
+        }
+    }
+    grants.remove(grant_id);
+    for prefix in ["mount:", "mount_status:", "cloud_mount:"] {
+        journal.delete_config(&format!("{prefix}{grant_id}")).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -652,30 +707,7 @@ async fn remove_mount(
     grant_id: String,
     runtime: tauri::State<'_, BridgeRuntime>,
 ) -> Result<(), String> {
-    if let (Ok(deployment), Some(device_id)) = (
-        deployment_url(&runtime.journal),
-        runtime
-            .journal
-            .config("device_id")
-            .map_err(|error| error.to_string())?,
-    ) {
-        if let Some(credential) = HostPlatform
-            .read_credential(&device_id)
-            .map_err(|error| error.to_string())?
-        {
-            detach_mount(&deployment, &credential, &grant_id)
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    runtime.grants.remove(&grant_id);
-    for prefix in ["mount:", "mount_status:", "cloud_mount:"] {
-        runtime
-            .journal
-            .delete_config(&format!("{prefix}{grant_id}"))
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
+    remove_mount_impl(&grant_id, &runtime.grants, &runtime.journal).await
 }
 
 fn main() {
@@ -703,7 +735,16 @@ fn main() {
             remove_mount
         ])
         .setup(|app| {
-            let isolated_runtime = std::env::var_os("SPECTRA_BRIDGE_DATA_DIR");
+            let isolated_runtime = std::env::var_os("SPECTRA_BRIDGE_DATA_DIR").or_else(|| {
+                #[cfg(debug_assertions)]
+                {
+                    Some(std::ffi::OsString::from(env!("CARGO_MANIFEST_DIR")))
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    None
+                }
+            });
             if isolated_runtime.is_none() {
                 app.autolaunch().enable()?;
                 repair_windows_autostart_command()?;
@@ -714,7 +755,11 @@ fn main() {
                 }
             }
             let data_dir = if let Some(path) = isolated_runtime {
-                let path = std::path::PathBuf::from(path);
+                let mut path = std::path::PathBuf::from(path);
+                #[cfg(debug_assertions)]
+                if path.ends_with("bridge-app") {
+                    path = path.join("..\\..\\.tmp-n5-bridge");
+                }
                 if !path.is_absolute() {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,
@@ -741,6 +786,9 @@ fn main() {
                     let _ = state.restore_pairing(origin, &token);
                 }
             }
+            if let Some(device_id) = journal.config("device_id")? {
+                state.set_device_id(device_id);
+            }
             app.manage(state.clone());
             let grants = Arc::new(GrantRegistry::default());
             for (key, value) in journal.config_prefix("mount:")? {
@@ -762,11 +810,17 @@ fn main() {
                 grants: grants.clone(),
                 journal: journal.clone(),
             });
+            state.install_local_control(Arc::new(SpectraLocalControl {
+                app: app.handle().clone(),
+                grants: grants.clone(),
+                journal: journal.clone(),
+            }));
             for grant in restored_grants {
                 spawn_grant_watcher(grant, grants.clone(), journal.clone());
             }
             let sync_journal = app.state::<BridgeRuntime>().journal.clone();
             let sync_grants = app.state::<BridgeRuntime>().grants.clone();
+            let sync_state = state.clone();
             tauri::async_runtime::spawn(async move {
                 // A file can change while the Bridge is offline. Reconcile every
                 // restored grant before claiming queued cloud-to-local writes so
@@ -785,6 +839,7 @@ fn main() {
                             {
                                 let _ = sync_journal.set_config("replica_migration_error", &error);
                             } else {
+                                sync_state.mark_cloud_seen();
                                 let _ = sync_journal.delete_config("replica_migration_error");
                                 if !restored_grants_reconciled {
                                     let mut reconciliation_succeeded = true;

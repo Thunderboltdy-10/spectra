@@ -20,6 +20,7 @@
     "check:secrets": "node scripts/scan-secrets.mjs",
     "test:realtime": "vitest run workers/collaboration",
     "fidelity:docx": "tsx scripts/fidelity-harness/docx.ts",
+    "fidelity:office": "tsx scripts/fidelity-harness/office.ts",
     "build:realtime": "wrangler deploy --dry-run --config workers/collaboration/wrangler.toml",
     "convex:dev": "convex dev"
   },

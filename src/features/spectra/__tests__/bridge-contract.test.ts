@@ -11,6 +11,10 @@ describe("N3 Bridge contract", () => {
     expect(bridgeConnectionState({ version: "0.1", paired: true, protocolVersion: "2.0", port: 47615 })).toBe("update-required");
   });
 
+  it("does not call a locally paired Bridge connected until its authenticated status is available", () => {
+    expect(bridgeConnectionState({ version: "0.1", paired: true, protocolVersion: "1.0", port: 47615 })).toBe("connected");
+  });
+
   it("selects one truthful vocabulary for cloud, local, conflict and pending states", () => {
     const now = Date.now();
     expect(selectSyncTruth({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: now }], openConflictCount: 0, pendingCount: 0 }).label).toBe("Saved");

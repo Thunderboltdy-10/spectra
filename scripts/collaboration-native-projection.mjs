@@ -198,7 +198,10 @@ function blocksFromJson(json) {
         id,
         type: "heading",
         text,
-        attrs: { level: Number(node.attrs?.level) || 2 },
+        attrs: {
+          level: Number(node.attrs?.level) || 2,
+          styleId: `Heading${Number(node.attrs?.level) || 2}`,
+        },
       };
     if (node?.type === "blockquote") return { id, type: "quote", text };
     if (node?.type === "bulletList" || node?.type === "orderedList")

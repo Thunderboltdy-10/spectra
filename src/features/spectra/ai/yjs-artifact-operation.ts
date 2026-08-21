@@ -6,6 +6,7 @@ import WebSocket from "ws";
 import * as Y from "yjs";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
+  collaborationDocumentName,
   collaborationProtocolVersion,
   signCollaborationSession,
 } from "@/lib/collaboration-token";
@@ -491,7 +492,11 @@ async function createCollaborationSession(
         : "AI_ARTIFACT_PERMISSION_REVOKED: Modify access was removed before the operation committed.",
     );
   }
-  const documentName = `artifact:${artifactId}:${Buffer.from("root").toString("base64url")}`;
+  const documentName = collaborationDocumentName(
+    artifactId,
+    "root",
+    artifact.blueprintKey,
+  );
   const token = await signCollaborationSession({
     artifactId,
     roomId: room.roomId,

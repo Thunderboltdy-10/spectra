@@ -15,6 +15,13 @@ describe("N3 Bridge contract", () => {
     expect(bridgeConnectionState({ version: "0.1", paired: true, protocolVersion: "1.0", port: 47615 })).toBe("connected");
   });
 
+  it("keeps the native session resumable without another pairing code", () => {
+    const server = fs.readFileSync(path.join(process.cwd(), "bridge/bridge-core/src/server.rs"), "utf8");
+    expect(server).toContain("/v1/session/resume");
+    expect(server).toContain("resume_session");
+    expect(fs.readFileSync(path.join(process.cwd(), "src/features/spectra/bridge/client.ts"), "utf8")).toContain("session/resume");
+  });
+
   it("selects one truthful vocabulary for cloud, local, conflict and pending states", () => {
     const now = Date.now();
     expect(selectSyncTruth({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: now }], openConflictCount: 0, pendingCount: 0 }).label).toBe("Saved");

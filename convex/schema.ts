@@ -1499,6 +1499,20 @@ export default defineSchema({
   })
     .index("by_account_scope", ["accountId", "scopeKind", "scopeId"]),
 
+  syncPolicyChanges: defineTable({
+    accountId: v.id("accounts"),
+    scopeKind: v.union(v.literal("account"), v.literal("mount"), v.literal("workspace"), v.literal("folder"), v.literal("item")),
+    scopeId: v.string(),
+    action: v.union(v.literal("override"), v.literal("revert")),
+    before: v.optional(v.any()),
+    after: v.optional(v.any()),
+    actorKind: v.union(v.literal("user"), v.literal("ai"), v.literal("migration")),
+    idempotencyKey: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_account_key", ["accountId", "idempotencyKey"])
+    .index("by_scope_created", ["accountId", "scopeKind", "scopeId", "createdAt"]),
+
   workReplicas: defineTable({
     accountId: v.id("accounts"),
     workId: v.id("spectraArtifacts"),

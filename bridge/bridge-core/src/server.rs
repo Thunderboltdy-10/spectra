@@ -139,6 +139,25 @@ impl ServerState {
         *self.paired.write().unwrap() = true;
         Ok(())
     }
+    pub fn resume_session(&self, origin: &str) -> Option<String> {
+        if !self.is_paired()
+            || !self
+                .allowed_origins
+                .read()
+                .unwrap()
+                .contains(origin)
+        {
+            return None;
+        }
+        let token = self.session_token.read().unwrap();
+        if token.len() != 32 {
+            return None;
+        }
+        Some(base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            token.as_slice(),
+        ))
+    }
     fn local_status(&self) -> LocalBridgeStatus {
         let cloud_seen_at = self.cloud_seen_at.load(Ordering::Relaxed);
         LocalBridgeStatus {
@@ -181,6 +200,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/health", get(health))
         .route("/v1/pair", post(pair_offer))
         .route("/v1/pair/status", post(pair_status))
+        .route("/v1/session/resume", post(resume))
         .merge(protected)
         .layer(
             CorsLayer::new()
@@ -266,6 +286,21 @@ async fn pair_status(
             Json(serde_json::json!({ "paired": true, "sessionToken": session_token }))
                 .into_response()
         }
+        None => Json(serde_json::json!({ "paired": false })).into_response(),
+    }
+}
+
+async fn resume(State(state): State<Arc<ServerState>>, request: Request) -> Response {
+    let origin = request
+        .headers()
+        .get("origin")
+        .and_then(|value| value.to_str().ok());
+    match origin.and_then(|value| state.resume_session(value)) {
+        Some(session_token) => Json(serde_json::json!({
+            "paired": true,
+            "sessionToken": session_token,
+        }))
+        .into_response(),
         None => Json(serde_json::json!({ "paired": false })).into_response(),
     }
 }
@@ -384,5 +419,12 @@ mod tests {
         assert!(state.confirm_pairing_code("000000").is_err());
         state.accept_pairing_offer(offer.clone()).unwrap();
         assert_eq!(state.confirm_pairing_code("123456").unwrap(), offer);
+    }
+    #[test]
+    fn paired_session_can_resume_only_for_an_allowed_origin() {
+        let state = ServerState::unpaired();
+        let token = state.pair("http://localhost:3000".into());
+        assert_eq!(state.resume_session("http://localhost:3000"), Some(token));
+        assert_eq!(state.resume_session("http://evil.test"), None);
     }
 }

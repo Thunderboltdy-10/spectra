@@ -50,7 +50,22 @@ async function authorizedBridgeRequest(path: string, init: RequestInit = {}) {
 
 export async function bridgeStatus(signal?: AbortSignal): Promise<BridgeStatus | null> {
   try {
-    const response = await authorizedBridgeRequest("/v1/status", { signal });
+    let response = await authorizedBridgeRequest("/v1/status", { signal });
+    if (!response && typeof window !== "undefined") {
+      const resume = await fetch(`${BRIDGE_URL}/v1/session/resume`, {
+        method: "POST",
+        signal,
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+      });
+      if (resume.ok) {
+        const result = z.object({ paired: z.boolean(), sessionToken: z.string().optional() }).parse(await resume.json());
+        if (result.paired && result.sessionToken) {
+          persistBridgeSession(result.sessionToken);
+          response = await authorizedBridgeRequest("/v1/status", { signal });
+        }
+      }
+    }
     return response ? statusSchema.parse(await response.json()) : null;
   } catch { return null; }
 }

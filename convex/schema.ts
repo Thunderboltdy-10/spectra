@@ -1504,9 +1504,16 @@ export default defineSchema({
     workId: v.id("spectraArtifacts"),
     kind: v.union(v.literal("cloud"), v.literal("local")),
     deviceId: v.optional(v.id("bridgeDevices")),
+    mountId: v.optional(v.id("bridgeMounts")),
     localResourceId: v.optional(v.string()),
+    relativePath: v.optional(v.string()),
     nativeFormat: v.string(),
     payloadRef: v.optional(v.string()),
+    preservedCarryVersion: v.optional(v.number()),
+    fidelityMap: v.optional(v.any()),
+    compatibilityProfile: v.optional(
+      v.union(v.literal("strict-native"), v.literal("enhanced"), v.literal("spectra-native")),
+    ),
     revision: v.string(),
     baseRevision: v.optional(v.string()),
     contentHash: v.optional(v.string()),
@@ -1521,6 +1528,7 @@ export default defineSchema({
     .index("by_work", ["workId"])
     .index("by_account_state", ["accountId", "state"])
     .index("by_device_resource", ["deviceId", "localResourceId"])
+    .index("by_device_mount_path", ["deviceId", "mountId", "relativePath"])
     .index("by_work_kind", ["workId", "kind"]),
 
   syncOperations: defineTable({
@@ -1556,6 +1564,38 @@ export default defineSchema({
   })
     .index("by_work_state", ["workId", "state"])
     .index("by_account_state", ["accountId", "state"]),
+
+  bridgeWriteRequests: defineTable({
+    accountId: v.id("accounts"),
+    workId: v.id("spectraArtifacts"),
+    replicaId: v.id("workReplicas"),
+    deviceId: v.id("bridgeDevices"),
+    mountId: v.id("bridgeMounts"),
+    localResourceId: v.string(),
+    relativePath: v.string(),
+    payloadRef: v.string(),
+    baseRevision: v.string(),
+    targetRevision: v.string(),
+    contentHash: v.string(),
+    idempotencyKey: v.string(),
+    regionIds: v.array(v.string()),
+    partNames: v.array(v.string()),
+    state: v.union(
+      v.literal("pending"),
+      v.literal("claimed"),
+      v.literal("verified"),
+      v.literal("failed"),
+      v.literal("conflicted"),
+    ),
+    errorCode: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    claimedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_device_state", ["deviceId", "state"])
+    .index("by_work_created", ["workId", "createdAt"])
+    .index("by_account_key", ["accountId", "idempotencyKey"]),
 
   payloadObjects: defineTable({
     accountId: v.id("accounts"),

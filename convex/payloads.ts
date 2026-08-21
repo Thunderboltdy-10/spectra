@@ -16,7 +16,12 @@ export const put = mutation({
     const metadata = await ctx.db.system.get(args.storageId);
     if (!metadata || metadata.size !== args.bytes) throw new Error("PAYLOAD_SIZE_MISMATCH");
     const existing = await ctx.db.query("payloadObjects").withIndex("by_account_hash", (q) => q.eq("accountId", actor.accountId).eq("hash", args.hash)).unique();
-    if (existing) { await ctx.db.patch(existing._id, { refCount: existing.refCount + 1 }); return { payloadRef: String(existing._id), deduplicated: true }; }
+    if (existing) {
+      if (existing.storageId !== args.storageId)
+        await ctx.storage.delete(args.storageId);
+      await ctx.db.patch(existing._id, { refCount: existing.refCount + 1 });
+      return { payloadRef: String(existing._id), deduplicated: true };
+    }
     const id = await ctx.db.insert("payloadObjects", { accountId: actor.accountId, hash: args.hash, storageId: args.storageId, bytes: args.bytes, mediaType: args.mediaType.slice(0, 120), refCount: 1, state: "active", createdAt: Date.now(), verifiedAt: Date.now() });
     return { payloadRef: String(id), deduplicated: false };
   },

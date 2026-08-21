@@ -3982,8 +3982,11 @@ name = "spectra-bridge"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hex",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "spectra-bridge-core",
  "tauri",
  "tauri-build",

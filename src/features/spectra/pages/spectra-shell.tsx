@@ -2318,6 +2318,38 @@ export function SpectraShell({
     const refresh = () => {
       void loadOverview(selectedWorkspaceId, true);
     };
+    const refreshActivatedArtifact = (event: Event) => {
+      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail
+        ?.artifactId;
+      if (!artifactId) return;
+      void getSpectraArtifact(artifactId)
+        .then(({ artifact }) => {
+          setOverview((current) => {
+            if (!current) return current;
+            return {
+              ...current,
+              artifacts: current.artifacts.map((item) =>
+                item._id === artifact._id ? artifact : item,
+              ),
+              workspace: current.workspace
+                ? {
+                    ...current.workspace,
+                    items: current.workspace.items.map((item) =>
+                      item.artifact?._id === artifact._id
+                        ? { ...item, artifact }
+                        : item,
+                    ),
+                  }
+                : current.workspace,
+            };
+          });
+        })
+        .catch(() => {
+          // The mutation already succeeded; a later overview refresh can
+          // recover the projection if this one-shot read is interrupted.
+          void loadOverview(selectedWorkspaceId, true);
+        });
+    };
     const createWorkspaceFromShell = () => setWorkspaceCreateOpen(true);
     const navigateWorkspaceHome = () => goToHomeHub();
     const shareFromShell = () => {
@@ -2332,6 +2364,10 @@ export function SpectraShell({
     window.addEventListener("spectra:focus-set", focusSet);
     window.addEventListener("spectra:clear-selection", clear);
     window.addEventListener("spectra:refresh", refresh);
+    window.addEventListener(
+      "spectra:artifact-lens-activated",
+      refreshActivatedArtifact,
+    );
     window.addEventListener(
       "spectra:create-workspace",
       createWorkspaceFromShell,
@@ -2349,6 +2385,10 @@ export function SpectraShell({
       window.removeEventListener("spectra:focus-set", focusSet);
       window.removeEventListener("spectra:clear-selection", clear);
       window.removeEventListener("spectra:refresh", refresh);
+      window.removeEventListener(
+        "spectra:artifact-lens-activated",
+        refreshActivatedArtifact,
+      );
       window.removeEventListener(
         "spectra:create-workspace",
         createWorkspaceFromShell,

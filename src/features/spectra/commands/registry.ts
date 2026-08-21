@@ -87,8 +87,16 @@ export function commandForBinding(type: WorkType, binding: CommandBinding, order
     availability: (ctx) => {
       if (binding.requires && !ctx.can(binding.requires)) return { state: "hidden" };
       if (binding.disabled) return { state: "disabled", reason: binding.hint ?? "Unavailable in the current selection" };
-      if (ctx.compatibilityProfile === "strict-native" && Object.values(ctx.fidelity).some((value) => value === "PRESERVED" || value === "EXTENSION")) {
-        return { state: "disabled", reason: "Unavailable in strict native compatibility" };
+      if (
+        ctx.compatibilityProfile === "strict-native" &&
+        binding.strictNative?.available === false
+      ) {
+        return {
+          state: "disabled",
+          reason:
+            binding.strictNative.reason ??
+            "This change cannot be written safely to the linked native file.",
+        };
       }
       return { state: "enabled" };
     },
@@ -112,12 +120,13 @@ export function commandContext(
   can: CommandContext["can"],
   role: CommandContext["permissions"]["role"],
   selectionKind?: string,
+  native?: Pick<CommandContext, "compatibilityProfile" | "fidelity">,
 ): CommandContext {
   return {
     workType: type,
     can,
-    compatibilityProfile: "spectra-native",
-    fidelity: { artifact: "NATIVE" },
+    compatibilityProfile: native?.compatibilityProfile ?? "spectra-native",
+    fidelity: native?.fidelity ?? { artifact: "NATIVE" },
     selection: { kind: selectionKind, ids: [] },
     permissions: { role, editable: can("edit") },
   };

@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-08-20T21:00:54.749Z",
+  "fixtures": ["complexity.docx", "trackChange.docx", "TOC2.docx", "Data-Bound-Content-Controls.docx", "UnknownElement.docx"],
+  "candidates": [
+    {
+      "name": "@ariadng/office",
+      "version": "0.3.0",
+      "licenseFromRepository": "MIT",
+      "runtime": "Node and browser TypeScript, zero runtime dependencies",
+      "unpackedBytes": 1850000,
+      "opened": 5,
+      "byteIdenticalNoOp": 5,
+      "paragraphEditVisible": 5,
+      "collateralPartRewrites": 0,
+      "decision": "adopt"
+    },
+    {
+      "name": "office-oxide",
+      "version": "0.1.8",
+      "licenseFromRepository": "MIT OR Apache-2.0",
+      "runtime": "Rust/wasm candidate",
+      "unpackedBytes": 14870000,
+      "opened": 5,
+      "byteIdenticalNoOp": 0,
+      "paragraphEditVisible": 3,
+      "decision": "reject: unrelated OPC rewrites and failed edit probes"
+    },
+    {
+      "name": "docxmlater",
+      "version": "12.1.0",
+      "licenseFromRepository": "MIT",
+      "runtime": "Node TypeScript",
+      "unpackedBytes": 17960000,
+      "decision": "reject after runtime and package-cost review; no advantage over the proven candidate"
+    }
+  ],
+  "exitStrategy": "All engine calls remain behind SpectraLens; callers depend only on payloads, semantic projections/deltas, fidelity maps and preserved carry."
+}

@@ -148,8 +148,11 @@ export function ArtifactWorkbar({
   const [activeTab, setActiveTab] = useState("General");
   const [customizing, setCustomizing] = useState(false);
   const commandCtx = useMemo(
-    () => commandContext(contract.type, can, contract.role, selectionContext),
-    [can, contract.role, contract.type, selectionContext],
+    () => commandContext(contract.type, can, contract.role, selectionContext, {
+      compatibilityProfile: contract.compatibilityProfile,
+      fidelity: contract.fidelity,
+    }),
+    [can, contract.compatibilityProfile, contract.fidelity, contract.role, contract.type, selectionContext],
   );
   const commands = useMemo(
     () => actions.map((binding, index) => ({
@@ -219,13 +222,19 @@ export function ArtifactWorkbar({
       command.defaultPlacement.tab === activeTab &&
       command.availability(commandCtx).state !== "hidden")
     .sort((left, right) => left.command.defaultPlacement.order - right.command.defaultPlacement.order)
-    .map(({ binding, command }) => ({
+    .map(({ binding, command }) => {
+      const availability = command.availability(commandCtx);
+      return ({
       ...binding,
       id: command.id,
       label: command.title,
-      disabled: command.availability(commandCtx).state === "disabled",
+      disabled: availability.state === "disabled",
+      hint:
+        availability.state === "disabled"
+          ? availability.reason
+          : binding.hint,
       onSelect: () => executeCommand(command, commandCtx),
-    })), [activeTab, commandCtx, commands]);
+    }); }), [activeTab, commandCtx, commands]);
   const essential = visibleActions.filter(
     (action) => (action.priority ?? "secondary") === "essential",
   );

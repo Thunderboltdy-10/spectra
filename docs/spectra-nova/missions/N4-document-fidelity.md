@@ -89,3 +89,18 @@ XLSX and PPTX (N5) · `spectra-pkg` (N5) · deep Word feature parity such as ful
 7. Command availability in `strict-native` demonstrated with screenshots (a disabled command with its reason; a preserved-feature placeholder).
 8. P1, P2, P8, P11 pass on a mounted DOCX as well as a native document; P12 sentinel unaffected on a large fixture.
 9. STATE gains a fidelity section with per-feature classes and the harness path; mission log ≤40 lines; close-out checks green.
+
+## Mission log — 2026-08-21
+
+- Adopted `@ariadng/office@0.3.0` (MIT) behind `SpectraLens`; five hostile-fixture spike passed byte-identical no-op and single-part edit probes. `office-oxide` failed preservation/edit probes; `docxmlater` lost on runtime/package cost. Exit remains the format-agnostic lens contract.
+- Added 16 public Open XML SDK fixtures plus sidecars and the DOCX harness. Final run: 16 fixtures, 101 assertions, green; no-op packages byte-identical.
+- Persisted semantic projections, preserved carry, fidelity maps, strict-native capabilities and verified payload materialization through Convex replicas and the Bridge journal.
+- Mounted DOCX now opens in the native Yjs Document editor with Word heading styles, protected field rows and stable region IDs.
+- Fixed native editor lifecycle races that replayed stale artifact content over fresh Yjs keystrokes; typing remains immediate through acknowledgement.
+- Real F2 pass on `.tmp-n4-mount/N4-controlled-fields.docx`: Spectra edit retained, Word lock reported Waiting, unlock materialized and read-back verified, status reached Saved locally, TOC/fields survived and Word showed no repair prompt.
+- Real F3 pass: Word save produced a persisted same-region conflict with Keep Spectra / Keep Word controls; Keep Word applied in place and surfaced Edited in Word.
+- Five marquee XPath spot-proofs survived three unrelated Spectra edits: field, tracked change, bibliography source, embedded OLE and custom XML.
+- Password-protected/corrupt fixtures fail honestly as resources; `.docm` macro parts remain untouched and are never executed.
+- Strict-native command registry disables unsafe template/import operations with reasons; preserved Word fields render as a quiet protected placeholder.
+- Identity continuity tests cover duplicate local candidates and resource→document activation without changing work ID.
+- Close-out: `tsc`, lint, 23 focused tests, DOCX harness, secret scan and `git diff --check` green. Bridge stopped after testing; production Physics grant untouched.

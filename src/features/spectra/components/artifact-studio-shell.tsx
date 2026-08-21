@@ -16,6 +16,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { type SpectraArtifact } from "../data/api";
+import type { CompatibilityProfile, FidelityClass } from "../commands/types";
 import {
   availableWorkModes,
   getWorkDefinition,
@@ -91,6 +92,8 @@ export type StudioContract = {
   sync: { state: StudioSyncState; label: string };
   responsive: WorkResponsiveContract;
   density: StudioDensity;
+  compatibilityProfile: CompatibilityProfile;
+  fidelity: Readonly<Record<string, FidelityClass>>;
   /** The shell's docked inspectors. A studio opens them, never rebuilds them. */
   inspector: {
     open: StudioInspectorPanel | null;
@@ -142,6 +145,8 @@ export function useStudioContractValue({
   sync,
   density,
   inspector,
+  compatibilityProfile = "spectra-native",
+  fidelity = { artifact: "NATIVE" },
 }: {
   artifactId: string;
   type: WorkType;
@@ -150,6 +155,8 @@ export function useStudioContractValue({
   sync: { state: StudioSyncState; label: string };
   density: StudioDensity;
   inspector: StudioContract["inspector"];
+  compatibilityProfile?: CompatibilityProfile;
+  fidelity?: Readonly<Record<string, FidelityClass>>;
 }): StudioContract {
   return useMemo(() => {
     const definition = getWorkDefinition(type);
@@ -164,9 +171,11 @@ export function useStudioContractValue({
       sync,
       responsive: definition.responsive,
       density,
+      compatibilityProfile,
+      fidelity,
       inspector,
     };
-  }, [artifactId, density, inspector, role, surface, sync, type]);
+  }, [artifactId, compatibilityProfile, density, fidelity, inspector, role, surface, sync, type]);
 }
 
 /**

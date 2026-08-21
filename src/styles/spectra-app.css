@@ -19088,6 +19088,52 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   overflow: hidden;
 }
 
+.spectra-document-native-features {
+  position: relative;
+  z-index: 28;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 7px 20px 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.spectra-document-native-features span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.spectra-document-native-features strong,
+.spectra-document-native-features small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spectra-document-native-features strong {
+  color: var(--text-primary);
+  font-size: var(--text-micro);
+  font-weight: 680;
+}
+
+.spectra-document-native-features small,
+.spectra-document-native-features em {
+  font-size: var(--text-micro);
+  font-style: normal;
+}
+
+.spectra-document-native-features em {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
 .spectra-command-tabs {
   display: flex;
   min-width: 0;

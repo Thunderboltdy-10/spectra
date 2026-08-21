@@ -2,8 +2,9 @@ import { v } from "convex/values";
 import { mutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { getActorForAccountId } from "./identityShared";
-import { createFolderNode, placeSourceNode, trashNode } from "./orgTreeShared";
+import { createFolderNode, placeSourceNode, purgeSourceNodes, trashNode } from "./orgTreeShared";
 import { z } from "zod";
+import { chooseReplicaContinuity } from "./bridgeIdentity";
 
 async function digest(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -51,16 +52,290 @@ export const discoverResource = mutation({
     const mount = await ctx.db.get(args.mountId);
     if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || !mount.rootOrgNodeId || mount.state !== "active") throw new Error("MOUNT_NOT_ACTIVE");
     const input = z.object({ localResourceId: z.string().regex(/^lr_[a-f0-9]+$/), relativePath: z.string().min(1).max(1024).refine((value) => !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes("..")), size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), contentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), nativeFormat: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/) }).parse(args);
-    const existingReplica = await ctx.db.query("workReplicas").withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId)).unique();
-    if (existingReplica) return existingReplica.workId;
+    const byResource = await ctx.db.query("workReplicas").withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId)).take(20);
+    const byPath = await ctx.db.query("workReplicas").withIndex("by_device_mount_path", (q) => q.eq("deviceId", device._id).eq("mountId", mount._id).eq("relativePath", input.relativePath)).take(20);
+    const candidates = [...byResource, ...byPath].filter((candidate, index, all) => all.findIndex((entry) => entry._id === candidate._id) === index);
+    const scored = await Promise.all(candidates.map(async (candidate) => ({
+      candidate,
+      cloud: await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", candidate.workId).eq("kind", "cloud")).first(),
+    })));
+    const existingReplica = chooseReplicaContinuity(scored.map(({ candidate, cloud }) => ({
+      value: candidate,
+      creationTime: candidate._creationTime,
+      hasCloudReplica: Boolean(cloud),
+    })));
+    if (existingReplica) {
+      const changed = Boolean(input.contentHash && input.contentHash !== existingReplica.contentHash);
+      await ctx.db.patch(existingReplica._id, {
+        mountId: mount._id,
+        localResourceId: input.localResourceId,
+        relativePath: input.relativePath,
+        ...(changed ? { state: "ahead" as const } : {}),
+        updatedAt: Date.now(),
+      });
+      for (const duplicate of candidates.filter((candidate) => candidate._id !== existingReplica._id)) {
+        const duplicateCloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", duplicate.workId).eq("kind", "cloud")).first();
+        if (duplicateCloud) continue;
+        await ctx.db.patch(duplicate.workId, { status: "deleted", updatedAt: Date.now() });
+        await purgeSourceNodes(ctx, "work", String(duplicate.workId));
+        await ctx.db.delete(duplicate._id);
+      }
+      return {
+        workId: existingReplica.workId,
+        replicaId: existingReplica._id,
+        revision: existingReplica.revision,
+        payloadHash: existingReplica.contentHash,
+        needsPayload: ["docx", "docm"].includes(input.nativeFormat) &&
+          (!existingReplica.payloadRef || input.contentHash !== existingReplica.contentHash),
+      };
+    }
     const parts = input.relativePath.replaceAll("\\", "/").split("/").filter(Boolean);
     const title = parts.pop()!;
     const parentId = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, mount.rootOrgNodeId, parts);
     const now = Date.now();
     const workId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: actor.accountId, schoolId: actor.schoolId, blueprintKey: "resource", resourceClass: "resource", nativeFormat: input.nativeFormat, compatibilityProfile: "strict-native", title, summary: `${input.size} bytes`, content: null, schemaVersion: 1, contentHash: input.contentHash, tags: [], status: "active", createdFrom: { source: "manual" }, createdAt: now, updatedAt: now });
-    await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId, kind: "local", deviceId: device._id, localResourceId: input.localResourceId, nativeFormat: input.nativeFormat, revision: input.contentHash ?? `discovered:${input.localResourceId}`, contentHash: input.contentHash, state: "current", lastVerifiedAt: now, updatedAt: now });
+    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId, kind: "local", deviceId: device._id, mountId: mount._id, localResourceId: input.localResourceId, relativePath: input.relativePath, nativeFormat: input.nativeFormat, revision: input.contentHash ?? `discovered:${input.localResourceId}`, contentHash: input.contentHash, state: "current", lastVerifiedAt: now, updatedAt: now });
     await placeSourceNode(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, kind: "work", sourceId: String(workId), name: title, target: { parentId }, typeKey: "resource", placedByAccountId: actor.accountId });
-    return workId;
+    return {
+      workId,
+      replicaId,
+      revision: input.contentHash ?? `discovered:${input.localResourceId}`,
+      payloadHash: undefined,
+      needsPayload: ["docx", "docm"].includes(input.nativeFormat),
+    };
+  },
+});
+
+export const beginPayloadUpload = mutation({
+  args: {
+    credential: v.string(),
+    replicaId: v.id("workReplicas"),
+    hash: v.string(),
+    bytes: v.number(),
+    mediaType: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { device } = await requireDevice(ctx, args.credential);
+    const input = z.object({
+      hash: z.string().regex(/^[a-f0-9]{64}$/),
+      bytes: z.number().int().min(0).max(100 * 1024 * 1024),
+      mediaType: z.string().min(1).max(120),
+    }).parse(args);
+    const replica = await ctx.db.get(args.replicaId);
+    if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id)
+      throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
+    const existing = await ctx.db.query("payloadObjects")
+      .withIndex("by_account_hash", (q) => q.eq("accountId", device.accountId).eq("hash", input.hash))
+      .unique();
+    if (existing?.state === "active")
+      return { deduplicated: true as const, payloadRef: String(existing._id) };
+    return { deduplicated: false as const, uploadUrl: await ctx.storage.generateUploadUrl() };
+  },
+});
+
+export const commitPayloadUpload = mutation({
+  args: {
+    credential: v.string(),
+    replicaId: v.id("workReplicas"),
+    hash: v.string(),
+    bytes: v.number(),
+    mediaType: v.string(),
+    storageId: v.optional(v.id("_storage")),
+    payloadRef: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { device } = await requireDevice(ctx, args.credential);
+    const input = z.object({
+      hash: z.string().regex(/^[a-f0-9]{64}$/),
+      bytes: z.number().int().min(0).max(100 * 1024 * 1024),
+      mediaType: z.string().min(1).max(120),
+      payloadRef: z.string().optional(),
+    }).parse(args);
+    const replica = await ctx.db.get(args.replicaId);
+    if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id)
+      throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
+    let payload = await ctx.db.query("payloadObjects")
+      .withIndex("by_account_hash", (q) => q.eq("accountId", device.accountId).eq("hash", input.hash))
+      .unique();
+    if (!payload) {
+      if (!args.storageId) throw new Error("PAYLOAD_STORAGE_REQUIRED");
+      const metadata = await ctx.db.system.get(args.storageId);
+      if (!metadata || metadata.size !== input.bytes) throw new Error("PAYLOAD_SIZE_MISMATCH");
+      const payloadId = await ctx.db.insert("payloadObjects", {
+        accountId: device.accountId,
+        hash: input.hash,
+        storageId: args.storageId,
+        bytes: input.bytes,
+        mediaType: input.mediaType,
+        refCount: 1,
+        state: "active",
+        createdAt: Date.now(),
+        verifiedAt: Date.now(),
+      });
+      payload = (await ctx.db.get(payloadId))!;
+    } else if (args.storageId && args.storageId !== payload.storageId) {
+      await ctx.storage.delete(args.storageId);
+    }
+    if (input.payloadRef && input.payloadRef !== String(payload._id))
+      throw new Error("PAYLOAD_REFERENCE_MISMATCH");
+    const now = Date.now();
+    const externalChange = Boolean(replica.payloadRef && replica.contentHash !== input.hash);
+    await ctx.db.patch(replica._id, {
+      payloadRef: String(payload._id),
+      baseRevision: externalChange ? replica.revision : replica.baseRevision,
+      revision: input.hash,
+      contentHash: input.hash,
+      state: externalChange ? "ahead" : "current",
+      lastVerifiedAt: now,
+      updatedAt: now,
+    });
+    const cloud = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
+      .unique();
+    if (!cloud) {
+      await ctx.db.insert("workReplicas", {
+        accountId: device.accountId,
+        workId: replica.workId,
+        kind: "cloud",
+        nativeFormat: replica.nativeFormat,
+        payloadRef: String(payload._id),
+        preservedCarryVersion: 1,
+        compatibilityProfile: "strict-native",
+        revision: input.hash,
+        contentHash: input.hash,
+        state: "current",
+        lastVerifiedAt: now,
+        updatedAt: now,
+      });
+    }
+    if (externalChange) {
+      await ctx.db.insert("syncOperations", {
+        accountId: device.accountId,
+        workId: replica.workId,
+        replicaId: replica._id,
+        idempotencyKey: `external:${replica._id}:${input.hash}`,
+        direction: "external",
+        revisionBefore: replica.revision,
+        revisionAfter: input.hash,
+        state: "pending",
+        actorKind: "external-edit",
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    await ctx.db.patch(device._id, { lastSeenAt: now });
+    return { payloadRef: String(payload._id), externalChange };
+  },
+});
+
+export const claimWrite = mutation({
+  args: { credential: v.string() },
+  handler: async (ctx, args) => {
+    const { device } = await requireDevice(ctx, args.credential);
+    const now = Date.now();
+    const pending = await ctx.db.query("bridgeWriteRequests")
+      .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending"))
+      .first();
+    const request = pending ?? (await ctx.db.query("bridgeWriteRequests")
+      .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "claimed"))
+      .filter((q) => q.lt(q.field("claimedAt"), now - 60_000))
+      .first());
+    if (!request) return { request: null };
+    const payloadId = ctx.db.normalizeId("payloadObjects", request.payloadRef);
+    const payload = payloadId ? await ctx.db.get(payloadId) : null;
+    const mount = await ctx.db.get(request.mountId);
+    if (!payload || payload.state !== "active" || !mount || mount.deviceId !== device._id)
+      throw new Error("WRITE_PAYLOAD_UNAVAILABLE");
+    await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, updatedAt: now });
+    return { request: {
+      requestId: request._id,
+      replicaId: request.replicaId,
+      grantId: mount.grantId,
+      localResourceId: request.localResourceId,
+      relativePath: request.relativePath,
+      baseRevision: request.baseRevision,
+      targetRevision: request.targetRevision,
+      contentHash: request.contentHash,
+      idempotencyKey: request.idempotencyKey,
+      payloadUrl: await ctx.storage.getUrl(payload.storageId),
+    } };
+  },
+});
+
+export const completeWrite = mutation({
+  args: {
+    credential: v.string(),
+    requestId: v.id("bridgeWriteRequests"),
+    outcome: v.union(v.literal("verified"), v.literal("waiting"), v.literal("conflicted"), v.literal("failed")),
+    actualRevision: v.optional(v.string()),
+    errorCode: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { device } = await requireDevice(ctx, args.credential);
+    const request = await ctx.db.get(args.requestId);
+    if (!request || request.deviceId !== device._id || request.accountId !== device.accountId)
+      throw new Error("WRITE_REQUEST_NOT_OWNED_BY_DEVICE");
+    const operation = await ctx.db.query("syncOperations")
+      .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
+      .unique();
+    const now = Date.now();
+    if (args.outcome === "waiting") {
+      await ctx.db.patch(request._id, {
+        state: "pending",
+        errorCode: args.errorCode ?? "office-locked",
+        errorMessage: args.errorMessage,
+        claimedAt: undefined,
+        updatedAt: now,
+      });
+      return { state: "pending" as const };
+    }
+    if (args.outcome === "verified") {
+      await ctx.db.patch(request.replicaId, {
+        payloadRef: request.payloadRef,
+        baseRevision: request.baseRevision,
+        revision: request.targetRevision,
+        contentHash: request.contentHash,
+        state: "current",
+        lastVerifiedAt: now,
+        errorCode: undefined,
+        errorMessage: undefined,
+        errorAt: undefined,
+        updatedAt: now,
+      });
+      await ctx.db.patch(request._id, { state: "verified", errorCode: undefined, errorMessage: undefined, updatedAt: now });
+      if (operation) await ctx.db.patch(operation._id, { state: "verified", updatedAt: now });
+      return { state: "verified" as const };
+    }
+    const conflicted = args.outcome === "conflicted";
+    await ctx.db.patch(request._id, {
+      state: conflicted ? "conflicted" : "failed",
+      errorCode: args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"),
+      errorMessage: args.errorMessage,
+      updatedAt: now,
+    });
+    await ctx.db.patch(request.replicaId, {
+      state: conflicted ? "diverged" : "error",
+      errorCode: args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"),
+      errorMessage: args.errorMessage,
+      errorAt: now,
+      updatedAt: now,
+    });
+    if (operation) await ctx.db.patch(operation._id, { state: conflicted ? "conflicted" : "failed", errorCode: args.errorCode, updatedAt: now });
+    if (conflicted) {
+      await ctx.db.insert("syncConflicts", {
+        accountId: device.accountId,
+        workId: request.workId,
+        replicaIds: [request.replicaId],
+        regionIds: request.regionIds,
+        partNames: request.partNames,
+        localRevision: args.actualRevision ?? request.baseRevision,
+        spectraRevision: request.targetRevision,
+        state: "open",
+        createdAt: now,
+      });
+    }
+    return { state: conflicted ? "conflicted" as const : "failed" as const };
   },
 });
 

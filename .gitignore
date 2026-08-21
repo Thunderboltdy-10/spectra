@@ -50,3 +50,9 @@ next-env.d.ts
 /.tmp-n3-*/
 /.tmp-n3-mount/
 /.tmp-n3-updater.key*
+/.tmp-n4-eval/
+/.tmp-n4-appdata/
+/.tmp-n4-bridge-isolated/
+/.tmp-n4-mount/
+/.tmp-n4-target/
+/.tmp-n4-sanitize-target/

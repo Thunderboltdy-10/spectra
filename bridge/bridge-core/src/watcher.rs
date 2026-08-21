@@ -196,11 +196,16 @@ impl StabilityTracker {
     }
 }
 
-fn office_lock_exists(path: &Path) -> bool {
+pub(crate) fn office_lock_exists(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
-    path.with_file_name(format!("~${name}")).exists()
+    let owner_name = if name.chars().count() > 2 {
+        format!("~${}", name.chars().skip(2).collect::<String>())
+    } else {
+        format!("~${name}")
+    };
+    path.with_file_name(owner_name).exists()
 }
 
 pub fn office_locks_present(root: &Path) -> bool {
@@ -307,11 +312,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("paper.docx");
         std::fs::write(&path, b"bytes").unwrap();
-        std::fs::write(dir.path().join("~$paper.docx"), b"lock").unwrap();
+        std::fs::write(dir.path().join("~$per.docx"), b"lock").unwrap();
         let mut tracker = StabilityTracker::new(Duration::from_millis(1));
         let now = Instant::now();
         assert_eq!(tracker.observe(&path, now).unwrap(), None);
-        std::fs::remove_file(dir.path().join("~$paper.docx")).unwrap();
+        std::fs::remove_file(dir.path().join("~$per.docx")).unwrap();
         assert_eq!(
             tracker
                 .observe(&path, now + Duration::from_millis(2))
@@ -332,5 +337,14 @@ mod tests {
         assert!(!office_locks_present(dir.path()));
         std::fs::write(dir.path().join("~$paper.docx"), b"lock").unwrap();
         assert!(office_locks_present(dir.path()));
+    }
+
+    #[test]
+    fn word_owner_file_name_matches_the_open_document() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("paper.docx");
+        std::fs::write(&path, b"bytes").unwrap();
+        std::fs::write(dir.path().join("~$per.docx"), b"lock").unwrap();
+        assert!(office_lock_exists(&path));
     }
 }

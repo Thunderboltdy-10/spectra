@@ -66,7 +66,9 @@ function blockToJson(block: Record<string, unknown>, index: number): ProseMirror
       type: "heading",
       attrs: {
         blockId: id,
-        level: [1, 2, 3].includes(Number(attrs.level)) ? Number(attrs.level) : 2,
+        level: [1, 2, 3].includes(Number(attrs.level))
+          ? Number(attrs.level)
+          : Number(String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1] ?? 2),
       },
       content: inlineText(value),
     };
@@ -121,13 +123,50 @@ export function documentContentToProseMirrorJson(
   content: DocumentWorkContent,
 ): ProseMirrorJson {
   const existing = record(content.tiptap);
-  if (existing.type === "doc") return existing as ProseMirrorJson;
   const blocks = Array.isArray(content.blocks)
     ? content.blocks.filter(
         (entry): entry is Record<string, unknown> =>
           Boolean(entry && typeof entry === "object" && !Array.isArray(entry)),
       )
     : [];
+  if (existing.type === "doc") {
+    const byId = new Map(
+      blocks.flatMap((block) =>
+        typeof block.id === "string" && block.id
+          ? [[block.id, block] as const]
+          : [],
+      ),
+    );
+    const existingContent = Array.isArray(existing.content)
+      ? (existing.content as ProseMirrorJson[])
+      : [];
+    return {
+      ...(existing as ProseMirrorJson),
+      content: existingContent.map((node) => {
+        const blockId = node.attrs?.blockId;
+        const block = typeof blockId === "string" ? byId.get(blockId) : undefined;
+        const attrs = record(block?.attrs);
+        const styleId = typeof attrs.styleId === "string" ? attrs.styleId : "";
+        const headingLevel = Number(styleId.match(/^Heading([1-3])$/i)?.[1] ?? 0);
+        if (headingLevel && (node.type === "paragraph" || node.type === "heading"))
+          return {
+            ...node,
+            type: "heading",
+            attrs: {
+              ...node.attrs,
+              level: headingLevel,
+              ...(attrs.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
+            },
+          };
+        if (attrs.nativeReadOnly === true)
+          return {
+            ...node,
+            attrs: { ...node.attrs, nativeReadOnly: true },
+          };
+        return node;
+      }),
+    };
+  }
   return {
     type: "doc",
     content: (blocks.length ? blocks : [{ id: "intro", type: "paragraph", text: "" }]).map(
@@ -175,8 +214,10 @@ function blocksFromJson(json: ProseMirrorJson) {
     }
     seen.add(id);
     const text = textContent(node).trimEnd();
-    if (node.type === "heading")
-      return { id, type: "heading", text, attrs: { level: Number(node.attrs?.level) || 2 } };
+    if (node.type === "heading") {
+      const level = Number(node.attrs?.level) || 2;
+      return { id, type: "heading", text, attrs: { level, styleId: `Heading${level}` } };
+    }
     if (node.type === "blockquote") return { id, type: "quote", text };
     if (node.type === "bulletList" || node.type === "orderedList")
       return { id, type: "list", text };

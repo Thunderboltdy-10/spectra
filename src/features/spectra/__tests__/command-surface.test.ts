@@ -42,6 +42,32 @@ describe("N2 command surface", () => {
     expect(executeCommand(command, denied)).toBe(false);
   });
 
+  it("decides strict-native availability per command", () => {
+    const blocked = commandForBinding("document", {
+      id: "apply-template",
+      label: "Apply template",
+      strictNative: {
+        available: false,
+        reason: "Templates replace the whole linked Word document.",
+      },
+      onSelect: vi.fn(),
+    }, 0);
+    const safe = commandForBinding("document", {
+      id: "export-copy",
+      label: "Export a copy",
+      onSelect: vi.fn(),
+    }, 1);
+    const context = commandContext("document", () => true, "edit", undefined, {
+      compatibilityProfile: "strict-native",
+      fidelity: { trackedChanges: "PRESERVED" },
+    });
+    expect(blocked.availability(context)).toEqual({
+      state: "disabled",
+      reason: "Templates replace the whole linked Word document.",
+    });
+    expect(safe.availability(context)).toEqual({ state: "enabled" });
+  });
+
   it("adds and dismisses selection-driven contextual tabs", () => {
     expect(tabsFor("presentation", "Shape")).toContain("Shape");
     expect(tabsFor("presentation")).not.toContain("Shape");

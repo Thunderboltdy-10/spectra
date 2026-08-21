@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::journal::{Journal, OpState};
+use crate::watcher::office_lock_exists;
 use crate::platform::Platform;
 
 #[derive(Debug, Error)]
@@ -202,7 +203,7 @@ impl<P: Platform> SafeWriter<P> {
             )?;
             return Err(FsError::StaleRevision);
         }
-        if target.exists() && self.platform.is_locked(&target)? {
+        if target.exists() && (office_lock_exists(&target) || self.platform.is_locked(&target)?) {
             return Err(FsError::FileLocked);
         }
         let parent = target.parent().ok_or(FsError::GrantEscape)?;
@@ -455,5 +456,36 @@ mod tests {
             Err(FsError::FileLocked)
         ));
         assert_eq!(fs::read(dir.path().join("a.txt")).unwrap(), b"original");
+    }
+
+    #[test]
+    fn word_owner_file_queues_the_write_without_touching_the_document() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("paper.docx"), b"original").unwrap();
+        fs::write(dir.path().join("~$per.docx"), b"owner").unwrap();
+        let grants = Arc::new(GrantRegistry::default());
+        let grant = grants
+            .add_native_selection("Test".into(), dir.path())
+            .unwrap();
+        let writer = SafeWriter::new(
+            grants,
+            Arc::new(Journal::in_memory().unwrap()),
+            Arc::new(TestPlatform::default()),
+        );
+        let hash = hex::encode(Sha256::digest(b"new"));
+        assert!(matches!(
+            writer.write(WriteRequest {
+                grant_id: &grant.id,
+                relative_path: Path::new("paper.docx"),
+                resource_id: "r",
+                base_revision: "same",
+                known_revision: "same",
+                bytes: b"new",
+                expected_hash: &hash,
+                idempotency_key: "word-owner-file",
+            }),
+            Err(FsError::FileLocked)
+        ));
+        assert_eq!(fs::read(dir.path().join("paper.docx")).unwrap(), b"original");
     }
 }

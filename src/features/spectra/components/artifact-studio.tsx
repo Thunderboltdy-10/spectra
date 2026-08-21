@@ -2165,13 +2165,81 @@ export function documentJsonFromContent(
 ): JSONContent {
   const source = record(content);
   const tiptap = source.tiptap;
-  if (tiptap && typeof tiptap === "object" && record(tiptap).type === "doc")
-    return normalizeDocumentInlineMarkup(tiptap as JSONContent);
   const blocks = arrayOfRecords(source.blocks);
+  const nativeBlocks = new Map(
+    blocks
+      .filter((block) => typeof block.id === "string" && block.id)
+      .map((block) => [block.id as string, block]),
+  );
+  const nativeBlockSemantics = (node: JSONContent): JSONContent => {
+    if (!node.attrs || typeof node.attrs.blockId !== "string") return node;
+    const nativeBlock = nativeBlocks.get(node.attrs.blockId);
+    if (!nativeBlock) return node;
+    const attrs = record(nativeBlock.attrs);
+    const styleId = typeof attrs.styleId === "string" ? attrs.styleId : undefined;
+    const headingMatch = styleId?.match(/^Heading([1-3])$/i);
+    if (headingMatch && (node.type === "paragraph" || node.type === "heading")) {
+      return {
+        ...node,
+        type: "heading",
+        attrs: {
+          ...node.attrs,
+          level: Number(headingMatch[1]),
+          blockId: nativeBlock.id,
+          ...(attrs.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
+        },
+      };
+    }
+    if (attrs.nativeReadOnly === true) {
+      return {
+        ...node,
+        attrs: { ...node.attrs, nativeReadOnly: true },
+      };
+    }
+    return node;
+  };
+  if (tiptap && typeof tiptap === "object" && record(tiptap).type === "doc") {
+    const protectedIds = new Set(
+      blocks.flatMap((block) =>
+        record(block.attrs).nativeReadOnly === true &&
+        typeof block.id === "string" &&
+        block.id
+          ? [block.id]
+          : [],
+      ),
+    );
+    const normalized = normalizeDocumentInlineMarkup(tiptap as JSONContent);
+    const semanticallyMapped = {
+      ...normalized,
+      content: normalized.content?.map(nativeBlockSemantics),
+    };
+    if (!protectedIds.size) return semanticallyMapped;
+    return {
+      ...semanticallyMapped,
+      content: semanticallyMapped.content?.map((node) =>
+        typeof node.attrs?.blockId === "string" &&
+        protectedIds.has(node.attrs.blockId)
+          ? {
+              ...node,
+              attrs: { ...node.attrs, nativeReadOnly: true },
+            }
+          : node,
+      ),
+    };
+  }
   const contentNodes =
     blocks.length > 0
       ? blocks.map((block) => {
           const text = typeof block.text === "string" ? block.text : "";
+          const blockAttrs = record(block.attrs);
+          const nativeAttrs = {
+            ...(typeof block.id === "string" && block.id
+              ? { blockId: block.id }
+              : {}),
+            ...(blockAttrs.nativeReadOnly === true
+              ? { nativeReadOnly: true }
+              : {}),
+          };
           if (block.type === "equation" || block.type === "math") {
             const attrs = record(block.attrs);
             return {
@@ -2222,6 +2290,7 @@ export function documentJsonFromContent(
             const normalizedRows = rows.length > 0 ? rows : [[""]];
             return {
               type: "table",
+              attrs: nativeAttrs,
               content: normalizedRows.map((row, rowIndex) => ({
                 type: "tableRow",
                 content: row.map((cell) => ({
@@ -2241,19 +2310,23 @@ export function documentJsonFromContent(
                 : block.type === "quote"
                   ? "blockquote"
                   : "paragraph";
-          if (type === "heading")
+          if (type === "heading") {
+            const attrs = record(block.attrs);
+            const styleId = typeof attrs.styleId === "string" ? attrs.styleId : "";
+            const styleLevel = Number(styleId.match(/^Heading([1-3])$/i)?.[1] ?? 0);
             return {
               type: "heading",
               attrs: {
-                level: [1, 2, 3].includes(Number(record(block.attrs).level))
-                  ? Number(record(block.attrs).level)
-                  : 2,
-                ...(typeof block.id === "string" && block.id
-                  ? { blockId: block.id }
-                  : {}),
+                level: [1, 2, 3].includes(Number(attrs.level))
+                  ? Number(attrs.level)
+                  : [1, 2, 3].includes(styleLevel)
+                    ? styleLevel
+                    : 2,
+                ...nativeAttrs,
               },
               content: inlineMathContent(text),
             };
+          }
           if (type === "bulletList") {
             const items = text
               .split(/\r?\n/)
@@ -2263,10 +2336,7 @@ export function documentJsonFromContent(
               .filter(Boolean);
             return {
               type: "bulletList",
-              attrs:
-                typeof block.id === "string" && block.id
-                  ? { blockId: block.id }
-                  : undefined,
+              attrs: nativeAttrs,
               content: (items.length > 0 ? items : [text]).map((item) => ({
                 type: "listItem",
                 content: [
@@ -2281,10 +2351,7 @@ export function documentJsonFromContent(
           if (type === "blockquote")
             return {
               type: "blockquote",
-              attrs:
-                typeof block.id === "string" && block.id
-                  ? { blockId: block.id }
-                  : undefined,
+              attrs: nativeAttrs,
               content: [
                 {
                   type: "paragraph",
@@ -2294,10 +2361,7 @@ export function documentJsonFromContent(
             };
           return {
             type: "paragraph",
-            attrs:
-              typeof block.id === "string" && block.id
-                ? { blockId: block.id }
-                : undefined,
+            attrs: nativeAttrs,
             content: inlineMathContent(text),
           };
         })
@@ -2358,6 +2422,9 @@ export function blocksFromJson(json: JSONContent) {
           id: stableId,
           type: "table",
           text: rows.join("\n"),
+          ...(node.attrs?.nativeReadOnly === true
+            ? { attrs: { nativeReadOnly: true } }
+            : {}),
         };
       }
       const text =
@@ -2375,12 +2442,26 @@ export function blocksFromJson(json: JSONContent) {
             : node.type === "bulletList" || node.type === "orderedList"
               ? "list"
               : "paragraph";
+      const semanticAttrs =
+        node.type === "heading"
+          ? {
+              level: Number(node.attrs?.level) || 2,
+              styleId: `Heading${Number(node.attrs?.level) || 2}`,
+            }
+          : {};
       return {
         id: stableId,
         type,
         text,
-        ...(node.type === "heading"
-          ? { attrs: { level: Number(node.attrs?.level) || 2 } }
+        ...(node.type === "heading" || node.attrs?.nativeReadOnly === true
+          ? {
+              attrs: {
+                ...semanticAttrs,
+                ...(node.attrs?.nativeReadOnly === true
+                  ? { nativeReadOnly: true }
+                  : {}),
+              },
+            }
           : {}),
       };
     })
@@ -3171,7 +3252,12 @@ function ArtifactStudioEditor({
     !(permissionReadOnly && artifact.blueprintKey === "quiz"),
     artifact.aiState === "edited" && artifact.aiRunId
       ? `${artifact.aiRunId}:${artifact.updatedAt}`
-      : null,
+      : artifact.blueprintKey === "document" &&
+          ["docx", "docm", "dotx", "dotm"].includes(
+            artifact.nativeFormat?.toLowerCase() ?? "",
+          )
+        ? String(artifact.updatedAt)
+        : null,
   );
   const liveRecovery = useMemo(
     () =>
@@ -3270,6 +3356,20 @@ function ArtifactStudioEditor({
     regionId?: string;
     queuePosition?: number;
   } | null>(null);
+  const [nativeWriteError, setNativeWriteError] = useState<string>();
+  const [nativeMaterialization, setNativeMaterialization] = useState<
+    | { state: "queueing" }
+    | { state: "pending"; hash: string }
+  >();
+  const [nativeAttribution, setNativeAttribution] = useState<string>();
+  const [nativeConflict, setNativeConflict] = useState<{
+    regionIds: string[];
+    message: string;
+  } | null>(null);
+  const nativeReconciliationRevisionRef = useRef<string | undefined>(undefined);
+  const nativeProjectionArtifactRef = useRef<string | undefined>(undefined);
+  const nativeLensRefreshRef = useRef<string | undefined>(undefined);
+  const nativeLocalRevisionRef = useRef<string | undefined>(undefined);
   const meta = workTypeMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const dirtyRef = useRef(dirty);
@@ -3324,6 +3424,11 @@ function ArtifactStudioEditor({
   const reconciliationFrameRef = useRef<number | null>(null);
   const nativeBodyBinding =
     artifact.blueprintKey === "document" || artifact.blueprintKey === "code";
+  const nativeWordDocument =
+    artifact.blueprintKey === "document" &&
+    ["docx", "docm", "dotx", "dotm"].includes(
+      artifact.nativeFormat?.toLowerCase() ?? "",
+    );
   const incomingLiveContent = nativeBodyBinding ? null : live.liveValue.content;
   const incomingLiveTagDraft = live.liveValue.tags.join(", ");
   const incomingSnapshot = useMemo(
@@ -3349,6 +3454,116 @@ function ArtifactStudioEditor({
   const currentSnapshot = useMemo(
     () => ({ title, summary, tagDraft, content }),
     [content, summary, tagDraft, title],
+  );
+  useEffect(() => {
+    if (!nativeWordDocument || nativeLensRefreshRef.current === artifact._id)
+      return;
+    nativeLensRefreshRef.current = artifact._id;
+    let cancelled = false;
+    void fetch("/api/spectra/lenses/docx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "open", artifactId: artifact._id }),
+    })
+      .then((response) => {
+        if (!cancelled && response.ok)
+          window.dispatchEvent(
+            new CustomEvent("spectra:artifact-lens-activated", {
+              detail: { artifactId: artifact._id },
+            }),
+          );
+      })
+      .catch(() => {
+        nativeLensRefreshRef.current = undefined;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact._id, nativeWordDocument]);
+  useEffect(() => {
+    if (
+      !nativeWordDocument ||
+      !live.modelSnapshot.initialized ||
+      live.modelSnapshot.validity !== "valid" ||
+      !live.modelSnapshot.value ||
+      dirty ||
+      userHasEditedRef.current ||
+      live.unsynchronizedChanges > 0
+    )
+      return;
+    // The persisted artifact content is only the opening bootstrap for a
+    // native document. Once the bound Y.XmlFragment is live, Bridge/native
+    // revisions are reconciled through the lens endpoint. Replaying this
+    // snapshot on every artifact.updatedAt change would overwrite a freshly
+    // typed native edit with a stale cloud projection.
+    if (nativeProjectionArtifactRef.current === artifact._id) return;
+    nativeProjectionArtifactRef.current = artifact._id;
+    const refreshedContent = initialLiveValue.content;
+    if (
+      JSON.stringify(live.modelSnapshot.value.content) ===
+      JSON.stringify(refreshedContent)
+    )
+      return;
+    void live
+      .synchronize({ ...initialLiveValue, content: refreshedContent })
+      .then((result) => {
+        if (result && "applied" in result && result.applied === false) {
+          nativeProjectionArtifactRef.current = undefined;
+          return;
+        }
+      })
+      .catch(() => {
+        nativeProjectionArtifactRef.current = undefined;
+      });
+  }, [
+    artifact._id,
+    dirty,
+    initialLiveValue,
+    live,
+    live.synchronize,
+    live.unsynchronizedChanges,
+    nativeWordDocument,
+  ]);
+  const queueNativeMaterialization = useCallback(
+    async (snapshot: { content?: unknown }) => {
+      if (!nativeWordDocument) return;
+      setNativeMaterialization({ state: "queueing" });
+      setNativeWriteError(undefined);
+      try {
+        const response = await fetch("/api/spectra/lenses/docx", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "materialize",
+            artifactId: artifact._id,
+            content: snapshot.content,
+          }),
+        });
+        const result = (await response.json().catch(() => null)) as
+          | { hash?: string; message?: string; state?: string }
+          | null;
+        if (!response.ok)
+          throw new Error(
+            result?.message ??
+              "This edit could not be written safely to the Word file.",
+          );
+        if (result?.state === "unchanged") {
+          setNativeMaterialization(undefined);
+          return;
+        }
+        if (!result?.hash)
+          throw new Error("The Word write was queued without a verifiable hash.");
+        setNativeMaterialization({ state: "pending", hash: result.hash });
+      } catch (error) {
+        setNativeMaterialization(undefined);
+        setNativeWriteError(
+          error instanceof Error
+            ? error.message
+            : "This edit could not be written safely to the Word file.",
+        );
+      }
+    },
+    [artifact._id, nativeWordDocument],
   );
   const synchronizeDraft = useCallback(
     async (snapshot = currentSnapshotRef.current) => {
@@ -3450,17 +3665,9 @@ function ArtifactStudioEditor({
           } else {
             setBaseline(acknowledged);
           }
-          window.dispatchEvent(
-            new CustomEvent("spectra:artifact-synchronized", {
-              detail: { artifactId: artifact._id, snapshot: acknowledged },
-            }),
-          );
+          await queueNativeMaterialization(acknowledged);
         } else {
-          window.dispatchEvent(
-            new CustomEvent("spectra:artifact-synchronized", {
-              detail: { artifactId: artifact._id, snapshot },
-            }),
-          );
+          await queueNativeMaterialization(snapshot);
         }
         return true;
       } catch (error) {
@@ -3480,11 +3687,11 @@ function ArtifactStudioEditor({
       }
     },
     [
-      artifact._id,
       artifact.blueprintKey,
       isCollaborativeArtifact,
       live,
       permissionReadOnly,
+      queueNativeMaterialization,
     ],
   );
   const previewDiff = useMemo(() => {
@@ -4780,6 +4987,7 @@ function ArtifactStudioEditor({
     busy,
     dirty,
     live.modelSnapshot.initialized,
+    live.modelSnapshot.value,
     liveConflict,
     readOnly,
     syncBusy,
@@ -5120,7 +5328,12 @@ function ArtifactStudioEditor({
           openConflictCount: replicaTruth.openConflictCount,
           pendingCount:
             replicaTruth.pendingCount +
-            (syncBusy || dirty || live.unsynchronizedChanges > 0 ? 1 : 0),
+            (syncBusy ||
+            dirty ||
+            live.unsynchronizedChanges > 0 ||
+            nativeMaterialization
+              ? 1
+              : 0),
           online: !livePermissionLost,
           queuedChangeCount: live.unsynchronizedChanges,
         }).label
@@ -5206,6 +5419,229 @@ function ArtifactStudioEditor({
     () => ({ state: syncState, label: syncLabel }),
     [syncLabel, syncState],
   );
+
+  const markLocalCollaborativeDocumentChange = useCallback(() => {
+    if (readOnly || artifact.blueprintKey !== "document") return;
+    userHasEditedRef.current = true;
+    reconcilingRemoteRef.current = false;
+    dirtyRef.current = true;
+    setDirty(true);
+    setActivePresence("artifact:structure", { mode: "typing" });
+  }, [artifact.blueprintKey, readOnly, setActivePresence]);
+
+  const applyExternalProjection = useCallback(
+    async (projection: unknown, attribution = "Edited in Word") => {
+      const nextValue = { ...live.liveValue, content: projection };
+      const applied = await live.synchronize(nextValue);
+      if (applied && "applied" in applied && applied.applied === false)
+        throw new Error("The Word edit overlaps an active collaborator region.");
+      const snapshot = {
+        ...currentSnapshotRef.current,
+        content: projection,
+      };
+      reconcilingRemoteRef.current = true;
+      userHasEditedRef.current = false;
+      setContent(projection);
+      setBaseline(snapshot);
+      setDirty(false);
+      setNativeAttribution(attribution);
+      setNativeConflict(null);
+      window.requestAnimationFrame(() => {
+        reconcilingRemoteRef.current = false;
+      });
+    },
+    [live],
+  );
+
+  const reconcileNativeRevision = useCallback(
+    async (resolution?: "word" | "spectra") => {
+      const response = await fetch("/api/spectra/lenses/docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reconcile",
+          artifactId: artifact._id,
+          ...(resolution ? { resolution } : {}),
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as
+        | {
+            state?: string;
+            projection?: unknown;
+            attribution?: string;
+            status?: string;
+            message?: string;
+            conflict?: { regionIds?: string[]; message?: string };
+          }
+        | null;
+      if (!response.ok)
+        throw new Error(
+          result?.message ?? "The Word edit could not be reconciled safely.",
+        );
+      if (result?.state === "applied" && result.projection)
+        await applyExternalProjection(
+          result.projection,
+          result.attribution ?? "Edited in Word",
+        );
+      else if (result?.state === "conflicted")
+        setNativeConflict({
+          regionIds: result.conflict?.regionIds ?? [],
+          message:
+            result.conflict?.message ??
+            "Word and Spectra changed the same document region.",
+        });
+      else if (resolution === "spectra") {
+        setNativeConflict(null);
+        setNativeAttribution(
+          result?.status ?? "Waiting to save your Spectra version locally",
+        );
+      }
+      setNativeWriteError(undefined);
+    },
+    [applyExternalProjection, artifact._id],
+  );
+
+  const nativeLocalReplica = nativeWordDocument
+    ? replicaTruth?.replicas.find((replica) => replica.kind === "local")
+    : undefined;
+  useEffect(() => {
+    if (!nativeWordDocument || !nativeLocalReplica) return;
+    const previousRevision = nativeLocalRevisionRef.current;
+    nativeLocalRevisionRef.current = nativeLocalReplica.revision;
+    if (
+      !previousRevision ||
+      previousRevision === nativeLocalReplica.revision ||
+      nativeLocalReplica.state !== "current" ||
+      nativeMaterialization ||
+      dirty ||
+      live.unsynchronizedChanges > 0
+    )
+      return;
+    // Some Bridge filesystems report an Office save only after the local
+    // replica has already returned to `current`. A changed verified revision
+    // still needs semantic reconciliation; otherwise an open Spectra surface
+    // can keep showing the pre-Word snapshot indefinitely.
+    nativeReconciliationRevisionRef.current = `current:${nativeLocalReplica.revision}`;
+    const timer = window.setTimeout(() => {
+      void reconcileNativeRevision().catch((error: unknown) => {
+        setNativeWriteError(
+          error instanceof Error
+            ? error.message
+            : "The Word edit could not be reconciled safely.",
+        );
+      });
+    }, 360);
+    return () => window.clearTimeout(timer);
+  }, [
+    dirty,
+    live.unsynchronizedChanges,
+    nativeLocalReplica,
+    nativeMaterialization,
+    nativeWordDocument,
+    reconcileNativeRevision,
+  ]);
+  useEffect(() => {
+    if (!nativeMaterialization || !nativeLocalReplica) return;
+    if (
+      nativeMaterialization.state === "pending" &&
+      nativeLocalReplica.state === "current" &&
+      nativeLocalReplica.contentHash === nativeMaterialization.hash
+    ) {
+      setNativeMaterialization(undefined);
+      setNativeAttribution("Saved locally");
+    } else if (
+      nativeLocalReplica.state === "error" ||
+      nativeLocalReplica.state === "diverged"
+    ) {
+      setNativeMaterialization(undefined);
+    }
+  }, [nativeLocalReplica, nativeMaterialization]);
+  const reconcilableLocalRevision =
+    nativeLocalReplica?.state === "ahead" ||
+    nativeLocalReplica?.state === "diverged"
+      ? `${nativeLocalReplica.state}:${nativeLocalReplica.revision}`
+      : undefined;
+  const persistedNativeConflict = nativeWordDocument
+    ? replicaTruth?.conflicts[0]
+    : undefined;
+  useEffect(() => {
+    if (!persistedNativeConflict) return;
+    const regionCount = persistedNativeConflict.regionIds.length;
+    const preservedPartCount = persistedNativeConflict.partNames.length;
+    setNativeConflict((current) =>
+      current ?? {
+        regionIds: persistedNativeConflict.regionIds,
+        message: regionCount
+          ? `Word and Spectra changed ${regionCount === 1 ? "the same document region" : `${regionCount} overlapping document regions`}. Choose which version to keep.`
+          : preservedPartCount
+            ? `Word and Spectra changed the same preserved document content. Choose which version to keep.`
+            : "Word and Spectra changed this document independently. Choose which version to keep.",
+      },
+    );
+  }, [persistedNativeConflict]);
+  useEffect(() => {
+    if (
+      !reconcilableLocalRevision ||
+      dirty ||
+      live.unsynchronizedChanges > 0 ||
+      nativeReconciliationRevisionRef.current === reconcilableLocalRevision
+    )
+      return;
+    nativeReconciliationRevisionRef.current = reconcilableLocalRevision;
+    const timer = window.setTimeout(() => {
+      void reconcileNativeRevision().catch((error: unknown) => {
+        setNativeWriteError(
+          error instanceof Error
+            ? error.message
+            : "The Word edit could not be reconciled safely.",
+        );
+      });
+    }, 360);
+    return () => window.clearTimeout(timer);
+  }, [
+    reconcilableLocalRevision,
+    dirty,
+    live.unsynchronizedChanges,
+    reconcileNativeRevision,
+  ]);
+  const nativeFidelity = useMemo(() => {
+    const entries = replicaTruth?.replicas.flatMap((replica) => {
+      const map = record(replica.fidelityMap);
+      return Array.isArray(map.entries) ? map.entries : [];
+    }) ?? [];
+    return entries.reduce<Record<string, "NATIVE" | "EQUIVALENT" | "PRESERVED" | "EXTENSION">>(
+      (result, value) => {
+        const entry = record(value);
+        if (
+          typeof entry.feature === "string" &&
+          (entry.class === "NATIVE" ||
+            entry.class === "EQUIVALENT" ||
+            entry.class === "PRESERVED" ||
+            entry.class === "EXTENSION")
+        )
+          result[entry.feature] = entry.class;
+        return result;
+      },
+      { artifact: "NATIVE" },
+    );
+  }, [replicaTruth?.replicas]);
+  const nativeReadOnlyRegionIds = useMemo(
+    () =>
+      replicaTruth?.replicas.flatMap((replica) => {
+        const map = record(replica.fidelityMap);
+        return Array.isArray(map.entries)
+          ? map.entries.flatMap((value) => {
+              const entry = record(value);
+              return entry.readOnly === true &&
+                typeof entry.regionId === "string" &&
+                entry.regionId.startsWith("docx:paragraph:")
+                ? [entry.regionId]
+                : [];
+            })
+          : [];
+      }) ?? [],
+    [replicaTruth?.replicas],
+  );
   const studioContract = useStudioContractValue({
     artifactId: artifact._id,
     type: contractType,
@@ -5214,6 +5650,8 @@ function ArtifactStudioEditor({
     sync: syncTruth,
     density: studioDensity,
     inspector,
+    compatibilityProfile: artifact.compatibilityProfile ?? "spectra-native",
+    fidelity: nativeFidelity,
   });
   const identityBlock = (
     <div
@@ -5599,6 +6037,67 @@ function ArtifactStudioEditor({
           </div>
         </div>
       ) : null}
+      {nativeConflict ? (
+        <div
+          role="alert"
+          className="shrink-0 border-y border-[color-mix(in_oklab,#d88922_28%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2.5"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+            <AlertCircle className="h-4 w-4 shrink-0 text-[#d88922]" />
+            <span className="min-w-0 flex-1">
+              {nativeConflict.message}
+            </span>
+            <button
+              type="button"
+              className="rounded-[7px] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+              onClick={() =>
+                void reconcileNativeRevision("spectra").catch((error: unknown) =>
+                  setNativeWriteError(
+                    error instanceof Error
+                      ? error.message
+                      : "The conflict could not be resolved safely.",
+                  ),
+                )
+              }
+            >
+              Keep Spectra version
+            </button>
+            <button
+              type="button"
+              className="rounded-[7px] bg-[var(--text-primary)] px-2.5 py-1 text-[11px] font-medium text-[var(--bg-primary)]"
+              onClick={() =>
+                void reconcileNativeRevision("word").catch((error: unknown) =>
+                  setNativeWriteError(
+                    error instanceof Error
+                      ? error.message
+                      : "The conflict could not be resolved safely.",
+                  ),
+                )
+              }
+            >
+              Keep Word version
+            </button>
+          </div>
+        </div>
+      ) : nativeWriteError ? (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
+        >
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />
+          <span className="min-w-0 flex-1">
+            {nativeWriteError} Your Spectra edit is still saved; the Word file
+            has not been reported as updated.
+          </span>
+        </div>
+      ) : nativeAttribution ? (
+        <div
+          role="status"
+          className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
+        >
+          {nativeAttribution}
+        </div>
+      ) : null}
       {isCollaborativeArtifact &&
       (live.initializationError ||
         live.modelSnapshot.validity === "invalid") ? (
@@ -5677,10 +6176,14 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                nativeReadOnlyRegionIds={nativeReadOnlyRegionIds}
                 collaborationDocument={
                   live.modelSnapshot.initialized
                     ? live.transport?.document
                     : undefined
+                }
+                onLocalCollaborativeChange={
+                  markLocalCollaborativeDocumentChange
                 }
                 header={null}
                 mode={contentMode}

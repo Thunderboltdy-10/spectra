@@ -58,6 +58,9 @@ export type CommandBinding = {
   group?: string;
   contextualTab?: string;
   shortcut?: string;
+  /** Native-format availability is declared per command. Unspecified means
+   * the command is non-mutating or safely representable in every profile. */
+  strictNative?: { available: boolean; reason?: string };
 };
 
 export type CommandLayout = {

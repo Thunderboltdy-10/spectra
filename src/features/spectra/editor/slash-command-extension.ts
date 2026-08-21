@@ -84,10 +84,15 @@ export const SlashCommand = Extension.create({
     };
   },
   addProseMirrorPlugins() {
+    const configuredItems = this.options.suggestion.items as
+      | ((input: { query: string }) => SlashCommandItem[])
+      | undefined;
     return [Suggestion<SlashCommandItem>({
       editor: this.editor,
       ...this.options.suggestion,
-      items: ({ query }: { query: string }) => getFilteredCommands(query),
+      items:
+        configuredItems ??
+        (({ query }: { query: string }) => getFilteredCommands(query)),
     })];
   },
 });

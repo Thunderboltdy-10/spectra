@@ -1,0 +1,1 @@
+{"source":"512-byte deliberate truncation of complex-structure.docx","contains":["invalid ZIP package"],"expected":{"file":"genuinely unsupported file","behavior":"remain a generic resource with an honest corrupt-file reason"}}

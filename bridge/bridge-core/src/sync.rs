@@ -106,6 +106,39 @@ pub struct DiscoveredResource {
     pub native_format: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredRegistration {
+    pub work_id: String,
+    pub replica_id: String,
+    pub revision: String,
+    pub payload_hash: Option<String>,
+    pub needs_payload: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PayloadUploadIntent {
+    deduplicated: bool,
+    upload_url: Option<String>,
+    payload_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimedWrite {
+    pub request_id: String,
+    pub replica_id: String,
+    pub grant_id: String,
+    pub local_resource_id: String,
+    pub relative_path: String,
+    pub base_revision: String,
+    pub target_revision: String,
+    pub content_hash: String,
+    pub idempotency_key: String,
+    pub payload_url: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplicaMigrationPage {
@@ -153,7 +186,7 @@ pub async fn discover_resource(
     credential: &str,
     mount_id: &str,
     resource: &DiscoveredResource,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<DiscoveredRegistration> {
     let mut args = serde_json::to_value(resource)?;
     let object = args
         .as_object_mut()
@@ -161,6 +194,124 @@ pub async fn discover_resource(
     object.insert("credential".into(), credential.into());
     object.insert("mountId".into(), mount_id.into());
     mutation(deployment_url, "bridgeSync:discoverResource", args).await
+}
+
+pub async fn upload_resource_payload(
+    deployment_url: &str,
+    credential: &str,
+    replica_id: &str,
+    bytes: &[u8],
+    hash: &str,
+    media_type: &str,
+) -> anyhow::Result<String> {
+    anyhow::ensure!(
+        bytes.len() <= 100 * 1024 * 1024,
+        "payload exceeds the 100 MB safety ceiling"
+    );
+    let intent: PayloadUploadIntent = mutation(
+        deployment_url,
+        "bridgeSync:beginPayloadUpload",
+        serde_json::json!({
+            "credential": credential,
+            "replicaId": replica_id,
+            "hash": hash,
+            "bytes": bytes.len(),
+            "mediaType": media_type,
+        }),
+    )
+    .await?;
+    let (storage_id, payload_ref) = if intent.deduplicated {
+        (None, intent.payload_ref)
+    } else {
+        let upload_url = intent
+            .upload_url
+            .ok_or_else(|| anyhow::anyhow!("payload upload URL missing"))?;
+        let response = reqwest::Client::new()
+            .post(upload_url)
+            .header(reqwest::header::CONTENT_TYPE, media_type)
+            .body(bytes.to_vec())
+            .send()
+            .await?
+            .error_for_status()?;
+        let stored: serde_json::Value = response.json().await?;
+        let storage_id = stored
+            .get("storageId")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| anyhow::anyhow!("payload storage response did not include storageId"))?;
+        (Some(storage_id.to_owned()), None)
+    };
+    let mut args = serde_json::json!({
+        "credential": credential,
+        "replicaId": replica_id,
+        "hash": hash,
+        "bytes": bytes.len(),
+        "mediaType": media_type,
+    });
+    if let Some(storage_id) = storage_id {
+        args.as_object_mut()
+            .expect("payload commit args are an object")
+            .insert("storageId".into(), storage_id.into());
+    }
+    if let Some(payload_ref) = payload_ref {
+        args.as_object_mut()
+            .expect("payload commit args are an object")
+            .insert("payloadRef".into(), payload_ref.into());
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CommittedPayload {
+        payload_ref: String,
+    }
+    let committed: CommittedPayload =
+        mutation(deployment_url, "bridgeSync:commitPayloadUpload", args).await?;
+    Ok(committed.payload_ref)
+}
+
+pub async fn claim_write(
+    deployment_url: &str,
+    credential: &str,
+) -> anyhow::Result<Option<ClaimedWrite>> {
+    #[derive(Deserialize)]
+    struct ClaimWriteResponse {
+        request: Option<ClaimedWrite>,
+    }
+    let response: ClaimWriteResponse = mutation(
+        deployment_url,
+        "bridgeSync:claimWrite",
+        serde_json::json!({ "credential": credential }),
+    )
+    .await?;
+    Ok(response.request)
+}
+
+pub async fn complete_write(
+    deployment_url: &str,
+    credential: &str,
+    request_id: &str,
+    outcome: &str,
+    actual_revision: Option<&str>,
+    error: Option<(&str, &str)>,
+) -> anyhow::Result<()> {
+    let mut args = serde_json::json!({
+        "credential": credential,
+        "requestId": request_id,
+        "outcome": outcome,
+    });
+    let object = args
+        .as_object_mut()
+        .expect("complete write args are an object");
+    if let Some(actual_revision) = actual_revision {
+        object.insert("actualRevision".into(), actual_revision.into());
+    }
+    if let Some((code, message)) = error {
+        object.insert("errorCode".into(), code.into());
+        object.insert(
+            "errorMessage".into(),
+            message.chars().take(500).collect::<String>().into(),
+        );
+    }
+    let _: serde_json::Value = mutation(deployment_url, "bridgeSync:completeWrite", args).await?;
+    Ok(())
 }
 
 pub async fn detach_mount(

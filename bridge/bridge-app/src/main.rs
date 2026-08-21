@@ -1,17 +1,21 @@
+use sha2::Digest;
 use std::sync::Arc;
 
-use spectra_bridge_core::fs::{Grant, GrantRegistry};
+use spectra_bridge_core::fs::{
+    FsError, Grant, GrantRegistry, SafeWriter, WriteRequest, sha256_file,
+};
 use spectra_bridge_core::journal::Journal;
 use spectra_bridge_core::platform::{HostPlatform, Platform};
 use spectra_bridge_core::server::{ServerState, serve};
 use spectra_bridge_core::sync::{
-    DiscoveredResource, ReplicaMigrationPage, detach_mount, discover_resource, drain_cloud_queue,
-    exchange_pairing, migrate_cloud_replica_page, register_mount,
+    DiscoveredResource, ReplicaMigrationPage, claim_write, complete_write, detach_mount,
+    discover_resource, drain_cloud_queue, exchange_pairing, migrate_cloud_replica_page,
+    register_mount, upload_resource_payload,
 };
 use spectra_bridge_core::watcher::{MountWatcher, WatcherConfig, office_locks_present, scan_page};
-use tauri::Manager;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 
@@ -223,11 +227,14 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                 .and_then(|value| value.to_str())
                 .unwrap_or("file")
                 .to_ascii_lowercase();
+            let content_hash = entry
+                .content_hash
+                .or_else(|| sha256_file(&grant.device_root().join(&entry.relative_path)).ok());
             files.push(DiscoveredResource {
                 local_resource_id: entry.local_resource_id,
                 relative_path: entry.relative_path,
                 size: entry.size,
-                content_hash: entry.content_hash,
+                content_hash,
                 native_format,
             });
         }
@@ -258,9 +265,55 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         .set_config(&format!("cloud_mount:{}", grant.id), &mount_id)
         .map_err(|error| error.to_string())?;
     for (index, resource) in files.iter().enumerate() {
-        discover_resource(&deployment, &credential, &mount_id, resource)
+        let registration = discover_resource(&deployment, &credential, &mount_id, resource)
             .await
             .map_err(|error| error.to_string())?;
+        if registration.needs_payload && ["docx", "docm"].contains(&resource.native_format.as_str())
+        {
+            let relative = std::path::Path::new(&resource.relative_path);
+            if relative.is_absolute()
+                || relative.components().any(|part| {
+                    matches!(
+                        part,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
+            {
+                return Err("payload path escaped its selected folder".into());
+            }
+            let candidate = grant.device_root().join(relative);
+            let canonical = candidate
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
+            if !canonical.starts_with(grant.device_root()) {
+                return Err("payload path escaped its selected folder".into());
+            }
+            let bytes = std::fs::read(&canonical).map_err(|error| error.to_string())?;
+            let hash = hex::encode(sha2::Sha256::digest(&bytes));
+            if resource.content_hash.as_deref() != Some(hash.as_str()) {
+                return Err(format!(
+                    "{} changed while it was being read; retrying after it settles",
+                    resource.relative_path
+                ));
+            }
+            let media_type = if resource.native_format == "docm" {
+                "application/vnd.ms-word.document.macroEnabled.12"
+            } else {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            };
+            upload_resource_payload(
+                &deployment,
+                &credential,
+                &registration.replica_id,
+                &bytes,
+                &hash,
+                media_type,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        }
         set_mount_status(
             journal,
             &grant.id,
@@ -278,6 +331,133 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         files.len(),
         files.len(),
     )
+}
+
+async fn drain_write_requests(
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    deployment: &str,
+    credential: &str,
+) -> anyhow::Result<usize> {
+    use sha2::Digest;
+    let mut handled = 0;
+    for _ in 0..20 {
+        let Some(request) = claim_write(deployment, credential).await? else {
+            break;
+        };
+        let response = match reqwest::Client::new()
+            .get(&request.payload_url)
+            .send()
+            .await
+        {
+            Ok(response) => response.error_for_status(),
+            Err(error) => Err(error),
+        };
+        let payload = match response {
+            Ok(response) => response.bytes().await?.to_vec(),
+            Err(error) => {
+                complete_write(
+                    deployment,
+                    credential,
+                    &request.request_id,
+                    "failed",
+                    None,
+                    Some(("payload-download-failed", &error.to_string())),
+                )
+                .await?;
+                handled += 1;
+                continue;
+            }
+        };
+        let payload_hash = hex::encode(sha2::Sha256::digest(&payload));
+        if payload_hash != request.content_hash {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "failed",
+                None,
+                Some((
+                    "payload-hash-mismatch",
+                    "downloaded payload did not match its verified hash",
+                )),
+            )
+            .await?;
+            handled += 1;
+            continue;
+        }
+        let relative = std::path::Path::new(&request.relative_path);
+        let target = grants.resolve(&request.grant_id, relative)?;
+        let actual_revision = target.exists().then(|| sha256_file(&target)).transpose()?;
+        let known_revision = actual_revision
+            .as_deref()
+            .unwrap_or(request.base_revision.as_str());
+        let writer = SafeWriter::new(grants.clone(), journal.clone(), Arc::new(HostPlatform));
+        let result = writer.write(WriteRequest {
+            grant_id: &request.grant_id,
+            relative_path: relative,
+            resource_id: &request.local_resource_id,
+            base_revision: &request.base_revision,
+            known_revision,
+            bytes: &payload,
+            expected_hash: &request.content_hash,
+            idempotency_key: &request.idempotency_key,
+        });
+        match result {
+            Ok(_) => {
+                complete_write(
+                    deployment,
+                    credential,
+                    &request.request_id,
+                    "verified",
+                    Some(&request.target_revision),
+                    None,
+                )
+                .await?;
+                handled += 1;
+            }
+            Err(FsError::FileLocked) => {
+                complete_write(
+                    deployment,
+                    credential,
+                    &request.request_id,
+                    "waiting",
+                    actual_revision.as_deref(),
+                    Some(("office-locked", "Waiting for Office to finish saving")),
+                )
+                .await?;
+                break;
+            }
+            Err(FsError::StaleRevision) => {
+                complete_write(
+                    deployment,
+                    credential,
+                    &request.request_id,
+                    "conflicted",
+                    actual_revision.as_deref(),
+                    Some((
+                        "stale-revision",
+                        "Word changed this file before Spectra could write it",
+                    )),
+                )
+                .await?;
+                handled += 1;
+            }
+            Err(error) => {
+                complete_write(
+                    deployment,
+                    credential,
+                    &request.request_id,
+                    "failed",
+                    actual_revision.as_deref(),
+                    Some(("write-failed", &error.to_string())),
+                )
+                .await?;
+                handled += 1;
+            }
+        }
+    }
+    Ok(handled)
 }
 
 fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Journal>) {
@@ -523,14 +703,29 @@ fn main() {
             remove_mount
         ])
         .setup(|app| {
-            app.autolaunch().enable()?;
-            repair_windows_autostart_command()?;
+            let isolated_runtime = std::env::var_os("SPECTRA_BRIDGE_DATA_DIR");
+            if isolated_runtime.is_none() {
+                app.autolaunch().enable()?;
+                repair_windows_autostart_command()?;
+            }
             if std::env::args().any(|argument| argument == "--autostart") {
                 if let Some(window) = app.get_webview_window("main") {
                     window.hide()?;
                 }
             }
-            let data_dir = app.path().app_data_dir()?;
+            let data_dir = if let Some(path) = isolated_runtime {
+                let path = std::path::PathBuf::from(path);
+                if !path.is_absolute() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "SPECTRA_BRIDGE_DATA_DIR must be absolute",
+                    )
+                    .into());
+                }
+                path
+            } else {
+                app.path().app_data_dir()?
+            };
             std::fs::create_dir_all(&data_dir)?;
             let journal = Arc::new(Journal::open(&data_dir.join("bridge.sqlite"))?);
             let state = Arc::new(ServerState::unpaired());
@@ -571,7 +766,14 @@ fn main() {
                 spawn_grant_watcher(grant, grants.clone(), journal.clone());
             }
             let sync_journal = app.state::<BridgeRuntime>().journal.clone();
+            let sync_grants = app.state::<BridgeRuntime>().grants.clone();
             tauri::async_runtime::spawn(async move {
+                // A file can change while the Bridge is offline. Reconcile every
+                // restored grant before claiming queued cloud-to-local writes so
+                // SafeWriter compares against the uploaded local truth, never a
+                // stale pre-shutdown revision. New grants are reconciled by
+                // add_mount before their watcher starts.
+                let mut restored_grants_reconciled = false;
                 loop {
                     if let (Ok(url), Ok(Some(device_id))) = (
                         deployment_url(&sync_journal),
@@ -584,7 +786,33 @@ fn main() {
                                 let _ = sync_journal.set_config("replica_migration_error", &error);
                             } else {
                                 let _ = sync_journal.delete_config("replica_migration_error");
+                                if !restored_grants_reconciled {
+                                    let mut reconciliation_succeeded = true;
+                                    for grant in sync_grants.device_grants() {
+                                        if sync_grant(&grant, &sync_journal).await.is_err() {
+                                            reconciliation_succeeded = false;
+                                        }
+                                    }
+                                    if !reconciliation_succeeded {
+                                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                        continue;
+                                    }
+                                    restored_grants_reconciled = true;
+                                }
                                 let _ = drain_cloud_queue(&sync_journal, &url, &credential).await;
+                                if let Err(error) = drain_write_requests(
+                                    &sync_grants,
+                                    &sync_journal,
+                                    &url,
+                                    &credential,
+                                )
+                                .await
+                                {
+                                    let _ = sync_journal
+                                        .set_config("write_queue_error", &error.to_string());
+                                } else {
+                                    let _ = sync_journal.delete_config("write_queue_error");
+                                }
                             }
                         }
                     }
@@ -599,8 +827,8 @@ fn main() {
             let show = MenuItem::with_id(app, "show", "Open Spectra Bridge", true, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
             let logs = MenuItem::with_id(app, "logs", "Open logs", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &pause, &logs, &quit])?;
+            let stop = MenuItem::with_id(app, "stop", "Stop Bridge", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &pause, &logs, &stop])?;
             let mut tray = TrayIconBuilder::new()
                 .menu(&menu)
                 .tooltip("Spectra Bridge · Disconnected")
@@ -611,7 +839,7 @@ fn main() {
                             let _ = window.set_focus();
                         }
                     }
-                    "quit" => app.exit(0),
+                    "stop" => app.exit(0),
                     "pause" | "logs" | _ => {}
                 });
             let tray_icon =
@@ -619,6 +847,15 @@ fn main() {
             tray = tray.icon(tray_icon);
             tray.build(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                // Closing the window is a presentation action, not a Bridge
+                // shutdown. Keep the service and tray icon alive; the explicit
+                // tray action is the only normal way to stop the Bridge.
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .run(tauri::generate_context!())
         .expect("Spectra Bridge shell failed");

@@ -3,6 +3,7 @@
 import { uniqueToken } from "@/lib/unique-token";
 import type { JSONContent } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
+import { isLocalCollaborativeDocumentChange } from "../editor/collaboration-change";
 import Highlight from "@tiptap/extension-highlight";
 import { Image } from "@tiptap/extension-image";
 import TiptapLink from "@tiptap/extension-link";
@@ -104,6 +105,7 @@ import {
   WorkbarSelect,
   workbarMenuItemClass,
 } from "./artifact-workbar";
+import { useStudioContract } from "./artifact-studio-shell";
 
 function documentMarkdown(json: JSONContent) {
   const renderInline = (node: JSONContent): string => {
@@ -169,7 +171,9 @@ export function DocumentStudio({
   onChange,
   aiChangedPaths = [],
   readOnly = false,
+  nativeReadOnlyRegionIds = [],
   collaborationDocument,
+  onLocalCollaborativeChange,
   header,
   mode = "tab",
 }: {
@@ -179,10 +183,15 @@ export function DocumentStudio({
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
   readOnly?: boolean;
+  nativeReadOnlyRegionIds?: string[];
   collaborationDocument?: Y.Doc;
+  onLocalCollaborativeChange?: () => void;
   header: ReactNode;
   mode?: "split" | "tab";
 }) {
+  const studioContract = useStudioContract();
+  const strictNative = studioContract.compatibilityProfile === "strict-native";
+  const nativeReadOnlyKey = nativeReadOnlyRegionIds.join("|");
   const { preferences } = useSpectraPreferences();
   const [initialContent] = useState(() =>
     documentJsonFromContent(content, title),
@@ -212,6 +221,25 @@ export function DocumentStudio({
   );
   const [importReport, setImportReport] = useState<string>();
   const [importError, setImportError] = useState<string>();
+  const nativePlaceholders = useMemo(() => {
+    const binding = record(record(content).nativeBinding);
+    return Array.isArray(binding.nativePlaceholders)
+      ? binding.nativePlaceholders.flatMap((value) => {
+          const placeholder = record(value);
+          return typeof placeholder.label === "string" &&
+            typeof placeholder.detail === "string"
+            ? [{
+                id:
+                  typeof placeholder.id === "string"
+                    ? placeholder.id
+                    : placeholder.label,
+                label: placeholder.label,
+                detail: placeholder.detail,
+              }]
+            : [];
+        })
+      : [];
+  }, [content]);
   const [pendingTemplate, setPendingTemplate] = useState<
     "notes" | "essay" | "lab" | null
   >(null);
@@ -272,7 +300,9 @@ export function DocumentStudio({
         SpectraReferenceNode,
         SpectraCitationNode,
         DragHandle,
-        StableBlockId,
+        StableBlockId.configure({
+          nativeReadOnlyBlockIds: nativeReadOnlyRegionIds,
+        }),
         AiRegionDecoration,
         SpectraTiptapAutocomplete.configure({
           enabled:
@@ -287,6 +317,7 @@ export function DocumentStudio({
             char: "/",
             startOfLine: false,
             render: createSlashCommandRenderer,
+            ...(strictNative ? { items: () => [] } : {}),
           },
         }),
         // TipTap packages resolve through mixed @tiptap/core versions in this
@@ -302,6 +333,7 @@ export function DocumentStudio({
             "min-h-[620px] px-2 pb-24 pt-2 outline-none text-[var(--text-primary)]",
         },
         handlePaste: (view, event) => {
+          if (strictNative) return false;
           const target = parseSpectraWorkUrl(
             event.clipboardData?.getData("text/plain") ?? "",
           );
@@ -323,22 +355,23 @@ export function DocumentStudio({
           return true;
         },
       },
-      onUpdate: ({ editor }) => {
+      onUpdate: ({ editor, transaction }) => {
         const nextJson = editor.getJSON();
         editorJsonKeyRef.current = JSON.stringify(nextJson);
         refreshToolbar((value) => value + 1);
         // Extension normalization can emit an update during the editor's mount
         // frame even when the user changed nothing. Treat that frame as editor
         // hydration; genuine input begins immediately afterward.
-        if (
-          !editorReadyForUserChanges.current ||
-          readOnly ||
-          collaborationDocument
-        )
+        if (!editorReadyForUserChanges.current || readOnly)
           return;
         // Native collaboration already committed this transaction directly to
         // the bound XmlFragment. Mirroring it through React/onChange would turn
         // each keystroke back into a full projected document replacement.
+        if (collaborationDocument) {
+          if (isLocalCollaborativeDocumentChange(transaction))
+            onLocalCollaborativeChange?.();
+          return;
+        }
         onChange(documentContentFromJson(nextJson, content));
       },
       onSelectionUpdate: ({ editor }) => {
@@ -398,13 +431,18 @@ export function DocumentStudio({
         );
       },
     },
-    [collaborationDocument],
+    [
+      collaborationDocument,
+      nativeReadOnlyKey,
+      onLocalCollaborativeChange,
+    ],
   );
 
   useEffect(
     () =>
       spectraBus.handle("reference.insert", ({ hostWorkId, target }) => {
-        if (hostWorkId !== artifactId || !editor || readOnly) return;
+        if (hostWorkId !== artifactId || !editor || readOnly || strictNative)
+          return;
         editor
           .chain()
           .focus()
@@ -429,7 +467,7 @@ export function DocumentStudio({
           })
           .run();
       }),
-    [artifactId, editor, readOnly],
+    [artifactId, editor, readOnly, strictNative],
   );
 
   useEffect(() => {
@@ -779,9 +817,9 @@ export function DocumentStudio({
                 ? new Paragraph({
                     text: block.text,
                     heading:
-                      Number(block.attrs?.level) === 1
+                      Number(record(block.attrs).level) === 1
                         ? HeadingLevel.HEADING_1
-                        : Number(block.attrs?.level) === 3
+                        : Number(record(block.attrs).level) === 3
                           ? HeadingLevel.HEADING_3
                           : HeadingLevel.HEADING_2,
                   })
@@ -848,8 +886,8 @@ export function DocumentStudio({
         );
         setImportReport(
           result.messages.length
-            ? `Imported as editable content with ${result.messages.length} fidelity note${result.messages.length === 1 ? "" : "s"}. The original should remain available in import history.`
-            : "Imported as editable native content with no reported conversion warnings.",
+            ? `Imported a separate editable copy with ${result.messages.length} fidelity note${result.messages.length === 1 ? "" : "s"}. It is not linked to the source file; the retained original remains available in import history.`
+            : "Imported a separate editable copy. It is not linked to the source file; the retained original remains available in import history.",
         );
         fidelityReport.push({
           scope: "editable document structure",
@@ -1139,12 +1177,12 @@ export function DocumentStudio({
             ? [
                 { id: "focus", label: "Focus", icon: Focus, priority: "advanced" as const, tab: "Layout", onSelect: () => { setDocMode("focus"); setOutlineOpen(false); setSourcesOpen(false); setFindOpen(false); } },
                 { id: "page-layout", label: pageLayout === "page" ? "Continuous canvas" : "Page canvas", icon: FileText, priority: "advanced" as const, tab: "Layout", onSelect: () => setPageLayout(pageLayout === "page" ? "continuous" : "page") },
-                { id: "import", label: importing ? "Importing…" : "Import", icon: importing ? Loader2 : Import, priority: "advanced" as const, disabled: importing, onSelect: () => importRef.current?.click() },
-                ...(["notes", "essay", "lab"] as const).map((template) => ({ id: `template-${template}`, label: template === "lab" ? "Lab report" : template === "notes" ? "Study notes" : "Essay", icon: LayoutTemplate, priority: "advanced" as const, tab: "Layout", onSelect: () => setPendingTemplate(template) })),
+                { id: "import", label: importing ? "Importing a copy…" : "Import a copy", icon: importing ? Loader2 : Import, priority: "advanced" as const, disabled: importing, hint: "Creates a separate Spectra document; it does not stay linked to the source file.", strictNative: { available: false, reason: "Import a copy from the Library so the linked Word file is not replaced." }, onSelect: () => importRef.current?.click() },
+                ...(["notes", "essay", "lab"] as const).map((template) => ({ id: `template-${template}`, label: template === "lab" ? "Lab report" : template === "notes" ? "Study notes" : "Essay", icon: LayoutTemplate, priority: "advanced" as const, tab: "Layout", strictNative: { available: false, reason: "Templates replace the whole document and are unavailable for a linked Word file." }, onSelect: () => setPendingTemplate(template) })),
               ]
             : []),
           ...([[
-            "docx", "Export Word"], ["pdf", "Export PDF"], ["md", "Export Markdown"], ["html", "Export HTML"], ["txt", "Export text"]] as const).map(([format, label]) => ({ id: `export-${format}`, label, icon: FileDown, priority: "advanced" as const, onSelect: () => void exportDocument(format) })),
+            "docx", "Export a Word copy"], ["pdf", "Export a PDF copy"], ["md", "Export a Markdown copy"], ["html", "Export an HTML copy"], ["txt", "Export a text copy"]] as const).map(([format, label]) => ({ id: `export-${format}`, label, icon: FileDown, priority: "advanced" as const, hint: "Downloads a separate copy; it does not replace a linked native file.", onSelect: () => void exportDocument(format) })),
           { id: "print", label: "Print", icon: Printer, priority: "advanced", onSelect: () => window.print() },
         ]}
         overflow={
@@ -1162,7 +1200,7 @@ export function DocumentStudio({
           </>
         }
       >
-        {docMode === "write" && editor ? (
+        {docMode === "write" && editor && !strictNative ? (
           <RichTextFormatBar
             editor={editor}
             disabled={readOnly}
@@ -1213,7 +1251,7 @@ export function DocumentStudio({
           />
         ) : null}
       </ArtifactWorkbar>
-      {docMode === "write" && editor ? (
+      {docMode === "write" && editor && !strictNative ? (
         <BubbleMenu
           editor={editor}
           appendTo={() => document.body}
@@ -1459,6 +1497,24 @@ export function DocumentStudio({
             >
               <X className="h-4 w-4" />
             </button>
+          </div>
+        ) : null}
+        {nativePlaceholders.length ? (
+          <div className="spectra-document-native-features" role="note">
+            <FileText className="h-4 w-4 shrink-0" />
+            <span>
+              <strong>
+                {nativePlaceholders.length === 1
+                  ? nativePlaceholders[0]!.label
+                  : `${nativePlaceholders.length} Word features preserved`}
+              </strong>
+              <small>
+                {nativePlaceholders.length === 1
+                  ? nativePlaceholders[0]!.detail
+                  : "They remain intact in the Word file and are read-only here."}
+              </small>
+            </span>
+            <em>Preserved</em>
           </div>
         ) : null}
         {pendingTemplate ? (

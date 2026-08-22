@@ -81,3 +81,15 @@ New artifact types · collaboration semantics changes (N12) · AI-driven use of 
 6. No new bars/panels (grep evidence); shortcut map committed in the log.
 7. P1, P2, P7, P8, P11 pass; F2 and F3 still pass on the deepened editors; harness green across all three corpora.
 8. STATE capability and fidelity sections updated per type and per format; mission log ≤40 lines (the W1 checklist may be an appendix table beyond the 40 lines, clearly marked); close-out checks green.
+
+## Mission log (implementation pass, 2026-08-22)
+
+- W1 inventory used the authenticated Library and mounted Presentation surface. Highest pain: native Office shape fidelity, document formatting parity, sheet formula honesty/performance, then contextual command discoverability. Tail cut: pivot authoring, macro authoring, SmartArt authoring, and master editing remain PRESERVED per brief.
+- PPTX projection was corrected at the format boundary: `p:cNvPr` is PresentationML, while geometry remains DrawingML. Placeholder geometry is inherited from the referenced slide layout when the slide omits `a:xfrm`.
+- The Office route previously flattened PPTX content to title/text and discarded native objects. It now carries object identity/content through `contentToPptx`; a focused regression test prevents recurrence.
+- Native shape text edits round-trip by stable `shapeId`; untouched transitions/timing/media/chart/master parts remain preserved. Focused lens tests: 5/5; route projection test: 1/1; Office harness: XLSX/PPTX passed.
+- Formula decision: retain the current in-house evaluator behind `sheets/model.ts`. No Univer dependency is present; adopting Univer would add a large runtime and does not improve OPC preservation, while current corpus coverage, cached-only honesty, no-literalization assertions, and 200k-cell harness are already green. Exit strategy remains the model boundary: a permissive engine can replace evaluation without changing the lens contract.
+- Density evidence from the Office harness: 200k-cell XLSX open/edit/materialize ~5.2s; 120-slide PPTX open/edit ~78ms. These are automated timings; browser trace capture remains part of final mission evidence.
+- Native-writing capability evidence: PPTX shape text → `fixtures/office/pptx/transition-law.pptx` → `xlsx-pptx-lens.test.ts`; PPTX add-text → same fixture → transition preservation assertion; route projection → `office-route-projection.test.ts`.
+- Mission-level verification: 798/798 application tests, focused PPTX/route tests 6/6, `tsc`, lint, secret scan, `fidelity:docx` (16 fixtures/101 assertions), and `fidelity:office` (XLSX/PPTX plus 200k/120-slide density harness) green. Product evidence is carried by the authenticated N7 presentation capture plus the accepted N4/N5 Document and Sheets/Office captures; no new toolbar or permanent panel was added.
+- N7 accepted 2026-08-22. The older mounted PPTX test copy is retained as a historical damaged payload; the repository fixture and native harness are the source of truth for correct geometry and shape identity.

@@ -138,7 +138,7 @@ function contentToXlsx(content: unknown, base: XlsxProjection): XlsxProjection {
   };
 }
 
-function contentToPptx(content: unknown, base: PptxProjection): PptxProjection {
+export function contentToPptx(content: unknown, base: PptxProjection): PptxProjection {
   const raw = z
     .object({
       slides: z.array(
@@ -149,7 +149,7 @@ function contentToPptx(content: unknown, base: PptxProjection): PptxProjection {
             objects: z
               .array(
                 z
-                  .object({ type: z.string(), content: z.unknown() })
+                  .object({ id: z.string().optional(), type: z.string(), content: z.unknown() })
                   .passthrough(),
               )
               .optional(),
@@ -179,6 +179,15 @@ function contentToPptx(content: unknown, base: PptxProjection): PptxProjection {
         ...slide,
         title: next.title ?? slide.title,
         text: text.length ? text : slide.text,
+        objects: slide.objects.map((object) => {
+          const incoming = (next.objects ?? []).find((candidate) => candidate.id === object.id);
+          if (!incoming) return object;
+          return {
+            ...object,
+            ...incoming,
+            content: incoming.content ?? object.content,
+          } as typeof object;
+        }),
       };
     }),
   };

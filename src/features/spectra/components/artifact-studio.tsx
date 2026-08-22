@@ -3369,6 +3369,8 @@ function ArtifactStudioEditor({
   const [nativeAttribution, setNativeAttribution] = useState<string>();
   const [nativeRecoveryBusy, setNativeRecoveryBusy] = useState<"download" | "materialize" | null>(null);
   const [nativeRecoveryError, setNativeRecoveryError] = useState<string>();
+  const [nativeLensProjection, setNativeLensProjection] = useState<unknown>();
+  const [nativeProjectionReady, setNativeProjectionReady] = useState(false);
   const [nativeConflict, setNativeConflict] = useState<{
     regionIds: string[];
     message: string;
@@ -3429,20 +3431,30 @@ function ArtifactStudioEditor({
   const syncingRef = useRef(false);
   const nativeFallbackEditedRef = useRef(false);
   const pendingNativeProjectionRef = useRef<unknown>(undefined);
+  const nativeProjectionOverrideRef = useRef<unknown>(undefined);
   const reconciliationFrameRef = useRef<number | null>(null);
   const nativeBodyBinding =
     artifact.blueprintKey === "document" || artifact.blueprintKey === "code";
+  const titleNativeFormat = artifact.title.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const storedNativeFormat = artifact.nativeFormat?.toLowerCase();
+  const officeFormatNames = new Set([
+    "docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm",
+    "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam",
+  ]);
+  const inferredNativeFormat = officeFormatNames.has(titleNativeFormat ?? "")
+    ? titleNativeFormat
+    : storedNativeFormat;
   const nativeOfficeDocument = [
     "docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm",
     "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam",
-  ].includes(artifact.nativeFormat?.toLowerCase() ?? "");
+  ].includes(inferredNativeFormat ?? "");
   const nativePortableArtifact = nativeOfficeDocument || [
     "flashcard_deck", "quiz", "planner_task", "agent", "whiteboard", "presentation",
   ].includes(artifact.blueprintKey);
   const nativeWordDocument =
     artifact.blueprintKey === "document" &&
     ["docx", "docm", "dotx", "dotm"].includes(
-      artifact.nativeFormat?.toLowerCase() ?? "",
+      inferredNativeFormat ?? "",
     );
   const nativeOfficeApplication = nativeWordDocument
     ? "Word"
@@ -3470,15 +3482,18 @@ function ArtifactStudioEditor({
       // second full-document reconciliation path on each keystroke.
       content: nativeBodyBinding
         ? currentSnapshotRef.current.content
-        : incomingLiveContent,
+        : nativeProjectionOverrideRef.current ??
+          (nativeProjectionReady ? content : incomingLiveContent),
     }),
     [
       incomingLiveContent,
       incomingLiveTagDraft,
       live.liveValue.summary,
       live.liveValue.title,
+      content,
       humanSummary,
       nativeBodyBinding,
+      nativeProjectionReady,
     ],
   );
   const currentSnapshot = useMemo(
@@ -3490,6 +3505,7 @@ function ArtifactStudioEditor({
       return;
     nativeLensRefreshRef.current = artifact._id;
     let cancelled = false;
+    let completed = false;
     const endpoint = nativeWordDocument
       ? "/api/spectra/lenses/docx"
       : "/api/spectra/lenses/office";
@@ -3499,24 +3515,57 @@ function ArtifactStudioEditor({
       body: JSON.stringify({ action: "open", artifactId: artifact._id }),
     })
       .then(async (response) => {
-        if (!cancelled && response.ok) {
-          const result = (await response.json().catch(() => null)) as
-            | { projection?: unknown }
-            | null;
+        const result = (await response.json().catch(() => null)) as
+          | { content?: unknown; projection?: unknown; message?: string }
+          | null;
+        if (!response.ok)
+          throw new Error(
+            result?.message ??
+              `The ${nativeOfficeApplication} file could not be opened safely.`,
+          );
+        if (!cancelled) {
+          completed = true;
+          const projection = result?.content ?? result?.projection;
+          if (projection !== undefined) {
+            // A native lens is the source of truth for the first render. Stage
+            // it before the Yjs acknowledgement so the artifact reconciliation
+            // effect cannot replace real Office geometry with the legacy
+            // persisted fallback while the live model is bootstrapping.
+            nativeProjectionOverrideRef.current = projection;
+            setNativeLensProjection(projection);
+            setNativeProjectionReady(true);
+          }
           window.dispatchEvent(
             new CustomEvent("spectra:artifact-lens-activated", {
-              detail: { artifactId: artifact._id, projection: result?.projection },
+              detail: { artifactId: artifact._id, projection },
             }),
           );
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        completed = true;
         nativeLensRefreshRef.current = undefined;
+        if (!cancelled)
+          setNativeWriteError(
+            error instanceof Error
+              ? error.message
+              : `The ${nativeOfficeApplication} file could not be opened safely.`,
+          );
       });
     return () => {
       cancelled = true;
+      // Lens activation refreshes the artifact object and can replace this
+      // effect while the request is still in flight. Allow the new instance
+      // to retry instead of leaving the stale Yjs bootstrap mounted forever.
+      if (!completed && nativeLensRefreshRef.current === artifact._id)
+        nativeLensRefreshRef.current = undefined;
     };
-  }, [artifact._id, nativeOfficeDocument, nativeWordDocument]);
+  }, [
+    artifact._id,
+    nativeOfficeApplication,
+    nativeOfficeDocument,
+    nativeWordDocument,
+  ]);
   useEffect(() => {
     if (
       !nativeWordDocument ||
@@ -5511,6 +5560,7 @@ function ArtifactStudioEditor({
 
   const applyExternalProjection = useCallback(
     async (projection: unknown, attribution = `Edited in ${nativeOfficeApplication}`) => {
+      nativeProjectionOverrideRef.current = projection;
       const nextValue = { ...live.liveValue, content: projection };
       const applied = await live.synchronize(nextValue);
       if (applied && "applied" in applied && applied.applied === false)
@@ -5526,12 +5576,23 @@ function ArtifactStudioEditor({
       setDirty(false);
       setNativeAttribution(attribution);
       setNativeConflict(null);
+      setNativeLensProjection(undefined);
+      setNativeProjectionReady(false);
       window.requestAnimationFrame(() => {
         reconcilingRemoteRef.current = false;
       });
     },
     [live, nativeOfficeApplication],
   );
+  useEffect(() => {
+    if (
+      nativeProjectionOverrideRef.current !== undefined &&
+      JSON.stringify(live.liveValue.content) ===
+        JSON.stringify(nativeProjectionOverrideRef.current)
+    ) {
+      nativeProjectionOverrideRef.current = undefined;
+    }
+  }, [live.liveValue.content]);
   useEffect(() => {
     const onLensActivated = (event: Event) => {
       const detail = (event as CustomEvent<{ artifactId?: string; projection?: unknown }>).detail;
@@ -5569,6 +5630,26 @@ function ArtifactStudioEditor({
     live.modelSnapshot.initialized,
     live.modelSnapshot.validity,
     live.unsynchronizedChanges,
+    nativeOfficeApplication,
+  ]);
+  useEffect(() => {
+    if (
+      !nativeLensProjection ||
+      dirty ||
+      !live.modelSnapshot.initialized ||
+      live.modelSnapshot.validity !== "valid" ||
+      live.unsynchronizedChanges > 0
+    ) return;
+    void applyExternalProjection(nativeLensProjection, `Opened from ${nativeOfficeApplication}`).catch((error: unknown) => {
+      setNativeWriteError(error instanceof Error ? error.message : `The ${nativeOfficeApplication} projection could not be applied safely.`);
+    });
+  }, [
+    applyExternalProjection,
+    dirty,
+    live.modelSnapshot.initialized,
+    live.modelSnapshot.validity,
+    live.unsynchronizedChanges,
+    nativeLensProjection,
     nativeOfficeApplication,
   ]);
   useEffect(() => {
@@ -5932,6 +6013,8 @@ function ArtifactStudioEditor({
         catchUpActive && highlightPaths.length > 0 ? "true" : undefined
       }
       data-blueprint={artifact.blueprintKey}
+      data-native-office={nativeOfficeDocument ? "true" : "false"}
+      data-native-format={inferredNativeFormat}
       data-ai-highlight-paths={highlightPaths.join("|") || undefined}
       data-ai-protocol={
         activeAiCollaborator?.interactionState

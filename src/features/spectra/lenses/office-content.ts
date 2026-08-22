@@ -119,17 +119,7 @@ export function pptxArtifactContent(
       id: slide.id,
       title: slide.title,
       ...(slide.layoutPartName ? { layoutId: slide.layoutPartName } : {}),
-      objects: slide.text.map((text, index) => ({
-        id: `${slide.id}:text:${index}`,
-        type: "text" as const,
-        x: 8,
-        y: index ? 24 + index * 12 : 6,
-        width: 84,
-        height: 10,
-        rotation: 0,
-        content: { text },
-        locked: index === 0,
-      })),
+      objects: slide.objects,
       ...(slide.hasTransition || slide.hasTiming
         ? {
             nativeCompatibility: {

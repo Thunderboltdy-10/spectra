@@ -139,6 +139,8 @@ describe("XLSX and PPTX fidelity lenses", () => {
     const opened = await pptxLens.open(source);
     expect(opened.projection.slides[0]!.hasTransition).toBe(true);
     const slide = opened.projection.slides[0]!;
+    expect(slide.objects.length).toBeGreaterThanOrEqual(2);
+    expect(slide.objects.some((object) => object.type === "text" && object.width > 10 && object.height > 10)).toBe(true);
     const edited = await pptxLens.mutate(opened.preservedCarry, {
       kind: "add-text-box",
       slideId: slide.id,
@@ -152,6 +154,27 @@ describe("XLSX and PPTX fidelity lenses", () => {
           entry.feature === "transition" && entry.class === "PRESERVED",
       ),
     ).toBe(true);
+  });
+
+  it("projects native shape identity and writes edits back to that shape", async () => {
+    const source = await nativeTransitionFixture();
+    const opened = await pptxLens.open(source);
+    const slide = opened.projection.slides[0]!;
+    const target = slide.objects.find((object) => !object.locked && object.type === "text");
+    expect(target).toBeTruthy();
+    const content = target!.content as { text: string };
+    const edited = await pptxLens.materialize({
+      projection: {
+        ...opened.projection,
+        slides: opened.projection.slides.map((candidate) => candidate.id !== slide.id ? candidate : {
+          ...candidate,
+          objects: candidate.objects.map((object) => object.id === target!.id ? { ...object, content: { ...object.content as object, text: `${content.text} edited` } } : object),
+        }),
+      },
+      carry: opened.preservedCarry,
+    });
+    const reopened = await pptxLens.open(edited);
+    expect(reopened.projection.slides[0]!.objects.find((object) => object.id === target!.id)?.content).toMatchObject({ text: `${content.text} edited` });
   });
 
   it("keeps the PPTX native contract valid through normalization and Yjs", async () => {

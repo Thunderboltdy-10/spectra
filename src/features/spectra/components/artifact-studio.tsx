@@ -61,6 +61,7 @@ import {
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { ResourceSurface } from "../bridge/resource-surface";
 import { selectSyncTruth } from "../bridge/status";
+import { formatByteCount } from "../../../../shared/human-format";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import {
   codeParameterSnapshot,
@@ -3297,7 +3298,11 @@ function ArtifactStudioEditor({
   // silently downgrade an owner/editor's open surface.
   const readOnly = permissionReadOnly;
   const [title, setTitle] = useState(artifact.title);
-  const [summary, setSummary] = useState(artifact.summary ?? "");
+  const [summary, setSummary] = useState(() =>
+    (artifact.summary ?? "").replace(/^(\d+) bytes$/i, (_, value: string) =>
+      formatByteCount(Number(value)),
+    ),
+  );
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   // Whether the collapsed summary is actually cut off. This has to be measured,
   // not guessed from a character count: the same 60-character sentence fits on
@@ -3423,6 +3428,7 @@ function ArtifactStudioEditor({
   const localSyncKeysRef = useRef(new Set<string>());
   const syncingRef = useRef(false);
   const nativeFallbackEditedRef = useRef(false);
+  const pendingNativeProjectionRef = useRef<unknown>(undefined);
   const reconciliationFrameRef = useRef<number | null>(null);
   const nativeBodyBinding =
     artifact.blueprintKey === "document" || artifact.blueprintKey === "code";
@@ -3445,12 +3451,19 @@ function ArtifactStudioEditor({
       : artifact.blueprintKey === "presentation"
         ? "PowerPoint"
         : "Office";
+  const humanSummary = useCallback(
+    (value: string | undefined) =>
+      (value ?? "").replace(/^(\d+) bytes$/i, (_, bytes: string) =>
+        formatByteCount(Number(bytes)),
+      ),
+    [],
+  );
   const incomingLiveContent = nativeBodyBinding ? null : live.liveValue.content;
   const incomingLiveTagDraft = live.liveValue.tags.join(", ");
   const incomingSnapshot = useMemo(
     () => ({
       title: live.liveValue.title,
-      summary: live.liveValue.summary ?? "",
+      summary: humanSummary(live.liveValue.summary),
       tagDraft: incomingLiveTagDraft,
       // Native document/code editors already consume their Yjs types directly.
       // Feeding every live-origin body projection back through React creates a
@@ -3464,6 +3477,7 @@ function ArtifactStudioEditor({
       incomingLiveTagDraft,
       live.liveValue.summary,
       live.liveValue.title,
+      humanSummary,
       nativeBodyBinding,
     ],
   );
@@ -3484,13 +3498,17 @@ function ArtifactStudioEditor({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "open", artifactId: artifact._id }),
     })
-      .then((response) => {
-        if (!cancelled && response.ok)
+      .then(async (response) => {
+        if (!cancelled && response.ok) {
+          const result = (await response.json().catch(() => null)) as
+            | { projection?: unknown }
+            | null;
           window.dispatchEvent(
             new CustomEvent("spectra:artifact-lens-activated", {
-              detail: { artifactId: artifact._id },
+              detail: { artifactId: artifact._id, projection: result?.projection },
             }),
           );
+        }
       })
       .catch(() => {
         nativeLensRefreshRef.current = undefined;
@@ -5514,6 +5532,74 @@ function ArtifactStudioEditor({
     },
     [live, nativeOfficeApplication],
   );
+  useEffect(() => {
+    const onLensActivated = (event: Event) => {
+      const detail = (event as CustomEvent<{ artifactId?: string; projection?: unknown }>).detail;
+      if (
+        detail?.artifactId !== artifact._id ||
+        !detail.projection ||
+        dirty
+      )
+        return;
+      if (
+        !live.modelSnapshot.initialized ||
+        live.modelSnapshot.validity !== "valid" ||
+        live.unsynchronizedChanges > 0
+      ) {
+        pendingNativeProjectionRef.current = detail.projection;
+        return;
+      }
+      void applyExternalProjection(detail.projection, `Edited in ${nativeOfficeApplication}`).catch(
+        (error: unknown) => {
+          setNativeWriteError(
+            error instanceof Error
+              ? error.message
+              : `The ${nativeOfficeApplication} projection could not be applied safely.`,
+          );
+        },
+      );
+    };
+    window.addEventListener("spectra:artifact-lens-activated", onLensActivated);
+    return () =>
+      window.removeEventListener("spectra:artifact-lens-activated", onLensActivated);
+  }, [
+    applyExternalProjection,
+    artifact._id,
+    dirty,
+    live.modelSnapshot.initialized,
+    live.modelSnapshot.validity,
+    live.unsynchronizedChanges,
+    nativeOfficeApplication,
+  ]);
+  useEffect(() => {
+    const projection = pendingNativeProjectionRef.current;
+    if (
+      !projection ||
+      dirty ||
+      !live.modelSnapshot.initialized ||
+      live.modelSnapshot.validity !== "valid" ||
+      live.unsynchronizedChanges > 0
+    )
+      return;
+    pendingNativeProjectionRef.current = undefined;
+    void applyExternalProjection(projection, `Edited in ${nativeOfficeApplication}`).catch(
+      (error: unknown) => {
+        pendingNativeProjectionRef.current = projection;
+        setNativeWriteError(
+          error instanceof Error
+            ? error.message
+            : `The ${nativeOfficeApplication} projection could not be applied safely.`,
+        );
+      },
+    );
+  }, [
+    applyExternalProjection,
+    dirty,
+    live.modelSnapshot.initialized,
+    live.modelSnapshot.validity,
+    live.unsynchronizedChanges,
+    nativeOfficeApplication,
+  ]);
 
   const reconcileNativeRevision = useCallback(
     async (resolution?: "word" | "spectra") => {
@@ -5583,12 +5669,20 @@ function ArtifactStudioEditor({
         )
         .sort((left, right) => right.updatedAt - left.updatedAt)[0]
     : undefined;
+  const nativeCloudReplica = nativeOfficeDocument
+    ? replicaTruth?.replicas.find((replica) => replica.kind === "cloud")
+    : undefined;
   useEffect(() => {
     if (!nativeOfficeDocument || !nativeLocalReplica) return;
     const previousRevision = nativeLocalRevisionRef.current;
+    const localChangedSinceCloud = Boolean(
+      nativeLocalReplica.contentHash &&
+        nativeCloudReplica?.contentHash &&
+        nativeLocalReplica.contentHash !== nativeCloudReplica.contentHash,
+    );
     nativeLocalRevisionRef.current = nativeLocalReplica.revision;
     if (
-      !previousRevision ||
+      (!previousRevision && !localChangedSinceCloud) ||
       previousRevision === nativeLocalReplica.revision ||
       nativeLocalReplica.state !== "current" ||
       nativeMaterialization ||
@@ -5618,6 +5712,7 @@ function ArtifactStudioEditor({
     nativeMaterialization,
     nativeOfficeApplication,
     nativeOfficeDocument,
+    nativeCloudReplica,
     reconcileNativeRevision,
   ]);
   useEffect(() => {

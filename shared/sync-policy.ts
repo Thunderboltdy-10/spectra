@@ -156,3 +156,84 @@ export function structurePropagates(
   if (mode === "mirror-from-disk") return direction === "disk-to-spectra";
   return false;
 }
+
+export type StructureDirection = "spectra-to-disk" | "disk-to-spectra";
+export type StructureDecision = "ignore" | "propagate" | "ask";
+export type StructureOperationKind = "move" | "rename" | "delete";
+export type StructureRequestState =
+  | "ignored"
+  | "approval-required"
+  | "pending";
+
+/**
+ * The one policy decision used by the tree, Bridge discovery, UI and tests.
+ * `ask` is deliberately not treated as propagation: a durable decision must
+ * be recorded before either side is changed.
+ */
+export function decideStructureOperation(
+  mode: StructureMode,
+  direction: StructureDirection,
+): StructureDecision {
+  if (mode === "ask") return "ask";
+  return structurePropagates(mode, direction) ? "propagate" : "ignore";
+}
+
+/**
+ * Physical deletion is always an explicit user decision, even when structure
+ * mirroring is enabled. Move and rename can follow the selected policy.
+ */
+export function initialStructureRequestState(
+  decision: StructureDecision,
+  direction: StructureDirection,
+  kind: StructureOperationKind,
+): StructureRequestState {
+  if (
+    direction === "spectra-to-disk" &&
+    kind === "delete" &&
+    decision === "propagate"
+  )
+    return "approval-required";
+  if (decision === "ask") return "approval-required";
+  return decision === "propagate" ? "pending" : "ignored";
+}
+
+export type MissingResourceAction =
+  | "keep-unavailable"
+  | "restore-to-disk"
+  | "trash-in-spectra"
+  | "ask";
+
+/** The server-side decision for a file that vanished between mount scans. */
+export function decideMissingResourceAction(
+  mode: StructureMode,
+  cloudPayloadAvailable: boolean,
+): MissingResourceAction {
+  if (mode === "mirror-from-disk" || mode === "mirror-both")
+    return "trash-in-spectra";
+  if (mode === "mirror-to-disk" && cloudPayloadAvailable)
+    return "restore-to-disk";
+  if (mode === "ask") return "ask";
+  return "keep-unavailable";
+}
+
+export function collisionSafeRelativePath(
+  requestedPath: string,
+  occupiedPaths: readonly string[],
+) {
+  const normalized = requestedPath.replaceAll("\\", "/");
+  const occupied = new Set(
+    occupiedPaths.map((path) => path.replaceAll("\\", "/").toLocaleLowerCase()),
+  );
+  if (!occupied.has(normalized.toLocaleLowerCase())) return normalized;
+  const slash = normalized.lastIndexOf("/");
+  const directory = slash >= 0 ? normalized.slice(0, slash + 1) : "";
+  const fileName = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+  const dot = fileName.lastIndexOf(".");
+  const stem = dot > 0 ? fileName.slice(0, dot) : fileName;
+  const extension = dot > 0 ? fileName.slice(dot) : "";
+  for (let index = 2; index < 10_000; index += 1) {
+    const candidate = `${directory}${stem} (Spectra ${index})${extension}`;
+    if (!occupied.has(candidate.toLocaleLowerCase())) return candidate;
+  }
+  throw new Error("STRUCTURE_COLLISION_LIMIT");
+}

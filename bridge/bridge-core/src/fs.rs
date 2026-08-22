@@ -39,6 +39,10 @@ impl Grant {
     pub fn device_root(&self) -> &Path {
         &self.root
     }
+
+    pub fn is_available(&self) -> bool {
+        self.root.is_dir()
+    }
 }
 
 #[derive(Default)]
@@ -53,6 +57,16 @@ impl GrantRegistry {
         selected_root: &Path,
     ) -> Result<Grant, FsError> {
         let root = selected_root.canonicalize()?;
+        if let Some(existing) = self
+            .grants
+            .read()
+            .unwrap()
+            .values()
+            .find(|grant| grant.root == root)
+            .cloned()
+        {
+            return Ok(existing);
+        }
         let grant = Grant {
             id: format!("grant_{}", uuid::Uuid::new_v4().simple()),
             label,
@@ -71,10 +85,26 @@ impl GrantRegistry {
         label: String,
         root: &Path,
     ) -> Result<Grant, FsError> {
+        let normalized_root = root
+            .canonicalize()
+            .unwrap_or_else(|_| root.to_path_buf());
+        if let Some(existing) = self
+            .grants
+            .read()
+            .unwrap()
+            .values()
+            .find(|grant| grant.root == normalized_root)
+            .cloned()
+        {
+            return Ok(existing);
+        }
         let grant = Grant {
             id,
             label,
-            root: root.canonicalize()?,
+            // Keep the persisted location even while an external drive or
+            // provider mount is offline. Dropping it here makes the folder
+            // disappear from Spectra and forces an unnecessary re-selection.
+            root: normalized_root,
         };
         self.grants
             .write()
@@ -300,6 +330,65 @@ impl<P: Platform> SafeWriter<P> {
             .transition(&op.op_id, OpState::Verified, None, None)?;
         Ok(op.op_id)
     }
+
+    pub fn relocate(
+        &self,
+        grant_id: &str,
+        source_relative_path: &Path,
+        target_relative_path: &Path,
+        resource_id: &str,
+        idempotency_key: &str,
+    ) -> Result<String, FsError> {
+        if let Some(existing) = self.journal.by_key(idempotency_key)? {
+            if existing.state == OpState::Verified {
+                return Ok(existing.op_id);
+            }
+        }
+        let source = self.grants.resolve(grant_id, source_relative_path)?;
+        let target = self.grants.resolve(grant_id, target_relative_path)?;
+        if source == target {
+            return Err(FsError::Other(anyhow::anyhow!("source and target are identical")));
+        }
+        if !source.exists() {
+            return Err(FsError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "source does not exist",
+            )));
+        }
+        if target.exists() {
+            return Err(FsError::Other(anyhow::anyhow!("destination already exists")));
+        }
+        let pre_hash = source.is_file().then(|| sha256_file(&source)).transpose()?;
+        let op = self.journal.begin_intent(
+            idempotency_key,
+            "fs.move",
+            Some(resource_id),
+            None,
+            pre_hash.as_deref(),
+        )?;
+        if op.state == OpState::Verified { return Ok(op.op_id); }
+        let parent = target.parent().ok_or(FsError::GrantEscape)?;
+        fs::create_dir_all(parent)?;
+        if self.platform.is_locked(&source)? {
+            return Err(FsError::FileLocked);
+        }
+        if target.exists() {
+            return Err(FsError::Other(anyhow::anyhow!("destination already exists")));
+        }
+        fs::rename(&source, &target)?;
+        self.journal.transition(&op.op_id, OpState::Performed, pre_hash.as_deref(), None)?;
+        if source.exists() || !target.exists() {
+            self.journal.transition(
+                &op.op_id,
+                OpState::Failed,
+                None,
+                Some(("move-verification-failed", "source or destination state was unexpected")),
+            )?;
+            return Err(FsError::VerificationFailed);
+        }
+        self.journal.transition(&op.op_id, OpState::Verified, pre_hash.as_deref(), None)?;
+        Ok(op.op_id)
+    }
 }
 
 #[cfg(windows)]
@@ -366,6 +455,40 @@ mod tests {
             grants.resolve(&grant.id, Path::new("C:\\secret")),
             Err(FsError::GrantEscape)
         ));
+    }
+
+    #[test]
+    fn selecting_or_restoring_same_root_reuses_one_grant() {
+        let dir = tempdir().unwrap();
+        let grants = GrantRegistry::default();
+        let first = grants
+            .add_native_selection("Physics".into(), dir.path())
+            .unwrap();
+        let second = grants
+            .add_native_selection("Physics".into(), dir.path())
+            .unwrap();
+        let restored = grants
+            .restore_device_grant("grant_other".into(), "Physics".into(), dir.path())
+            .unwrap();
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.id, restored.id);
+        assert_eq!(grants.device_grants().len(), 1);
+    }
+
+    #[test]
+    fn restored_unavailable_grant_remains_visible_for_reconnect() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("external-drive");
+        fs::create_dir_all(&root).unwrap();
+        let grants = GrantRegistry::default();
+        let id = "grant_persisted".to_owned();
+        fs::remove_dir_all(&root).unwrap();
+        let grant = grants
+            .restore_device_grant(id.clone(), "External drive".into(), &root)
+            .unwrap();
+        assert_eq!(grant.id, id);
+        assert!(!grant.is_available());
+        assert_eq!(grants.device_grants().len(), 1);
     }
 
     #[test]
@@ -487,5 +610,20 @@ mod tests {
             Err(FsError::FileLocked)
         ));
         assert_eq!(fs::read(dir.path().join("paper.docx")).unwrap(), b"original");
+    }
+
+    #[test]
+    fn relocate_is_journaled_and_idempotent() {
+        let dir = tempdir().unwrap();
+        let grants = Arc::new(GrantRegistry::default());
+        let grant = grants.add_native_selection("Test".into(), dir.path()).unwrap();
+        std::fs::write(dir.path().join("before.txt"), b"move me").unwrap();
+        let journal = Arc::new(Journal::in_memory().unwrap());
+        let writer = SafeWriter::new(grants, journal.clone(), Arc::new(TestPlatform::default()));
+        let first = writer.relocate(&grant.id, Path::new("before.txt"), Path::new("after.txt"), "r", "move-once").unwrap();
+        assert!(!dir.path().join("before.txt").exists());
+        assert_eq!(std::fs::read(dir.path().join("after.txt")).unwrap(), b"move me");
+        let second = writer.relocate(&grant.id, Path::new("before.txt"), Path::new("after.txt"), "r", "move-once").unwrap();
+        assert_eq!(first, second);
     }
 }

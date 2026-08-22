@@ -11,9 +11,160 @@ import {
 } from "./bridgeIdentity";
 import { bumpPolicyVersion } from "./authorityShared";
 import { computeEffectivePolicy } from "./syncPolicy";
+import { POLICY_PRESETS, type SyncPolicyPreset } from "../shared/sync-policy";
+import { planStorageStrategyTransition } from "../shared/storage-strategy";
 
 const replicaState = z.enum(["current", "ahead", "behind", "diverged", "pending", "error", "unavailable"]);
 const transitionSchema = z.object({ idempotencyKey: z.string().uuid(), revisionBefore: z.string().min(1).max(200).optional(), revisionAfter: z.string().min(1).max(200).optional(), contentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), state: replicaState, errorCode: z.string().min(1).max(80).optional() }).strict();
+
+const strategyPreset = v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked"));
+
+/** Change storage strategy without changing the logical work identity. */
+export const transitionStorageStrategy = mutation({
+  args: { workId: v.id("spectraArtifacts"), toPreset: strategyPreset, idempotencyKey: v.string(), mountId: v.optional(v.id("bridgeMounts")), relativePath: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const idempotencyKey = z.string().uuid().parse(args.idempotencyKey);
+    const work = await ctx.db.get(args.workId);
+    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    const existingTransition = await ctx.db.query("storageStrategyTransitions")
+      .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey)).unique();
+    if (existingTransition) return { state: existingTransition.state, transitionId: existingTransition._id };
+    const effective = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), item: String(args.workId) });
+    const fromPreset = effective.preset as SyncPolicyPreset;
+    const [cloud, locals] = await Promise.all([
+      ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud")).unique(),
+      ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).take(20),
+    ]);
+    let activeLocal = locals.find((replica) => replica.state !== "unavailable" && replica.unavailableReason !== "removed-by-user");
+    const requiresLocal = args.toPreset === "device" || args.toPreset === "both" || args.toPreset === "linked";
+    const strategyPlan = planStorageStrategyTransition(args.toPreset, {
+      hasCloud: Boolean(cloud),
+      cloudHasPayload: Boolean(cloud?.payloadRef),
+      hasActiveLocal: Boolean(activeLocal),
+      localIsVerified: Boolean(activeLocal && activeLocal.state === "current" && activeLocal.payloadRef && activeLocal.contentHash),
+      hasProtectedPending: locals.some((replica) => Boolean(replica.pendingPayloadRef)),
+    });
+    // Materialize the cloud identity up front when a local-only work is being
+    // promoted. The native payload is still uploaded and verified by the
+    // Bridge; this row is deliberately payload-less and cannot report
+    // `current` until commitPayloadUpload completes.
+    if (!cloud && activeLocal && args.toPreset !== "device") {
+      const now = Date.now();
+      await ctx.db.insert("workReplicas", {
+        accountId: actor.accountId,
+        workId: args.workId,
+        kind: "cloud",
+        nativeFormat: activeLocal.nativeFormat,
+        revision: activeLocal.revision,
+        baseRevision: activeLocal.baseRevision,
+        contentHash: activeLocal.contentHash,
+        state: args.toPreset === "linked" ? "current" : "pending",
+        fidelityMap: activeLocal.fidelityMap,
+        preservedCarryVersion: activeLocal.preservedCarryVersion ?? 1,
+        compatibilityProfile: activeLocal.compatibilityProfile ?? "strict-native",
+        updatedAt: now,
+      });
+    }
+    let createdLocal = false;
+    let materializationRequestId: Id<"bridgeWriteRequests"> | undefined;
+    if (requiresLocal && !activeLocal) {
+      if (!args.mountId || !args.relativePath || !cloud?.payloadRef) throw new Error("STORAGE_STRATEGY_LOCAL_TARGET_REQUIRED");
+      if (!cloud.contentHash) throw new Error("STORAGE_STRATEGY_CLOUD_HASH_REQUIRED");
+      const mount = await ctx.db.get(args.mountId);
+      const device = mount ? await ctx.db.get(mount.deviceId) : null;
+      if (!mount || mount.accountId !== actor.accountId || mount.state !== "active" || !device || device.state !== "active") throw new Error("MOUNT_NOT_ACTIVE");
+      const relativePath = z.string().trim().min(1).max(1024).refine((value) => !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes(".."), "LOCAL_PATH_INVALID").parse(args.relativePath);
+      const now = Date.now();
+      const localResourceId = `lr_${crypto.randomUUID().replaceAll("-", "")}`;
+      const localId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: args.workId, kind: "local", deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, nativeFormat: cloud.nativeFormat, payloadRef: undefined, revision: `new:${cloud.revision}`, baseRevision: cloud.revision, contentHash: undefined, state: "pending", fidelityMap: cloud.fidelityMap, preservedCarryVersion: 1, compatibilityProfile: cloud.compatibilityProfile ?? "strict-native", updatedAt: now });
+      activeLocal = (await ctx.db.get(localId)) ?? undefined;
+      const writeKey = crypto.randomUUID();
+      materializationRequestId = await ctx.db.insert("bridgeWriteRequests", { accountId: actor.accountId, workId: args.workId, replicaId: localId, deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, payloadRef: cloud.payloadRef, baseRevision: cloud.revision, targetRevision: cloud.contentHash, contentHash: cloud.contentHash, idempotencyKey: writeKey, regionIds: [], partNames: [], state: "pending", createdAt: now, updatedAt: now });
+      await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: args.workId, replicaId: localId, idempotencyKey: writeKey, direction: "cloud-to-local", revisionBefore: cloud.revision, revisionAfter: cloud.contentHash, state: "pending", actorKind: "user", createdAt: now, updatedAt: now });
+      createdLocal = true;
+    }
+    // A local-only -> Spectra transition can be pending without creating a
+    // new local replica: the existing Bridge source must upload its retained
+    // native payload before the cloud replica is considered complete. Keep
+    // the source active until bridgeSync:commitPayloadUpload verifies it.
+    const now = Date.now();
+    const before = { preset: fromPreset, cloudPayloadRef: cloud?.payloadRef, localReplicaIds: locals.map((replica) => String(replica._id)), localStates: locals.map((replica) => ({ id: String(replica._id), state: replica.state })) };
+    const transitionId = await ctx.db.insert("storageStrategyTransitions", { accountId: actor.accountId, workId: args.workId, idempotencyKey, fromPreset, toPreset: args.toPreset, state: "pending", before, createdAt: now, updatedAt: now });
+    try {
+      const presetValues = POLICY_PRESETS[args.toPreset];
+      const existingPolicy = await ctx.db.query("syncPolicies").withIndex("by_account_scope", (q) => q.eq("accountId", actor.accountId).eq("scopeKind", "item").eq("scopeId", String(args.workId))).unique();
+      if (existingPolicy) await ctx.db.patch(existingPolicy._id, { ...presetValues, updatedAt: now });
+      else await ctx.db.insert("syncPolicies", { accountId: actor.accountId, scopeKind: "item", scopeId: String(args.workId), ...presetValues, createdAt: now, updatedAt: now });
+      await ctx.db.insert("syncPolicyChanges", {
+        accountId: actor.accountId,
+        scopeKind: "item",
+        scopeId: String(args.workId),
+        action: "override",
+        before: { preset: fromPreset },
+        after: { ...presetValues },
+        actorKind: "user",
+        idempotencyKey: `storage:${idempotencyKey}`,
+        createdAt: now,
+      });
+      if (args.toPreset === "spectra") {
+        // A metadata-only cloud row is not a completed migration. Keep the
+        // local source active until the normal Bridge discovery/upload path
+        // has attached and verified the native payload in Spectra.
+        if (!strategyPlan.requiresCloudMaterialization) {
+          for (const local of locals) await ctx.db.patch(local._id, { state: "unavailable", unavailableReason: "removed-by-user", protectedOriginal: undefined, updatedAt: now });
+        }
+        await ctx.db.patch(args.workId, { protectedOriginal: false, updatedAt: now });
+      } else if (args.toPreset === "device" && cloud) {
+        // Keep the cloud payload until the Bridge has read back and verified
+        // the materialized local file. completeWrite owns the final cleanup;
+        // clearing it here would make a failed F6 transition lose recovery.
+        await ctx.db.patch(activeLocal!._id, { protectedOriginal: undefined, state: createdLocal ? "pending" : activeLocal!.state === "unavailable" ? "behind" : activeLocal!.state, updatedAt: now });
+        await ctx.db.patch(args.workId, { protectedOriginal: false, updatedAt: now });
+      } else if (args.toPreset === "both") {
+        await ctx.db.patch(activeLocal!._id, { protectedOriginal: undefined, state: activeLocal!.state === "unavailable" ? "behind" : activeLocal!.state, updatedAt: now });
+        await ctx.db.patch(args.workId, { protectedOriginal: false, updatedAt: now });
+      } else if (args.toPreset === "linked") {
+        await ctx.db.patch(activeLocal!._id, { protectedOriginal: true, updatedAt: now });
+        await ctx.db.patch(args.workId, { protectedOriginal: true, updatedAt: now });
+      }
+      const after = { preset: args.toPreset, cloudPayloadRef: args.toPreset === "device" ? undefined : cloud?.payloadRef, localReplicaIds: [...locals.map((replica) => String(replica._id)), ...(activeLocal && createdLocal ? [String(activeLocal._id)] : [])], physicalLocalAction: args.toPreset === "spectra" ? "leave-file-in-place" : "retain", materializationRequestId: materializationRequestId ? String(materializationRequestId) : undefined };
+      const finalState = createdLocal || strategyPlan.requiresCloudMaterialization ? "pending" : strategyPlan.completion;
+      await ctx.db.patch(transitionId, { state: finalState, after, updatedAt: Date.now() });
+      return { state: finalState as "pending" | "verified", transitionId, materializationRequestId: materializationRequestId ?? null };
+    } catch (error) {
+      await ctx.db.patch(transitionId, { state: "failed", errorCode: error instanceof Error ? error.message.slice(0, 120) : "STRATEGY_TRANSITION_FAILED", updatedAt: Date.now() });
+      throw error;
+    }
+  },
+});
+
+export const removeLocalReplica = mutation({
+  args: { workId: v.id("spectraArtifacts"), replicaId: v.id("workReplicas"), idempotencyKey: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const idempotencyKey = z.string().uuid().parse(args.idempotencyKey);
+    const replica = await ctx.db.get(args.replicaId);
+    if (!replica || replica.accountId !== actor.accountId || replica.workId !== args.workId || replica.kind !== "local") throw new Error("LOCAL_REPLICA_NOT_FOUND");
+    if (replica.pendingPayloadRef) throw new Error("LOCAL_REPLICA_PENDING_CHANGES");
+    const existing = await ctx.db.query("storageStrategyTransitions").withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey)).unique();
+    if (existing) return { state: existing.state, transitionId: existing._id };
+    const now = Date.now();
+    const transitionId = await ctx.db.insert("storageStrategyTransitions", { accountId: actor.accountId, workId: args.workId, idempotencyKey, fromPreset: "both", toPreset: "spectra", state: "pending", before: { replicaId: String(replica._id), relativePath: replica.relativePath, state: replica.state }, createdAt: now, updatedAt: now });
+    const spectraPolicy = POLICY_PRESETS.spectra;
+    const existingPolicy = await ctx.db.query("syncPolicies")
+      .withIndex("by_account_scope", (q) => q.eq("accountId", actor.accountId).eq("scopeKind", "item").eq("scopeId", String(args.workId)))
+      .unique();
+    if (existingPolicy) await ctx.db.patch(existingPolicy._id, { ...spectraPolicy, updatedAt: now });
+    else await ctx.db.insert("syncPolicies", { accountId: actor.accountId, scopeKind: "item", scopeId: String(args.workId), ...spectraPolicy, createdAt: now, updatedAt: now });
+    await ctx.db.insert("syncPolicyChanges", { accountId: actor.accountId, scopeKind: "item", scopeId: String(args.workId), action: "override", before: { preset: "both" }, after: { ...spectraPolicy }, actorKind: "user", idempotencyKey: `storage:${idempotencyKey}`, createdAt: now });
+    await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: "removed-by-user", protectedOriginal: undefined, updatedAt: now });
+    await ctx.db.patch(transitionId, { state: "verified", after: { replicaId: String(replica._id), physicalAction: "leave-file-in-place", state: "unavailable" }, updatedAt: Date.now() });
+    return { state: "verified" as const, transitionId };
+  },
+});
 
 export const forWork = query({
   args: { workId: v.id("spectraArtifacts") },
@@ -23,7 +174,22 @@ export const forWork = query({
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
     const conflicts = await ctx.db.query("syncConflicts").withIndex("by_work_state", (q) => q.eq("workId", workId).eq("state", "open")).take(20);
     const pending = await ctx.db.query("syncOperations").withIndex("by_work_created", (q) => q.eq("workId", workId)).order("desc").take(50);
-    return { replicas, conflicts, openConflictCount: conflicts.length, pendingCount: pending.filter((op) => op.state === "pending" || op.state === "applied").length, recentOperations: pending.slice(0, 10) };
+    return { replicas, conflicts, openConflictCount: conflicts.length, pendingCount: pending.filter((op) => op.state === "pending" || op.state === "applied").length, recentOperations: pending.slice(0, 20) };
+  },
+});
+
+export const strategyTransitionForWork = query({
+  args: { workId: v.id("spectraArtifacts") },
+  handler: async (ctx, { workId }) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const work = await ctx.db.get(workId);
+    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    const transitions = await ctx.db.query("storageStrategyTransitions")
+      .withIndex("by_work_created", (q) => q.eq("workId", workId))
+      .order("desc")
+      .take(10);
+    return transitions.find((transition) => transition.state === "pending") ?? transitions[0] ?? null;
   },
 });
 
@@ -196,6 +362,9 @@ export const queueMaterialization = mutation({
     regionIds: v.array(v.string()),
     partNames: v.array(v.string()),
     localReplicaId: v.optional(v.id("workReplicas")),
+    baseContent: v.optional(v.any()),
+    baseContentHash: v.optional(v.string()),
+    baseTextIndex: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -207,6 +376,8 @@ export const queueMaterialization = mutation({
       idempotencyKey: z.string().uuid(),
       regionIds: z.array(z.string().min(1).max(300)).max(500),
       partNames: z.array(z.string().min(1).max(500)).max(200),
+      baseContentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+      baseTextIndex: z.string().max(200_000).optional(),
     }).parse(args);
     const work = await ctx.db.get(args.workId);
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
@@ -249,6 +420,9 @@ export const queueMaterialization = mutation({
     });
     if (policy.protectedOriginal) {
       const now = Date.now();
+      const startsProtectedSession = !work.pendingPayloadRef;
+      if (startsProtectedSession && (args.baseContent === undefined || !input.baseContentHash))
+        throw new Error("PROTECTED_BASE_SNAPSHOT_REQUIRED");
       await ctx.db.patch(local._id, {
         pendingPayloadRef: input.payloadRef,
         pendingContentHash: input.contentHash,
@@ -261,6 +435,13 @@ export const queueMaterialization = mutation({
         pendingPayloadRef: input.payloadRef,
         pendingContentHash: input.contentHash,
         pendingBaseRevision: input.baseRevision,
+        ...(startsProtectedSession
+          ? {
+              protectedBaseContent: args.baseContent,
+              protectedBaseContentHash: input.baseContentHash,
+              protectedBaseTextIndex: input.baseTextIndex,
+            }
+          : {}),
         protectedOriginal: true,
         updatedAt: now,
       });
@@ -344,6 +525,8 @@ export const discardProtectedPending = mutation({
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
     const locals = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).take(20);
     const changed = locals.filter((replica) => replica.pendingPayloadRef).length;
+    if (changed && (work.protectedBaseContent === undefined || !work.protectedBaseContentHash))
+      throw new Error("PROTECTED_BASE_SNAPSHOT_MISSING");
     await Promise.all(locals.filter((replica) => replica.pendingPayloadRef).map((replica) => ctx.db.patch(replica._id, {
       pendingPayloadRef: undefined,
       pendingContentHash: undefined,
@@ -361,9 +544,15 @@ export const discardProtectedPending = mutation({
     ));
     if (changed) {
       await ctx.db.patch(args.workId, {
+        content: work.protectedBaseContent,
+        contentHash: work.protectedBaseContentHash,
+        textIndex: work.protectedBaseTextIndex,
         pendingPayloadRef: undefined,
         pendingContentHash: undefined,
         pendingBaseRevision: undefined,
+        protectedBaseContent: undefined,
+        protectedBaseContentHash: undefined,
+        protectedBaseTextIndex: undefined,
         protectedOriginal: true,
         updatedAt: Date.now(),
       });
@@ -383,10 +572,16 @@ export const applyProtectedPending = mutation({
       .find((replica) => replica.pendingPayloadRef);
     if (!local?.pendingPayloadRef || !local.pendingContentHash || !local.pendingBaseRevision || !local.deviceId || !local.mountId || !local.localResourceId || !local.relativePath)
       throw new Error("PROTECTED_PENDING_NOT_FOUND");
+    const openConflict = await ctx.db.query("syncConflicts")
+      .withIndex("by_work_state", (q) => q.eq("workId", args.workId).eq("state", "open"))
+      .first();
+    if (openConflict) throw new Error("PROTECTED_ORIGINAL_CONFLICT");
     const payloadId = ctx.db.normalizeId("payloadObjects", local.pendingPayloadRef);
     const payload = payloadId ? await ctx.db.get(payloadId) : null;
     if (!payload || payload.accountId !== actor.accountId || payload.state !== "active" || payload.hash !== local.pendingContentHash)
       throw new Error("PROTECTED_PENDING_PAYLOAD_INVALID");
+    if (work.protectedBaseContent === undefined || !work.protectedBaseContentHash)
+      throw new Error("PROTECTED_BASE_SNAPSHOT_MISSING");
     const existing = await ctx.db.query("bridgeWriteRequests").withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", args.idempotencyKey)).unique();
     if (existing) return { requestId: existing._id, state: existing.state };
     const [mount, device] = await Promise.all([ctx.db.get(local.mountId), ctx.db.get(local.deviceId)]);
@@ -398,22 +593,11 @@ export const applyProtectedPending = mutation({
       baseRevision: local.pendingBaseRevision, targetRevision: local.pendingContentHash, contentHash: local.pendingContentHash,
       idempotencyKey: args.idempotencyKey, regionIds: [], partNames: [], state: "pending", createdAt: now, updatedAt: now,
     });
-    await ctx.db.patch(local._id, {
-      payloadRef: local.pendingPayloadRef, contentHash: local.pendingContentHash, revision: local.pendingContentHash,
-      baseRevision: local.pendingBaseRevision, pendingPayloadRef: undefined, pendingContentHash: undefined,
-      pendingBaseRevision: undefined, protectedOriginal: false, state: "pending", updatedAt: now,
-    });
-    await ctx.db.patch(args.workId, {
-      pendingPayloadRef: undefined,
-      pendingContentHash: undefined,
-      pendingBaseRevision: undefined,
-      protectedOriginal: false,
-      updatedAt: now,
-    });
+    await ctx.db.patch(local._id, { state: "pending", updatedAt: now });
     await ctx.db.insert("syncOperations", {
       accountId: actor.accountId, workId: args.workId, replicaId: local._id, idempotencyKey: args.idempotencyKey,
       direction: "cloud-to-local", revisionBefore: local.pendingBaseRevision, revisionAfter: local.pendingContentHash,
-      state: "pending", actorKind: "user", createdAt: now, updatedAt: now,
+      state: "pending", actorKind: "user", errorCode: "protected-original-apply-pending", createdAt: now, updatedAt: now,
     });
     return { requestId, state: "pending" as const };
   },
@@ -439,7 +623,7 @@ export const forkProtectedPending = mutation({
       ownerAccountId: actor.accountId, schoolId: work.schoolId, blueprintKey: work.blueprintKey,
       resourceClass: work.resourceClass, nativeFormat: work.nativeFormat, compatibilityProfile: work.compatibilityProfile,
       title, summary: work.summary, content: work.content, schemaVersion: work.schemaVersion,
-      contentHash: local.pendingContentHash, textIndex: work.textIndex, tags: work.tags, status: "active",
+      contentHash: work.contentHash, textIndex: work.textIndex, tags: work.tags, status: "active",
       createdFrom: { source: "manual", sourceArtifactIds: [args.workId] }, createdAt: now, updatedAt: now,
     });
     await ctx.db.insert("workReplicas", {
@@ -451,15 +635,34 @@ export const forkProtectedPending = mutation({
       pendingPayloadRef: undefined,
       pendingContentHash: undefined,
       pendingBaseRevision: undefined,
-      updatedAt: now,
-    });
-    await ctx.db.patch(args.workId, {
-      pendingPayloadRef: undefined,
-      pendingContentHash: undefined,
-      pendingBaseRevision: undefined,
+      state: "current",
       protectedOriginal: true,
       updatedAt: now,
     });
+    await ctx.db.patch(args.workId, {
+      content: work.protectedBaseContent,
+      contentHash: work.protectedBaseContentHash,
+      textIndex: work.protectedBaseTextIndex,
+      pendingPayloadRef: undefined,
+      pendingContentHash: undefined,
+      pendingBaseRevision: undefined,
+      protectedBaseContent: undefined,
+      protectedBaseContentHash: undefined,
+      protectedBaseTextIndex: undefined,
+      protectedOriginal: true,
+      updatedAt: now,
+    });
+    const pendingOperations = await ctx.db.query("syncOperations")
+      .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
+      .order("desc")
+      .take(50);
+    await Promise.all(pendingOperations
+      .filter((operation) => operation.errorCode === "protected-original-pending" && operation.state === "pending")
+      .map((operation) => ctx.db.patch(operation._id, {
+        state: "verified",
+        errorCode: "protected-original-forked",
+        updatedAt: now,
+      })));
     if (work.schoolId) {
       await placeSourceNode(ctx, { accountId: actor.accountId, schoolId: work.schoolId, kind: "work", sourceId: String(forkId), name: title, target: {}, placedByAccountId: actor.accountId, typeKey: work.blueprintKey });
     }
@@ -563,6 +766,7 @@ export const attachPortablePayload = mutation({
 export const recordExternalReconciliation = mutation({
   args: {
     workId: v.id("spectraArtifacts"),
+    localReplicaId: v.optional(v.id("workReplicas")),
     localPayloadRef: v.string(),
     localRevision: v.string(),
     content: v.any(),
@@ -576,7 +780,19 @@ export const recordExternalReconciliation = mutation({
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const work = await ctx.db.get(args.workId);
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
-    const local = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).unique();
+    // A work may legitimately have one local replica per device. Reconcile
+    // against the exact replica reported by the Bridge, never an arbitrary
+    // `unique()` local row that only happened to exist before N6.
+    const locals = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local"))
+      .take(50);
+    const local = (args.localReplicaId
+      ? locals.find((candidate) => candidate._id === args.localReplicaId)
+      : undefined) ?? locals.find((candidate) =>
+      candidate.payloadRef === args.localPayloadRef && candidate.revision === args.localRevision,
+    );
+    if (local && (local.payloadRef !== args.localPayloadRef || local.revision !== args.localRevision))
+      throw new Error("EXTERNAL_REVISION_CHANGED");
     const cloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud")).unique();
     if (!local || !cloud || local.payloadRef !== args.localPayloadRef || local.revision !== args.localRevision)
       throw new Error("EXTERNAL_REVISION_CHANGED");
@@ -587,6 +803,22 @@ export const recordExternalReconciliation = mutation({
       .filter((q) => q.and(q.eq(q.field("direction"), "external"), q.eq(q.field("state"), "pending")))
       .first();
     if (args.conflictRegionIds.length) {
+      const existingConflict = await ctx.db
+        .query("syncConflicts")
+        .withIndex("by_work_state", (q) => q.eq("workId", args.workId).eq("state", "open"))
+        .filter((q) =>
+          q.and(
+            q.eq(q.field("localRevision"), local.revision),
+            q.eq(q.field("spectraRevision"), cloud.revision),
+          ),
+        )
+        .first();
+      if (existingConflict) {
+        if (operation) await ctx.db.patch(operation._id, { state: "conflicted", updatedAt: now });
+        await ctx.db.patch(local._id, { state: "diverged", updatedAt: now });
+        await ctx.db.patch(cloud._id, { state: "diverged", updatedAt: now });
+        return { state: "conflicted" as const };
+      }
       await ctx.db.insert("syncConflicts", {
         accountId: actor.accountId,
         workId: args.workId,

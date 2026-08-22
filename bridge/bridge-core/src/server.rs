@@ -32,6 +32,7 @@ pub struct ServerState {
 #[async_trait]
 pub trait LocalBridgeControl: Send + Sync {
     fn pairing_requested(&self);
+    async fn auto_pair(&self) -> Result<(), String>;
     fn mounts(&self) -> Vec<LocalMountStatus>;
     async fn select_mount(&self) -> Result<(), String>;
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String>;
@@ -113,6 +114,16 @@ impl ServerState {
             offer.expires_at > unix_ms() && offer.short_code == code,
             "pairing code does not match"
         );
+        Ok(offer)
+    }
+    pub fn take_pairing_offer(&self) -> anyhow::Result<PairingOffer> {
+        let offer = self
+            .pending_pairing
+            .write()
+            .unwrap()
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no pairing is waiting"))?;
+        anyhow::ensure!(offer.expires_at > unix_ms(), "pairing offer expired");
         Ok(offer)
     }
     pub fn pending_pairing_code(&self) -> Option<String> {
@@ -267,7 +278,16 @@ async fn pair_offer(
     Json(offer): Json<PairingOffer>,
 ) -> Response {
     match state.accept_pairing_offer(offer) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => {
+            let control = state.local_control.read().unwrap().clone();
+            match control {
+                Some(control) => match control.auto_pair().await {
+                    Ok(()) => StatusCode::NO_CONTENT.into_response(),
+                    Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+                },
+                None => (StatusCode::SERVICE_UNAVAILABLE, "Bridge controls are not ready").into_response(),
+            }
+        }
         Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
     }
 }
@@ -407,7 +427,7 @@ mod tests {
         );
     }
     #[test]
-    fn pairing_requires_the_bridge_side_code_confirmation() {
+    fn pairing_offer_is_consumed_by_spectra_owned_auto_pair_flow() {
         let state = ServerState::unpaired();
         let offer = PairingOffer {
             challenge: "a".repeat(64),
@@ -416,9 +436,8 @@ mod tests {
             expires_at: unix_ms() + 60_000,
         };
         state.accept_pairing_offer(offer.clone()).unwrap();
-        assert!(state.confirm_pairing_code("000000").is_err());
-        state.accept_pairing_offer(offer.clone()).unwrap();
-        assert_eq!(state.confirm_pairing_code("123456").unwrap(), offer);
+        assert_eq!(state.take_pairing_offer().unwrap(), offer);
+        assert!(state.take_pairing_offer().is_err());
     }
     #[test]
     fn paired_session_can_resume_only_for_an_allowed_origin() {

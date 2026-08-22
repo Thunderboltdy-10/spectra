@@ -5,11 +5,12 @@ export const BRIDGE_PROTOCOL_VERSION = "1.0";
 
 const healthSchema = z.object({ version: z.string(), paired: z.boolean(), protocolVersion: z.string(), port: z.literal(47615), bindError: z.string().nullable().optional() }).strict();
 export type BridgeHealth = z.infer<typeof healthSchema>;
-const mountSchema = z.object({ id: z.string(), label: z.string(), state: z.string(), detail: z.string(), synced: z.number(), total: z.number() }).strict();
+const mountSchema = z.object({ id: z.string(), label: z.string(), state: z.string(), detail: z.string(), synced: z.number(), total: z.number(), doubleSyncRisk: z.boolean().default(false) }).strict();
 const statusSchema = z.object({ version: z.string(), protocolVersion: z.string(), paired: z.boolean(), cloudConnected: z.boolean(), deviceId: z.string().nullable().optional(), mounts: z.array(mountSchema) }).strict();
 export type BridgeStatus = z.infer<typeof statusSchema>;
 export type BridgeConnectionState = "connected" | "disconnected" | "paused" | "update-required";
 export const BRIDGE_SESSION_STORAGE_KEY = "spectra.bridge.session";
+export const BRIDGE_STATUS_CACHE_KEY = "spectra.bridge.status";
 
 export function protocolMajor(value: string) { const parsed = Number(value.split(".")[0]); return Number.isSafeInteger(parsed) ? parsed : null; }
 
@@ -35,6 +36,22 @@ export function loadBridgeSession() {
 export function persistBridgeSession(token: string) {
   window.localStorage.setItem(BRIDGE_SESSION_STORAGE_KEY, token);
   window.sessionStorage.removeItem(BRIDGE_SESSION_STORAGE_KEY);
+}
+
+export function loadBridgeStatusCache(): BridgeStatus | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(BRIDGE_STATUS_CACHE_KEY);
+    if (!raw) return null;
+    return statusSchema.parse(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+export function persistBridgeStatusCache(status: BridgeStatus) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(BRIDGE_STATUS_CACHE_KEY, JSON.stringify(status));
 }
 
 async function authorizedBridgeRequest(path: string, init: RequestInit = {}) {

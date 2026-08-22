@@ -6,14 +6,14 @@ use spectra_bridge_core::fs::{
 };
 use spectra_bridge_core::journal::Journal;
 use spectra_bridge_core::platform::{HostPlatform, Platform};
-use spectra_bridge_core::protocol::LocalMountStatus;
+use spectra_bridge_core::protocol::{LocalMountStatus, PairingOffer};
 use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
     DiscoveredResource, ReplicaMigrationPage, claim_write, complete_write, detach_mount,
     discover_resource, drain_cloud_queue, exchange_pairing, migrate_cloud_replica_page,
-    register_mount, resume_pairing, upload_resource_payload,
+    register_mount, reconcile_missing_resources, resume_pairing, upload_resource_payload, claim_fs_request, complete_fs_request, set_mount_availability,
 };
-use spectra_bridge_core::watcher::{MountWatcher, WatcherConfig, office_locks_present, scan_page};
+use spectra_bridge_core::watcher::{MountWatcher, WatcherConfig, office_lock_exists, office_lock_paths, scan_page};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WindowEvent};
@@ -28,6 +28,7 @@ struct BridgeRuntime {
 #[derive(Clone)]
 struct SpectraLocalControl {
     app: tauri::AppHandle,
+    state: Arc<ServerState>,
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
 }
@@ -41,10 +42,12 @@ impl SpectraLocalControl {
 #[async_trait::async_trait]
 impl LocalBridgeControl for SpectraLocalControl {
     fn pairing_requested(&self) {
-        if let Some(window) = self.app.get_webview_window("main") {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
+        // Pairing is initiated and completed from Spectra; the tray window stays hidden.
+    }
+
+    async fn auto_pair(&self) -> Result<(), String> {
+        let offer = self.state.take_pairing_offer().map_err(|error| error.to_string())?;
+        complete_pairing_offer(&offer, &self.state, &self.journal).await
     }
 
     fn mounts(&self) -> Vec<LocalMountStatus> {
@@ -55,6 +58,7 @@ impl LocalBridgeControl for SpectraLocalControl {
             detail: mount.detail,
             synced: mount.synced,
             total: mount.total,
+            double_sync_risk: mount.double_sync_risk,
         }).collect()
     }
 
@@ -143,6 +147,7 @@ struct MountView {
     detail: String,
     synced: usize,
     total: usize,
+    double_sync_risk: bool,
 }
 
 fn mount_views(grants: &GrantRegistry, journal: &Journal) -> Vec<MountView> {
@@ -152,13 +157,29 @@ fn mount_views(grants: &GrantRegistry, journal: &Journal) -> Vec<MountView> {
             .ok().flatten()
             .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
             .unwrap_or_else(|| serde_json::json!({}));
+        let double_sync_risk = journal
+            .config(&format!("mount_double_sync:{}", grant.id))
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("true");
+        let base_detail = value
+            .get("detail")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Selected on this device");
+        let detail = if double_sync_risk {
+            format!("{base_detail} Provider-managed folder detected; conflict windows may be wider.")
+        } else {
+            base_detail.to_owned()
+        };
         MountView {
             id: grant.id,
             label: grant.label,
             state: value.get("state").and_then(|v| v.as_str()).unwrap_or("selected").to_owned(),
-            detail: value.get("detail").and_then(|v| v.as_str()).unwrap_or("Selected on this device").to_owned(),
+            detail,
             synced: value.get("synced").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
             total: value.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+            double_sync_risk,
         }
     }).collect()
 }
@@ -172,6 +193,16 @@ fn set_mount_status(
     total: usize,
 ) -> Result<(), String> {
     journal.set_config(&format!("mount_status:{grant_id}"), &serde_json::json!({ "state": state, "detail": detail, "synced": synced, "total": total }).to_string()).map_err(|error| error.to_string())
+}
+
+fn mount_root_key(grant: &Grant) -> String {
+    let normalized = grant
+        .device_root()
+        .to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    hex::encode(sha2::Sha256::digest(normalized.as_bytes()))
 }
 
 fn deployment_url(journal: &Journal) -> Result<String, String> {
@@ -287,20 +318,35 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     let deployment = deployment_url(journal)?;
     let mut cursor = None;
     let mut files = Vec::new();
+    let owner_lock_paths = office_lock_paths(grant.device_root(), 500);
+    let scan_id = uuid::Uuid::new_v4().to_string();
     let mut double_sync_risk = false;
+    let mut locked_files = 0usize;
     loop {
         let page = scan_page(&HostPlatform, grant.device_root(), cursor.as_deref(), 500)
             .map_err(|error| error.to_string())?;
-        for entry in page.entries.into_iter().filter(|entry| !entry.is_directory) {
+        for entry in page.entries {
+            if entry.is_directory {
+                continue;
+            }
             double_sync_risk |= entry.double_sync_risk;
             let native_format = std::path::Path::new(&entry.relative_path)
                 .extension()
                 .and_then(|value| value.to_str())
                 .unwrap_or("file")
                 .to_ascii_lowercase();
-            let content_hash = entry
-                .content_hash
-                .or_else(|| sha256_file(&grant.device_root().join(&entry.relative_path)).ok());
+            let entry_path = grant.device_root().join(&entry.relative_path);
+            let locked = office_lock_exists(&entry_path);
+            if locked {
+                locked_files += 1;
+            }
+            // Never hash a file while Office owns it. The next watcher pass
+            // will pick it up after the owner lock disappears.
+            let content_hash = if locked {
+                None
+            } else {
+                entry.content_hash.or_else(|| sha256_file(&entry_path).ok())
+            };
             files.push(DiscoveredResource {
                 local_resource_id: entry.local_resource_id,
                 relative_path: entry.relative_path,
@@ -322,13 +368,22 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         0,
         files.len(),
     )?;
+    journal
+        .set_config(
+            &format!("mount_double_sync:{}", grant.id),
+            if double_sync_risk { "true" } else { "false" },
+        )
+        .map_err(|error| error.to_string())?;
     let mount_id = register_mount(
         &deployment,
         &credential,
         &grant.label,
         &grant.id,
+        &mount_root_key(grant),
+        &scan_id,
         files.len(),
         double_sync_risk,
+        &owner_lock_paths,
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -370,6 +425,11 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                 return Err("payload path escaped its selected folder".into());
             }
             let candidate = grant.device_root().join(relative);
+            if office_lock_exists(&candidate) {
+                // The mount remains usable and unrelated files continue to
+                // sync. This specific file is retried after Word releases it.
+                continue;
+            }
             let canonical = candidate
                 .canonicalize()
                 .map_err(|error| error.to_string())?;
@@ -415,14 +475,28 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             files.len(),
         )?;
     }
-    set_mount_status(
-        journal,
-        &grant.id,
-        "active",
-        "Available in Spectra",
-        files.len(),
-        files.len(),
-    )
+    reconcile_missing_resources(&deployment, &credential, &mount_id, &scan_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    if locked_files > 0 {
+        set_mount_status(
+            journal,
+            &grant.id,
+            "waiting",
+            &format!("Waiting for Office to finish saving {locked_files} file{}", if locked_files == 1 { "" } else { "s" }),
+            files.len().saturating_sub(locked_files),
+            files.len(),
+        )
+    } else {
+        set_mount_status(
+            journal,
+            &grant.id,
+            "active",
+            "Available in Spectra",
+            files.len(),
+            files.len(),
+        )
+    }
 }
 
 async fn drain_write_requests(
@@ -552,13 +626,71 @@ async fn drain_write_requests(
     Ok(handled)
 }
 
+fn collision_path(root: &std::path::Path, requested: &std::path::Path) -> std::path::PathBuf {
+    if !root.join(requested).exists() { return requested.to_owned(); }
+    let parent = requested.parent().unwrap_or_else(|| std::path::Path::new(""));
+    let name = requested.file_name().and_then(|name| name.to_str()).unwrap_or("file");
+    let dot = name.rfind('.');
+    let (stem, extension) = match dot { Some(index) if index > 0 => (&name[..index], &name[index..]), _ => (name, "") };
+    for index in 2..10_000 {
+        let candidate = parent.join(format!("{stem} (Spectra {index}){extension}"));
+        if !root.join(&candidate).exists() { return candidate; }
+    }
+    requested.to_owned()
+}
+
+async fn drain_structure_requests(
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    deployment: &str,
+    credential: &str,
+) -> anyhow::Result<usize> {
+    let mut handled = 0;
+    for _ in 0..20 {
+        let Some(request) = claim_fs_request(deployment, credential).await? else { break; };
+        let relative_source = std::path::Path::new(&request.source_relative_path);
+        let target_candidate = request.target_relative_path.as_deref().map(std::path::Path::new);
+        let grant = grants.device_grants().into_iter().find(|grant| grant.id == request.grant_id);
+        let Some(grant) = grant else {
+            complete_fs_request(deployment, credential, &request.request_id, "failed", None, Some(("grant-unavailable", "The selected folder is no longer available."))).await?;
+            handled += 1;
+            continue;
+        };
+        let writer = SafeWriter::new(grants.clone(), journal.clone(), Arc::new(HostPlatform));
+        let result = match request.kind.as_str() {
+            "delete" => writer.recycle(&request.grant_id, relative_source, &request.local_resource_id, &request.idempotency_key).map(|_| None),
+            "move" | "rename" => {
+                match target_candidate {
+                    Some(target) => {
+                        let parent = grant.device_root().join(target.parent().unwrap_or_else(|| std::path::Path::new("")));
+                        if let Err(error) = std::fs::create_dir_all(&parent) {
+                            Err(FsError::Other(anyhow::anyhow!(error)))
+                        } else {
+                            let actual = collision_path(grant.device_root(), target);
+                            writer.relocate(&request.grant_id, relative_source, &actual, &request.local_resource_id, &request.idempotency_key).map(|_| Some(actual.to_string_lossy().replace('\\', "/")))
+                        }
+                    }
+                    None => Err(FsError::Other(anyhow::anyhow!("structure target missing"))),
+                }
+            }
+            _ => Err(FsError::Other(anyhow::anyhow!("unknown structure operation"))),
+        };
+        match result {
+            Ok(actual) => complete_fs_request(deployment, credential, &request.request_id, "verified", actual.as_deref(), None).await?,
+            Err(FsError::FileLocked) => complete_fs_request(deployment, credential, &request.request_id, "failed", None, Some(("office-locked", "The file is open in another application."))).await?,
+            Err(error) => complete_fs_request(deployment, credential, &request.request_id, "failed", None, Some(("structure-operation-failed", &error.to_string()))).await?,
+        }
+        handled += 1;
+    }
+    Ok(handled)
+}
+
 fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Journal>) {
     tauri::async_runtime::spawn(async move {
-        let config = WatcherConfig::default();
-        let watcher =
+        let config = WatcherConfig::for_root(std::path::Path::new(grant.device_root()));
+        let mut watcher =
             MountWatcher::start(std::path::Path::new(grant.device_root()), config.clone()).ok();
         let mut last_reconciliation = std::time::Instant::now();
-        let mut waiting_for_office = false;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             if !grants
@@ -568,30 +700,63 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
             {
                 break;
             }
-            let changed = watcher
-                .as_ref()
-                .is_some_and(|watcher| !watcher.drain().is_empty());
-            let office_locked = office_locks_present(std::path::Path::new(grant.device_root()));
-            if office_locked {
-                if changed || !waiting_for_office {
+            if !grant.is_available() {
+                watcher = None;
+                let marker_key = format!("mount_availability:{}", grant.id);
+                let already_reported = journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
+                if !already_reported {
+                    if let (Ok(url), Ok(Some(device_id))) = (deployment_url(&journal), journal.config("device_id")) {
+                        if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
+                            if set_mount_availability(&url, &credential, &grant.id, false).await.is_ok() {
+                                let _ = journal.set_config(&marker_key, "unavailable");
+                            }
+                        }
+                    }
+                }
+                let _ = set_mount_status(
+                    &journal,
+                    &grant.id,
+                    "unavailable",
+                    "Folder is unavailable on this device; reconnect the drive to resume.",
+                    0,
+                    0,
+                );
+                continue;
+            }
+            if watcher.is_none() {
+                watcher = MountWatcher::start(
+                    std::path::Path::new(grant.device_root()),
+                    config.clone(),
+                )
+                .ok();
+                if watcher.is_none() {
                     let _ = set_mount_status(
                         &journal,
                         &grant.id,
-                        "waiting",
-                        "Waiting for Office to finish saving",
+                        "error",
+                        "The folder could not be watched yet.",
                         0,
                         0,
                     );
+                    continue;
                 }
-                waiting_for_office = true;
-                continue;
-            }
-            if waiting_for_office {
                 let _ = sync_grant(&grant, &journal).await;
-                waiting_for_office = false;
+                let marker_key = format!("mount_availability:{}", grant.id);
+                let was_unavailable = journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
+                if was_unavailable {
+                    if let (Ok(url), Ok(Some(device_id))) = (deployment_url(&journal), journal.config("device_id")) {
+                        if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
+                            if set_mount_availability(&url, &credential, &grant.id, true).await.is_ok() {
+                                let _ = journal.delete_config(&marker_key);
+                            }
+                        }
+                    }
+                }
                 last_reconciliation = std::time::Instant::now();
-                continue;
             }
+            let changed = watcher
+                .as_ref()
+                .is_some_and(|watcher| !watcher.drain().is_empty());
             if changed {
                 tokio::time::sleep(config.stability_window).await;
                 let _ = sync_grant(&grant, &journal).await;
@@ -605,6 +770,17 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
 }
 
 async fn sync_grant(grant: &Grant, journal: &Journal) -> Result<(), String> {
+    if !grant.is_available() {
+        set_mount_status(
+            journal,
+            &grant.id,
+            "unavailable",
+            "Folder is unavailable on this device; reconnect the drive to resume.",
+            0,
+            0,
+        )?;
+        return Ok(());
+    }
     match run_sync(grant, journal).await {
         Ok(()) => Ok(()),
         Err(error) => {
@@ -629,6 +805,63 @@ fn bridge_status(
 }
 
 #[tauri::command]
+async fn complete_pairing_offer(
+    offer: &PairingOffer,
+    state: &Arc<ServerState>,
+    journal: &Arc<Journal>,
+) -> Result<(), String> {
+    let deployment = deployment_url(journal)?;
+    let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "This device".into());
+    let installation_id = match journal.config("installation_id").map_err(|error| error.to_string())? {
+        Some(value) => value,
+        None => {
+            let value = uuid::Uuid::new_v4().to_string();
+            journal.set_config("installation_id", &value).map_err(|error| error.to_string())?;
+            value
+        }
+    };
+    let existing = journal.config("device_id").map_err(|error| error.to_string())?
+        .and_then(|device_id| HostPlatform.read_credential(&device_id).ok().flatten().map(|credential| (device_id, credential)));
+    let (device_id, browser_origin) = if let Some((_device_id, credential)) = existing {
+        match resume_pairing(&deployment, &credential, offer, &device_name, &installation_id).await {
+            Ok(exchange) => (exchange.device_id, exchange.browser_origin),
+            Err(error) if should_repair_pairing(&error.to_string()) => {
+                let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id).await.map_err(|error| error.to_string())?;
+                HostPlatform.store_credential(&exchange.device_id, &exchange.device_credential).map_err(|error| error.to_string())?;
+                (exchange.device_id, exchange.browser_origin)
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    } else {
+        let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id).await.map_err(|error| error.to_string())?;
+        HostPlatform.store_credential(&exchange.device_id, &exchange.device_credential).map_err(|error| error.to_string())?;
+        (exchange.device_id, exchange.browser_origin)
+    };
+    journal.set_config("device_id", &device_id).map_err(|error| error.to_string())?;
+    state.set_device_id(device_id);
+    let session_token = state.complete_pairing(offer.challenge.clone(), browser_origin.clone());
+    journal.set_config("browser_origin", &browser_origin).map_err(|error| error.to_string())?;
+    journal.set_config("browser_session_token", &session_token).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn should_repair_pairing(error: &str) -> bool {
+    error.contains("BRIDGE_CREDENTIAL_INVALID")
+}
+
+#[cfg(test)]
+mod pairing_tests {
+    use super::should_repair_pairing;
+
+    #[test]
+    fn only_invalid_credentials_trigger_device_repair() {
+        assert!(should_repair_pairing("bridge: BRIDGE_CREDENTIAL_INVALID"));
+        assert!(!should_repair_pairing("network timeout"));
+        assert!(!should_repair_pairing("PAIRING_CHALLENGE_INVALID"));
+    }
+}
+
+#[tauri::command]
 async fn confirm_pairing(
     code: String,
     state: tauri::State<'_, Arc<ServerState>>,
@@ -637,39 +870,7 @@ async fn confirm_pairing(
     let offer = state
         .confirm_pairing_code(&code)
         .map_err(|error| error.to_string())?;
-    let deployment = deployment_url(&runtime.journal)?;
-    let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "This device".into());
-    let existing = runtime.journal.config("device_id").map_err(|error| error.to_string())?
-        .and_then(|device_id| HostPlatform.read_credential(&device_id).ok().flatten().map(|credential| (device_id, credential)));
-    let (device_id, browser_origin) = if let Some((_device_id, credential)) = existing {
-        match resume_pairing(&deployment, &credential, &offer, &device_name).await {
-            Ok(exchange) => (exchange.device_id, exchange.browser_origin),
-            Err(_) => {
-                let exchange = exchange_pairing(&deployment, &offer, &device_name).await.map_err(|error| error.to_string())?;
-                HostPlatform.store_credential(&exchange.device_id, &exchange.device_credential).map_err(|error| error.to_string())?;
-                (exchange.device_id, exchange.browser_origin)
-            }
-        }
-    } else {
-        let exchange = exchange_pairing(&deployment, &offer, &device_name).await.map_err(|error| error.to_string())?;
-        HostPlatform.store_credential(&exchange.device_id, &exchange.device_credential).map_err(|error| error.to_string())?;
-        (exchange.device_id, exchange.browser_origin)
-    };
-    runtime
-        .journal
-        .set_config("device_id", &device_id)
-        .map_err(|error| error.to_string())?;
-    state.set_device_id(device_id);
-    let session_token = state.complete_pairing(offer.challenge, browser_origin.clone());
-    runtime
-        .journal
-        .set_config("browser_origin", &browser_origin)
-        .map_err(|error| error.to_string())?;
-    runtime
-        .journal
-        .set_config("browser_session_token", &session_token)
-        .map_err(|error| error.to_string())?;
-    Ok(())
+    complete_pairing_offer(&offer, &state, &runtime.journal).await
 }
 
 async fn select_mount_impl(app: &tauri::AppHandle, grants: &Arc<GrantRegistry>, journal: &Arc<Journal>) -> Result<Option<(String, String)>, String> {
@@ -678,7 +879,10 @@ async fn select_mount_impl(app: &tauri::AppHandle, grants: &Arc<GrantRegistry>, 
     let label = path.file_name().and_then(|name| name.to_str()).unwrap_or("Selected folder").to_owned();
     let grant = grants.add_native_selection(label.clone(), &path).map_err(|error| error.to_string())?;
     journal.set_config(&format!("mount:{}", grant.id), &serde_json::json!({ "label": label, "path": grant.device_root() }).to_string()).map_err(|error| error.to_string())?;
-    sync_grant(&grant, journal).await?;
+    // Persist and expose the grant before doing any network or payload work.
+    // Selection must remain responsive even when Cloud is slow/offline; the
+    // watcher owns the asynchronous scan and updates the durable status.
+    set_mount_status(journal, &grant.id, "scanning", "Reading folder metadata…", 0, 0)?;
     spawn_grant_watcher(grant.clone(), grants.clone(), journal.clone());
     Ok(Some((grant.id, label)))
 }
@@ -711,7 +915,7 @@ async fn remove_mount_impl(grant_id: &str, grants: &Arc<GrantRegistry>, journal:
         }
     }
     grants.remove(grant_id);
-    for prefix in ["mount:", "mount_status:", "cloud_mount:"] {
+    for prefix in ["mount:", "mount_status:", "mount_double_sync:", "cloud_mount:"] {
         journal.delete_config(&format!("{prefix}{grant_id}")).map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -764,16 +968,17 @@ fn main() {
                 app.autolaunch().enable()?;
                 repair_windows_autostart_command()?;
             }
-            if std::env::args().any(|argument| argument == "--autostart") {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.hide()?;
-                }
+            // The Bridge is tray infrastructure. Spectra owns pairing, folder
+            // selection, policy and status; the native surface is opt-in from
+            // the tray only and never appears during normal startup.
+            if let Some(window) = app.get_webview_window("main") {
+                window.hide()?;
             }
             let data_dir = if let Some(path) = isolated_runtime {
                 let mut path = std::path::PathBuf::from(path);
                 #[cfg(debug_assertions)]
                 if path.ends_with("bridge-app") {
-                    path = path.join("..\\..\\.tmp-n5-bridge");
+                    path = path.join("..\\..\\.tmp-n6-bridge");
                 }
                 if !path.is_absolute() {
                     return Err(std::io::Error::new(
@@ -821,12 +1026,25 @@ fn main() {
                 }
             }
             let restored_grants = grants.device_grants();
+            for grant in &restored_grants {
+                if !grant.is_available() {
+                    let _ = set_mount_status(
+                        &journal,
+                        &grant.id,
+                        "unavailable",
+                        "Folder is unavailable on this device; reconnect the drive to resume.",
+                        0,
+                        0,
+                    );
+                }
+            }
             app.manage(BridgeRuntime {
                 grants: grants.clone(),
                 journal: journal.clone(),
             });
             state.install_local_control(Arc::new(SpectraLocalControl {
                 app: app.handle().clone(),
+                state: state.clone(),
                 grants: grants.clone(),
                 journal: journal.clone(),
             }));
@@ -870,6 +1088,7 @@ fn main() {
                                     restored_grants_reconciled = true;
                                 }
                                 let _ = drain_cloud_queue(&sync_journal, &url, &credential).await;
+                                let _ = drain_structure_requests(&sync_grants, &sync_journal, &url, &credential).await;
                                 if let Err(error) = drain_write_requests(
                                     &sync_grants,
                                     &sync_journal,

@@ -44,4 +44,45 @@ describe("N3 Bridge contract", () => {
     expect(source).toContain("grantId");
     expect(source).toContain("relativePath");
   });
+
+  it("restores mirror-to-disk files through the verified write journal", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "convex/bridgeSync.ts"), "utf8");
+    expect(source).toContain("decideMissingResourceAction(policy.structure");
+    expect(source).toContain("actorKind: \"restore\"");
+    expect(source).toContain("unavailableReason: \"restoring-from-cloud\"");
+    expect(source).toContain("idempotencyKey = `restore:${replica._id}:${cloud.contentHash}`");
+  });
+
+  it("keeps recovery payloads until F6 local verification completes", () => {
+    const replicas = fs.readFileSync(path.join(process.cwd(), "convex/replicas.ts"), "utf8");
+    const completeWrite = fs.readFileSync(path.join(process.cwd(), "convex/bridgeSync.ts"), "utf8");
+    expect(replicas).not.toContain("if (!createdLocal) await ctx.db.patch(cloud._id, { payloadRef: undefined");
+    expect(completeWrite).toContain("if (strategyTransition.toPreset === \"device\")");
+    expect(completeWrite).toContain("payloadRef: undefined");
+  });
+
+  it("replays abandoned cloud and structure claims instead of stranding them", () => {
+    const writes = fs.readFileSync(path.join(process.cwd(), "convex/bridgeSync.ts"), "utf8");
+    const structure = fs.readFileSync(path.join(process.cwd(), "convex/bridgeStructure.ts"), "utf8");
+    expect(writes).toContain("const abandonedClaims = await ctx.db.query(\"bridgeWriteRequests\")");
+    expect(writes).toContain("q.lt(q.field(\"claimedAt\"), now - 60_000)");
+    expect(structure).toContain("const abandoned = await ctx.db.query(\"bridgeFsRequests\")");
+    expect(structure).toContain("q.lt(q.field(\"claimedAt\"), now - 60_000)");
+  });
+
+  it("turns a concurrent device revision into a conflict, never last-write-wins", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "convex/bridgeSync.ts"), "utf8");
+    expect(source).toContain("cloudChangedSinceReplicaBase");
+    expect(source).toContain("state: \"diverged\"");
+    expect(source).toContain("state: \"conflicted\"");
+    expect(source).toContain("await ctx.db.insert(\"syncConflicts\"");
+  });
+
+  it("validates a protected baseline before discarding any pending state", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "convex/replicas.ts"), "utf8");
+    const validation = source.indexOf("if (changed && (work.protectedBaseContent === undefined || !work.protectedBaseContentHash))");
+    const firstReplicaPatch = source.indexOf("await Promise.all(locals.filter((replica) => replica.pendingPayloadRef)", validation);
+    expect(validation).toBeGreaterThan(-1);
+    expect(firstReplicaPatch).toBeGreaterThan(validation);
+  });
 });

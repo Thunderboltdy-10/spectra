@@ -38,6 +38,12 @@ type WorkTruth = {
     state: string;
     payloadRef?: string;
   }>;
+  recentOperations?: Array<{
+    direction?: string;
+    state?: string;
+    actorKind?: string;
+    revisionAfter?: string;
+  }>;
 };
 
 type ArtifactTruth = {
@@ -134,8 +140,76 @@ export async function POST(request: Request) {
     const workId = artifactId(input.artifactId);
 
     if (input.action === "open") {
-      const { truth, payload } = await fetchVerifiedNativePayload(workId, "cloud");
-      const opened = await docxLens.open(payload, "strict-native");
+      let { truth, payload } = await fetchVerifiedNativePayload(workId, "cloud");
+      let opened = await docxLens.open(payload, "strict-native");
+
+      // A Bridge external revision may arrive after the cloud projection was
+      // last activated. Reconcile it before opening so the user sees the
+      // native file they just saved, while still failing closed on overlap.
+      try {
+        const local = await fetchVerifiedNativePayload(workId, "local-latest");
+        const workTruth = await convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
+          "replicas:forWork",
+          { workId },
+        );
+        const externalRevision = workTruth.recentOperations?.find(
+          (operation) =>
+            operation.direction === "external" &&
+            operation.actorKind === "external-edit" &&
+            operation.revisionAfter === local.truth.hash,
+        );
+        const externalNeedsActivation = Boolean(
+          local.truth.hash !== truth.hash || externalRevision,
+        );
+        if (externalNeedsActivation) {
+          const [artifact, externalOpened, diff] = await Promise.all([
+            convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>(
+              "spectraArtifacts:get",
+              { artifactId: workId },
+            ),
+            docxLens.open(local.payload, "strict-native"),
+            docxLens.diffExternal(payload, local.payload),
+          ]);
+          const current = contentProjection(artifact.content, opened.projection);
+          const spectraChanged = new Set(changedRegions(opened.projection, current));
+          const externalChanged = new Set(
+            local.truth.hash === truth.hash && externalRevision
+              ? changedRegions(opened.projection, current)
+              : diff.changes
+                  .filter((change) => change.kind !== "preserved-part-replaced")
+                  .map((change) => change.regionId),
+          );
+          const conflictRegionIds =
+            local.truth.hash === truth.hash && externalRevision
+              ? []
+              : [...externalChanged].filter((regionId) => spectraChanged.has(regionId));
+          if (conflictRegionIds.length) {
+            return NextResponse.json(
+              { state: "conflicted", conflictRegionIds, message: "The Word file and Spectra changed the same regions. Review the conflict before opening." },
+              { status: 409 },
+            );
+          }
+          const merged = mergeExternalProjection(current, externalOpened.projection, externalChanged);
+          await convexMutation("replicas:recordExternalReconciliation", {
+            workId,
+            localReplicaId: local.truth.replicaId as Id<"workReplicas">,
+            localPayloadRef: local.truth.payloadRef,
+            localRevision: local.truth.revision,
+            content: merged,
+            fidelityMap: externalOpened.fidelityMap,
+            regionIds: [...externalChanged],
+            partNames: diff.preservedPartChanges,
+            conflictRegionIds: [],
+          });
+          truth = local.truth;
+          payload = local.payload;
+          opened = { ...externalOpened, projection: merged };
+        }
+      } catch (error) {
+        // A missing local payload is normal for cloud-only work. Other errors
+        // must remain visible instead of silently reverting to stale content.
+        if (!(error instanceof Error) || !["LOCAL_REPLICA_UNAVAILABLE", "NATIVE_PAYLOAD_UNAVAILABLE"].includes(error.message)) throw error;
+      }
       await convexMutation<
         {
           workId: Id<"spectraArtifacts">;
@@ -201,6 +275,9 @@ export async function POST(request: Request) {
           regionIds: string[];
           partNames: string[];
           localReplicaId?: Id<"workReplicas">;
+          baseContent?: unknown;
+          baseContentHash?: string;
+          baseTextIndex?: string;
         },
         { requestId: string; state: string }
       >("replicas:queueMaterialization", {
@@ -213,6 +290,9 @@ export async function POST(request: Request) {
         regionIds,
         partNames,
         localReplicaId: local._id as Id<"workReplicas">,
+        baseContent: opened.projection,
+        baseContentHash: opened.projection.nativeBinding.semanticDigest,
+        baseTextIndex: opened.projection.blocks.map((block) => block.text).join("\n").slice(0, 200_000),
       });
       return NextResponse.json({
         state: queued.state,
@@ -304,6 +384,7 @@ export async function POST(request: Request) {
     const recorded = await convexMutation<
       {
         workId: Id<"spectraArtifacts">;
+        localReplicaId: Id<"workReplicas">;
         localPayloadRef: string;
         localRevision: string;
         content: DocxProjection;
@@ -315,6 +396,7 @@ export async function POST(request: Request) {
       { state: "applied" | "conflicted" }
     >("replicas:recordExternalReconciliation", {
       workId,
+      localReplicaId: local.truth.replicaId as Id<"workReplicas">,
       localPayloadRef: local.truth.payloadRef,
       localRevision: local.truth.revision,
       content: merged,

@@ -221,6 +221,11 @@ export function DocumentStudio({
   );
   const [importReport, setImportReport] = useState<string>();
   const [importError, setImportError] = useState<string>();
+  const nativeNoticeKey = `spectra:native-features-notice:${artifactId}`;
+  const [nativeNoticeDismissed, setNativeNoticeDismissed] = useState(() =>
+    typeof window !== "undefined" &&
+    window.localStorage.getItem(nativeNoticeKey) === "dismissed",
+  );
   const nativePlaceholders = useMemo(() => {
     const binding = record(record(content).nativeBinding);
     return Array.isArray(binding.nativePlaceholders)
@@ -477,7 +482,7 @@ export function DocumentStudio({
   }, [docMode, editor, readOnly]);
 
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || !editor.isInitialized) return;
     const markUserInput = () => {
       editorReadyForUserChanges.current = true;
     };
@@ -559,7 +564,7 @@ export function DocumentStudio({
     // requestAnimationFrame is throttled in an unfocused collaborator window,
     // and cancelling the preceding callback for every 112 ms presence beat can
     // starve TipTap indefinitely, leaving a peer on a provisional prefix.
-    if (editor.isDestroyed) return;
+    if (editor.isDestroyed || !editor.isInitialized) return;
     // Native Y.XmlFragment collaboration is already bound directly to the
     // editor. Reapplying a projected JSON snapshot here would reset selection,
     // corrupt IME composition, and turn a remote delta into a full replace.
@@ -1499,7 +1504,7 @@ export function DocumentStudio({
             </button>
           </div>
         ) : null}
-        {nativePlaceholders.length ? (
+        {nativePlaceholders.length && !nativeNoticeDismissed ? (
           <div className="spectra-document-native-features" role="note">
             <FileText className="h-4 w-4 shrink-0" />
             <span>
@@ -1515,6 +1520,17 @@ export function DocumentStudio({
               </small>
             </span>
             <em>Preserved</em>
+            <button
+              type="button"
+              aria-label="Dismiss preserved features notice"
+              title="Dismiss"
+              onClick={() => {
+                window.localStorage.setItem(nativeNoticeKey, "dismissed");
+                setNativeNoticeDismissed(true);
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         ) : null}
         {pendingTemplate ? (

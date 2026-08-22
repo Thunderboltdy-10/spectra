@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import {
@@ -44,11 +44,22 @@ export function ResourceSurface({
   const truth = useQuery(api.replicas.forWork, {
     workId: artifact._id as never,
   });
+  const effectivePolicy = useQuery(api.syncPolicy.effective, {
+    itemId: artifact._id,
+  });
+  const strategyTransition = useQuery(api.replicas.strategyTransitionForWork, {
+    workId: artifact._id as never,
+  });
+  const activeMounts = useQuery(api.bridge.activeMounts, {});
   const applyProtectedPending = useMutation(api.replicas.applyProtectedPending);
   const forkProtectedPending = useMutation(api.replicas.forkProtectedPending);
   const discardProtectedPending = useMutation(
     api.replicas.discardProtectedPending,
   );
+  const transitionStorageStrategy = useMutation(
+    api.replicas.transitionStorageStrategy,
+  );
+  const revertPolicy = useMutation(api.syncPolicy.revert);
   const bridge = useBridgeHealth();
   const replicas =
     truth?.replicas.map((replica) => ({
@@ -94,6 +105,14 @@ export function ResourceSurface({
         replica.protectedOriginal &&
         Boolean(replica.pendingPayloadRef),
     ) ?? false;
+  const currentPreset =
+    effectivePolicy?.preset ??
+    (truth?.replicas.some((replica) => replica.kind === "local")
+      ? "both"
+      : "spectra");
+  const [strategyBusy, setStrategyBusy] = useState(false);
+  const strategyPending = strategyBusy || strategyTransition?.state === "pending";
+  const autoOpenedRef = useRef<string | undefined>(undefined);
   async function protectedAction(action: "apply" | "fork" | "discard") {
     setFileAction("materialize");
     setOpenError(undefined);
@@ -116,7 +135,30 @@ export function ResourceSurface({
       setFileAction(null);
     }
   }
-  async function openInSpectra() {
+  async function changeStorageStrategy(toPreset: "spectra" | "device" | "both" | "linked") {
+    if (toPreset === currentPreset) return;
+    setStrategyBusy(true);
+    setOpenError(undefined);
+    try {
+      await transitionStorageStrategy({
+        workId: artifact._id as never,
+        toPreset,
+        idempotencyKey: crypto.randomUUID(),
+        ...(toPreset !== "spectra" && !truth?.replicas.some((replica) => replica.kind === "local") && activeMounts?.[0]
+          ? { mountId: activeMounts[0]._id, relativePath: artifact.title }
+          : {}),
+      });
+    } catch (error) {
+      setOpenError(
+        error instanceof Error
+          ? error.message
+          : "The storage strategy could not be changed. No file was removed.",
+      );
+    } finally {
+      setStrategyBusy(false);
+    }
+  }
+  const openInSpectra = useCallback(async () => {
     setOpening(true);
     setOpenError(undefined);
     try {
@@ -154,7 +196,18 @@ export function ResourceSurface({
     } finally {
       setOpening(false);
     }
-  }
+  }, [artifact._id, format]);
+
+  useEffect(() => {
+    if ((!DOCUMENT_LENS.has(format) && !OFFICE_LENS.has(format)) || opening)
+      return;
+    if (autoOpenedRef.current === artifact._id) return;
+    if (!truth?.replicas.some((replica) => Boolean(replica.payloadRef))) return;
+    autoOpenedRef.current = artifact._id;
+    void openInSpectra().catch(() => {
+      autoOpenedRef.current = undefined;
+    });
+  }, [artifact._id, format, opening, openInSpectra, truth?.replicas]);
   async function downloadCopy() {
     setFileAction("download");
     setOpenError(undefined);
@@ -268,6 +321,17 @@ export function ResourceSurface({
                 </p>
               ) : null}
             </div>
+            <div>
+              <h2 className="text-[12px] font-semibold text-[var(--text-primary)]">Effective policy</h2>
+              <p className="mt-1 text-[11px] leading-5 text-[var(--text-secondary)]">
+                {effectivePolicy?.source.kind === "default" ? "Using the account default." : `Inherited from ${effectivePolicy?.source.kind ?? "account"}.`}
+              </p>
+              {effectivePolicy?.source.kind !== "default" ? (
+                <button type="button" className="mt-2 text-[11px] font-medium text-[var(--text-primary)]" onClick={() => void revertPolicy({ scopeKind: "item", scopeId: artifact._id, idempotencyKey: crypto.randomUUID() })}>
+                  Revert to inherited policy
+                </button>
+              ) : null}
+            </div>
           </div>
           <aside className="space-y-5">
             {protectedPending ? (
@@ -342,6 +406,45 @@ export function ResourceSurface({
                   <li key={line}>{line}</li>
                 ))}
               </ul>
+            </div>
+            <div>
+              <h2 className="text-[12px] font-semibold text-[var(--text-primary)]">
+                Storage strategy
+              </h2>
+              <p className="mt-1 text-[11px] leading-5 text-[var(--text-secondary)]">
+                Changing this keeps the same Spectra item. Removing a local replica leaves the file on disk.
+              </p>
+              <div className="mt-3 grid gap-2">
+                {([
+                  ["spectra", "Keep in Spectra"],
+                  ["device", "Keep on this device"],
+                  ["both", "Keep on device + Spectra"],
+                  ["linked", "Link without changing original"],
+                ] as const).map(([preset, label]) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={`h-8 rounded-[7px] border px-3 text-left text-[11px] ${
+                      currentPreset === preset
+                        ? "border-[var(--text-primary)] bg-[var(--bg-secondary)] font-semibold"
+                        : "border-[var(--border-default)]"
+                    }`}
+                    disabled={strategyPending || currentPreset === preset}
+                    onClick={() => void changeStorageStrategy(preset)}
+                  >
+                    {strategyPending && currentPreset !== preset ? "Updating…" : label}
+                  </button>
+                ))}
+              </div>
+              {strategyTransition?.state === "pending" ? (
+                <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
+                  Moving this work between Spectra and the selected device. The item stays open while the Bridge verifies the file.
+                </p>
+              ) : strategyTransition?.state === "failed" ? (
+                <p className="mt-2 text-[11px] text-[var(--danger)]" role="alert">
+                  The last storage change did not finish: {strategyTransition.errorCode ?? "Bridge verification failed"}.
+                </p>
+              ) : null}
             </div>
             <div className="grid gap-2">
               <button

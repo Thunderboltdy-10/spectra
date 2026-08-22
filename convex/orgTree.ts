@@ -32,6 +32,7 @@ import {
   type OrgNode,
 } from "./orgTreeShared";
 import { hydrateNodes, type OrgNodeView } from "./orgTreeViews";
+import { enqueueStructureRequest } from "./bridgeStructure";
 
 /**
  * The tree's public surface. Reads are account-scoped; every write validates
@@ -541,6 +542,13 @@ export const rename = mutation({
     const actor = await requireSpectraActor(ctx);
     const node = await requireOwnNode(ctx, args.nodeId, actor.accountId);
     const renamed = await renameNode(ctx, node, args.name);
+    if (renamed.kind === "work" && renamed.sourceId) {
+      const replica = (await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", ctx.db.normalizeId("spectraArtifacts", renamed.sourceId!)!).eq("kind", "local")).take(1))[0];
+      if (replica?.relativePath) {
+        const slash = replica.relativePath.lastIndexOf("/");
+        await enqueueStructureRequest(ctx, actor.accountId, ctx.db.normalizeId("spectraArtifacts", renamed.sourceId!)!, "rename", replica.relativePath, `${slash >= 0 ? replica.relativePath.slice(0, slash + 1) : ""}${args.name}`, renamed._id);
+      }
+    }
     return { nodeId: renamed._id, name: renamed.name };
   },
 });
@@ -570,6 +578,14 @@ export const move = mutation({
         afterSiblingId,
       });
       moved.push(result._id);
+      if (result.kind === "work" && result.sourceId) {
+        const workId = ctx.db.normalizeId("spectraArtifacts", result.sourceId);
+        const replica = workId ? (await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local")).take(1))[0] : null;
+        if (workId && replica?.relativePath) {
+          const slash = replica.relativePath.lastIndexOf("/");
+          await enqueueStructureRequest(ctx, actor.accountId, workId, "move", replica.relativePath, `${slash >= 0 ? replica.relativePath.slice(0, slash + 1) : ""}${result.name}`, result._id);
+        }
+      }
       afterSiblingId = result._id;
     }
     return { moved, parentId };
@@ -604,7 +620,16 @@ export const trash = mutation({
     const results = [];
     for (const nodeId of args.nodeIds) {
       const node = await requireOwnNode(ctx, nodeId, actor.accountId);
-      results.push(await trashNode(ctx, node));
+      const sourceWorkId = node.kind === "work" && node.sourceId
+        ? ctx.db.normalizeId("spectraArtifacts", node.sourceId)
+        : null;
+      const replica = sourceWorkId
+        ? (await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", sourceWorkId).eq("kind", "local")).take(1))[0]
+        : null;
+      const sourcePath = replica?.relativePath;
+      const trashed = await trashNode(ctx, node);
+      if (sourceWorkId && sourcePath) await enqueueStructureRequest(ctx, actor.accountId, sourceWorkId, "delete", sourcePath, undefined, node._id);
+      results.push(trashed);
     }
     return { trashed: results };
   },

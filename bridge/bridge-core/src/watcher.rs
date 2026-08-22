@@ -26,6 +26,19 @@ impl Default for WatcherConfig {
     }
 }
 
+impl WatcherConfig {
+    /// Provider-backed folders can emit a short rewrite sequence after the
+    /// user's save. Give that sequence one wider quiescence window so the
+    /// Bridge reports the final revision instead of a phantom intermediate.
+    pub fn for_root(root: &Path) -> Self {
+        let mut config = Self::default();
+        if is_double_sync_path(root) {
+            config.stability_window = Duration::from_secs(2);
+        }
+        config
+    }
+}
+
 pub struct MountWatcher {
     _watcher: RecommendedWatcher,
     events: std::sync::mpsc::Receiver<notify::Result<Event>>,
@@ -80,6 +93,7 @@ pub fn scan_page<P: Platform>(
         .into_iter()
         .filter_map(Result::ok)
         .filter(|entry| entry.path() != root)
+        .filter(|entry| !is_office_lock_file(entry.path()))
         .collect::<Vec<_>>();
     paths.sort_by(|a, b| a.path().cmp(b.path()));
     let start = cursor
@@ -130,6 +144,12 @@ fn is_double_sync_path(path: &Path) -> bool {
             "onedrive" | "dropbox" | "google drive" | "my drive"
         )
     })
+}
+
+pub fn is_office_lock_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("~$"))
 }
 
 #[derive(Debug, Clone)]
@@ -196,7 +216,10 @@ impl StabilityTracker {
     }
 }
 
-pub(crate) fn office_lock_exists(path: &Path) -> bool {
+/// Returns whether Office currently owns the file through its owner lock.
+/// This is intentionally public to the Bridge app so lock handling can stay
+/// per-file; one open Word document must not stall an entire selected mount.
+pub fn office_lock_exists(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
@@ -216,6 +239,23 @@ pub fn office_locks_present(root: &Path) -> bool {
         .any(|entry| {
             entry.file_type().is_file() && entry.file_name().to_string_lossy().starts_with("~$")
         })
+}
+
+pub fn office_lock_paths(root: &Path, limit: usize) -> Vec<String> {
+    WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_file() && entry.file_name().to_string_lossy().starts_with("~$")
+        })
+        .filter_map(|entry| {
+            entry.path().strip_prefix(root).ok().map(|path| {
+                path.to_string_lossy().replace('\\', "/")
+            })
+        })
+        .take(limit.clamp(1, 500))
+        .collect()
 }
 
 #[cfg(test)]
@@ -340,11 +380,60 @@ mod tests {
     }
 
     #[test]
+    fn scan_excludes_office_owner_lock_files() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("~$paper.docx"), b"lock").unwrap();
+        std::fs::write(dir.path().join("paper.docx"), b"bytes").unwrap();
+        let page = scan_page(&TestPlatform, dir.path(), None, 20).unwrap();
+        assert_eq!(page.entries.len(), 1);
+        assert_eq!(page.entries[0].relative_path, "paper.docx");
+    }
+
+    #[test]
+    fn owner_lock_probe_reports_paths_without_scanning_them_as_resources() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("nested")).unwrap();
+        std::fs::write(dir.path().join("nested/~$paper.docx"), b"lock").unwrap();
+        assert_eq!(office_lock_paths(dir.path(), 20), vec!["nested/~$paper.docx"]);
+        assert!(scan_page(&TestPlatform, dir.path(), None, 20).unwrap().entries.iter()
+            .all(|entry| !entry.relative_path.contains("~$")));
+    }
+
+    #[test]
     fn word_owner_file_name_matches_the_open_document() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("paper.docx");
         std::fs::write(&path, b"bytes").unwrap();
         std::fs::write(dir.path().join("~$per.docx"), b"lock").unwrap();
         assert!(office_lock_exists(&path));
+    }
+
+    #[test]
+    fn provider_backed_roots_use_a_wider_stability_window() {
+        let provider = Path::new(r"C:\Users\pablo\OneDrive\Documents\Physics");
+        let ordinary = Path::new(r"C:\Users\pablo\Documents\Physics");
+        assert!(WatcherConfig::for_root(provider).stability_window > WatcherConfig::default().stability_window);
+        assert_eq!(WatcherConfig::for_root(ordinary).stability_window, WatcherConfig::default().stability_window);
+    }
+
+    #[test]
+    fn provider_rewrite_emits_only_the_final_stable_revision() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("provider.docx");
+        let start = Instant::now();
+        let mut tracker = StabilityTracker::new(Duration::from_secs(2));
+        std::fs::write(&path, b"first provider pass").unwrap();
+        assert_eq!(tracker.observe(&path, start).unwrap(), None);
+        std::fs::write(&path, b"second provider pass").unwrap();
+        assert_eq!(tracker.observe(&path, start + Duration::from_millis(900)).unwrap(), None);
+        std::fs::write(&path, b"final provider bytes").unwrap();
+        assert_eq!(tracker.observe(&path, start + Duration::from_millis(1_800)).unwrap(), None);
+        assert_eq!(tracker.observe(&path, start + Duration::from_millis(3_000)).unwrap(), None);
+        let revision = tracker
+            .observe(&path, start + Duration::from_millis(3_900))
+            .unwrap()
+            .expect("the final provider rewrite should settle once");
+        assert_eq!(revision, hex::encode(sha2::Sha256::digest(b"final provider bytes")));
+        assert_eq!(tracker.observe(&path, start + Duration::from_millis(4_000)).unwrap(), None);
     }
 }

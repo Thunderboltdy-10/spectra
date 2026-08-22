@@ -17,6 +17,7 @@ import {
   type SpectraCardState,
 } from "./card-system";
 import { previewText } from "./preview-text";
+import { formatByteCount } from "../../../../shared/human-format";
 
 const AI_EDITED_FLASH_FALLBACK_MS = 90_000;
 
@@ -309,7 +310,11 @@ export function ArtifactCard({
               size === "large" ? "line-clamp-3" : "line-clamp-2",
             )}
           >
-            {previewText(artifact.summary)}
+            {previewText(
+              artifact.summary.replace(/^(\d+) bytes$/i, (_, value: string) =>
+                formatByteCount(Number(value)),
+              ),
+            )}
           </p>
           {artifact.accessExplanation ? (
             <div className="mt-2 flex min-w-0 items-center gap-1.5 text-micro text-[var(--text-tertiary)]">

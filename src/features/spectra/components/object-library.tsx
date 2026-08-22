@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { RichText } from "@/components/chat/rich-text";
+import { formatByteCount } from "../../../../shared/human-format";
 import { workTypeMeta } from "./artifact-card";
 import { CardTypeIcon, IconAction } from "./card-system";
 import { FloatingMenu } from "./floating-menu";
@@ -97,10 +98,12 @@ function objectSummary(entry: ObjectLibraryEntry) {
     return `Building ${objectTitle(entry)}`;
   if (entry.artifact?.aiState === "updating")
     return `Updating ${objectTitle(entry)}`;
-  return previewText(
-    entry.artifact?.summary ??
+  const summary = entry.artifact?.summary ??
     entry.thread?.summaryShort ??
-    "Continue this conversation.",
+    "Continue this conversation.";
+  const rawBytes = summary.match(/^(\d+) bytes$/i);
+  return previewText(
+    rawBytes ? formatByteCount(Number(rawBytes[1])) : summary,
     "Continue this conversation.",
   );
 }
@@ -640,7 +643,7 @@ export function ObjectLibrary({
         }
         data-interactive="true"
         draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
-        className="relative min-h-[118px] overflow-hidden p-3"
+        className="relative min-h-[118px] cursor-grab overflow-hidden p-3 active:cursor-grabbing"
         style={{ "--card-accent": meta.color } as CSSProperties}
         onDragStart={(event) => beginDrag(event, entry)}
         onDragEnd={() => {

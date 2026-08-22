@@ -153,6 +153,18 @@ pub struct ClaimedWrite {
     pub payload_url: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimedFsRequest {
+    pub request_id: String,
+    pub grant_id: String,
+    pub local_resource_id: String,
+    pub kind: String,
+    pub source_relative_path: String,
+    pub target_relative_path: Option<String>,
+    pub idempotency_key: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplicaMigrationPage {
@@ -189,10 +201,13 @@ pub async fn register_mount(
     credential: &str,
     root_label: &str,
     grant_id: &str,
+    root_key: &str,
+    scan_id: &str,
     file_count: usize,
     double_sync_risk: bool,
+    owner_lock_paths: &[String],
 ) -> anyhow::Result<String> {
-    mutation(deployment_url, "bridgeSync:registerMount", serde_json::json!({ "credential": credential, "rootLabel": root_label, "grantId": grant_id, "fileCount": file_count, "doubleSyncRisk": double_sync_risk })).await
+    mutation(deployment_url, "bridgeSync:registerMount", serde_json::json!({ "credential": credential, "rootLabel": root_label, "grantId": grant_id, "rootKey": root_key, "scanId": scan_id, "fileCount": file_count, "doubleSyncRisk": double_sync_risk, "ownerLockPaths": owner_lock_paths })).await
 }
 
 pub async fn discover_resource(
@@ -208,6 +223,16 @@ pub async fn discover_resource(
     object.insert("credential".into(), credential.into());
     object.insert("mountId".into(), mount_id.into());
     mutation(deployment_url, "bridgeSync:discoverResource", args).await
+}
+
+pub async fn reconcile_missing_resources(
+    deployment_url: &str,
+    credential: &str,
+    mount_id: &str,
+    scan_id: &str,
+) -> anyhow::Result<()> {
+    let _: serde_json::Value = mutation(deployment_url, "bridgeSync:reconcileMissingResources", serde_json::json!({ "credential": credential, "mountId": mount_id, "scanId": scan_id })).await?;
+    Ok(())
 }
 
 pub async fn upload_resource_payload(
@@ -328,6 +353,35 @@ pub async fn complete_write(
     Ok(())
 }
 
+pub async fn claim_fs_request(
+    deployment_url: &str,
+    credential: &str,
+) -> anyhow::Result<Option<ClaimedFsRequest>> {
+    #[derive(Deserialize)]
+    struct Response { request: Option<ClaimedFsRequest> }
+    let response: Response = mutation(deployment_url, "bridgeStructure:claim", serde_json::json!({ "credential": credential })).await?;
+    Ok(response.request)
+}
+
+pub async fn complete_fs_request(
+    deployment_url: &str,
+    credential: &str,
+    request_id: &str,
+    outcome: &str,
+    actual_relative_path: Option<&str>,
+    error: Option<(&str, &str)>,
+) -> anyhow::Result<()> {
+    let mut args = serde_json::json!({ "credential": credential, "requestId": request_id, "outcome": outcome });
+    let object = args.as_object_mut().unwrap();
+    if let Some(path) = actual_relative_path { object.insert("actualRelativePath".into(), path.into()); }
+    if let Some((code, message)) = error {
+        object.insert("errorCode".into(), code.into());
+        object.insert("errorMessage".into(), message.chars().take(500).collect::<String>().into());
+    }
+    let _: serde_json::Value = mutation(deployment_url, "bridgeStructure:complete", args).await?;
+    Ok(())
+}
+
 pub async fn detach_mount(
     deployment_url: &str,
     credential: &str,
@@ -341,16 +395,28 @@ pub async fn detach_mount(
     .await
 }
 
+pub async fn set_mount_availability(
+    deployment_url: &str,
+    credential: &str,
+    grant_id: &str,
+    available: bool,
+) -> anyhow::Result<()> {
+    let _: serde_json::Value = mutation(deployment_url, "bridgeSync:setMountAvailability", serde_json::json!({ "credential": credential, "grantId": grant_id, "available": available })).await?;
+    Ok(())
+}
+
 pub async fn exchange_pairing(
     deployment_url: &str,
     offer: &PairingOffer,
     device_name: &str,
+    installation_id: &str,
 ) -> anyhow::Result<PairingExchange> {
     mutation(
         deployment_url,
         "bridge:confirmPairing",
         serde_json::json!({
                 "challenge": offer.challenge, "shortCode": offer.short_code,
+                "installationId": installation_id,
                 "deviceName": device_name, "platform": std::env::consts::OS,
                 "appVersion": env!("CARGO_PKG_VERSION"), "protocolVersion": crate::PROTOCOL_VERSION
         }),
@@ -363,6 +429,7 @@ pub async fn resume_pairing(
     credential: &str,
     offer: &PairingOffer,
     device_name: &str,
+    installation_id: &str,
 ) -> anyhow::Result<PairingResume> {
     mutation(
         deployment_url,
@@ -371,6 +438,7 @@ pub async fn resume_pairing(
             "credential": credential,
             "challenge": offer.challenge,
             "shortCode": offer.short_code,
+            "installationId": installation_id,
             "deviceName": device_name,
             "platform": std::env::consts::OS,
             "appVersion": env!("CARGO_PKG_VERSION"),

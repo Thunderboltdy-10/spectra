@@ -25,6 +25,7 @@ import type * as authority from "../authority.js";
 import type * as authorityShared from "../authorityShared.js";
 import type * as bridge from "../bridge.js";
 import type * as bridgeIdentity from "../bridgeIdentity.js";
+import type * as bridgeStructure from "../bridgeStructure.js";
 import type * as bridgeSync from "../bridgeSync.js";
 import type * as calendar from "../calendar.js";
 import type * as calendarShared from "../calendarShared.js";
@@ -98,6 +99,7 @@ declare const fullApi: ApiFromModules<{
   authorityShared: typeof authorityShared;
   bridge: typeof bridge;
   bridgeIdentity: typeof bridgeIdentity;
+  bridgeStructure: typeof bridgeStructure;
   bridgeSync: typeof bridgeSync;
   calendar: typeof calendar;
   calendarShared: typeof calendarShared;

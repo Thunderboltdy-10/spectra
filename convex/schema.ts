@@ -1304,6 +1304,9 @@ export default defineSchema({
     pendingPayloadRef: v.optional(v.string()),
     pendingContentHash: v.optional(v.string()),
     pendingBaseRevision: v.optional(v.string()),
+    protectedBaseContent: v.optional(v.any()),
+    protectedBaseContentHash: v.optional(v.string()),
+    protectedBaseTextIndex: v.optional(v.string()),
     protectedOriginal: v.optional(v.boolean()),
     currentVersionId: v.optional(v.id("spectraArtifactVersions")),
     syncState: v.optional(
@@ -1442,6 +1445,7 @@ export default defineSchema({
 
   bridgeDevices: defineTable({
     accountId: v.id("accounts"),
+    installationId: v.optional(v.string()),
     name: v.string(),
     platform: v.string(),
     credentialHash: v.string(),
@@ -1451,6 +1455,7 @@ export default defineSchema({
     lastSeenAt: v.number(),
     state: v.union(v.literal("active"), v.literal("revoked"), v.literal("lost")),
   })
+    .index("by_account_installation", ["accountId", "installationId"])
     .index("by_account_state", ["accountId", "state"])
     .index("by_credential_hash", ["credentialHash"]),
 
@@ -1469,20 +1474,23 @@ export default defineSchema({
   bridgeMounts: defineTable({
     accountId: v.id("accounts"),
     deviceId: v.id("bridgeDevices"),
-    rootLabel: v.string(),
-    grantId: v.string(),
-    rootOrgNodeId: v.optional(v.id("orgNodes")),
+      rootLabel: v.string(),
+      grantId: v.string(),
+      rootKey: v.optional(v.string()),
+      rootOrgNodeId: v.optional(v.id("orgNodes")),
     policyId: v.optional(v.id("syncPolicies")),
     state: v.union(v.literal("active"), v.literal("detached"), v.literal("revoked")),
     fileCount: v.number(),
     lastScanAt: v.optional(v.number()),
+    lastScanId: v.optional(v.string()),
     doubleSyncRisk: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_account_state", ["accountId", "state"])
-    .index("by_device_state", ["deviceId", "state"])
-    .index("by_device_grant", ["deviceId", "grantId"]),
+      .index("by_device_state", ["deviceId", "state"])
+      .index("by_device_root_key", ["deviceId", "rootKey"])
+      .index("by_device_grant", ["deviceId", "grantId"]),
 
   syncPolicies: defineTable({
     accountId: v.id("accounts"),
@@ -1517,6 +1525,53 @@ export default defineSchema({
     .index("by_account_key", ["accountId", "idempotencyKey"])
     .index("by_scope_created", ["accountId", "scopeKind", "scopeId", "createdAt"]),
 
+  storageStrategyTransitions: defineTable({
+    accountId: v.id("accounts"),
+    workId: v.id("spectraArtifacts"),
+    idempotencyKey: v.string(),
+    fromPreset: v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked")),
+    toPreset: v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked")),
+    state: v.union(v.literal("pending"), v.literal("verified"), v.literal("failed")),
+    before: v.any(),
+    after: v.optional(v.any()),
+    errorCode: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_key", ["accountId", "idempotencyKey"])
+    .index("by_work_created", ["workId", "createdAt"]),
+
+  syncStructureDecisions: defineTable({
+    accountId: v.id("accounts"),
+    scopeKind: v.union(v.literal("account"), v.literal("mount"), v.literal("workspace"), v.literal("folder"), v.literal("item")),
+    scopeId: v.string(),
+    direction: v.union(v.literal("spectra-to-disk"), v.literal("disk-to-spectra")),
+    action: v.union(v.literal("propagate"), v.literal("ignore")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_scope_direction", ["accountId", "scopeKind", "scopeId", "direction"]),
+
+  syncDiscoveryRequests: defineTable({
+    accountId: v.id("accounts"),
+    deviceId: v.id("bridgeDevices"),
+    mountId: v.id("bridgeMounts"),
+    localResourceId: v.string(),
+    relativePath: v.string(),
+    size: v.number(),
+    contentHash: v.optional(v.string()),
+    nativeFormat: v.string(),
+    state: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("ignored"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_mount_state", ["mountId", "state"])
+    .index("by_device_resource", ["deviceId", "localResourceId"]),
+
   workReplicas: defineTable({
     accountId: v.id("accounts"),
     workId: v.id("spectraArtifacts"),
@@ -1530,6 +1585,7 @@ export default defineSchema({
     pendingPayloadRef: v.optional(v.string()),
     pendingContentHash: v.optional(v.string()),
     pendingBaseRevision: v.optional(v.string()),
+    lastSeenScanId: v.optional(v.string()),
     protectedOriginal: v.optional(v.boolean()),
     preservedCarryVersion: v.optional(v.number()),
     fidelityMap: v.optional(v.any()),
@@ -1549,6 +1605,7 @@ export default defineSchema({
   })
     .index("by_work", ["workId"])
     .index("by_account_state", ["accountId", "state"])
+    .index("by_mount", ["mountId"])
     .index("by_device_resource", ["deviceId", "localResourceId"])
     .index("by_device_mount_path", ["deviceId", "mountId", "relativePath"])
     .index("by_work_kind", ["workId", "kind"]),
@@ -1618,6 +1675,41 @@ export default defineSchema({
     .index("by_device_state", ["deviceId", "state"])
     .index("by_work_created", ["workId", "createdAt"])
     .index("by_account_key", ["accountId", "idempotencyKey"]),
+
+  bridgeFsRequests: defineTable({
+    accountId: v.id("accounts"),
+    workId: v.id("spectraArtifacts"),
+    replicaId: v.id("workReplicas"),
+    deviceId: v.id("bridgeDevices"),
+    mountId: v.id("bridgeMounts"),
+    nodeId: v.optional(v.id("orgNodes")),
+    localResourceId: v.string(),
+    direction: v.union(v.literal("spectra-to-disk"), v.literal("disk-to-spectra")),
+    kind: v.union(v.literal("move"), v.literal("rename"), v.literal("delete")),
+    sourceRelativePath: v.string(),
+    targetRelativePath: v.optional(v.string()),
+    idempotencyKey: v.string(),
+    state: v.union(
+      v.literal("approval-required"),
+      v.literal("pending"),
+      v.literal("claimed"),
+      v.literal("verified"),
+      v.literal("failed"),
+      v.literal("conflicted"),
+      v.literal("ignored"),
+    ),
+    explanation: v.string(),
+    claimedAt: v.optional(v.number()),
+    actualRelativePath: v.optional(v.string()),
+    errorCode: v.optional(v.string()),
+    errorMessage: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_device_state", ["deviceId", "state"])
+    .index("by_account_state", ["accountId", "state"])
+    .index("by_account_key", ["accountId", "idempotencyKey"])
+    .index("by_work_created", ["workId", "createdAt"]),
 
   payloadObjects: defineTable({
     accountId: v.id("accounts"),

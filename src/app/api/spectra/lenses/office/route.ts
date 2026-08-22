@@ -44,6 +44,12 @@ type WorkTruth = {
     revision: string;
     state: string;
   }>;
+  recentOperations?: Array<{
+    direction?: string;
+    state?: string;
+    actorKind?: string;
+    revisionAfter?: string;
+  }>;
 };
 type ArtifactTruth = { content: unknown };
 type OfficeProjection = XlsxProjection | PptxProjection;
@@ -293,14 +299,73 @@ export async function POST(request: Request) {
   try {
     const input = schema.parse(await request.json());
     const workId = id(input.artifactId);
-    const cloud = await fetchVerifiedNativePayload(workId, "cloud");
+    let cloud = await fetchVerifiedNativePayload(workId, "cloud");
     const isSheet = spreadsheetFormats.has(cloud.truth.nativeFormat);
-    const baseOpened = isSheet
+    let baseOpened = isSheet
       ? await xlsxLens.open(cloud.payload)
       : await pptxLens.open(cloud.payload);
-    const baseProjection = baseOpened.projection as OfficeProjection;
 
     if (input.action === "open") {
+      try {
+        const local = await fetchVerifiedNativePayload(workId, "local-latest");
+        const workTruth = await convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
+          "replicas:forWork",
+          { workId },
+        );
+        const externalRevision = workTruth.recentOperations?.find(
+          (operation) =>
+            operation.direction === "external" &&
+            operation.actorKind === "external-edit" &&
+            operation.revisionAfter === local.truth.hash,
+        );
+        const externalNeedsActivation = Boolean(
+          local.truth.hash !== cloud.truth.hash || externalRevision,
+        );
+        if (externalNeedsActivation) {
+          const [artifact, externalOpened] = await Promise.all([
+            convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>(
+              "spectraArtifacts:get",
+              { artifactId: workId },
+            ),
+            isSheet ? xlsxLens.open(local.payload) : pptxLens.open(local.payload),
+          ]);
+          const current = projectionFor(artifact.content, baseOpened.projection as OfficeProjection, isSheet);
+          const externalProjection = externalOpened.projection as OfficeProjection;
+          const externalChanged = new Set(
+            local.truth.hash === cloud.truth.hash && externalRevision
+              ? changedRegions(baseOpened.projection as OfficeProjection, current, isSheet)
+              : changedRegions(baseOpened.projection as OfficeProjection, externalProjection, isSheet),
+          );
+          const spectraChanged = new Set(changedRegions(baseOpened.projection as OfficeProjection, current, isSheet));
+          const conflictRegionIds =
+            local.truth.hash === cloud.truth.hash && externalRevision
+              ? []
+              : [...externalChanged].filter((regionId) => spectraChanged.has(regionId));
+          if (conflictRegionIds.length) {
+            return NextResponse.json(
+              { state: "conflicted", conflictRegionIds, message: "The Office file and Spectra changed the same regions. Review the conflict before opening." },
+              { status: 409 },
+            );
+          }
+          const merged = mergeExternalProjection(current, externalProjection, externalChanged, isSheet);
+          await convexMutation("replicas:recordExternalReconciliation", {
+            workId,
+            localReplicaId: local.truth.replicaId as Id<"workReplicas">,
+            localPayloadRef: local.truth.payloadRef,
+            localRevision: local.truth.revision,
+            content: contentFor(merged, isSheet),
+            fidelityMap: externalOpened.fidelityMap,
+            regionIds: [...externalChanged],
+            partNames: [],
+            conflictRegionIds: [],
+          });
+          cloud = local;
+          baseOpened = { ...externalOpened, projection: merged } as typeof baseOpened;
+        }
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== "NATIVE_PAYLOAD_UNAVAILABLE") throw error;
+      }
+      const baseProjection = baseOpened.projection as OfficeProjection;
       const content = contentFor(baseProjection, isSheet);
       await convexMutation("replicas:activateLens", {
         workId,
@@ -329,6 +394,8 @@ export async function POST(request: Request) {
         capabilities: baseOpened.capabilities,
       });
     }
+
+    const baseProjection = baseOpened.projection as OfficeProjection;
 
     if (input.action === "materialize") {
       const workTruth = await convexQuery<
@@ -372,6 +439,8 @@ export async function POST(request: Request) {
           .filter((part) => part.verdict !== "identical")
           .map((part) => `/${part.name}`),
         localReplicaId: local._id as Id<"workReplicas">,
+        baseContent: contentFor(baseProjection, isSheet),
+        baseContentHash: baseProjection.nativeBinding.semanticDigest,
       });
       return NextResponse.json({
         state: (queued as { state: string }).state,
@@ -467,6 +536,7 @@ export async function POST(request: Request) {
       "replicas:recordExternalReconciliation",
       {
         workId,
+        localReplicaId: local.truth.replicaId,
         localPayloadRef: local.truth.payloadRef,
         localRevision: local.truth.revision,
         content: mergedContent,

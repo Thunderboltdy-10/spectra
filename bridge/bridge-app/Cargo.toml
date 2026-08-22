@@ -9,6 +9,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 hex.workspace = true
 reqwest.workspace = true
+uuid.workspace = true
 sha2.workspace = true
 spectra-bridge-core = { path = "../bridge-core" }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }

@@ -19,6 +19,7 @@ pub struct LocalMountStatus {
     pub detail: String,
     pub synced: usize,
     pub total: usize,
+    pub double_sync_risk: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

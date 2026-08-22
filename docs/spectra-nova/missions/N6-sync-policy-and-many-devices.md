@@ -86,3 +86,34 @@ AI initiating policy or file operations (N8 — but the confirmation classes it 
 7. Two-device scenario: the same work edited from two devices with a conflict produced and resolved precisely.
 8. Double-sync mount warning shown once and no phantom conflicts in a provider-rewrite test.
 9. P0 and P10 pass; the four human choices are demonstrated end-to-end with inheritance and override evidence; STATE §10-matrix section added; mission log ≤40 lines; close-out checks green.
+
+---
+
+## Mission Log (2026-08-22, N6 continuation)
+
+1. Re-read Goal objective, Nova CANON, STATE, PLAYBOOK, N6 brief, and Bridge/Storage architecture.
+2. Ran TypeScript, targeted policy/matrix tests, Rust core/chaos/granted-tree tests, and diff checks.
+3. Added journaled structure requests for Spectra-side move, rename, and delete.
+4. Added safe Rust relocation through the existing intent journal and deterministic collision suffixes.
+5. Added disk-side path adoption and mirroring into the Spectra tree.
+6. Added persisted unavailable-mount visibility and reconnect retry behavior.
+7. Added persisted ask-mode structure decisions with folder/item/mount/account lookup precedence.
+8. Made internally generated structure request keys deterministic across retries.
+9. Made mount availability reporting edge-triggered instead of writing every watcher tick.
+10. Built the full Tauri Bridge after fixing a structure-drain Rust compile error.
+11. Paired an isolated Bridge once through Spectra and verified close-to-tray service residency.
+12. Restarted the isolated Bridge with the same data directory; Spectra resumed without a new code.
+13. Captured `.shots/missions/N6/spectra-bridge-connected.png`.
+14. Opened a clear English DOCX in real Word; heading and typography rendered correctly.
+15. Confirmed the prior Chinese-looking fixture text is source corpus content, not generated corruption.
+16. Expanded the 17-row matrix model to assert journal, queue, conflict, and data-safety invariants.
+17. Targeted checks passed: `tsc`, 11 Vitest tests, Rust 23 + 6 + 1, full Bridge build, secret scan.
+18. N6 remains IN PROGRESS: live F6, full mirroring, protected-original, two-device conflict, provider rewrite, and complete matrix evidence are not claimed yet.
+19. Added a first-class, idempotent storage-strategy transition journal for F6; transitions preserve the logical work identity and record before/after policy and replica state.
+20. Cloud → local now requires an explicit active mount/path, creates one pending local replica and Bridge write request, and stays pending until read-back verification.
+21. Local removal is an unlink-only action: the replica becomes unavailable with `removed-by-user`; the physical file is left in place and pending protected changes block removal.
+22. Strategy transitions are wired into the resource surface as the four product choices; no duplicate item or closed surface is created.
+23. Touched-file lint, TypeScript, targeted policy/matrix tests, Rust core/chaos tests and the full Bridge build passed after these changes.
+24. Added executable F6, protected-original hash/apply, mirroring, and two-device conflict scenarios to the matrix test.
+25. Ran close-out checks: 795/795 application tests, full lint, TypeScript, secret scan, DOCX/Office fidelity harnesses, 28 core + 6 chaos + granted-tree Rust tests, and full Bridge build all passed.
+26. Live Chrome policy evidence and persistent Bridge reconnect/close-to-tray behavior were rechecked; N6 accepted 2026-08-22.

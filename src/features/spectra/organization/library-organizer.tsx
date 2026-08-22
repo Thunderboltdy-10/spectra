@@ -588,6 +588,16 @@ export function LibraryOrganizer({
         beginDrag(event, ids, label);
       },
       onClick: (event, node) => {
+        if (
+          !selectionMode &&
+          !node.isContainer &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey
+        ) {
+          openNode(node);
+          return;
+        }
         setSelection((current) => selectRow(current, rows, node.nodeId, clickIntent(event)));
         if (renamingId && renamingId !== node.nodeId) setRenamingId(null);
       },
@@ -629,7 +639,7 @@ export function LibraryOrganizer({
       },
       onCancelRename: () => setRenamingId(null),
     }),
-    [actions, beginDrag, openNode, renamingId, rows, run, selection.ids],
+    [actions, beginDrag, openNode, renamingId, rows, run, selection.ids, selectionMode],
   );
 
   const range = windowRange(scrollTop, viewportHeight, ROW_HEIGHT, rows.length);

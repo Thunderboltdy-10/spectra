@@ -27,20 +27,26 @@ export const requestPairing = mutation({
 });
 
 export const confirmPairing = mutation({
-  args: { challenge: v.string(), shortCode: v.string(), deviceName: v.string(), platform: v.string(), appVersion: v.string(), protocolVersion: v.string() },
+  args: { challenge: v.string(), shortCode: v.string(), installationId: v.string(), deviceName: v.string(), platform: v.string(), appVersion: v.string(), protocolVersion: v.string() },
   handler: async (ctx, args) => {
     const challengeHash = await digest(z.string().min(32).max(256).parse(args.challenge));
     const row = await ctx.db.query("bridgePairingChallenges").withIndex("by_challenge_hash", (q) => q.eq("challengeHash", challengeHash)).unique();
     if (!row || row.expiresAt <= Date.now() || row.consumedAt || row.shortCode !== args.shortCode) throw new Error("PAIRING_CHALLENGE_INVALID");
     const credential = randomSecret(); const now = Date.now();
-    const deviceId = await ctx.db.insert("bridgeDevices", { accountId: row.accountId, name: z.string().trim().min(1).max(80).parse(args.deviceName), platform: z.string().trim().min(1).max(40).parse(args.platform), credentialHash: await digest(credential), protocolVersion: z.string().regex(/^\d+\.\d+$/).parse(args.protocolVersion), appVersion: z.string().trim().min(1).max(40).parse(args.appVersion), pairedAt: now, lastSeenAt: now, state: "active" });
+    const installationId = z.string().uuid().parse(args.installationId);
+    const values = { installationId, name: z.string().trim().min(1).max(80).parse(args.deviceName), platform: z.string().trim().min(1).max(40).parse(args.platform), credentialHash: await digest(credential), protocolVersion: z.string().regex(/^\d+\.\d+$/).parse(args.protocolVersion), appVersion: z.string().trim().min(1).max(40).parse(args.appVersion), pairedAt: now, lastSeenAt: now, state: "active" as const };
+    const existingDevice = await ctx.db.query("bridgeDevices")
+      .withIndex("by_account_installation", (q) => q.eq("accountId", row.accountId).eq("installationId", installationId))
+      .unique();
+    const deviceId = existingDevice?._id ?? await ctx.db.insert("bridgeDevices", { accountId: row.accountId, ...values });
+    if (existingDevice) await ctx.db.patch(existingDevice._id, values);
     await ctx.db.patch(row._id, { confirmedAt: now, consumedAt: now });
     return { deviceId, deviceCredential: credential, browserOrigin: row.browserOrigin };
   },
 });
 
 export const resumePairing = mutation({
-  args: { credential: v.string(), challenge: v.string(), shortCode: v.string(), deviceName: v.string(), platform: v.string(), appVersion: v.string(), protocolVersion: v.string() },
+  args: { credential: v.string(), challenge: v.string(), shortCode: v.string(), installationId: v.string(), deviceName: v.string(), platform: v.string(), appVersion: v.string(), protocolVersion: v.string() },
   handler: async (ctx, args) => {
     const challengeHash = await digest(z.string().min(32).max(256).parse(args.challenge));
     const credentialHash = await digest(z.string().min(32).max(256).parse(args.credential));
@@ -49,10 +55,12 @@ export const resumePairing = mutation({
       ctx.db.query("bridgeDevices").withIndex("by_credential_hash", (q) => q.eq("credentialHash", credentialHash)).unique(),
     ]);
     if (!row || row.expiresAt <= Date.now() || row.consumedAt || row.shortCode !== args.shortCode) throw new Error("PAIRING_CHALLENGE_INVALID");
-    if (!device || device.state !== "active" || device.accountId !== row.accountId) throw new Error("BRIDGE_CREDENTIAL_INVALID");
+    const installationId = z.string().uuid().parse(args.installationId);
+    if (!device || device.state !== "active" || device.accountId !== row.accountId || (device.installationId && device.installationId !== installationId)) throw new Error("BRIDGE_CREDENTIAL_INVALID");
     const now = Date.now();
     await ctx.db.patch(device._id, {
       name: z.string().trim().min(1).max(80).parse(args.deviceName),
+      installationId,
       platform: z.string().trim().min(1).max(40).parse(args.platform),
       protocolVersion: z.string().regex(/^\d+\.\d+$/).parse(args.protocolVersion),
       appVersion: z.string().trim().min(1).max(40).parse(args.appVersion),
@@ -68,7 +76,7 @@ export const devices = query({ args: {}, handler: async (ctx) => { const actor =
 export const overview = query({ args: {}, handler: async (ctx) => {
   const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
   const devices = await ctx.db.query("bridgeDevices").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).take(50);
-  const mounts = await ctx.db.query("bridgeMounts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).take(200);
+  const mounts = await ctx.db.query("bridgeMounts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId)).filter((q) => q.neq(q.field("state"), "revoked")).take(200);
   return { devices: devices.map(({ credentialHash: _credentialHash, ...device }) => device), mounts };
 } });
 
@@ -90,15 +98,17 @@ export const activeMounts = query({
 });
 
 export const registerMount = mutation({
-  args: { deviceId: v.id("bridgeDevices"), rootLabel: v.string(), grantId: v.string(), fileCount: v.number(), doubleSyncRisk: v.boolean() },
+  args: { deviceId: v.id("bridgeDevices"), rootLabel: v.string(), grantId: v.string(), rootKey: v.string(), fileCount: v.number(), doubleSyncRisk: v.boolean() },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED"); const device = await ctx.db.get(args.deviceId);
     if (!device || device.accountId !== actor.accountId || device.state !== "active") throw new Error("BRIDGE_DEVICE_INVALID");
-    const values = z.object({ rootLabel: z.string().trim().min(1).max(120), grantId: z.string().regex(/^grant_[a-f0-9]+$/), fileCount: z.number().int().min(0).max(10_000_000) }).parse(args);
-    const existing = await ctx.db.query("bridgeMounts").withIndex("by_device_grant", (q) => q.eq("deviceId", args.deviceId).eq("grantId", values.grantId)).unique(); const now = Date.now();
-    if (existing) { await ctx.db.patch(existing._id, { rootLabel: values.rootLabel, fileCount: values.fileCount, doubleSyncRisk: args.doubleSyncRisk, state: "active", lastScanAt: now, updatedAt: now }); return existing._id; }
+    const values = z.object({ rootLabel: z.string().trim().min(1).max(120), grantId: z.string().regex(/^grant_[a-f0-9]+$/), rootKey: z.string().regex(/^[a-f0-9]{64}$/), fileCount: z.number().int().min(0).max(10_000_000) }).parse(args);
+    const byRootKey = await ctx.db.query("bridgeMounts").withIndex("by_device_root_key", (q) => q.eq("deviceId", args.deviceId).eq("rootKey", values.rootKey)).unique();
+    const legacy = byRootKey ? [] : (await ctx.db.query("bridgeMounts").withIndex("by_device_state", (q) => q.eq("deviceId", args.deviceId).eq("state", "active")).take(500)).filter((mount) => mount.rootLabel === values.rootLabel && !mount.rootKey);
+    const existing = byRootKey ?? (legacy.length === 1 ? legacy[0] : null) ?? await ctx.db.query("bridgeMounts").withIndex("by_device_grant", (q) => q.eq("deviceId", args.deviceId).eq("grantId", values.grantId)).unique(); const now = Date.now();
+    if (existing) { await ctx.db.patch(existing._id, { rootLabel: values.rootLabel, grantId: values.grantId, rootKey: values.rootKey, fileCount: values.fileCount, doubleSyncRisk: args.doubleSyncRisk, state: "active", lastScanAt: now, updatedAt: now }); return existing._id; }
     const rootNode = await createFolderNode(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, name: values.rootLabel });
-    return ctx.db.insert("bridgeMounts", { accountId: actor.accountId, deviceId: args.deviceId, rootLabel: values.rootLabel, grantId: values.grantId, rootOrgNodeId: rootNode._id, state: "active", fileCount: values.fileCount, doubleSyncRisk: args.doubleSyncRisk, lastScanAt: now, createdAt: now, updatedAt: now });
+    return ctx.db.insert("bridgeMounts", { accountId: actor.accountId, deviceId: args.deviceId, rootLabel: values.rootLabel, grantId: values.grantId, rootKey: values.rootKey, rootOrgNodeId: rootNode._id, state: "active", fileCount: values.fileCount, doubleSyncRisk: args.doubleSyncRisk, lastScanAt: now, createdAt: now, updatedAt: now });
   },
 });
 

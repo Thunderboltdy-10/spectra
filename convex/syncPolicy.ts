@@ -4,7 +4,6 @@ import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import {
-  POLICY_PRESETS,
   resolveEffectivePolicy,
   type EffectiveSyncPolicy,
   type ScopedSyncPolicy,

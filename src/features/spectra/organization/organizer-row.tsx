@@ -64,7 +64,7 @@ export const OrganizerRow = memo(function OrganizerRow({
       data-node-row={node.nodeId}
       style={{ top, height: ROW_HEIGHT }}
       className={cn(
-        "group absolute inset-x-0 flex items-center gap-2 rounded-[6px] pl-2 pr-1.5 text-[13px] transition-colors",
+        "group absolute inset-x-0 flex cursor-grab items-center gap-2 rounded-[6px] pl-2 pr-1.5 text-[13px] transition-colors active:cursor-grabbing",
         selected
           ? "bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-elevated))] text-[var(--text-primary)]"
           : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",

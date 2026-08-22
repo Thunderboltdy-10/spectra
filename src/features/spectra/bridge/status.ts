@@ -1,3 +1,5 @@
+import { formatElapsedSince } from "../../../../shared/human-format";
+
 export type ReplicaState = "current" | "ahead" | "behind" | "diverged" | "pending" | "error" | "unavailable";
 export type ReplicaTruth = {
   kind: "cloud" | "local";
@@ -42,7 +44,6 @@ export function replicaDisclosure(replicas: readonly ReplicaTruth[], now = Date.
     const state = replica.state[0]!.toUpperCase() + replica.state.slice(1);
     if (replica.lastVerifiedAt === undefined)
       return `${location} · ${state} · Not yet verified`;
-    const ageSeconds = Math.max(0, Math.floor((now - replica.lastVerifiedAt) / 1_000));
-    return `${location} · ${state} · Last verified ${ageSeconds}s ago`;
+    return `${location} · ${state} · Last verified ${formatElapsedSince(replica.lastVerifiedAt, now)}`;
   });
 }

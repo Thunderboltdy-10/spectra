@@ -41,6 +41,8 @@ export type Command<P = unknown> = {
   risk: "safe" | "confirm" | "always-confirm" | "destructive";
   undo: "yjs" | "operation-inverse" | "none(explain)";
   choreography?: { target: string; region?: string };
+  aiAuthority?: "allowed" | "prohibited";
+  prohibitionReason?: string;
 };
 
 export type CommandBinding = {

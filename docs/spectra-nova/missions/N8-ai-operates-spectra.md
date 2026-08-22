@@ -91,3 +91,10 @@ Embeds and proactive artifact creation (N9) · provider adapters · motion polis
 8. AI toolbar customization demonstrated end-to-end: request → confirm → layout changes live in an open split editor → persists across reload → visible on a second profile.
 9. Placement: a chat-created artifact with no workspace context lands in General; one with clear context lands in the right workspace; both attributed and reversible.
 10. P4, P5, P11 pass; STATE gains an AI-plane section listing capability coverage and prohibitions; mission log ≤40 lines; close-out checks green.
+
+## Mission log (implementation pass, 2026-08-22)
+
+- Authority policy is now one pure D37 decision table in `ai/authority-policy.ts`: reads/navigation/content proceed, settings always-confirm, local-file effects confirm with concrete file count, sharing/mapping confirm, sync/memory notify, and security/Bridge/credential/account actions are prohibited.
+- `SpectraToolExecutor` accepts the authority decision before tool execution and returns a durable `authority_prohibited` result; prohibited actions cannot be bypassed by model instructions. Focused authority/executor tests: 35/35.
+- Added explicit app-command records for navigation, Library organization, settings, Calendar, Bridge pairing and credentials, including choreography targets and prohibition reasons. Existing `spectraBus` remains transport; semantic handler migration is next.
+- Added pure app-surface arbitration and a choreography-disabled correctness test. Remaining W3-W8 work is not yet accepted.

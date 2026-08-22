@@ -1,4 +1,5 @@
 import { z, type ZodType } from "zod";
+import type { AiTargetClass } from "../../ai/authority-policy";
 
 export type ToolCategory = "read" | "write" | "external" | "server" | "interaction";
 export type ToolRisk = "low" | "medium" | "high";
@@ -34,6 +35,10 @@ export type ToolExecutionContext = {
     input: unknown,
     context: ToolExecutionContext,
   ) => Promise<unknown>;
+  authorize?: (input: { toolId: string; input: unknown }) =>
+    | { decision: "proceed" | "notify" }
+    | { decision: "confirm" | "always-confirm" | "prohibited"; reason?: string };
+  authorityMode?: "standard" | "permissive";
 };
 
 export type RegisteredToolDefinition<I, O> = {
@@ -48,6 +53,9 @@ export type RegisteredToolDefinition<I, O> = {
   category: ToolCategory;
   risk: ToolRisk;
   approval: ToolApproval;
+  authorityTarget?: AiTargetClass;
+  aiAvailability?: "allowed" | "prohibited";
+  prohibitionReason?: string;
   parallelSafe: boolean;
   idempotent: boolean;
   concurrencyDomain?: string;

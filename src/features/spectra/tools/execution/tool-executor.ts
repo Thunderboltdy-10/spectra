@@ -1,6 +1,7 @@
 import type { ToolExecutionContext, ToolProgress } from "../registry";
 import { spectraToolRegistry } from "../registry";
 import { boundedToolData, boundedToolSummary, type ToolResult } from "./tool-result";
+import { decideAiAuthority } from "../../ai/authority-policy";
 
 type ToolCall = { id: string; name: string; input: unknown };
 
@@ -41,8 +42,25 @@ export class SpectraToolExecutor {
     const input = definition.inputSchema.safeParse(call.input);
     if (!input.success)
       return { ok: false, code: "invalid_arguments", message: input.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join("; "), retryable: false };
-    if (definition.approval !== "never") {
+    if (definition.aiAvailability === "prohibited")
+      return { ok: false, code: "authority_prohibited", message: definition.prohibitionReason ?? `${definition.title} is not permitted for AI.`, retryable: false };
+    const authority = context.authorize?.({ toolId: definition.id, input: input.data }) ??
+      (definition.authorityTarget
+        ? decideAiAuthority({ target: definition.authorityTarget, mode: context.authorityMode })
+        : undefined);
+    if (authority?.decision === "prohibited")
+      return { ok: false, code: "authority_prohibited", message: authority.reason ?? `${definition.title} is not permitted for AI.`, retryable: false };
+    let authorityApproved = false;
+    if (authority && (authority.decision === "confirm" || authority.decision === "always-confirm")) {
       const approved = await context.requireApproval?.({ toolId: definition.id, risk: definition.risk, input: input.data });
+      if (approved !== true)
+        return { ok: false, code: "approval_required", message: authority.reason ?? `${definition.title} requires approval.`, retryable: true };
+      authorityApproved = true;
+    }
+    if (definition.approval !== "never") {
+      const approved = authorityApproved
+        ? true
+        : await context.requireApproval?.({ toolId: definition.id, risk: definition.risk, input: input.data });
       if (definition.approval === "always" && approved !== true)
         return { ok: false, code: "approval_required", message: `${definition.title} requires approval.`, retryable: true };
       if (approved === false)

@@ -377,6 +377,36 @@ describe("AI Action Protocol V2", () => {
     ).toMatchObject({ ok: false, code: "tool_cancelled" });
   });
 
+  it("refuses prohibited authority before invoking a tool", async () => {
+    if (!spectraToolRegistry.has("test.prohibited"))
+      spectraToolRegistry.register({
+        id: "test.prohibited",
+        version: 1,
+        title: "Prohibited",
+        description: "Prohibited",
+        inputSchema: z.object({}),
+        outputSchema: z.string(),
+        capability: "test",
+        category: "write",
+        risk: "high",
+        approval: "never",
+        aiAvailability: "prohibited",
+        prohibitionReason: "This action is never available to AI.",
+        parallelSafe: false,
+        idempotent: true,
+        retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
+        cancellable: true,
+        resumable: true,
+        summarizeOutput: (output) => ({ text: output }),
+        execute: async () => "should not run",
+      });
+    expect(await new SpectraToolExecutor().execute({ id: "blocked", name: "test.prohibited", input: {} })).toMatchObject({
+      ok: false,
+      code: "authority_prohibited",
+      message: "This action is never available to AI.",
+    });
+  });
+
   it("uses OpenRouter's Parallel server-search tool with one full-result call", async () => {
     const previousKey = process.env.OPENROUTER_API_KEY;
     process.env.OPENROUTER_API_KEY = "test-key";

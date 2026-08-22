@@ -113,6 +113,26 @@ export function registerApplicationTools() {
   define({ ...mutationDefaults, id: "move_calendar_block", title: "Move Calendar block", description: "Move one scheduled work block through the same revision-checked gesture contract as a human drag.", inputSchema: z.object({ itemId: z.string(), startAt: z.number(), endAt: z.number(), expectedRevision: z.number() }), concurrencyDomain: "calendar:gesture" });
   define({ ...mutationDefaults, id: "resize_calendar_block", title: "Resize Calendar block", description: "Resize one scheduled work block without mutating its task or official deadline.", inputSchema: z.object({ itemId: z.string(), endAt: z.number(), expectedRevision: z.number() }), concurrencyDomain: "calendar:gesture" });
 
+  const appActionDefaults = {
+    ...mutationDefaults,
+    capability: "operate_application",
+    concurrencyDomain: "application_command",
+  };
+  define({ ...appActionDefaults, id: "navigate_spectra", title: "Navigate Spectra", description: "Open a registered Spectra route or work target through the same navigation command used by the human interface.", inputSchema: z.object({ destination: z.enum(["library", "calendar", "settings", "workspace", "artifact"]), targetId: z.string().optional() }), risk: "low", approval: "never", authorityTarget: "navigation" });
+  define({ ...appActionDefaults, id: "organize_library", title: "Organize Library", description: "Create, rename, move, or link Library nodes through the canonical organization operation path.", inputSchema: z.object({ action: z.enum(["create_folder", "rename", "move", "link"]), targetIds: z.array(z.string()).min(1).max(100), destinationId: z.string().optional(), name: z.string().max(200).optional() }), authorityTarget: "tree" });
+  define({ ...appActionDefaults, id: "delete_library_items", title: "Delete Library items", description: "Delete Library items only after explicit approval and recoverability checks.", inputSchema: z.object({ targetIds: z.array(z.string()).min(1).max(100) }), risk: "high", approval: "always", authorityTarget: "tree_delete" });
+  define({ ...appActionDefaults, id: "change_spectra_settings", title: "Change Spectra settings", description: "Change account-synced Spectra preferences, including toolbar layout, through the human settings path.", inputSchema: z.object({ patch: jsonObject }), risk: "medium", approval: "always", authorityTarget: "settings" });
+  define({ ...appActionDefaults, id: "change_sync_policy", title: "Change sync policy", description: "Change storage or sync behavior through the N6 policy path, naming concrete local-file effects before approval.", inputSchema: z.object({ targetIds: z.array(z.string()).min(1).max(100), patch: jsonObject, localFileCount: z.number().int().min(0).max(100000) }), risk: "high", approval: "always", authorityTarget: "local_file" });
+  define({ ...appActionDefaults, id: "write_memory", title: "Write memory", description: "Create or revise permission-bound memory with visible attribution and revision history.", inputSchema: z.object({ action: z.enum(["create", "revise"]), content: z.string().min(1).max(10000), memoryId: z.string().optional() }), authorityTarget: "memory" });
+  define({ ...appActionDefaults, id: "change_sharing", title: "Change sharing", description: "Change sharing or permission state only after explicit approval.", inputSchema: z.object({ resourceId: z.string(), action: z.enum(["invite", "change_level", "revoke"]), subjectId: z.string().optional(), level: z.string().optional() }), risk: "high", approval: "always", authorityTarget: "sharing" });
+  for (const [id, title, reason] of [
+    ["pair_bridge", "Pair Spectra Bridge", "Bridge pairing and revocation are never AI-performable."],
+    ["change_credentials", "Change credentials", "Credential changes are never AI-performable."],
+    ["change_ai_authority_mode", "Change AI authority mode", "AI cannot change its own authority mode."],
+    ["delete_account", "Delete account", "Account deletion is never AI-performable."],
+  ] as const)
+    define({ ...appActionDefaults, id, title, description: reason, inputSchema: jsonObject, risk: "high", approval: "always", aiAvailability: "prohibited", prohibitionReason: reason });
+
   const inputDefaults = {
     capability: "request_user_input",
     category: "interaction" as const,

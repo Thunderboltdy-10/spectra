@@ -173,7 +173,12 @@ import {
   type StudioTab,
 } from "./artifact-studio-shell";
 import { commandContext, commandForBinding, executeCommand } from "../commands";
-import { tagsFromDraft } from "./artifact-studio-value-utils";
+import type { ApplicationCommandDispatcher } from "../commands/application-dispatcher";
+import {
+  incomingReconciliationKey,
+  reconciliationSnapshotKey,
+  tagsFromDraft,
+} from "./artifact-studio-value-utils";
 export { tagsFromDraft } from "./artifact-studio-value-utils";
 import {
   CollaborationCursorLayer,
@@ -2751,7 +2756,7 @@ function snapshotKey(snapshot: {
   tagDraft: string;
   content: unknown;
 }) {
-  return JSON.stringify(snapshot);
+  return reconciliationSnapshotKey(snapshot);
 }
 
 type ArtifactEditorSnapshot = ReturnType<typeof artifactEditorSnapshot>;
@@ -2896,6 +2901,7 @@ export function ArtifactStudio({
   onContinueThread,
   continuedThreadId,
   compact = false,
+  executeApplicationCommand,
 }: {
   mode: "split" | "tab";
   artifact: SpectraArtifact;
@@ -2916,6 +2922,7 @@ export function ArtifactStudio({
   onContinueThread?: (threadId: string, title: string) => void;
   continuedThreadId?: string | null;
   compact?: boolean;
+  executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
   const router = useRouter();
   const width = panelWidth ?? 720;
@@ -3110,6 +3117,7 @@ export function ArtifactStudio({
           onShare={onShare ? () => onShare(artifact) : undefined}
           onDirtyChange={handleDirtyChange}
           compact={compact}
+          executeApplicationCommand={executeApplicationCommand}
         />
       </div>
     );
@@ -3166,6 +3174,7 @@ function ArtifactStudioEditor({
   onShare,
   onDirtyChange,
   compact,
+  executeApplicationCommand,
 }: {
   mode: "split" | "tab";
   artifact: SpectraArtifact;
@@ -3179,6 +3188,7 @@ function ArtifactStudioEditor({
   onShare?: () => void;
   onDirtyChange: (dirty: boolean) => void;
   compact: boolean;
+  executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
   const replicaTruth = useQuery(api.replicas.forWork, {
     workId: artifact._id as never,
@@ -3420,6 +3430,7 @@ function ArtifactStudioEditor({
   // stale until it is closed and reopened.
   const reconcilingRemoteRef = useRef(false);
   const activeArtifactIdRef = useRef(artifact._id);
+  const lastReconciledIncomingKeyRef = useRef<string | null>(null);
   const currentSnapshotRef = useRef(artifactEditorSnapshot(artifact));
   const aiMergeRef = useRef<{
     paths: string[];
@@ -4923,19 +4934,35 @@ function ArtifactStudioEditor({
     const nextDirty = userHasEditedRef.current && snapshotsDiffer;
     if (reconcilingRemoteRef.current) {
       if (!nextDirty) reconcilingRemoteRef.current = false;
-      dirtyRef.current = false;
-      setDirty(false);
+      if (dirtyRef.current) {
+        dirtyRef.current = false;
+        setDirty(false);
+      }
       return;
     }
     if (!snapshotsDiffer) userHasEditedRef.current = false;
-    dirtyRef.current = nextDirty;
-    setDirty(nextDirty);
+    if (dirtyRef.current !== nextDirty) {
+      dirtyRef.current = nextDirty;
+      setDirty(nextDirty);
+    }
   }, [baseline, currentSnapshot]);
 
   useEffect(() => {
     const switchedArtifacts = activeArtifactIdRef.current !== artifact._id;
+    const incomingKey = snapshotKey(incomingSnapshot);
+    // Key reconciliation by artifact and value, rather than by the derived
+    // object identity. The live projection is recreated during the batched
+    // state updates below; treating that new object as a fresh remote write
+    // creates a setState -> render -> effect loop in native editors.
+    const reconciliationKey = incomingReconciliationKey(
+      artifact._id,
+      incomingSnapshot,
+    );
+    if (lastReconciledIncomingKeyRef.current === reconciliationKey) {
+      return;
+    }
+    lastReconciledIncomingKeyRef.current = reconciliationKey;
     if (!switchedArtifacts && dirtyRef.current) {
-      const incomingKey = snapshotKey(incomingSnapshot);
       if (
         incomingKey !== snapshotKey(baseline) &&
         incomingKey !== dismissedRemoteKey
@@ -4994,8 +5021,10 @@ function ArtifactStudioEditor({
     activeArtifactIdRef.current = artifact._id;
     reconcilingRemoteRef.current = true;
     userHasEditedRef.current = false;
-    dirtyRef.current = false;
-    setDirty(false);
+    if (dirtyRef.current) {
+      dirtyRef.current = false;
+      setDirty(false);
+    }
     setRemoteConflict(null);
     setDismissedRemoteKey(null);
     setLiveConflict(null);
@@ -5911,6 +5940,7 @@ function ArtifactStudioEditor({
     inspector,
     compatibilityProfile: artifact.compatibilityProfile ?? "spectra-native",
     fidelity: nativeFidelity,
+    executeApplicationCommand,
   });
   const identityBlock = (
     <div

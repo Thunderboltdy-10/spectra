@@ -52,6 +52,7 @@ import {
 import {
   EMPTY_SELECTION,
   clickIntent,
+  opensOnPlainClick,
   filterRows,
   pruneSelection,
   resolveKey,
@@ -67,6 +68,7 @@ import { useOrganizerDrag } from "./organizer-drag";
 import { OrganizerRail, type OrganizerLocation } from "./organizer-rail";
 import { OrganizerRow, ROW_HEIGHT, type RowCallbacks } from "./organizer-row";
 import { WorkBoard } from "./work-board";
+import { spectraBus } from "../events";
 import {
   SurfaceGroupBy,
   SurfaceNewMenu,
@@ -195,6 +197,8 @@ export function LibraryOrganizer({
 }: LibraryOrganizerProps) {
   const now = useNow(60_000);
   const actions = useTreeActions();
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
   const reportError = useTreeErrorReporter((message) => toast.error(message));
 
   /* The scope is the floor. Everything that talks about "the top" — the rail's
@@ -227,6 +231,8 @@ export function LibraryOrganizer({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
   const frameRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const lastLoadRequestLengthRef = useRef<number | null>(null);
   /* Every node the surface has seen, so a drop target's ancestry can be checked
      without another query. Cheap: it is only ever read during a drag. */
   const seenRef = useRef(new Map<string, TreeNode>());
@@ -234,6 +240,8 @@ export function LibraryOrganizer({
   const searching = term.trim().length >= 2;
   const inFolder = location.kind === "folder";
   const currentParentId = inFolder ? location.nodeId : null;
+  const currentParentRef = useRef(currentParentId);
+  currentParentRef.current = currentParentId;
 
   const children = useTreeChildren(currentParentId, {
     enabled: inFolder && !searching,
@@ -287,13 +295,24 @@ export function LibraryOrganizer({
   /* Ordinary scrolling loads the next page as the reader approaches the end. */
   useEffect(() => {
     if (sortKey !== "manual" || !inFolder || searching) return;
-    if (children.status !== "CanLoadMore") return;
+    if (children.status !== "CanLoadMore" || loadingMoreRef.current) return;
     const remaining = rows.length * ROW_HEIGHT - scrollTop - viewportHeight;
-    if (remaining < ROW_HEIGHT * 12) children.loadMore(300);
+    if (remaining >= ROW_HEIGHT * 12) return;
+    /* Convex may keep the status at CanLoadMore while a request is settling.
+       Do not issue the same page request again on every render. A new request
+       is permitted only after the result length changes. */
+    if (lastLoadRequestLengthRef.current === rows.length) return;
+    lastLoadRequestLengthRef.current = rows.length;
+    loadingMoreRef.current = true;
+    void Promise.resolve(children.loadMore(300)).finally(() => {
+      loadingMoreRef.current = false;
+    });
   }, [
     sortKey,
     inFolder,
     searching,
+    children.status,
+    children.loadMore,
     children,
     rows.length,
     scrollTop,
@@ -312,10 +331,10 @@ export function LibraryOrganizer({
     if (!inFolder || currentParentId !== null || searching) return;
     if (children.status === "LoadingFirstPage") return;
     rootsEnsured.current = true;
-    void actions.ensureRoots().catch(() => {
+    void actionsRef.current.ensureRoots().catch(() => {
       rootsEnsured.current = false;
     });
-  }, [inFolder, currentParentId, searching, children.status, actions, scope]);
+  }, [inFolder, currentParentId, searching, children.status, scope]);
 
   /* Opening a folder opens its branch in the rail, so the two panes always
      agree about where the reader is. */
@@ -370,6 +389,39 @@ export function LibraryOrganizer({
     },
     [reportError],
   );
+
+  /* Application commands and visible Library gestures share these exact tree
+     mutations. The handler is semantic and awaitable; choreography may point
+     at this surface, but it never performs the write itself. */
+  useEffect(() => {
+    const removeOrganize = spectraBus.handle("library.organize", async (input) => {
+      if (input.action === "create_folder") {
+        if (!input.name?.trim()) throw new Error("LIBRARY_FOLDER_NAME_REQUIRED");
+        await actionsRef.current.createFolder(input.name.trim(), input.destinationId ?? currentParentRef.current);
+        return;
+      }
+      if (input.targetIds.length === 0) throw new Error("LIBRARY_TARGETS_REQUIRED");
+      if (input.action === "rename") {
+        if (input.targetIds.length !== 1 || !input.name?.trim()) throw new Error("LIBRARY_RENAME_PARAMS_REQUIRED");
+        await actionsRef.current.rename(input.targetIds[0]!, input.name.trim());
+        return;
+      }
+      if (!input.destinationId) throw new Error("LIBRARY_DESTINATION_REQUIRED");
+      if (input.action === "move") {
+        await actionsRef.current.move(input.targetIds, input.destinationId);
+        return;
+      }
+      for (const nodeId of input.targetIds) await actionsRef.current.createReference(nodeId, input.destinationId);
+    });
+    const removeDelete = spectraBus.handle("library.delete", async ({ targetIds }) => {
+      if (!targetIds.length) throw new Error("LIBRARY_TARGETS_REQUIRED");
+      await actionsRef.current.trash(targetIds);
+    });
+    return () => {
+      removeOrganize();
+      removeDelete();
+    };
+  }, []);
 
   const openNode = useCallback(
     (node: TreeNode) => {
@@ -431,7 +483,7 @@ export function LibraryOrganizer({
     [actions, run],
   );
 
-  const { drag, beginDrag } = useOrganizerDrag({
+  const { drag, beginDrag, consumeSuppressedClick } = useOrganizerDrag({
     nodesById,
     rows,
     currentParentId,
@@ -588,18 +640,21 @@ export function LibraryOrganizer({
         beginDrag(event, ids, label);
       },
       onClick: (event, node) => {
-        if (
-          !selectionMode &&
-          !node.isContainer &&
-          !event.metaKey &&
-          !event.ctrlKey &&
-          !event.shiftKey
-        ) {
+        if (consumeSuppressedClick()) {
+          event.preventDefault();
+          return;
+        }
+        if (opensOnPlainClick(event, selectionMode)) {
           openNode(node);
           return;
         }
         setSelection((current) => selectRow(current, rows, node.nodeId, clickIntent(event)));
         if (renamingId && renamingId !== node.nodeId) setRenamingId(null);
+      },
+      onDoubleClick: (event, node) => {
+        if (renamingId === node.nodeId) return;
+        event.preventDefault();
+        openNode(node);
       },
       onOpen: openNode,
       onContextMenu: (event, node) => {
@@ -639,7 +694,7 @@ export function LibraryOrganizer({
       },
       onCancelRename: () => setRenamingId(null),
     }),
-    [actions, beginDrag, openNode, renamingId, rows, run, selection.ids, selectionMode],
+    [actions, beginDrag, consumeSuppressedClick, openNode, renamingId, rows, run, selection.ids, selectionMode],
   );
 
   const range = windowRange(scrollTop, viewportHeight, ROW_HEIGHT, rows.length);

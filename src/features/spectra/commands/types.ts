@@ -16,6 +16,12 @@ export type CommandContext = {
   fidelity: Readonly<Record<string, FidelityClass>>;
   selection: Readonly<{ kind?: string; ids: readonly string[] }>;
   permissions: Readonly<{ role: WorkSharingRole; editable: boolean }>;
+  /** Shared semantic application dispatcher. App commands must use this
+   * path so toolbar, shortcuts, and AI cannot drift into separate effects. */
+  executeApplicationCommand?: (
+    commandId: string,
+    params: unknown,
+  ) => void | Promise<void>;
 };
 
 export type CommandPresentation = {
@@ -36,7 +42,13 @@ export type Command<P = unknown> = {
   availability: (ctx: CommandContext) => CommandAvailability;
   presentation: CommandPresentation;
   defaultPlacement: { tab: string; group: string; order: number };
+  /** The shipped category before a command is pinned into General. */
+  sourceTab?: string;
   contextualTab?: string;
+  /** Shipped in the user's General favorites surface. */
+  general?: boolean;
+  /** Allows a command to render its honest compact/medium form. */
+  controlSize?: "compact" | "medium";
   shortcut?: string;
   risk: "safe" | "confirm" | "always-confirm" | "destructive";
   undo: "yjs" | "operation-inverse" | "none(explain)";
@@ -59,6 +71,12 @@ export type CommandBinding = {
   tab?: string;
   group?: string;
   contextualTab?: string;
+  /** Shipped in the user's General favorites surface. */
+  general?: boolean;
+  /** Honest rendering density for controls that support a larger form. */
+  controlSize?: "compact" | "medium";
+  /** Persisted workbar density override, applied by the shared renderer. */
+  density?: "compact" | "medium";
   shortcut?: string;
   /** Native-format availability is declared per command. Unspecified means
    * the command is non-mutating or safely representable in every profile. */

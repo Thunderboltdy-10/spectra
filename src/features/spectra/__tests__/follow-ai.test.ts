@@ -5,9 +5,13 @@ import {
   clearAiLocation,
   disengageFollowAi,
   getAiLocation,
+  getAiSurfaceLocation,
+  getFollowedAiActorId,
+  followAiActor,
   isFollowingAi,
   isProgrammaticOpen,
   noteAiLocation,
+  noteAiSurface,
   setFollowingAi,
 } from "../collaboration/follow-ai";
 
@@ -31,6 +35,57 @@ describe("follow AI", () => {
     noteAiLocation({ artifactId: "art-1", path: "/questions/2/prompt" });
     expect(opened).toEqual([]);
     expect(isFollowingAi()).toBe(false);
+  });
+
+  it("carries a followed actor across app routes without moving a non-followed viewport", () => {
+    const navigated: string[] = [];
+    window.addEventListener("spectra:ai-navigate", (event) => {
+      navigated.push((event as CustomEvent<{ route: string }>).detail.route);
+    });
+    noteAiSurface({
+      route: "settings",
+      target: "toolbar",
+      note: "Changing the Document toolbar",
+    });
+    expect(navigated).toEqual([]);
+    setFollowingAi(true);
+    expect(navigated).toEqual(["settings"]);
+    noteAiSurface({ route: "calendar", note: "Reviewing next week" });
+    expect(navigated).toEqual(["settings", "calendar"]);
+  });
+
+  it("follows exactly one actor while another continues silently", () => {
+    const navigated: string[] = [];
+    window.addEventListener("spectra:ai-navigate", (event) => {
+      navigated.push((event as CustomEvent<{ route: string }>).detail.route);
+    });
+    noteAiSurface({ actorId: "run-a", route: "library", note: "Organizing" });
+    noteAiSurface({ actorId: "run-b", route: "settings", note: "Configuring" });
+    followAiActor("run-a");
+    expect(getFollowedAiActorId()).toBe("run-a");
+    expect(navigated).toEqual(["library"]);
+    noteAiSurface({ actorId: "run-b", route: "calendar", note: "Scheduling" });
+    expect(navigated).toEqual(["library"]);
+    noteAiSurface({ actorId: "run-a", route: "workspace", note: "Returning" });
+    expect(navigated).toEqual(["library", "workspace"]);
+  });
+
+  it("does not redispatch an unchanged followed surface", () => {
+    const navigated: string[] = [];
+    window.addEventListener("spectra:ai-navigate", (event) => {
+      navigated.push((event as CustomEvent<{ route: string }>).detail.route);
+    });
+    noteAiSurface({ route: "settings", target: "toolbar", note: "Editing" });
+    setFollowingAi(true);
+    noteAiSurface({ route: "settings", target: "toolbar", note: "Editing" });
+    expect(navigated).toEqual(["settings"]);
+  });
+
+  it("clears a remembered surface even when no artifact is open", () => {
+    noteAiSurface({ route: "settings", target: "toolbar" });
+    clearAiLocation();
+    expect(getAiLocation()).toBeNull();
+    expect(getAiSurfaceLocation()).toBeNull();
   });
 
   it("opens the artifact the AI moves to while following", () => {

@@ -179,7 +179,14 @@ function setup(
     }
     if (name.includes("spectraOperations:recordPlan")) {
       const next = args.operations as Array<Record<string, unknown>>;
-      operations.push(...next.map((operation, index) => ({ _id: `operation-${index + 1}`, runId: "run-real", status: "proposed", affected: [], ...operation })));
+      operations.push(...next.map((operation, index) => ({
+        _id: `operation-${index + 1}`,
+        runId: "run-real",
+        executionId: args.executionId,
+        status: "proposed",
+        affected: [],
+        ...operation,
+      })));
       return { operationIds: next.map((_operation, index) => `operation-${index + 1}`) };
     }
     if (name.includes("spectraArtifacts:createPending")) {
@@ -227,6 +234,15 @@ function setup(
       card.actions = [];
       return { alreadyRejected: false };
     }
+    if (name.includes("spectraRuns:claimConfirmation")) {
+      run.status = "running";
+      card.status = "running";
+      return { resultCardId: "card-real" };
+    }
+    if (name.includes("accountPreferences:writeLayer")) return { scope: "account", values: args.values };
+    if (name.includes("syncPolicy:override")) return { changed: true };
+    if (name.includes("replicas:localEffectCount")) return { count: 3 };
+    if (name.includes("orgTree:createFolder") || name.includes("orgTree:rename") || name.includes("orgTree:move") || name.includes("orgTree:createReference") || name.includes("orgTree:trash")) return { ok: true, nodeId: "node-app" };
     if (name.includes("spectraOperations:claim") || name.includes("spectraOperations:assertClaimed") || name.includes("spectraOperations:markExecuted") || name.includes("spectraOperations:cancelPending") || name.includes("spectraOperations:attachPendingArtifact") || name.includes("spectraOperations:attachPendingWorkspace")) return {};
     if (name.includes("spectraRuns:appendEvent") || name.includes("spectraRuns:appendEvents") || name.includes("spectraRuns:markTraceDegraded")) return {};
     if (name.includes("spectraArtifacts:patchPendingContent") || name.includes("spectraArtifacts:stageAiPatch") || name.includes("spectraArtifacts:discardPendingForRun") || name.includes("spectraArtifacts:failPendingForRun") || name.includes("spectraArtifacts:settleStagedForRun") || name.includes("spectraWorkspaces:settleForRun")) return {};
@@ -1530,6 +1546,34 @@ describe("Spectra run route", () => {
     const cancelEvents = (await cancelResponse.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; summary?: string });
     expect(cancelEvents).toContainEqual(expect.objectContaining({ type: "final", summary: "No proposed changes were applied." }));
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:rejectConfirmation"))).toBe(true);
+  });
+
+  it("journals an approved settings tool as one resumable app command", async () => {
+    const plan = {
+      decision: "operate",
+      intent: { mode: "mixed", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null },
+      finalResponse: "I can make the toolbar compact after you confirm.",
+      operations: [{ type: "app.command", input: { command: "change_spectra_settings", args: { patch: { appearance: { density: "compact" } } } } }],
+    };
+    const { convexMutation, fetchMock } = setup(plan);
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Make my toolbar compact." }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; reasons?: string[] });
+    expect(events.some((event) => event.type === "confirmation_required")).toBe(true);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("accountPreferences:writeLayer"))).toBe(false);
+    const recorded = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraOperations:recordPlan"));
+    expect(recorded?.[1]).toMatchObject({ operations: [{ type: "app.command", requiresConfirmation: true }] });
+
+    const confirmResponse = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({ action: "confirm", runId: "run-real", executionId: "execution-1" }),
+    }));
+    await confirmResponse.text();
+    expect(convexMutation.mock.calls.filter(([name]) => String(name).includes("accountPreferences:writeLayer"))).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("routes an open-sheet validation-column edit to sheets update, not a flashcard create", async () => {

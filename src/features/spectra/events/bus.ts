@@ -1,5 +1,5 @@
 type ContractMap = Record<string, unknown>;
-type Listener<T> = (payload: T) => void;
+type Listener<T> = (payload: T) => void | Promise<void>;
 
 export class TypedSpectraBus<
   Commands extends ContractMap,
@@ -16,7 +16,12 @@ export class TypedSpectraBus<
   }
 
   command<K extends keyof Commands>(key: K, payload: Commands[K]) {
-    this.dispatch(this.commandHandlers, key, payload);
+    return this.dispatch(this.commandHandlers, key, payload);
+  }
+
+  /** Await every semantic command consumer before reporting completion. */
+  async commandAsync<K extends keyof Commands>(key: K, payload: Commands[K]) {
+    return this.dispatchAsync(this.commandHandlers, key, payload);
   }
 
   on<K extends keyof Events>(key: K, listener: Listener<Events[K]>) {
@@ -58,7 +63,21 @@ export class TypedSpectraBus<
     registry: Map<K, Set<Listener<unknown>>>,
     key: K,
     payload: T,
-  ) {
-    for (const listener of registry.get(key) ?? []) listener(payload);
+  ): number {
+    const listeners = registry.get(key);
+    if (!listeners) return 0;
+    for (const listener of listeners) listener(payload);
+    return listeners.size;
+  }
+
+  private async dispatchAsync<K extends PropertyKey, T>(
+    registry: Map<K, Set<Listener<unknown>>>,
+    key: K,
+    payload: T,
+  ): Promise<number> {
+    const listeners = registry.get(key);
+    if (!listeners) return 0;
+    await Promise.all([...listeners].map((listener) => listener(payload)));
+    return listeners.size;
   }
 }

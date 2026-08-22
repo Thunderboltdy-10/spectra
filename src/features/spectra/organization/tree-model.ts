@@ -39,6 +39,14 @@ export function clickIntent(event: {
   return "replace";
 }
 
+export function opensOnPlainClick(event: {
+  shiftKey: boolean;
+  metaKey: boolean;
+  ctrlKey: boolean;
+}, selectionMode: boolean) {
+  return !selectionMode && !event.shiftKey && !event.metaKey && !event.ctrlKey;
+}
+
 /** Apply a click to a selection, given the rows currently on screen. */
 export function selectRow(
   selection: RowSelection,

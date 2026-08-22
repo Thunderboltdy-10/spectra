@@ -178,6 +178,27 @@ export const forWork = query({
   },
 });
 
+/** Count the currently available local replicas behind an application-level
+ * sync-policy confirmation. The consequence is derived from owned data rather
+ * than trusted from model-provided arguments. */
+export const localEffectCount = query({
+  args: { workIds: v.array(v.id("spectraArtifacts")) },
+  handler: async (ctx, { workIds }) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    let count = 0;
+    for (const workId of workIds.slice(0, 100)) {
+      const work = await ctx.db.get(workId);
+      if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+      const replicas = await ctx.db.query("workReplicas")
+        .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local"))
+        .take(50);
+      count += replicas.filter((replica) => replica.state !== "unavailable").length;
+    }
+    return { count };
+  },
+});
+
 export const strategyTransitionForWork = query({
   args: { workId: v.id("spectraArtifacts") },
   handler: async (ctx, { workId }) => {

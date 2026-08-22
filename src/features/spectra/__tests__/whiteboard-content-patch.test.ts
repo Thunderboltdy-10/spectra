@@ -175,24 +175,31 @@ describe("whiteboard contentPatch recolor coerce", () => {
     }
 
     // The raw slips that previously produced path:input invalid_union.
-    expect(() =>
-      parseModelOperation({
-        type: "artifact.update",
-        input: {
-          artifactId: "wb-1",
-          blueprintKey: "whiteboard",
-          contentPatch: {
-            changes: [
-              {
-                op: "replace",
-                path: "/nodes/0/style/fill",
-                value: "#2563eb",
-              },
-            ],
-          },
+    const stableSelector = parseModelOperation({
+      type: "artifact.update",
+      input: {
+        artifactId: "wb-1",
+        blueprintKey: "whiteboard",
+        title: null,
+        summary: null,
+        content: null,
+        tags: null,
+        contentPatch: {
+          changes: [
+            {
+              path: "/nodes/id:node-comp/style/fill",
+              value: "#2563eb",
+            },
+          ],
         },
-      }),
-    ).toThrow();
+      },
+    });
+    expect(stableSelector.type).toBe("artifact.update");
+    if (stableSelector.type === "artifact.update") {
+      expect(stableSelector.input.contentPatch?.changes[0]?.path).toBe(
+        "/nodes/id:node-comp/style/fill",
+      );
+    }
     expect(() =>
       parseModelOperation({
         type: "artifact.update",
@@ -206,6 +213,7 @@ describe("whiteboard contentPatch recolor coerce", () => {
           contentPatch: {
             changes: [
               {
+                op: "replace",
                 path: "/nodes/id:node-comp/style/fill",
                 value: "#2563eb",
               },

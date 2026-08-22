@@ -102,6 +102,64 @@ describe("Wave 6 bounded context builder", () => {
     ]);
   });
 
+  it("keeps canonical Library node ids available for organization requests", () => {
+    const libraryMap = [
+      {
+        id: "physics-node",
+        title: "Physics",
+        type: "folder",
+        parentId: null,
+      },
+      {
+        id: "arduino-node",
+        title: "Arduino_IA",
+        type: "folder",
+        parentId: "physics-node",
+      },
+      {
+        id: "pendulum-node",
+        title: "Pendulum_Experiment_Results.xlsx",
+        type: "work",
+        sourceId: "pendulum-artifact",
+        parentId: "physics-node",
+      },
+    ];
+    const packet = buildBoundedContextPacket({
+      prompt:
+        "Create a Sources folder in Arduino_IA and move Pendulum_Experiment_Results.xlsx there.",
+      focusMode: "workspace",
+      artifacts: [],
+      libraryMap,
+    });
+    expect(packet.libraryMap).toEqual(libraryMap);
+    expect(packet.contextLayers.libraryMap).toMatch(/currently visible/i);
+  });
+
+  it("keeps the exact current Library location separate from the bounded node window", () => {
+    const location = {
+      id: "physics-node",
+      title: "Physics",
+      type: "folder",
+      parentId: "general-node",
+      path: [
+        { id: "general-node", title: "General", type: "folder" },
+        { id: "physics-node", title: "Physics", type: "folder" },
+      ],
+    };
+    const packet = buildBoundedContextPacket({
+      prompt: "Create a folder here",
+      focusMode: "workspace",
+      artifacts: [],
+      libraryMap: [
+        { id: "other-physics", title: "Physics", type: "folder", parentId: null },
+      ],
+      currentLibraryLocation: location,
+    });
+    expect(packet.currentLibraryLocation).toEqual(location);
+    expect(packet.currentLibraryLocation?.id).toBe("physics-node");
+    expect(packet.contextLayers.currentLibraryLocation).toMatch(/exact Library folder/i);
+  });
+
   it("uses a compact focused profile for a narrow artifact edit", () => {
     const focused = artifact("focused", {
       blueprintKey: "flashcard_deck",

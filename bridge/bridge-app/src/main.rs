@@ -9,11 +9,14 @@ use spectra_bridge_core::platform::{HostPlatform, Platform};
 use spectra_bridge_core::protocol::{LocalMountStatus, PairingOffer};
 use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
-    DiscoveredResource, ReplicaMigrationPage, claim_write, complete_write, detach_mount,
-    discover_resource, drain_cloud_queue, exchange_pairing, migrate_cloud_replica_page,
-    register_mount, reconcile_missing_resources, resume_pairing, upload_resource_payload, claim_fs_request, complete_fs_request, set_mount_availability,
+    DiscoveredResource, ReplicaMigrationPage, claim_fs_request, claim_write, complete_fs_request,
+    complete_write, detach_mount, discover_resource, drain_cloud_queue, exchange_pairing,
+    migrate_cloud_replica_page, reconcile_missing_resources, register_mount, resume_pairing,
+    set_mount_availability, upload_resource_payload,
 };
-use spectra_bridge_core::watcher::{MountWatcher, WatcherConfig, office_lock_exists, office_lock_paths, scan_page};
+use spectra_bridge_core::watcher::{
+    MountWatcher, WatcherConfig, office_lock_exists, office_lock_paths, scan_page,
+};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WindowEvent};
@@ -23,6 +26,21 @@ use tauri_plugin_dialog::DialogExt;
 struct BridgeRuntime {
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
+}
+
+fn resolve_bridge_data_dir(
+    isolated_runtime: Option<std::ffi::OsString>,
+    app_data_dir: std::path::PathBuf,
+) -> anyhow::Result<std::path::PathBuf> {
+    let Some(path) = isolated_runtime else {
+        return Ok(app_data_dir);
+    };
+    let path = std::path::PathBuf::from(path);
+    anyhow::ensure!(
+        path.is_absolute(),
+        "SPECTRA_BRIDGE_DATA_DIR must be absolute"
+    );
+    Ok(path)
 }
 
 #[derive(Clone)]
@@ -46,24 +64,32 @@ impl LocalBridgeControl for SpectraLocalControl {
     }
 
     async fn auto_pair(&self) -> Result<(), String> {
-        let offer = self.state.take_pairing_offer().map_err(|error| error.to_string())?;
+        let offer = self
+            .state
+            .take_pairing_offer()
+            .map_err(|error| error.to_string())?;
         complete_pairing_offer(&offer, &self.state, &self.journal).await
     }
 
     fn mounts(&self) -> Vec<LocalMountStatus> {
-        self.mount_views().into_iter().map(|mount| LocalMountStatus {
-            id: mount.id,
-            label: mount.label,
-            state: mount.state,
-            detail: mount.detail,
-            synced: mount.synced,
-            total: mount.total,
-            double_sync_risk: mount.double_sync_risk,
-        }).collect()
+        self.mount_views()
+            .into_iter()
+            .map(|mount| LocalMountStatus {
+                id: mount.id,
+                label: mount.label,
+                state: mount.state,
+                detail: mount.detail,
+                synced: mount.synced,
+                total: mount.total,
+                double_sync_risk: mount.double_sync_risk,
+            })
+            .collect()
     }
 
     async fn select_mount(&self) -> Result<(), String> {
-        select_mount_impl(&self.app, &self.grants, &self.journal).await.map(|_| ())
+        select_mount_impl(&self.app, &self.grants, &self.journal)
+            .await
+            .map(|_| ())
     }
 
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
@@ -151,37 +177,48 @@ struct MountView {
 }
 
 fn mount_views(grants: &GrantRegistry, journal: &Journal) -> Vec<MountView> {
-    grants.device_grants().into_iter().map(|grant| {
-        let value = journal
-            .config(&format!("mount_status:{}", grant.id))
-            .ok().flatten()
-            .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        let double_sync_risk = journal
-            .config(&format!("mount_double_sync:{}", grant.id))
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some("true");
-        let base_detail = value
-            .get("detail")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Selected on this device");
-        let detail = if double_sync_risk {
-            format!("{base_detail} Provider-managed folder detected; conflict windows may be wider.")
-        } else {
-            base_detail.to_owned()
-        };
-        MountView {
-            id: grant.id,
-            label: grant.label,
-            state: value.get("state").and_then(|v| v.as_str()).unwrap_or("selected").to_owned(),
-            detail,
-            synced: value.get("synced").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
-            total: value.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
-            double_sync_risk,
-        }
-    }).collect()
+    grants
+        .device_grants()
+        .into_iter()
+        .map(|grant| {
+            let value = journal
+                .config(&format!("mount_status:{}", grant.id))
+                .ok()
+                .flatten()
+                .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            let double_sync_risk = journal
+                .config(&format!("mount_double_sync:{}", grant.id))
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some("true");
+            let base_detail = value
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Selected on this device");
+            let detail = if double_sync_risk {
+                format!(
+                    "{base_detail} Provider-managed folder detected; conflict windows may be wider."
+                )
+            } else {
+                base_detail.to_owned()
+            };
+            MountView {
+                id: grant.id,
+                label: grant.label,
+                state: value
+                    .get("state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("selected")
+                    .to_owned(),
+                detail,
+                synced: value.get("synced").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+                total: value.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+                double_sync_risk,
+            }
+        })
+        .collect()
 }
 
 fn set_mount_status(
@@ -213,9 +250,15 @@ fn deployment_url(journal: &Journal) -> Result<String, String> {
         return Ok(url);
     }
     #[cfg(debug_assertions)]
-    if journal.config("deployment_url").map_err(|error| error.to_string())?.is_none() {
+    if journal
+        .config("deployment_url")
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
         let url = "https://proper-orca-653.convex.cloud".to_owned();
-        journal.set_config("deployment_url", &url).map_err(|error| error.to_string())?;
+        journal
+            .set_config("deployment_url", &url)
+            .map_err(|error| error.to_string())?;
         return Ok(url);
     }
     journal
@@ -399,13 +442,36 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                 journal,
                 &grant.id,
                 "waiting",
-                registration.reason.as_deref().unwrap_or("Waiting for approval in Spectra"),
+                registration
+                    .reason
+                    .as_deref()
+                    .unwrap_or("Waiting for approval in Spectra"),
                 index + 1,
                 files.len(),
             )?;
             continue;
         }
-        if registration.needs_payload && ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].contains(&resource.native_format.as_str())
+        if registration.needs_payload
+            && [
+                "docx",
+                "docm",
+                "dotx",
+                "dotm",
+                "xlsx",
+                "xlsm",
+                "xltx",
+                "xltm",
+                "xlam",
+                "pptx",
+                "pptm",
+                "potx",
+                "potm",
+                "ppsx",
+                "ppsm",
+                "ppam",
+                "spectra-pkg",
+            ]
+            .contains(&resource.native_format.as_str())
         {
             let replica_id = registration
                 .replica_id
@@ -448,9 +514,13 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                 "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 "docm" | "dotm" => "application/vnd.ms-word.document.macroEnabled.12",
                 "dotx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
-                "xlsx" | "xltx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "xlsx" | "xltx" => {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                }
                 "xlsm" | "xltm" | "xlam" => "application/vnd.ms-excel.sheet.macroEnabled.12",
-                "pptm" | "potm" | "ppsm" | "ppam" => "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+                "pptm" | "potm" | "ppsm" | "ppam" => {
+                    "application/vnd.ms-powerpoint.presentation.macroEnabled.12"
+                }
                 "potx" => "application/vnd.openxmlformats-officedocument.presentationml.template",
                 "spectra-pkg" => "application/vnd.spectra.package+zip",
                 _ => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -483,7 +553,10 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             journal,
             &grant.id,
             "waiting",
-            &format!("Waiting for Office to finish saving {locked_files} file{}", if locked_files == 1 { "" } else { "s" }),
+            &format!(
+                "Waiting for Office to finish saving {locked_files} file{}",
+                if locked_files == 1 { "" } else { "s" }
+            ),
             files.len().saturating_sub(locked_files),
             files.len(),
         )
@@ -627,14 +700,26 @@ async fn drain_write_requests(
 }
 
 fn collision_path(root: &std::path::Path, requested: &std::path::Path) -> std::path::PathBuf {
-    if !root.join(requested).exists() { return requested.to_owned(); }
-    let parent = requested.parent().unwrap_or_else(|| std::path::Path::new(""));
-    let name = requested.file_name().and_then(|name| name.to_str()).unwrap_or("file");
+    if !root.join(requested).exists() {
+        return requested.to_owned();
+    }
+    let parent = requested
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new(""));
+    let name = requested
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
     let dot = name.rfind('.');
-    let (stem, extension) = match dot { Some(index) if index > 0 => (&name[..index], &name[index..]), _ => (name, "") };
+    let (stem, extension) = match dot {
+        Some(index) if index > 0 => (&name[..index], &name[index..]),
+        _ => (name, ""),
+    };
     for index in 2..10_000 {
         let candidate = parent.join(format!("{stem} (Spectra {index}){extension}"));
-        if !root.join(&candidate).exists() { return candidate; }
+        if !root.join(&candidate).exists() {
+            return candidate;
+        }
     }
     requested.to_owned()
 }
@@ -647,38 +732,104 @@ async fn drain_structure_requests(
 ) -> anyhow::Result<usize> {
     let mut handled = 0;
     for _ in 0..20 {
-        let Some(request) = claim_fs_request(deployment, credential).await? else { break; };
+        let Some(request) = claim_fs_request(deployment, credential).await? else {
+            break;
+        };
         let relative_source = std::path::Path::new(&request.source_relative_path);
-        let target_candidate = request.target_relative_path.as_deref().map(std::path::Path::new);
-        let grant = grants.device_grants().into_iter().find(|grant| grant.id == request.grant_id);
+        let target_candidate = request
+            .target_relative_path
+            .as_deref()
+            .map(std::path::Path::new);
+        let grant = grants
+            .device_grants()
+            .into_iter()
+            .find(|grant| grant.id == request.grant_id);
         let Some(grant) = grant else {
-            complete_fs_request(deployment, credential, &request.request_id, "failed", None, Some(("grant-unavailable", "The selected folder is no longer available."))).await?;
+            complete_fs_request(
+                deployment,
+                credential,
+                &request.request_id,
+                "failed",
+                None,
+                Some((
+                    "grant-unavailable",
+                    "The selected folder is no longer available.",
+                )),
+            )
+            .await?;
             handled += 1;
             continue;
         };
         let writer = SafeWriter::new(grants.clone(), journal.clone(), Arc::new(HostPlatform));
         let result = match request.kind.as_str() {
-            "delete" => writer.recycle(&request.grant_id, relative_source, &request.local_resource_id, &request.idempotency_key).map(|_| None),
-            "move" | "rename" => {
-                match target_candidate {
-                    Some(target) => {
-                        let parent = grant.device_root().join(target.parent().unwrap_or_else(|| std::path::Path::new("")));
-                        if let Err(error) = std::fs::create_dir_all(&parent) {
-                            Err(FsError::Other(anyhow::anyhow!(error)))
-                        } else {
-                            let actual = collision_path(grant.device_root(), target);
-                            writer.relocate(&request.grant_id, relative_source, &actual, &request.local_resource_id, &request.idempotency_key).map(|_| Some(actual.to_string_lossy().replace('\\', "/")))
-                        }
+            "delete" => writer
+                .recycle(
+                    &request.grant_id,
+                    relative_source,
+                    &request.local_resource_id,
+                    &request.idempotency_key,
+                )
+                .map(|_| None),
+            "move" | "rename" => match target_candidate {
+                Some(target) => {
+                    let parent = grant
+                        .device_root()
+                        .join(target.parent().unwrap_or_else(|| std::path::Path::new("")));
+                    if let Err(error) = std::fs::create_dir_all(&parent) {
+                        Err(FsError::Other(anyhow::anyhow!(error)))
+                    } else {
+                        let actual = collision_path(grant.device_root(), target);
+                        writer
+                            .relocate(
+                                &request.grant_id,
+                                relative_source,
+                                &actual,
+                                &request.local_resource_id,
+                                &request.idempotency_key,
+                            )
+                            .map(|_| Some(actual.to_string_lossy().replace('\\', "/")))
                     }
-                    None => Err(FsError::Other(anyhow::anyhow!("structure target missing"))),
                 }
-            }
-            _ => Err(FsError::Other(anyhow::anyhow!("unknown structure operation"))),
+                None => Err(FsError::Other(anyhow::anyhow!("structure target missing"))),
+            },
+            _ => Err(FsError::Other(anyhow::anyhow!(
+                "unknown structure operation"
+            ))),
         };
         match result {
-            Ok(actual) => complete_fs_request(deployment, credential, &request.request_id, "verified", actual.as_deref(), None).await?,
-            Err(FsError::FileLocked) => complete_fs_request(deployment, credential, &request.request_id, "failed", None, Some(("office-locked", "The file is open in another application."))).await?,
-            Err(error) => complete_fs_request(deployment, credential, &request.request_id, "failed", None, Some(("structure-operation-failed", &error.to_string()))).await?,
+            Ok(actual) => {
+                complete_fs_request(
+                    deployment,
+                    credential,
+                    &request.request_id,
+                    "verified",
+                    actual.as_deref(),
+                    None,
+                )
+                .await?
+            }
+            Err(FsError::FileLocked) => {
+                complete_fs_request(
+                    deployment,
+                    credential,
+                    &request.request_id,
+                    "failed",
+                    None,
+                    Some(("office-locked", "The file is open in another application.")),
+                )
+                .await?
+            }
+            Err(error) => {
+                complete_fs_request(
+                    deployment,
+                    credential,
+                    &request.request_id,
+                    "failed",
+                    None,
+                    Some(("structure-operation-failed", &error.to_string())),
+                )
+                .await?
+            }
         }
         handled += 1;
     }
@@ -703,11 +854,17 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
             if !grant.is_available() {
                 watcher = None;
                 let marker_key = format!("mount_availability:{}", grant.id);
-                let already_reported = journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
+                let already_reported =
+                    journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
                 if !already_reported {
-                    if let (Ok(url), Ok(Some(device_id))) = (deployment_url(&journal), journal.config("device_id")) {
+                    if let (Ok(url), Ok(Some(device_id))) =
+                        (deployment_url(&journal), journal.config("device_id"))
+                    {
                         if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
-                            if set_mount_availability(&url, &credential, &grant.id, false).await.is_ok() {
+                            if set_mount_availability(&url, &credential, &grant.id, false)
+                                .await
+                                .is_ok()
+                            {
                                 let _ = journal.set_config(&marker_key, "unavailable");
                             }
                         }
@@ -724,11 +881,9 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                 continue;
             }
             if watcher.is_none() {
-                watcher = MountWatcher::start(
-                    std::path::Path::new(grant.device_root()),
-                    config.clone(),
-                )
-                .ok();
+                watcher =
+                    MountWatcher::start(std::path::Path::new(grant.device_root()), config.clone())
+                        .ok();
                 if watcher.is_none() {
                     let _ = set_mount_status(
                         &journal,
@@ -742,11 +897,17 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                 }
                 let _ = sync_grant(&grant, &journal).await;
                 let marker_key = format!("mount_availability:{}", grant.id);
-                let was_unavailable = journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
+                let was_unavailable =
+                    journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
                 if was_unavailable {
-                    if let (Ok(url), Ok(Some(device_id))) = (deployment_url(&journal), journal.config("device_id")) {
+                    if let (Ok(url), Ok(Some(device_id))) =
+                        (deployment_url(&journal), journal.config("device_id"))
+                    {
                         if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
-                            if set_mount_availability(&url, &credential, &grant.id, true).await.is_ok() {
+                            if set_mount_availability(&url, &credential, &grant.id, true)
+                                .await
+                                .is_ok()
+                            {
                                 let _ = journal.delete_config(&marker_key);
                             }
                         }
@@ -812,36 +973,71 @@ async fn complete_pairing_offer(
 ) -> Result<(), String> {
     let deployment = deployment_url(journal)?;
     let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "This device".into());
-    let installation_id = match journal.config("installation_id").map_err(|error| error.to_string())? {
+    let installation_id = match journal
+        .config("installation_id")
+        .map_err(|error| error.to_string())?
+    {
         Some(value) => value,
         None => {
             let value = uuid::Uuid::new_v4().to_string();
-            journal.set_config("installation_id", &value).map_err(|error| error.to_string())?;
+            journal
+                .set_config("installation_id", &value)
+                .map_err(|error| error.to_string())?;
             value
         }
     };
-    let existing = journal.config("device_id").map_err(|error| error.to_string())?
-        .and_then(|device_id| HostPlatform.read_credential(&device_id).ok().flatten().map(|credential| (device_id, credential)));
+    let existing = journal
+        .config("device_id")
+        .map_err(|error| error.to_string())?
+        .and_then(|device_id| {
+            HostPlatform
+                .read_credential(&device_id)
+                .ok()
+                .flatten()
+                .map(|credential| (device_id, credential))
+        });
     let (device_id, browser_origin) = if let Some((_device_id, credential)) = existing {
-        match resume_pairing(&deployment, &credential, offer, &device_name, &installation_id).await {
+        match resume_pairing(
+            &deployment,
+            &credential,
+            offer,
+            &device_name,
+            &installation_id,
+        )
+        .await
+        {
             Ok(exchange) => (exchange.device_id, exchange.browser_origin),
             Err(error) if should_repair_pairing(&error.to_string()) => {
-                let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id).await.map_err(|error| error.to_string())?;
-                HostPlatform.store_credential(&exchange.device_id, &exchange.device_credential).map_err(|error| error.to_string())?;
+                let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                HostPlatform
+                    .store_credential(&exchange.device_id, &exchange.device_credential)
+                    .map_err(|error| error.to_string())?;
                 (exchange.device_id, exchange.browser_origin)
             }
             Err(error) => return Err(error.to_string()),
         }
     } else {
-        let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id).await.map_err(|error| error.to_string())?;
-        HostPlatform.store_credential(&exchange.device_id, &exchange.device_credential).map_err(|error| error.to_string())?;
+        let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        HostPlatform
+            .store_credential(&exchange.device_id, &exchange.device_credential)
+            .map_err(|error| error.to_string())?;
         (exchange.device_id, exchange.browser_origin)
     };
-    journal.set_config("device_id", &device_id).map_err(|error| error.to_string())?;
+    journal
+        .set_config("device_id", &device_id)
+        .map_err(|error| error.to_string())?;
     state.set_device_id(device_id);
     let session_token = state.complete_pairing(offer.challenge.clone(), browser_origin.clone());
-    journal.set_config("browser_origin", &browser_origin).map_err(|error| error.to_string())?;
-    journal.set_config("browser_session_token", &session_token).map_err(|error| error.to_string())?;
+    journal
+        .set_config("browser_origin", &browser_origin)
+        .map_err(|error| error.to_string())?;
+    journal
+        .set_config("browser_session_token", &session_token)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -873,16 +1069,40 @@ async fn confirm_pairing(
     complete_pairing_offer(&offer, &state, &runtime.journal).await
 }
 
-async fn select_mount_impl(app: &tauri::AppHandle, grants: &Arc<GrantRegistry>, journal: &Arc<Journal>) -> Result<Option<(String, String)>, String> {
-    let Some(selection) = app.dialog().file().blocking_pick_folder() else { return Ok(None); };
+async fn select_mount_impl(
+    app: &tauri::AppHandle,
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+) -> Result<Option<(String, String)>, String> {
+    let Some(selection) = app.dialog().file().blocking_pick_folder() else {
+        return Ok(None);
+    };
     let path = selection.into_path().map_err(|error| error.to_string())?;
-    let label = path.file_name().and_then(|name| name.to_str()).unwrap_or("Selected folder").to_owned();
-    let grant = grants.add_native_selection(label.clone(), &path).map_err(|error| error.to_string())?;
-    journal.set_config(&format!("mount:{}", grant.id), &serde_json::json!({ "label": label, "path": grant.device_root() }).to_string()).map_err(|error| error.to_string())?;
+    let label = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Selected folder")
+        .to_owned();
+    let grant = grants
+        .add_native_selection(label.clone(), &path)
+        .map_err(|error| error.to_string())?;
+    journal
+        .set_config(
+            &format!("mount:{}", grant.id),
+            &serde_json::json!({ "label": label, "path": grant.device_root() }).to_string(),
+        )
+        .map_err(|error| error.to_string())?;
     // Persist and expose the grant before doing any network or payload work.
     // Selection must remain responsive even when Cloud is slow/offline; the
     // watcher owns the asynchronous scan and updates the durable status.
-    set_mount_status(journal, &grant.id, "scanning", "Reading folder metadata…", 0, 0)?;
+    set_mount_status(
+        journal,
+        &grant.id,
+        "scanning",
+        "Reading folder metadata…",
+        0,
+        0,
+    )?;
     spawn_grant_watcher(grant.clone(), grants.clone(), journal.clone());
     Ok(Some((grant.id, label)))
 }
@@ -895,8 +1115,16 @@ async fn select_mount(
     select_mount_impl(&app, &runtime.grants, &runtime.journal).await
 }
 
-async fn retry_mount_impl(grant_id: &str, grants: &Arc<GrantRegistry>, journal: &Arc<Journal>) -> Result<(), String> {
-    let grant = grants.device_grants().into_iter().find(|grant| grant.id == grant_id).ok_or_else(|| "Folder grant not found".to_string())?;
+async fn retry_mount_impl(
+    grant_id: &str,
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+) -> Result<(), String> {
+    let grant = grants
+        .device_grants()
+        .into_iter()
+        .find(|grant| grant.id == grant_id)
+        .ok_or_else(|| "Folder grant not found".to_string())?;
     sync_grant(&grant, journal).await
 }
 
@@ -908,15 +1136,36 @@ async fn retry_mount(
     retry_mount_impl(&grant_id, &runtime.grants, &runtime.journal).await
 }
 
-async fn remove_mount_impl(grant_id: &str, grants: &Arc<GrantRegistry>, journal: &Arc<Journal>) -> Result<(), String> {
-    if let (Ok(deployment), Some(device_id)) = (deployment_url(journal), journal.config("device_id").map_err(|error| error.to_string())?) {
-        if let Some(credential) = HostPlatform.read_credential(&device_id).map_err(|error| error.to_string())? {
-            detach_mount(&deployment, &credential, grant_id).await.map_err(|error| error.to_string())?;
+async fn remove_mount_impl(
+    grant_id: &str,
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+) -> Result<(), String> {
+    if let (Ok(deployment), Some(device_id)) = (
+        deployment_url(journal),
+        journal
+            .config("device_id")
+            .map_err(|error| error.to_string())?,
+    ) {
+        if let Some(credential) = HostPlatform
+            .read_credential(&device_id)
+            .map_err(|error| error.to_string())?
+        {
+            detach_mount(&deployment, &credential, grant_id)
+                .await
+                .map_err(|error| error.to_string())?;
         }
     }
     grants.remove(grant_id);
-    for prefix in ["mount:", "mount_status:", "mount_double_sync:", "cloud_mount:"] {
-        journal.delete_config(&format!("{prefix}{grant_id}")).map_err(|error| error.to_string())?;
+    for prefix in [
+        "mount:",
+        "mount_status:",
+        "mount_double_sync:",
+        "cloud_mount:",
+    ] {
+        journal
+            .delete_config(&format!("{prefix}{grant_id}"))
+            .map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -954,16 +1203,12 @@ fn main() {
             remove_mount
         ])
         .setup(|app| {
-            let isolated_runtime = std::env::var_os("SPECTRA_BRIDGE_DATA_DIR").or_else(|| {
-                #[cfg(debug_assertions)]
-                {
-                    Some(std::ffi::OsString::from(env!("CARGO_MANIFEST_DIR")))
-                }
-                #[cfg(not(debug_assertions))]
-                {
-                    None
-                }
-            });
+            // Debug and release binaries must share the same per-user journal
+            // by default. Test isolation is opt-in through the explicit
+            // SPECTRA_BRIDGE_DATA_DIR environment variable; silently deriving
+            // a workspace-local journal creates duplicate devices and leaves
+            // queued writes attached to an offline Bridge.
+            let isolated_runtime = std::env::var_os("SPECTRA_BRIDGE_DATA_DIR");
             if isolated_runtime.is_none() {
                 app.autolaunch().enable()?;
                 repair_windows_autostart_command()?;
@@ -974,23 +1219,7 @@ fn main() {
             if let Some(window) = app.get_webview_window("main") {
                 window.hide()?;
             }
-            let data_dir = if let Some(path) = isolated_runtime {
-                let mut path = std::path::PathBuf::from(path);
-                #[cfg(debug_assertions)]
-                if path.ends_with("bridge-app") {
-                    path = path.join("..\\..\\.tmp-n6-bridge");
-                }
-                if !path.is_absolute() {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "SPECTRA_BRIDGE_DATA_DIR must be absolute",
-                    )
-                    .into());
-                }
-                path
-            } else {
-                app.path().app_data_dir()?
-            };
+            let data_dir = resolve_bridge_data_dir(isolated_runtime, app.path().app_data_dir()?)?;
             std::fs::create_dir_all(&data_dir)?;
             let journal = Arc::new(Journal::open(&data_dir.join("bridge.sqlite"))?);
             let state = Arc::new(ServerState::unpaired());
@@ -1088,7 +1317,13 @@ fn main() {
                                     restored_grants_reconciled = true;
                                 }
                                 let _ = drain_cloud_queue(&sync_journal, &url, &credential).await;
-                                let _ = drain_structure_requests(&sync_grants, &sync_journal, &url, &credential).await;
+                                let _ = drain_structure_requests(
+                                    &sync_grants,
+                                    &sync_journal,
+                                    &url,
+                                    &credential,
+                                )
+                                .await;
                                 if let Err(error) = drain_write_requests(
                                     &sync_grants,
                                     &sync_journal,
@@ -1148,4 +1383,38 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("Spectra Bridge shell failed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_bridge_data_dir;
+
+    #[test]
+    fn bridge_data_dir_defaults_to_per_user_app_data() {
+        let app_data =
+            std::path::PathBuf::from(r"C:\Users\test\AppData\Roaming\com.spectra.bridge");
+        assert_eq!(
+            resolve_bridge_data_dir(None, app_data.clone()).unwrap(),
+            app_data
+        );
+    }
+
+    #[test]
+    fn bridge_data_dir_accepts_only_explicit_absolute_isolation() {
+        let app_data =
+            std::path::PathBuf::from(r"C:\Users\test\AppData\Roaming\com.spectra.bridge");
+        let isolated = std::ffi::OsString::from(r"C:\fixtures\spectra-bridge");
+        assert_eq!(
+            resolve_bridge_data_dir(Some(isolated), app_data).unwrap(),
+            std::path::PathBuf::from(r"C:\fixtures\spectra-bridge")
+        );
+    }
+
+    #[test]
+    fn bridge_data_dir_rejects_relative_isolation() {
+        let app_data =
+            std::path::PathBuf::from(r"C:\Users\test\AppData\Roaming\com.spectra.bridge");
+        let error = resolve_bridge_data_dir(Some(".tmp-bridge".into()), app_data).unwrap_err();
+        assert!(error.to_string().contains("must be absolute"));
+    }
 }

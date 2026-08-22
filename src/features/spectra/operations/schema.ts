@@ -32,6 +32,7 @@ export const OPERATION_TYPES = [
   "thread.create",
   "resultCard.create",
   "resultCard.update",
+  "app.command",
   "plannerTask.create",
   "quiz.create",
   "flashcardDeck.create",
@@ -48,6 +49,7 @@ export const MODEL_OPERATION_TYPES = [
   "workspaceItem.add",
   "workspaceItem.hide",
   "workspaceItem.setPinned",
+  "app.command",
 ] as const;
 
 export const PLAN_DECISIONS = [
@@ -86,7 +88,7 @@ const contentPatchSchema = z
               .string()
               .trim()
               .regex(
-                /^\/(?!.*(?:__proto__|prototype|constructor)(?:\/|$))[A-Za-z0-9_~\/-]+$/,
+                /^\/(?!.*(?:__proto__|prototype|constructor)(?:\/|$))[A-Za-z0-9_~:\/-]+$/,
               )
               .max(240),
             value: z.unknown(),
@@ -300,6 +302,12 @@ const workspaceItemSetPinnedInputSchema = z
     exclusive: z.boolean(),
   })
   .strict();
+const appCommandInputSchema = z
+  .object({
+    command: z.string().trim().min(1).max(120),
+    args: z.record(z.string(), z.unknown()),
+  })
+  .strict();
 
 export const modelOperationSchema = z.discriminatedUnion("type", [
   z
@@ -354,6 +362,12 @@ export const modelOperationSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("workspaceItem.setPinned"),
       input: workspaceItemSetPinnedInputSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("app.command"),
+      input: appCommandInputSchema,
     })
     .strict(),
 ]);
@@ -1441,6 +1455,23 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
                   nodeId: { type: "string" },
                   pinned: { type: "boolean" },
                   exclusive: { type: "boolean" },
+                },
+              },
+            },
+          },
+          {
+            type: "object",
+            additionalProperties: false,
+            required: ["type", "input"],
+            properties: {
+              type: { const: "app.command" },
+              input: {
+                type: "object",
+                additionalProperties: false,
+                required: ["command", "args"],
+                properties: {
+                  command: { type: "string" },
+                  args: { type: "object", additionalProperties: true },
                 },
               },
             },

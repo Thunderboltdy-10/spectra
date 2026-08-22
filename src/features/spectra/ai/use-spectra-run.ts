@@ -16,6 +16,7 @@ import {
 import type { CommandAttachment } from "../components/command-bar";
 import { getRunLedger, recordRunEvent } from "../collaboration/run-ledger";
 import { noteAiLocation } from "../collaboration/follow-ai";
+import { handleSpectraAiUiEvent } from "../collaboration/ai-ui-events";
 import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
 import { useSpectraPreferences } from "../settings/preference-store";
 
@@ -95,6 +96,9 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
           }
         }
       }
+      break;
+    case "ui_event":
+      handleSpectraAiUiEvent({ ...event, runId });
       break;
     case "operation_commit":
     case "operation_result":
@@ -302,6 +306,7 @@ function appendStep(
 export function useSpectraRun({
   surface,
   workspaceId,
+  scopeNodeId,
   artifactId,
   threadId,
   initialCards = EMPTY_INITIAL_CARDS,
@@ -319,6 +324,7 @@ export function useSpectraRun({
 }: {
   surface: SpectraRunSurface;
   workspaceId?: string;
+  scopeNodeId?: string;
   artifactId?: string;
   threadId?: string;
   initialCards?: SpectraResultCard[];
@@ -999,6 +1005,7 @@ export function useSpectraRun({
             prompt: clean,
             surface,
             workspaceId,
+            scopeNodeId,
             artifactId,
             // `null` is an explicit new-conversation boundary. It must not fall
             // through to the last durable thread ref: a user can deselect an
@@ -1062,6 +1069,7 @@ export function useSpectraRun({
       upsert,
       preferences.ai.continueCurrentConversation,
       workspaceId,
+      scopeNodeId,
     ],
   );
 

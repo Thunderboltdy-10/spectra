@@ -1205,7 +1205,7 @@ export function DocumentStudio({
           </>
         }
       >
-        {docMode === "write" && editor && !strictNative ? (
+        {(activeTab) => activeTab === "Format" && docMode === "write" && editor ? (
           <RichTextFormatBar
             editor={editor}
             disabled={readOnly}
@@ -1251,6 +1251,31 @@ export function DocumentStudio({
                           .run()
                   }
                 />
+              </>
+            }
+          />
+        ) : activeTab === "Insert" && docMode === "write" && editor ? (
+          <RichTextFormatBar
+            editor={editor}
+            disabled={readOnly}
+            label="Document insert tools"
+            withTextStyle={false}
+            inserts
+          />
+        ) : activeTab === "Table" && editor ? (
+          <RichTextFormatBar
+            editor={editor}
+            disabled={readOnly}
+            label="Table tools"
+            withTextStyle={false}
+            inserts={false}
+            trailing={
+              <>
+                <ToolbarButton label="Add table row" icon={Plus} onClick={() => editor.chain().focus().addRowAfter().run()} />
+                <ToolbarButton label="Add table column" icon={Plus} onClick={() => editor.chain().focus().addColumnAfter().run()} />
+                <ToolbarButton label="Delete table row" icon={Minus} onClick={() => editor.chain().focus().deleteRow().run()} />
+                <ToolbarButton label="Delete table column" icon={X} onClick={() => editor.chain().focus().deleteColumn().run()} />
+                <ToolbarButton label="Delete table" icon={Trash2} onClick={() => editor.chain().focus().deleteTable().run()} />
               </>
             }
           />

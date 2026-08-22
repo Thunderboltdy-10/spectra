@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   arbitrateAppSurface,
   choreographyDisabledResult,
+  resolveAppChoreographySurface,
 } from "../collaboration/app-choreography";
 
 describe("app choreography arbitration", () => {
@@ -31,6 +32,31 @@ describe("app choreography arbitration", () => {
         followingActor: true,
       }),
     ).toMatchObject({ animate: true, navigate: true, surface: "calendar" });
+  });
+
+  it("does not navigate for a different followed actor", () => {
+    expect(
+      arbitrateAppSurface("settings", {
+        visibleSurfaces: ["library"],
+        followingActor: true,
+        followedActorId: "ai-a",
+        actorId: "ai-b",
+      }),
+    ).toMatchObject({ animate: false, navigate: false, surface: "none" });
+  });
+
+  it("chooses exactly one of four visible rename surfaces", () => {
+    const decision = resolveAppChoreographySurface(
+      ["library", "workspace", "settings", "artifact"],
+      "library",
+      {
+        visibleSurfaces: ["library", "workspace", "settings", "artifact"],
+        focusedSurface: "artifact",
+        recentSurface: "workspace",
+        followingActor: false,
+      },
+    );
+    expect(decision).toMatchObject({ surface: "library", animate: true, navigate: false });
   });
 
   it("commits identically when the visual layer is disabled", () => {

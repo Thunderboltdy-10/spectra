@@ -57,7 +57,7 @@ function artifactId(value: string) {
   return value as Id<"spectraArtifacts">;
 }
 
-function contentProjection(value: unknown, base: DocxProjection): DocxProjection {
+export function contentProjection(value: unknown, base: DocxProjection): DocxProjection {
   const parsed = z.object({
     blocks: z.array(z.object({
       id: z.string().min(1).max(300),
@@ -68,14 +68,24 @@ function contentProjection(value: unknown, base: DocxProjection): DocxProjection
     outline: z.array(z.object({ id: z.string(), title: z.string(), level: z.number() })).optional(),
     nativeBinding: z.unknown().optional(),
   }).passthrough().parse(value);
+  // Strict-native materialization cannot interpret an omitted block as a
+  // deletion: the lens deliberately refuses destructive Word edits. Merge
+  // the semantic projection onto the last verified native projection so a
+  // partial/stale Yjs projection never turns into a false native deletion.
+  const incomingById = new Map(parsed.blocks.map((block) => [block.id, block]));
+  const baseIds = new Set(base.blocks.map((block) => block.id));
+  const blocks = base.blocks.map((block) => incomingById.get(block.id) ?? block);
+  for (const block of parsed.blocks) {
+    if (!baseIds.has(block.id)) blocks.push(block);
+  }
   return {
-    blocks: parsed.blocks,
+    blocks,
     outline: parsed.outline ?? base.outline,
     nativeBinding: base.nativeBinding,
   };
 }
 
-function changedRegions(before: DocxProjection, after: DocxProjection) {
+export function changedRegions(before: DocxProjection, after: DocxProjection) {
   const prior = new Map(before.blocks.map((block) => [block.id, block]));
   const changed: string[] = [];
   for (const block of after.blocks) {
@@ -86,6 +96,81 @@ function changedRegions(before: DocxProjection, after: DocxProjection) {
   }
   changed.push(...prior.keys());
   return [...new Set(changed)];
+}
+
+/** Queue one verified DOCX payload for the Bridge. Used by both the human
+ * editor endpoint and AI artifact updates so native materialization cannot be
+ * accidentally omitted by a second caller. */
+export async function materializeDocxArtifact(
+  workId: Id<"spectraArtifacts">,
+  content: unknown,
+) {
+  const [{ truth, payload }, workTruth] = await Promise.all([
+    fetchVerifiedNativePayload(workId, "cloud"),
+    convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
+      "replicas:forWork",
+      { workId },
+    ),
+  ]);
+  const opened = await docxLens.open(payload, "strict-native");
+  const projection = contentProjection(content, opened.projection);
+  const regionIds = changedRegions(opened.projection, projection);
+  const output = await docxLens.materialize({
+    projection,
+    carry: opened.preservedCarry,
+  });
+  const hash = await sha256Payload(output);
+  if (hash === truth.hash) return { state: "unchanged" as const, hash };
+  const [next, comparison] = await Promise.all([
+    docxLens.open(output, "strict-native"),
+    comparePackages(payload, output),
+  ]);
+  const stored = await uploadNativePayload(output, hash, truth.nativeFormat);
+  const local = workTruth.replicas.find(
+    (replica) => replica.kind === "local" && replica.state !== "unavailable",
+  );
+  if (!local) throw new Error("LOCAL_REPLICA_UNAVAILABLE");
+  const queued = await convexMutation<
+    {
+      workId: Id<"spectraArtifacts">;
+      payloadRef: string;
+      contentHash: string;
+      baseRevision: string;
+      idempotencyKey: string;
+      fidelityMap: unknown;
+      regionIds: string[];
+      partNames: string[];
+      localReplicaId?: Id<"workReplicas">;
+      baseContent?: unknown;
+      baseContentHash?: string;
+      baseTextIndex?: string;
+    },
+    { requestId: string; state: string }
+  >("replicas:queueMaterialization", {
+    workId,
+    payloadRef: stored.payloadRef,
+    contentHash: hash,
+    baseRevision: local.revision,
+    idempotencyKey: crypto.randomUUID(),
+    fidelityMap: next.fidelityMap,
+    regionIds,
+    partNames: comparison.parts
+      .filter((part) => part.verdict !== "identical")
+      .map((part) => `/${part.name}`),
+    localReplicaId: local._id as Id<"workReplicas">,
+    baseContent: opened.projection,
+    baseContentHash: opened.projection.nativeBinding.semanticDigest,
+    baseTextIndex: opened.projection.blocks
+      .map((block) => block.text)
+      .join("\n")
+      .slice(0, 200_000),
+  });
+  return {
+    state: queued.state,
+    requestId: queued.requestId,
+    hash,
+    status: "Waiting to save locally",
+  };
 }
 
 function mergeExternalProjection(
@@ -237,69 +322,7 @@ export async function POST(request: Request) {
     }
 
     if (input.action === "materialize") {
-      const [{ truth, payload }, workTruth] = await Promise.all([
-        fetchVerifiedNativePayload(workId, "cloud"),
-        convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
-          "replicas:forWork",
-          { workId },
-        ),
-      ]);
-      const opened = await docxLens.open(payload, "strict-native");
-      const projection = contentProjection(input.content, opened.projection);
-      const regionIds = changedRegions(opened.projection, projection);
-      const output = await docxLens.materialize({
-        projection,
-        carry: opened.preservedCarry,
-      });
-      const hash = await sha256Payload(output);
-      if (hash === truth.hash)
-        return NextResponse.json({ state: "unchanged", hash });
-      const [next, comparison] = await Promise.all([
-        docxLens.open(output, "strict-native"),
-        comparePackages(payload, output),
-      ]);
-      const stored = await uploadNativePayload(output, hash, truth.nativeFormat);
-      const local = workTruth.replicas.find((replica) => replica.kind === "local" && replica.state !== "unavailable");
-      if (!local) throw new Error("LOCAL_REPLICA_UNAVAILABLE");
-      const partNames = comparison.parts
-        .filter((part) => part.verdict !== "identical")
-        .map((part) => `/${part.name}`);
-      const queued = await convexMutation<
-        {
-          workId: Id<"spectraArtifacts">;
-          payloadRef: string;
-          contentHash: string;
-          baseRevision: string;
-          idempotencyKey: string;
-          fidelityMap: unknown;
-          regionIds: string[];
-          partNames: string[];
-          localReplicaId?: Id<"workReplicas">;
-          baseContent?: unknown;
-          baseContentHash?: string;
-          baseTextIndex?: string;
-        },
-        { requestId: string; state: string }
-      >("replicas:queueMaterialization", {
-        workId,
-        payloadRef: stored.payloadRef,
-        contentHash: hash,
-        baseRevision: local.revision,
-        idempotencyKey: crypto.randomUUID(),
-        fidelityMap: next.fidelityMap,
-        regionIds,
-        partNames,
-        localReplicaId: local._id as Id<"workReplicas">,
-        baseContent: opened.projection,
-        baseContentHash: opened.projection.nativeBinding.semanticDigest,
-        baseTextIndex: opened.projection.blocks.map((block) => block.text).join("\n").slice(0, 200_000),
-      });
-      return NextResponse.json({
-        state: queued.state,
-        requestId: queued.requestId,
-        hash,
-        status: "Waiting to save locally",
-      });
+      return NextResponse.json(await materializeDocxArtifact(workId, input.content));
     }
 
     const [cloud, local, artifact] = await Promise.all([

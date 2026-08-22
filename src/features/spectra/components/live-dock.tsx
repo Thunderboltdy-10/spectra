@@ -688,12 +688,12 @@ export function LiveDock({
       aria-label="Live Dock"
       data-live-dock-version="2"
     >
-      <div className="spectra-live-dock-row flex w-full items-center gap-1">
+      <div className="spectra-live-dock-row grid w-full grid-cols-[44px_minmax(0,1fr)] items-center gap-2">
         {onStartNewThread && (showOptimistic || visible.length > 0) ? (
           <button
             type="button"
             onClick={onStartNewThread}
-            className="spectra-live-dock-slot mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="spectra-live-dock-slot flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             aria-label="Start a new thread"
             title="New thread"
           >
@@ -701,7 +701,7 @@ export function LiveDock({
           </button>
         ) : null}
         <div
-          className="spectra-run-tab-strip flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overflow-y-visible px-0.5 pb-0.5 pt-0.5 max-sm:snap-x"
+          className="spectra-run-tab-strip col-start-2 flex min-w-0 w-full items-center gap-1.5 overflow-x-auto overflow-y-visible px-0.5 pb-0.5 pt-0.5 max-sm:snap-x"
           aria-live="polite"
         >
         {showOptimistic ? (

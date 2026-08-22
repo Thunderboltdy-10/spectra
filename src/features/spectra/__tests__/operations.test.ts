@@ -75,6 +75,43 @@ describe("Spectra operation policy", () => {
     if (plan.operations[0]?.type === "artifact.update") expect(plan.operations[0].input.contentPatch?.changes[0]?.path).toBe("/questions/0/timeLimitSeconds");
   });
 
+  it("accepts stable document block selectors while rejecting prototype paths", () => {
+    expect(() => parseSpectraPlan({
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["document"], requestedVisibleArtifactCount: 0, targetArtifactId: "doc-1", targetWorkspaceId: null },
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "doc-1",
+          blueprintKey: "document",
+          title: null,
+          summary: null,
+          content: null,
+          contentPatch: { changes: [{ path: "/blocks/id:docx:paragraph:abc/text", value: "Updated" }] },
+          tags: null,
+        },
+      }],
+      finalResponse: "Updated the document.",
+    })).not.toThrow();
+    expect(() => parseSpectraPlan({
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["document"], requestedVisibleArtifactCount: 0, targetArtifactId: "doc-1", targetWorkspaceId: null },
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "doc-1",
+          blueprintKey: "document",
+          title: null,
+          summary: null,
+          content: null,
+          contentPatch: { changes: [{ path: "/blocks/__proto__/text", value: "Unsafe" }] },
+          tags: null,
+        },
+      }],
+      finalResponse: "Updated the document.",
+    })).toThrow();
+  });
+
   it("treats omitted unchanged update fields as null", () => {
     const plan = parseSpectraPlan({
       decision: "operate",

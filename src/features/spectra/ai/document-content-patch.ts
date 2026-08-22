@@ -148,6 +148,9 @@ export function resolveDocumentPatchPath(
   if (!match) return path;
   const [, prefix = "/", selector = "", rest = ""] = match;
   const blocks = asBlocks(content);
+  // JSON Pointer '-' addresses an append slot. It is intentionally left
+  // unresolved so the generic patch applier can push onto the blocks array.
+  if (selector === "-" && rest === "") return path;
   let index = -1;
   if (/^\d+$/.test(selector)) {
     index = Number(selector);

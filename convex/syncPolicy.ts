@@ -57,6 +57,18 @@ const policyValues = {
   ),
   protectedOriginal: v.boolean(),
 };
+const policyPatch = {
+  preset: v.optional(policyValues.preset),
+  contentDirection: v.optional(policyValues.contentDirection),
+  discovery: v.optional(policyValues.discovery),
+  structure: v.optional(policyValues.structure),
+  cloudContent: v.optional(policyValues.cloudContent),
+  localMirrorGrantId: v.optional(v.union(v.string(), v.null())),
+  includeGlobs: v.optional(v.array(v.string())),
+  excludeGlobs: v.optional(v.array(v.string())),
+  timing: v.optional(policyValues.timing),
+  protectedOriginal: v.optional(v.boolean()),
+};
 
 function policySnapshot(policy: {
   preset: string;
@@ -204,6 +216,68 @@ export const overrideAccount = mutation({
       : await ctx.db.insert("syncPolicies", { accountId: actor.accountId, scopeKind: "account", scopeId, ...next, createdAt: now, updatedAt: now });
     const changeId = await ctx.db.insert("syncPolicyChanges", { accountId: actor.accountId, scopeKind: "account", scopeId, action: "override", before: policySnapshot(existing), after: policySnapshot(next), actorKind: "user", idempotencyKey: args.idempotencyKey, createdAt: now });
     return { changed: true, policyId, changeId };
+  },
+});
+
+/** Apply a partial item policy without widening it to the account scope. The
+ * current effective value is resolved per item so inherited folder/workspace
+ * policy is preserved before the requested fields are overlaid. */
+export const patchItems = mutation({
+  args: {
+    itemIds: v.array(v.string()),
+    patch: v.object(policyPatch),
+    idempotencyKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const itemIds = [...new Set(args.itemIds.map((id) => id.trim()).filter(Boolean))];
+    if (itemIds.length === 0 || itemIds.length > 100) throw new Error("SYNC_POLICY_TARGETS_INVALID");
+    const rootKey = args.idempotencyKey.trim();
+    if (!rootKey || rootKey.length > 160) throw new Error("SYNC_POLICY_IDEMPOTENCY_KEY_INVALID");
+    const results = [];
+    for (const itemId of itemIds) {
+      const key = `${rootKey}:${itemId}`.slice(0, 200);
+      const duplicate = await ctx.db.query("syncPolicyChanges").withIndex("by_account_key", (q) =>
+        q.eq("accountId", actor.accountId).eq("idempotencyKey", key),
+      ).unique();
+      if (duplicate) {
+        results.push({ itemId, changed: false, changeId: duplicate._id });
+        continue;
+      }
+      const effective = await computeEffectivePolicy(ctx, actor.accountId, { item: itemId });
+      const existing = await ctx.db.query("syncPolicies").withIndex("by_account_scope", (q) =>
+        q.eq("accountId", actor.accountId).eq("scopeKind", "item").eq("scopeId", itemId),
+      ).unique();
+      const next = {
+        ...effective,
+        ...args.patch,
+        localMirrorGrantId: args.patch.localMirrorGrantId === null
+          ? undefined
+          : (args.patch.localMirrorGrantId ?? effective.localMirrorGrantId),
+        includeGlobs: [...new Set((args.patch.includeGlobs ?? effective.includeGlobs).map((glob) => glob.trim()).filter(Boolean))],
+        excludeGlobs: [...new Set((args.patch.excludeGlobs ?? effective.excludeGlobs).map((glob) => glob.trim()).filter(Boolean))],
+      };
+      if (next.includeGlobs.length > 100 || next.excludeGlobs.length > 100)
+        throw new Error("SYNC_POLICY_FILTER_LIMIT");
+      const now = Date.now();
+      const policyId = existing
+        ? (await ctx.db.patch(existing._id, { ...next, updatedAt: now }), existing._id)
+        : await ctx.db.insert("syncPolicies", { accountId: actor.accountId, scopeKind: "item", scopeId: itemId, ...next, createdAt: now, updatedAt: now });
+      const changeId = await ctx.db.insert("syncPolicyChanges", {
+        accountId: actor.accountId,
+        scopeKind: "item",
+        scopeId: itemId,
+        action: "override",
+        before: policySnapshot(existing),
+        after: policySnapshot(next),
+        actorKind: "user",
+        idempotencyKey: key,
+        createdAt: now,
+      });
+      results.push({ itemId, changed: true, policyId, changeId });
+    }
+    return { changed: results.filter((result) => result.changed).length, results };
   },
 });
 

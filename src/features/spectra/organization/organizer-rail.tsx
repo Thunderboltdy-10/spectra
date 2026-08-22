@@ -189,6 +189,9 @@ function RailBranch({
               onClick={() =>
                 handlers.onNavigate({ kind: "folder", nodeId: node.nodeId })
               }
+              onDoubleClick={() =>
+                handlers.onNavigate({ kind: "folder", nodeId: node.nodeId })
+              }
               className={cn(
                 "group flex h-8 cursor-default items-center gap-1 rounded-[6px] pr-1.5 text-[13px] transition-colors",
                 selected

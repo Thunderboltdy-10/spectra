@@ -94,6 +94,8 @@ export type StudioContract = {
   density: StudioDensity;
   compatibilityProfile: CompatibilityProfile;
   fidelity: Readonly<Record<string, FidelityClass>>;
+  /** Optional app-level semantic dispatcher supplied by the shell. */
+  executeApplicationCommand?: (commandId: string, params: unknown) => void | Promise<void>;
   /** The shell's docked inspectors. A studio opens them, never rebuilds them. */
   inspector: {
     open: StudioInspectorPanel | null;
@@ -147,6 +149,7 @@ export function useStudioContractValue({
   inspector,
   compatibilityProfile = "spectra-native",
   fidelity = { artifact: "NATIVE" },
+  executeApplicationCommand,
 }: {
   artifactId: string;
   type: WorkType;
@@ -157,6 +160,7 @@ export function useStudioContractValue({
   inspector: StudioContract["inspector"];
   compatibilityProfile?: CompatibilityProfile;
   fidelity?: Readonly<Record<string, FidelityClass>>;
+  executeApplicationCommand?: StudioContract["executeApplicationCommand"];
 }): StudioContract {
   return useMemo(() => {
     const definition = getWorkDefinition(type);
@@ -173,9 +177,10 @@ export function useStudioContractValue({
       density,
       compatibilityProfile,
       fidelity,
+      ...(executeApplicationCommand ? { executeApplicationCommand } : {}),
       inspector,
     };
-  }, [artifactId, compatibilityProfile, density, fidelity, inspector, role, surface, sync, type]);
+  }, [artifactId, compatibilityProfile, density, executeApplicationCommand, fidelity, inspector, role, surface, sync, type]);
 }
 
 /**

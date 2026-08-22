@@ -8,8 +8,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::journal::{Journal, OpState};
-use crate::watcher::office_lock_exists;
 use crate::platform::Platform;
+use crate::watcher::office_lock_exists;
 
 #[derive(Debug, Error)]
 pub enum FsError {
@@ -85,9 +85,7 @@ impl GrantRegistry {
         label: String,
         root: &Path,
     ) -> Result<Grant, FsError> {
-        let normalized_root = root
-            .canonicalize()
-            .unwrap_or_else(|_| root.to_path_buf());
+        let normalized_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         if let Some(existing) = self
             .grants
             .read()
@@ -347,7 +345,9 @@ impl<P: Platform> SafeWriter<P> {
         let source = self.grants.resolve(grant_id, source_relative_path)?;
         let target = self.grants.resolve(grant_id, target_relative_path)?;
         if source == target {
-            return Err(FsError::Other(anyhow::anyhow!("source and target are identical")));
+            return Err(FsError::Other(anyhow::anyhow!(
+                "source and target are identical"
+            )));
         }
         if !source.exists() {
             return Err(FsError::Io(std::io::Error::new(
@@ -356,7 +356,9 @@ impl<P: Platform> SafeWriter<P> {
             )));
         }
         if target.exists() {
-            return Err(FsError::Other(anyhow::anyhow!("destination already exists")));
+            return Err(FsError::Other(anyhow::anyhow!(
+                "destination already exists"
+            )));
         }
         let pre_hash = source.is_file().then(|| sha256_file(&source)).transpose()?;
         let op = self.journal.begin_intent(
@@ -366,27 +368,36 @@ impl<P: Platform> SafeWriter<P> {
             None,
             pre_hash.as_deref(),
         )?;
-        if op.state == OpState::Verified { return Ok(op.op_id); }
+        if op.state == OpState::Verified {
+            return Ok(op.op_id);
+        }
         let parent = target.parent().ok_or(FsError::GrantEscape)?;
         fs::create_dir_all(parent)?;
         if self.platform.is_locked(&source)? {
             return Err(FsError::FileLocked);
         }
         if target.exists() {
-            return Err(FsError::Other(anyhow::anyhow!("destination already exists")));
+            return Err(FsError::Other(anyhow::anyhow!(
+                "destination already exists"
+            )));
         }
         fs::rename(&source, &target)?;
-        self.journal.transition(&op.op_id, OpState::Performed, pre_hash.as_deref(), None)?;
+        self.journal
+            .transition(&op.op_id, OpState::Performed, pre_hash.as_deref(), None)?;
         if source.exists() || !target.exists() {
             self.journal.transition(
                 &op.op_id,
                 OpState::Failed,
                 None,
-                Some(("move-verification-failed", "source or destination state was unexpected")),
+                Some((
+                    "move-verification-failed",
+                    "source or destination state was unexpected",
+                )),
             )?;
             return Err(FsError::VerificationFailed);
         }
-        self.journal.transition(&op.op_id, OpState::Verified, pre_hash.as_deref(), None)?;
+        self.journal
+            .transition(&op.op_id, OpState::Verified, pre_hash.as_deref(), None)?;
         Ok(op.op_id)
     }
 }
@@ -609,21 +620,45 @@ mod tests {
             }),
             Err(FsError::FileLocked)
         ));
-        assert_eq!(fs::read(dir.path().join("paper.docx")).unwrap(), b"original");
+        assert_eq!(
+            fs::read(dir.path().join("paper.docx")).unwrap(),
+            b"original"
+        );
     }
 
     #[test]
     fn relocate_is_journaled_and_idempotent() {
         let dir = tempdir().unwrap();
         let grants = Arc::new(GrantRegistry::default());
-        let grant = grants.add_native_selection("Test".into(), dir.path()).unwrap();
+        let grant = grants
+            .add_native_selection("Test".into(), dir.path())
+            .unwrap();
         std::fs::write(dir.path().join("before.txt"), b"move me").unwrap();
         let journal = Arc::new(Journal::in_memory().unwrap());
         let writer = SafeWriter::new(grants, journal.clone(), Arc::new(TestPlatform::default()));
-        let first = writer.relocate(&grant.id, Path::new("before.txt"), Path::new("after.txt"), "r", "move-once").unwrap();
+        let first = writer
+            .relocate(
+                &grant.id,
+                Path::new("before.txt"),
+                Path::new("after.txt"),
+                "r",
+                "move-once",
+            )
+            .unwrap();
         assert!(!dir.path().join("before.txt").exists());
-        assert_eq!(std::fs::read(dir.path().join("after.txt")).unwrap(), b"move me");
-        let second = writer.relocate(&grant.id, Path::new("before.txt"), Path::new("after.txt"), "r", "move-once").unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("after.txt")).unwrap(),
+            b"move me"
+        );
+        let second = writer
+            .relocate(
+                &grant.id,
+                Path::new("before.txt"),
+                Path::new("after.txt"),
+                "r",
+                "move-once",
+            )
+            .unwrap();
         assert_eq!(first, second);
     }
 }

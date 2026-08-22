@@ -198,7 +198,7 @@ function contentFor(projection: OfficeProjection, isSheet: boolean) {
     ? xlsxArtifactContent(projection as XlsxProjection)
     : pptxArtifactContent(projection as PptxProjection);
 }
-function projectionFor(
+export function projectionFor(
   content: unknown,
   base: OfficeProjection,
   isSheet: boolean,
@@ -206,6 +206,72 @@ function projectionFor(
   return isSheet
     ? contentToXlsx(content, base as XlsxProjection)
     : contentToPptx(content, base as PptxProjection);
+}
+
+/** Queue one verified XLSX/PPTX payload for the Bridge. AI and human edits
+ * must share this path so native writes cannot diverge by caller. */
+export async function materializeOfficeArtifact(
+  workId: Id<"spectraArtifacts">,
+  content: unknown,
+) {
+  const [{ truth: cloudTruth, payload: cloudPayload }, workTruth] =
+    await Promise.all([
+      fetchVerifiedNativePayload(workId, "cloud"),
+      convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
+        "replicas:forWork",
+        { workId },
+      ),
+    ]);
+  const isSheet = spreadsheetFormats.has(cloudTruth.nativeFormat);
+  const baseOpened = isSheet
+    ? await xlsxLens.open(cloudPayload)
+    : await pptxLens.open(cloudPayload);
+  const baseProjection = baseOpened.projection as OfficeProjection;
+  const projection = projectionFor(content, baseProjection, isSheet);
+  const regionIds = changedRegions(baseProjection, projection, isSheet);
+  const output = isSheet
+    ? await xlsxLens.materialize({
+        projection: projection as XlsxProjection,
+        carry: (baseOpened as Awaited<ReturnType<typeof xlsxLens.open>>)
+          .preservedCarry,
+      })
+    : await pptxLens.materialize({
+        projection: projection as PptxProjection,
+        carry: (baseOpened as Awaited<ReturnType<typeof pptxLens.open>>)
+          .preservedCarry,
+      });
+  const hash = await sha256Payload(output);
+  if (hash === cloudTruth.hash) return { state: "unchanged" as const, hash };
+  const [next, comparison] = await Promise.all([
+    isSheet ? xlsxLens.open(output) : pptxLens.open(output),
+    comparePackages(cloudPayload, output),
+  ]);
+  const stored = await uploadNativePayload(output, hash, cloudTruth.nativeFormat);
+  const local = workTruth.replicas.find(
+    (replica) => replica.kind === "local" && replica.state !== "unavailable",
+  );
+  if (!local) throw new Error("LOCAL_REPLICA_UNAVAILABLE");
+  const queued = await convexMutation("replicas:queueMaterialization", {
+    workId,
+    payloadRef: stored.payloadRef,
+    contentHash: hash,
+    baseRevision: local.revision,
+    idempotencyKey: crypto.randomUUID(),
+    fidelityMap: next.fidelityMap,
+    regionIds,
+    partNames: comparison.parts
+      .filter((part) => part.verdict !== "identical")
+      .map((part) => `/${part.name}`),
+    localReplicaId: local._id as Id<"workReplicas">,
+    baseContent: contentFor(baseProjection, isSheet),
+    baseContentHash: baseProjection.nativeBinding.semanticDigest,
+  });
+  return {
+    state: (queued as { state: string }).state,
+    requestId: (queued as { requestId: string }).requestId,
+    hash,
+    status: "Waiting to save locally",
+  };
 }
 
 function changedRegions(
@@ -407,56 +473,7 @@ export async function POST(request: Request) {
     const baseProjection = baseOpened.projection as OfficeProjection;
 
     if (input.action === "materialize") {
-      const workTruth = await convexQuery<
-        { workId: Id<"spectraArtifacts"> },
-        WorkTruth
-      >("replicas:forWork", { workId });
-      const projection = projectionFor(input.content, baseProjection, isSheet);
-      const regionIds = changedRegions(baseProjection, projection, isSheet);
-      const output = isSheet
-        ? await xlsxLens.materialize({
-            projection: projection as XlsxProjection,
-            carry: (baseOpened as Awaited<ReturnType<typeof xlsxLens.open>>)
-              .preservedCarry,
-          })
-        : await pptxLens.materialize({
-            projection: projection as PptxProjection,
-            carry: (baseOpened as Awaited<ReturnType<typeof pptxLens.open>>)
-              .preservedCarry,
-          });
-      const hash = await sha256Payload(output);
-      if (hash === cloud.truth.hash)
-        return NextResponse.json({ state: "unchanged", hash });
-      const [next, comparison] = await Promise.all([
-        isSheet ? xlsxLens.open(output) : pptxLens.open(output),
-        comparePackages(cloud.payload, output),
-      ]);
-      const stored = await uploadNativePayload(output, hash, cloud.truth.nativeFormat);
-      const local = workTruth.replicas.find(
-        (replica) => replica.kind === "local" && replica.state !== "unavailable",
-      );
-      if (!local) throw new Error("LOCAL_REPLICA_UNAVAILABLE");
-      const queued = await convexMutation("replicas:queueMaterialization", {
-        workId,
-        payloadRef: stored.payloadRef,
-        contentHash: hash,
-        baseRevision: local.revision,
-        idempotencyKey: crypto.randomUUID(),
-        fidelityMap: next.fidelityMap,
-        regionIds,
-        partNames: comparison.parts
-          .filter((part) => part.verdict !== "identical")
-          .map((part) => `/${part.name}`),
-        localReplicaId: local._id as Id<"workReplicas">,
-        baseContent: contentFor(baseProjection, isSheet),
-        baseContentHash: baseProjection.nativeBinding.semanticDigest,
-      });
-      return NextResponse.json({
-        state: (queued as { state: string }).state,
-        requestId: (queued as { requestId: string }).requestId,
-        hash,
-        status: "Waiting to save locally",
-      });
+      return NextResponse.json(await materializeOfficeArtifact(workId, input.content));
     }
 
     const [local, artifact] = await Promise.all([

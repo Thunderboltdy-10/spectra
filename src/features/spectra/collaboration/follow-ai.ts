@@ -20,6 +20,7 @@
 import { useSyncExternalStore } from "react";
 
 export type AiLocation = {
+  actorId?: string;
   artifactId: string;
   /** Canonical semantic path of the control being worked, when known. */
   path?: string;
@@ -28,19 +29,42 @@ export type AiLocation = {
   updatedAt: number;
 };
 
+export type AiSurfaceLocation = {
+  actorId?: string;
+  route: "library" | "calendar" | "settings" | "workspace" | "artifact";
+  target?: string;
+  note?: string;
+  updatedAt: number;
+};
+
 const PROGRAMMATIC_OPEN_MS = 1200;
 
 let following = false;
+let followedActorId: string | null = null;
 let location: AiLocation | null = null;
+let surfaceLocation: AiSurfaceLocation | null = null;
+const locationsByActor = new Map<string, AiLocation>();
+const surfacesByActor = new Map<string, AiSurfaceLocation>();
 let lastDispatchedArtifactId: string | null = null;
+let lastDispatchedSurfaceKey: string | null = null;
 let programmaticOpenAt = 0;
 const listeners = new Set<() => void>();
 
-type FollowSnapshot = { following: boolean; location: AiLocation | null };
-let snapshot: FollowSnapshot = { following: false, location: null };
+type FollowSnapshot = {
+  following: boolean;
+  followedActorId: string | null;
+  location: AiLocation | null;
+  surfaceLocation: AiSurfaceLocation | null;
+};
+let snapshot: FollowSnapshot = {
+  following: false,
+  followedActorId: null,
+  location: null,
+  surfaceLocation: null,
+};
 
 function emit(): void {
-  snapshot = { following, location };
+  snapshot = { following, followedActorId, location, surfaceLocation };
   for (const listener of listeners) listener();
 }
 
@@ -59,6 +83,14 @@ function dispatchOpen(artifactId: string): void {
   );
 }
 
+function dispatchSurface(location: AiSurfaceLocation): void {
+  if (typeof window === "undefined") return;
+  const key = `${location.route}|${location.target ?? ""}`;
+  if (lastDispatchedSurfaceKey === key) return;
+  lastDispatchedSurfaceKey = key;
+  window.dispatchEvent(new CustomEvent("spectra:ai-navigate", { detail: location }));
+}
+
 export function isFollowingAi(): boolean {
   return following;
 }
@@ -66,14 +98,62 @@ export function isFollowingAi(): boolean {
 export function setFollowingAi(next: boolean): void {
   if (following === next) return;
   following = next;
-  if (next && location?.artifactId) dispatchOpen(location.artifactId);
+  if (!next) {
+    followedActorId = null;
+    lastDispatchedArtifactId = null;
+    lastDispatchedSurfaceKey = null;
+  } else {
+    const actorLocation = followedActorId ? locationsByActor.get(followedActorId) : location;
+    const actorSurface = followedActorId ? surfacesByActor.get(followedActorId) : surfaceLocation;
+    if (actorLocation?.artifactId) dispatchOpen(actorLocation.artifactId);
+    if (actorSurface) dispatchSurface(actorSurface);
+  }
   emit();
+}
+
+/** Follow exactly one AI actor. Passing null disengages. */
+export function followAiActor(actorId: string | null): void {
+  const normalized = actorId?.trim() || null;
+  if (!normalized) {
+    setFollowingAi(false);
+    return;
+  }
+  followedActorId = normalized;
+  following = true;
+  lastDispatchedArtifactId = null;
+  lastDispatchedSurfaceKey = null;
+  const actorLocation = locationsByActor.get(normalized);
+  const actorSurface = surfacesByActor.get(normalized);
+  if (actorLocation?.artifactId) dispatchOpen(actorLocation.artifactId);
+  if (actorSurface) dispatchSurface(actorSurface);
+  emit();
+}
+
+export function getFollowedAiActorId(): string | null {
+  return followedActorId;
+}
+
+/** Publish an app-wide target for Follow AI. Non-followed actors only update
+ * the dock; followed actors may navigate through this single controller. */
+export function noteAiSurface(update: Omit<AiSurfaceLocation, "updatedAt">): void {
+  const next = { ...update, updatedAt: Date.now() };
+  const unchanged = surfaceLocation?.route === next.route && surfaceLocation?.target === next.target && surfaceLocation?.note === next.note;
+  if (unchanged) return;
+  surfaceLocation = next;
+  if (next.actorId) surfacesByActor.set(next.actorId, next);
+  if (following && (!followedActorId || next.actorId === followedActorId)) dispatchSurface(next);
+  emit();
+}
+
+export function getAiSurfaceLocation(): AiSurfaceLocation | null {
+  return surfaceLocation;
 }
 
 /** The user took control: navigation, scrolling, editing, any direct input. */
 export function disengageFollowAi(): void {
   if (!following) return;
   following = false;
+  followedActorId = null;
   emit();
 }
 
@@ -88,6 +168,7 @@ export function isProgrammaticOpen(): boolean {
  * reveals the exact target itself.
  */
 export function noteAiLocation(update: {
+  actorId?: string;
   artifactId: string;
   path?: string;
   note?: string;
@@ -97,6 +178,7 @@ export function noteAiLocation(update: {
   // A coarse publisher (the run feed) names only the artifact; never let it
   // overwrite a precise path and note reported by the open studio.
   const nextLocation: AiLocation = {
+    ...(update.actorId ? { actorId: update.actorId } : {}),
     artifactId: update.artifactId,
     ...(update.path !== undefined || !sameArtifact
       ? { path: update.path }
@@ -118,14 +200,23 @@ export function noteAiLocation(update: {
   // React correctly stops the resulting external-store feedback loop.
   if (sameArtifact && samePath && sameNote) return;
   location = nextLocation;
-  if (following && !sameArtifact) dispatchOpen(update.artifactId);
+  if (update.actorId) locationsByActor.set(update.actorId, nextLocation);
+  if (following && (!followedActorId || update.actorId === followedActorId) && !sameArtifact)
+    dispatchOpen(update.artifactId);
   emit();
 }
 
 export function clearAiLocation(artifactId?: string): void {
-  if (!location) return;
-  if (artifactId && location.artifactId !== artifactId) return;
-  location = null;
+  for (const [actorId, actorLocation] of locationsByActor) {
+    if (!artifactId || actorLocation.artifactId === artifactId) locationsByActor.delete(actorId);
+  }
+  if (!artifactId) surfacesByActor.clear();
+  if (location && (!artifactId || location.artifactId === artifactId)) location = null;
+  if (!artifactId || !location || location.artifactId === artifactId) surfaceLocation = null;
+  if (!location && !surfaceLocation) {
+    lastDispatchedArtifactId = null;
+    lastDispatchedSurfaceKey = null;
+  }
   emit();
 }
 
@@ -146,11 +237,18 @@ export function subscribeFollowAi(listener: () => void): () => void {
   return subscribe(listener);
 }
 
-const SERVER_SNAPSHOT: FollowSnapshot = { following: false, location: null };
+const SERVER_SNAPSHOT: FollowSnapshot = {
+  following: false,
+  followedActorId: null,
+  location: null,
+  surfaceLocation: null,
+};
 
 export function useFollowAi(): {
   following: boolean;
+  followedActorId: string | null;
   location: AiLocation | null;
+  surfaceLocation: AiSurfaceLocation | null;
   setFollowing: (next: boolean) => void;
 } {
   const state = useSyncExternalStore(
@@ -164,9 +262,13 @@ export function useFollowAi(): {
 /** Test-only reset. */
 export function __resetFollowAi(): void {
   following = false;
+  followedActorId = null;
   location = null;
   lastDispatchedArtifactId = null;
+  lastDispatchedSurfaceKey = null;
   programmaticOpenAt = 0;
+  locationsByActor.clear();
+  surfacesByActor.clear();
   listeners.clear();
-  snapshot = { following: false, location: null };
+  snapshot = { following: false, followedActorId: null, location: null, surfaceLocation: null };
 }

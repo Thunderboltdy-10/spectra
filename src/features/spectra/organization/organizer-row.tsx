@@ -11,6 +11,7 @@ export const ROW_HEIGHT = 36;
 export type RowCallbacks = {
   onPointerDown: (event: React.PointerEvent, node: TreeNode) => void;
   onClick: (event: React.MouseEvent, node: TreeNode) => void;
+  onDoubleClick: (event: React.MouseEvent, node: TreeNode) => void;
   onOpen: (node: TreeNode) => void;
   onContextMenu: (event: React.MouseEvent, node: TreeNode) => void;
   onMenuButton: (event: React.MouseEvent, node: TreeNode) => void;
@@ -64,7 +65,7 @@ export const OrganizerRow = memo(function OrganizerRow({
       data-node-row={node.nodeId}
       style={{ top, height: ROW_HEIGHT }}
       className={cn(
-        "group absolute inset-x-0 flex cursor-grab items-center gap-2 rounded-[6px] pl-2 pr-1.5 text-[13px] transition-colors active:cursor-grabbing",
+        "group absolute inset-x-0 flex cursor-default items-center gap-2 rounded-[6px] pl-2 pr-1.5 text-[13px] transition-colors",
         selected
           ? "bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-elevated))] text-[var(--text-primary)]"
           : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
@@ -75,7 +76,7 @@ export const OrganizerRow = memo(function OrganizerRow({
       )}
       onPointerDown={(event) => callbacks.onPointerDown(event, node)}
       onClick={(event) => callbacks.onClick(event, node)}
-      onDoubleClick={() => callbacks.onOpen(node)}
+      onDoubleClick={(event) => callbacks.onDoubleClick(event, node)}
       onContextMenu={(event) => callbacks.onContextMenu(event, node)}
     >
       {insertion ? (

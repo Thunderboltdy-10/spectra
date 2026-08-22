@@ -231,7 +231,12 @@ pub async fn reconcile_missing_resources(
     mount_id: &str,
     scan_id: &str,
 ) -> anyhow::Result<()> {
-    let _: serde_json::Value = mutation(deployment_url, "bridgeSync:reconcileMissingResources", serde_json::json!({ "credential": credential, "mountId": mount_id, "scanId": scan_id })).await?;
+    let _: serde_json::Value = mutation(
+        deployment_url,
+        "bridgeSync:reconcileMissingResources",
+        serde_json::json!({ "credential": credential, "mountId": mount_id, "scanId": scan_id }),
+    )
+    .await?;
     Ok(())
 }
 
@@ -358,8 +363,15 @@ pub async fn claim_fs_request(
     credential: &str,
 ) -> anyhow::Result<Option<ClaimedFsRequest>> {
     #[derive(Deserialize)]
-    struct Response { request: Option<ClaimedFsRequest> }
-    let response: Response = mutation(deployment_url, "bridgeStructure:claim", serde_json::json!({ "credential": credential })).await?;
+    struct Response {
+        request: Option<ClaimedFsRequest>,
+    }
+    let response: Response = mutation(
+        deployment_url,
+        "bridgeStructure:claim",
+        serde_json::json!({ "credential": credential }),
+    )
+    .await?;
     Ok(response.request)
 }
 
@@ -373,10 +385,15 @@ pub async fn complete_fs_request(
 ) -> anyhow::Result<()> {
     let mut args = serde_json::json!({ "credential": credential, "requestId": request_id, "outcome": outcome });
     let object = args.as_object_mut().unwrap();
-    if let Some(path) = actual_relative_path { object.insert("actualRelativePath".into(), path.into()); }
+    if let Some(path) = actual_relative_path {
+        object.insert("actualRelativePath".into(), path.into());
+    }
     if let Some((code, message)) = error {
         object.insert("errorCode".into(), code.into());
-        object.insert("errorMessage".into(), message.chars().take(500).collect::<String>().into());
+        object.insert(
+            "errorMessage".into(),
+            message.chars().take(500).collect::<String>().into(),
+        );
     }
     let _: serde_json::Value = mutation(deployment_url, "bridgeStructure:complete", args).await?;
     Ok(())

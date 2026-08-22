@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use axum::extract::{Request, State, WebSocketUpgrade};
@@ -14,7 +14,9 @@ use futures_util::StreamExt;
 use rand::RngCore;
 use subtle::ConstantTimeEq;
 
-use crate::protocol::{BrowserResponse, HealthResponse, LocalBridgeStatus, LocalMountStatus, PairingOffer};
+use crate::protocol::{
+    BrowserResponse, HealthResponse, LocalBridgeStatus, LocalMountStatus, PairingOffer,
+};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 pub struct ServerState {
@@ -151,13 +153,7 @@ impl ServerState {
         Ok(())
     }
     pub fn resume_session(&self, origin: &str) -> Option<String> {
-        if !self.is_paired()
-            || !self
-                .allowed_origins
-                .read()
-                .unwrap()
-                .contains(origin)
-        {
+        if !self.is_paired() || !self.allowed_origins.read().unwrap().contains(origin) {
             return None;
         }
         let token = self.session_token.read().unwrap();
@@ -177,7 +173,13 @@ impl ServerState {
             paired: self.is_paired(),
             cloud_connected: cloud_seen_at > 0 && unix_ms().saturating_sub(cloud_seen_at) <= 15_000,
             device_id: self.device_id.read().unwrap().clone(),
-            mounts: self.local_control.read().unwrap().as_ref().map(|control| control.mounts()).unwrap_or_default(),
+            mounts: self
+                .local_control
+                .read()
+                .unwrap()
+                .as_ref()
+                .map(|control| control.mounts())
+                .unwrap_or_default(),
         }
     }
     fn take_pairing_completion(&self, challenge: &str) -> Option<String> {
@@ -243,33 +245,53 @@ async fn select_mount(State(state): State<Arc<ServerState>>) -> Response {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
             Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
         },
-        None => (StatusCode::SERVICE_UNAVAILABLE, "Bridge controls are not ready").into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Bridge controls are not ready",
+        )
+            .into_response(),
     }
 }
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MountAction { grant_id: String }
+struct MountAction {
+    grant_id: String,
+}
 
-async fn retry_mount(State(state): State<Arc<ServerState>>, Json(input): Json<MountAction>) -> Response {
+async fn retry_mount(
+    State(state): State<Arc<ServerState>>,
+    Json(input): Json<MountAction>,
+) -> Response {
     let control = state.local_control.read().unwrap().clone();
     match control {
         Some(control) => match control.retry_mount(&input.grant_id).await {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
             Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
         },
-        None => (StatusCode::SERVICE_UNAVAILABLE, "Bridge controls are not ready").into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Bridge controls are not ready",
+        )
+            .into_response(),
     }
 }
 
-async fn remove_mount(State(state): State<Arc<ServerState>>, Json(input): Json<MountAction>) -> Response {
+async fn remove_mount(
+    State(state): State<Arc<ServerState>>,
+    Json(input): Json<MountAction>,
+) -> Response {
     let control = state.local_control.read().unwrap().clone();
     match control {
         Some(control) => match control.remove_mount(&input.grant_id).await {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
             Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
         },
-        None => (StatusCode::SERVICE_UNAVAILABLE, "Bridge controls are not ready").into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Bridge controls are not ready",
+        )
+            .into_response(),
     }
 }
 
@@ -285,7 +307,11 @@ async fn pair_offer(
                     Ok(()) => StatusCode::NO_CONTENT.into_response(),
                     Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
                 },
-                None => (StatusCode::SERVICE_UNAVAILABLE, "Bridge controls are not ready").into_response(),
+                None => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Bridge controls are not ready",
+                )
+                    .into_response(),
             }
         }
         Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),

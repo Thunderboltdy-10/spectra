@@ -2,6 +2,13 @@ import type { WorkAnchor } from "../work/registry";
 import type { SpectraPreferences } from "../settings/schema";
 
 export type SpectraCommands = {
+  "library.organize": {
+    action: "create_folder" | "rename" | "move" | "link";
+    targetIds: string[];
+    destinationId?: string;
+    name?: string;
+  };
+  "library.delete": { targetIds: string[] };
   "work.open": {
     workId: string;
     surface?: "full" | "panel" | "tile";
@@ -14,6 +21,19 @@ export type SpectraCommands = {
   "context.beginPicking": { source: "quick_chat" | "composer" };
   "settings.manageAccount": Record<string, never>;
   "settings.clearLocalComputeCache": Record<string, never>;
+  "settings.change": { patch: Record<string, unknown>; section?: string };
+  "sync.policy.change": { targetIds: string[]; patch: Record<string, unknown> };
+  "memory.write": { action: "create" | "revise"; content: string; memoryId?: string };
+  "sharing.change": {
+    resourceType: "workspace" | "artifact" | "agent";
+    resourceId: string;
+    action: "invite" | "change_level" | "revoke";
+    subjectId?: string;
+    invitationId?: string;
+    grantId?: string;
+    level?: "read" | "modify";
+  };
+  "managebac.sync": { purpose: "upcoming_deadlines" | "class_resources" | "timetable" | "classes" | "cas" };
 };
 
 export type SpectraEvents = {

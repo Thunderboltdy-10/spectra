@@ -461,13 +461,39 @@ function assertEditable(map: LensFidelityMap, regionId: string) {
     );
 }
 
+function resolveParagraphIndex(
+  projection: DocxProjection,
+  block: DocxProjectionBlock,
+  paragraphCount: number,
+) {
+  const declared = Number(block.attrs?.paragraphIndex);
+  if (Number.isInteger(declared) && declared >= 0 && declared < paragraphCount)
+    return declared;
+  const blockIndex = projection.blocks.findIndex((candidate) => candidate.id === block.id);
+  if (blockIndex < 0) return -1;
+  return projection.blocks
+    .slice(0, blockIndex)
+    .filter((candidate) => candidate.type !== "table").length;
+}
+
 async function applyDelta(
   carry: LensPreservedCarry<DocxProjection>,
   delta: DocxSemanticDelta,
 ) {
   const document = await Document.open(carry.payload);
   const opened = await projectDocument(document, carry.profile);
-  const paragraphs = document.paragraphs();
+  // Projection indexes only top-level body paragraphs. The generic
+  // document.paragraphs() collection also includes paragraphs inside table
+  // cells, so using it here shifts every paragraph after the first table and
+  // can make a valid AI or human edit target the wrong native region.
+  const paragraphs = document
+    .body()
+    .elements()
+    .filter(
+      (element) =>
+        element.namespaceUri() === WML_NAMESPACE && element.localName === "p",
+    )
+    .map((element) => Paragraph._wrap(document, element));
   const tables = document.tables().filter((table) => table.depth === 0);
   const operations =
     delta.kind === "ai-edit" ? delta.operations : [delta];
@@ -489,21 +515,21 @@ async function applyDelta(
         `The Word region ${operation.regionId} no longer exists.`,
       );
     if (operation.kind === "replace-paragraph") {
-      const index = Number(block.attrs?.paragraphIndex);
+      const index = resolveParagraphIndex(opened.projection, block, paragraphs.length);
       const paragraph = paragraphs[index];
       if (!paragraph)
         throw new DocxLensError(
           "DOCX_UNSUPPORTED_EDIT",
-          "The target Word paragraph could not be resolved safely.",
+          `The target Word paragraph could not be resolved safely (region=${operation.regionId}, index=${index}, projectedParagraphs=${paragraphs.length}).`,
         );
       replaceParagraphText(document, paragraph, operation.text);
     } else if (operation.kind === "apply-style") {
-      const index = Number(block.attrs?.paragraphIndex);
+      const index = resolveParagraphIndex(opened.projection, block, paragraphs.length);
       const paragraph = paragraphs[index];
       if (!paragraph)
         throw new DocxLensError(
           "DOCX_UNSUPPORTED_EDIT",
-          "The target Word paragraph could not be resolved safely.",
+          `The target Word paragraph could not be resolved safely (style region=${operation.regionId}, index=${index}, projectedParagraphs=${paragraphs.length}).`,
         );
       setParagraphStyle(document, paragraph, operation.style);
     } else if (operation.kind === "edit-table-cell") {
@@ -579,10 +605,26 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         });
         continue;
       }
+      // Yjs/Convex content normalization is allowed to omit native locator
+      // metadata from an otherwise unchanged block. Keep the retained
+      // paragraph/table locator as the source of truth; only semantic fields
+      // supplied by the incoming projection may replace it.
+      const incomingAttrs = { ...(block.attrs ?? {}) };
+      delete incomingAttrs.paragraphIndex;
+      delete incomingAttrs.tableIndex;
+      delete incomingAttrs.rowCount;
+      delete incomingAttrs.columnCount;
+      const effectiveBlock = {
+        ...block,
+        attrs: {
+          ...(previous.attrs ?? {}),
+          ...incomingAttrs,
+        },
+      };
       before.delete(block.id);
-      if (block.type === "table" && block.text !== previous.text) {
+      if (effectiveBlock.type === "table" && effectiveBlock.text !== previous.text) {
         const oldRows = parseTableText(previous.text);
-        const newRows = parseTableText(block.text);
+        const newRows = parseTableText(effectiveBlock.text);
         if (
           oldRows.length !== newRows.length ||
           oldRows.some((row, index) => row.length !== newRows[index]?.length)
@@ -603,14 +645,14 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
               });
           }),
         );
-      } else if (block.type !== "table" && block.text !== previous.text) {
+      } else if (effectiveBlock.type !== "table" && effectiveBlock.text !== previous.text) {
         operations.push({
           kind: "replace-paragraph",
           regionId: block.id,
-          text: block.text,
+          text: effectiveBlock.text,
         });
       }
-      const nextStyle = block.attrs?.styleId;
+      const nextStyle = effectiveBlock.attrs?.styleId;
       if (
         typeof nextStyle === "string" &&
         nextStyle !== previous.attrs?.styleId

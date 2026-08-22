@@ -213,4 +213,24 @@ describe("document contentPatch section rewrite", () => {
     expect(next.cards).toHaveLength(3);
     expect(next.cards[2]?.id).toBe("c3");
   });
+
+  it("appends a final document block with JSON Pointer '-'", () => {
+    const content = {
+      blocks: [{ id: "intro", type: "paragraph", text: "Existing" }],
+    };
+    const next = applyResolvedContentPatch(content, {
+      changes: [
+        {
+          path: "/blocks/-",
+          value: { id: "tail", type: "paragraph", text: "N8 note" },
+        },
+      ],
+    }) as { blocks: Array<{ id: string; text: string }> };
+    expect(next.blocks).toHaveLength(2);
+    expect(next.blocks[1]).toEqual({
+      id: "tail",
+      type: "paragraph",
+      text: "N8 note",
+    });
+  });
 });

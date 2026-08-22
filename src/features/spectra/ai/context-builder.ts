@@ -408,6 +408,14 @@ export function buildBoundedContextPacket(input: {
   linksByArtifact?: Record<string, unknown[]>;
   recentActivity?: unknown[];
   workspaceMap?: unknown[];
+  libraryMap?: unknown[];
+  currentLibraryLocation?: {
+    id: string;
+    title?: string;
+    type?: string;
+    parentId?: string | null;
+    path?: Array<{ id: string; title?: string; type?: string }>;
+  } | null;
   threadMap?: unknown[];
   inboxMap?: unknown[];
   contextReasons?: Record<string, "explicit" | "selected" | "visible" | "open">;
@@ -535,6 +543,12 @@ export function buildBoundedContextPacket(input: {
           ? "active workspace identity only"
           : "bounded active workspace map"
         : null,
+      libraryMap: input.libraryMap?.length
+        ? "bounded nodes in the currently visible Library subtree"
+        : null,
+      currentLibraryLocation: input.currentLibraryLocation
+        ? "the exact Library folder currently open; use this id for scoped mutations"
+        : null,
       globalMap:
         "bounded workspaces, threads, and Inbox map with retrieval available",
     },
@@ -589,6 +603,8 @@ export function buildBoundedContextPacket(input: {
               ),
           )
           .slice(0, 18),
+    libraryMap: (input.libraryMap ?? []).slice(0, 120),
+    currentLibraryLocation: input.currentLibraryLocation ?? null,
     threadMap: focusedMutation
       ? []
       : (input.threadMap ?? [])
@@ -672,6 +688,8 @@ export function buildBoundedContextPacket(input: {
     })),
     catalog: [],
     workspaceMap: packet.workspaceMap.slice(0, 16),
+    libraryMap: packet.libraryMap.slice(0, 80),
+    currentLibraryLocation: packet.currentLibraryLocation,
     threadMap: packet.threadMap.slice(0, 12),
     inboxMap: packet.inboxMap.slice(0, 10),
     workspace: packet.workspace
@@ -705,6 +723,8 @@ export function buildBoundedContextPacket(input: {
           : undefined,
       type: item.type ?? item.blueprintKey,
       workspaceId: item.workspaceId,
+      parentId: item.parentId,
+      sourceId: item.sourceId,
       lastMessageAt: item.lastMessageAt,
     };
   };
@@ -748,6 +768,8 @@ export function buildBoundedContextPacket(input: {
       : null,
     conversation: hardConversation,
     workspaceMap: compactPacket.workspaceMap.slice(0, 8).map(compactMapItem),
+    libraryMap: compactPacket.libraryMap.slice(0, 48).map(compactMapItem),
+    currentLibraryLocation: compactPacket.currentLibraryLocation,
     threadMap: compactPacket.threadMap.slice(0, 8).map(compactMapItem),
     inboxMap: compactPacket.inboxMap.slice(0, 6).map(compactMapItem),
     workspace: compactPacket.workspace
@@ -787,6 +809,8 @@ export function buildBoundedContextPacket(input: {
       content: message.content.slice(0, 500),
     })),
     workspaceMap: [],
+    libraryMap: hardPacket.libraryMap.slice(0, 24),
+    currentLibraryLocation: hardPacket.currentLibraryLocation,
     threadMap: [],
     inboxMap: [],
     workspace: hardPacket.workspace

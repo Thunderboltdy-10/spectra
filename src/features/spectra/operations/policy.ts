@@ -14,6 +14,7 @@ const DIRECT_OPERATION_TYPES = new Set<SpectraOperationType>([
   "thread.create",
   "workspace.update",
   "artifact.link",
+  "app.command",
   "resultCard.create",
   "resultCard.update",
   "plannerTask.create",
@@ -70,6 +71,19 @@ export function evaluatePlanPolicy(
   const reasons: string[] = [];
   if (operations.some((operation) => operation.type === "workspace.create"))
     reasons.push("Create a new workspace");
+  const appCommands = operations.filter((operation) => operation.type === "app.command");
+  for (const operation of appCommands) {
+    const command = operation.input.command;
+    if (command === "change_spectra_settings") reasons.push("Change Spectra settings");
+    else if (command === "change_sync_policy") {
+      const count = Math.max(0, Math.floor(Number(operation.input.args.localFileCount) || 0));
+      reasons.push(`Change sync policy; this will affect ${count} file${count === 1 ? "" : "s"} on this PC`);
+    }
+    else if (command === "delete_library_items") reasons.push("Delete Library items");
+    else if (command === "change_sharing") reasons.push("Change sharing or permissions");
+    else if (command === "change_managebac_mapping") reasons.push("Change ManageBac mapping");
+    else reasons.push(`Approve ${command.replaceAll("_", " ")}`);
+  }
   if (operations.some((operation) => operation.type === "artifact.archive"))
     reasons.push("Archive the selected artifact");
   if (artifactCreates > 1)

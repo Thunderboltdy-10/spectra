@@ -78,8 +78,11 @@ import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import { WorkbenchDockShell } from "./workbench-dock-shell";
+import { createApplicationCommandDispatcher, mergePreferences } from "../commands/application-dispatcher";
+import { useSpectraPreferences } from "../settings/preference-store";
 import {
   disengageFollowAi,
+  isFollowingAi,
   isProgrammaticOpen,
 } from "../collaboration/follow-ai";
 import {
@@ -94,6 +97,8 @@ import {
   useTreePlacement,
   type BoardGroupBy,
 } from "../organization/tree-client";
+import { spectraBus } from "../events";
+import { syncSpectraManageBac, rememberSpectraMemory, correctSpectraMemory } from "../data/api";
 import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
 import { previewText } from "../components/preview-text";
 import {
@@ -968,6 +973,8 @@ export function SpectraShell({
     undefined;
   const requestedArtifactId =
     initialArtifactId ?? searchParams.get("artifactId") ?? undefined;
+  const { preferences, replace: replacePreferences } = useSpectraPreferences();
+  const patchItemSyncPolicies = useMutation(api.syncPolicy.patchItems);
   /* A deep link into a folder. Absent means the top of whatever is open. */
   const requestedNodeId = searchParams.get("nodeId");
   const surfaceLabel = surface === "library" ? "Library" : "Workspace";
@@ -1003,6 +1010,12 @@ export function SpectraShell({
   /* Set when the reader jumps from a board column to the folder it names, so the
      List view opens there instead of at the top of the workspace. */
   const [boardFolderNodeId, setBoardFolderNodeId] = useState<string | null>(null);
+  /* The AI needs the Library location the reader is actually viewing, not only
+     the route's entry node. Keep it separate from the one-shot board jump so
+     ordinary breadcrumb/folder navigation does not remount the organizer. */
+  const [currentLibraryNodeId, setCurrentLibraryNodeId] = useState<string | null>(
+    requestedNodeId,
+  );
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [, setLoading] = useState(true);
   const [, setWorkspaceLoading] = useState(false);
@@ -1454,6 +1467,9 @@ export function SpectraShell({
   const atRoot = !selectedWorkspaceId;
   const scopeNodeId = atRoot ? null : workspaceNodeId;
   const scopeReady = atRoot || Boolean(workspace && workspaceNodeId);
+  useEffect(() => {
+    setCurrentLibraryNodeId(requestedNodeId ?? scopeNodeId);
+  }, [requestedNodeId, scopeNodeId]);
   const boardGroupBy = atRoot ? rootGroupBy : hubGroupBy;
   const setBoardGroupBy = atRoot ? setRootGroupBy : setHubGroupBy;
   const viewScopeKey = selectedWorkspaceId || "root";
@@ -1530,6 +1546,82 @@ export function SpectraShell({
     "spectra.shared.artifactStudio",
     allArtifacts,
   );
+  const applicationCommandDispatcher = useMemo(
+    () => createApplicationCommandDispatcher({
+      openArtifact: (artifactId, surfaceMode) => {
+        const artifact = allArtifacts.find((item) => item._id === artifactId);
+        if (!artifact) throw new Error(`APPLICATION_COMMAND_TARGET_NOT_FOUND: ${artifactId}`);
+        if (surfaceMode === "full") studio.openTab(artifact);
+        else openArtifactPanel(artifact);
+      },
+      navigate: (destination, targetId) => {
+        if (destination === "calendar") router.push("/calendar");
+        else if (destination === "settings") router.push(targetId ? `/settings?section=${encodeURIComponent(targetId)}` : "/settings");
+        else if (destination === "workspace") {
+          if (targetId) goToWorkspaceHub(targetId);
+          else goToHomeHub();
+        }
+        else goToHomeHub();
+      },
+      replacePreferences,
+      preferences,
+    }),
+    // These shell handlers are intentionally recreated with the current
+    // mounted studio state; the dispatcher must never retain a stale panel
+    // callback while a user changes workspace or artifact focus.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allArtifacts, preferences, replacePreferences, router, studio],
+  );
+
+  useEffect(() => {
+    const removeSettings = spectraBus.handle("settings.change", ({ patch, section }) => {
+      replacePreferences(mergePreferences(preferences, patch));
+      router.push(section ? `/settings?section=${encodeURIComponent(section)}` : "/settings");
+    });
+    const removeSync = spectraBus.handle("sync.policy.change", async ({ targetIds, patch }) => {
+      if (targetIds.length === 0) throw new Error("SYNC_TARGETS_REQUIRED");
+      await patchItemSyncPolicies({ itemIds: targetIds, patch, idempotencyKey: crypto.randomUUID() });
+    });
+    const removeMemory = spectraBus.handle("memory.write", async ({ action, content, memoryId }) => {
+      if (action === "revise") {
+        if (!memoryId) throw new Error("MEMORY_ID_REQUIRED");
+        await correctSpectraMemory(memoryId, content);
+      } else {
+        await rememberSpectraMemory({
+          proposition: content,
+          scope: "private_global",
+          claimType: "inferred_preference",
+          captureReason: "AI memory write through the shared command path.",
+        });
+      }
+    });
+    const removeSharing = spectraBus.handle("sharing.change", async (input) => {
+      if (input.action === "invite") {
+        await postSpectra({
+          action: "inviteShare",
+          resourceType: input.resourceType,
+          resourceId: input.resourceId,
+          inviteeAccountId: input.subjectId ?? "",
+          level: input.level ?? "read",
+        });
+      } else if (input.action === "change_level") {
+        await postSpectra({ action: "changeShareLevel", invitationId: input.invitationId ?? "", level: input.level ?? "read" });
+      } else {
+        await postSpectra({ action: "revokeShareAccess", resourceType: input.resourceType, resourceId: input.resourceId, grantId: input.grantId ?? "" });
+      }
+    });
+    const removeManageBac = spectraBus.handle("managebac.sync", async ({ purpose }) => {
+      await syncSpectraManageBac("manual");
+      window.dispatchEvent(new CustomEvent("spectra:managebac-ai-sync", { detail: { purpose } }));
+    });
+    return () => {
+      removeSettings();
+      removeSync();
+      removeMemory();
+      removeSharing();
+      removeManageBac();
+    };
+  }, [patchItemSyncPolicies, preferences, replacePreferences, router]);
 
   useEffect(() => {
     if (!requestedHome) return;
@@ -2201,6 +2293,12 @@ export function SpectraShell({
         ? "artifact"
         : "workspace",
     workspaceId: selectedWorkspaceId,
+    scopeNodeId:
+      currentLibraryNodeId ??
+      boardFolderNodeId ??
+      requestedNodeId ??
+      scopeNodeId ??
+      undefined,
     artifactId: commandFocusArtifact?._id,
     threadId: composerThread?.id,
     focusMode: effectiveFocusMode,
@@ -2303,6 +2401,19 @@ export function SpectraShell({
         .detail?.workspaceId;
       if (workspaceId) goToWorkspaceHub(workspaceId);
     }
+    function onAiNavigate(event: Event) {
+      if (!isFollowingAi()) return;
+      const detail = (event as CustomEvent<{ route?: string; target?: string }>).detail;
+      if (!detail?.route) return;
+      if (detail.route === "library" || detail.route === "workspace") {
+        if (detail.target) goToWorkspaceHub(detail.target);
+        else goToHomeHub();
+      } else if (detail.route === "settings") {
+        router.push(detail.target ? `/settings?section=${encodeURIComponent(detail.target)}` : "/settings");
+      } else if (detail.route === "calendar") {
+        router.push("/calendar");
+      }
+    }
     function onAsk(event: Event) {
       const prompt = (
         event as CustomEvent<{ prompt?: string }>
@@ -2359,6 +2470,7 @@ export function SpectraShell({
     };
     window.addEventListener("spectra:open-artifact", onOpenArtifact);
     window.addEventListener("spectra:open-workspace", onOpenWorkspace);
+    window.addEventListener("spectra:ai-navigate", onAiNavigate);
     window.addEventListener("spectra:ask", onAsk);
     window.addEventListener("spectra:tile-selected", tile);
     window.addEventListener("spectra:focus-set", focusSet);
@@ -2380,6 +2492,7 @@ export function SpectraShell({
     return () => {
       window.removeEventListener("spectra:open-artifact", onOpenArtifact);
       window.removeEventListener("spectra:open-workspace", onOpenWorkspace);
+      window.removeEventListener("spectra:ai-navigate", onAiNavigate);
       window.removeEventListener("spectra:ask", onAsk);
       window.removeEventListener("spectra:tile-selected", tile);
       window.removeEventListener("spectra:focus-set", focusSet);
@@ -2500,6 +2613,7 @@ export function SpectraShell({
       return;
     }
     setBoardFolderNodeId(target.nodeId);
+    setCurrentLibraryNodeId(target.nodeId);
     setViewMode("list");
   };
 
@@ -3779,6 +3893,7 @@ export function SpectraShell({
               onContinueThread={(threadId, title) =>
                 toggleContinuedThread(threadId, title)
               }
+              executeApplicationCommand={applicationCommandDispatcher}
             />
           ) : studio.mode === "tab" && studio.activeArtifact ? (
             <ArtifactStudio
@@ -3800,6 +3915,7 @@ export function SpectraShell({
                   : undefined
               }
               onDirtyChange={studio.setDirty}
+              executeApplicationCommand={applicationCommandDispatcher}
               compact={false}
             />
           ) : (
@@ -3880,7 +3996,10 @@ export function SpectraShell({
                         contextIds={selectedContextIds}
                         onOpenWork={openArtifactById}
                         onOpenContainer={openBoardContainerById}
-                        onLocationChange={() => setBoardFolderNodeId(null)}
+                        onLocationChange={(nodeId) => {
+                          setCurrentLibraryNodeId(nodeId);
+                          setBoardFolderNodeId(null);
+                        }}
                         onOpenThread={(threadId, title) =>
                           setLiveThread({ id: threadId, title })
                         }
@@ -3937,6 +4056,7 @@ export function SpectraShell({
                         : undefined
                     }
                     onDirtyChange={studio.setDirty}
+                    executeApplicationCommand={applicationCommandDispatcher}
                     compact={false}
                   />
                 ) : null}
@@ -3967,6 +4087,7 @@ export function SpectraShell({
                         : undefined
                     }
                     onDirtyChange={studio.setDirty}
+                    executeApplicationCommand={applicationCommandDispatcher}
                     compact={false}
                   />
                 ) : null}
@@ -3992,6 +4113,7 @@ export function SpectraShell({
                     onContinueThread={(threadId, title) =>
                       toggleContinuedThread(threadId, title)
                     }
+                    executeApplicationCommand={applicationCommandDispatcher}
                   />
                 ) : null}
               </>

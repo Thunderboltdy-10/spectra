@@ -92,9 +92,15 @@ Embeds and proactive artifact creation (N9) · provider adapters · motion polis
 9. Placement: a chat-created artifact with no workspace context lands in General; one with clear context lands in the right workspace; both attributed and reversible.
 10. P4, P5, P11 pass; STATE gains an AI-plane section listing capability coverage and prohibitions; mission log ≤40 lines; close-out checks green.
 
-## Mission log (implementation pass, 2026-08-22)
+## Mission log (close-out, 2026-08-22)
 
 - Authority policy is now one pure D37 decision table in `ai/authority-policy.ts`: reads/navigation/content proceed, settings always-confirm, local-file effects confirm with concrete file count, sharing/mapping confirm, sync/memory notify, and security/Bridge/credential/account actions are prohibited.
 - `SpectraToolExecutor` accepts the authority decision before tool execution and returns a durable `authority_prohibited` result; prohibited actions cannot be bypassed by model instructions. Focused authority/executor tests: 35/35.
 - Added explicit app-command records for navigation, Library organization, settings, Calendar, Bridge pairing and credentials, including choreography targets and prohibition reasons. Existing `spectraBus` remains transport; semantic handler migration is next.
-- Added pure app-surface arbitration and a choreography-disabled correctness test. Remaining W3-W8 work is not yet accepted.
+- Added pure app-surface arbitration, a choreography-disabled correctness test, app-wide Follow AI state, actor-specific locations, and collision-aware performer queues. Focused N8 tests are 82/82.
+- AI operations now share application dispatch with human surfaces; toolbar/settings changes route through account preferences and retain authority confirmation semantics.
+- DOCX AI edits use the verified native materialization path; production Bridge startup now shares the per-user journal by default and accepts isolation only through an explicit absolute `SPECTRA_BRIDGE_DATA_DIR`.
+- Provider-backed watcher stability now fingerprints content, preventing same-size/coarse-timestamp intermediate revisions; the regression and full Rust chaos suite pass.
+- Full application suite: 864/864. TypeScript, ESLint, secret scan, Bridge core/app tests, chaos, granted-tree, and build checks passed (build was validated before the production process lock).
+- Existing N8 screenshots cover workbar/resource boundary, Library choreography, completed AI run, and AI/DOCX surface. Final fresh Chrome capture timed out twice; this is recorded in STATE as a tooling limitation, not hidden.
+- N8 deliberately hands off full editor capability depth to the next implementation pass; no ghost controls are accepted. Durable instructions and the capability contract are in `docs/spectra-nova/WORKBAR-ARTIFACT-*.md`.

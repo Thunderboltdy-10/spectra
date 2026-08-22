@@ -9,12 +9,8 @@ import {
   MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { createPortal } from "react-dom";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { SelectField } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { WorkCapability } from "../work/registry";
@@ -136,7 +132,7 @@ export function ArtifactWorkbar({
    */
   overflow?: ReactNode;
   /** Legacy inline content. Prefer `actions`; this does not shed. */
-  children?: ReactNode;
+  children?: ReactNode | ((activeTab: string) => ReactNode);
   /** Selection kind activates a registry-declared contextual tab. */
   selectionContext?: string;
   className?: string;
@@ -147,12 +143,16 @@ export function ArtifactWorkbar({
   const storedLayout = preferences.workbar[contract.type] as CommandLayout | undefined;
   const [activeTab, setActiveTab] = useState("General");
   const [customizing, setCustomizing] = useState(false);
+  const [renameCommandId, setRenameCommandId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [dragCommandId, setDragCommandId] = useState<string | null>(null);
+  const previousSelectionContext = useRef<string | undefined>(undefined);
   const commandCtx = useMemo(
     () => commandContext(contract.type, can, contract.role, selectionContext, {
       compatibilityProfile: contract.compatibilityProfile,
       fidelity: contract.fidelity,
-    }),
-    [can, contract.compatibilityProfile, contract.fidelity, contract.role, contract.type, selectionContext],
+    }, contract.executeApplicationCommand),
+    [can, contract.compatibilityProfile, contract.executeApplicationCommand, contract.fidelity, contract.role, contract.type, selectionContext],
   );
   const commands = useMemo(
     () => actions.map((binding, index) => ({
@@ -165,9 +165,22 @@ export function ArtifactWorkbar({
     () => tabsFor(contract.type, selectionContext, storedLayout),
     [contract.type, selectionContext, storedLayout],
   );
+  const tabSignature = tabs.join("\u001f");
   useEffect(() => {
-    if (!tabs.includes(activeTab)) setActiveTab(selectionContext ? tabs.at(-1) ?? "General" : "General");
-  }, [activeTab, selectionContext, tabs]);
+    if (selectionContext !== previousSelectionContext.current) {
+      previousSelectionContext.current = selectionContext;
+      const next = selectionContext && tabs.includes(selectionContext)
+        ? selectionContext
+        : "General";
+      setActiveTab((current) => current === next ? current : next);
+      return;
+    }
+    setActiveTab((current) => tabs.includes(current) ? current : "General");
+    // tabSignature is the stable dependency for the derived tab list. The
+    // array itself is intentionally not used because tabsFor returns a new
+    // array when layout preferences are resolved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionContext, tabSignature]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -200,6 +213,15 @@ export function ArtifactWorkbar({
       },
     });
   };
+  const customizationCommands = useMemo(
+    () => commands
+      .map(({ command }) => command)
+      .sort((left, right) => {
+        const tabOrder = tabs.indexOf(left.defaultPlacement.tab) - tabs.indexOf(right.defaultPlacement.tab);
+        return tabOrder || left.defaultPlacement.order - right.defaultPlacement.order || left.title.localeCompare(right.title);
+      }),
+    [commands, tabs],
+  );
 
   const resolvedModes = useMemo<readonly WorkbarModeSpec[]>(() => {
     if (Array.isArray(modes)) return modes;
@@ -219,22 +241,24 @@ export function ArtifactWorkbar({
   const visibleActions = useMemo(() => commands
     .filter(({ command }) =>
       !command.hidden &&
-      command.defaultPlacement.tab === activeTab &&
+      (command.defaultPlacement.tab === activeTab || command.contextualTab === activeTab) &&
       command.availability(commandCtx).state !== "hidden")
     .sort((left, right) => left.command.defaultPlacement.order - right.command.defaultPlacement.order)
-    .map(({ binding, command }) => {
+      .map(({ binding, command }) => {
       const availability = command.availability(commandCtx);
       return ({
       ...binding,
       id: command.id,
       label: command.title,
+      group: command.defaultPlacement.group,
+      density: storedLayout?.commands?.[command.id]?.density,
       disabled: availability.state === "disabled",
       hint:
         availability.state === "disabled"
           ? availability.reason
           : binding.hint,
       onSelect: () => executeCommand(command, commandCtx),
-    }); }), [activeTab, commandCtx, commands]);
+    }); }), [activeTab, commandCtx, commands, storedLayout]);
   const essential = visibleActions.filter(
     (action) => (action.priority ?? "secondary") === "essential",
   );
@@ -259,8 +283,22 @@ export function ArtifactWorkbar({
   // not by measuring the bar: a control is rendered in the bar or in the menu,
   // never in both, so a shedding bar can never list an action twice.
   const tight = contract.density === "tight";
-  const barActions = tight ? essential : [...essential, ...secondary];
-  const menuActions = tight ? [...secondary, ...advanced] : advanced;
+  // General is the compact favorites surface. Category tabs are task surfaces:
+  // promote their own commands into the row first, then keep the remainder in
+  // the same overflow menu. This prevents a populated tab from looking empty
+  // merely because its commands are marked advanced in the global registry.
+  const categoryTab = activeTab !== "General";
+  const categoryBarActions = visibleActions.slice(0, MAX_ESSENTIAL_ACTIONS);
+  const barActions = categoryTab
+    ? categoryBarActions
+    : tight
+      ? essential
+      : [...essential, ...secondary];
+  const menuActions = categoryTab
+    ? visibleActions.slice(MAX_ESSENTIAL_ACTIONS)
+    : tight
+      ? [...secondary, ...advanced]
+      : advanced;
 
   return (
     <div
@@ -289,36 +327,49 @@ export function ArtifactWorkbar({
             </button>
           ))}
         </div>
-        {resolvedModes.length > 1 ? (
-          <div className="spectra-workbar-modes" role="group" aria-label="View">
-            {resolvedModes.map((mode) => (
-              <button
-                key={mode.id}
-                type="button"
-                aria-pressed={mode.active}
-                data-active={mode.active || undefined}
-                disabled={mode.disabled}
-                onClick={mode.onSelect}
-                title={mode.label}
-                className="spectra-workbar-mode"
-              >
-                {mode.icon ? <mode.icon className="size-3.5 shrink-0" /> : null}
-                <span>{mode.label}</span>
-              </button>
-            ))}
-          </div>
-        ) : null}
-        {selector}
-        {context ? (
-          <span className="spectra-workbar-context" title={context}>
-            {context}
-          </span>
-        ) : null}
-        {children}
+        <div className="spectra-workbar-controls">
+          {resolvedModes.length > 1 ? (
+            <div className="spectra-workbar-modes" role="group" aria-label="View">
+              {resolvedModes.map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  aria-pressed={mode.active}
+                  data-active={mode.active || undefined}
+                  disabled={mode.disabled}
+                  onClick={mode.onSelect}
+                  title={mode.label}
+                  className="spectra-workbar-mode"
+                >
+                  {mode.icon ? <mode.icon className="size-3.5 shrink-0" /> : null}
+                  <span>{mode.label}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {selector}
+          {context ? (
+            <span className="spectra-workbar-context" title={context}>
+              {context}
+            </span>
+          ) : null}
+          {typeof children === "function" ? children(activeTab) : children}
+        </div>
       </div>
       <div className="spectra-workbar-trail">
         {trailing}
-        {barActions.map((action) => (
+        {storedLayout?.expanded ? (
+          <div className="spectra-workbar-expanded-groups" role="group" aria-label={`${label} expanded commands`}>
+            {Object.entries(Object.groupBy(barActions, (action) => action.group ?? activeTab)).map(([group, groupActions]) => (
+              <div key={group} className="spectra-workbar-command-group" role="group" aria-label={group}>
+                <span className="spectra-workbar-command-group-label">{group}</span>
+                <div className="spectra-workbar-command-group-actions">
+                  {(groupActions ?? []).map((action) => <WorkbarActionButton key={action.id} action={action} />)}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : barActions.map((action) => (
           <WorkbarActionButton key={action.id} action={action} />
         ))}
         {showPrimary && primary ? (
@@ -375,26 +426,79 @@ export function ArtifactWorkbar({
               }}>→</button>
             </div>
           )) : null}
-          {customizing ? commands.filter(({ command }) => command.defaultPlacement.tab === activeTab).map(({ command }, index, list) => {
-            const current = storedLayout?.commands?.[command.id];
-            const tabIndex = tabs.indexOf(command.defaultPlacement.tab);
-            return (
-              <div key={command.id} className="spectra-command-custom-row" role="group" aria-label={`Customize ${command.title}`}>
-                <span title={command.title}>{command.title}</span>
-                <button type="button" title="Move earlier" disabled={index === 0} onClick={() => updateCommandLayout(command.id, { order: command.defaultPlacement.order - 1 })}>←</button>
-                <button type="button" title="Move later" disabled={index === list.length - 1} onClick={() => updateCommandLayout(command.id, { order: command.defaultPlacement.order + 1 })}>→</button>
-                <button type="button" title="Move to previous tab" disabled={tabIndex <= 0} onClick={() => updateCommandLayout(command.id, { tab: tabs[tabIndex - 1] })}>‹</button>
-                <button type="button" title="Move to next tab" disabled={tabIndex < 0 || tabIndex >= tabs.length - 1} onClick={() => updateCommandLayout(command.id, { tab: tabs[tabIndex + 1] })}>›</button>
-                <button type="button" title={current?.pinned ? "Remove from General" : "Pin in General"} onClick={() => updateCommandLayout(command.id, { pinned: !current?.pinned })}>★</button>
-                <button type="button" title="Change density" onClick={() => updateCommandLayout(command.id, { density: current?.density === "compact" ? "medium" : "compact" })}>Aa</button>
-                <button type="button" title="Rename visible label" onClick={() => {
-                  const next = window.prompt("Visible command label", current?.label ?? command.title);
-                  if (next?.trim()) updateCommandLayout(command.id, { label: next.trim() });
-                }}>✎</button>
-                <button type="button" title="Remove command" onClick={() => updateCommandLayout(command.id, { hidden: true })}>×</button>
-              </div>
-            );
-          }) : null}
+          {customizing ? (
+            <div className="spectra-workbar-customizer" role="group" aria-label="All workbar commands">
+              <div className="spectra-workbar-customizer-heading">All commands</div>
+              {customizationCommands.map((command) => {
+                const current = storedLayout?.commands?.[command.id];
+                const currentTab = current?.pinned ? "General" : current?.tab ?? command.defaultPlacement.tab;
+                const label = current?.label ?? command.title;
+                return (
+                  <div
+                    key={command.id}
+                    className="spectra-command-custom-row"
+                    role="group"
+                    aria-label={`Customize ${command.title}`}
+                    draggable
+                    data-dragging={dragCommandId === command.id || undefined}
+                    onDragStart={() => setDragCommandId(command.id)}
+                    onDragEnd={() => setDragCommandId(null)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      if (!dragCommandId || dragCommandId === command.id) return;
+                      const source = customizationCommands.findIndex((entry) => entry.id === dragCommandId);
+                      const target = customizationCommands.findIndex((entry) => entry.id === command.id);
+                      if (source < 0 || target < 0) return;
+                      const sourceCommand = customizationCommands[source];
+                      const targetCommand = customizationCommands[target];
+                      const sourceOrder = storedLayout?.commands?.[sourceCommand.id]?.order ?? sourceCommand.defaultPlacement.order;
+                      const targetOrder = storedLayout?.commands?.[targetCommand.id]?.order ?? targetCommand.defaultPlacement.order;
+                      saveLayout({
+                        ...storedLayout,
+                        commands: {
+                          ...storedLayout?.commands,
+                          [sourceCommand.id]: { ...storedLayout?.commands?.[sourceCommand.id], order: targetOrder },
+                          [targetCommand.id]: { ...storedLayout?.commands?.[targetCommand.id], order: sourceOrder },
+                        },
+                      });
+                      setDragCommandId(null);
+                    }}
+                  >
+                    {renameCommandId === command.id ? (
+                      <input
+                        autoFocus
+                        value={renameDraft}
+                        aria-label={`Rename ${command.title}`}
+                        onChange={(event) => setRenameDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && renameDraft.trim()) {
+                            updateCommandLayout(command.id, { label: renameDraft.trim() });
+                            setRenameCommandId(null);
+                          }
+                          if (event.key === "Escape") setRenameCommandId(null);
+                        }}
+                        className="min-w-0 rounded border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 py-1 text-[11px] text-[var(--text-primary)]"
+                      />
+                    ) : <span title={label}>{label}{current?.hidden ? " (hidden)" : ""}</span>}
+                    <select
+                      aria-label={`Move ${command.title} to tab`}
+                      value={currentTab}
+                      onChange={(event) => updateCommandLayout(command.id, { tab: event.target.value, pinned: false })}
+                      className="min-w-0 rounded border border-[var(--border-default)] bg-[var(--bg-primary)] px-1 text-[10px] text-[var(--text-secondary)]"
+                    >
+                      {tabs.filter((tab) => !["Equation", "Table", "Image", "Chart", "Formula", "Shape", "Transition", "Code output"].includes(tab)).map((tab) => <option key={tab} value={tab}>{tab}</option>)}
+                    </select>
+                    <button type="button" title="Move earlier" onClick={() => updateCommandLayout(command.id, { order: (current?.order ?? command.defaultPlacement.order) - 1 })}>↑</button>
+                    <button type="button" title="Move later" onClick={() => updateCommandLayout(command.id, { order: (current?.order ?? command.defaultPlacement.order) + 1 })}>↓</button>
+                    <button type="button" title={current?.pinned ? "Unpin from General" : "Pin in General"} onClick={() => updateCommandLayout(command.id, current?.pinned ? { pinned: false, tab: command.defaultPlacement.tab } : { pinned: true, tab: "General" })}>★</button>
+                    <button type="button" title="Change density" onClick={() => updateCommandLayout(command.id, { density: current?.density === "compact" ? "medium" : "compact" })}>Aa</button>
+                    {renameCommandId === command.id ? <button type="button" title="Save label" onClick={() => { if (renameDraft.trim()) updateCommandLayout(command.id, { label: renameDraft.trim() }); setRenameCommandId(null); }}>✓</button> : <button type="button" title="Rename visible label" onClick={() => { setRenameCommandId(command.id); setRenameDraft(label); }}>✎</button>}
+                    <button type="button" title={current?.hidden ? "Restore command" : "Remove command"} onClick={() => updateCommandLayout(command.id, { hidden: !current?.hidden })}>{current?.hidden ? "＋" : "×"}</button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
           <button type="button" role="menuitem" className={workbarMenuItemClass()} onClick={() => saveLayout({})}>
             <RotateCcw className="size-3.5" />
             <span>Reset this workbar</span>
@@ -427,6 +531,7 @@ function WorkbarActionButton({ action }: { action: CommandBinding }) {
       title={actionTitle(action)}
       aria-pressed={action.active}
       data-active={action.active || undefined}
+      data-workbar-density={action.density ?? undefined}
       data-workbar-keep-label={action.keepLabel || undefined}
       disabled={action.disabled}
       onClick={action.onSelect}
@@ -591,29 +696,106 @@ export function WorkbarMenu({
   ariaLabel?: string;
   triggerClassName?: string;
 }) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const resolvedOpen = open ?? internalOpen;
+  const [position, setPosition] = useState<{
+    top: number;
+    left?: number;
+    right?: number;
+    maxHeight: number;
+  }>({ top: 0, left: 0, maxHeight: 420 });
+  const setOpen = useCallback((next: boolean) => {
+    if (open === undefined) setInternalOpen(next);
+    onOpenChange?.(next);
+  }, [onOpenChange, open]);
+
+  useLayoutEffect(() => {
+    if (!resolvedOpen) return;
+    const place = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const below = window.innerHeight - rect.bottom - 8;
+      const above = rect.top - 8;
+      const opensBelow = below >= Math.min(220, above);
+      const maxHeight = Math.max(120, Math.min(420, opensBelow ? below : above));
+      setPosition({
+        top: opensBelow ? rect.bottom + 6 : Math.max(8, rect.top - maxHeight - 6),
+        ...(align === "end"
+          ? { right: Math.max(8, window.innerWidth - rect.right) }
+          : { left: Math.max(8, rect.left) }),
+        maxHeight,
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [align, resolvedOpen]);
+
+  useEffect(() => {
+    if (!resolvedOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        triggerRef.current?.contains(target) ||
+        contentRef.current?.contains(target)
+      ) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [resolvedOpen, setOpen]);
+
   return (
-    <DropdownMenu
-      modal={false}
-      {...(open === undefined ? {} : { open })}
-      onOpenChange={onOpenChange}
-    >
-      <DropdownMenuTrigger
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={resolvedOpen}
         aria-label={ariaLabel ?? (typeof label === "string" ? label : "More")}
         className={cn("spectra-workbar-menu-trigger", triggerClassName)}
+        onClick={() => setOpen(!resolvedOpen)}
       >
         {label}
         {typeof label === "string" ? (
           <ChevronDown className="size-3 shrink-0 text-[var(--text-secondary)]" />
         ) : null}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align={align}
-        sideOffset={6}
-        className="spectra-workbar-menu max-h-[min(60vh,420px)] min-w-[210px] overflow-y-auto p-1.5"
-      >
-        {children}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </button>
+      {resolvedOpen && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={contentRef}
+              role="menu"
+              className="spectra-workbar-menu fixed z-[340] min-w-[210px] overflow-y-auto rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)]"
+              style={{
+                top: position.top,
+                left: position.left,
+                right: position.right,
+                maxHeight: position.maxHeight,
+              }}
+            >
+              {children}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 

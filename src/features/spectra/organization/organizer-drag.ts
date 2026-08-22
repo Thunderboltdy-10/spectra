@@ -83,6 +83,7 @@ export function useOrganizerDrag(context: DragContext) {
   } | null>(null);
   const dragRef = useRef<DragState | null>(null);
   dragRef.current = drag;
+  const suppressClickRef = useRef(false);
   const scrollRef = useRef<{ frame: number; speed: number } | null>(null);
 
   const ancestorIdsOf = useCallback((nodeId: string) => {
@@ -219,6 +220,25 @@ export function useOrganizerDrag(context: DragContext) {
     pendingRef.current = null;
   }, []);
 
+  const consumeSuppressedClick = useCallback(() => {
+    if (!suppressClickRef.current) return false;
+    suppressClickRef.current = false;
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (!drag) return;
+    const root = document.documentElement;
+    const previousCursor = root.style.cursor;
+    const previousUserSelect = root.style.userSelect;
+    root.style.cursor = "grabbing";
+    root.style.userSelect = "none";
+    return () => {
+      root.style.cursor = previousCursor;
+      root.style.userSelect = previousUserSelect;
+    };
+  }, [drag]);
+
   useEffect(() => {
     function onPointerMove(event: PointerEvent) {
       const pending = pendingRef.current;
@@ -263,6 +283,7 @@ export function useOrganizerDrag(context: DragContext) {
       dragRef.current = null;
       setDrag(null);
       if (!state) return;
+      suppressClickRef.current = true;
       const { onMove, onReference, onRejected } = contextRef.current;
       if (!state.target) {
         if (state.reason && state.reason !== "Already here.")
@@ -314,5 +335,5 @@ export function useOrganizerDrag(context: DragContext) {
     };
   }, [resolveTarget, stopAutoscroll, updateAutoscroll]);
 
-  return { drag, beginDrag, cancelPending };
+  return { drag, beginDrag, cancelPending, consumeSuppressedClick };
 }

@@ -3,6 +3,7 @@ import {
   commandContext,
   commandForBinding,
   executeCommand,
+  resolveCommandLayout,
   tabsFor,
 } from "../commands";
 import { preferenceLayerValuesSchema, resolvePreferences } from "../settings/schema";
@@ -71,6 +72,43 @@ describe("N2 command surface", () => {
   it("adds and dismisses selection-driven contextual tabs", () => {
     expect(tabsFor("presentation", "Shape")).toContain("Shape");
     expect(tabsFor("presentation")).not.toContain("Shape");
+  });
+
+  it("keeps honest type-specific tabs and honors persisted customization", () => {
+    expect(tabsFor("document")).toEqual(["General", "Insert", "Format", "Layout", "References"]);
+    expect(tabsFor("sheets")).toEqual(["General", "Insert", "Format", "Data", "Formula", "Review"]);
+    expect(tabsFor("presentation")).toEqual(["General", "Insert", "Design", "Arrange", "Animate", "Present"]);
+    expect(tabsFor("document", undefined, { tabOrder: ["References", "General"] }))
+      .toEqual(["References", "General", "Insert", "Format", "Layout"]);
+  });
+
+  it("keeps category commands in their category and reserves General for favorites", () => {
+    expect(commandForBinding("sheets", {
+      id: "chart",
+      label: "Chart",
+      priority: "essential",
+      onSelect: vi.fn(),
+    }, 0).defaultPlacement.tab).toBe("Insert");
+    expect(commandForBinding("sheets", {
+      id: "find",
+      label: "Find",
+      priority: "essential",
+      onSelect: vi.fn(),
+    }, 0).defaultPlacement.tab).toBe("General");
+  });
+
+  it("pins and reorders commands through the persisted layout", () => {
+    const chart = commandForBinding("sheets", {
+      id: "chart",
+      label: "Chart",
+      onSelect: vi.fn(),
+    }, 9);
+    const resolved = resolveCommandLayout(chart, {
+      commands: { "sheets.chart": { pinned: true, order: 2, label: "Quick chart" } },
+    });
+    expect(resolved.title).toBe("Quick chart");
+    expect(resolved.defaultPlacement).toMatchObject({ tab: "General", order: 2 });
+    expect(resolved.sourceTab).toBe("Insert");
   });
 
   it("namespaces every manifest operation as a command id", () => {

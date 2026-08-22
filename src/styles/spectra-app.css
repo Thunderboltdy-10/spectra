@@ -11560,15 +11560,25 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .spectra-live-dock-row {
-  justify-content: center;
+  grid-template-columns: 44px minmax(0, 1fr);
 }
 
-@media (min-width: 900px) {
-  .spectra-workbench-live-stack .spectra-command-bar > button:first-of-type {
-    position: absolute;
-    right: calc(100% + 8px);
-    margin-right: 0;
-  }
+.spectra-command-bar {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+}
+
+.spectra-command-bar > button:first-of-type {
+  grid-column: 1;
+  margin-right: 0;
+}
+
+.spectra-command-bar > .spectra-command-surface {
+  grid-column: 2;
+  min-width: 0;
+  width: 100%;
 }
 
 .spectra-artifact-card {
@@ -15071,13 +15081,13 @@ button[data-spectra-context-trigger="true"]::after {
     font-size: 16px;
   }
   .spectra-command-bar {
-    gap: 6px;
+    gap: 8px;
   }
   .spectra-live-dock-slot,
   .spectra-command-bar > button:first-of-type {
     width: 44px;
     height: 44px;
-    margin-right: 8px;
+    margin-right: 0;
   }
   .spectra-conversation {
     background-image: none;
@@ -19058,8 +19068,8 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   z-index: 18;
   /* Fixed, not minimum: a wrapping bar that pushes the canvas down was the
      baseline's most common editor defect. */
-  height: 42px;
-  min-height: 42px;
+  height: 72px;
+  min-height: 72px;
   box-sizing: border-box;
   flex-wrap: nowrap !important;
   align-items: center;
@@ -19080,9 +19090,18 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 
 /* The elastic half. Truncates so the trailing cluster never leaves the bar. */
 .spectra-workbar-lead {
-  display: flex;
+  display: grid;
+  grid-template-rows: 30px minmax(32px, 1fr);
   min-width: 0;
   flex: 1 1 auto;
+  align-content: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.spectra-workbar-controls {
+  display: flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   overflow: hidden;
@@ -19141,9 +19160,9 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   align-items: center;
   gap: 1px;
   overflow: hidden;
-  padding: 1px;
-  border-radius: 7px;
-  background: var(--bg-secondary);
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .spectra-command-tab {
@@ -19159,11 +19178,31 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 
 .spectra-command-custom-row {
   display: grid;
-  grid-template-columns: minmax(104px, 1fr) repeat(8, 26px);
+  grid-template-columns: minmax(118px, 1fr) minmax(72px, 86px) repeat(7, 26px);
   align-items: center;
   gap: 2px;
   padding: 3px 4px;
   border-top: 1px solid var(--border-subtle);
+}
+
+.spectra-workbar-customizer {
+  display: grid;
+  gap: 2px;
+  min-width: min(620px, 78vw);
+}
+
+.spectra-workbar-customizer-heading {
+  padding: 5px 6px 4px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spectra-command-custom-row select {
+  height: 26px;
+  outline: none;
 }
 
 .spectra-command-custom-row > span {
@@ -19190,13 +19229,23 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   color: var(--text-primary);
 }
 
+.spectra-command-custom-row[draggable="true"] {
+  cursor: grab;
+}
+
+.spectra-command-custom-row[draggable="true"]:active,
+.spectra-command-custom-row[data-dragging="true"] {
+  cursor: grabbing;
+  opacity: 0.62;
+}
+
 .spectra-command-tab-custom-row {
   grid-template-columns: minmax(104px, 1fr) repeat(2, 26px);
 }
 
 .spectra-editor-workbar[data-workbar-expanded="true"] {
-  height: 84px;
-  min-height: 84px;
+  height: 98px;
+  min-height: 98px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: 34px 34px;
@@ -19221,6 +19270,36 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   align-items: center;
   gap: 4px;
   margin-left: auto;
+}
+
+.spectra-workbar-expanded-groups {
+  display: flex;
+  min-width: 0;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.spectra-workbar-command-group {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 7px;
+}
+
+.spectra-workbar-command-group-label {
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.spectra-workbar-command-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .spectra-workbar-progress {
@@ -19523,7 +19602,13 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 /* Label shedding. The accessible name stays on the button, so a shed label
    costs nothing to a screen reader or to a pointer with a tooltip. */
 @container artifact-workbar (max-width: 720px) {
-  .spectra-command-tab:not([aria-selected="true"]) {
+  .spectra-command-tabs {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .spectra-command-tabs::-webkit-scrollbar {
     display: none;
   }
   .spectra-artifact-workbar-action:not([data-workbar-keep-label]) span,

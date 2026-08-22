@@ -156,6 +156,7 @@ pub fn is_office_lock_file(path: &Path) -> bool {
 struct Candidate {
     size: u64,
     modified: Option<SystemTime>,
+    fingerprint: String,
     first_stable_at: Instant,
 }
 
@@ -185,12 +186,18 @@ impl StabilityTracker {
             }
         };
         let current = (metadata.len(), metadata.modified().ok());
+        // Provider-backed folders can rewrite bytes without changing size or
+        // timestamp resolution. Include a content fingerprint in the
+        // candidate identity so an intermediate revision cannot be emitted.
+        let fingerprint = sha256_file(path)?;
         match self.candidates.get_mut(path) {
-            Some(candidate) if (candidate.size, candidate.modified) == current => {
+            Some(candidate)
+                if (candidate.size, candidate.modified, &candidate.fingerprint)
+                    == (current.0, current.1, &fingerprint) =>
+            {
                 if now.duration_since(candidate.first_stable_at) >= self.window {
-                    let hash = sha256_file(path)?;
                     self.candidates.remove(path);
-                    Ok(Some(hash))
+                    Ok(Some(fingerprint))
                 } else {
                     Ok(None)
                 }
@@ -198,6 +205,7 @@ impl StabilityTracker {
             Some(candidate) => {
                 candidate.size = current.0;
                 candidate.modified = current.1;
+                candidate.fingerprint = fingerprint;
                 candidate.first_stable_at = now;
                 Ok(None)
             }
@@ -207,6 +215,7 @@ impl StabilityTracker {
                     Candidate {
                         size: current.0,
                         modified: current.1,
+                        fingerprint,
                         first_stable_at: now,
                     },
                 );
@@ -250,9 +259,11 @@ pub fn office_lock_paths(root: &Path, limit: usize) -> Vec<String> {
             entry.file_type().is_file() && entry.file_name().to_string_lossy().starts_with("~$")
         })
         .filter_map(|entry| {
-            entry.path().strip_prefix(root).ok().map(|path| {
-                path.to_string_lossy().replace('\\', "/")
-            })
+            entry
+                .path()
+                .strip_prefix(root)
+                .ok()
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
         })
         .take(limit.clamp(1, 500))
         .collect()
@@ -394,9 +405,17 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("nested")).unwrap();
         std::fs::write(dir.path().join("nested/~$paper.docx"), b"lock").unwrap();
-        assert_eq!(office_lock_paths(dir.path(), 20), vec!["nested/~$paper.docx"]);
-        assert!(scan_page(&TestPlatform, dir.path(), None, 20).unwrap().entries.iter()
-            .all(|entry| !entry.relative_path.contains("~$")));
+        assert_eq!(
+            office_lock_paths(dir.path(), 20),
+            vec!["nested/~$paper.docx"]
+        );
+        assert!(
+            scan_page(&TestPlatform, dir.path(), None, 20)
+                .unwrap()
+                .entries
+                .iter()
+                .all(|entry| !entry.relative_path.contains("~$"))
+        );
     }
 
     #[test]
@@ -412,8 +431,14 @@ mod tests {
     fn provider_backed_roots_use_a_wider_stability_window() {
         let provider = Path::new(r"C:\Users\pablo\OneDrive\Documents\Physics");
         let ordinary = Path::new(r"C:\Users\pablo\Documents\Physics");
-        assert!(WatcherConfig::for_root(provider).stability_window > WatcherConfig::default().stability_window);
-        assert_eq!(WatcherConfig::for_root(ordinary).stability_window, WatcherConfig::default().stability_window);
+        assert!(
+            WatcherConfig::for_root(provider).stability_window
+                > WatcherConfig::default().stability_window
+        );
+        assert_eq!(
+            WatcherConfig::for_root(ordinary).stability_window,
+            WatcherConfig::default().stability_window
+        );
     }
 
     #[test]
@@ -425,15 +450,38 @@ mod tests {
         std::fs::write(&path, b"first provider pass").unwrap();
         assert_eq!(tracker.observe(&path, start).unwrap(), None);
         std::fs::write(&path, b"second provider pass").unwrap();
-        assert_eq!(tracker.observe(&path, start + Duration::from_millis(900)).unwrap(), None);
+        assert_eq!(
+            tracker
+                .observe(&path, start + Duration::from_millis(900))
+                .unwrap(),
+            None
+        );
         std::fs::write(&path, b"final provider bytes").unwrap();
-        assert_eq!(tracker.observe(&path, start + Duration::from_millis(1_800)).unwrap(), None);
-        assert_eq!(tracker.observe(&path, start + Duration::from_millis(3_000)).unwrap(), None);
+        assert_eq!(
+            tracker
+                .observe(&path, start + Duration::from_millis(1_800))
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            tracker
+                .observe(&path, start + Duration::from_millis(3_000))
+                .unwrap(),
+            None
+        );
         let revision = tracker
             .observe(&path, start + Duration::from_millis(3_900))
             .unwrap()
             .expect("the final provider rewrite should settle once");
-        assert_eq!(revision, hex::encode(sha2::Sha256::digest(b"final provider bytes")));
-        assert_eq!(tracker.observe(&path, start + Duration::from_millis(4_000)).unwrap(), None);
+        assert_eq!(
+            revision,
+            hex::encode(sha2::Sha256::digest(b"final provider bytes"))
+        );
+        assert_eq!(
+            tracker
+                .observe(&path, start + Duration::from_millis(4_000))
+                .unwrap(),
+            None
+        );
     }
 }

@@ -643,7 +643,7 @@ export function ObjectLibrary({
         }
         data-interactive="true"
         draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
-        className="relative min-h-[118px] cursor-grab overflow-hidden p-3 active:cursor-grabbing"
+        className="relative min-h-[118px] cursor-pointer overflow-hidden p-3"
         style={{ "--card-accent": meta.color } as CSSProperties}
         onDragStart={(event) => beginDrag(event, entry)}
         onDragEnd={() => {

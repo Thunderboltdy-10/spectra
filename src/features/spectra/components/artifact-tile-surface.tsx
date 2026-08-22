@@ -20,6 +20,7 @@ import {
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { StudioSplitPlaceholder } from "./artifact-studio-shell";
 import type { SpectraArtifact } from "../data/api";
+import type { ApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { getWorkDefinition } from "../work/registry";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import {
@@ -51,6 +52,7 @@ type ArtifactTileSurfaceProps = {
   onArchive?: (artifact: SpectraArtifact) => Promise<void> | void;
   onDirtyChange: (artifactId: string, dirty: boolean) => void;
   onContinueThread?: (threadId: string, title: string) => void;
+  executeApplicationCommand?: ApplicationCommandDispatcher;
 };
 
 const ArtifactStudio = dynamic(
@@ -75,6 +77,7 @@ export function ArtifactTileSurface({
   onArchive,
   onDirtyChange,
   onContinueThread,
+  executeApplicationCommand,
 }: ArtifactTileSurfaceProps) {
   const uniqueArtifacts = useMemo(
     () =>
@@ -374,6 +377,7 @@ export function ArtifactTileSurface({
                     onDirtyChange={onDirtyChange}
                     onContinueThread={onContinueThread}
                     continuedThreadId={continuedThreadId}
+                    executeApplicationCommand={executeApplicationCommand}
                   />
                 </div>
               );

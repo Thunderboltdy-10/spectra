@@ -56,3 +56,7 @@ next-env.d.ts
 /.tmp-n4-mount/
 /.tmp-n4-target/
 /.tmp-n4-sanitize-target/
+/.tmp-n5-bridge
+/.tmp-n6-bridge
+/.tmp-n8-target
+

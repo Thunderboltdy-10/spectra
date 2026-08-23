@@ -1,0 +1,683 @@
+/* Document canvas.
+   Page surface, typography, table handles, header/footer chrome and the
+   review affordances for the Document studio. Split out of `spectra-app.css`
+   so the document canvas can grow without three editors editing one file. */
+
+/* ---------------------------------------------------------------------------
+   Paper.
+
+   A page view that is not the paper it claims to be is a lie the writer only
+   discovers at the printer. So the canvas is sized from the real paper widths,
+   and the margin presets are the millimetres their labels promise. The print
+   rules at the foot of this file read the same variables, so the printed page is
+   the page that was on screen.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-studio {
+  --spectra-page-width: 210mm;
+  --spectra-page-height: 297mm;
+  --spectra-page-margin: 25mm;
+  --spectra-page-columns: 1;
+}
+
+.spectra-document-studio[data-page-size="letter"] {
+  --spectra-page-width: 215.9mm;
+  --spectra-page-height: 279.4mm;
+}
+
+.spectra-document-studio[data-page-size="legal"] {
+  --spectra-page-width: 215.9mm;
+  --spectra-page-height: 355.6mm;
+}
+
+.spectra-document-studio[data-page-size="a5"] {
+  --spectra-page-width: 148mm;
+  --spectra-page-height: 210mm;
+}
+
+/* Landscape states both axes for each paper: a variable cannot be defined from
+   the value it is replacing, so the swap has to be written out. */
+.spectra-document-studio[data-orientation="landscape"][data-page-size="a4"] {
+  --spectra-page-width: 297mm;
+  --spectra-page-height: 210mm;
+}
+
+.spectra-document-studio[data-orientation="landscape"][data-page-size="letter"] {
+  --spectra-page-width: 279.4mm;
+  --spectra-page-height: 215.9mm;
+}
+
+.spectra-document-studio[data-orientation="landscape"][data-page-size="legal"] {
+  --spectra-page-width: 355.6mm;
+  --spectra-page-height: 215.9mm;
+}
+
+.spectra-document-studio[data-orientation="landscape"][data-page-size="a5"] {
+  --spectra-page-width: 210mm;
+  --spectra-page-height: 148mm;
+}
+
+.spectra-document-studio[data-margins="narrow"] {
+  --spectra-page-margin: 12mm;
+}
+
+.spectra-document-studio[data-margins="wide"] {
+  --spectra-page-margin: 40mm;
+}
+
+.spectra-document-studio[data-columns="2"] {
+  --spectra-page-columns: 2;
+}
+
+.spectra-document-studio[data-columns="3"] {
+  --spectra-page-columns: 3;
+}
+
+/* Page view takes its width and padding from the paper, so what the writer
+   measures on screen is what comes out of the printer. */
+.spectra-document-studio[data-layout="page"] .tiptap-root {
+  width: min(100%, var(--spectra-page-width));
+  max-width: min(100%, var(--spectra-page-width));
+}
+
+.spectra-document-studio[data-layout="page"] .ProseMirror {
+  min-height: var(--spectra-page-height);
+  padding: var(--spectra-page-margin) !important;
+}
+
+/* Columns are a section property in Word and a real multi-column flow here.
+   Only page view honours them: continuous view has no page width to divide. */
+.spectra-document-studio[data-layout="page"][data-columns] .ProseMirror {
+  column-count: var(--spectra-page-columns);
+  column-gap: 9mm;
+  column-rule: 1px solid #ecefe9;
+}
+
+/* A heading should not sit alone at the foot of a column. */
+.spectra-document-studio[data-layout="page"][data-columns]
+  .ProseMirror
+  :is(h1, h2, h3) {
+  break-after: avoid-column;
+}
+
+/* ---------------------------------------------------------------------------
+   Breaks.
+
+   A page break in the editor is the page break in the print and in the PDF —
+   one node, one behaviour. It is visible while writing because an invisible
+   break is a break a writer inserts twice.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-studio .ProseMirror .spectra-page-break,
+.spectra-document-studio .ProseMirror .spectra-section-break {
+  position: relative;
+  height: 0;
+  margin: 26px 0;
+  border-top: 1px dashed #c9d0c8;
+  cursor: pointer;
+  user-select: none;
+}
+
+.spectra-document-studio .ProseMirror .spectra-page-break::after,
+.spectra-document-studio .ProseMirror .spectra-section-break::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  padding: 1px 8px;
+  transform: translate(-50%, -50%);
+  border: 1px solid #dfe4dd;
+  border-radius: 999px;
+  background: #fff;
+  color: #6f7973;
+  content: "Page break";
+  font-size: var(--text-micro);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.spectra-document-studio .ProseMirror .spectra-section-break {
+  border-top-style: solid;
+  border-top-color: #b9c3b8;
+}
+
+.spectra-document-studio .ProseMirror .spectra-section-break::after {
+  content: attr(data-section-label);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.spectra-document-studio .ProseMirror .spectra-page-break.ProseMirror-selectednode,
+.spectra-document-studio
+  .ProseMirror
+  .spectra-section-break.ProseMirror-selectednode {
+  border-top-color: var(--accent-primary, #3c6d4f);
+}
+
+/* ---------------------------------------------------------------------------
+   Paragraph properties.
+
+   Indent, leading, border and shading are paragraph properties in Word and
+   paragraph attributes here, so each renders from its own attribute rather than
+   from a wrapper element that a copy would lose.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-studio .ProseMirror [data-indent="1"] { margin-left: 12.7mm; }
+.spectra-document-studio .ProseMirror [data-indent="2"] { margin-left: 25.4mm; }
+.spectra-document-studio .ProseMirror [data-indent="3"] { margin-left: 38.1mm; }
+.spectra-document-studio .ProseMirror [data-indent="4"] { margin-left: 50.8mm; }
+.spectra-document-studio .ProseMirror [data-indent="5"] { margin-left: 63.5mm; }
+.spectra-document-studio .ProseMirror [data-indent="6"] { margin-left: 76.2mm; }
+.spectra-document-studio .ProseMirror [data-indent="7"] { margin-left: 88.9mm; }
+.spectra-document-studio .ProseMirror [data-indent="8"] { margin-left: 101.6mm; }
+
+/* Negative levels are outdents. Word puts such a paragraph out into the left
+   margin — a hanging heading — and the file keeps that geometry whether or not
+   Spectra draws it, so it is drawn. The paper has 25.4mm of margin to give back
+   at most, which is why the step stops mattering visually past -2 while the
+   stored value keeps counting. */
+.spectra-document-studio .ProseMirror [data-indent="-1"] { margin-left: -12.7mm; }
+.spectra-document-studio .ProseMirror [data-indent="-2"],
+.spectra-document-studio .ProseMirror [data-indent="-3"],
+.spectra-document-studio .ProseMirror [data-indent="-4"],
+.spectra-document-studio .ProseMirror [data-indent="-5"],
+.spectra-document-studio .ProseMirror [data-indent="-6"],
+.spectra-document-studio .ProseMirror [data-indent="-7"],
+.spectra-document-studio .ProseMirror [data-indent="-8"] { margin-left: -25.4mm; }
+
+.spectra-document-studio .ProseMirror [data-border] {
+  padding: 8px 10px;
+  border: 1px solid #ccd4cb;
+  border-radius: 3px;
+}
+
+.spectra-document-studio .ProseMirror [data-border="top"] {
+  padding: 8px 0 0;
+  border: 0;
+  border-top: 1px solid #ccd4cb;
+  border-radius: 0;
+}
+
+.spectra-document-studio .ProseMirror [data-border="bottom"] {
+  padding: 0 0 8px;
+  border: 0;
+  border-bottom: 1px solid #ccd4cb;
+  border-radius: 0;
+}
+
+.spectra-document-studio .ProseMirror [data-border="left"] {
+  padding: 0 0 0 10px;
+  border: 0;
+  border-left: 2px solid #ccd4cb;
+  border-radius: 0;
+}
+
+.spectra-document-studio .ProseMirror [data-shading] {
+  padding: 8px 10px;
+  border-radius: 3px;
+}
+
+/* A caption is a caption wherever it is pasted, because it carries the style
+   name rather than a bundle of inline properties. */
+.spectra-document-studio .ProseMirror [data-style="caption"] {
+  margin-top: 6px !important;
+  color: #6f7973;
+  font-size: 0.86em;
+  font-style: italic;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   Notes.
+
+   Numbered by CSS counters, so the sequence is right the moment a note is
+   inserted or deleted — no field to refresh, and no wrong number in a printed
+   copy. Footnotes and endnotes count separately, as they do in Word.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-studio .ProseMirror {
+  counter-reset: spectra-footnote spectra-endnote;
+}
+
+.spectra-document-studio .ProseMirror .spectra-note {
+  display: inline;
+}
+
+.spectra-document-studio .ProseMirror .spectra-note-footnote {
+  counter-increment: spectra-footnote;
+}
+
+.spectra-document-studio .ProseMirror .spectra-note-endnote {
+  counter-increment: spectra-endnote;
+}
+
+.spectra-document-studio .ProseMirror .spectra-note-marker {
+  padding: 0 1px;
+  color: var(--accent-primary, #3c6d4f);
+  cursor: pointer;
+  font-feature-settings: "sups" 0;
+  font-weight: 640;
+}
+
+.spectra-document-studio .ProseMirror .spectra-note-footnote .spectra-note-marker::after {
+  content: counter(spectra-footnote);
+}
+
+.spectra-document-studio .ProseMirror .spectra-note-endnote .spectra-note-marker::after {
+  content: counter(spectra-endnote, lower-roman);
+}
+
+.spectra-document-studio .ProseMirror .spectra-note[data-empty="true"] .spectra-note-marker {
+  color: #b4802b;
+}
+
+/* The note text is not hidden behind a hover: an unwritten note is visible work,
+   and a written one is readable at a glance without leaving the sentence. */
+.spectra-document-studio .ProseMirror .spectra-note-preview {
+  margin-left: 2px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #f3f5f1;
+  color: #5f6a63;
+  font-size: 0.82em;
+  vertical-align: 1px;
+}
+
+.spectra-document-studio .ProseMirror .spectra-note[data-empty="true"] .spectra-note-preview {
+  background: color-mix(in oklab, #d88922 12%, #fff);
+  color: #7a5312;
+}
+
+.spectra-document-studio .ProseMirror .spectra-note-editor {
+  display: inline-block;
+  width: min(100%, 320px);
+  vertical-align: top;
+}
+
+.spectra-document-studio .ProseMirror .spectra-note-editor textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #cfd6cd;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text-primary, #27312b);
+  font-size: var(--text-micro);
+  line-height: 1.45;
+  resize: vertical;
+}
+
+/* ---------------------------------------------------------------------------
+   Pictures.
+
+   Wrap and width are attributes on the image, so a picture keeps its placement
+   when the paragraph around it is rewritten.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-studio .ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 3px;
+}
+
+.spectra-document-studio .ProseMirror img[data-wrap="left"] {
+  float: left;
+  margin: 4px 14px 8px 0;
+}
+
+.spectra-document-studio .ProseMirror img[data-wrap="right"] {
+  float: right;
+  margin: 4px 0 8px 14px;
+}
+
+.spectra-document-studio .ProseMirror img[data-wrap="break"] {
+  display: block;
+  clear: both;
+  margin: 14px auto;
+}
+
+.spectra-document-studio .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid var(--accent-primary, #3c6d4f);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Tables.
+
+   Handles the writer can see. A table whose row and column edges are invisible
+   until hovered is a table people resize by trial and error.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-studio .ProseMirror table {
+  width: 100%;
+  margin: 14px 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  overflow: hidden;
+}
+
+.spectra-document-studio .ProseMirror table :is(td, th) {
+  position: relative;
+  min-width: 2em;
+  padding: 6px 9px;
+  border: 1px solid #dbe0d9;
+  vertical-align: top;
+}
+
+.spectra-document-studio .ProseMirror table th {
+  background: #f4f6f2;
+  font-weight: 660;
+  text-align: left;
+}
+
+.spectra-document-studio .ProseMirror table .selectedCell::after {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklab, var(--accent-primary, #3c6d4f) 12%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+.spectra-document-studio .ProseMirror .column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  bottom: 0;
+  width: 4px;
+  background: var(--accent-primary, #3c6d4f);
+  pointer-events: none;
+}
+
+.spectra-document-studio .ProseMirror.resize-cursor {
+  cursor: col-resize;
+}
+
+/* A read-only native region says so instead of quietly refusing keystrokes. */
+.spectra-document-studio .ProseMirror [data-native-read-only="true"] {
+  border-left: 2px solid #d8b26a;
+  padding-left: 8px;
+  background: color-mix(in oklab, #d88922 5%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Selection toolbar.
+
+   It renders registry bindings, so it inherits the work bar's control styling
+   and only needs the floating shell and the plain icon button.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-selection-commands {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: min(92vw, 640px);
+  padding: 3px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.spectra-document-selection-commands::-webkit-scrollbar {
+  display: none;
+}
+
+.spectra-document-selection-command {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: #4c5750;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.spectra-document-selection-command:hover:not(:disabled) {
+  background: #eef1ec;
+}
+
+.spectra-document-selection-command[data-active] {
+  background: color-mix(in oklab, var(--accent-primary, #3c6d4f) 14%, #fff);
+  color: var(--accent-primary, #3c6d4f);
+}
+
+/* Disabled means unavailable *and* explained — the title carries the sentence,
+   so the button stays present rather than disappearing. */
+.spectra-document-selection-command:disabled {
+  color: #a8b0a9;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   Inline panel.
+
+   One field, in the writer's column, for the one word a command needs: a link,
+   alt text, a running head, a style name.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-inline-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 14px 8px;
+  padding: 9px 11px;
+  border: 1px solid #dfe4dd;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 24px rgba(40, 50, 44, 0.05);
+}
+
+.spectra-document-inline-panel > span {
+  display: flex;
+  min-width: 0;
+  max-width: 40%;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.spectra-document-inline-panel strong {
+  font-size: var(--text-micro);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spectra-document-inline-panel small {
+  color: #6f7973;
+  font-size: var(--text-micro);
+  line-height: 1.35;
+}
+
+.spectra-document-inline-panel :is(input, textarea) {
+  min-width: 0;
+  flex: 1;
+  padding: 6px 9px;
+  border: 1px solid #cfd6cd;
+  border-radius: 7px;
+  background: #fff;
+  font-size: var(--text-small, 0.8125rem);
+}
+
+.spectra-document-inline-panel :is(input, textarea):focus-visible {
+  border-color: var(--accent-primary, #3c6d4f);
+  outline: none;
+}
+
+.spectra-document-inline-panel button {
+  flex: none;
+  padding: 6px 11px;
+  border: 1px solid #cfd6cd;
+  border-radius: 7px;
+  font-size: var(--text-micro);
+  font-weight: 640;
+}
+
+.spectra-document-inline-panel button[data-confirm-panel] {
+  border-color: var(--accent-primary, #3c6d4f);
+  background: var(--accent-primary, #3c6d4f);
+  color: #fff;
+}
+
+/* ---------------------------------------------------------------------------
+   Tracked changes.
+
+   Read-only by design: accepting or rejecting a Word revision would rewrite
+   parts Spectra does not model. The rail says that in words rather than
+   offering buttons that cannot keep their promise.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-revisions {
+  display: flex;
+  width: 246px;
+  flex: 0 0 246px;
+  flex-direction: column;
+  gap: 6px;
+  margin-right: 14px;
+  padding-bottom: 10px;
+  overflow-y: auto;
+  border: 1px solid #e3e6e0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 9px 28px rgba(40, 50, 44, 0.045);
+}
+
+.spectra-document-revisions > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 12px;
+  border-bottom: 1px solid #eceeea;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.spectra-document-revisions > header strong {
+  flex: 1;
+  font-size: var(--text-micro);
+  font-weight: 760;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.spectra-document-revisions > header button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: #6f7973;
+}
+
+.spectra-document-revisions > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 10px;
+  padding: 8px 9px;
+  border: 1px solid #eceeea;
+  border-left: 2px solid #d8b26a;
+  border-radius: 7px;
+  background: color-mix(in oklab, #d88922 4%, #fff);
+}
+
+.spectra-document-revisions > div strong {
+  font-size: var(--text-micro);
+  font-weight: 700;
+}
+
+.spectra-document-revisions > div small,
+.spectra-document-revisions > p {
+  color: #6f7973;
+  font-size: var(--text-micro);
+  line-height: 1.45;
+}
+
+.spectra-document-revisions > p {
+  margin: 4px 12px 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Running head and foot.
+
+   Word keeps these in their own parts, which Spectra preserves; a header
+   written here is Spectra's own and prints on every page. It is shown as page
+   furniture, greyed and outside the text column, so nobody mistakes it for a
+   paragraph they can write in.
+   --------------------------------------------------------------------------- */
+
+.spectra-document-page-chrome {
+  max-width: min(100%, var(--spectra-page-width, 210mm));
+  margin: 0 auto;
+  padding: 6px var(--spectra-page-margin, 25mm);
+  color: #7b857e;
+  font-size: var(--text-micro);
+  letter-spacing: 0.02em;
+}
+
+.spectra-document-page-chrome[data-slot="header"] {
+  padding-bottom: 0;
+  border-bottom: 1px solid #eceeea;
+}
+
+.spectra-document-page-chrome[data-slot="footer"] {
+  padding-top: 0;
+  border-top: 1px solid #eceeea;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+   Print.
+
+   The printed page is the page view, without the editing furniture. The paper
+   and margins come from the same variables the canvas uses, so what was on
+   screen is what comes out.
+   --------------------------------------------------------------------------- */
+
+@media print {
+  .spectra-document-selection-commands,
+  .spectra-document-inline-panel,
+  .spectra-document-revisions,
+  .spectra-document-outline,
+  .spectra-document-sources,
+  .spectra-document-findbar {
+    display: none !important;
+  }
+
+  .spectra-document-studio .ProseMirror .spectra-page-break {
+    break-after: page;
+    height: 0;
+    margin: 0;
+    border: 0;
+  }
+
+  .spectra-document-studio .ProseMirror .spectra-page-break::after {
+    content: none;
+  }
+
+  .spectra-document-studio .ProseMirror .spectra-section-break {
+    break-after: page;
+    border: 0;
+  }
+
+  .spectra-document-studio .ProseMirror .spectra-section-break::after {
+    content: none;
+  }
+
+  /* A note prints as its number followed by its text, which is what a reader
+     of a printed page needs; the inline preview chrome goes away. */
+  .spectra-document-studio .ProseMirror .spectra-note-preview {
+    padding: 0;
+    background: none;
+    color: inherit;
+  }
+
+  .spectra-document-studio .ProseMirror :is(h1, h2, h3) {
+    break-after: avoid;
+  }
+
+  .spectra-document-studio .ProseMirror :is(p, li, tr, img) {
+    break-inside: avoid;
+  }
+}

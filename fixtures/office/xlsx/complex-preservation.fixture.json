@@ -1,0 +1,63 @@
+{
+  "source": "Microsoft Open XML SDK corpus: chart, table, SmartArt diagram, image, comments and a calculated cell",
+  "contains": [
+    "xl/charts/chart1.xml",
+    "xl/tables/table1.xml",
+    "xl/diagrams/data1.xml",
+    "xl/comments1.xml",
+    "xl/media/image1.png"
+  ],
+  "expected": {
+    "cells": "NATIVE",
+    "recognizedFormulas": "NATIVE",
+    "charts": "PRESERVED",
+    "tables": "PRESERVED",
+    "smartArt": "PRESERVED",
+    "comments": "PRESERVED",
+    "media": "PRESERVED"
+  },
+  "mutations": [
+    {
+      "commandId": "sheets.clipboard.paste",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": [
+        "xl/charts/chart1.xml",
+        "xl/tables/table1.xml",
+        "xl/diagrams/data1.xml",
+        "xl/comments1.xml",
+        "xl/media/image1.png"
+      ]
+    },
+    {
+      "commandId": "sheets.fill.down",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": [
+        "xl/charts/chart1.xml",
+        "xl/tables/table1.xml",
+        "xl/diagrams/data1.xml",
+        "xl/comments1.xml",
+        "xl/media/image1.png"
+      ]
+    },
+    {
+      "commandId": "sheets.formula.autosum",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": [
+        "xl/charts/chart1.xml",
+        "xl/tables/table1.xml",
+        "xl/diagrams/data1.xml",
+        "xl/comments1.xml"
+      ]
+    },
+    {
+      "commandId": "sheets.formula.insert",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": [
+        "xl/charts/chart1.xml",
+        "xl/tables/table1.xml",
+        "xl/diagrams/data1.xml",
+        "xl/comments1.xml"
+      ]
+    }
+  ]
+}

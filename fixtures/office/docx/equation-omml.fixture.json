@@ -1,1 +1,32 @@
-{"source":"Microsoft Open XML SDK test asset","contains":["OMML equation"],"expected":{"surrounding paragraphs":"NATIVE","equation XML":"unsupported-but-preserved"}}
+{
+  "source": "Microsoft Open XML SDK test asset",
+  "contains": [
+    "OMML equation"
+  ],
+  "expected": {
+    "surrounding paragraphs": "NATIVE",
+    "equation XML": "unsupported-but-preserved"
+  },
+  "mutations": [
+    {
+      "commandId": "document.format.italic",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "i"
+      },
+      "preserve": [
+        "word/styles.xml"
+      ]
+    }
+  ],
+  "refusedRegions": [
+    {
+      "commandId": "document.insert.equation",
+      "region": "equations"
+    }
+  ]
+}

@@ -1132,6 +1132,12 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
     "apply_layout",
     "apply_theme",
     "write_speaker_notes",
+    // A person can describe a shape for a screen reader, and the PPTX lens
+    // writes that description natively. Without an operation for it the
+    // assistant is the only party that cannot — the "human can, AI cannot"
+    // direction of C2, where "add alt text to every image" fails beside a
+    // button that works.
+    "describe_object",
     "generate_chart",
     "check_overflow",
     "check_contrast",

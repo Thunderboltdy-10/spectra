@@ -1,1 +1,61 @@
-{"source":"Microsoft Open XML SDK test asset","contains":["footnotes","endnotes","bibliography/custom XML"],"expected":{"body paragraphs":"NATIVE","notes":"PRESERVED","custom XML":"PRESERVED"}}
+{
+  "source": "Microsoft Open XML SDK test asset",
+  "contains": [
+    "footnotes",
+    "endnotes",
+    "bibliography/custom XML"
+  ],
+  "expected": {
+    "body paragraphs": "NATIVE",
+    "notes": "PRESERVED",
+    "custom XML": "PRESERVED"
+  },
+  "mutations": [
+    {
+      "commandId": "document.format.bold",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "b"
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "customXml/"
+      ]
+    },
+    {
+      "commandId": "document.format.align",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "jc",
+        "attribute": {
+          "name": "val",
+          "value": "center"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "customXml/"
+      ]
+    }
+  ],
+  "refusedRegions": [
+    {
+      "commandId": "document.insert.footnote",
+      "region": "footnotes"
+    },
+    {
+      "commandId": "document.insert.endnote",
+      "region": "footnotes"
+    }
+  ]
+}

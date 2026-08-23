@@ -1,0 +1,12 @@
+{
+  "source": "Microsoft Open XML SDK corpus: cell comments with their VML drawing",
+  "contains": ["xl/comments1.xml", "xl/drawings/vmlDrawing1.vml"],
+  "expected": { "cells": "NATIVE", "comments": "PRESERVED" },
+  "mutations": [
+    {
+      "commandId": "sheets.clipboard.paste",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": ["xl/comments1.xml", "xl/drawings/vmlDrawing1.vml"]
+    }
+  ]
+}

@@ -382,6 +382,14 @@ export const presentationContentSchema = z
               .object({
                 transition: z.literal("preserved").optional(),
                 animations: z.literal("preserved").optional(),
+                /**
+                 * Set when the linked deck has no notes page for this slide.
+                 * Spectra can still hold the note on its own side, but it cannot
+                 * write it into the file — and without saying so here, the notes
+                 * command accepts the text and materialize silently drops it,
+                 * which is the exact shape of a lie D25 exists to prevent.
+                 */
+                speakerNotes: z.literal("unsupported").optional(),
               })
               .strict()
               .optional(),

@@ -1,0 +1,37 @@
+{
+  "source": "Microsoft Open XML SDK corpus: ActiveX controls with binary payloads, charts, drawings and EMF media",
+  "contains": [
+    "xl/activeX/activeX1.bin",
+    "xl/drawings/vmlDrawing1.vml",
+    "xl/charts/chart1.xml",
+    "xl/media/image1.emf"
+  ],
+  "expected": {
+    "cells": "NATIVE",
+    "activeX": "PRESERVED",
+    "charts": "PRESERVED",
+    "media": "PRESERVED"
+  },
+  "mutations": [
+    {
+      "commandId": "sheets.clipboard.paste",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": [
+        "xl/activeX/activeX1.bin",
+        "xl/drawings/vmlDrawing1.vml",
+        "xl/charts/chart1.xml",
+        "xl/media/image1.emf"
+      ]
+    },
+    {
+      "commandId": "sheets.fill.down",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": [
+        "xl/activeX/activeX1.bin",
+        "xl/drawings/vmlDrawing1.vml",
+        "xl/charts/chart1.xml",
+        "xl/media/image1.emf"
+      ]
+    }
+  ]
+}

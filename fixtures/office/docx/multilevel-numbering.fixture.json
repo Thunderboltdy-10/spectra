@@ -1,1 +1,48 @@
-{"source":"Microsoft Open XML SDK test asset","contains":["multi-level numbering","numbering/style inheritance"],"expected":{"plain paragraphs":"NATIVE","lists":"EQUIVALENT","numbering part":"round-trip preservation"}}
+{
+  "source": "Microsoft Open XML SDK test asset",
+  "contains": [
+    "multi-level numbering",
+    "numbering/style inheritance"
+  ],
+  "expected": {
+    "plain paragraphs": "NATIVE",
+    "lists": "EQUIVALENT",
+    "numbering part": "round-trip preservation"
+  },
+  "mutations": [
+    {
+      "commandId": "document.format.shading",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "shd",
+        "attribute": {
+          "name": "fill",
+          "value": "F2F4F7"
+        }
+      },
+      "preserve": [
+        "word/numbering.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.border",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "pBdr"
+      },
+      "preserve": [
+        "word/numbering.xml",
+        "word/styles.xml"
+      ]
+    }
+  ]
+}

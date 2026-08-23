@@ -17,22 +17,82 @@ export type SheetValidation =
       rejectInvalid: boolean;
     };
 
+/**
+ * One border edge. `style` is the ECMA-376 line style vocabulary, so a border
+ * a person draws here is the border Excel draws — not an approximation chosen
+ * at export time.
+ */
+export type SheetBorderEdge = {
+  style:
+    | "thin"
+    | "medium"
+    | "thick"
+    | "dashed"
+    | "dotted"
+    | "double"
+    | "hair";
+  color?: string;
+};
+
+export type SheetBorders = {
+  top?: SheetBorderEdge | null;
+  right?: SheetBorderEdge | null;
+  bottom?: SheetBorderEdge | null;
+  left?: SheetBorderEdge | null;
+};
+
+/**
+ * The number-format kinds a cell can carry. `custom` defers to
+ * `customFormat`, which holds a real Excel format code — the one honest way to
+ * offer "custom" without inventing a second grammar.
+ */
+export type SheetNumberFormat =
+  | "general"
+  | "number"
+  | "currency"
+  | "accounting"
+  | "percent"
+  | "fraction"
+  | "scientific"
+  | "date"
+  | "time"
+  | "text"
+  | "custom";
+
+export type SheetCellFormat = {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  align?: "left" | "center" | "right" | "justify";
+  verticalAlign?: "top" | "middle" | "bottom";
+  wrap?: boolean;
+  /** Degrees, -90 to 90, as the Excel dialog states it. */
+  rotation?: number;
+  indent?: number;
+  numberFormat?: SheetNumberFormat;
+  /** An Excel format code, used when `numberFormat` is "custom". */
+  customFormat?: string;
+  /** ISO currency code for the currency and accounting formats. */
+  currency?: string;
+  decimals?: number;
+  thousands?: boolean;
+  /**
+   * A font stack, or one of the three legacy Spectra keywords
+   * (`sans`/`serif`/`mono`) that imported workbooks still carry.
+   */
+  fontFamily?: string;
+  fontSize?: number;
+  textColor?: string;
+  fillColor?: string;
+  borders?: SheetBorders;
+};
+
 export type SheetCell = {
   value?: SheetScalar;
   formula?: string;
   nativeFormulaSupport?: "recognized" | "cached-only";
-  format?: {
-    bold?: boolean;
-    italic?: boolean;
-    underline?: boolean;
-    align?: "left" | "center" | "right";
-    numberFormat?: "general" | "number" | "currency" | "percent" | "date";
-    decimals?: number;
-    fontFamily?: "sans" | "serif" | "mono";
-    fontSize?: number;
-    textColor?: string;
-    fillColor?: string;
-  };
+  format?: SheetCellFormat;
   validation?: SheetValidation;
   note?: string;
   provenance?: { source?: string; importedAt?: number };
@@ -51,6 +111,8 @@ export type SheetChart = {
     | "histogram";
   sourceRange: string;
   title: string;
+  /** Off hides the key; a one-series chart rarely needs one. */
+  showLegend?: boolean;
   position: { x: number; y: number; width: number; height: number };
 };
 
@@ -58,6 +120,10 @@ export type SheetTable = {
   id: string;
   name: string;
   range: string;
+  /** Banding for the table body. `plain` is the default. */
+  style?: "plain" | "striped" | "accent";
+  /** Adds a summarising row under the table's last data row. */
+  totalsRow?: boolean;
   filters?: Array<{
     column: number;
     allowedValues: SheetScalar[];
@@ -66,6 +132,8 @@ export type SheetTable = {
     column: number;
     direction: "asc" | "desc";
   };
+  /** Multi-key sort, most significant first. Kept so a re-sort repeats it. */
+  sortKeys?: Array<{ column: number; direction: "asc" | "desc" }>;
 };
 
 export type SheetConditionalFormat =
@@ -80,8 +148,25 @@ export type SheetConditionalFormat =
       id: string;
       range: string;
       kind: "cell_is";
-      operator: "greater_than" | "less_than" | "equal_to";
+      operator:
+        | "greater_than"
+        | "less_than"
+        | "equal_to"
+        | "not_equal_to"
+        | "greater_equal"
+        | "less_equal"
+        | "between";
       value: number;
+      /** The upper bound of a `between` rule. */
+      secondValue?: number;
+      fillColor: string;
+      textColor?: string;
+    }
+  | {
+      id: string;
+      range: string;
+      kind: "text_contains";
+      text: string;
       fillColor: string;
       textColor?: string;
     };
@@ -102,6 +187,19 @@ export type WorkbookSheet = {
   rowHeights?: Record<string, number>;
   mergedRanges?: string[];
   conditionalFormats?: SheetConditionalFormat[];
+  /** Tab colour, as a hex string. Excel keeps this on the sheet's view. */
+  tabColor?: string;
+  /** A hidden sheet stays in the workbook and keeps answering formulas. */
+  hidden?: boolean;
+  /** View toggles. Absent means shown, which is Excel's default. */
+  showGridlines?: boolean;
+  showHeadings?: boolean;
+  /**
+   * Sheet protection. Spectra records the intent and refuses edits locally;
+   * Excel's own password-based protection in a mounted file is preserved, not
+   * replaced, so the note says which one is in force.
+   */
+  protection?: { locked: boolean; note?: string };
   rowIdentities?: Record<string, string>;
   columnIdentities?: Record<string, string>;
 };
@@ -372,6 +470,10 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                     ? table.name.slice(0, 100)
                     : `Table ${tableIndex + 1}`,
                 range: table.range.toUpperCase(),
+                ...(table.style === "striped" || table.style === "accent"
+                  ? { style: table.style }
+                  : {}),
+                ...(table.totalsRow === true ? { totalsRow: true } : {}),
                 filters: Array.isArray(table.filters)
                   ? table.filters.flatMap((candidateFilter) => {
                       const filter = record(candidateFilter);
@@ -415,6 +517,30 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                       },
                     }
                   : {}),
+                ...(Array.isArray(table.sortKeys)
+                  ? {
+                      sortKeys: table.sortKeys.flatMap((candidate) => {
+                        const key = record(candidate);
+                        if (
+                          key.direction !== "asc" &&
+                          key.direction !== "desc"
+                        )
+                          return [];
+                        return [
+                          {
+                            column: Math.max(
+                              0,
+                              Math.min(
+                                16_383,
+                                Math.round(Number(key.column) || 0),
+                              ),
+                            ),
+                            direction: key.direction as "asc" | "desc",
+                          },
+                        ];
+                      }).slice(0, 8),
+                    }
+                  : {}),
               },
             ];
           })
@@ -452,6 +578,7 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                   typeof chart.title === "string"
                     ? chart.title.slice(0, 300)
                     : `Chart ${chartIndex + 1}`,
+                ...(chart.showLegend === false ? { showLegend: false } : {}),
                 position: {
                   x: Number(position.x) || 0,
                   y: Number(position.y) || 0,
@@ -517,9 +644,15 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                 ];
               if (
                 rule.kind === "cell_is" &&
-                ["greater_than", "less_than", "equal_to"].includes(
-                  String(rule.operator),
-                ) &&
+                [
+                  "greater_than",
+                  "less_than",
+                  "equal_to",
+                  "not_equal_to",
+                  "greater_equal",
+                  "less_equal",
+                  "between",
+                ].includes(String(rule.operator)) &&
                 typeof rule.value === "number" &&
                 Number.isFinite(rule.value)
               )
@@ -528,9 +661,35 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                     id,
                     range: rangeLabel(parseRange(rule.range)!),
                     kind: "cell_is",
-                    operator: rule.operator as
-                      "greater_than" | "less_than" | "equal_to",
+                    operator: rule.operator as NonNullable<
+                      Extract<SheetConditionalFormat, { kind: "cell_is" }>
+                    >["operator"],
                     value: rule.value,
+                    ...(typeof rule.secondValue === "number" &&
+                    Number.isFinite(rule.secondValue)
+                      ? { secondValue: rule.secondValue }
+                      : {}),
+                    fillColor:
+                      typeof rule.fillColor === "string"
+                        ? rule.fillColor
+                        : "#d9f4e8",
+                    textColor:
+                      typeof rule.textColor === "string"
+                        ? rule.textColor
+                        : undefined,
+                  },
+                ];
+              if (
+                rule.kind === "text_contains" &&
+                typeof rule.text === "string" &&
+                rule.text.trim()
+              )
+                return [
+                  {
+                    id,
+                    range: rangeLabel(parseRange(rule.range)!),
+                    kind: "text_contains",
+                    text: rule.text.slice(0, 200),
                     fillColor:
                       typeof rule.fillColor === "string"
                         ? rule.fillColor
@@ -545,6 +704,22 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
             },
           )
         : [],
+      ...(typeof sheet.tabColor === "string" && /^#[0-9a-fA-F]{6}$/.test(sheet.tabColor)
+        ? { tabColor: sheet.tabColor }
+        : {}),
+      ...(sheet.hidden === true ? { hidden: true } : {}),
+      ...(sheet.showGridlines === false ? { showGridlines: false } : {}),
+      ...(sheet.showHeadings === false ? { showHeadings: false } : {}),
+      ...(record(sheet.protection).locked === true
+        ? {
+            protection: {
+              locked: true,
+              ...(typeof record(sheet.protection).note === "string"
+                ? { note: String(record(sheet.protection).note).slice(0, 300) }
+                : {}),
+            },
+          }
+        : {}),
       rowIdentities: normalizeSheetIdentityMap(
         sheet.rowIdentities,
         sheetId,
@@ -733,6 +908,57 @@ function tokenize(expression: string): Token[] {
 
 type FormulaValue = SheetScalar | FormulaValue[];
 
+/**
+ * An error produced while evaluating one argument.
+ *
+ * Excel does not abandon a whole formula because one branch failed:
+ * `IFERROR(A1/B1, 0)` is the standard way to say "and if that fails, use this".
+ * Arguments are therefore evaluated defensively and a failure is carried as
+ * this sentinel, so the handful of functions whose entire job is to inspect a
+ * failure can see it, while every other function still propagates it.
+ */
+class FormulaErrorValue {
+  constructor(readonly code: string) {}
+}
+
+type FormulaArgument = FormulaValue | FormulaErrorValue;
+
+/** Functions that are allowed to look at a failed argument. */
+const ERROR_TOLERANT_FUNCTIONS = new Set([
+  "IFERROR",
+  "IFNA",
+  "IF",
+  "IFS",
+  "SWITCH",
+  "ISERROR",
+  "ISERR",
+  "ISNA",
+  "ISBLANK",
+]);
+
+function isFormulaError(value: FormulaArgument): value is FormulaErrorValue {
+  return value instanceof FormulaErrorValue;
+}
+
+/** Rows and columns of an A1 range reference, sheet prefixes ignored. */
+function referenceShape(reference: string) {
+  const [left, right] = reference.split(":", 2);
+  const start = parseAddress((left ?? "").split("!").at(-1) ?? "");
+  const end = parseAddress((right ?? "").split("!").at(-1) ?? "");
+  if (!start || !end) return null;
+  return {
+    rows: Math.abs(end.row - start.row) + 1,
+    columns: Math.abs(end.column - start.column) + 1,
+  };
+}
+
+/** An evaluation error code, or null when the failure is not one of ours. */
+function formulaErrorCode(error: unknown) {
+  return error instanceof Error && /^#[A-Z0-9/?!.]+$/.test(error.message)
+    ? error.message
+    : null;
+}
+
 function scalar(value: FormulaValue): SheetScalar {
   return Array.isArray(value) ? scalar(value[0] ?? null) : value;
 }
@@ -788,6 +1014,14 @@ function formulaCriteriaMatches(value: SheetScalar, criterion: SheetScalar) {
 
 class FormulaParser {
   private index = 0;
+  /**
+   * The shape of the most recent range literal, and the shapes of the current
+   * call's arguments. A range arrives at a function flattened, so a lookup that
+   * needs to know "how wide was that table" has no other honest source: without
+   * it VLOOKUP would read some other column and look like it worked.
+   */
+  private rangeShape: { rows: number; columns: number } | null = null;
+  private argumentShapes: Array<{ rows: number; columns: number } | null> = [];
   constructor(
     private readonly tokens: Token[],
     private readonly resolveCell: (reference: string) => SheetScalar,
@@ -907,13 +1141,31 @@ class FormulaParser {
     if (upper === "NULL") return null;
     if (this.current()?.value === "(") {
       this.consume();
-      const args: FormulaValue[] = [];
+      const args: FormulaArgument[] = [];
+      const shapes: Array<{ rows: number; columns: number } | null> = [];
       while (this.current() && this.current()!.value !== ")") {
-        args.push(this.comparison());
+        const start = this.index;
+        this.rangeShape = null;
+        try {
+          args.push(this.comparison());
+        } catch (error) {
+          const code = formulaErrorCode(error);
+          if (code === null) throw error;
+          // The argument failed part-way through, so the token cursor is
+          // wherever it stopped. Rewind and step over the whole argument, or
+          // the rest of the call would be parsed as if it were shifted along.
+          this.index = start;
+          this.skipArgument();
+          args.push(new FormulaErrorValue(code));
+        }
+        shapes.push(this.rangeShape);
         if (this.current()?.type === "comma") this.consume();
         else break;
       }
       if (this.consume()?.value !== ")") throw new Error("#VALUE!");
+      // Every nested call has finished by now, so these shapes belong to this
+      // call and cannot be clobbered by a deeper one.
+      this.argumentShapes = shapes;
       return this.call(upper, args);
     }
     if (!addressPattern.test(upper.split("!").at(-1) ?? ""))
@@ -922,12 +1174,97 @@ class FormulaParser {
       this.consume();
       const end = this.consume();
       if (!end || end.type !== "identifier") throw new Error("#REF!");
-      return this.resolveRange(`${upper}:${end.value.toUpperCase()}`);
+      const reference = `${upper}:${end.value.toUpperCase()}`;
+      this.rangeShape = referenceShape(reference);
+      return this.resolveRange(reference);
     }
     return this.resolveCell(upper);
   }
-  private call(name: string, args: FormulaValue[]): FormulaValue {
-    const values = flattened(args);
+  /** Advance past one argument, honouring nested calls, to its delimiter. */
+  private skipArgument() {
+    let depth = 0;
+    while (this.index < this.tokens.length) {
+      const token = this.tokens[this.index]!;
+      if (token.type === "paren" && token.value === "(") depth += 1;
+      else if (token.type === "paren" && token.value === ")") {
+        if (depth === 0) return;
+        depth -= 1;
+      } else if (token.type === "comma" && depth === 0) return;
+      this.index += 1;
+    }
+  }
+
+  private call(name: string, args: readonly FormulaArgument[]): FormulaValue {
+    if (!ERROR_TOLERANT_FUNCTIONS.has(name)) {
+      const failed = args.find(isFormulaError);
+      if (failed) throw new Error(failed.code);
+    }
+    if (name === "ISERROR" || name === "ISERR")
+      return isFormulaError(args[0] ?? null);
+    if (name === "ISNA")
+      return isFormulaError(args[0] ?? null) &&
+        (args[0] as FormulaErrorValue).code === "#N/A";
+    if (name === "ISBLANK") {
+      const first = args[0];
+      if (first === undefined || isFormulaError(first)) return false;
+      const item = scalar(first);
+      return item === null || item === "";
+    }
+    if (name === "IFERROR" || name === "IFNA") {
+      const first = args[0] ?? null;
+      const matches =
+        name === "IFERROR"
+          ? isFormulaError(first)
+          : isFormulaError(first) && first.code === "#N/A";
+      if (!matches) return isFormulaError(first) ? null : first;
+      const fallback = args[1];
+      if (fallback === undefined) return null;
+      if (isFormulaError(fallback)) throw new Error(fallback.code);
+      return fallback;
+    }
+    if (name === "IF") {
+      const condition = args[0] ?? false;
+      if (isFormulaError(condition)) throw new Error(condition.code);
+      const branch = Boolean(scalar(condition)) ? args[1] : args[2];
+      if (branch === undefined) return Boolean(scalar(condition)) ? true : false;
+      if (isFormulaError(branch)) throw new Error(branch.code);
+      return branch;
+    }
+    if (name === "IFS") {
+      for (let index = 0; index + 1 < args.length; index += 2) {
+        const condition = args[index]!;
+        if (isFormulaError(condition)) throw new Error(condition.code);
+        if (!Boolean(scalar(condition))) continue;
+        const result = args[index + 1]!;
+        if (isFormulaError(result)) throw new Error(result.code);
+        return result;
+      }
+      throw new Error("#N/A");
+    }
+    if (name === "SWITCH") {
+      const subject = args[0] ?? null;
+      if (isFormulaError(subject)) throw new Error(subject.code);
+      const needle = scalar(subject);
+      let index = 1;
+      for (; index + 1 < args.length; index += 2) {
+        const candidate = args[index]!;
+        const result = args[index + 1]!;
+        if (isFormulaError(candidate)) throw new Error(candidate.code);
+        if (scalar(candidate) !== needle) continue;
+        if (isFormulaError(result)) throw new Error(result.code);
+        return result;
+      }
+      // An odd trailing argument is SWITCH's default.
+      const fallback = args[index];
+      if (fallback === undefined) throw new Error("#N/A");
+      if (isFormulaError(fallback)) throw new Error(fallback.code);
+      return fallback;
+    }
+    return this.apply(name, args as readonly FormulaValue[]);
+  }
+
+  private apply(name: string, args: readonly FormulaValue[]): FormulaValue {
+    const values = flattened(args as FormulaValue[]);
     const numbers = values.filter(
       (value): value is number =>
         typeof value === "number" && Number.isFinite(value),
@@ -1008,10 +1345,6 @@ class FormulaParser {
         0,
       );
     }
-    if (name === "IF")
-      return Boolean(scalar(args[0] ?? false))
-        ? (args[1] ?? null)
-        : (args[2] ?? null);
     if (name === "AND") return values.every(Boolean);
     if (name === "OR") return values.some(Boolean);
     if (name === "NOT") return !Boolean(scalar(args[0] ?? false));
@@ -1048,6 +1381,12 @@ class FormulaParser {
       return String(scalar(args[0] ?? "") ?? "").toLowerCase();
     if (name === "UPPER")
       return String(scalar(args[0] ?? "") ?? "").toUpperCase();
+    if (name === "TEXT") {
+      const raw = scalar(args[0] ?? null);
+      const code = String(scalar(args[1] ?? "") ?? "");
+      if (typeof raw !== "number") return raw === null ? "" : String(raw);
+      return formatWithCode(raw, code);
+    }
     if (name === "TRIM")
       return String(scalar(args[0] ?? "") ?? "")
         .trim()
@@ -1201,6 +1540,127 @@ class FormulaParser {
       }
       return returned[position] ?? null;
     }
+    if (name === "COUNTBLANK")
+      return values.filter((value) => value === null || value === "").length;
+    if (name === "SUMPRODUCT") {
+      const ranges = args.map((argument) =>
+        Array.isArray(argument)
+          ? flattened([argument])
+          : [scalar(argument ?? null)],
+      );
+      if (!ranges.length) throw new Error("#VALUE!");
+      const length = Math.max(...ranges.map((range) => range.length));
+      let total = 0;
+      for (let index = 0; index < length; index += 1) {
+        let product = 1;
+        for (const range of ranges) {
+          const item = range[index] ?? null;
+          product *= typeof item === "number" && Number.isFinite(item) ? item : 0;
+        }
+        total += product;
+      }
+      return total;
+    }
+    if (name === "LARGE" || name === "SMALL") {
+      const position = Math.round(numeric(args[1] ?? 1));
+      if (position < 1 || position > numbers.length) throw new Error("#NUM!");
+      const sorted = [...numbers].sort((left, right) =>
+        name === "LARGE" ? right - left : left - right,
+      );
+      return sorted[position - 1]!;
+    }
+    if (name === "RANK" || name === "RANK.EQ") {
+      const target = numeric(args[0] ?? 0);
+      const pool = Array.isArray(args[1]) ? flattened([args[1]]) : [];
+      const scores = pool.filter(
+        (value): value is number =>
+          typeof value === "number" && Number.isFinite(value),
+      );
+      const ascending = Boolean(scalar(args[2] ?? false));
+      const better = scores.filter((value) =>
+        ascending ? value < target : value > target,
+      ).length;
+      if (!scores.includes(target)) throw new Error("#N/A");
+      return better + 1;
+    }
+    if (name === "VLOOKUP" || name === "HLOOKUP") {
+      // The table argument arrives flattened, so the shape has to come from the
+      // range itself. Without it a lookup would silently read the wrong column,
+      // which is worse than refusing.
+      const shape = this.argumentShapes[1] ?? null;
+      const needle = scalar(args[0] ?? null);
+      const table = Array.isArray(args[1]) ? flattened([args[1]]) : [];
+      const index = Math.round(numeric(args[2] ?? 1));
+      if (!shape || !table.length || index < 1) throw new Error("#REF!");
+      const width = shape.columns;
+      const height = shape.rows;
+      if (name === "VLOOKUP") {
+        if (index > width) throw new Error("#REF!");
+        for (let row = 0; row < height; row += 1) {
+          if (table[row * width] === needle)
+            return table[row * width + index - 1] ?? null;
+        }
+      } else {
+        if (index > height) throw new Error("#REF!");
+        for (let column = 0; column < width; column += 1) {
+          if (table[column] === needle)
+            return table[(index - 1) * width + column] ?? null;
+        }
+      }
+      const approximate = args[3] === undefined || Boolean(scalar(args[3]));
+      if (!approximate) throw new Error("#N/A");
+      throw new Error("#N/A");
+    }
+    if (name === "PROPER")
+      return String(scalar(args[0] ?? "") ?? "").replace(
+        /\p{L}+/gu,
+        (word) => word[0]!.toUpperCase() + word.slice(1).toLowerCase(),
+      );
+    if (name === "REPT") {
+      const count = Math.max(0, Math.min(4096, Math.round(numeric(args[1] ?? 0))));
+      return String(scalar(args[0] ?? "") ?? "").repeat(count);
+    }
+    if (name === "VALUE") {
+      const parsed = Number(String(scalar(args[0] ?? "") ?? "").replace(/[,\s]/g, ""));
+      if (!Number.isFinite(parsed)) throw new Error("#VALUE!");
+      return parsed;
+    }
+    if (name === "TODAY") {
+      const now = new Date();
+      return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    }
+    if (name === "NOW") return Date.now();
+    if (name === "WEEKDAY") {
+      const date = new Date(numeric(args[0] ?? 0));
+      if (Number.isNaN(date.getTime())) throw new Error("#VALUE!");
+      const type = Math.round(numeric(args[1] ?? 1));
+      const day = date.getUTCDay();
+      if (type === 2) return day === 0 ? 7 : day;
+      if (type === 3) return day === 0 ? 6 : day - 1;
+      return day + 1;
+    }
+    if (name === "DAYS") {
+      const later = numeric(args[0] ?? 0);
+      const earlier = numeric(args[1] ?? 0);
+      return Math.round((later - earlier) / 86_400_000);
+    }
+    if (name === "HOUR" || name === "MINUTE" || name === "SECOND") {
+      const date = new Date(numeric(args[0] ?? 0));
+      if (Number.isNaN(date.getTime())) throw new Error("#VALUE!");
+      if (name === "HOUR") return date.getUTCHours();
+      if (name === "MINUTE") return date.getUTCMinutes();
+      return date.getUTCSeconds();
+    }
+    if (name === "SIGN") {
+      const value = numeric(args[0] ?? 0);
+      return value > 0 ? 1 : value < 0 ? -1 : 0;
+    }
+    if (name === "INT") return Math.floor(numeric(args[0] ?? 0));
+    if (name === "TRUNC") {
+      const digits = Math.max(0, Math.min(12, numeric(args[1] ?? 0)));
+      const factor = Math.pow(10, digits);
+      return Math.trunc(numeric(args[0] ?? 0) * factor) / factor;
+    }
     throw new Error("#NAME?");
   }
 }
@@ -1222,9 +1682,30 @@ function referenceParts(
   return { sheet, address: reference.slice(separator + 1) };
 }
 
-export function calculateWorkbook(content: SheetsContent) {
+/**
+ * A calculation that evaluates on demand.
+ *
+ * The grid reads a few hundred cells at a time — the viewport, the selection,
+ * a conditional rule's own range. Recalculating a 200,000-cell workbook to
+ * answer that would put the whole sheet on the keystroke path, which is exactly
+ * what CANON D20 forbids. So the dependency walk is kept, the memo table is
+ * kept, and only the trigger changes: a cell is evaluated the first time
+ * something asks for it, and its precedents come along because the walk is
+ * recursive.
+ *
+ * The accessor is `get(key)` so every existing caller — which held a `Map` —
+ * works unchanged.
+ */
+export type SheetsCalculation = {
+  get(key: string): CalculatedCell | undefined;
+  /** How many cells have actually been evaluated. Asserted by the density test. */
+  readonly size: number;
+};
+
+function calculationCore(content: SheetsContent) {
   const result = new Map<string, CalculatedCell>();
   const resolving = new Set<string>();
+  const sheetById = new Map(content.sheets.map((sheet) => [sheet.id, sheet]));
   const calculate = (sheet: WorkbookSheet, address: string): CalculatedCell => {
     const key = `${sheet.id}:${address.toUpperCase()}`;
     const cached = result.get(key);
@@ -1326,9 +1807,112 @@ export function calculateWorkbook(content: SheetsContent) {
       return calculated;
     }
   };
+  return { result, calculate, sheetById };
+}
+
+/**
+ * The on-demand calculation used by the grid. Nothing is evaluated until a
+ * surface asks for a cell, so opening a large workbook and typing in it costs
+ * the cells on screen rather than the whole sheet.
+ */
+export function sheetsCalculation(content: SheetsContent): SheetsCalculation {
+  const { result, calculate, sheetById } = calculationCore(content);
+  return {
+    get(key: string) {
+      const cached = result.get(key);
+      if (cached) return cached;
+      const separator = key.lastIndexOf(":");
+      if (separator < 0) return undefined;
+      // Sheet ids contain colons themselves (`xlsx:sheet:3`), so the address is
+      // whatever follows the last one.
+      const sheet = sheetById.get(key.slice(0, separator));
+      const address = key.slice(separator + 1).toUpperCase();
+      if (!sheet || !addressPattern.test(address)) return undefined;
+      return calculate(sheet, address);
+    },
+    get size() {
+      return result.size;
+    },
+  };
+}
+
+/**
+ * The whole workbook, evaluated eagerly. Export, the ODS writer and the tests
+ * want every cell at once; the grid deliberately does not.
+ */
+export function calculateWorkbook(content: SheetsContent) {
+  const { result, calculate } = calculationCore(content);
   for (const sheet of content.sheets)
     for (const address of Object.keys(sheet.cells)) calculate(sheet, address);
   return result;
+}
+/**
+ * A fraction close to `value`, with a denominator no larger than `limit`.
+ * Excel's fraction formats are approximations too; stating the denominator
+ * ceiling keeps ours honest rather than pretending at arbitrary precision.
+ */
+function fractionText(value: number, limit = 99) {
+  const sign = value < 0 ? "-" : "";
+  const absolute = Math.abs(value);
+  const whole = Math.floor(absolute);
+  const remainder = absolute - whole;
+  if (remainder < 1 / (2 * limit))
+    return `${sign}${whole.toLocaleString("en-US")}`;
+  let bestNumerator = 1;
+  let bestDenominator = 1;
+  let bestError = Number.POSITIVE_INFINITY;
+  for (let denominator = 1; denominator <= limit; denominator += 1) {
+    const numerator = Math.round(remainder * denominator);
+    if (numerator === 0) continue;
+    const error = Math.abs(remainder - numerator / denominator);
+    if (error < bestError - 1e-12) {
+      bestError = error;
+      bestNumerator = numerator;
+      bestDenominator = denominator;
+    }
+  }
+  if (bestNumerator === bestDenominator)
+    return `${sign}${(whole + 1).toLocaleString("en-US")}`;
+  return whole
+    ? `${sign}${whole.toLocaleString("en-US")} ${bestNumerator}/${bestDenominator}`
+    : `${sign}${bestNumerator}/${bestDenominator}`;
+}
+
+/**
+ * Renders a cell the way its number format says. Every branch is a real Excel
+ * format family; nothing here invents a presentation the workbook cannot round
+ * trip. A custom code is applied for the parts Spectra understands and
+ * otherwise falls back to the plain number rather than printing a guess.
+ */
+/**
+ * Renders a number through an Excel format code.
+ *
+ * This is the one reader of a format code in the workbook, which is the point:
+ * the `custom` number format and the `TEXT` function have to agree, and they can
+ * only agree by being the same code. Codes Spectra cannot fully model degrade to
+ * the closest honest reading rather than being dropped, and the stored number is
+ * never touched — a format is a view of a value, never a rewrite of it.
+ */
+export function formatWithCode(value: number, code: string, locale?: string) {
+  const codeDecimals = /\.(0+)/.exec(code)?.[1]?.length;
+  if (/[dmy]/i.test(code.replace(/\[[^\]]*]/g, "")) && /[dy]/i.test(code))
+    return new Intl.DateTimeFormat(locale).format(new Date(value));
+  if (code.includes("%"))
+    return new Intl.NumberFormat(locale, {
+      style: "percent",
+      minimumFractionDigits: codeDecimals ?? 0,
+      maximumFractionDigits: codeDecimals ?? 0,
+    }).format(value);
+  if (/E\+/i.test(code))
+    return new Intl.NumberFormat(locale, {
+      notation: "scientific",
+      maximumFractionDigits: codeDecimals ?? 2,
+    }).format(value);
+  return new Intl.NumberFormat(locale, {
+    useGrouping: code.includes(","),
+    minimumFractionDigits: codeDecimals ?? 0,
+    maximumFractionDigits: codeDecimals ?? 12,
+  }).format(value);
 }
 
 export function formatCalculatedCell(
@@ -1339,31 +1923,68 @@ export function formatCalculatedCell(
   if (calculated?.error) return calculated.error;
   const value = calculated?.value ?? cell?.value ?? null;
   if (value === null) return "";
-  if (typeof value !== "number") return String(value);
   const format = cell?.format;
+  if (format?.numberFormat === "text") return String(value);
+  if (typeof value !== "number") return String(value);
   const decimals = Math.max(
     0,
     Math.min(12, format?.decimals ?? (Number.isInteger(value) ? 0 : 2)),
   );
+  const grouping = format?.thousands ?? true;
   try {
-    if (format?.numberFormat === "currency")
-      return new Intl.NumberFormat(locale, {
-        style: "currency",
-        currency: "USD",
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-      }).format(value);
-    if (format?.numberFormat === "percent")
-      return new Intl.NumberFormat(locale, {
-        style: "percent",
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-      }).format(value);
-    if (format?.numberFormat === "date")
-      return new Intl.DateTimeFormat(locale).format(new Date(value));
-    return new Intl.NumberFormat(locale, {
-      maximumFractionDigits: decimals,
-    }).format(value);
+    switch (format?.numberFormat) {
+      case "currency":
+        return new Intl.NumberFormat(locale, {
+          style: "currency",
+          currency: format.currency ?? "USD",
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals,
+        }).format(value);
+      case "accounting": {
+        // Accounting aligns the sign outside the figure and prints zero as a
+        // dash, which is what a ledger reader expects to see.
+        const body = new Intl.NumberFormat(locale, {
+          style: "currency",
+          currency: format.currency ?? "USD",
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals,
+          currencySign: "accounting",
+        }).format(Math.abs(value));
+        if (value === 0) return body.replace(/[\d.,]+/, "-");
+        return value < 0 ? `(${body})` : body;
+      }
+      case "percent":
+        return new Intl.NumberFormat(locale, {
+          style: "percent",
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals,
+        }).format(value);
+      case "fraction":
+        return fractionText(value);
+      case "scientific":
+        return new Intl.NumberFormat(locale, {
+          notation: "scientific",
+          minimumFractionDigits: Math.min(12, format.decimals ?? 2),
+          maximumFractionDigits: Math.min(12, format.decimals ?? 2),
+        }).format(value);
+      case "date":
+        return new Intl.DateTimeFormat(locale).format(new Date(value));
+      case "time":
+        return new Intl.DateTimeFormat(locale, {
+          hour: "2-digit",
+          minute: "2-digit",
+          ...(decimals > 0 ? { second: "2-digit" as const } : {}),
+        }).format(new Date(value));
+      case "custom":
+        return formatWithCode(value, format.customFormat ?? "", locale);
+      default:
+        return new Intl.NumberFormat(locale, {
+          useGrouping: grouping,
+          minimumFractionDigits:
+            format?.numberFormat === "number" ? decimals : 0,
+          maximumFractionDigits: decimals,
+        }).format(value);
+    }
   } catch {
     return String(value);
   }

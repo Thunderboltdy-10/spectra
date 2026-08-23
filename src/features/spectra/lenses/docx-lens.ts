@@ -1,4 +1,4 @@
-import { Document, Paragraph, WML_NAMESPACE } from "@ariadng/office/docx";
+import { Document, Paragraph, type Run, WML_NAMESPACE } from "@ariadng/office/docx";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
 import type {
@@ -42,6 +42,39 @@ export type DocxProjection = {
   };
 };
 
+export type DocxRunFormat = {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  /** A literal typeface name; theme indirection is never written. */
+  fontFamily?: string | null;
+  fontSizePoints?: number | null;
+  /** `RRGGBB`, without the hash. */
+  color?: string | null;
+  /** One of Word's named highlights, or null to remove it. */
+  highlight?: string | null;
+  /**
+   * Run shading as `RRGGBB` (`w:rPr/w:shd`). Spectra's highlighter offers soft
+   * tints that Word's named highlighter cannot hold, so the exact colour is
+   * written as character shading instead of being rounded to "yellow".
+   */
+  shading?: string | null;
+};
+
+export type DocxParagraphFormat = {
+  alignment?: "left" | "center" | "right" | "justify" | null;
+  /** Line spacing as a multiple of single. */
+  lineSpacing?: number | null;
+  spacingAfterPoints?: number | null;
+  /** Left indent in half-inch steps, the way the editor counts them. */
+  indentLevel?: number | null;
+  /** `none | all | top | bottom | left`. */
+  border?: string | null;
+  /** `RRGGBB` fill, or null to remove the shading. */
+  shading?: string | null;
+};
+
 export type DocxSemanticDelta =
   | {
       kind: "replace-paragraph";
@@ -64,6 +97,16 @@ export type DocxSemanticDelta =
       kind: "apply-style";
       regionId: string;
       style: string;
+    }
+  | {
+      kind: "format-runs";
+      regionId: string;
+      format: DocxRunFormat;
+    }
+  | {
+      kind: "format-paragraph";
+      regionId: string;
+      format: DocxParagraphFormat;
     }
   | {
       kind: "ai-edit";
@@ -152,8 +195,38 @@ function setParagraphStyle(document: Document, paragraph: Paragraph, style: stri
   document._markMainDirty();
 }
 
+/**
+ * Run children Spectra is able to write back.
+ *
+ * Everything a run may hold that is not in this set — a VML text box, a
+ * DrawingML picture or chart, an embedded OLE object, an OMML equation, a
+ * symbol glyph, a footnote reference — is content this lens does not model. It
+ * lives inside `w:r`, so `setText` on that run would delete it: the paragraph
+ * looks like text in the projection and is a picture in the file.
+ */
+const WRITABLE_RUN_CHILDREN = new Set([
+  "rPr", "t", "br", "tab", "cr", "noBreakHyphen", "softHyphen", "lastRenderedPageBreak",
+]);
+
+/**
+ * True when every child of this run is text Spectra can reproduce.
+ *
+ * A `false` answer is a preservation guarantee, not a limitation to work
+ * around: the run is left exactly as Word wrote it, and new text goes into a
+ * new run beside it.
+ */
+function writableRun(run: Run) {
+  return run.element
+    .elements()
+    .every(
+      (child) =>
+        child.namespaceUri() === WML_NAMESPACE &&
+        WRITABLE_RUN_CHILDREN.has(child.localName),
+    );
+}
+
 function replaceParagraphText(document: Document, paragraph: Paragraph, text: string) {
-  const runs = paragraph.runs();
+  const runs = paragraph.runs().filter(writableRun);
   if (runs.length) {
     runs[0]!.setText(text);
     for (const run of runs.slice(1)) run.setText("");
@@ -167,6 +240,433 @@ function replaceParagraphText(document: Document, paragraph: Paragraph, text: st
   run.appendChild(textElement);
   paragraph.element.appendChild(run);
   document._markMainDirty();
+}
+
+/**
+ * Word's `w:pPr` and `w:rPr` children are a *sequence*, not a set: a property
+ * written in the wrong position produces a document.xml that Word repairs on
+ * open, and a repaired file is a lost file. These are the ECMA-376 orders, and
+ * `orderedChild` is the only way this module creates a property element.
+ */
+const PPR_ORDER: readonly string[] = [
+  "pStyle", "keepNext", "keepLines", "pageBreakBefore", "framePr", "widowControl",
+  "numPr", "suppressLineNumbers", "pBdr", "shd", "tabs", "suppressAutoHyphens",
+  "kinsoku", "wordWrap", "overflowPunct", "topLinePunct", "autoSpaceDE",
+  "autoSpaceDN", "bidi", "adjustRightInd", "snapToGrid", "spacing", "ind",
+  "contextualSpacing", "mirrorIndents", "suppressOverlap", "jc", "textDirection",
+  "textAlignment", "textboxTightWrap", "outlineLvl", "divId", "cnfStyle", "rPr",
+  "sectPr", "pPrChange",
+];
+
+const RPR_ORDER: readonly string[] = [
+  "rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike",
+  "dstrike", "outline", "shadow", "emboss", "imprint", "noProof", "snapToGrid",
+  "vanish", "webHidden", "color", "spacing", "w", "kern", "position", "sz",
+  "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText", "vertAlign",
+  "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath",
+];
+
+const WORD_HIGHLIGHTS = new Set([
+  "yellow", "green", "cyan", "magenta", "blue", "red", "darkBlue", "darkCyan",
+  "darkGreen", "darkMagenta", "darkRed", "darkYellow", "darkGray", "lightGray",
+  "black", "white", "none",
+]);
+
+function orderedChild(parent: XmlElement, localName: string, order: readonly string[]) {
+  const existing = parent.find(WML_NAMESPACE, localName);
+  if (existing) return existing;
+  const created = new XmlElement(localName, "w");
+  const rank = order.indexOf(localName);
+  const reference =
+    parent.elements().find((child) => {
+      if (child.namespaceUri() !== WML_NAMESPACE) return false;
+      const childRank = order.indexOf(child.localName);
+      return childRank >= 0 && childRank > rank;
+    }) ?? null;
+  parent.insertBefore(created, reference);
+  return created;
+}
+
+function dropChild(parent: XmlElement, localName: string) {
+  const existing = parent.find(WML_NAMESPACE, localName);
+  if (existing) parent.removeChild(existing);
+}
+
+/**
+ * A toggle written as Word writes it. Turning one *off* has to be an explicit
+ * `w:val="0"`, not a missing element: a paragraph style may already be bold, and
+ * deleting the direct property would leave the text bold after the writer asked
+ * for it not to be (§17.7.3 — only direct formatting can force a toggle off).
+ */
+function setToggle(properties: XmlElement, localName: string, on: boolean) {
+  const element = orderedChild(properties, localName, RPR_ORDER);
+  if (on) element.removeAttributeNs(WML_NAMESPACE, "val");
+  else element.setAttributeNs(WML_NAMESPACE, "val", "0");
+}
+
+function safeFontName(value: string) {
+  if (!/^[\w .+&'-]{1,64}$/.test(value))
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "That font name cannot be written safely into a Word file.",
+    );
+  return value;
+}
+
+function safeHexColor(value: string) {
+  const hex = value.replace(/^#/, "");
+  if (!/^[0-9A-Fa-f]{6}$/.test(hex))
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "Word colours must be six hexadecimal digits.",
+    );
+  return hex.toUpperCase();
+}
+
+function runProperties(run: XmlElement) {
+  const existing = run.find(WML_NAMESPACE, "rPr");
+  if (existing) return existing;
+  const created = new XmlElement("rPr", "w");
+  run.insertBefore(created, run.children[0] ?? null);
+  return created;
+}
+
+function paragraphProperties(paragraph: Paragraph) {
+  const existing = paragraph.element.find(WML_NAMESPACE, "pPr");
+  if (existing) return existing;
+  const created = new XmlElement("pPr", "w");
+  paragraph.element.insertBefore(created, paragraph.element.children[0] ?? null);
+  return created;
+}
+
+/**
+ * Applies one set of run properties to every run in the paragraph.
+ *
+ * Spectra's editor formats a selection; Word stores formatting per run. The
+ * lens deliberately writes the paragraph's runs uniformly rather than splitting
+ * them: splitting a run is how a round-trip loses a comment anchor or a bookmark
+ * that sits between two halves of a sentence. So the projection only reports a
+ * run property when every run agrees on it, and a write only happens when the
+ * writer changed that agreed value.
+ */
+function applyRunFormat(document: Document, paragraph: Paragraph, format: DocxRunFormat) {
+  // Character formatting reaches the text runs only. A run holding a picture or
+  // a text box is skipped rather than styled: the anchor is not text a person
+  // selected, and its `w:rPr` carries positioning Word wrote for the drawing.
+  const runs = paragraph.runs().filter(writableRun);
+  if (!runs.length) return;
+  for (const run of runs) {
+    const properties = runProperties(run.element);
+    if (format.bold !== undefined) setToggle(properties, "b", format.bold);
+    if (format.italic !== undefined) setToggle(properties, "i", format.italic);
+    if (format.strike !== undefined) setToggle(properties, "strike", format.strike);
+    if (format.underline !== undefined) {
+      orderedChild(properties, "u", RPR_ORDER).setAttributeNs(
+        WML_NAMESPACE,
+        "val",
+        format.underline ? "single" : "none",
+      );
+    }
+    if (format.fontFamily !== undefined) {
+      if (!format.fontFamily) dropChild(properties, "rFonts");
+      else {
+        const fonts = orderedChild(properties, "rFonts", RPR_ORDER);
+        const name = safeFontName(format.fontFamily);
+        for (const slot of ["ascii", "hAnsi", "cs"])
+          fonts.setAttributeNs(WML_NAMESPACE, slot, name);
+        // A literal name and a theme reference in the same element would let
+        // Word prefer the theme font and silently ignore the choice.
+        for (const slot of ["asciiTheme", "hAnsiTheme", "cstheme", "csTheme"])
+          fonts.removeAttributeNs(WML_NAMESPACE, slot);
+      }
+    }
+    if (format.fontSizePoints !== undefined) {
+      if (!format.fontSizePoints) {
+        dropChild(properties, "sz");
+        dropChild(properties, "szCs");
+      } else {
+        const halfPoints = String(
+          Math.round(Math.min(400, Math.max(4, format.fontSizePoints)) * 2),
+        );
+        orderedChild(properties, "sz", RPR_ORDER).setAttributeNs(WML_NAMESPACE, "val", halfPoints);
+        orderedChild(properties, "szCs", RPR_ORDER).setAttributeNs(WML_NAMESPACE, "val", halfPoints);
+      }
+    }
+    if (format.color !== undefined) {
+      if (!format.color) dropChild(properties, "color");
+      else {
+        const color = orderedChild(properties, "color", RPR_ORDER);
+        color.setAttributeNs(WML_NAMESPACE, "val", safeHexColor(format.color));
+        color.removeAttributeNs(WML_NAMESPACE, "themeColor");
+      }
+    }
+    if (format.highlight !== undefined) {
+      if (!format.highlight || format.highlight === "none")
+        dropChild(properties, "highlight");
+      else {
+        if (!WORD_HIGHLIGHTS.has(format.highlight))
+          throw new DocxLensError(
+            "DOCX_UNSUPPORTED_EDIT",
+            "Word highlights are a fixed set of named colours; this one has no Word equivalent.",
+          );
+        orderedChild(properties, "highlight", RPR_ORDER).setAttributeNs(
+          WML_NAMESPACE,
+          "val",
+          format.highlight,
+        );
+      }
+    }
+    if (format.shading !== undefined) {
+      if (!format.shading) dropChild(properties, "shd");
+      else {
+        const shading = orderedChild(properties, "shd", RPR_ORDER);
+        shading.setAttributeNs(WML_NAMESPACE, "val", "clear");
+        shading.setAttributeNs(WML_NAMESPACE, "color", "auto");
+        shading.setAttributeNs(WML_NAMESPACE, "fill", safeHexColor(format.shading));
+      }
+    }
+  }
+  document._markMainDirty();
+}
+
+function applyParagraphFormat(
+  document: Document,
+  paragraph: Paragraph,
+  format: DocxParagraphFormat,
+) {
+  const properties = paragraphProperties(paragraph);
+  if (format.alignment !== undefined) {
+    if (!format.alignment || format.alignment === "left") dropChild(properties, "jc");
+    else
+      orderedChild(properties, "jc", PPR_ORDER).setAttributeNs(
+        WML_NAMESPACE,
+        "val",
+        format.alignment === "justify" ? "both" : format.alignment,
+      );
+  }
+  if (format.lineSpacing !== undefined || format.spacingAfterPoints !== undefined) {
+    const spacing = orderedChild(properties, "spacing", PPR_ORDER);
+    if (format.lineSpacing !== undefined) {
+      if (!format.lineSpacing || format.lineSpacing === 1) {
+        spacing.removeAttributeNs(WML_NAMESPACE, "line");
+        spacing.removeAttributeNs(WML_NAMESPACE, "lineRule");
+      } else {
+        // `w:line` counts 240ths of a line under the 'auto' rule, which is how
+        // Word stores "1.5" and "double" rather than as a multiplier.
+        spacing.setAttributeNs(
+          WML_NAMESPACE,
+          "line",
+          String(Math.round(Math.min(6, Math.max(0.5, format.lineSpacing)) * 240)),
+        );
+        spacing.setAttributeNs(WML_NAMESPACE, "lineRule", "auto");
+      }
+    }
+    if (format.spacingAfterPoints !== undefined) {
+      if (!format.spacingAfterPoints) spacing.removeAttributeNs(WML_NAMESPACE, "after");
+      else
+        spacing.setAttributeNs(
+          WML_NAMESPACE,
+          "after",
+          String(Math.round(Math.min(600, Math.max(0, format.spacingAfterPoints)) * 20)),
+        );
+    }
+    if (!spacing.attributes.length) dropChild(properties, "spacing");
+  }
+  if (format.indentLevel !== undefined) {
+    // One editor step is half an inch, the Word default tab: 720 twips. The step
+    // is applied *relative* to the indent the file already resolves to, not as
+    // `level × 720`, because a Word style may outdent a heading by an amount
+    // that is not a multiple of 720 — `ProductHead` in the Microsoft test asset
+    // sits at -3254. Writing the absolute grid value would snap that heading
+    // onto Spectra's grid and move text on the printed page, which is a silent
+    // change the person never asked for. Word steps the same way.
+    const existing = paragraph.format().indentLeftTwips ?? 0;
+    const steps = Math.round(format.indentLevel ?? 0) - Math.round(existing / 720);
+    const indent = properties.find(WML_NAMESPACE, "ind");
+    // A level that did not move writes nothing: re-stating a style's indent as a
+    // direct property would turn inherited formatting into local formatting.
+    if (steps !== 0) {
+      const next = Math.min(31680, Math.max(-31680, existing + steps * 720));
+      if (!next) {
+        if (indent) {
+          indent.removeAttributeNs(WML_NAMESPACE, "left");
+          indent.removeAttributeNs(WML_NAMESPACE, "start");
+          if (!indent.attributes.length) properties.removeChild(indent);
+        }
+      } else {
+        const element = orderedChild(properties, "ind", PPR_ORDER);
+        // Mirror the attribute the file already uses; `w:start` is the strict
+        // spelling of `w:left` and the two must never both be present.
+        const attribute =
+          element.getAttributeNs(WML_NAMESPACE, "start") !== undefined &&
+          element.getAttributeNs(WML_NAMESPACE, "left") === undefined
+            ? "start"
+            : "left";
+        element.setAttributeNs(WML_NAMESPACE, attribute, String(next));
+      }
+    }
+  }
+  if (format.border !== undefined) {
+    if (!format.border || format.border === "none") dropChild(properties, "pBdr");
+    else {
+      const borders = orderedChild(properties, "pBdr", PPR_ORDER);
+      const sides =
+        format.border === "all"
+          ? ["top", "left", "bottom", "right"]
+          : ["top", "bottom", "left", "right"].includes(format.border)
+            ? [format.border]
+            : [];
+      if (!sides.length)
+        throw new DocxLensError(
+          "DOCX_UNSUPPORTED_EDIT",
+          "That paragraph border has no Word equivalent.",
+        );
+      for (const child of [...borders.elements()]) borders.removeChild(child);
+      // Word's border sequence is top, left, bottom, right, between, bar.
+      for (const side of ["top", "left", "bottom", "right"]) {
+        if (!sides.includes(side)) continue;
+        const edge = new XmlElement(side, "w");
+        edge.setAttributeNs(WML_NAMESPACE, "val", "single");
+        edge.setAttributeNs(WML_NAMESPACE, "sz", "4");
+        edge.setAttributeNs(WML_NAMESPACE, "space", "4");
+        edge.setAttributeNs(WML_NAMESPACE, "color", "auto");
+        borders.appendChild(edge);
+      }
+    }
+  }
+  if (format.shading !== undefined) {
+    if (!format.shading) dropChild(properties, "shd");
+    else {
+      const shading = orderedChild(properties, "shd", PPR_ORDER);
+      shading.setAttributeNs(WML_NAMESPACE, "val", "clear");
+      shading.setAttributeNs(WML_NAMESPACE, "color", "auto");
+      shading.setAttributeNs(WML_NAMESPACE, "fill", safeHexColor(format.shading));
+    }
+  }
+  if (!properties.elements().length) paragraph.element.removeChild(properties);
+  document._markMainDirty();
+}
+
+/** What every run in the paragraph agrees on. Disagreement reports nothing. */
+function uniformRunFormat(paragraph: Paragraph): DocxRunFormat | undefined {
+  const runs = paragraph.runs().filter((run) => run.text().length > 0);
+  if (!runs.length) return undefined;
+  const first = runs[0]!.format();
+  const agreed = <T>(read: (format: ReturnType<Run["format"]>) => T) => {
+    const value = read(first);
+    return runs.every((run) => read(run.format()) === value) ? value : undefined;
+  };
+  const bold = agreed((format) => format.bold);
+  const italic = agreed((format) => format.italic);
+  const strike = agreed((format) => format.strike);
+  const underline = agreed((format) => format.underline !== null);
+  const fontFamily = agreed((format) => format.font);
+  const fontSizePoints = agreed((format) => format.sizePt);
+  const color = agreed((format) => format.color);
+  const highlight = agreed((format) => format.highlight);
+  const shadingFills = runs.map(
+    (run) =>
+      run.element
+        .find(WML_NAMESPACE, "rPr")
+        ?.find(WML_NAMESPACE, "shd")
+        ?.getAttributeNs(WML_NAMESPACE, "fill")
+        ?.toUpperCase() ?? null,
+  );
+  const shading = shadingFills.every((fill) => fill === shadingFills[0])
+    ? (shadingFills[0] === "AUTO" ? null : shadingFills[0])
+    : undefined;
+  const format: DocxRunFormat = {
+    ...(bold !== undefined ? { bold } : {}),
+    ...(italic !== undefined ? { italic } : {}),
+    ...(strike !== undefined ? { strike } : {}),
+    ...(underline !== undefined ? { underline } : {}),
+    ...(fontFamily !== undefined ? { fontFamily } : {}),
+    ...(fontSizePoints !== undefined ? { fontSizePoints } : {}),
+    ...(color !== undefined ? { color } : {}),
+    ...(highlight !== undefined ? { highlight } : {}),
+    ...(shading !== undefined ? { shading } : {}),
+  };
+  return Object.keys(format).length ? format : undefined;
+}
+
+function projectedParagraphFormat(paragraph: Paragraph): DocxParagraphFormat | undefined {
+  const resolved = paragraph.format();
+  const properties = paragraph.element.find(WML_NAMESPACE, "pPr");
+  const borders = properties?.find(WML_NAMESPACE, "pBdr");
+  const shading = properties?.find(WML_NAMESPACE, "shd");
+  const fill = shading?.getAttributeNs(WML_NAMESPACE, "fill");
+  const border = borders
+    ? borders.elements().length >= 4
+      ? "all"
+      : (borders.elements()[0]?.localName ?? "all")
+    : null;
+  const format: DocxParagraphFormat = {
+    alignment:
+      resolved.alignment === "center" ||
+      resolved.alignment === "right" ||
+      resolved.alignment === "justify"
+        ? resolved.alignment
+        : "left",
+    lineSpacing:
+      resolved.lineSpacing && resolved.lineSpacing.rule === "auto"
+        ? Number((resolved.lineSpacing.value / 240).toFixed(2))
+        : 1,
+    spacingAfterPoints:
+      resolved.spacingAfterTwips === null ? 0 : Math.round(resolved.spacingAfterTwips / 20),
+    indentLevel:
+      resolved.indentLeftTwips === null ? 0 : Math.round(resolved.indentLeftTwips / 720),
+    border,
+    shading: fill && fill.toLowerCase() !== "auto" ? fill.toUpperCase() : null,
+  };
+  return format;
+}
+
+const RUN_FORMAT_FIELDS = [
+  "bold",
+  "italic",
+  "underline",
+  "strike",
+  "fontFamily",
+  "fontSizePoints",
+  "color",
+  "highlight",
+  "shading",
+] as const;
+
+const PARAGRAPH_FORMAT_FIELDS = [
+  "alignment",
+  "lineSpacing",
+  "spacingAfterPoints",
+  "indentLevel",
+  "border",
+  "shading",
+] as const;
+
+/**
+ * The subset of a format record the writer actually changed, or undefined when
+ * nothing did. A missing incoming record means the surface never carried
+ * formatting for that block, which is not the same as clearing it, so it
+ * produces no operation at all.
+ */
+function changedFormatFields<T extends Record<string, unknown>>(
+  before: unknown,
+  after: unknown,
+  fields: readonly string[],
+): T | undefined {
+  if (!after || typeof after !== "object") return undefined;
+  const previous = (before && typeof before === "object" ? before : {}) as Record<
+    string,
+    unknown
+  >;
+  const incoming = after as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (!(field in incoming)) continue;
+    const next = incoming[field] ?? null;
+    const current = previous[field] ?? null;
+    if (next !== current) patch[field] = incoming[field];
+  }
+  return Object.keys(patch).length ? (patch as T) : undefined;
 }
 
 function tableText(rows: readonly { cells(): readonly { text(): string }[] }[]) {
@@ -212,7 +712,15 @@ function placeholderFor(entry: LensFidelityEntry): DocxNativePlaceholder | null 
     textBox: "Word text box",
     contentControl: "Word content control",
   };
-  const label = labels[entry.feature];
+  // Only the detection pass may raise a placeholder. A placeholder is a claim
+  // about *this* file — "there is a text box here, and it is safe" — so it may
+  // only come from a `docx:feature:` entry, which is written when the markup was
+  // actually found. The blanket `docx:region:` rows say what Spectra can write,
+  // not what the file contains; reading them as placeholders would announce
+  // tracked changes in every document that has none.
+  const label = entry.regionId.startsWith("docx:feature:")
+    ? labels[entry.feature]
+    : undefined;
   return label
     ? {
         id: entry.regionId,
@@ -222,6 +730,87 @@ function placeholderFor(entry: LensFidelityEntry): DocxNativePlaceholder | null 
       }
     : null;
 }
+
+/**
+ * The region-level fidelity vocabulary the command surface reasons in.
+ *
+ * Per-block entries answer "may I edit *this* paragraph?". The work bar asks a
+ * different question — "may this *kind* of change be written to this file at
+ * all?" — and it asks it with the shared region keys, not with the lens's own
+ * feature names. So the projection states both, and the region row is deliberately
+ * pessimistic: a region is NATIVE only where `materialize` can actually produce
+ * a mutation for it today.
+ *
+ * `images`, `equations`, `footnotes`, `headersFooters` and `sections` are
+ * PRESERVED unconditionally, and that is the honest answer rather than a cautious
+ * one: the lens writes `/word/document.xml` paragraph text, paragraph properties
+ * and table cell text. It writes no drawingML, no OMML, no notes part and no
+ * section properties. A file that happens to contain no pictures would otherwise
+ * let "insert image" report success while materializing an empty paragraph.
+ */
+const REGION_FIDELITY: ReadonlyArray<{
+  region: string;
+  class: LensFidelityEntry["class"];
+  reason?: string;
+}> = [
+  { region: "body", class: "NATIVE" },
+  { region: "styles", class: "NATIVE" },
+  { region: "tables", class: "NATIVE" },
+  {
+    region: "lists",
+    class: "EQUIVALENT",
+    reason:
+      "List text and level are written to Word; the numbering definition itself stays as Word defined it.",
+  },
+  {
+    region: "images",
+    class: "PRESERVED",
+    reason:
+      "Pictures in a linked Word file are kept exactly as they are. Spectra does not write Word drawing markup, so a picture cannot be added or resized here.",
+  },
+  {
+    region: "equations",
+    class: "PRESERVED",
+    reason:
+      "Word equations are preserved as OMML. Spectra writes its own LaTeX equations, which a linked Word file cannot hold, so equation editing belongs in Word.",
+  },
+  {
+    region: "footnotes",
+    class: "PRESERVED",
+    reason:
+      "Footnotes and endnotes live in their own Word parts, which Spectra keeps untouched. A note added here could not be written back.",
+  },
+  {
+    region: "headersFooters",
+    class: "PRESERVED",
+    reason:
+      "Headers and footers live in their own Word parts and are kept exactly as the file has them.",
+  },
+  {
+    region: "sections",
+    class: "PRESERVED",
+    reason:
+      "Page size, margins and columns are section properties Spectra preserves rather than rewrites, so the printed Word page stays the one Word laid out.",
+  },
+  {
+    region: "fields",
+    class: "PRESERVED",
+    reason:
+      "Field codes and their last results are preserved. Spectra never recalculates a Word field.",
+  },
+  {
+    region: "comments",
+    class: "PRESERVED",
+    reason:
+      "Word comment parts are preserved. Spectra's own threads live beside the document rather than inside the package.",
+  },
+  {
+    region: "trackedChanges",
+    class: "PRESERVED",
+    reason:
+      "Word revision marks are kept exactly as Word wrote them. Spectra never rewrites them, so accepting or rejecting a revision belongs in Word.",
+  },
+];
 
 async function projectDocument(
   document: Document,
@@ -265,6 +854,8 @@ async function projectDocument(
         !readOnly && /^[1-3]$/.test(styleId ?? "")
           ? `Heading${styleId}`
           : styleId;
+      const runFormat = readOnly ? undefined : uniformRunFormat(paragraph);
+      const paragraphFormat = readOnly ? undefined : projectedParagraphFormat(paragraph);
       blocks.push({
         id: regionId,
         type: list
@@ -278,6 +869,12 @@ async function projectDocument(
           ...(semanticStyleId ? { styleId: semanticStyleId } : {}),
           ...(list ? { list } : {}),
           ...(readOnly ? { nativeReadOnly: true } : {}),
+          // Formatting travels with the block so a writer sees the file's own
+          // bold and leading rather than Spectra defaults, and so materialize
+          // can tell an edit from an unchanged value. A read-only paragraph
+          // reports none: nothing may be written back to it anyway.
+          ...(runFormat ? { format: runFormat } : {}),
+          ...(paragraphFormat ? { paragraphFormat } : {}),
         },
       });
       fidelityEntries.push({
@@ -410,6 +1007,18 @@ async function projectDocument(
     );
   }
 
+  // The region row, stated last so a per-block entry never overwrites it.
+  for (const region of REGION_FIDELITY) {
+    fidelityEntries.push({
+      regionId: `docx:region:${region.region}`,
+      feature: region.region,
+      class: region.class,
+      partName: "/word/document.xml",
+      ...(region.class === "PRESERVED" ? { readOnly: true } : {}),
+      ...(region.reason ? { reason: region.reason } : {}),
+    });
+  }
+
   const fidelityMap: LensFidelityMap = {
     version: 1,
     profile,
@@ -532,6 +1141,17 @@ async function applyDelta(
           `The target Word paragraph could not be resolved safely (style region=${operation.regionId}, index=${index}, projectedParagraphs=${paragraphs.length}).`,
         );
       setParagraphStyle(document, paragraph, operation.style);
+    } else if (operation.kind === "format-runs" || operation.kind === "format-paragraph") {
+      const index = resolveParagraphIndex(opened.projection, block, paragraphs.length);
+      const paragraph = paragraphs[index];
+      if (!paragraph)
+        throw new DocxLensError(
+          "DOCX_UNSUPPORTED_EDIT",
+          `The target Word paragraph could not be resolved safely (format region=${operation.regionId}, index=${index}, projectedParagraphs=${paragraphs.length}).`,
+        );
+      if (operation.kind === "format-runs")
+        applyRunFormat(document, paragraph, operation.format);
+      else applyParagraphFormat(document, paragraph, operation.format);
     } else if (operation.kind === "edit-table-cell") {
       const index = Number(block.attrs?.tableIndex);
       const table = tables[index];
@@ -662,6 +1282,28 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
           regionId: block.id,
           style: nextStyle,
         });
+      // Only the properties the writer actually changed are written. Writing
+      // the whole projected set back would turn resolved formatting into direct
+      // formatting — a style-bold heading would gain its own `w:b`, and the next
+      // person to edit the style in Word would find it no longer applied.
+      const runDelta = changedFormatFields(
+        previous.attrs?.format,
+        effectiveBlock.attrs?.format,
+        RUN_FORMAT_FIELDS,
+      );
+      if (runDelta)
+        operations.push({ kind: "format-runs", regionId: block.id, format: runDelta });
+      const paragraphDelta = changedFormatFields(
+        previous.attrs?.paragraphFormat,
+        effectiveBlock.attrs?.paragraphFormat,
+        PARAGRAPH_FORMAT_FIELDS,
+      );
+      if (paragraphDelta)
+        operations.push({
+          kind: "format-paragraph",
+          regionId: block.id,
+          format: paragraphDelta,
+        });
     }
     if (before.size)
       throw new DocxLensError(
@@ -750,6 +1392,8 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         "insert_paragraph",
         "edit_table_cell",
         "apply_paragraph_style",
+        "format_runs",
+        "format_paragraph",
       ],
     };
   },

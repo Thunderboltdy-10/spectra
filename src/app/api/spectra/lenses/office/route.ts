@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { comparePackages } from "@ariadng/office/preservation";
+import { assertPreservationKept } from "@/features/spectra/commands/office/preservation-guard";
 import { z } from "zod";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
@@ -146,6 +147,7 @@ export function contentToPptx(content: unknown, base: PptxProjection): PptxProje
           .object({
             id: z.string(),
             title: z.string().optional(),
+            speakerNotes: z.string().optional(),
             objects: z
               .array(
                 z
@@ -159,25 +161,61 @@ export function contentToPptx(content: unknown, base: PptxProjection): PptxProje
     })
     .passthrough()
     .parse(content);
-  const byId = new Map(raw.slides.map((slide) => [slide.id, slide]));
+  const baseById = new Map(base.slides.map((slide) => [slide.id, slide]));
+  const textOf = (next: { objects?: ReadonlyArray<{ type: string; content?: unknown }> }) =>
+    (next.objects ?? [])
+      .filter((object) => object.type === "text")
+      .map((object) => {
+        const value = object.content as { text?: unknown } | string;
+        return typeof value === "string"
+          ? value
+          : typeof value?.text === "string"
+            ? value.text
+            : "";
+      });
+
+  // A deck with no slides is not a request to empty the file — PowerPoint cannot
+  // hold one, so an empty list is a truncated payload. Keeping the base is the
+  // safe reading, and it is the one that cannot destroy someone's work.
+  if (!raw.slides.length) return base;
+
   return {
     ...base,
-    slides: base.slides.map((slide) => {
-      const next = byId.get(slide.id);
-      if (!next) return slide;
-      const text = (next.objects ?? [])
-        .filter((object) => object.type === "text")
-        .map((object) => {
-          const value = object.content as { text?: unknown } | string;
-          return typeof value === "string"
-            ? value
-            : typeof value?.text === "string"
-              ? value.text
-              : "";
-        });
+    /**
+     * Slide identity and order come from the *incoming* content, not from the
+     * base projection. Mapping over `base.slides` pinned both, so adding,
+     * removing and reordering slides could be proven in the lens and the harness
+     * and still never reach a person: the write was correct and the boundary
+     * quietly discarded it. Known ids keep their native part and everything
+     * preserved on it; an unknown id is a new slide and says so, with no part
+     * and nothing preserved to claim.
+     */
+    slides: raw.slides.map((next, index) => {
+      const slide = baseById.get(next.id);
+      const text = textOf(next);
+      if (!slide) {
+        return {
+          id: next.id,
+          index,
+          title: next.title ?? "",
+          text,
+          objects: (next.objects ?? []).map((object) => object as PptxProjection["slides"][number]["objects"][number]),
+          // A slide Spectra has just made has no PowerPoint part behind it yet,
+          // so it carries no transition, no timing and no notes part. Copying
+          // those from a neighbour would be inventing preserved content.
+          hasTransition: false,
+          hasTiming: false,
+          speakerNotes: next.speakerNotes ?? "",
+        };
+      }
       return {
         ...slide,
+        index,
         title: next.title ?? slide.title,
+        // Speaker notes are a promoted native region for a deck, so they have to
+        // survive the projection round trip: dropping them here would make the
+        // notes command look like it worked and change nothing in the file.
+        speakerNotes: next.speakerNotes ?? slide.speakerNotes,
         text: text.length ? text : slide.text,
         objects: slide.objects.map((object) => {
           const incoming = (next.objects ?? []).find((candidate) => candidate.id === object.id);
@@ -246,6 +284,19 @@ export async function materializeOfficeArtifact(
     isSheet ? xlsxLens.open(output) : pptxLens.open(output),
     comparePackages(cloudPayload, output),
   ]);
+  /**
+   * The preservation promise, checked against the bytes before anything is
+   * queued. Every other preservation check in Spectra is a declaration — a
+   * command naming the regions it writes, a gate trusting that name. This one
+   * trusts nothing: if the lens said a part is preserved and the part came back
+   * with different content, the write is refused here, on the one path both a
+   * person's edit and the assistant's edit go through. So the two cannot diverge
+   * by caller, and neither can be preserved-safe merely by accident.
+   */
+  assertPreservationKept({
+    entries: baseOpened.fidelityMap.entries,
+    parts: comparison.parts,
+  });
   const stored = await uploadNativePayload(output, hash, cloudTruth.nativeFormat);
   const local = workTruth.replicas.find(
     (replica) => replica.kind === "local" && replica.state !== "unavailable",

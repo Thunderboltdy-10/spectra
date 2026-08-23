@@ -1,0 +1,46 @@
+{
+ "source": "Authored for Spectra as the animation timing case",
+ "contains": [
+  "p:timing on slide 1",
+  "media part"
+ ],
+ "expected": {
+  "slides": "NATIVE",
+  "shapes": "NATIVE",
+  "animations": "PRESERVED",
+  "media": "PRESERVED"
+ },
+ "mutations": [
+  {
+   "commandId": "presentation.slide.setTitle",
+   "touch": [
+    "ppt/slides/slide1.xml"
+   ],
+   "preserve": [
+    "p:timing",
+    "ppt/media"
+   ]
+  },
+  {
+   "commandId": "presentation.arrange.geometry.width",
+   "touch": [
+    "ppt/slides/slide1.xml"
+   ],
+   "preserve": [
+    "p:timing",
+    "ppt/media"
+   ]
+  },
+  {
+   "commandId": "presentation.slide.moveLater",
+   "touch": [
+    "ppt/presentation.xml"
+   ],
+   "preserve": [
+    "p:timing",
+    "ppt/slides",
+    "ppt/media"
+   ]
+  }
+ ]
+}

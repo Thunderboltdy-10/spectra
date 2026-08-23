@@ -4,29 +4,14 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
-  BarChart3,
   Bold,
   ChevronDown,
-  Copy,
-  Download,
-  Filter,
   Italic,
-  Palette,
-  Plus,
-  Redo2,
-  Search,
-  Sigma,
-  Snowflake,
-  SortAsc,
-  SortDesc,
+  Text as TextIcon,
   Trash2,
   TriangleAlert,
   Underline,
-  Undo2,
-  Upload,
   X,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import {
   Area,
@@ -61,7 +46,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  calculateWorkbook,
   columnName,
   coordinateToAddress,
   formatCalculatedCell,
@@ -73,13 +57,19 @@ import {
   parseRange,
   rangeAddresses,
   rangeLabel,
+  sheetsCalculation,
   type CellCoordinate,
+  type SheetBorderEdge,
+  type SheetCellFormat,
+  type SheetNumberFormat,
+  type SheetTable,
   type CellRange,
   type SheetCell,
   type SheetChart,
   type SheetConditionalFormat,
   type SheetScalar,
   type SheetValidation,
+  type SheetsCalculation,
   type SheetsContent,
   type WorkbookSheet,
 } from "../sheets/model";
@@ -108,6 +98,30 @@ import {
   type CommandBinding,
 } from "./artifact-workbar";
 import { getWorkDefinition } from "../work/registry";
+import type { CommandParam } from "../commands/types";
+import {
+  SHEETS_BORDER_PRESETS,
+  SHEETS_BORDER_STYLES,
+  SHEETS_CURRENCIES,
+  SHEETS_FUNCTION_LIBRARY,
+  SHEETS_NUMBER_FORMATS,
+  sheetsCommandBindings,
+  type SheetsCommandHandlers,
+} from "../commands/office/sheets-commands";
+import {
+  applyBorderPreset,
+  duplicateRowIndices,
+  fillRange,
+  fillSeries,
+  isPreservedFormula,
+  pasteBlock,
+  replaceInCells,
+  sortRows,
+  splitColumn,
+  type CellsResult,
+  type ClipboardBlock,
+  type SortKey,
+} from "../sheets/operations";
 import {
   useComposerSafeArea,
   useStudioContract,
@@ -446,7 +460,7 @@ function interpolateHexColor(start: string, end: string, amount: number) {
 
 function chartCellValue(
   sheet: WorkbookSheet,
-  calculated: ReturnType<typeof calculateWorkbook>,
+  calculated: SheetsCalculation,
   row: number,
   column: number,
 ) {
@@ -461,7 +475,7 @@ function chartCellValue(
 function chartFirstRowIsHeader(
   sheet: WorkbookSheet,
   range: CellRange,
-  calculated: ReturnType<typeof calculateWorkbook>,
+  calculated: SheetsCalculation,
 ) {
   for (
     let column = range.start.column;
@@ -479,7 +493,7 @@ function chartFirstRowIsHeader(
 export function chartDataset(
   sheet: WorkbookSheet,
   chart: SheetChart,
-  calculated: ReturnType<typeof calculateWorkbook>,
+  calculated: SheetsCalculation,
 ) {
   const range = parseRange(chart.sourceRange.split("!").at(-1) ?? "");
   if (!range) return { data: [], keys: [] as string[], category: "Category" };
@@ -564,7 +578,7 @@ export function chartDataset(
 function chartSummary(
   sheet: WorkbookSheet,
   chart: SheetChart,
-  calculated: ReturnType<typeof calculateWorkbook>,
+  calculated: SheetsCalculation,
 ) {
   const dataset = chartDataset(sheet, chart, calculated);
   const values =
@@ -599,7 +613,7 @@ function chartSummary(
 function numericValuesForRange(
   sheet: WorkbookSheet,
   chart: SheetChart,
-  calculated: ReturnType<typeof calculateWorkbook>,
+  calculated: SheetsCalculation,
 ) {
   const range = parseRange(chart.sourceRange.split("!").at(-1) ?? "");
   if (!range) return [];
@@ -630,7 +644,7 @@ function numericValuesForRange(
 function histogramDataset(
   sheet: WorkbookSheet,
   chart: SheetChart,
-  calculated: ReturnType<typeof calculateWorkbook>,
+  calculated: SheetsCalculation,
 ) {
   const values = numericValuesForRange(sheet, chart, calculated);
   if (!values.length) return [];
@@ -677,7 +691,7 @@ function SheetsChartView({
 }: {
   sheet: WorkbookSheet;
   chart: SheetChart;
-  calculated: ReturnType<typeof calculateWorkbook>;
+  calculated: SheetsCalculation;
 }) {
   const dataset = chartDataset(sheet, chart, calculated);
   const tick = {
@@ -1015,6 +1029,85 @@ type SheetsCellHandlers = {
   ) => void;
 };
 
+/** CSS for one border edge, or nothing when the edge is unset. */
+function borderCss(edge: SheetBorderEdge | null | undefined) {
+  if (!edge) return undefined;
+  const width =
+    edge.style === "thick"
+      ? "3px"
+      : edge.style === "medium" || edge.style === "double"
+        ? "2px"
+        : "1px";
+  const line =
+    edge.style === "dashed"
+      ? "dashed"
+      : edge.style === "dotted" || edge.style === "hair"
+        ? "dotted"
+        : edge.style === "double"
+          ? "double"
+          : "solid";
+  return `${width} ${line} ${edge.color ?? "var(--text-primary)"}`;
+}
+
+/**
+ * Everything a cell's stored format asks the grid to paint.
+ *
+ * This used to be an inline object that honoured eight of the sixteen fields the
+ * model can hold, so a border, a rotation, a wrap or a real font stack was
+ * stored, exported and never drawn — the format commands wrote state nothing
+ * could see. One helper now covers every field, which also means a fixture can
+ * assert what a format command does without mounting the grid.
+ */
+function cellVisualStyle(
+  format: SheetCell["format"],
+  zoom: number,
+): CSSProperties {
+  if (!format) return {};
+  const borders = format.borders;
+  const decoration = [
+    format.underline ? "underline" : null,
+    format.strike ? "line-through" : null,
+  ].filter(Boolean);
+  return {
+    fontWeight: format.bold ? 700 : undefined,
+    fontStyle: format.italic ? "italic" : undefined,
+    textDecoration: decoration.length ? decoration.join(" ") : undefined,
+    textAlign: format.align,
+    alignItems:
+      format.verticalAlign === "top"
+        ? "flex-start"
+        : format.verticalAlign === "bottom"
+          ? "flex-end"
+          : undefined,
+    justifyContent:
+      format.align === "center"
+        ? "center"
+        : format.align === "right"
+          ? "flex-end"
+          : undefined,
+    whiteSpace: format.wrap ? "pre-wrap" : undefined,
+    // Wrapped text needs a line box narrower than the cell to break inside it.
+    lineHeight: format.wrap ? 1.25 : undefined,
+    paddingLeft: format.indent ? 8 + format.indent * 8 : undefined,
+    // Rotation is stated the way the Excel dialog states it: positive is
+    // counter-clockwise, which is the opposite sign to CSS.
+    transform: format.rotation ? `rotate(${-format.rotation}deg)` : undefined,
+    fontFamily:
+      format.fontFamily === "serif"
+        ? "var(--font-serif), ui-sans-serif, system-ui, sans-serif"
+        : format.fontFamily === "mono"
+          ? "ui-monospace, SFMono-Regular, Consolas, monospace"
+          : format.fontFamily === "sans"
+            ? "var(--font-sans), ui-sans-serif, system-ui, sans-serif"
+            : format.fontFamily,
+    fontSize: format.fontSize ? format.fontSize * zoom : undefined,
+    borderTop: borderCss(borders?.top),
+    borderRight: borderCss(borders?.right),
+    borderBottom: borderCss(borders?.bottom),
+    borderLeft: borderCss(borders?.left),
+  };
+}
+
 function SheetsCellPointerTarget({
   handlersRef,
   coordinate,
@@ -1113,7 +1206,7 @@ export function SheetsStudio({
   const rootRef = useRef<HTMLDivElement>(null);
   useComposerSafeArea(rootRef);
   const canEditCells = contract ? contract.can("edit") : !readOnly;
-  const locked = readOnly || !canEditCells;
+  const grantLocked = readOnly || !canEditCells;
   const density = contract?.density ?? "comfortable";
   /** Registry-declared peer views. Both edit; neither is a reading mode (D2). */
   const [sheetMode, setSheetMode] = useState("grid");
@@ -1144,12 +1237,18 @@ export function SheetsStudio({
    */
   const [inspector, setInspector] = useState<
     | "format"
+    | "borders"
     | "name"
     | "validate"
     | "conditional"
     | "find"
+    | "replace"
     | "sheet"
     | "filter"
+    | "sort"
+    | "note"
+    | "library"
+    | "chart"
     | null
   >(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -1184,6 +1283,33 @@ export function SheetsStudio({
     column: number;
   } | null>(null);
   const [filterValues, setFilterValues] = useState<SheetScalar[]>([]);
+  /**
+   * Spectra's own clipboard block. The system clipboard carries text, which is
+   * all another application can read; paste-special needs the cells themselves —
+   * their formulas, their formats — so the block is kept here as well.
+   */
+  const [clipboardBlock, setClipboardBlock] = useState<
+    (ClipboardBlock & { cut?: boolean }) | null
+  >(null);
+  const [copiedFormat, setCopiedFormat] = useState<SheetCellFormat | null>(null);
+  const [borderStyle, setBorderStyle] = useState<SheetBorderEdge["style"]>("thin");
+  const [borderColor, setBorderColor] = useState<string | null>(null);
+  const [showFormulas, setShowFormulas] = useState(false);
+  const [traceReferences, setTraceReferences] = useState(false);
+  const [replaceDraft, setReplaceDraft] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [sortKeys, setSortKeys] = useState<SortKey[]>([]);
+  const [libraryFilter, setLibraryFilter] = useState("");
+  const [chartTitleDraft, setChartTitleDraft] = useState("");
+  const [chartRangeDraft, setChartRangeDraft] = useState("");
+  const [customFormatDraft, setCustomFormatDraft] = useState("");
+  /** The formula bar, so the Formula command focuses the field a person types in. */
+  const formulaInputRef = useRef<HTMLInputElement>(null);
+  /**
+   * The live command set, read by `runCommand`. Every inspector control and grid
+   * gesture dispatches through that one function, so a verb cannot exist twice.
+   */
+  const actionsRef = useRef<CommandBinding[]>([]);
   /**
    * Notices are not `role="status"`: the shared rail owns save state and
    * `spectra-app.css` hides `[role="status"]` inside this studio to stop the
@@ -1259,11 +1385,11 @@ export function SheetsStudio({
   // Losing the grant closes every editing surface rather than leaving a panel
   // open over cells it can no longer change.
   useEffect(() => {
-    if (!locked) return;
+    if (!grantLocked) return;
     setInspector(null);
     setFilterEditor(null);
     setEditingAddress(null);
-  }, [locked]);
+  }, [grantLocked]);
 
   useEffect(() => {
     const incomingKey = JSON.stringify(incoming);
@@ -1300,11 +1426,35 @@ export function SheetsStudio({
   const activeSheetIndex = workbook.sheets.findIndex(
     (sheet) => sheet.id === activeSheet.id,
   );
+  /**
+   * Excel's sheet protection is honoured, not ignored: a protected sheet reads
+   * as locked everywhere the grant does, so no command promises an edit the
+   * sheet refuses. Protect itself stays reachable so the state can be lifted.
+   */
+  const sheetProtected = Boolean(activeSheet.protection?.locked);
+  const locked = grantLocked || sheetProtected;
   const bounds = useMemo(() => usedBounds(activeSheet), [activeSheet]);
-  const calculated = useMemo(() => calculateWorkbook(workbook), [workbook]);
+  /**
+   * Calculation is lazy and per cell (D20). The grid asks for the cells it is
+   * about to paint, so a keystroke costs one dependency walk rather than a pass
+   * over every formula in a 200k-cell workbook. In manual mode the source is a
+   * snapshot instead of the live workbook, so typing does not recalculate at all
+   * until someone asks for it.
+   */
+  const [manualSnapshot, setManualSnapshot] = useState<SheetsContent | null>(
+    null,
+  );
+  const manual = workbook.workbook.calculationMode === "manual";
+  const calculationSource = manual ? (manualSnapshot ?? workbook) : workbook;
+  const calculated = useMemo(
+    () => sheetsCalculation(calculationSource),
+    [calculationSource],
+  );
   const cachedOnlyFormulaCount = useMemo(
     () =>
-      workbook.sheets.reduce(
+      !workbook.nativeBinding
+        ? 0
+        : workbook.sheets.reduce(
         (count, sheet) =>
           count +
           Object.values(sheet.cells).filter(
@@ -1312,7 +1462,7 @@ export function SheetsStudio({
           ).length,
         0,
       ),
-    [workbook.sheets],
+    [workbook.nativeBinding, workbook.sheets],
   );
   const activeSheetRef = useRef(activeSheet);
   activeSheetRef.current = activeSheet;
@@ -1344,20 +1494,42 @@ export function SheetsStudio({
       string,
       { backgroundColor?: string; color?: string }
     >();
-    const populated = Object.keys(activeSheet.cells);
+    /**
+     * Each rule reads its own range, capped, rather than every populated cell in
+     * the sheet. A workbook with three rules over `A1:D50` used to walk 200,000
+     * addresses per rule on every keystroke; now it walks 200 (D20).
+     */
     for (const rule of activeSheet.conditionalFormats ?? []) {
       const parsed = parseRange(rule.range);
       if (!parsed) continue;
-      const addresses = populated.filter((address) => {
-        const coordinate = parseAddress(address);
-        return coordinate
-          ? selected(parsed, coordinate.row, coordinate.column)
-          : false;
-      });
+      const normalized = normalizeRange(parsed);
+      const area =
+        (normalized.end.row - normalized.start.row + 1) *
+        (normalized.end.column - normalized.start.column + 1);
+      if (area > 20_000) continue;
+      const addresses = rangeAddresses(normalized).filter(
+        (address) => activeSheet.cells[address] !== undefined,
+      );
+      const resolve = (address: string) =>
+        calculated.get(`${activeSheet.id}:${address}`)?.value ??
+        activeSheet.cells[address]?.value;
+      if (rule.kind === "text_contains") {
+        const needle = rule.text.toLowerCase();
+        if (!needle) continue;
+        for (const address of addresses) {
+          const value = resolve(address);
+          if (value === undefined || value === null) continue;
+          if (!String(value).toLowerCase().includes(needle)) continue;
+          styles.set(address, {
+            ...styles.get(address),
+            backgroundColor: rule.fillColor,
+            color: rule.textColor,
+          });
+        }
+        continue;
+      }
       const numeric = addresses.flatMap((address) => {
-        const value =
-          calculated.get(`${activeSheet.id}:${address}`)?.value ??
-          activeSheet.cells[address]?.value;
+        const value = resolve(address);
         return typeof value === "number" && Number.isFinite(value)
           ? [{ address, value }]
           : [];
@@ -1377,21 +1549,31 @@ export function SheetsStudio({
                 : (entry.value - minimum) / (maximum - minimum),
             ),
           });
-      } else {
-        for (const entry of numeric) {
-          const matches =
-            rule.operator === "greater_than"
-              ? entry.value > rule.value
-              : rule.operator === "less_than"
-                ? entry.value < rule.value
-                : entry.value === rule.value;
-          if (matches)
-            styles.set(entry.address, {
-              ...styles.get(entry.address),
-              backgroundColor: rule.fillColor,
-              color: rule.textColor,
-            });
-        }
+        continue;
+      }
+      for (const entry of numeric) {
+        const second = rule.secondValue ?? rule.value;
+        const matches =
+          rule.operator === "greater_than"
+            ? entry.value > rule.value
+            : rule.operator === "less_than"
+              ? entry.value < rule.value
+              : rule.operator === "greater_equal"
+                ? entry.value >= rule.value
+                : rule.operator === "less_equal"
+                  ? entry.value <= rule.value
+                  : rule.operator === "not_equal_to"
+                    ? entry.value !== rule.value
+                    : rule.operator === "between"
+                      ? entry.value >= Math.min(rule.value, second) &&
+                        entry.value <= Math.max(rule.value, second)
+                      : entry.value === rule.value;
+        if (matches)
+          styles.set(entry.address, {
+            ...styles.get(entry.address),
+            backgroundColor: rule.fillColor,
+            color: rule.textColor,
+          });
       }
     }
     return styles;
@@ -1431,9 +1613,27 @@ export function SheetsStudio({
   const selectionLabel = rangeLabel(normalizedSelection);
   const activeAddress = coordinateToAddress(range.end);
   const activeCell = activeSheet.cells[activeAddress];
+  /**
+   * A copy of the current selection, for handing to an operation.
+   *
+   * The operations take a plain `CellRange`, so nothing stops one from writing
+   * into the object it was given. None of them does, but a caller cannot know
+   * that from the signature — and neither can the compiler, which stops
+   * memoizing everything downstream of a value it thinks might be mutated. A
+   * fresh copy per call settles it.
+   */
+  function selectionCopy(): CellRange {
+    return {
+      start: { ...normalizedSelection.start },
+      end: { ...normalizedSelection.end },
+    };
+  }
   const selectedAddresses = useMemo(
-    () => rangeAddresses(normalizedSelection),
-    [normalizedSelection],
+    // Keyed on the selection state rather than on the normalized copy: the
+    // normalized object is handed to helpers that take a mutable `CellRange`, and
+    // a memo keyed on it is not a memo at all.
+    () => rangeAddresses(normalizeRange(range)),
+    [range],
   );
   /**
    * Stored widths and heights are honoured, not just persisted. The xlsx
@@ -1441,6 +1641,65 @@ export function SheetsStudio({
    * every column at 122px anyway, so an imported sheet lost its layout the
    * moment it opened.
    */
+  const activeCalculated = calculated.get(`${activeSheet.id}:${activeAddress}`);
+  /**
+   * The functions inside the active formula, each with the library's one-line
+   * account of what it does. This is what "Explain this formula" actually owes a
+   * person: not a restatement of the text they can already see, but what each
+   * piece does and who evaluates it.
+   */
+  const explainedFunctions = useMemo(() => {
+    const formula = activeCell?.formula;
+    if (!formula) return [];
+    const names = new Set(
+      [...formula.toUpperCase().matchAll(/(?:_XLFN\.)?([A-Z][A-Z0-9_.]*)\s*\(/g)].map(
+        (match) => match[1]!,
+      ),
+    );
+    return [...names].slice(0, 12).map((name) => {
+      const spec = SHEETS_FUNCTION_LIBRARY.find((entry) => entry.name === name);
+      return {
+        name,
+        summary: spec
+          ? `${spec.summary}${spec.native ? " Excel recalculates it." : " Spectra calculates it."}`
+          : "Spectra does not recognize this function, so it keeps Excel's text and Excel's value.",
+      };
+    });
+  }, [activeCell?.formula]);
+
+  /**
+   * The cells the active formula reads from, when tracing is on.
+   *
+   * "Which cells feed this one" is the question every spreadsheet mistake starts
+   * with, and until now the only way to answer it here was to read the formula
+   * text by eye. The references are pulled straight from the formula and capped,
+   * so tracing a formula that sums a whole column costs a bounded amount of work
+   * rather than 200k Set entries (D20).
+   */
+  const tracedAddresses = useMemo(() => {
+    const traced = new Set<string>();
+    if (!traceReferences) return traced;
+    const formula = activeCell?.formula;
+    if (!formula) return traced;
+    const pattern = /\$?([A-Z]{1,3})\$?([1-9][0-9]*)(?::\$?([A-Z]{1,3})\$?([1-9][0-9]*))?/g;
+    for (const match of formula.toUpperCase().matchAll(pattern)) {
+      if (traced.size > 4_000) break;
+      const start = `${match[1]}${match[2]}`;
+      const label = match[3] ? `${start}:${match[3]}${match[4]}` : start;
+      const parsed = parseRange(label);
+      if (!parsed) continue;
+      const normalized = normalizeRange(parsed);
+      const area =
+        (normalized.end.row - normalized.start.row + 1) *
+        (normalized.end.column - normalized.start.column + 1);
+      // A whole-column reference is a real thing to write and a pointless thing
+      // to outline cell by cell, so it is skipped rather than expanded.
+      if (area > 4_000) continue;
+      for (const address of rangeAddresses(normalized)) traced.add(address);
+    }
+    return traced;
+  }, [activeCell?.formula, traceReferences]);
+
   const columnOffsets = useMemo(
     () =>
       trackOffsets(bounds.columns, (column) =>
@@ -1504,10 +1763,12 @@ export function SheetsStudio({
   }, []);
 
   const commit = useCallback(
-    (next: SheetsContent, remember = true) => {
+    (next: SheetsContent, remember = true, scope: "cells" | "state" = "cells") => {
       // One gate for every write in this file. A capability that is not granted
-      // stops the change here rather than at each of forty call sites.
-      if (locked) return;
+      // stops the change here rather than at each of forty call sites. Sheet
+      // protection blocks cell writes but not view state, and not the toggle
+      // that lifts the protection itself — a lock you cannot unlock is a trap.
+      if (scope === "cells" ? locked : grantLocked) return;
       const current = workbookRef.current;
       if (sameContent(current, next)) return;
       if (remember) {
@@ -1523,14 +1784,14 @@ export function SheetsStudio({
       // never from inside a React state updater.
       onChange(next);
     },
-    [locked, onChange, rememberEmitted],
+    [grantLocked, locked, onChange, rememberEmitted],
   );
 
   const showSheet = useCallback(
     (sheetId: string) => {
       setLocalSheetId(sheetId);
       setRange({ start: { row: 0, column: 0 }, end: { row: 0, column: 0 } });
-      if (locked) return;
+      if (grantLocked) return;
       const current = workbookRef.current;
       if (current.activeSheetId === sheetId) return;
       const next = { ...current, activeSheetId: sheetId };
@@ -1539,12 +1800,16 @@ export function SheetsStudio({
       setWorkbook(next);
       onChange(next);
     },
-    [locked, onChange, rememberEmitted],
+    [grantLocked, onChange, rememberEmitted],
   );
 
   const updateActiveSheet = useCallback(
-    (updater: (sheet: WorkbookSheet) => WorkbookSheet, remember = true) => {
-      commit(replaceSheet(workbook, updater(activeSheet)), remember);
+    (
+      updater: (sheet: WorkbookSheet) => WorkbookSheet,
+      remember = true,
+      scope: "cells" | "state" = "cells",
+    ) => {
+      commit(replaceSheet(workbook, updater(activeSheet)), remember, scope);
     },
     [activeSheet, commit, workbook],
   );
@@ -1921,48 +2186,54 @@ export function SheetsStudio({
     });
   }
 
+  /**
+   * The grid keyboard. Every shortcut that performs an operation dispatches the
+   * registered command by id rather than reaching for a local mutation, so a key,
+   * a button and an assistant call cannot drift apart (C1). Only movement and
+   * cell entry — which are selection, not operations — stay local.
+   */
   function onGridKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (editingAddress) return;
     const command = event.metaKey || event.ctrlKey;
+    const shortcuts: Record<string, string> = {
+      c: "clipboard.copy",
+      x: "clipboard.cut",
+      v: "clipboard.paste",
+      b: "format.bold",
+      i: "format.italic",
+      u: "format.underline",
+      d: "fill.down",
+      r: "fill.right",
+    };
     if (command && event.key.toLowerCase() === "z") {
       event.preventDefault();
-      if (event.shiftKey) redo();
-      else undo();
+      runCommand(event.shiftKey ? "history.redo" : "history.undo");
       return;
     }
     if (command && event.key.toLowerCase() === "y") {
       event.preventDefault();
-      redo();
-      return;
-    }
-    if (command && event.key.toLowerCase() === "c") {
-      event.preventDefault();
-      void copySelection();
-      return;
-    }
-    if (command && event.key.toLowerCase() === "v") {
-      event.preventDefault();
-      void pasteSelection();
-      return;
-    }
-    if (command && event.key.toLowerCase() === "b") {
-      event.preventDefault();
-      formatSelection({ bold: !activeCell?.format?.bold });
-      return;
-    }
-    if (command && event.key.toLowerCase() === "i") {
-      event.preventDefault();
-      formatSelection({ italic: !activeCell?.format?.italic });
-      return;
-    }
-    if (command && event.key.toLowerCase() === "u") {
-      event.preventDefault();
-      formatSelection({ underline: !activeCell?.format?.underline });
+      runCommand("history.redo");
       return;
     }
     if (command && event.key.toLowerCase() === "f") {
       event.preventDefault();
-      setInspector("find");
+      runCommand("navigate.find");
+      return;
+    }
+    if (command && event.key.toLowerCase() === "h") {
+      event.preventDefault();
+      runCommand("navigate.replace");
+      return;
+    }
+    const shortcut = command ? shortcuts[event.key.toLowerCase()] : undefined;
+    if (shortcut) {
+      event.preventDefault();
+      runCommand(shortcut);
+      return;
+    }
+    if (event.key === "F9") {
+      event.preventDefault();
+      runCommand("formula.calculate");
       return;
     }
     if (event.key === "ArrowUp") {
@@ -1986,7 +2257,7 @@ export function SheetsStudio({
       setEditingValue(cellInput(activeCell));
     } else if (event.key === "Backspace" || event.key === "Delete") {
       event.preventDefault();
-      clearSelection();
+      runCommand("clear.values");
     } else if (!command && event.key.length === 1) {
       setEditingAddress(activeAddress);
       setEditingValue(event.key);
@@ -3056,8 +3327,14 @@ export function SheetsStudio({
     name: `Name ${selectionLabel}`,
     validate: `Validate ${selectionLabel}`,
     conditional: `Conditional format ${selectionLabel}`,
+    borders: `Borders for ${selectionLabel}`,
     find: `Find in ${activeSheet.name}`,
+    replace: `Replace in ${activeSheet.name}`,
     sheet: "Rename sheet",
+    sort: `Sort ${selectionLabel}`,
+    note: `Note on ${activeAddress}`,
+    library: "Function library",
+    chart: "Chart",
     filter: filterEditor
       ? `Filter ${columnName(filterEditor.column)}`
       : "Filter",
@@ -3066,6 +3343,11 @@ export function SheetsStudio({
    * Character emphasis and cell alignment, declared once so the row cannot grow
    * a seventh toggle with a seventh button treatment. Every entry writes a real
    * cell format.
+   */
+  /**
+   * Character emphasis and cell alignment. Each button dispatches the registered
+   * command rather than calling `formatSelection` itself, so the inspector, the
+   * workbar, Ctrl+B and an assistant call are literally the same code path (C1).
    */
   const emphasisControls: Array<{
     label: string;
@@ -3077,20 +3359,25 @@ export function SheetsStudio({
       label: "Bold",
       icon: Bold,
       active: activeCell?.format?.bold,
-      onClick: () => formatSelection({ bold: !activeCell?.format?.bold }),
+      onClick: () => runCommand("format.bold"),
     },
     {
       label: "Italic",
       icon: Italic,
       active: activeCell?.format?.italic,
-      onClick: () => formatSelection({ italic: !activeCell?.format?.italic }),
+      onClick: () => runCommand("format.italic"),
     },
     {
       label: "Underline",
       icon: Underline,
       active: activeCell?.format?.underline,
-      onClick: () =>
-        formatSelection({ underline: !activeCell?.format?.underline }),
+      onClick: () => runCommand("format.underline"),
+    },
+    {
+      label: "Wrap text",
+      icon: TextIcon,
+      active: activeCell?.format?.wrap,
+      onClick: () => runCommand("format.wrap"),
     },
     ...(
       [
@@ -3102,7 +3389,7 @@ export function SheetsStudio({
       label,
       icon,
       active: activeCell?.format?.align === align,
-      onClick: () => formatSelection({ align }),
+      onClick: () => runCommand("format.align", align),
     })),
   ];
   const changeZoom = (next: number) => {
@@ -3111,135 +3398,609 @@ export function SheetsStudio({
   };
 
   /**
-   * The six bars became one declared action list. Priority decides where each
-   * entry lives at a given density and it is rendered in exactly one place, so
-   * nothing is ever listed twice and nothing is deleted at a narrow width.
-   * `requires` is the enforcement: an action a role cannot perform is absent,
-   * not disabled.
+   * Every verb this workbook can perform, declared once.
+   *
+   * The bar, the inspector, a keyboard shortcut, a header drag and an assistant
+   * call all arrive at the same function here. Before this, the format panel
+   * mutated cells directly, Ctrl+V had its own paste and the fill handle had its
+   * own copy loop, so "merge these cells" existed three times and none of the
+   * three could be reached by anything but a mouse (C1).
    */
-  const actions: CommandBinding[] = [
-    {
-      id: "undo",
-      label: "Undo",
-      icon: Undo2,
-      priority: "essential",
-      requires: "edit",
-      disabled: !canUndo,
-      onSelect: undo,
+  function moveActiveSheet(delta: -1 | 1) {
+    const target = activeSheetIndex + delta;
+    if (target < 0 || target >= workbook.sheets.length) return;
+    const sheets = [...workbook.sheets];
+    const [moved] = sheets.splice(activeSheetIndex, 1);
+    if (!moved) return;
+    sheets.splice(target, 0, moved);
+    commit({ ...workbook, sheets });
+  }
+
+  /**
+   * The one dispatcher. An inspector toggle, a context menu item, a grid gesture
+   * and a keyboard shortcut all call this with a command id, so the registry is
+   * the only place an operation is implemented and a disabled command is refused
+   * the same way everywhere (C1/C2).
+   */
+  function runCommand(id: string, value?: CommandParam) {
+    const binding = actionsRef.current.find((candidate) => candidate.id === id);
+    if (!binding || binding.disabled) return false;
+    binding.onSelect(value);
+    return true;
+  }
+
+  function applyCells(result: CellsResult, verb: string) {
+    if (result.blocked.length) {
+      const shown = result.blocked.slice(0, 3).join(", ");
+      setImportNotice(
+        `${verb} left ${result.blocked.length === 1 ? "one cell" : `${result.blocked.length} cells`} as ${result.blocked.length === 1 ? "it was" : "they were"} — ${shown} hold formulas Spectra shows but cannot rewrite, so Excel's own text is kept.`,
+        "warning",
+      );
+    }
+    if (!result.written) return;
+    updateActiveSheet((sheet) => ({ ...sheet, cells: result.cells }));
+  }
+
+  function captureBlock(cut: boolean) {
+    const cells: Record<string, SheetCell> = {};
+    for (const address of selectedAddresses) {
+      const cell = activeSheet.cells[address];
+      if (cell) cells[address] = cell;
+    }
+    // A copy, not the live selection: the clipboard has to keep the shape that
+    // was copied even after the selection moves.
+    setClipboardBlock({ range: selectionCopy(), cells, cut });
+    void copySelection();
+  }
+
+  function pasteHere(mode: string) {
+    if (!clipboardBlock) {
+      void pasteSelection();
+      return;
+    }
+    const result = pasteBlock(
+      activeSheet.cells,
+      clipboardBlock,
+      normalizedSelection.start,
+      mode,
+      (address) => calculated.get(`${activeSheet.id}:${address}`)?.value,
+    );
+    let cells = result.cells;
+    if (clipboardBlock.cut && mode !== "formats") {
+      cells = { ...cells };
+      for (const address of Object.keys(clipboardBlock.cells)) delete cells[address];
+    }
+    applyCells({ ...result, cells }, "Paste");
+    if (clipboardBlock.cut) setClipboardBlock(null);
+  }
+
+  function clearSelectionScope(scope: "all" | "values" | "formats") {
+    if (scope === "all") {
+      clearSelection();
+      return;
+    }
+    const cells = { ...activeSheet.cells };
+    const blocked: string[] = [];
+    let written = 0;
+    for (const address of selectedAddresses) {
+      const cell = cells[address];
+      if (!cell) continue;
+      if (scope === "values") {
+        if (isPreservedFormula(cell)) {
+          blocked.push(address);
+          continue;
+        }
+        if (cell.format || cell.note || cell.validation)
+          cells[address] = { ...cell, value: undefined, formula: undefined };
+        else delete cells[address];
+      } else {
+        cells[address] = { ...cell, format: undefined };
+      }
+      written += 1;
+    }
+    applyCells(
+      { cells, blocked, written },
+      scope === "values" ? "Clear contents" : "Clear formatting",
+    );
+  }
+
+  function applyBorders(preset: string) {
+    applyCells(
+      applyBorderPreset(
+        activeSheet.cells,
+        selectionCopy(),
+        preset,
+        borderStyle,
+        borderColor,
+      ),
+      "Borders",
+    );
+  }
+
+  function resizeSelectedColumns(width: number) {
+    updateActiveSheet((sheet) => {
+      const columnWidths = { ...(sheet.columnWidths ?? {}) };
+      for (
+        let column = normalizedSelection.start.column;
+        column <= normalizedSelection.end.column;
+        column += 1
+      )
+        columnWidths[String(column)] = width;
+      return { ...sheet, columnWidths };
+    });
+  }
+
+  function resizeSelectedRows(height: number) {
+    updateActiveSheet((sheet) => {
+      const rowHeights = { ...(sheet.rowHeights ?? {}) };
+      for (
+        let row = normalizedSelection.start.row;
+        row <= normalizedSelection.end.row;
+        row += 1
+      )
+        rowHeights[String(row)] = height;
+      return { ...sheet, rowHeights };
+    });
+  }
+
+  function hideSelected(axis: "row" | "column") {
+    updateActiveSheet((sheet) => {
+      const key = axis === "row" ? "hiddenRows" : "hiddenColumns";
+      const start = axis === "row" ? normalizedSelection.start.row : normalizedSelection.start.column;
+      const end = axis === "row" ? normalizedSelection.end.row : normalizedSelection.end.column;
+      const hidden = new Set(sheet[key] ?? []);
+      for (let index = start; index <= end; index += 1) hidden.add(index);
+      return { ...sheet, [key]: [...hidden].sort((left, right) => left - right) };
+    });
+  }
+
+  function runCustomSort() {
+    if (!sortKeys.length) {
+      setInspector("sort");
+      return;
+    }
+    const selection = selectionCopy();
+    const header = chartFirstRowIsHeader(activeSheet, selection, calculated);
+    const first = header ? selection.start.row + 1 : selection.start.row;
+    const rows: Array<{ row: number; values: Record<number, SheetCell | undefined> }> = [];
+    for (let row = first; row <= selection.end.row; row += 1) {
+      const values: Record<number, SheetCell | undefined> = {};
+      for (
+        let column = selection.start.column;
+        column <= selection.end.column;
+        column += 1
+      )
+        values[column] = activeSheet.cells[coordinateToAddress({ row, column })];
+      rows.push({ row, values });
+    }
+    const valueAt = (entry: (typeof rows)[number], column: number) =>
+      calculated.get(
+        `${activeSheet.id}:${coordinateToAddress({ row: entry.row, column })}`,
+      )?.value ?? entry.values[column]?.value;
+    const sorted = sortRows(rows, sortKeys, valueAt);
+    updateActiveSheet((sheet) => {
+      const cells = { ...sheet.cells };
+      sorted.forEach((entry, offset) => {
+        for (
+          let column = selection.start.column;
+          column <= selection.end.column;
+          column += 1
+        ) {
+          const address = coordinateToAddress({ row: first + offset, column });
+          const cell = entry.values[column];
+          if (cell) cells[address] = cell;
+          else delete cells[address];
+        }
+      });
+      return { ...sheet, cells };
+    });
+  }
+
+  function removeDuplicateRows() {
+    const selection = selectionCopy();
+    const header = chartFirstRowIsHeader(activeSheet, selection, calculated);
+    const first = header ? selection.start.row + 1 : selection.start.row;
+    const rows: number[] = [];
+    for (let row = first; row <= selection.end.row; row += 1) rows.push(row);
+    const columns: number[] = [];
+    for (
+      let column = selection.start.column;
+      column <= selection.end.column;
+      column += 1
+    )
+      columns.push(column);
+    const duplicates = duplicateRowIndices(rows, columns, (row, column) => {
+      const address = coordinateToAddress({ row, column });
+      return (
+        calculated.get(`${activeSheet.id}:${address}`)?.value ??
+        activeSheet.cells[address]?.value
+      );
+    });
+    if (!duplicates.length) {
+      setImportNotice("No repeated rows in that selection.");
+      return;
+    }
+    updateActiveSheet((sheet) => {
+      let next = sheet;
+      for (const row of [...duplicates].sort((left, right) => right - left))
+        next = mutateSheetAxis(next, "row", row, -1);
+      return next;
+    });
+    setImportNotice(
+      `Removed ${duplicates.length === 1 ? "one repeated row" : `${duplicates.length} repeated rows`}.`,
+    );
+  }
+
+  function splitTextToColumns() {
+    const selection = selectionCopy();
+    const column = selection.start.column;
+    const values: string[] = [];
+    for (let row = selection.start.row; row <= selection.end.row; row += 1) {
+      const cell = activeSheet.cells[coordinateToAddress({ row, column })];
+      values.push(typeof cell?.value === "string" ? cell.value : "");
+    }
+    const { rows, delimiter } = splitColumn(values);
+    const widest = Math.max(...rows.map((parts) => parts.length), 1);
+    if (widest < 2) {
+      setImportNotice("Nothing in that column has a comma or a tab to split on.");
+      return;
+    }
+    updateActiveSheet((sheet) => {
+      const cells = { ...sheet.cells };
+      rows.forEach((parts, offset) => {
+        parts.forEach((part, index) => {
+          const address = coordinateToAddress({
+            row: selection.start.row + offset,
+            column: column + index,
+          });
+          if (index === 0 && isPreservedFormula(cells[address])) return;
+          cells[address] = { ...cells[address], value: part, formula: undefined };
+        });
+      });
+      return { ...sheet, cells };
+    });
+    setImportNotice(
+      `Split ${rows.length === 1 ? "one row" : `${rows.length} rows`} at "${delimiter === "\t" ? "tab" : delimiter}" into ${widest} columns.`,
+    );
+  }
+
+  function insertFunctionTemplate(name: string) {
+    const spec = SHEETS_FUNCTION_LIBRARY.find((entry) => entry.name === name);
+    if (!spec) return;
+    const rangeText = selectedAddresses.length > 1 ? selectionLabel : `${activeAddress}`;
+    const template = spec.template
+      .replaceAll("{range}", rangeText)
+      .replaceAll("{cell}", activeAddress);
+    setFormulaDraft(template);
+    setInspector(null);
+    requestAnimationFrame(() => formulaInputRef.current?.focus());
+  }
+
+  function autoSumSelection() {
+    const selection = selectionCopy();
+    const column = selection.start.column;
+    let top = selection.start.row - 1;
+    while (
+      top >= 0 &&
+      activeSheet.cells[coordinateToAddress({ row: top, column })] !== undefined
+    )
+      top -= 1;
+    const first = top + 1;
+    if (first >= selection.start.row) {
+      const source = `${coordinateToAddress({ row: first, column })}:${coordinateToAddress({ row: selection.start.row - 1, column })}`;
+      commitInput(coordinateToAddress(selection.start), `=SUM(${source})`);
+      return;
+    }
+    setImportNotice("Put the cursor below the numbers you want totalled.");
+  }
+
+  function replaceInSelection(scope: "sheet" | "selection") {
+    const query = search.trim();
+    if (!query) {
+      setInspector("replace");
+      return;
+    }
+    const addresses =
+      scope === "selection" ? selectedAddresses : Object.keys(activeSheet.cells);
+    const result = replaceInCells(activeSheet.cells, addresses, query, replaceDraft);
+    applyCells(result, "Replace");
+    if (result.written)
+      setImportNotice(
+        `Replaced ${result.written === 1 ? "one value" : `${result.written} values`} in ${scope === "selection" ? selectionLabel : activeSheet.name}.`,
+      );
+  }
+
+  function setNoteOnActiveCell(text: string) {
+    const note = text.trim();
+    setCell(activeAddress, {
+      ...activeCell,
+      ...(note ? { note } : { note: undefined }),
+    });
+  }
+
+  function patchActiveTable(patch: Partial<SheetTable>) {
+    const table = activeSheet.tables.find((candidate) =>
+      candidate.range === selectionLabel ||
+      Boolean(parseRange(candidate.range)) &&
+        selected(normalizeRange(parseRange(candidate.range)!), range.end.row, range.end.column),
+    );
+    if (!table) return;
+    updateActiveSheet((sheet) => ({
+      ...sheet,
+      tables: sheet.tables.map((candidate) =>
+        candidate.id === table.id ? { ...candidate, ...patch } : candidate,
+      ),
+    }));
+  }
+
+  const activeTable = activeSheet.tables.find((candidate) => {
+    const parsed = parseRange(candidate.range);
+    return parsed
+      ? selected(normalizeRange(parsed), range.end.row, range.end.column)
+      : false;
+  });
+  const selectedChart = activeSheet.charts.find((chart) => chart.id === selectedChartId);
+  const mergedHere = (activeSheet.mergedRanges ?? []).some((label) => {
+    const parsed = parseRange(label);
+    return parsed
+      ? selected(normalizeRange(parsed), range.end.row, range.end.column)
+      : false;
+  });
+  const hiddenTrackCount =
+    (activeSheet.hiddenRows?.length ?? 0) + (activeSheet.hiddenColumns?.length ?? 0);
+  const hiddenSheetCount = workbook.sheets.filter((sheet) => sheet.hidden).length;
+  const mountedNative = Boolean(workbook.nativeBinding);
+  const sheetAddBlockedReason = mountedNative
+    ? "This workbook is linked to an Excel file, and Spectra keeps its sheet list exactly as Excel wrote it. Import a copy to restructure it."
+    : undefined;
+
+  const commandHandlers: SheetsCommandHandlers = {
+    readOnly: grantLocked,
+    protectedSheet: sheetProtected,
+    history: {
+      undo,
+      redo,
+      canUndo,
+      canRedo,
     },
-    {
-      id: "redo",
-      label: "Redo",
-      icon: Redo2,
-      priority: "essential",
-      requires: "edit",
-      disabled: !canRedo,
-      onSelect: redo,
+    find: {
+      toggle: () => toggleInspector("find"),
+      open: inspector === "find",
+      toggleReplace: () => toggleInspector("replace"),
+      replaceOpen: inspector === "replace",
+      matchCount: search.trim() ? searchMatches.length : undefined,
+      matchNoun: "cell",
     },
-    {
-      id: "format",
-      label: "Format",
-      icon: Palette,
-      priority: "essential",
-      requires: "edit",
-      hint: `Number, font and fill for ${selectionLabel}`,
-      active: inspector === "format",
-      onSelect: () => toggleInspector("format"),
+    textFormat: {
+      fontFamily: {
+        value: activeCell?.format?.fontFamily,
+        set: (value) => formatSelection({ fontFamily: value }),
+      },
+      fontSize: {
+        value: activeCell?.format?.fontSize ?? 11,
+        set: (value) => formatSelection({ fontSize: value }),
+      },
+      bold: {
+        active: activeCell?.format?.bold,
+        toggle: () => formatSelection({ bold: !activeCell?.format?.bold }),
+      },
+      italic: {
+        active: activeCell?.format?.italic,
+        toggle: () => formatSelection({ italic: !activeCell?.format?.italic }),
+      },
+      underline: {
+        active: activeCell?.format?.underline,
+        toggle: () => formatSelection({ underline: !activeCell?.format?.underline }),
+      },
+      strike: {
+        active: activeCell?.format?.strike,
+        toggle: () => formatSelection({ strike: !activeCell?.format?.strike }),
+      },
+      color: {
+        value: activeCell?.format?.textColor ?? null,
+        set: (value) => formatSelection({ textColor: value ?? undefined }),
+      },
+      alignment: {
+        value: activeCell?.format?.align ?? "left",
+        set: (value) =>
+          formatSelection({ align: value as NonNullable<SheetCellFormat["align"]> }),
+      },
+      clear: () => clearSelectionScope("formats"),
+      touches: ["styles", "numberFormats"],
     },
-    {
-      id: "chart",
-      label: "Chart",
-      icon: BarChart3,
-      priority: "essential",
-      requires: "edit",
-      hint: `Read ${selectionLabel}`,
-      onSelect: createChart,
+    openFormatPanel: () => toggleInspector("format"),
+    formatPanelOpen: inspector === "format",
+    clipboard: {
+      copy: () => captureBlock(false),
+      cut: () => captureBlock(true),
+      paste: () => pasteHere("all"),
+      pasteSpecial: (mode) => pasteHere(mode),
+      canPaste: Boolean(clipboardBlock) || undefined,
+      clear: clearSelectionScope,
+      fill: (direction) =>
+        applyCells(
+          fillRange(activeSheet.cells, selectionCopy(), direction),
+          direction === "down" ? "Fill down" : "Fill right",
+        ),
+      fillSeries: (kind) =>
+        applyCells(
+          fillSeries(activeSheet.cells, selectionCopy(), kind),
+          "Fill series",
+        ),
+      canFill: selectedAddresses.length > 1,
     },
-    {
-      id: "find",
-      label: "Find",
-      icon: Search,
-      hint: "Ctrl F",
-      active: inspector === "find",
-      onSelect: () => toggleInspector("find"),
+    numberFormat: {
+      format: activeCell?.format?.numberFormat ?? "general",
+      set: (format) => {
+        if (format === "custom") {
+          toggleInspector("format");
+          return;
+        }
+        formatSelection({ numberFormat: format as SheetNumberFormat });
+      },
+      customCode: activeCell?.format?.customFormat,
+      setCustom: (code) => {
+        if (!code.trim()) {
+          setInspector("format");
+          return;
+        }
+        formatSelection({ numberFormat: "custom", customFormat: code.trim() });
+      },
+      currency: activeCell?.format?.currency ?? "USD",
+      setCurrency: (code) =>
+        formatSelection({ numberFormat: "currency", currency: code }),
+      decimals: activeCell?.format?.decimals ?? 2,
+      setDecimals: (decimals) => formatSelection({ decimals }),
+      thousands: activeCell?.format?.thousands,
+      toggleThousands: () =>
+        formatSelection({ thousands: !activeCell?.format?.thousands }),
     },
-    {
-      id: "sort",
-      label: "Sort",
-      icon: SortAsc,
-      requires: "edit",
-      hint: `Ascending by ${columnName(normalizedSelection.start.column)}`,
-      onSelect: () => sortSelection("asc"),
+    cellFormat: {
+      fillColor: {
+        value: activeCell?.format?.fillColor ?? null,
+        set: (value) => formatSelection({ fillColor: value ?? undefined }),
+      },
+      borders: applyBorders,
+      borderStyle: {
+        value: borderStyle,
+        set: (value) => setBorderStyle(value as SheetBorderEdge["style"]),
+      },
+      borderColor: { value: borderColor, set: setBorderColor },
+      wrap: {
+        active: activeCell?.format?.wrap,
+        toggle: () => formatSelection({ wrap: !activeCell?.format?.wrap }),
+      },
+      verticalAlign: {
+        value: activeCell?.format?.verticalAlign ?? "bottom",
+        set: (value) =>
+          formatSelection({
+            verticalAlign: value as NonNullable<SheetCellFormat["verticalAlign"]>,
+          }),
+      },
+      rotation: {
+        value: activeCell?.format?.rotation ?? 0,
+        set: (rotation) => formatSelection({ rotation }),
+      },
+      indent: {
+        increase: () =>
+          formatSelection({ indent: Math.min(8, (activeCell?.format?.indent ?? 0) + 1) }),
+        decrease: () =>
+          formatSelection({ indent: Math.max(0, (activeCell?.format?.indent ?? 0) - 1) }),
+        canDecrease: (activeCell?.format?.indent ?? 0) > 0,
+      },
+      merge: mergeSelection,
+      unmerge: unmergeSelection,
+      canMerge: selectedAddresses.length > 1,
+      canUnmerge: mergedHere,
+      mergeBlockedReason:
+        selectedAddresses.length > 1
+          ? undefined
+          : "Select more than one cell to merge.",
+      copyFormat: () => setCopiedFormat(activeCell?.format ?? null),
+      pasteFormat: () => {
+        if (!copiedFormat) return;
+        updateActiveSheet((sheet) => {
+          const cells = { ...sheet.cells };
+          for (const address of selectedAddresses)
+            cells[address] = { ...cells[address], format: { ...copiedFormat } };
+          return { ...sheet, cells };
+        });
+      },
+      hasCopiedFormat: Boolean(copiedFormat),
     },
-    {
-      id: "filter",
-      label: "Filter",
-      icon: Filter,
-      requires: "edit",
-      active: filterableHere,
-      hint: `Filterable table over ${selectionLabel}`,
-      onSelect: toggleTable,
+    structure: {
+      insertRow: () =>
+        updateActiveSheet((sheet) =>
+          mutateSheetAxis(sheet, "row", normalizedSelection.start.row, 1),
+        ),
+      insertColumn: () =>
+        updateActiveSheet((sheet) =>
+          mutateSheetAxis(sheet, "column", normalizedSelection.start.column, 1),
+        ),
+      deleteRow: () =>
+        updateActiveSheet((sheet) =>
+          mutateSheetAxis(sheet, "row", normalizedSelection.start.row, -1),
+        ),
+      deleteColumn: () =>
+        updateActiveSheet((sheet) =>
+          mutateSheetAxis(sheet, "column", normalizedSelection.start.column, -1),
+        ),
+      columnWidth: Math.round(
+        activeSheet.columnWidths?.[String(normalizedSelection.start.column)] ??
+          COLUMN_WIDTH,
+      ),
+      setColumnWidth: resizeSelectedColumns,
+      rowHeight: Math.round(
+        activeSheet.rowHeights?.[String(normalizedSelection.start.row)] ?? ROW_HEIGHT,
+      ),
+      setRowHeight: resizeSelectedRows,
+      autofitColumn: () => fitTrackSize("column", normalizedSelection.start.column),
+      hideRow: () => hideSelected("row"),
+      hideColumn: () => hideSelected("column"),
+      unhideAll: () =>
+        updateActiveSheet((sheet) => ({ ...sheet, hiddenRows: [], hiddenColumns: [] })),
+      hiddenCount: hiddenTrackCount,
     },
-    {
-      id: "freeze-rows",
-      label: "Freeze rows",
-      icon: Snowflake,
-      requires: "edit",
-      active: frozenRowCount > 0,
-      hint: frozenRowCount > 0 ? "Unfreeze" : `Through row ${freezeRowTarget}`,
-      onSelect: () =>
+    view: {
+      freezeRows: () =>
         updateActiveSheet((sheet) => ({
           ...sheet,
-          frozenRows:
-            (sheet.frozenRows ?? 0) > 0 ? 0 : Math.min(100, freezeRowTarget),
+          frozenRows: (sheet.frozenRows ?? 0) > 0 ? 0 : Math.min(100, freezeRowTarget),
         })),
-    },
-    {
-      id: "freeze-columns",
-      label: "Freeze columns",
-      icon: Snowflake,
-      priority: "advanced",
-      requires: "edit",
-      active: frozenColumnCount > 0,
-      hint:
-        frozenColumnCount > 0
-          ? "Unfreeze"
-          : `Through column ${columnName(freezeColumnTarget - 1)}`,
-      onSelect: () =>
+      freezeColumns: () =>
         updateActiveSheet((sheet) => ({
           ...sheet,
           frozenColumns:
-            (sheet.frozenColumns ?? 0) > 0
-              ? 0
-              : Math.min(50, freezeColumnTarget),
+            (sheet.frozenColumns ?? 0) > 0 ? 0 : Math.min(50, freezeColumnTarget),
         })),
-    },
-    {
-      id: "sort-descending",
-      label: "Sort descending",
-      icon: SortDesc,
-      priority: "advanced",
-      requires: "edit",
-      onSelect: () => sortSelection("desc"),
-    },
-    {
-      id: "name-range",
-      label: "Name this range",
-      icon: Sigma,
-      priority: "advanced",
-      requires: "edit",
-      onSelect: () => {
-        setNamedRangeDraft("");
-        setInspector("name");
+      clearFreeze: () =>
+        updateActiveSheet((sheet) => ({ ...sheet, frozenRows: 0, frozenColumns: 0 })),
+      frozenRows: frozenRowCount,
+      frozenColumns: frozenColumnCount,
+      showFormulas: { active: showFormulas, toggle: () => setShowFormulas((on) => !on) },
+      gridlines: {
+        active: activeSheet.showGridlines !== false,
+        toggle: () =>
+          updateActiveSheet(
+            (sheet) => ({ ...sheet, showGridlines: sheet.showGridlines === false }),
+            false,
+            "state",
+          ),
+      },
+      headings: {
+        active: activeSheet.showHeadings !== false,
+        toggle: () =>
+          updateActiveSheet(
+            (sheet) => ({ ...sheet, showHeadings: sheet.showHeadings === false }),
+            false,
+            "state",
+          ),
       },
     },
-    {
-      id: "validation",
-      label: "Data validation",
-      icon: Filter,
-      priority: "advanced",
-      requires: "edit",
-      onSelect: () => {
+    data: {
+      sortAscending: () => sortSelection("asc"),
+      sortDescending: () => sortSelection("desc"),
+      openSort: () => toggleInspector("sort"),
+      sortOpen: inspector === "sort",
+      sortKeyCount: sortKeys.length,
+      toggleFilter: toggleTable,
+      filterActive: filterableHere,
+      openFilter: () => {
+        if (!activeTable) return;
+        setFilterEditor({ tableId: activeTable.id, column: range.end.column });
+        setInspector("filter");
+      },
+      createTable: toggleTable,
+      hasTable: Boolean(activeTable),
+      tableStyle: {
+        value: activeTable?.style ?? "striped",
+        set: (style) => patchActiveTable({ style: style as SheetTable["style"] }),
+      },
+      toggleTotals: {
+        active: activeTable?.totalsRow ?? false,
+        toggle: () => patchActiveTable({ totalsRow: !activeTable?.totalsRow }),
+      },
+      openValidation: () => {
         const existing = activeCell?.validation;
         setValidationKind(existing?.kind ?? "list");
         setValidationDraft(
@@ -3249,158 +4010,202 @@ export function SheetsStudio({
               ? `${existing.minimum ?? ""}, ${existing.maximum ?? ""}`
               : "",
         );
-        setInspector("validate");
+        toggleInspector("validate");
+      },
+      validationOpen: inspector === "validate",
+      openConditional: () => toggleInspector("conditional"),
+      conditionalOpen: inspector === "conditional",
+      removeDuplicates: removeDuplicateRows,
+      splitText: splitTextToColumns,
+      analyze: () => setSheetMode("analysis"),
+      // True of every linked workbook, said without claiming to know whether this
+      // one has a pivot table: the Spectra content model carries no pivot list,
+      // so the note answers "can I build one here?" and nothing more.
+      ...(mountedNative
+        ? {
+            pivotPreservedNote:
+              "Spectra cannot build or change a pivot table. Any pivot table in this Excel file is kept exactly as Excel wrote it.",
+          }
+        : {}),
+    },
+    formula: {
+      openBar: () => formulaInputRef.current?.focus(),
+      insertFunction: insertFunctionTemplate,
+      autoSum: autoSumSelection,
+      openLibrary: () => toggleInspector("library"),
+      libraryOpen: inspector === "library",
+      explain: () => toggleInspector("library"),
+      recalculate: () => setManualSnapshot(workbook),
+      calculationMode: workbook.workbook.calculationMode,
+      setCalculationMode: (mode) => {
+        setManualSnapshot(mode === "manual" ? workbook : null);
+        commit({
+          ...workbook,
+          workbook: {
+            ...workbook.workbook,
+            calculationMode: mode === "manual" ? "manual" : "automatic",
+          },
+        });
+      },
+      traceReferences: {
+        active: traceReferences,
+        toggle: () => setTraceReferences((on) => !on),
+      },
+      cachedOnlyCount: cachedOnlyFormulaCount,
+      ...(cachedOnlyFormulaCount
+        ? {
+            cachedOnlyNote: `${cachedOnlyFormulaCount} formulas here show the value Excel saved; Spectra keeps their text exactly as written.`,
+          }
+        : {}),
+      createNamedRange: () => {
+        setNamedRangeDraft("");
+        toggleInspector("name");
+      },
+      manageNames: () => toggleInspector("name"),
+      namedRangeCount: Object.keys(workbook.workbook.namedRanges ?? {}).length,
+    },
+    chart: {
+      insert: createChart,
+      hasSelection: Boolean(selectedChart),
+      type: {
+        value: selectedChart?.type ?? "column",
+        set: (type) => {
+          if (selectedChart)
+            patchChart(selectedChart.id, { type: type as SheetChart["type"] });
+        },
+      },
+      setTitle: () => toggleInspector("chart"),
+      setRange: () => toggleInspector("chart"),
+      toggleLegend: {
+        active: selectedChart?.showLegend !== false,
+        toggle: () => {
+          if (selectedChart)
+            patchChart(selectedChart.id, {
+              showLegend: selectedChart.showLegend === false,
+            });
+        },
+      },
+      remove: () => {
+        if (!selectedChart) return;
+        const id = selectedChart.id;
+        setSelectedChartId(undefined);
+        updateActiveSheet((sheet) => ({
+          ...sheet,
+          charts: sheet.charts.filter((chart) => chart.id !== id),
+        }));
       },
     },
-    {
-      id: "conditional",
-      label: "Conditional formatting",
-      icon: BarChart3,
-      priority: "advanced",
-      requires: "edit",
-      onSelect: () => setInspector("conditional"),
-    },
-    {
-      id: "insert-row",
-      label: "Insert row above",
-      priority: "advanced",
-      requires: "edit",
-      onSelect: () =>
-        updateActiveSheet((sheet) =>
-          mutateSheetAxis(sheet, "row", normalizedSelection.start.row, 1),
-        ),
-    },
-    {
-      id: "insert-column",
-      label: "Insert column left",
-      priority: "advanced",
-      requires: "edit",
-      onSelect: () =>
-        updateActiveSheet((sheet) =>
-          mutateSheetAxis(sheet, "column", normalizedSelection.start.column, 1),
-        ),
-    },
-    {
-      id: "delete-row",
-      label: "Delete selected row",
-      priority: "advanced",
-      requires: "edit",
-      onSelect: () =>
-        updateActiveSheet((sheet) =>
-          mutateSheetAxis(sheet, "row", normalizedSelection.start.row, -1),
-        ),
-    },
-    {
-      id: "delete-column",
-      label: "Delete selected column",
-      priority: "advanced",
-      requires: "edit",
-      onSelect: () =>
-        updateActiveSheet((sheet) =>
-          mutateSheetAxis(
-            sheet,
-            "column",
-            normalizedSelection.start.column,
-            -1,
-          ),
-        ),
-    },
-    {
-      id: "copy",
-      label: "Copy selection",
-      icon: Copy,
-      priority: "advanced",
-      onSelect: () => void copySelection(),
-    },
-    {
-      id: "clear",
-      label: "Clear selection",
-      icon: Trash2,
-      priority: "advanced",
-      requires: "edit",
-      onSelect: clearSelection,
-    },
-    {
-      id: "zoom-in",
-      label: "Zoom in",
-      icon: ZoomIn,
-      priority: "advanced",
-      disabled: zoom >= 1.5,
-      hint: `${Math.round(zoom * 100)}%`,
-      onSelect: () => changeZoom(Math.min(1.5, zoom + 0.25)),
-    },
-    {
-      id: "zoom-out",
-      label: "Zoom out",
-      icon: ZoomOut,
-      priority: "advanced",
-      disabled: zoom <= 0.75,
-      hint: `${Math.round(zoom * 100)}%`,
-      onSelect: () => changeZoom(Math.max(0.75, zoom - 0.25)),
-    },
-    {
-      id: "sheet-new",
-      label: "New sheet",
-      icon: Plus,
-      priority: "advanced",
-      requires: "edit",
-      onSelect: addSheet,
-    },
-    {
-      id: "sheet-rename",
-      label: "Rename sheet",
-      priority: "advanced",
-      requires: "edit",
-      onSelect: () => {
+    sheet: {
+      add: addSheet,
+      canAdd: !mountedNative,
+      ...(sheetAddBlockedReason ? { addBlockedReason: sheetAddBlockedReason } : {}),
+      rename: () => {
         setRenameDraft(activeSheet.name);
-        setInspector("sheet");
+        toggleInspector("sheet");
       },
+      duplicate: () => {
+        const copy: WorkbookSheet = {
+          ...activeSheet,
+          id: `sheet-${Date.now().toString(36)}`,
+          name: `${activeSheet.name} copy`,
+        };
+        commit({
+          ...workbook,
+          sheets: [
+            ...workbook.sheets.slice(0, activeSheetIndex + 1),
+            copy,
+            ...workbook.sheets.slice(activeSheetIndex + 1),
+          ],
+          activeSheetId: copy.id,
+        });
+      },
+      remove: removeActiveSheet,
+      canRemove: workbook.sheets.length > 1,
+      moveLeft: () => moveActiveSheet(-1),
+      moveRight: () => moveActiveSheet(1),
+      canMoveLeft: activeSheetIndex > 0,
+      canMoveRight: activeSheetIndex < workbook.sheets.length - 1,
+      tabColor: {
+        value: activeSheet.tabColor ?? null,
+        set: (color) =>
+          updateActiveSheet((sheet) => ({ ...sheet, tabColor: color ?? undefined })),
+      },
+      hide: () =>
+        updateActiveSheet((sheet) => ({ ...sheet, hidden: true })),
+      canHide: workbook.sheets.filter((sheet) => !sheet.hidden).length > 1,
+      showHidden: () =>
+        commit({
+          ...workbook,
+          sheets: workbook.sheets.map((sheet) => ({ ...sheet, hidden: undefined })),
+        }),
+      hiddenSheetCount,
     },
-    {
-      id: "sheet-delete",
-      label: "Delete sheet",
-      icon: Trash2,
-      priority: "advanced",
-      requires: "edit",
-      disabled: workbook.sheets.length <= 1,
-      onSelect: removeActiveSheet,
+    review: {
+      setNote: () => {
+        setNoteDraft(activeCell?.note ?? "");
+        toggleInspector("note");
+      },
+      noteOpen: inspector === "note",
+      hasNote: Boolean(activeCell?.note),
+      protectSheet: () =>
+        updateActiveSheet(
+          (sheet) => ({
+            ...sheet,
+            protection: { locked: !sheet.protection?.locked },
+          }),
+          true,
+          "state",
+        ),
+      ...(sheetProtected
+        ? {
+            protectionNote:
+              "This sheet is protected, so cells cannot be changed. Turn it off to edit again.",
+          }
+        : {}),
+      openHistory: () => contract?.inspector.show("history"),
     },
-    {
-      id: "import",
-      label: "Import spreadsheet",
-      icon: Upload,
-      priority: "advanced",
-      requires: "edit",
-      disabled: !synchronizationReady || importing,
-      hint: importing
-        ? "Importing"
-        : synchronizationReady
-          ? "CSV, TSV, Excel or OpenDocument"
-          : "Finish synchronizing first",
-      onSelect: () => importRef.current?.click(),
+    comments: {
+      toggle: () =>
+        contract?.inspector.open === "comments"
+          ? contract.inspector.hide()
+          : contract?.inspector.show("comments"),
+      open: contract?.inspector.open === "comments",
+      ...(mountedNative
+        ? {
+            preservedNote:
+              "Spectra keeps this workbook's Excel comments exactly as they were saved.",
+          }
+        : {}),
     },
-    {
-      id: "export-xlsx",
-      label: "Export Excel",
-      icon: Download,
-      priority: "advanced",
-      onSelect: () => void exportWorkbook("xlsx"),
+    zoom: {
+      zoom,
+      setZoom: changeZoom,
+      min: 0.75,
+      max: 1.5,
+      step: 0.25,
     },
-    {
-      id: "export-csv",
-      label: "Export CSV",
-      icon: Download,
-      priority: "advanced",
-      onSelect: () => void exportWorkbook("csv"),
+    export: {
+      noun: "workbook",
+      formats: [
+        { format: "xlsx", label: "Excel", lossy: true },
+        { format: "csv", label: "CSV", lossy: true },
+        { format: "ods", label: "OpenDocument", lossy: true },
+      ],
+      run: (format) => void exportWorkbook(format as "xlsx" | "csv" | "ods"),
     },
-    {
-      id: "export-ods",
-      label: "Export OpenDocument",
-      icon: Download,
-      priority: "advanced",
-      onSelect: () => void exportWorkbook("ods"),
+    import: {
+      open: () => importRef.current?.click(),
+      busy: importing || !synchronizationReady,
+      noun: "workbook",
+      ...(synchronizationReady
+        ? {}
+        : { strictReason: "Finish synchronizing before importing." }),
     },
-  ];
+    print: () => window.print(),
+  };
+
+  const actions: CommandBinding[] = sheetsCommandBindings(commandHandlers);
+  actionsRef.current = actions;
 
   return (
     <div
@@ -3421,13 +4226,7 @@ export function SheetsStudio({
       {contract ? (
         <ArtifactWorkbar
           label="Sheet tools"
-          selectionContext={
-            selectedChartId
-              ? "Chart"
-              : formulaDraft.startsWith("=") || activeCell?.formula
-                ? "Formula"
-                : undefined
-          }
+          selectionContext={selectedChartId ? "Chart" : undefined}
           modes={{
             registry: true,
             value: sheetMode,
@@ -3450,14 +4249,31 @@ export function SheetsStudio({
                 className="flex min-w-0 items-center"
                 {...targetAttrs("/activeSheetId")}
               >
+                {/* The tab colour has somewhere to land. Without this dot the
+                    colour command would write a field nothing paints, which is a
+                    switch that does nothing — the one thing worse than a missing
+                    feature. */}
+                {activeSheet.tabColor ? (
+                  <span
+                    className="sheets-tab-color"
+                    style={{ backgroundColor: activeSheet.tabColor }}
+                    aria-hidden
+                  />
+                ) : null}
                 <WorkbarItemSelector
                   ariaLabel="Sheet"
                   itemNoun="sheet"
                   className="max-w-[22ch]"
-                  items={workbook.sheets.map((sheet) => ({
-                    value: sheet.id,
-                    label: sheet.name,
-                  }))}
+                  /* A hidden sheet is hidden. It stays out of the selector
+                     until "Show hidden sheets" brings it back, except when it is
+                     somehow the active one, which would otherwise leave the
+                     control showing a value it does not list. */
+                  items={workbook.sheets
+                    .filter((sheet) => !sheet.hidden || sheet.id === activeSheet.id)
+                    .map((sheet) => ({
+                      value: sheet.id,
+                      label: sheet.hidden ? `${sheet.name} (hidden)` : sheet.name,
+                    }))}
                   value={activeSheet.id}
                   onChange={showSheet}
                 />
@@ -3539,6 +4355,7 @@ export function SheetsStudio({
             fx
           </span>
           <input
+            ref={formulaInputRef}
             aria-label={`Formula for ${activeAddress}`}
             value={formulaDraft}
             readOnly={locked}
@@ -3592,10 +4409,22 @@ export function SheetsStudio({
       <div
         className="sheets-grid-frame"
         data-analysis={analysing || undefined}
+        /* The two view toggles are honest states, not decoration: hiding the
+           gridlines or the A/B/C headers changes what this frame paints, and CSS
+           reads these attributes so the toggle is never a dead switch. */
+        data-gridlines={activeSheet.showGridlines === false ? "off" : undefined}
+        data-headings={activeSheet.showHeadings === false ? "off" : undefined}
+        data-formulas={showFormulas ? "on" : undefined}
         style={
           {
-            "--sheet-row-header": `${ROW_HEADER_WIDTH}px`,
-            "--sheet-column-header": `${COLUMN_HEADER_HEIGHT}px`,
+            // Hiding the headers gives their space back to the grid rather
+            // than leaving two empty gutters, which is what "hide" means.
+            "--sheet-row-header":
+              activeSheet.showHeadings === false ? "0px" : `${ROW_HEADER_WIDTH}px`,
+            "--sheet-column-header":
+              activeSheet.showHeadings === false
+                ? "0px"
+                : `${COLUMN_HEADER_HEIGHT}px`,
             position: "relative",
             flex: "1 1 auto",
             height: "auto",
@@ -3878,6 +4707,9 @@ export function SheetsStudio({
                     data-address={address}
                     data-selected={isSelected || undefined}
                     data-active={isActive || undefined}
+                    data-traced={
+                      (tracedAddresses.has(address) && !isActive) || undefined
+                    }
                     data-selection-top={
                       (isSelected && row === normalizedSelection.start.row) ||
                       undefined
@@ -3942,21 +4774,7 @@ export function SheetsStudio({
                               : merged
                                 ? 3
                                 : undefined,
-                      fontWeight: style?.bold ? 700 : undefined,
-                      fontStyle: style?.italic ? "italic" : undefined,
-                      textDecoration: style?.underline
-                        ? "underline"
-                        : undefined,
-                      textAlign: style?.align,
-                      fontFamily:
-                        style?.fontFamily === "serif"
-                          ? "var(--font-serif), ui-sans-serif, system-ui, sans-serif"
-                          : style?.fontFamily === "mono"
-                            ? "ui-monospace, SFMono-Regular, Consolas, monospace"
-                            : undefined,
-                      fontSize: style?.fontSize
-                        ? style.fontSize * zoom
-                        : undefined,
+                      ...cellVisualStyle(style, zoom),
                       color: conditionalStyle?.color ?? style?.textColor,
                       backgroundColor:
                         conditionalStyle?.backgroundColor ?? style?.fillColor,
@@ -3996,14 +4814,24 @@ export function SheetsStudio({
                     ) : (
                       <span
                         className={
-                          calculatedCell?.error ? "text-[var(--danger)]" : ""
+                          showFormulas && cell?.formula
+                            ? "sheets-cell-formula-text"
+                            : calculatedCell?.error
+                              ? "text-[var(--danger)]"
+                              : ""
                         }
                       >
-                        {formatCalculatedCell(
-                          cell,
-                          calculatedCell,
-                          workbook.workbook.locale,
-                        )}
+                        {/* Show formulas is the audit view: the text a cell
+                            holds, not the number it works out to. Cells without
+                            a formula still show their value, because a sheet of
+                            blanks would tell you nothing. */}
+                        {showFormulas && cell?.formula
+                          ? cell.formula
+                          : formatCalculatedCell(
+                              cell,
+                              calculatedCell,
+                              workbook.workbook.locale,
+                            )}
                       </span>
                     )}
                     {cell?.note ? (
@@ -4253,21 +5081,43 @@ export function SheetsStudio({
                   label="Number format"
                   size="sm"
                   value={activeCell?.format?.numberFormat ?? "general"}
-                  onChange={(next) =>
-                    formatSelection({
-                      numberFormat: next as NonNullable<
-                        SheetCell["format"]
-                      >["numberFormat"],
-                    })
-                  }
-                  options={[
-                    { value: "general", label: "General" },
-                    { value: "number", label: "Number" },
-                    { value: "currency", label: "Currency" },
-                    { value: "percent", label: "Percent" },
-                    { value: "date", label: "Date" },
-                  ]}
+                  onChange={(next) => runCommand("format.number", next)}
+                  options={SHEETS_NUMBER_FORMATS.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
                 />
+                {activeCell?.format?.numberFormat === "currency" ? (
+                  <SelectField
+                    label="Currency"
+                    size="sm"
+                    value={activeCell?.format?.currency ?? "USD"}
+                    onChange={(next) => runCommand("format.currency", next)}
+                    options={SHEETS_CURRENCIES.map((option) => ({
+                      value: option.value,
+                      label: option.label,
+                    }))}
+                  />
+                ) : null}
+                {activeCell?.format?.numberFormat === "custom" ? (
+                  <label className="block">
+                    <span className={PANEL_LABEL}>Format code</span>
+                    <input
+                      value={
+                        customFormatDraft || (activeCell?.format?.customFormat ?? "")
+                      }
+                      onChange={(event) => setCustomFormatDraft(event.target.value)}
+                      onBlur={() =>
+                        runCommand("format.number.custom", customFormatDraft)
+                      }
+                      placeholder="#,##0.00"
+                      className={PANEL_INPUT}
+                    />
+                    <span className="mt-1 block text-caption text-[var(--text-secondary)]">
+                      An Excel format code. The stored number never changes.
+                    </span>
+                  </label>
+                ) : null}
                 <div>
                   <span className={PANEL_LABEL}>Decimal places</span>
                   <div className="flex items-center gap-1.5">
@@ -4275,12 +5125,10 @@ export function SheetsStudio({
                       type="button"
                       className={PANEL_BUTTON}
                       onClick={() =>
-                        formatSelection({
-                          decimals: Math.max(
-                            0,
-                            (activeCell?.format?.decimals ?? 2) - 1,
-                          ),
-                        })
+                        runCommand(
+                          "format.decimals",
+                          Math.max(0, (activeCell?.format?.decimals ?? 2) - 1),
+                        )
                       }
                     >
                       Fewer
@@ -4292,12 +5140,10 @@ export function SheetsStudio({
                       type="button"
                       className={PANEL_BUTTON}
                       onClick={() =>
-                        formatSelection({
-                          decimals: Math.min(
-                            12,
-                            (activeCell?.format?.decimals ?? 2) + 1,
-                          ),
-                        })
+                        runCommand(
+                          "format.decimals",
+                          Math.min(10, (activeCell?.format?.decimals ?? 2) + 1),
+                        )
                       }
                     >
                       More
@@ -4320,13 +5166,7 @@ export function SheetsStudio({
                   label="Typeface"
                   size="sm"
                   value={activeCell?.format?.fontFamily ?? "sans"}
-                  onChange={(next) =>
-                    formatSelection({
-                      fontFamily: next as NonNullable<
-                        SheetCell["format"]
-                      >["fontFamily"],
-                    })
-                  }
+                  onChange={(next) => runCommand("format.fontFamily", next)}
                   options={[
                     { value: "sans", label: "Spectra Sans" },
                     { value: "serif", label: "Spectra Serif" },
@@ -4337,9 +5177,7 @@ export function SheetsStudio({
                   label="Size"
                   size="sm"
                   value={String(activeCell?.format?.fontSize ?? 11)}
-                  onChange={(next) =>
-                    formatSelection({ fontSize: Number(next) })
-                  }
+                  onChange={(next) => runCommand("format.fontSize", Number(next))}
                   options={["9", "10", "11", "12", "14", "16"].map((size) => ({
                     value: size,
                     label: `${size} px`,
@@ -4358,7 +5196,10 @@ export function SheetsStudio({
                         type="color"
                         value={activeCell?.format?.[key] ?? fallback}
                         onChange={(event) =>
-                          formatSelection({ [key]: event.target.value })
+                          runCommand(
+                            key === "textColor" ? "format.color" : "format.fill",
+                            event.target.value,
+                          )
                         }
                         className="h-8 w-full cursor-pointer rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-1"
                       />
@@ -4369,16 +5210,25 @@ export function SheetsStudio({
                   <button
                     type="button"
                     className={PANEL_BUTTON}
-                    onClick={mergeSelection}
+                    disabled={selectedAddresses.length < 2}
+                    onClick={() => runCommand("format.merge")}
                   >
                     Merge cells
                   </button>
                   <button
                     type="button"
                     className={PANEL_BUTTON}
-                    onClick={unmergeSelection}
+                    disabled={!mergedHere}
+                    onClick={() => runCommand("format.unmerge")}
                   >
                     Unmerge
+                  </button>
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={() => setInspector("borders")}
+                  >
+                    Borders
                   </button>
                 </div>
               </>
@@ -4746,6 +5596,371 @@ export function SheetsStudio({
                     }}
                   >
                     Rename
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "borders" ? (
+              <>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  Applied to {selectionLabel}. Choose the line first, then the
+                  edges you want it on.
+                </p>
+                <SelectField
+                  label="Line"
+                  size="sm"
+                  value={borderStyle}
+                  onChange={(next) => runCommand("format.borders.style", next)}
+                  options={SHEETS_BORDER_STYLES.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
+                />
+                <label className="block">
+                  <span className={PANEL_LABEL}>Colour</span>
+                  <input
+                    type="color"
+                    value={borderColor ?? "#667085"}
+                    onChange={(event) =>
+                      runCommand("format.borders.color", event.target.value)
+                    }
+                    className="h-8 w-full cursor-pointer rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-1"
+                  />
+                </label>
+                <div className="sheets-border-presets">
+                  {SHEETS_BORDER_PRESETS.map((preset) => (
+                    <button
+                      key={preset.value}
+                      type="button"
+                      className={PANEL_BUTTON}
+                      onClick={() => runCommand("format.borders", preset.value)}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "replace" ? (
+              <>
+                <label className="block">
+                  <span className={PANEL_LABEL}>Find</span>
+                  <input
+                    autoFocus
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Term 1"
+                    className={PANEL_INPUT}
+                  />
+                </label>
+                <label className="block">
+                  <span className={PANEL_LABEL}>Replace with</span>
+                  <input
+                    value={replaceDraft}
+                    onChange={(event) => setReplaceDraft(event.target.value)}
+                    placeholder="Term 2"
+                    className={PANEL_INPUT}
+                  />
+                </label>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  {search.trim()
+                    ? `${searchMatches.length} ${searchMatches.length === 1 ? "cell matches" : "cells match"}. Formulas Spectra cannot evaluate keep the text Excel wrote.`
+                    : "Values and formula text are both searched."}
+                </p>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_PRIMARY}
+                    disabled={!search.trim()}
+                    onClick={() => replaceInSelection("sheet")}
+                  >
+                    Replace in sheet
+                  </button>
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    disabled={!search.trim() || selectedAddresses.length < 2}
+                    onClick={() => replaceInSelection("selection")}
+                  >
+                    In selection
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "sort" ? (
+              <>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  Keys apply in order. A second key only decides rows the first
+                  key ties on, which is what a single sort could never do.
+                </p>
+                {sortKeys.map((key, index) => (
+                  <div key={`${key.column}-${index}`} className="flex items-end gap-1.5">
+                    <SelectField
+                      label={index === 0 ? "Then by" : ""}
+                      size="sm"
+                      value={String(key.column)}
+                      onChange={(next) =>
+                        setSortKeys((current) =>
+                          current.map((entry, position) =>
+                            position === index
+                              ? { ...entry, column: Number(next) }
+                              : entry,
+                          ),
+                        )
+                      }
+                      options={Array.from(
+                        { length: Math.max(1, bounds.columns) },
+                        (_, column) => ({
+                          value: String(column),
+                          label: columnName(column),
+                        }),
+                      )}
+                    />
+                    <button
+                      type="button"
+                      className={PANEL_BUTTON}
+                      onClick={() =>
+                        setSortKeys((current) =>
+                          current.map((entry, position) =>
+                            position === index
+                              ? {
+                                  ...entry,
+                                  direction:
+                                    entry.direction === "asc" ? "desc" : "asc",
+                                }
+                              : entry,
+                          ),
+                        )
+                      }
+                    >
+                      {key.direction === "asc" ? "A to Z" : "Z to A"}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Remove sort key ${index + 1}`}
+                      className={PANEL_BUTTON}
+                      onClick={() =>
+                        setSortKeys((current) =>
+                          current.filter((_, position) => position !== index),
+                        )
+                      }
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={() =>
+                      setSortKeys((current) => [
+                        ...current,
+                        {
+                          column:
+                            normalizedSelection.start.column + current.length,
+                          direction: "asc",
+                        },
+                      ])
+                    }
+                  >
+                    Add a key
+                  </button>
+                  <button
+                    type="button"
+                    className={PANEL_PRIMARY}
+                    disabled={!sortKeys.length}
+                    onClick={() => {
+                      runCustomSort();
+                      setInspector(null);
+                    }}
+                  >
+                    Sort
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "note" ? (
+              <>
+                <label className="block">
+                  <span className={PANEL_LABEL}>Note</span>
+                  <textarea
+                    autoFocus
+                    rows={4}
+                    value={noteDraft}
+                    onChange={(event) => setNoteDraft(event.target.value)}
+                    placeholder="Why this number is what it is"
+                    className={`${PANEL_INPUT} resize-none`}
+                  />
+                </label>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  A note shows on hover and travels with the cell inside Spectra.
+                  {mountedNative
+                    ? " This workbook keeps its Excel comments exactly as they were saved; a Spectra note is not written into that file."
+                    : ""}
+                </p>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_PRIMARY}
+                    onClick={() => {
+                      setNoteOnActiveCell(noteDraft);
+                      setInspector(null);
+                    }}
+                  >
+                    Save note
+                  </button>
+                  {activeCell?.note ? (
+                    <button
+                      type="button"
+                      className={PANEL_BUTTON}
+                      onClick={() => {
+                        setNoteOnActiveCell("");
+                        setNoteDraft("");
+                        setInspector(null);
+                      }}
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "library" ? (
+              <>
+                <label className="block">
+                  <span className={PANEL_LABEL}>Function</span>
+                  <input
+                    autoFocus
+                    value={libraryFilter}
+                    onChange={(event) => setLibraryFilter(event.target.value)}
+                    placeholder="sum, lookup, date"
+                    className={PANEL_INPUT}
+                  />
+                </label>
+                {activeCell?.formula ? (
+                  <div className="sheets-formula-explanation">
+                    <p className="text-caption text-[var(--text-secondary)]">
+                      {activeAddress} holds <code>{activeCell.formula}</code>
+                      {activeCell.nativeFormulaSupport === "cached-only"
+                        ? ", which Excel evaluates. Spectra shows the value Excel saved and keeps the text exactly as written."
+                        : activeCalculated?.error
+                          ? `, and it currently reports ${activeCalculated.error}.`
+                          : `, and it currently works out to ${formatCalculatedCell(activeCell, activeCalculated, workbook.workbook.locale)}.`}
+                    </p>
+                    {/* Naming the functions is the explanation. A person reading
+                        an inherited sheet needs to know what each piece does, and
+                        whether Spectra or Excel is the one doing it. */}
+                    {explainedFunctions.length ? (
+                      <ul className="sheets-function-list">
+                        {explainedFunctions.map((entry) => (
+                          <li key={entry.name}>
+                            <span className="sheets-function-entry">
+                              <span className="sheets-function-name">
+                                {entry.name}
+                              </span>
+                              <span className="sheets-function-summary">
+                                {entry.summary}
+                              </span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
+                <ul className="sheets-function-list">
+                  {SHEETS_FUNCTION_LIBRARY.filter((spec) => {
+                    const needle = libraryFilter.trim().toLowerCase();
+                    return (
+                      !needle ||
+                      spec.name.toLowerCase().includes(needle) ||
+                      spec.summary.toLowerCase().includes(needle) ||
+                      spec.group.toLowerCase().includes(needle)
+                    );
+                  }).map((spec) => (
+                    <li key={spec.name}>
+                      <button
+                        type="button"
+                        className="sheets-function-entry"
+                        onClick={() => runCommand("formula.insert", spec.name)}
+                      >
+                        <span className="sheets-function-name">{spec.name}</span>
+                        <span className="sheets-function-summary">
+                          {spec.summary}
+                        </span>
+                        <span className="sheets-function-native">
+                          {spec.native
+                            ? "Live formula in Excel"
+                            : "Spectra calculates this"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+
+            {panelMode === "chart" && selectedChart ? (
+              <>
+                <label className="block">
+                  <span className={PANEL_LABEL}>Title</span>
+                  <input
+                    value={chartTitleDraft || selectedChart.title}
+                    onChange={(event) => setChartTitleDraft(event.target.value)}
+                    onBlur={() =>
+                      chartTitleDraft.trim() &&
+                      patchChart(selectedChart.id, {
+                        title: chartTitleDraft.trim(),
+                      })
+                    }
+                    className={PANEL_INPUT}
+                  />
+                </label>
+                <label className="block">
+                  <span className={PANEL_LABEL}>Data range</span>
+                  <input
+                    value={chartRangeDraft || selectedChart.sourceRange}
+                    onChange={(event) => setChartRangeDraft(event.target.value)}
+                    onBlur={() => {
+                      const next = chartRangeDraft.trim().toUpperCase();
+                      if (!next) return;
+                      if (!parseRange(next)) {
+                        setImportNotice(
+                          `${next} is not a range Spectra can read. Use a form like A1:C12.`,
+                          "warning",
+                        );
+                        return;
+                      }
+                      patchChart(selectedChart.id, { sourceRange: next });
+                    }}
+                    className={PANEL_INPUT}
+                  />
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={() => runCommand("chart.legend")}
+                  >
+                    {selectedChart.showLegend === false
+                      ? "Show legend"
+                      : "Hide legend"}
+                  </button>
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={() => {
+                      runCommand("chart.remove");
+                      setInspector(null);
+                    }}
+                  >
+                    Delete chart
                   </button>
                 </div>
               </>

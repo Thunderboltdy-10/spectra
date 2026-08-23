@@ -173,6 +173,7 @@ import {
   type StudioTab,
 } from "./artifact-studio-shell";
 import { commandContext, commandForBinding, executeCommand } from "../commands";
+import { fidelityRegionMap } from "../commands/office/fidelity-regions";
 import type { ApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import {
   incomingReconciliationKey,
@@ -5892,26 +5893,20 @@ function ArtifactStudioEditor({
     nativeOfficeApplication,
     nativeOfficeDocument,
   ]);
+  /**
+   * The live fidelity map every command in the bar is gated by.
+   *
+   * The lens reports a native package in the package's own terms; a command
+   * declares what it writes in the shared region vocabulary. `fidelityRegionMap`
+   * is the one translation between them, and it only accepts region-level facts
+   * — a single preserved paragraph must not refuse typing across the whole body.
+   */
   const nativeFidelity = useMemo(() => {
     const entries = replicaTruth?.replicas.flatMap((replica) => {
       const map = record(replica.fidelityMap);
-      return Array.isArray(map.entries) ? map.entries : [];
+      return Array.isArray(map.entries) ? map.entries.map(record) : [];
     }) ?? [];
-    return entries.reduce<Record<string, "NATIVE" | "EQUIVALENT" | "PRESERVED" | "EXTENSION">>(
-      (result, value) => {
-        const entry = record(value);
-        if (
-          typeof entry.feature === "string" &&
-          (entry.class === "NATIVE" ||
-            entry.class === "EQUIVALENT" ||
-            entry.class === "PRESERVED" ||
-            entry.class === "EXTENSION")
-        )
-          result[entry.feature] = entry.class;
-        return result;
-      },
-      { artifact: "NATIVE" },
-    );
+    return fidelityRegionMap(entries);
   }, [replicaTruth?.replicas]);
   const nativeReadOnlyRegionIds = useMemo(
     () =>

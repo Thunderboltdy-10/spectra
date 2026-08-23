@@ -8,10 +8,38 @@ import {
   docxLens,
   type DocxProjection,
 } from "../../src/features/spectra/lenses/docx-lens";
+import {
+  documentCommandBindings,
+  documentStubHandlers,
+} from "../../src/features/spectra/commands/office/document-commands";
+import { commandForBinding } from "../../src/features/spectra/commands/registry";
+import { runDocxCommandFixtures } from "./docx-commands";
+
+/**
+ * Every mutation names the manifest operation it exercises and the workbar
+ * commands that declare that operation, so the report can be read the way a
+ * reviewer actually asks the question: "this button says it writes to Word —
+ * where is the proof?" A native write with no fixture row is a claim with no
+ * evidence, and the row is indexed by command id so the absence is visible.
+ */
+const documentCommands = documentCommandBindings(documentStubHandlers()).map(
+  (binding, order) => commandForBinding("document", binding, order),
+);
+
+function commandsForOperation(operation: string) {
+  return documentCommands
+    .filter((command) => (command.manifestOps ?? []).includes(operation))
+    .map((command) => command.id)
+    .sort();
+}
 
 type MutationReport = {
   fixture: string;
   mutation: string;
+  /** The artifact-registry operation this mutation stands as evidence for. */
+  operation?: string;
+  /** Workbar commands that declare that operation. */
+  commandIds?: string[];
   status:
     | "round-trip preservation"
     | "mutation safety"
@@ -65,6 +93,10 @@ async function featureFacts(payload: Uint8Array) {
       "tcPrChange",
     ),
     contentControl: countWml("sdt"),
+    // A text box lives in the same part Spectra rewrites, and its anchor is an
+    // ordinary editable paragraph. So "only document.xml changed" proves nothing
+    // here; the box has to be counted before and after each edit.
+    textBox: countWml("txbxContent"),
     bibliographySource: bibliographySources,
     embeddedOle: parts.filter((part) =>
       part.name.toLowerCase().includes("/embeddings/"),
@@ -80,11 +112,18 @@ function cloneProjection(projection: DocxProjection) {
   return structuredClone(projection);
 }
 
+/**
+ * The paragraph a person would be editing.
+ *
+ * A paragraph whose only run holds a picture or a text box is editable but has
+ * no text, so formatting it proves nothing. Prefer one with text; fall back for
+ * fixtures that have none.
+ */
 function firstEditableParagraph(projection: DocxProjection) {
-  return projection.blocks.find(
-    (block) =>
-      block.type !== "table" && block.attrs?.nativeReadOnly !== true,
+  const editable = projection.blocks.filter(
+    (block) => block.type !== "table" && block.attrs?.nativeReadOnly !== true,
   );
+  return editable.find((block) => block.text.trim().length > 0) ?? editable[0];
 }
 
 function firstEditableTable(projection: DocxProjection) {
@@ -138,6 +177,36 @@ async function mutateProjection(
     });
   } else if (mutation === "apply a style") {
     paragraph.attrs = { ...paragraph.attrs, styleId: "Heading2" };
+  } else if (mutation === "format the runs") {
+    // Direct run formatting, the way the Format tab writes it: the projection
+    // carries what the file already agreed on, and only the changed properties
+    // become `w:rPr` mutations.
+    paragraph.attrs = {
+      ...paragraph.attrs,
+      format: {
+        ...(paragraph.attrs?.format as Record<string, unknown> | undefined),
+        bold: true,
+        italic: true,
+        underline: true,
+        fontFamily: "Georgia",
+        fontSizePoints: 13,
+        color: "1F3A2E",
+        shading: "FEF0C7",
+      },
+    };
+  } else if (mutation === "format the paragraph") {
+    paragraph.attrs = {
+      ...paragraph.attrs,
+      paragraphFormat: {
+        ...(paragraph.attrs?.paragraphFormat as Record<string, unknown> | undefined),
+        alignment: "center",
+        lineSpacing: 1.5,
+        spacingAfterPoints: 12,
+        indentLevel: 1,
+        border: "all",
+        shading: "F2F4F7",
+      },
+    };
   } else if (mutation === "AI edit via operations") {
     const output = await docxLens.mutate(opened.preservedCarry, {
       kind: "ai-edit",
@@ -208,18 +277,27 @@ async function run() {
       detail: "package bytes identical",
     });
 
-    for (const mutation of [
-      "edit one paragraph",
-      "edit a table cell",
-      "insert a paragraph",
-      "apply a style",
-      "AI edit via operations",
-    ]) {
+    for (const [mutation, operation] of [
+      ["edit one paragraph", "rewrite_blocks"],
+      ["edit a table cell", "edit_table_cell"],
+      ["insert a paragraph", "insert_blocks"],
+      ["apply a style", "format_blocks"],
+      ["format the runs", "format_blocks"],
+      ["format the paragraph", "format_blocks"],
+      ["AI edit via operations", "rewrite_blocks"],
+    ] as const) {
       const result = await mutateProjection(source, mutation);
+      const indexed = {
+        operation,
+        ...(commandsForOperation(operation).length
+          ? { commandIds: commandsForOperation(operation) }
+          : {}),
+      };
       if (result.status === "unsupported-read-only") {
         rows.push({
           fixture,
           mutation,
+          ...indexed,
           status: result.status,
           changedParts: [],
           detail: result.detail,
@@ -231,6 +309,7 @@ async function run() {
       rows.push({
         fixture,
         mutation,
+        ...indexed,
         status: result.status,
         changedParts,
         semanticDigest: reopened.projection.nativeBinding.semanticDigest,
@@ -245,6 +324,7 @@ async function run() {
     "bibliography-source.docx": "bibliographySource",
     "embedded-ole.docx": "embeddedOle",
     "content-controls-customxml.docx": "customXml",
+    "floating-textbox.docx": "textBox",
   };
   const spotProofs: Array<{
     fixture: string;
@@ -258,6 +338,7 @@ async function run() {
     bibliographySource: "count(/pkg:package/pkg:part[@name='/customXml/item1.xml']//b:Source)",
     embeddedOle: "count(/pkg:package/pkg:part[contains(@name,'/embeddings/')])",
     customXml: "count(/pkg:package/pkg:part[starts-with(@name,'/customXml/')])",
+    textBox: "count(/w:document/w:body//w:txbxContent)",
   };
   for (const [fixture, feature] of Object.entries(spotFixtures)) {
     let payload: Uint8Array = new Uint8Array(
@@ -266,7 +347,13 @@ async function run() {
     const baseline = (await featureFacts(payload))[feature];
     if (baseline < 1) throw new Error(`${fixture} lacks expected ${feature}`);
     const afterEachEdit: number[] = [];
-    for (const mutation of ["insert a paragraph", "edit one paragraph", "apply a style"]) {
+    for (const mutation of [
+      "insert a paragraph",
+      "edit one paragraph",
+      "apply a style",
+      "format the runs",
+      "format the paragraph",
+    ]) {
       const result = await mutateProjection(payload, mutation);
       if (result.status === "unsupported-read-only")
         throw new Error(`${fixture} cannot run spot-proof mutation ${mutation}`);
@@ -284,6 +371,8 @@ async function run() {
     });
   }
 
+  const commandEvidence = await runDocxCommandFixtures(fixtureRoot);
+
   const report = {
     harness: "Spectra DOCX fidelity harness v1",
     generatedAt: new Date().toISOString(),
@@ -299,13 +388,26 @@ async function run() {
     ],
     summary: {
       fixtures: fixtureNames.length,
-      assertions: rows.length + spotProofs.length * 3,
-      failed: 0,
+      assertions:
+        rows.length +
+        spotProofs.length * 5 +
+        commandEvidence.assertions.length +
+        commandEvidence.refusals.length,
+      failed: commandEvidence.failures.length,
     },
     rows,
     spotProofs,
+    commandFixtures: commandEvidence.assertions,
+    refusalFixtures: commandEvidence.refusals,
   };
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  // The report is written first so a failure leaves the evidence on disk to read,
+  // then the failure is raised: a harness that prints green with failed rows in
+  // its own report is worse than no harness.
+  if (commandEvidence.failures.length)
+    throw new Error(
+      `command fixture evidence failed:\n${commandEvidence.failures.join("\n")}`,
+    );
   process.stdout.write(
     `${report.summary.fixtures} fixtures · ${report.summary.assertions} assertions · green\n${relative(process.cwd(), reportPath)}\n`,
   );

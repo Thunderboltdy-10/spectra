@@ -1,0 +1,44 @@
+{
+  "source": "Authored and saved by Microsoft Excel, with a real VBA project and an opaque custom XML part added afterwards",
+  "contains": [
+    "recognized SUM formula in D2",
+    "unrecognized _xlfn.XLOOKUP formula in C2 with Excel's cached value",
+    "xl/vbaProject.bin authored by Office",
+    "xl/customXml/item1.xml"
+  ],
+  "expected": {
+    "cells": "NATIVE",
+    "recognizedFormulas": "NATIVE",
+    "unrecognizedFormulas": "PRESERVED",
+    "macros": "PRESERVED",
+    "customXml": "PRESERVED"
+  },
+  "mutations": [
+    {
+      "commandId": "sheets.clipboard.paste",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": ["xl/vbaProject.bin", "xl/customXml/item1.xml"]
+    },
+    {
+      "commandId": "sheets.fill.down",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": ["xl/vbaProject.bin", "xl/customXml/item1.xml"]
+    },
+    {
+      "commandId": "sheets.formula.autosum",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": ["xl/vbaProject.bin", "xl/customXml/item1.xml"]
+    },
+    {
+      "commandId": "sheets.formula.insert",
+      "touch": ["xl/worksheets/sheet1.xml"],
+      "preserve": ["xl/vbaProject.bin", "xl/customXml/item1.xml"]
+    },
+    {
+      "commandId": "sheets.clipboard.paste.values",
+      "touch": [],
+      "preserve": ["xl/vbaProject.bin"],
+      "blocked": "XLSX_FORMULA_LITERALIZATION_BLOCKED"
+    }
+  ]
+}

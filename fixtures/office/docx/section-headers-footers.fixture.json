@@ -1,1 +1,70 @@
-{"source":"Microsoft Open XML SDK test asset","contains":["section variation","headers and footers","columns"],"expected":{"body paragraphs":"NATIVE","sections/headers/footers":"unsupported-but-preserved"}}
+{
+  "source": "Microsoft Open XML SDK test asset",
+  "contains": [
+    "section variation",
+    "headers and footers",
+    "columns"
+  ],
+  "expected": {
+    "body paragraphs": "NATIVE",
+    "sections/headers/footers": "unsupported-but-preserved"
+  },
+  "mutations": [
+    {
+      "commandId": "document.format.lineSpacing",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "spacing",
+        "attribute": {
+          "name": "line",
+          "value": "360"
+        }
+      },
+      "preserve": [
+        "word/header",
+        "word/footer"
+      ]
+    },
+    {
+      "commandId": "document.format.indent.increase",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "ind",
+        "attribute": {
+          "name": "left",
+          "value": "720"
+        }
+      },
+      "preserve": [
+        "word/header",
+        "word/footer"
+      ]
+    }
+  ],
+  "refusedRegions": [
+    {
+      "commandId": "document.layout.pageSize",
+      "region": "sections"
+    },
+    {
+      "commandId": "document.layout.margins",
+      "region": "sections"
+    },
+    {
+      "commandId": "document.layout.header",
+      "region": "headersFooters"
+    },
+    {
+      "commandId": "document.layout.footer",
+      "region": "headersFooters"
+    }
+  ]
+}

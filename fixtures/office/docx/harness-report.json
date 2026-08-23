@@ -1,6 +1,6 @@
 {
   "harness": "Spectra DOCX fidelity harness v1",
-  "generatedAt": "2026-08-22T06:40:00.428Z",
+  "generatedAt": "2026-08-23T01:15:52.690Z",
   "source": "Microsoft Open XML SDK public test assets (MIT)",
   "vocabulary": [
     "render fidelity",
@@ -13,7 +13,7 @@
   ],
   "summary": {
     "fixtures": 16,
-    "assertions": 101,
+    "assertions": 178,
     "failed": 0
   },
   "rows": [
@@ -28,6 +28,7 @@
     {
       "fixture": "bibliography-source.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -38,6 +39,7 @@
     {
       "fixture": "bibliography-source.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -45,6 +47,19 @@
     {
       "fixture": "bibliography-source.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -55,6 +70,34 @@
     {
       "fixture": "bibliography-source.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -64,7 +107,84 @@
     },
     {
       "fixture": "bibliography-source.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "b1e0dd9d7cccf1f3905f61f31ba0bd0c7f207a55680a9fd2debc42d9d176f205",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "bibliography-source.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "b1e0dd9d7cccf1f3905f61f31ba0bd0c7f207a55680a9fd2debc42d9d176f205",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "bibliography-source.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -83,16 +203,18 @@
     {
       "fixture": "complex-structure.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "6f8d431df22760dda623f13d0a5b9716408d1e806d1f6181b25043813ad805ee",
+      "semanticDigest": "017ed3cd19324b67e828b30f3fb65af3f85fec9aee4ba07c08069db0d5ad00bb",
       "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "complex-structure.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -103,6 +225,19 @@
     {
       "fixture": "complex-structure.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -113,21 +248,126 @@
     {
       "fixture": "complex-structure.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "dbcac5b901cf9c928719403f54454fcccec92c1c360e7c9c1b42c3abe938ca00",
+      "semanticDigest": "d6805cdc848b2fb8de38e250622b39b07b52a8045e006400d1e223bc42de1a3b",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "complex-structure.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "5f933073ffd80e9343feeb3ec7d7c435c5717f740e552a4394625844d034fdfb",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "complex-structure.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "5f933073ffd80e9343feeb3ec7d7c435c5717f740e552a4394625844d034fdfb",
       "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "complex-structure.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "db9c3ea2742009389f01290068b7a7fa5d3ab42f27553bfa4fcf63f5d9f552eb",
+      "semanticDigest": "00cbf56e1c1a8bb67c2d7e471c070de608ce7c02e29e96dd76df9b7670fa7fd1",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -141,6 +381,7 @@
     {
       "fixture": "content-controls-customxml.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -151,6 +392,7 @@
     {
       "fixture": "content-controls-customxml.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -161,6 +403,19 @@
     {
       "fixture": "content-controls-customxml.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -171,6 +426,34 @@
     {
       "fixture": "content-controls-customxml.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -180,7 +463,84 @@
     },
     {
       "fixture": "content-controls-customxml.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "2405a4cd1bce84c5c20a43864d3aaa97c4b5c2456c028a445a0dfc315df128f3",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "content-controls-customxml.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "2405a4cd1bce84c5c20a43864d3aaa97c4b5c2456c028a445a0dfc315df128f3",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "content-controls-customxml.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -206,6 +566,7 @@
     {
       "fixture": "embedded-ole.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -216,6 +577,7 @@
     {
       "fixture": "embedded-ole.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -223,6 +585,19 @@
     {
       "fixture": "embedded-ole.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -233,6 +608,34 @@
     {
       "fixture": "embedded-ole.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -242,7 +645,84 @@
     },
     {
       "fixture": "embedded-ole.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "b137d0e2b89a4727e5515ceae638b0cad93b1a06be27efd5a435089a62cb7e8b",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "embedded-ole.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "b137d0e2b89a4727e5515ceae638b0cad93b1a06be27efd5a435089a62cb7e8b",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "embedded-ole.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -261,6 +741,7 @@
     {
       "fixture": "equation-omml.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -271,6 +752,7 @@
     {
       "fixture": "equation-omml.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -278,6 +760,19 @@
     {
       "fixture": "equation-omml.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -288,6 +783,34 @@
     {
       "fixture": "equation-omml.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -297,7 +820,84 @@
     },
     {
       "fixture": "equation-omml.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "1b8d183702557eb98dff348f1d36b824620716452a4783e5ffc26ce1c3e2ea6a",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "equation-omml.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "1b8d183702557eb98dff348f1d36b824620716452a4783e5ffc26ce1c3e2ea6a",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "equation-omml.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -316,16 +916,18 @@
     {
       "fixture": "fields-toc.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "4d45eb580838b19090fdae11c63f38e15483adb3cc57e142943f33b09e4c2c9f",
+      "semanticDigest": "74e1db6c8792cf6abe5cd526fc7dd5dae39e9a2e7732ae7d733ae57e4837765e",
       "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "fields-toc.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -333,6 +935,19 @@
     {
       "fixture": "fields-toc.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -343,21 +958,126 @@
     {
       "fixture": "fields-toc.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "1fa8cea444e101ab6bb24203dceae3302833734a55c09ece29405294c8434fe6",
+      "semanticDigest": "5f1423e2812e56d49e265f588c61f0387e5fa52f9083d30f862ae69068587101",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "fields-toc.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "5f1423e2812e56d49e265f588c61f0387e5fa52f9083d30f862ae69068587101",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "fields-toc.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "5f1423e2812e56d49e265f588c61f0387e5fa52f9083d30f862ae69068587101",
       "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "fields-toc.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "825b98af6bd4e63292624d488b3b07a2e7a491dbe02517f265f7eb2a5e026f98",
+      "semanticDigest": "a6b978a101a57b1636cb9e4521fde956e7fdb7ce0684108c20ca90d559a54646",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -371,6 +1091,7 @@
     {
       "fixture": "floating-textbox.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -381,6 +1102,7 @@
     {
       "fixture": "floating-textbox.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -388,6 +1110,19 @@
     {
       "fixture": "floating-textbox.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -398,6 +1133,34 @@
     {
       "fixture": "floating-textbox.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -407,7 +1170,82 @@
     },
     {
       "fixture": "floating-textbox.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [],
+      "semanticDigest": "f73d002bc52f9654820e9ed0238e8b5be364de2c7c4e38251d51c2813f04e459",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "floating-textbox.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "f73d002bc52f9654820e9ed0238e8b5be364de2c7c4e38251d51c2813f04e459",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "floating-textbox.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -426,6 +1264,7 @@
     {
       "fixture": "footnotes-endnotes.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -436,6 +1275,7 @@
     {
       "fixture": "footnotes-endnotes.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -443,6 +1283,19 @@
     {
       "fixture": "footnotes-endnotes.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -453,6 +1306,34 @@
     {
       "fixture": "footnotes-endnotes.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -462,7 +1343,84 @@
     },
     {
       "fixture": "footnotes-endnotes.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "4ce83029e29f0ea622413c494b7ecf22352194c5240974b085444fbe4ccfeb23",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "footnotes-endnotes.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "4ce83029e29f0ea622413c494b7ecf22352194c5240974b085444fbe4ccfeb23",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "footnotes-endnotes.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -481,6 +1439,7 @@
     {
       "fixture": "macro-enabled.docm",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -491,6 +1450,7 @@
     {
       "fixture": "macro-enabled.docm",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -498,6 +1458,19 @@
     {
       "fixture": "macro-enabled.docm",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -508,6 +1481,34 @@
     {
       "fixture": "macro-enabled.docm",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -517,7 +1518,84 @@
     },
     {
       "fixture": "macro-enabled.docm",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "651527c7d0b7587b40f95c95cd40c7b40ce9d6153d69dce9fe46056b9ec70543",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "macro-enabled.docm",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "651527c7d0b7587b40f95c95cd40c7b40ce9d6153d69dce9fe46056b9ec70543",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "macro-enabled.docm",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -536,6 +1614,7 @@
     {
       "fixture": "multilevel-numbering.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -546,6 +1625,7 @@
     {
       "fixture": "multilevel-numbering.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -553,6 +1633,19 @@
     {
       "fixture": "multilevel-numbering.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -563,6 +1656,110 @@
     {
       "fixture": "multilevel-numbering.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "c23208d9b2a5687eed25a677222537d7fd5ce256ce6d5eeb279d8632c7533db7",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "multilevel-numbering.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "c23208d9b2a5687eed25a677222537d7fd5ce256ce6d5eeb279d8632c7533db7",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "multilevel-numbering.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -573,6 +1770,7 @@
     {
       "fixture": "multilevel-numbering.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -598,6 +1796,7 @@
     {
       "fixture": "section-headers-footers.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -608,6 +1807,7 @@
     {
       "fixture": "section-headers-footers.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -615,6 +1815,19 @@
     {
       "fixture": "section-headers-footers.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -625,6 +1838,34 @@
     {
       "fixture": "section-headers-footers.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -634,7 +1875,82 @@
     },
     {
       "fixture": "section-headers-footers.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [],
+      "semanticDigest": "f73d002bc52f9654820e9ed0238e8b5be364de2c7c4e38251d51c2813f04e459",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "section-headers-footers.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "f73d002bc52f9654820e9ed0238e8b5be364de2c7c4e38251d51c2813f04e459",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "section-headers-footers.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -653,6 +1969,7 @@
     {
       "fixture": "smartart.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -663,6 +1980,7 @@
     {
       "fixture": "smartart.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable table region"
@@ -670,6 +1988,19 @@
     {
       "fixture": "smartart.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -680,6 +2011,34 @@
     {
       "fixture": "smartart.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -689,7 +2048,84 @@
     },
     {
       "fixture": "smartart.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "677a73cbf7f4a2822f6842e28480bb7fe522a84e2d8f01457eeb26fc5b4e51ea",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "smartart.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "677a73cbf7f4a2822f6842e28480bb7fe522a84e2d8f01457eeb26fc5b4e51ea",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "smartart.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -708,16 +2144,18 @@
     {
       "fixture": "tracked-changes.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "4db4b11198c2221b3913f7bf511168be48fa34810a46ae7fffac6e1b1e357a0d",
+      "semanticDigest": "c187d533621440e1987a58b9382d1e9cb47cdc11419def925d341acbb7e092b8",
       "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "tracked-changes.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -728,6 +2166,19 @@
     {
       "fixture": "tracked-changes.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
@@ -738,21 +2189,126 @@
     {
       "fixture": "tracked-changes.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "240ab5bd3ab6c0f7e0fbe2673eb77d3be1ffac07be4aaaf0ecdb44f9cf7792ac",
+      "semanticDigest": "990badabad576e8f26503052deda7e432b232de98c32ad8d213e791ce9b3a772",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "tracked-changes.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "990badabad576e8f26503052deda7e432b232de98c32ad8d213e791ce9b3a772",
+      "detail": "targeted semantic mutation materialized"
+    },
+    {
+      "fixture": "tracked-changes.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "mutation safety",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "semanticDigest": "990badabad576e8f26503052deda7e432b232de98c32ad8d213e791ce9b3a772",
       "detail": "targeted semantic mutation materialized"
     },
     {
       "fixture": "tracked-changes.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "mutation safety",
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "19664e4b49fff027dc1e68c5217bd42fb5753f4d8ea2bea3921efe12947c4e2f",
+      "semanticDigest": "ad830d59795af942ef9b342e9f808f9ecbe8ff9b2e9b00439deea7967cd3b86b",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -766,6 +2322,7 @@
     {
       "fixture": "unknown-extension.docx",
       "mutation": "edit one paragraph",
+      "operation": "rewrite_blocks",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable paragraph"
@@ -773,6 +2330,7 @@
     {
       "fixture": "unknown-extension.docx",
       "mutation": "edit a table cell",
+      "operation": "edit_table_cell",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable paragraph"
@@ -780,6 +2338,19 @@
     {
       "fixture": "unknown-extension.docx",
       "mutation": "insert a paragraph",
+      "operation": "insert_blocks",
+      "commandIds": [
+        "document.insert.caption",
+        "document.insert.divider",
+        "document.insert.endnote",
+        "document.insert.footnote",
+        "document.insert.pageBreak",
+        "document.insert.sectionBreak",
+        "document.insert.taskList",
+        "document.insert.toc",
+        "document.references.bibliography",
+        "document.references.crossRef"
+      ],
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable paragraph"
@@ -787,6 +2358,104 @@
     {
       "fixture": "unknown-extension.docx",
       "mutation": "apply a style",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "unsupported-read-only",
+      "changedParts": [],
+      "detail": "no safely editable paragraph"
+    },
+    {
+      "fixture": "unknown-extension.docx",
+      "mutation": "format the runs",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
+      "status": "unsupported-read-only",
+      "changedParts": [],
+      "detail": "no safely editable paragraph"
+    },
+    {
+      "fixture": "unknown-extension.docx",
+      "mutation": "format the paragraph",
+      "operation": "format_blocks",
+      "commandIds": [
+        "document.format.align",
+        "document.format.bold",
+        "document.format.border",
+        "document.format.clear",
+        "document.format.code.block",
+        "document.format.code.inline",
+        "document.format.color",
+        "document.format.fontFamily",
+        "document.format.fontSize",
+        "document.format.highlight",
+        "document.format.indent.decrease",
+        "document.format.indent.increase",
+        "document.format.italic",
+        "document.format.lineSpacing",
+        "document.format.list.bullet",
+        "document.format.list.demote",
+        "document.format.list.numbered",
+        "document.format.list.promote",
+        "document.format.namedStyle.apply",
+        "document.format.paragraphSpacing",
+        "document.format.quote",
+        "document.format.shading",
+        "document.format.strike",
+        "document.format.style",
+        "document.format.underline"
+      ],
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable paragraph"
@@ -794,6 +2463,7 @@
     {
       "fixture": "unknown-extension.docx",
       "mutation": "AI edit via operations",
+      "operation": "rewrite_blocks",
       "status": "unsupported-read-only",
       "changedParts": [],
       "detail": "no safely editable paragraph"
@@ -807,6 +2477,8 @@
       "afterEachEdit": [
         30,
         30,
+        30,
+        30,
         30
       ]
     },
@@ -815,6 +2487,8 @@
       "xpath": "count(/w:document/w:body//w:ins | /w:document/w:body//w:del)",
       "baseline": 8,
       "afterEachEdit": [
+        8,
+        8,
         8,
         8,
         8
@@ -827,6 +2501,8 @@
       "afterEachEdit": [
         1,
         1,
+        1,
+        1,
         1
       ]
     },
@@ -835,6 +2511,8 @@
       "xpath": "count(/pkg:package/pkg:part[contains(@name,'/embeddings/')])",
       "baseline": 1,
       "afterEachEdit": [
+        1,
+        1,
         1,
         1,
         1
@@ -847,8 +2525,418 @@
       "afterEachEdit": [
         2,
         2,
+        2,
+        2,
         2
       ]
+    },
+    {
+      "fixture": "floating-textbox.docx",
+      "xpath": "count(/w:document/w:body//w:txbxContent)",
+      "baseline": 1,
+      "afterEachEdit": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    }
+  ],
+  "commandFixtures": [
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.bold",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.italic",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.underline",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.strike",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.fontFamily",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.fontSize",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.color",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.highlight",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.align",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.lineSpacing",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.paragraphSpacing",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.indent.increase",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.border",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.shading",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.format.style",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "equation-omml",
+      "commandId": "document.format.italic",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "footnotes-endnotes",
+      "commandId": "document.format.bold",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "footnotes-endnotes",
+      "commandId": "document.format.align",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "multilevel-numbering",
+      "commandId": "document.format.shading",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "multilevel-numbering",
+      "commandId": "document.format.border",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "section-headers-footers",
+      "commandId": "document.format.lineSpacing",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    },
+    {
+      "fixture": "section-headers-footers",
+      "commandId": "document.format.indent.increase",
+      "operation": "format_blocks",
+      "changedParts": [
+        "word/document.xml"
+      ],
+      "touchedAsDeclared": true,
+      "noCollateralChange": true,
+      "preserved": true,
+      "readBack": true
+    }
+  ],
+  "refusalFixtures": [
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.insert.footnote",
+      "region": "footnotes",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [
+        "insert_blocks"
+      ],
+      "reason": "Spectra preserves footnotes in this file but cannot edit it yet, so this stays unavailable while the original is linked."
+    },
+    {
+      "fixture": "complex-structure",
+      "commandId": "document.insert.image",
+      "region": "images",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [],
+      "reason": "Spectra preserves images in this file but cannot edit it yet, so this stays unavailable while the original is linked."
+    },
+    {
+      "fixture": "equation-omml",
+      "commandId": "document.insert.equation",
+      "region": "equations",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [
+        "insert_equation"
+      ],
+      "reason": "Spectra preserves equations in this file but cannot edit it yet, so this stays unavailable while the original is linked."
+    },
+    {
+      "fixture": "footnotes-endnotes",
+      "commandId": "document.insert.footnote",
+      "region": "footnotes",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [
+        "insert_blocks"
+      ],
+      "reason": "Spectra preserves footnotes in this file but cannot edit it yet, so this stays unavailable while the original is linked."
+    },
+    {
+      "fixture": "footnotes-endnotes",
+      "commandId": "document.insert.endnote",
+      "region": "footnotes",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [
+        "insert_blocks"
+      ],
+      "reason": "Spectra preserves footnotes in this file but cannot edit it yet, so this stays unavailable while the original is linked."
+    },
+    {
+      "fixture": "section-headers-footers",
+      "commandId": "document.layout.pageSize",
+      "region": "sections",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [],
+      "reason": "Spectra preserves section layout in this file but cannot edit it yet, so this stays unavailable while the original is linked."
+    },
+    {
+      "fixture": "section-headers-footers",
+      "commandId": "document.layout.margins",
+      "region": "sections",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [],
+      "reason": "Spectra preserves section layout in this file but cannot edit it yet, so this stays unavailable while the original is linked."
+    },
+    {
+      "fixture": "section-headers-footers",
+      "commandId": "document.layout.header",
+      "region": "headersFooters",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [],
+      "reason": "Spectra preserves headers and footers in this file but cannot edit it yet, so this stays unavailable while the original is linked."
+    },
+    {
+      "fixture": "section-headers-footers",
+      "commandId": "document.layout.footer",
+      "region": "headersFooters",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [],
+      "reason": "Spectra preserves headers and footers in this file but cannot edit it yet, so this stays unavailable while the original is linked."
+    },
+    {
+      "fixture": "tracked-changes",
+      "commandId": "document.review.trackChanges.accept",
+      "region": "trackedChanges",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [],
+      "reason": "Word revision marks are preserved exactly as Word wrote them, so accepting them has to happen in Word."
+    },
+    {
+      "fixture": "tracked-changes",
+      "commandId": "document.review.trackChanges.reject",
+      "region": "trackedChanges",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [],
+      "reason": "Word revision marks are preserved exactly as Word wrote them, so rejecting them has to happen in Word."
+    },
+    {
+      "fixture": "tracked-changes",
+      "commandId": "document.review.updateFields",
+      "region": "fields",
+      "regionPreserved": true,
+      "humanRefused": true,
+      "assistantRefused": true,
+      "operations": [],
+      "reason": "Spectra preserves fields in this file but cannot edit it yet, so this stays unavailable while the original is linked."
     }
   ]
 }

@@ -1,1 +1,332 @@
-{"source":"Microsoft Open XML SDK test asset","contains":["merged and nested tables","footnotes","endnotes","footer","style inheritance"],"expected":{"paragraphs":"NATIVE","lists":"EQUIVALENT","tables":"NATIVE or PRESERVED when nested","notes":"PRESERVED","footer":"PRESERVED"}}
+{
+  "source": "Microsoft Open XML SDK test asset",
+  "contains": [
+    "merged and nested tables",
+    "footnotes",
+    "endnotes",
+    "footer",
+    "style inheritance"
+  ],
+  "expected": {
+    "paragraphs": "NATIVE",
+    "lists": "EQUIVALENT",
+    "tables": "NATIVE or PRESERVED when nested",
+    "notes": "PRESERVED",
+    "footer": "PRESERVED"
+  },
+  "mutations": [
+    {
+      "commandId": "document.format.bold",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "b",
+        "attribute": {
+          "name": "val",
+          "value": "0"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.italic",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "i"
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.underline",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "u",
+        "attribute": {
+          "name": "val",
+          "value": "single"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.strike",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "strike"
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.fontFamily",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "rFonts",
+        "attribute": {
+          "name": "ascii",
+          "value": "Georgia"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.fontSize",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "sz",
+        "attribute": {
+          "name": "val",
+          "value": "26"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.color",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "color",
+        "attribute": {
+          "name": "val",
+          "value": "1F3A2E"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.highlight",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "rPr",
+        "property": "shd",
+        "attribute": {
+          "name": "fill",
+          "value": "FEF0C7"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.align",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "jc",
+        "attribute": {
+          "name": "val",
+          "value": "center"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.lineSpacing",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "spacing",
+        "attribute": {
+          "name": "line",
+          "value": "360"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.paragraphSpacing",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "spacing",
+        "attribute": {
+          "name": "after",
+          "value": "360"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.indent.increase",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "ind",
+        "attribute": {
+          "name": "left",
+          "value": "-2534"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.border",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "pBdr"
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.shading",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "shd",
+        "attribute": {
+          "name": "fill",
+          "value": "F2F4F7"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    },
+    {
+      "commandId": "document.format.style",
+      "operation": "format_blocks",
+      "touch": [
+        "word/document.xml"
+      ],
+      "proof": {
+        "container": "pPr",
+        "property": "pStyle",
+        "attribute": {
+          "name": "val",
+          "value": "Heading2"
+        }
+      },
+      "preserve": [
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/footer1.xml",
+        "word/styles.xml"
+      ]
+    }
+  ],
+  "refusedRegions": [
+    {
+      "commandId": "document.insert.footnote",
+      "region": "footnotes"
+    },
+    {
+      "commandId": "document.insert.image",
+      "region": "images"
+    }
+  ]
+}

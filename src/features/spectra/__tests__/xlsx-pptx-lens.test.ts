@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Workbook } from "@ariadng/office/xlsx";
+import { Presentation } from "@ariadng/office/pptx";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
 import { xlsxLens } from "../lenses/xlsx-lens";
@@ -206,5 +207,296 @@ describe("XLSX and PPTX fidelity lenses", () => {
       presentationYjsAdapter.project(animationDocument).slides[0]!
         .nativeCompatibility?.animations,
     ).toBe("preserved");
+  });
+});
+
+/**
+ * The deck promotions, each proved the way the inventory asks: the write lands,
+ * the parts nobody asked for do not move, and reopening the file shows the
+ * change. A promotion with no evidence is not a promotion.
+ */
+describe("PPTX native promotions", () => {
+  async function fixture(name: string) {
+    return new Uint8Array(
+      await readFile(join(process.cwd(), "fixtures", "office", "pptx", `${name}.pptx`)),
+    );
+  }
+  async function changedParts(before: Uint8Array, after: Uint8Array) {
+    const comparison = await comparePackages(before, after);
+    return comparison.parts
+      .filter((part) => part.verdict !== "identical")
+      .map((part) => part.name.replace(/^\//, ""));
+  }
+
+  it("writes a speaker note into the notes page and leaves the slide alone", async () => {
+    const source = await fixture("chart-notes-preservation");
+    const opened = await pptxLens.open(source);
+    const index = opened.projection.slides.findIndex((slide) => slide.notesPartName);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const saved = await pptxLens.materialize({
+      projection: {
+        ...opened.projection,
+        slides: opened.projection.slides.map((slide, position) =>
+          position === index
+            ? { ...slide, speakerNotes: "Open on the number, then the story." }
+            : slide,
+        ),
+      },
+      carry: opened.preservedCarry,
+    });
+    const changed = await changedParts(source, saved);
+    // The slide part holds the transition and the timing, so it must not move.
+    expect(changed.every((part) => part.includes("notesSlides/"))).toBe(true);
+    const reopened = await pptxLens.open(saved);
+    expect(reopened.projection.slides[index]!.speakerNotes).toBe(
+      "Open on the number, then the story.",
+    );
+  });
+
+  it("describes a shape and moves it without touching anything else", async () => {
+    const source = await fixture("typical-preservation");
+    const opened = await pptxLens.open(source);
+    const slideIndex = opened.projection.slides.findIndex((slide) =>
+      slide.objects.some((object) => !object.locked),
+    );
+    expect(slideIndex).toBeGreaterThanOrEqual(0);
+    const slide = opened.projection.slides[slideIndex]!;
+    const target = slide.objects.find((object) => !object.locked)!;
+    const saved = await pptxLens.materialize({
+      projection: {
+        ...opened.projection,
+        slides: opened.projection.slides.map((candidate, position) =>
+          position !== slideIndex
+            ? candidate
+            : {
+                ...candidate,
+                objects: candidate.objects.map((object) =>
+                  object.id === target.id
+                    ? {
+                        ...object,
+                        x: object.x + 40,
+                        altText: "A described object, for anyone reading by ear.",
+                      }
+                    : object,
+                ),
+              },
+        ),
+      },
+      carry: opened.preservedCarry,
+    });
+    const changed = await changedParts(source, saved);
+    expect(changed).toEqual([slide.id.replace(/^pptx:slide:\//, "")]);
+    const reopened = await pptxLens.open(saved);
+    const moved = reopened.projection.slides[slideIndex]!.objects.find(
+      (object) => object.id === target.id,
+    )!;
+    expect(moved.x).toBeCloseTo(target.x + 40, 0);
+    expect(moved.altText).toBe("A described object, for anyone reading by ear.");
+  });
+
+  it("adds a slide on the file's own layout and keeps masters preserved", async () => {
+    const source = await fixture("masters-media-preservation");
+    const opened = await pptxLens.open(source);
+    const before = opened.projection.slides.length;
+    const saved = await pptxLens.materialize({
+      projection: {
+        ...opened.projection,
+        slides: [
+          ...opened.projection.slides,
+          {
+            id: "spectra:new-slide",
+            index: before,
+            title: "What we decided",
+            text: [],
+            objects: [
+              {
+                id: "spectra:new-slide:shape:1",
+                type: "text",
+                x: 80,
+                y: 300,
+                width: 600,
+                height: 80,
+                rotation: 0,
+                content: { text: "One sentence a room can repeat." },
+                locked: false,
+              },
+            ],
+            hasTransition: false,
+            hasTiming: false,
+            speakerNotes: "",
+          },
+        ],
+      },
+      carry: opened.preservedCarry,
+    });
+    const changed = await changedParts(source, saved);
+    // Growing a deck writes a new slide part, the presentation's slide list and
+    // the OPC bookkeeping. It never rewrites a master or a layout, which is why
+    // masters can stay PRESERVED while Add slide is native.
+    expect(changed.some((part) => part.startsWith("ppt/slideMasters/"))).toBe(false);
+    expect(changed.some((part) => part.startsWith("ppt/slideLayouts/"))).toBe(false);
+    expect(changed).toContain("ppt/presentation.xml");
+    const reopened = await pptxLens.open(saved);
+    expect(reopened.projection.slides).toHaveLength(before + 1);
+    expect(reopened.projection.slides.at(-1)!.title).toBe("What we decided");
+  });
+
+  it("puts a new slide where the person put it, not at the end", async () => {
+    const source = await fixture("masters-media-preservation");
+    const opened = await pptxLens.open(source);
+    const first = opened.projection.slides[0]!;
+    const saved = await pptxLens.materialize({
+      projection: {
+        ...opened.projection,
+        slides: [
+          {
+            id: "spectra:inserted",
+            index: 0,
+            title: "Before everything",
+            text: [],
+            objects: [],
+            hasTransition: false,
+            hasTiming: false,
+            speakerNotes: "",
+          },
+          ...opened.projection.slides,
+        ],
+      },
+      carry: opened.preservedCarry,
+    });
+    const reopened = await pptxLens.open(saved);
+    expect(reopened.projection.slides[0]!.title).toBe("Before everything");
+    expect(reopened.projection.slides[1]!.title).toBe(first.title);
+  });
+
+  it("removes a slide and leaves the surviving slides byte-identical", async () => {
+    const source = await fixture("typical-preservation");
+    const opened = await pptxLens.open(source);
+    if (opened.projection.slides.length < 2) return;
+    const dropped = opened.projection.slides[0]!;
+    const saved = await pptxLens.materialize({
+      projection: { ...opened.projection, slides: opened.projection.slides.slice(1) },
+      carry: opened.preservedCarry,
+    });
+    const changed = await changedParts(source, saved);
+    const survivors = opened.projection.slides
+      .slice(1)
+      .map((slide) => slide.id.replace(/^pptx:slide:\//, ""));
+    for (const survivor of survivors) expect(changed).not.toContain(survivor);
+    const reopened = await pptxLens.open(saved);
+    expect(reopened.projection.slides).toHaveLength(
+      opened.projection.slides.length - 1,
+    );
+    expect(
+      reopened.projection.slides.some((slide) => slide.id === dropped.id),
+    ).toBe(false);
+  });
+
+  it("reorders a deck by moving only the slide list", async () => {
+    const source = await fixture("typical-preservation");
+    const opened = await pptxLens.open(source);
+    if (opened.projection.slides.length < 2) return;
+    const reversed = [...opened.projection.slides].reverse();
+    const saved = await pptxLens.materialize({
+      projection: { ...opened.projection, slides: reversed },
+      carry: opened.preservedCarry,
+    });
+    const changed = await changedParts(source, saved);
+    expect(changed).toEqual(["ppt/presentation.xml"]);
+    const reopened = await pptxLens.open(saved);
+    expect(reopened.projection.slides.map((slide) => slide.title)).toEqual(
+      reversed.map((slide) => slide.title),
+    );
+  });
+
+  it("classifies every deck region by its own region key", async () => {
+    const opened = await pptxLens.open(await nativeTransitionFixture());
+    const byFeature = new Map(
+      opened.fidelityMap.entries.map((entry) => [entry.feature, entry]),
+    );
+    const regions = [
+      "slides",
+      "shapes",
+      "speakerNotes",
+      "transitions",
+      "animations",
+      "masters",
+      "layouts",
+      "media",
+      "charts",
+      "tables",
+    ];
+    for (const region of regions) expect(byFeature.has(region)).toBe(true);
+    // Masters are preserved on purpose: Spectra reads them and never writes
+    // them, so a command that claimed them would be claiming a lie.
+    expect(byFeature.get("masters")!.class).toBe("PRESERVED");
+    expect(byFeature.get("slides")!.class).toBe("NATIVE");
+    // Anything less than native owes a person a sentence. Only the region-key
+    // pass is asserted here; the per-part entries are the older feature-named
+    // pass the harness reads.
+    for (const region of regions) {
+      const entry = byFeature.get(region)!;
+      if (entry.class === "NATIVE") continue;
+      expect((entry.reason ?? "").length).toBeGreaterThan(8);
+    }
+    // Every class is one of the four the contract defines. A fifth name would
+    // compile behind a cast and then be dropped by every reader between here and
+    // the bar, so the region would silently look editable and the reason a
+    // person needs would never be shown anywhere.
+    const allowed = new Set(["NATIVE", "EQUIVALENT", "PRESERVED", "EXTENSION"]);
+    for (const entry of opened.fidelityMap.entries) {
+      expect(allowed.has(entry.class), `${entry.feature} ${entry.class}`).toBe(true);
+    }
+  });
+
+  it("says so when a deck has no notes page instead of taking the note", async () => {
+    const deck = await Presentation.create();
+    deck.addSlide({ layoutIndex: 0 });
+    const bytes = await deck.save();
+    const opened = await pptxLens.open(bytes);
+    const byFeature = new Map(
+      opened.fidelityMap.entries.map((entry) => [entry.feature, entry]),
+    );
+    const notes = byFeature.get("speakerNotes")!;
+    // EXTENSION, not a fifth class: Spectra genuinely can hold the note, on its
+    // own side, and that is what EXTENSION means. What it must not do is imply
+    // the note reaches the file.
+    expect(notes.class).toBe("EXTENSION");
+    expect(notes.reason).toContain("no notes page");
+    // And the flag the studio actually gates on travels with the content, per
+    // slide, because a deck can have a notes page for one slide and not the next.
+    const content = pptxArtifactContent(opened.projection);
+    expect(content.slides[0]!.nativeCompatibility?.speakerNotes).toBe("unsupported");
+
+    // The same deck with a notes page makes the note a native write again.
+    const withNotes = await pptxLens.open(await nativeTransitionFixture());
+    const withNotesRegion = withNotes.fidelityMap.entries.find(
+      (entry) => entry.feature === "speakerNotes",
+    )!;
+    if (withNotes.projection.slides.some((slide) => slide.notesPartName)) {
+      expect(withNotesRegion.class).toBe("EQUIVALENT");
+      expect(
+        pptxArtifactContent(withNotes.projection).slides.some(
+          (slide) => slide.nativeCompatibility?.speakerNotes === "unsupported",
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("says a deck can add, remove and reorder slides natively", async () => {
+    const opened = await pptxLens.open(await nativeTransitionFixture());
+    const capabilities = pptxLens.capabilities("strict-native", opened.fidelityMap);
+    for (const id of [
+      "add-slide-on-existing-layout",
+      "remove-slide",
+      "reorder-slides",
+    ]) {
+      expect(capabilities.human.find((entry) => entry.id === id)?.available).toBe(
+        true,
+      );
+    }
+    for (const op of ["add_slide", "delete_slide", "reorder_slides"]) {
+      expect(capabilities.aiOperations).toContain(op);
+    }
   });
 });

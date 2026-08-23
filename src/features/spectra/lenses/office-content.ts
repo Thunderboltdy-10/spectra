@@ -113,24 +113,41 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
 export function pptxArtifactContent(
   projection: PptxProjection,
 ): PresentationContent {
+  // A deck can have notes pages for some slides and none for others, so the
+  // honesty flag is decided per slide rather than for the file. A slide with no
+  // notes part is the case that used to lie: the note went into Spectra's own
+  // state, the command reported success, and materialize had nowhere to write
+  // it. Saying `unsupported` here is what lets the notes command refuse in
+  // advance, in words, instead of accepting text it cannot deliver.
   return {
     theme: { id: "native-pptx", name: "PowerPoint theme" },
-    slides: projection.slides.map((slide) => ({
-      id: slide.id,
-      title: slide.title,
-      ...(slide.layoutPartName ? { layoutId: slide.layoutPartName } : {}),
-      objects: slide.objects,
-      ...(slide.hasTransition || slide.hasTiming
-        ? {
-            nativeCompatibility: {
-              ...(slide.hasTransition
-                ? { transition: "preserved" as const }
-                : {}),
-              ...(slide.hasTiming ? { animations: "preserved" as const } : {}),
-            },
-          }
-        : {}),
-    })),
+    slides: projection.slides.map((slide) => {
+      const notesUnsupported = !slide.notesPartName;
+      return {
+        id: slide.id,
+        title: slide.title,
+        ...(slide.layoutPartName ? { layoutId: slide.layoutPartName } : {}),
+        // The lens reads the file's notes pages, so the studio has to receive
+        // them. Dropping them here made an opened deck look as though it had no
+        // speaker notes at all, and then saving could only ever write them back
+        // as empty.
+        ...(slide.speakerNotes ? { speakerNotes: slide.speakerNotes } : {}),
+        objects: slide.objects,
+        ...(slide.hasTransition || slide.hasTiming || notesUnsupported
+          ? {
+              nativeCompatibility: {
+                ...(slide.hasTransition
+                  ? { transition: "preserved" as const }
+                  : {}),
+                ...(slide.hasTiming ? { animations: "preserved" as const } : {}),
+                ...(notesUnsupported
+                  ? { speakerNotes: "unsupported" as const }
+                  : {}),
+              },
+            }
+          : {}),
+      };
+    }),
     nativeBinding: projection.nativeBinding,
   };
 }

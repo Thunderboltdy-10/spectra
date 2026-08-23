@@ -583,12 +583,12 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
   position: relative !important;
   z-index: 12 !important;
   top: auto !important;
-  display: flex;
+  /* Layout is owned by the workbar system in spectra-app.css, which stacks a tab
+     rail over a command rail. This file only restores the surface treatment the
+     old field styles had trampled — declaring `display` here as well silently
+     flattened the two rails back into one row. */
   margin: 8px 12px 0 !important;
   flex-shrink: 0;
-  flex-wrap: nowrap !important;
-  align-items: center;
-  gap: 4px;
   border: 1px solid var(--border-default) !important;
   border-radius: 12px !important;
   background: var(--bg-elevated) !important;

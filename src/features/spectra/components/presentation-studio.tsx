@@ -15,29 +15,24 @@ import {
   Copy,
   Download,
   FileArchive,
-  Group as GroupIcon,
   ImagePlus,
   Italic,
   Layers3,
-  LayoutTemplate,
   Link2,
   List,
   Lock,
   MonitorOff,
   MonitorPlay,
+  MousePointer2,
   Palette,
-  Play,
   Plus,
-  Redo2,
-  SlidersHorizontal,
+  Search,
   Square,
   StickyNote,
   Table2,
   Trash2,
   Type,
   Underline,
-  Undo2,
-  Ungroup,
   Upload,
   X,
   type LucideIcon,
@@ -48,6 +43,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -70,6 +66,17 @@ import {
   collectDeckCitations,
 } from "../presentation/bibliography";
 import {
+  presentationCommandBindings,
+  type PresentationHandlers,
+} from "../commands/office/presentation-commands";
+import {
+  commandContext,
+  commandForBinding,
+  executeCommand,
+} from "../commands/registry";
+import type { CommandParam } from "../commands/types";
+import { auditDeck } from "../presentation/audit";
+import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
   completeArtifactImport,
@@ -91,11 +98,7 @@ import {
 } from "../presentation/io";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
-import {
-  ArtifactWorkbar,
-  WorkbarItemSelector,
-  type CommandBinding,
-} from "./artifact-workbar";
+import { ArtifactWorkbar, WorkbarItemSelector } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
 import { SelectField } from "@/components/ui/select";
@@ -279,6 +282,28 @@ const OBJECT_FORMAT_TOOLS: ReadonlyArray<{
     },
   },
 ];
+/**
+ * A select that carries the registry's own refusal. When a command is not
+ * available the control goes quiet and prints the reason underneath, in the
+ * same words the workbar uses, so no surface can look willing while the
+ * command behind it is refusing.
+ */
+function GatedSelect({
+  refusal,
+  ...rest
+}: ComponentProps<typeof SelectField> & { refusal?: string }) {
+  return (
+    <div className="presentation-gated-field">
+      <SelectField {...rest} disabled={rest.disabled || Boolean(refusal)} />
+      {refusal ? (
+        <p className="presentation-refusal" role="note">
+          {refusal}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 const INSPECTOR_BUTTON =
   "inline-flex min-h-8 items-center justify-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-40";
 const INSPECTOR_ICON_BUTTON =
@@ -468,6 +493,11 @@ function objectStyle(
   object: PresentationObject,
   canvasHeight: number,
 ): CSSProperties {
+  // Opacity and shadow are object-level, not shape-level: a person who fades a
+  // picture and a person who fades a rectangle used the same control, so the
+  // frame carries both rather than each renderer repeating them.
+  const opacity = Number(object.style?.opacity ?? 1);
+  const shadow = object.style?.shadow === true;
   return {
     left: `${(object.x / 1_000) * 100}%`,
     top: `${(object.y / canvasHeight) * 100}%`,
@@ -475,6 +505,10 @@ function objectStyle(
     height: `${(object.height / canvasHeight) * 100}%`,
     transform: `rotate(${object.rotation}deg)`,
     zIndex: Math.max(1, (object.readingOrder ?? 0) + 1),
+    ...(Number.isFinite(opacity) && opacity < 1 ? { opacity } : {}),
+    ...(shadow
+      ? { filter: "drop-shadow(0 1.2cqw 2cqw rgb(23 34 30 / 26%))" }
+      : {}),
   };
 }
 
@@ -644,10 +678,31 @@ function PresentationObjectView({
       ) : object.type === "shape" ? (
         <div
           className="presentation-shape"
+          // The shape library is real geometry, not ten names for a rectangle:
+          // the clip path lives in CSS so a triangle stays a triangle at every
+          // size and in the thumbnail rail.
+          data-shape={String(
+            styleValue(object, "shape", "rounded-rectangle"),
+          )}
           style={{
             background: String(styleValue(object, "fill", "#dfeee4")),
             borderColor: String(styleValue(object, "stroke", "#82b79b")),
-            borderRadius: Number(styleValue(object, "radius", 24)),
+            borderWidth: `${Number(styleValue(object, "strokeWidth", 1))}px`,
+            // Only the rounded rectangle takes a radius from the inspector; the
+            // other nine get their corners from their own geometry, so the
+            // stylesheet is not fighting an inline value it cannot see.
+            ...(String(styleValue(object, "shape", "rounded-rectangle")) ===
+            "rounded-rectangle"
+              ? {
+                  borderRadius: Number(
+                    styleValue(
+                      object,
+                      "cornerRadius",
+                      Number(styleValue(object, "radius", 24)),
+                    ),
+                  ),
+                }
+              : {}),
           }}
         >
           {presentationObjectText(object)}
@@ -789,6 +844,8 @@ function SlideCanvas({
   compact = false,
   animateObjects = false,
   showSlideNumber = false,
+  showGrid = false,
+  showGuides = false,
   onSelectObject,
   onPointerDown,
   onResizePointerDown,
@@ -808,6 +865,9 @@ function SlideCanvas({
   compact?: boolean;
   animateObjects?: boolean;
   showSlideNumber?: boolean;
+  /** Authoring aids. They are drawn over the slide and never saved into it. */
+  showGrid?: boolean;
+  showGuides?: boolean;
   selectedObjectIds?: string[];
   guides?: { x?: number; y?: number };
   onSelectObject: (id?: string, additive?: boolean) => void;
@@ -899,6 +959,29 @@ function SlideCanvas({
             : ""}
         </span>
       ) : null}
+      {/* Grid and centre guides are authoring aids: they live over the slide,
+          never in it, so nothing here reaches the saved file or a projector. */}
+      {showGrid && !compact ? (
+        <span className="presentation-grid-overlay" aria-hidden="true" />
+      ) : null}
+      {showGuides && !compact ? (
+        <>
+          <span
+            className="presentation-guide presentation-guide--vertical presentation-guide--static"
+            style={{ left: "50%" }}
+            aria-hidden="true"
+          />
+          <span
+            className="presentation-guide presentation-guide--horizontal presentation-guide--static"
+            style={{ top: "50%" }}
+            aria-hidden="true"
+          />
+          <span
+            className="presentation-safe-area"
+            aria-hidden="true"
+          />
+        </>
+      ) : null}
       {guides?.x !== undefined ? (
         <span
           className="presentation-guide presentation-guide--vertical"
@@ -980,6 +1063,8 @@ function PresentationObjectInspector({
   artifacts,
   artifactId,
   onUpdate,
+  run,
+  refusalFor,
 }: {
   object: PresentationObject;
   readOnly: boolean;
@@ -987,6 +1072,9 @@ function PresentationObjectInspector({
   artifacts: SpectraArtifact[];
   artifactId: string;
   onUpdate: (recipe: (object: PresentationObject) => void) => void;
+  /** The studio's one execute path, so this pane is not a second one. */
+  run: (id: string, params?: CommandParam) => boolean;
+  refusalFor: (id: string) => string | undefined;
 }) {
   const geometry = [
     ["X", object.x, 0, 1_000 - object.width, "x"],
@@ -1011,33 +1099,33 @@ function PresentationObjectInspector({
               min={minimum}
               max={maximum}
               value={Math.round(value)}
-              disabled={readOnly || (object.locked && key !== "rotation")}
+              disabled={
+                readOnly ||
+                (object.locked && key !== "rotation") ||
+                refusalFor(`arrange.geometry.${key}`) !== undefined
+              }
+              title={refusalFor(`arrange.geometry.${key}`)}
               onChange={(event) =>
-                onUpdate((candidate) => {
-                  candidate[key] = Math.max(
+                run(
+                  `arrange.geometry.${key}`,
+                  Math.max(
                     minimum,
                     Math.min(maximum, Number(event.target.value)),
-                  );
-                })
+                  ),
+                )
               }
             />
           </label>
         ))}
       </div>
-      <SelectField
+      <GatedSelect
         label="Animation"
         size="sm"
         value={object.animation?.kind ?? "none"}
         disabled={readOnly}
+        refusal={refusalFor("animate.object")}
         options={OBJECT_ANIMATION_OPTIONS}
-        onChange={(kind) =>
-          onUpdate((candidate) => {
-            candidate.animation = {
-              kind: kind as "none" | "fade" | "rise" | "scale" | "wipe",
-              durationMs: candidate.animation?.durationMs ?? 450,
-            };
-          })
-        }
+        onChange={(kind) => run("animate.object", kind)}
       />
       {["image", "chart", "video"].includes(object.type) ? (
         <label>
@@ -1045,13 +1133,11 @@ function PresentationObjectInspector({
           <LocalAutocompleteTextarea
             surface="description"
             value={object.altText ?? ""}
-            disabled={readOnly}
-            placeholder="Describe the meaning, not only the appearance."
-            onValueChange={(altText) =>
-              onUpdate((candidate) => {
-                candidate.altText = altText;
-              })
+            disabled={
+              readOnly || refusalFor("accessibility.altText") !== undefined
             }
+            placeholder="Describe the meaning, not only the appearance."
+            onValueChange={(altText) => run("accessibility.altText", altText)}
             textareaClassName="w-full"
           />
         </label>
@@ -1159,29 +1245,23 @@ function PresentationObjectInspector({
       {object.type === "image" ? (
         <div className="presentation-source-binding">
           <div className="grid grid-cols-2 gap-2">
-            <SelectField
+            <GatedSelect
               label="Image fit"
               size="sm"
               value={String(styleValue(object, "fit", "contain"))}
               disabled={readOnly}
+              refusal={refusalFor("image.fit")}
               options={IMAGE_FIT_OPTIONS}
-              onChange={(fit) =>
-                onUpdate((candidate) => {
-                  candidate.style = { ...candidate.style, fit };
-                })
-              }
+              onChange={(fit) => run("image.fit", fit)}
             />
-            <SelectField
+            <GatedSelect
               label="Mask"
               size="sm"
               value={String(styleValue(object, "mask", "none"))}
               disabled={readOnly}
+              refusal={refusalFor("image.mask")}
               options={IMAGE_MASK_OPTIONS}
-              onChange={(mask) =>
-                onUpdate((candidate) => {
-                  candidate.style = { ...candidate.style, mask };
-                })
-              }
+              onChange={(mask) => run("image.mask", mask)}
             />
           </div>
           {styleValue(object, "fit", "contain") === "cover" ? (
@@ -1360,6 +1440,18 @@ export function PresentationStudio({
   );
   const [pendingImportVersion, setPendingImportVersion] = useState<string>();
   const [sectionDraft, setSectionDraft] = useState("");
+  // Stage aids. They change what you see while authoring and never the deck, so
+  // they live here rather than in the content, and their commands say so by
+  // declaring `undo: "none(explain)"`.
+  const [snapToObjects, setSnapToObjects] = useState(true);
+  const [showGrid, setShowGrid] = useState(false);
+  const [showGuides, setShowGuides] = useState(false);
+  const [pointerVisible, setPointerVisible] = useState(false);
+  /** Where the laser sits, in percent of the presenter surface. */
+  const [pointerAt, setPointerAt] = useState<{ x: number; y: number }>();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [stageZoom, setStageZoom] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragState | undefined>(undefined);
@@ -2723,14 +2815,24 @@ export function PresentationStudio({
 
   function startPresenting(rehearse = false) {
     const now = Date.now();
+    const staged = cloneDeck(deck);
+    const visible = staged.slides.filter((slide) => slide.hidden !== true);
+    // Hidden means hidden: the run skips those slides entirely, so the hide
+    // control is not a label that changes nothing. A deck with every slide
+    // hidden still presents, because a black room is the worse answer.
+    const shown = visible.length > 0 ? visible : [...staged.slides];
+    const startIndex = Math.max(
+      0,
+      shown.findIndex((slide) => slide.id === activeSlide.id),
+    );
     rehearsalModeRef.current = rehearse;
-    rehearsalDurationsRef.current = deck.slides.map(() => 0);
-    presentIndexRef.current = activeSlideIndex;
+    rehearsalDurationsRef.current = shown.map(() => 0);
+    presentIndexRef.current = startIndex;
     presentSlideStartedAtRef.current = now;
     setRehearsalMode(rehearse);
     if (rehearse) setRehearsalReport(undefined);
-    setPresentedDeck(cloneDeck(deck));
-    setPresentIndex(activeSlideIndex);
+    setPresentedDeck({ ...staged, slides: shown });
+    setPresentIndex(startIndex);
     setPresentStartedAt(now);
     setPresentElapsed(0);
     setSlideElapsed(0);
@@ -2798,6 +2900,63 @@ export function PresentationStudio({
     setLayerSelection([]);
     onActiveRegionChange?.(slideId);
   }
+  /**
+   * Shapes come from one library, and the shape a person picked is the shape the
+   * stage draws: the name is stored on the object and the CSS clip path keyed to
+   * it does the drawing, so the menu cannot promise a shape that does not exist.
+   */
+  function addShape(shape: string) {
+    const object = createPresentationObject("shape", activeSlide.objects.length + 1);
+    object.style = { ...object.style, shape };
+    if (shape === "line") {
+      object.height = 4;
+      object.style = { ...object.style, fill: deck.theme.tokens?.accent };
+    }
+    mutate((draft) => {
+      draft.slides[activeSlideIndex]!.objects.push(object);
+    });
+    setSelectedObjectId(object.id);
+    setLayerSelection([object.id]);
+    onActiveRegionChange?.(object.id);
+  }
+  /**
+   * Slide text is plain text, so a list is a real prefix on every line rather
+   * than a paragraph property Spectra cannot round-trip. Toggling off removes
+   * exactly what toggling on added.
+   */
+  function toggleObjectList(kind: "bullet" | "numbered") {
+    updateSelected((object) => {
+      const current = styleValue(object, "listStyle", "none");
+      const lines = presentationObjectText(object)
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^\s*(?:•\s+|\d+\.\s+)/, ""));
+      const next = current === kind ? "none" : kind;
+      const rendered =
+        next === "none"
+          ? lines
+          : lines.map((line, index) =>
+              line.trim()
+                ? next === "bullet"
+                  ? `• ${line}`
+                  : `${index + 1}. ${line}`
+                : line,
+            );
+      Object.assign(object, withPresentationObjectText(object, rendered.join("\n")));
+      object.style = { ...object.style, listStyle: next };
+    });
+  }
+  /** Reads the deck and reports through the one status line this studio has. */
+  function runDeckAudit() {
+    const report = auditDeck(deck);
+    setIoError(undefined);
+    setIoMessage(report.summary);
+  }
+  function buildBibliographySlide() {
+    mutate((draft) => {
+      const next = applyBibliographySlides(draft);
+      draft.slides = [...next.slides];
+    });
+  }
   function openInspector(section: InspectorSection) {
     setInspectorSection(section);
     setInspectorPreference("open");
@@ -2809,6 +2968,27 @@ export function PresentationStudio({
     value: slide.id,
     label: slide.title || `Slide ${index + 1}`,
   }));
+  /**
+   * Find is a filter on the rail, not a modal. The query narrows the previews to
+   * the slides that contain it and the count goes into the command hint, so the
+   * number a person reads is the number of slides they can click.
+   */
+  const searchMatches = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return [];
+    return deck.slides.filter((slide) => {
+      if (slide.title.toLowerCase().includes(query)) return true;
+      if ((slide.speakerNotes ?? "").toLowerCase().includes(query)) return true;
+      return slide.objects.some((object) =>
+        presentationObjectText(object).toLowerCase().includes(query),
+      );
+    });
+  }, [deck.slides, searchQuery]);
+  const railSlides =
+    searchOpen && searchQuery.trim() ? searchMatches : deck.slides;
+  /** A style read that answers honestly when nothing is selected. */
+  const selectedStyle = (key: string, fallback: string | number | boolean) =>
+    selectedObject ? styleValue(selectedObject, key, fallback) : fallback;
   const canvasHeight = deck.settings?.aspectRatio === "4:3" ? 750 : 562.5;
   // The rail keeps its previews and the inspector its column only while the
   // pane is at its preferred size; below that each collapses to a toggle so the
@@ -2822,187 +3002,620 @@ export function PresentationStudio({
   ]
     .filter(Boolean)
     .join(" ");
+
   /**
-   * The bar carries five things at every width and nothing else. Everything
-   * that used to live in a second 42px row is now either in `⋯` or in the
-   * inspector, which is the only split that survives a 560px pane in one row.
+   * The whole deck surface, in one place.
+   *
+   * Every semantic operation this studio performs is reachable through exactly
+   * one registered command, so the bar, a shortcut, the inspector, a canvas
+   * gesture, the thumbnail rail, the presenter chrome and the AI plane all land
+   * on the same function. The declarations that make each one honest — which
+   * native region it writes, whether a linked PowerPoint file will take the
+   * write, what the AI calls it — live in `presentation-commands.ts`, beside the
+   * ids, so this file stays about behaviour.
    */
-  const workbarActions: CommandBinding[] = [
-    // The rail and the inspector are the canvas's two side panes, so their
-    // toggles are absent on the notes page rather than present and inert.
-    ...(surface === "slides"
-      ? ([
-          ...(contract.surface === "full"
-            ? [
-                {
-                  id: "previews",
-                  label: slideRailOpen
-                    ? "Hide slide previews"
-                    : "Show slide previews",
-                  icon: LayoutTemplate,
-                  priority: "essential" as const,
-                  active: slideRailOpen,
-                  onSelect: () =>
-                    setSlideRailPreference(slideRailOpen ? "closed" : "open"),
-                },
-              ]
-            : []),
-          {
-            id: "inspector",
-            label: inspectorOpen ? "Hide inspector" : "Show inspector",
-            icon: SlidersHorizontal,
-            priority: "essential" as const,
-            active: inspectorOpen,
-            hint: "Slide, objects, design, sources and files",
-            onSelect: () =>
-              setInspectorPreference(inspectorOpen ? "closed" : "open"),
-          },
-        ] satisfies CommandBinding[])
-      : []),
-    // The notes page exists because the registry declares it, not because this
-    // studio decided to have one: drop the mode and the action goes with it.
-    ...(contract.modes.some((mode) => mode.id === "notes")
-      ? [
-          {
-            id: "notes-page",
-            label:
-              surface === "notes" ? "Back to the slides" : "Speaker notes",
-            icon: StickyNote,
-            priority: "essential" as const,
-            active: surface === "notes",
-            hint: "Every slide's notes on one page",
-            onSelect: () =>
-              setSurfacePreference(surface === "notes" ? "slides" : "notes"),
-          },
-        ]
-      : []),
-    {
-      id: "add-slide",
-      label: "Add slide",
-      icon: Plus,
-      priority: "essential",
-      requires: "edit",
-      onSelect: addSlide,
+  const presentationHandlers: PresentationHandlers = {
+    state: {
+      slideCount: deck.slides.length,
+      slideIndex: activeSlideIndex,
+      slideHidden: activeSlide.hidden === true,
+      layoutId: activeSlide.layoutId ?? "title-content",
+      sectionId: activeSlide.sectionId,
+      sections: (deck.sections ?? []).map((section) => ({
+        value: section.id,
+        label: section.name,
+      })),
+      themeId: deck.theme.id,
+      themes: THEMES.map((theme) => ({ value: theme.id, label: theme.name })),
+      background: activeSlide.background,
+      aspectRatio: deck.settings?.aspectRatio ?? "16:9",
+      transitionKind: activeSlide.transition?.kind ?? "none",
+      transitionDurationMs: activeSlide.transition?.durationMs ?? 350,
+      defaultTransition: deck.settings?.defaultTransition ?? "none",
+      autoAdvanceSeconds: deck.settings?.autoAdvanceSeconds ?? 0,
+      showSlideNumbers: deck.settings?.showSlideNumbers !== false,
+      transitionPreserved:
+        activeSlide.nativeCompatibility?.transition === "preserved",
+      animationsPreserved:
+        activeSlide.nativeCompatibility?.animations === "preserved",
+      notesUnsupported:
+        activeSlide.nativeCompatibility?.speakerNotes === "unsupported",
+      snapToObjects,
+      showGrid,
+      showGuides,
+      railOpen: slideRailOpen,
+      inspectorOpen,
+      notesSurface: surface === "notes",
+      notesPanelOpen: notesOpen,
+      presenting: Boolean(presentedDeck),
+      rehearsing: rehearsalMode,
+      presenterNotesVisible,
+      blackout: presentBlackout,
+      pointerVisible,
+      presenterLayout: presentLayout,
+      presentIndex,
+      components: (deck.components ?? []).map((component) => ({
+        value: component.id,
+        label: component.name,
+      })),
+      citationCount: deckCitationCount,
+      hasBibliography: deckHasBibliography,
+      mediaBusy: assetBusy,
+      selection: {
+        objectId: selectedObjectId,
+        objectType: selectedObject?.type,
+        count: layerSelection.length || (selectedObjectId ? 1 : 0),
+        locked: selectedObject?.locked === true,
+        hidden: selectedObject?.hidden === true,
+        isGroup: selectedObject?.type === "group",
+        isPlaceholder: Boolean(selectedObject?.componentId),
+        hasText: Boolean(
+          selectedObject && presentationObjectText(selectedObject).trim(),
+        ),
+        hasAltText: Boolean(selectedObject?.altText?.trim()),
+        x: selectedObject?.x ?? 0,
+        y: selectedObject?.y ?? 0,
+        width: selectedObject?.width ?? 400,
+        height: selectedObject?.height ?? 220,
+        rotation: selectedObject?.rotation ?? 0,
+        fill: selectedObject
+          ? (selectedStyle("fill", "") as string) || null
+          : null,
+        stroke: selectedObject
+          ? (selectedStyle("stroke", "") as string) || null
+          : null,
+        strokeWidth: Number(selectedStyle("strokeWidth", 1)),
+        cornerRadius: Number(selectedStyle("cornerRadius", 24)),
+        opacity: Math.round(
+          Number(selectedStyle("opacity", 1)) * 100,
+        ),
+        shadow: selectedStyle("shadow", false) === true,
+        imageFit: String(selectedStyle("fit", "contain")),
+        imageMask: String(selectedStyle("mask", "none")),
+        focalX: Number(selectedStyle("focalX", 50)),
+        focalY: Number(selectedStyle("focalY", 50)),
+        animationKind: selectedObject?.animation?.kind ?? "none",
+        animationDurationMs: selectedObject?.animation?.durationMs ?? 450,
+        animationDelayMs: selectedObject?.animation?.delayMs ?? 0,
+        textPreset: selectedTextPreset,
+        bindable:
+          selectedObject?.type === "chart" || selectedObject?.type === "embed",
+        sourceLive: selectedObject?.sourceBinding?.live === true,
+      },
     },
-    {
-      id: "undo",
-      label: "Undo",
-      icon: Undo2,
-      priority: "essential",
-      requires: "edit",
-      disabled: !undoStack.length,
-      hint: "Control with Z",
-      onSelect: undo,
+    history: {
+      undo,
+      redo,
+      canUndo: undoStack.length > 0,
+      canRedo: redoStack.length > 0,
     },
-    {
-      // Redo is the first thing the bar gives up under pressure, because it is
-      // the least reached of the five and it keeps its shortcut either way.
-      id: "redo",
-      label: "Redo",
-      icon: Redo2,
-      priority: "secondary",
-      requires: "edit",
-      disabled: !redoStack.length,
-      hint: "Control with Shift and Z",
-      onSelect: redo,
+    find: {
+      toggle: () => {
+        setSearchOpen((open) => {
+          if (open) setSearchQuery("");
+          return !open;
+        });
+        setSurfacePreference("slides");
+      },
+      open: searchOpen,
+      matchCount: searchOpen ? searchMatches.length : undefined,
+      matchNoun: "slide",
     },
-    {
-      id: "duplicate-slide",
-      label: "Duplicate slide",
-      icon: Copy,
-      priority: "advanced",
-      requires: "edit",
-      onSelect: duplicateSlide,
+    textFormat: {
+      fontFamily: {
+        value: selectedObject
+          ? (selectedStyle("fontFamily", "") as string) || undefined
+          : undefined,
+        set: (family) =>
+          updateSelected((object) => {
+            object.style = { ...object.style, fontFamily: family };
+          }),
+      },
+      fontSize: {
+        value: selectedObject
+          ? Number(selectedStyle("fontSize", 21))
+          : undefined,
+        set: (size) =>
+          updateSelected((object) => {
+            object.style = { ...object.style, fontSize: size };
+          }),
+      },
+      bold: {
+        active: Number(selectedStyle("fontWeight", 430)) >= 600,
+        toggle: () =>
+          updateSelected((object) => {
+            const weight = Number(styleValue(object, "fontWeight", 430));
+            object.style = { ...object.style, fontWeight: weight >= 600 ? 430 : 700 };
+          }),
+      },
+      italic: {
+        active: selectedStyle("fontStyle", "normal") === "italic",
+        toggle: () =>
+          updateSelected((object) => {
+            const italic = styleValue(object, "fontStyle", "normal") === "italic";
+            object.style = {
+              ...object.style,
+              fontStyle: italic ? "normal" : "italic",
+            };
+          }),
+      },
+      underline: {
+        active: selectedStyle("textDecoration", "none") === "underline",
+        toggle: () =>
+          updateSelected((object) => {
+            const underlined =
+              styleValue(object, "textDecoration", "none") === "underline";
+            object.style = {
+              ...object.style,
+              textDecoration: underlined ? "none" : "underline",
+            };
+          }),
+      },
+      strike: {
+        active:
+          selectedStyle("textDecoration", "none") === "line-through",
+        toggle: () =>
+          updateSelected((object) => {
+            const struck =
+              styleValue(object, "textDecoration", "none") === "line-through";
+            object.style = {
+              ...object.style,
+              textDecoration: struck ? "none" : "line-through",
+            };
+          }),
+      },
+      color: {
+        value: selectedObject
+          ? (selectedStyle("color", "") as string) || null
+          : null,
+        set: (color) =>
+          updateSelected((object) => {
+            object.style = { ...object.style, color: color ?? undefined };
+          }),
+      },
+      alignment: {
+        value: String(selectedStyle("textAlign", "left")),
+        set: (align) =>
+          updateSelected((object) => {
+            object.style = { ...object.style, textAlign: align };
+          }),
+      },
+      lineHeight: {
+        value: Number(selectedStyle("lineHeight", 1.25)),
+        set: (lineHeight) =>
+          updateSelected((object) => {
+            object.style = { ...object.style, lineHeight };
+          }),
+      },
+      bulletList: {
+        active: selectedStyle("listStyle", "none") === "bullet",
+        toggle: () => toggleObjectList("bullet"),
+      },
+      numberedList: {
+        active: selectedStyle("listStyle", "none") === "numbered",
+        toggle: () => toggleObjectList("numbered"),
+      },
+      clear: () =>
+        updateSelected((object) => {
+          object.style = {
+            ...object.style,
+            fontStyle: undefined,
+            textDecoration: undefined,
+            fontWeight: undefined,
+            color: undefined,
+            fontFamily: undefined,
+          };
+        }),
+      disabled: !selectedObject,
+      touches: ["shapes"],
+      generalPins: [],
     },
-    {
-      id: "move-slide-earlier",
-      label: "Move slide earlier",
-      icon: ArrowUp,
-      priority: "advanced",
-      requires: "edit",
-      disabled: activeSlideIndex === 0,
-      onSelect: () => moveSlide(-1),
+    exporter: {
+      noun: "deck",
+      busyFormat: ioBusy ? "pptx" : null,
+      formats: [
+        { format: "pptx", label: "PowerPoint", lossy: true },
+        { format: "pdf", label: "PDF", lossy: true },
+        { format: "odp", label: "OpenDocument", lossy: true },
+        { format: "png", label: "Slide image", lossy: true },
+      ],
+      run: (format) =>
+        void exportPresentation(format as "pptx" | "odp" | "pdf" | "png"),
     },
-    {
-      id: "move-slide-later",
-      label: "Move slide later",
-      icon: ArrowDown,
-      priority: "advanced",
-      requires: "edit",
-      disabled: activeSlideIndex === deck.slides.length - 1,
-      onSelect: () => moveSlide(1),
+    importer: {
+      noun: "deck",
+      busy: Boolean(ioBusy),
+      open: () => importInputRef.current?.click(),
     },
-    {
-      id: "delete-slide",
-      label: "Delete slide",
-      icon: Trash2,
-      priority: "advanced",
-      requires: "edit",
-      disabled: deck.slides.length === 1,
-      onSelect: deleteSlide,
+    print: () => window.print(),
+    zoom: {
+      zoom: stageZoom,
+      setZoom: setStageZoom,
+      min: 0.5,
+      max: 2,
+      fit: { label: "Fit the slide", run: () => setStageZoom(1) },
     },
-    {
-      id: "group",
-      label: "Group objects",
-      icon: GroupIcon,
-      priority: "advanced",
-      requires: "edit",
-      disabled: layerSelection.length < 2,
-      hint: "Shift-click objects to select several",
-      onSelect: groupSelectedObjects,
+    slide: {
+      add: addSlide,
+      duplicate: duplicateSlide,
+      remove: deleteSlide,
+      moveEarlier: () => moveSlide(-1),
+      moveLater: () => moveSlide(1),
+      setTitle: (title) =>
+        mutate((draft) => {
+          draft.slides[activeSlideIndex]!.title = title.slice(0, 300);
+        }),
+      toggleHidden: () =>
+        mutate((draft) => {
+          const slide = draft.slides[activeSlideIndex]!;
+          if (slide.hidden) delete slide.hidden;
+          else slide.hidden = true;
+        }),
+      setSection: (sectionId) =>
+        mutate((draft) => {
+          const slide = draft.slides[activeSlideIndex]!;
+          if (sectionId) slide.sectionId = sectionId;
+          else delete slide.sectionId;
+        }),
+      addSection: () => {
+        // The rail's own field is the place a section is named, so the command
+        // takes you there rather than inventing an untitled one.
+        openInspector("slide");
+      },
     },
-    {
-      id: "ungroup",
-      label: "Ungroup",
-      icon: Ungroup,
-      priority: "advanced",
-      requires: "edit",
-      disabled: selectedObject?.type !== "group",
-      onSelect: ungroupSelectedObject,
+    insert: {
+      textBox: () => addObject("text"),
+      placeholderText: () =>
+        updateSelected((object) => {
+          if (object.type !== "text") return;
+          object.content = { text: "Say the one thing this slide is for." };
+        }),
+      shape: (shape) => addShape(shape),
+      image: () => fileInputRef.current?.click(),
+      video: () => addObject("video"),
+      chart: () => addObject("chart"),
+      table: () => addObject("table"),
+      embed: () => addObject("embed"),
+      component: insertComponent,
     },
-    {
-      id: "rehearse",
-      label: "Rehearse timings",
-      icon: Clock3,
-      priority: "advanced",
-      requires: "present",
-      hint: "Private run with per-slide timings",
-      onSelect: () => startPresenting(true),
+    design: {
+      open: () => openInspector("design"),
+      applyLayout: applySlideLayout,
+      resetPlaceholders: () => applySlideLayout(activeSlide.layoutId ?? "title-content"),
+      applyTheme: (themeId) => {
+        const theme = THEMES.find((candidate) => candidate.id === themeId);
+        if (theme) applyTheme(theme);
+      },
+      setBackground: (background) =>
+        mutate((draft) => {
+          const slide = draft.slides[activeSlideIndex]!;
+          if (background) slide.background = background;
+          else delete slide.background;
+        }),
+      setAspectRatio: (ratio) =>
+        mutate((draft) => {
+          draft.settings = {
+            ...draft.settings,
+            aspectRatio: ratio === "4:3" ? "4:3" : "16:9",
+          };
+        }),
+      toggleSlideNumbers: () =>
+        mutate((draft) => {
+          draft.settings = {
+            ...draft.settings,
+            showSlideNumbers: draft.settings?.showSlideNumbers === false,
+          };
+        }),
+      saveComponent: saveSelectedAsComponent,
+      audit: runDeckAudit,
     },
-    {
-      id: "design",
-      label: "Design and theme",
-      icon: Palette,
-      priority: "advanced",
-      onSelect: () => openInspector("design"),
+    arrange: {
+      align: (mode) => arrangeSelection(mode),
+      order: (mode) => {
+        if (mode === "forward") moveSelectedLayer(1);
+        else if (mode === "backward") moveSelectedLayer(-1);
+        else {
+          // Front and back are the same one-step move repeated until the object
+          // runs out of neighbours, so there is one ordering implementation.
+          const steps = activeSlide.objects.length;
+          for (let step = 0; step < steps; step += 1)
+            moveSelectedLayer(mode === "front" ? 1 : -1);
+        }
+      },
+      group: groupSelectedObjects,
+      ungroup: ungroupSelectedObject,
+      toggleLock: () =>
+        updateSelected((object) => {
+          if (object.locked) delete object.locked;
+          else object.locked = true;
+        }),
+      toggleHidden: () =>
+        updateSelected((object) => {
+          if (object.hidden) delete object.hidden;
+          else object.hidden = true;
+        }),
+      remove: deleteSelectedObject,
+      toggleSnap: () => setSnapToObjects((value) => !value),
+      toggleGrid: () => setShowGrid((value) => !value),
+      toggleGuides: () => setShowGuides((value) => !value),
+      openReadingOrder: () => openInspector("slide"),
+      setGeometry: (key, value) =>
+        updateSelected((object) => {
+          if (object.locked && key !== "rotation") return;
+          if (key === "rotation") object.rotation = value;
+          else if (key === "width") object.width = Math.max(10, value);
+          else if (key === "height") object.height = Math.max(10, value);
+          else object[key] = value;
+        }),
     },
-    {
-      id: "sources",
-      label: "Sources and citations",
-      icon: List,
-      priority: "advanced",
-      onSelect: () => openInspector("sources"),
+    object: {
+      setText: (text) => {
+        if (selectedObjectId) updateText(selectedObjectId, text);
+      },
+      applyTextPreset: (preset) =>
+        applyTextPreset(preset as "title" | "subtitle" | "body" | "caption"),
+      setFill: (color) =>
+        updateSelected((object) => {
+          object.style = { ...object.style, fill: color ?? undefined };
+        }),
+      setStroke: (color) =>
+        updateSelected((object) => {
+          object.style = { ...object.style, stroke: color ?? undefined };
+        }),
+      setStrokeWidth: (width) =>
+        updateSelected((object) => {
+          object.style = { ...object.style, strokeWidth: width };
+        }),
+      setCornerRadius: (radius) =>
+        updateSelected((object) => {
+          object.style = { ...object.style, cornerRadius: radius };
+        }),
+      setOpacity: (opacity) =>
+        updateSelected((object) => {
+          object.style = {
+            ...object.style,
+            opacity: Math.min(1, Math.max(0.1, opacity / 100)),
+          };
+        }),
+      toggleShadow: () =>
+        updateSelected((object) => {
+          const shadow = styleValue(object, "shadow", false) === true;
+          object.style = { ...object.style, shadow: !shadow };
+        }),
+      setAltText: (altText) =>
+        updateSelected((object) => {
+          const trimmed = altText.trim();
+          if (trimmed) object.altText = trimmed.slice(0, 500);
+          else delete object.altText;
+        }),
+      setImageFit: (fit) =>
+        updateSelected((object) => {
+          object.style = { ...object.style, fit };
+        }),
+      setImageMask: (mask) =>
+        updateSelected((object) => {
+          object.style = { ...object.style, mask };
+        }),
+      setFocal: (axis, value) =>
+        updateSelected((object) => {
+          object.style = {
+            ...object.style,
+            [axis === "x" ? "focalX" : "focalY"]: Math.min(100, Math.max(0, value)),
+          };
+        }),
+      replaceImage: () => fileInputRef.current?.click(),
+      bindSource: (artifactId) =>
+        updateSelected((object) => {
+          if (!artifactId) {
+            delete object.sourceBinding;
+            return;
+          }
+          object.sourceBinding = {
+            ...object.sourceBinding,
+            artifactId,
+            kind: object.sourceBinding?.kind ?? "artifact",
+          };
+        }),
+      toggleSourceLive: () =>
+        updateSelected((object) => {
+          if (!object.sourceBinding) return;
+          object.sourceBinding = {
+            ...object.sourceBinding,
+            live: !object.sourceBinding.live,
+          };
+        }),
+      refreshChart: () =>
+        updateSelected((object) => {
+          if (!object.sourceBinding) return;
+          object.sourceBinding = {
+            ...object.sourceBinding,
+            versionId: `refresh-${Date.now().toString(36)}`,
+          };
+        }),
+      setAnimation: (kind) =>
+        updateSelected((object) => {
+          if (kind === "none") {
+            delete object.animation;
+            return;
+          }
+          object.animation = {
+            ...object.animation,
+            kind: kind as "fade" | "rise" | "scale" | "wipe",
+          };
+        }),
+      setAnimationDuration: (durationMs) =>
+        updateSelected((object) => {
+          if (!object.animation) return;
+          object.animation = { ...object.animation, durationMs };
+        }),
+      setAnimationDelay: (delayMs) =>
+        updateSelected((object) => {
+          if (!object.animation) return;
+          object.animation = { ...object.animation, delayMs };
+        }),
     },
-    {
-      id: "files",
-      label: "Import and export",
-      icon: FileArchive,
-      priority: "advanced",
-      onSelect: () => openInspector("files"),
+    transition: {
+      set: (kind) =>
+        mutate((draft) => {
+          const slide = draft.slides[activeSlideIndex]!;
+          if (kind === "none") {
+            delete slide.transition;
+            return;
+          }
+          slide.transition = {
+            kind: kind as "fade" | "push" | "dissolve",
+            durationMs: slide.transition?.durationMs ?? 350,
+          };
+        }),
+      setDuration: (durationMs) =>
+        mutate((draft) => {
+          const slide = draft.slides[activeSlideIndex]!;
+          if (!slide.transition) return;
+          slide.transition = { ...slide.transition, durationMs };
+        }),
+      applyToAll: () => {
+        const source = activeSlide.transition;
+        mutate((draft) => {
+          draft.slides.forEach((slide) => {
+            // A slide whose transition PowerPoint wrote keeps it: applying to
+            // every slide must not be the one gesture that overwrites what the
+            // rest of this studio refuses to touch.
+            if (slide.nativeCompatibility?.transition === "preserved") return;
+            if (!source) delete slide.transition;
+            else slide.transition = { ...source };
+          });
+        });
+      },
+      setDefault: (kind) =>
+        mutate((draft) => {
+          draft.settings = {
+            ...draft.settings,
+            defaultTransition: kind as "none" | "fade" | "push" | "dissolve",
+          };
+        }),
+      setAutoAdvance: (seconds) =>
+        mutate((draft) => {
+          draft.settings = {
+            ...draft.settings,
+            autoAdvanceSeconds: Math.max(0, Math.round(seconds)),
+          };
+        }),
     },
-  ];
+    notes: {
+      set: (notes) =>
+        mutate((draft) => {
+          draft.slides[activeSlideIndex]!.speakerNotes = notes.slice(0, 250_000);
+        }),
+      togglePanel: () => {
+        setNotesOpen((open) => !open);
+        setSurfacePreference("slides");
+      },
+      toggleSurface: () =>
+        setSurfacePreference(surface === "notes" ? "slides" : "notes"),
+    },
+    present: {
+      start: () => startPresenting(false),
+      rehearse: () => startPresenting(true),
+      stop: stopPresenting,
+      next: () => movePresentIndex(1),
+      previous: () => movePresentIndex(-1),
+      toggleNotes: togglePresenterNotes,
+      toggleBlackout: () => setPresentBlackout((value) => !value),
+      togglePointer: () => setPointerVisible((value) => !value),
+      setLayout: (layout) =>
+        setPresentLayout(layout === "speaker" ? "speaker" : "audience"),
+    },
+    sources: {
+      open: () => openInspector("sources"),
+      addCitation: () => openInspector("sources"),
+      buildBibliography: buildBibliographySlide,
+    },
+    view: {
+      toggleRail: () => setSlideRailPreference(slideRailOpen ? "closed" : "open"),
+      toggleInspector: () =>
+        setInspectorPreference(inspectorOpen ? "closed" : "open"),
+      openFiles: () => openInspector("files"),
+    },
+  };
+
+  const workbarActions = presentationCommandBindings(presentationHandlers);
+
+  // Which contextual tab the selection opens. The bar and the one execute path
+  // read the same value, so a Shape refusal cannot differ between them.
+  //
+  // With an object selected the subject is that object, so Shape is raised. With
+  // nothing selected the subject is the slide itself, and the slide-level thing
+  // a person changes is how it arrives — so Transition is raised, carrying its
+  // kind and length beside the rows that say what PowerPoint already saved here.
+  // Raising it only for slides that *already* have a transition would be a trap:
+  // the control that sets the first one would live on a tab that appears only
+  // after the first one is set.
+  const selectionContext = selectedObject ? "Shape" : "Transition";
+  /**
+   * The one execute path (C1). Every surface reaches a verb by its command id —
+   * the bar, the inspector, the rail, the canvas, the presenter — so the
+   * availability a person reads in the bar is the availability that actually
+   * governs the write. A control that calls a handler directly would be a
+   * second path, and in a strict-native deck it would happily write where the
+   * bar says it must not.
+   */
+  const commandCtx = commandContext(
+    "presentation",
+    contract.can,
+    contract.role,
+    selectionContext,
+    {
+      compatibilityProfile: contract.compatibilityProfile,
+      fidelity: contract.fidelity,
+      artifactId,
+    },
+    contract.executeApplicationCommand,
+    { ids: layerSelection.length ? layerSelection : selectedObject ? [selectedObject.id] : [] },
+  );
+  function commandById(id: string) {
+    const index = workbarActions.findIndex((binding) => binding.id === id);
+    if (index < 0) return undefined;
+    return commandForBinding("presentation", workbarActions[index]!, index);
+  }
+  /** Run a command by id. Returns false when the registry refuses it. */
+  function runCommand(id: string, params?: CommandParam) {
+    const command = commandById(id);
+    if (!command) return false;
+    return executeCommand(command, commandCtx, params);
+  }
+  /** Why a surface is refusing, in the registry's own words. */
+  function commandRefusal(id: string) {
+    const availability = commandById(id)?.availability(commandCtx);
+    if (!availability || availability.state === "enabled") return undefined;
+    return availability.state === "disabled" ? availability.reason : undefined;
+  }
+  const commandBlocked = (id: string) => commandRefusal(id) !== undefined;
 
   return (
     <section className="presentation-studio">
       <ArtifactWorkbar
         label="Presentation"
-        selectionContext={
-          selectedObject
-            ? "Shape"
-            : activeSlide.transition?.kind && activeSlide.transition.kind !== "none"
-              ? "Transition"
-              : undefined
-        }
+        selectionContext={selectionContext}
         // No mode row. A deck has one place you author it; Present is an
         // activity behind the primary verb and the notes page is a pane behind
         // an action, so neither can read as a peer tab beside the slides
@@ -3021,12 +3634,6 @@ export function PresentationStudio({
           )
         }
         actions={workbarActions}
-        primary={{
-          label: "Present",
-          icon: Play,
-          requires: "present",
-          onSelect: () => startPresenting(false),
-        }}
       />
       <div className="spectra-editor-body">
       <input
@@ -3098,20 +3705,63 @@ export function PresentationStudio({
             {contract.surface === "full" && surface === "slides" ? (
               <StudioItemRail
                 label="Slides"
-                count={deck.slides.length}
+                count={railSlides.length}
                 collapsed={!slideRailOpen}
                 onToggleCollapsed={() =>
                   setSlideRailPreference(slideRailOpen ? "closed" : "open")
                 }
-                items={deck.slides.map((slide, index) => ({
+                tools={
+                  searchOpen ? (
+                    <div className="presentation-rail-find">
+                      <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                      <input
+                        type="search"
+                        value={searchQuery}
+                        autoFocus
+                        placeholder="Find in deck"
+                        aria-label="Find in deck"
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Escape") return;
+                          setSearchOpen(false);
+                          setSearchQuery("");
+                        }}
+                      />
+                      <span aria-live="polite">
+                        {searchQuery.trim()
+                          ? `${searchMatches.length} of ${deck.slides.length}`
+                          : `${deck.slides.length} slides`}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Close find"
+                        onClick={() => {
+                          setSearchOpen(false);
+                          setSearchQuery("");
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : undefined
+                }
+                items={railSlides.map((slide) => ({
                   id: slide.id,
-                  title: slide.title || `Slide ${index + 1}`,
-                  subtitle: slide.speakerNotes
-                    ? "Has speaker notes"
-                    : undefined,
+                  title:
+                    slide.title || `Slide ${deck.slides.indexOf(slide) + 1}`,
+                  subtitle: [
+                    slide.hidden ? "Hidden in Present" : undefined,
+                    slide.speakerNotes ? "Has speaker notes" : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || undefined,
                   active: slide.id === activeSlide.id,
                   preview: (
-                    <div className="spectra-item-rail-preview" data-spectra-hidden-target="true">
+                    <div
+                      className="spectra-item-rail-preview"
+                      data-spectra-hidden-target="true"
+                      data-slide-hidden={slide.hidden || undefined}
+                    >
                       <SlideCanvas
                         slide={slide}
                         deck={deck}
@@ -3133,7 +3783,11 @@ export function PresentationStudio({
                   ),
                 }))}
                 onSelect={selectSlide}
-                onAdd={readOnly ? undefined : addSlide}
+                onAdd={
+                  readOnly || commandBlocked("slide.add")
+                    ? undefined
+                    : () => runCommand("slide.add")
+                }
                 addLabel="Add slide"
                 canEdit={!readOnly}
                 draggingId={draggingSlideId}
@@ -3143,8 +3797,10 @@ export function PresentationStudio({
                   setDropTargetSlideId(undefined);
                 }}
                 onMove={(from, to) => {
-                  const moved = deck.slides[from];
-                  const target = deck.slides[to];
+                  // The rail can be filtered by a find, so a drop maps through
+                  // the list a person is actually looking at.
+                  const moved = railSlides[from];
+                  const target = railSlides[to];
                   if (moved && target) {
                     setActiveSlideId(moved.id);
                     moveSlideBefore(target.id);
@@ -3152,7 +3808,13 @@ export function PresentationStudio({
                 }}
               />
             ) : null}
-            <div className="presentation-stage">
+            <div
+              className="presentation-stage"
+              data-zoomed={stageZoom !== 1 || undefined}
+              style={
+                { "--presentation-stage-zoom": stageZoom } as CSSProperties
+              }
+            >
               <SlideCanvas
                 slide={activeSlide}
                 deck={deck}
@@ -3162,6 +3824,8 @@ export function PresentationStudio({
                 selectedObjectIds={layerSelection}
                 guides={guides}
                 showSlideNumber
+                showGrid={showGrid}
+                showGuides={showGuides}
                 aiChangedPaths={aiChangedPaths}
                 readOnly={readOnly}
                 onSelectObject={(id, additive) => selectObject(id, additive)}
@@ -3202,7 +3866,7 @@ export function PresentationStudio({
                     <LocalAutocompleteTextarea
                       surface="slide_text"
                       value={activeSlide.speakerNotes ?? ""}
-                      readOnly={readOnly}
+                      readOnly={readOnly || commandBlocked("notes.set")}
                       aria-label={`Speaker notes for slide ${activeSlideIndex + 1}`}
                       {...targetAttrs(
                         `/slides/${activeSlideIndex}/speakerNotes`,
@@ -3212,14 +3876,20 @@ export function PresentationStudio({
                       onFocus={() =>
                         onActiveRegionChange?.(`${activeSlide.id}:notes`)
                       }
+                      // Through the command, not around it (C1). The panel and
+                      // the bar then agree by construction: when a linked deck
+                      // has no notes page the field is read-only and says why,
+                      // instead of taking a note the file cannot hold.
                       onValueChange={(speakerNotes) =>
-                        mutate((draft) => {
-                          draft.slides[activeSlideIndex]!.speakerNotes =
-                            speakerNotes;
-                        })
+                        runCommand("notes.set", speakerNotes)
                       }
                       textareaClassName="w-full"
                     />
+                    {commandRefusal("notes.set") ? (
+                      <p className="presentation-refusal">
+                        {commandRefusal("notes.set")}
+                      </p>
+                    ) : null}
                   </>
                 ) : null}
               </section>
@@ -3319,34 +3989,28 @@ export function PresentationStudio({
                             }
                           />
                         </label>
-                        <SelectField
+                        <GatedSelect
                           label="Layout"
                           size="sm"
                           className="mt-3"
                           value={activeSlide.layoutId ?? "title-content"}
                           disabled={readOnly}
+                          refusal={commandRefusal("design.applyLayout")}
                           options={LAYOUT_OPTIONS}
-                          onChange={applySlideLayout}
+                          onChange={(layoutId) =>
+                            runCommand("design.applyLayout", layoutId)
+                          }
                         />
-                        <SelectField
+                        <GatedSelect
                           label="Transition"
                           size="sm"
                           className="mt-3"
                           value={activeSlide.transition?.kind ?? "none"}
                           disabled={readOnly}
+                          refusal={commandRefusal("animate.transition")}
                           options={TRANSITION_OPTIONS}
                           onChange={(kind) =>
-                            mutate((draft) => {
-                              draft.slides[activeSlideIndex]!.transition = {
-                                kind: kind as
-                                  | "none"
-                                  | "fade"
-                                  | "push"
-                                  | "dissolve",
-                                durationMs:
-                                  activeSlide.transition?.durationMs ?? 720,
-                              };
-                            })
+                            runCommand("animate.transition", kind)
                           }
                         />
                         <label>
@@ -3558,21 +4222,16 @@ export function PresentationStudio({
                         {selectedObject ? (
                           <>
                             {selectedObject.type === "text" ? (
-                              <SelectField
+                              <GatedSelect
                                 label="Text style"
                                 size="sm"
                                 className="mt-3"
                                 value={selectedTextPreset ?? "body"}
                                 disabled={readOnly}
+                                refusal={commandRefusal("format.textPreset")}
                                 options={TEXT_PRESET_OPTIONS}
                                 onChange={(preset) =>
-                                  applyTextPreset(
-                                    preset as
-                                      | "title"
-                                      | "subtitle"
-                                      | "body"
-                                      | "caption",
-                                  )
+                                  runCommand("format.textPreset", preset)
                                 }
                               />
                             ) : null}
@@ -3616,6 +4275,8 @@ export function PresentationStudio({
                               artifacts={artifacts}
                               artifactId={artifactId}
                               onUpdate={updateSelected}
+                              run={runCommand}
+                              refusalFor={commandRefusal}
                             />
                             <button
                               type="button"
@@ -3744,8 +4405,13 @@ export function PresentationStudio({
                               data-active={
                                 deck.theme.id === theme.id || undefined
                               }
-                              disabled={readOnly}
-                              onClick={() => applyTheme(theme)}
+                              disabled={
+                                readOnly || commandBlocked("design.applyTheme")
+                              }
+                              title={commandRefusal("design.applyTheme")}
+                              onClick={() =>
+                                runCommand("design.applyTheme", theme.id)
+                              }
                             >
                               <span
                                 style={{ background: theme.tokens.background }}
@@ -3761,43 +4427,39 @@ export function PresentationStudio({
                             </button>
                           ))}
                         </div>
+                        {commandRefusal("design.applyTheme") ? (
+                          <p className="presentation-refusal" role="note">
+                            {commandRefusal("design.applyTheme")}
+                          </p>
+                        ) : null}
                       </section>
                       <section>
                         <h4>Deck format</h4>
-                        <SelectField
+                        <GatedSelect
                           label="Aspect ratio"
                           size="sm"
                           className="mt-3"
                           value={deck.settings?.aspectRatio ?? "16:9"}
                           disabled={readOnly}
+                          refusal={commandRefusal("design.slideSize")}
                           options={ASPECT_RATIO_OPTIONS}
                           onChange={(aspectRatio) =>
-                            mutate((draft) => {
-                              draft.settings = {
-                                ...draft.settings,
-                                aspectRatio: aspectRatio as "16:9" | "4:3",
-                              };
-                            })
+                            runCommand("design.slideSize", aspectRatio)
                           }
                         />
-                        <SelectField
+                        <GatedSelect
                           label="Default transition"
                           size="sm"
                           className="mt-3"
                           value={deck.settings?.defaultTransition ?? "none"}
                           disabled={readOnly}
+                          refusal={commandRefusal("animate.defaultTransition")}
                           options={TRANSITION_OPTIONS}
                           onChange={(defaultTransition) =>
-                            mutate((draft) => {
-                              draft.settings = {
-                                ...draft.settings,
-                                defaultTransition: defaultTransition as
-                                  | "none"
-                                  | "fade"
-                                  | "push"
-                                  | "dissolve",
-                              };
-                            })
+                            runCommand(
+                              "animate.defaultTransition",
+                              defaultTransition,
+                            )
                           }
                         />
                         <label>
@@ -3808,17 +4470,17 @@ export function PresentationStudio({
                             max="3600"
                             step="1"
                             value={deck.settings?.autoAdvanceSeconds ?? 0}
-                            disabled={readOnly}
+                            disabled={
+                              readOnly || commandBlocked("animate.autoAdvance")
+                            }
                             onChange={(event) =>
-                              mutate((draft) => {
-                                draft.settings = {
-                                  ...draft.settings,
-                                  autoAdvanceSeconds: Math.max(
-                                    0,
-                                    Math.min(3_600, Number(event.target.value)),
-                                  ),
-                                };
-                              })
+                              runCommand(
+                                "animate.autoAdvance",
+                                Math.max(
+                                  0,
+                                  Math.min(3_600, Number(event.target.value)),
+                                ),
+                              )
                             }
                           />
                         </label>
@@ -3826,15 +4488,10 @@ export function PresentationStudio({
                           <input
                             type="checkbox"
                             checked={deck.settings?.showSlideNumbers !== false}
-                            disabled={readOnly}
-                            onChange={(event) =>
-                              mutate((draft) => {
-                                draft.settings = {
-                                  ...draft.settings,
-                                  showSlideNumbers: event.target.checked,
-                                };
-                              })
+                            disabled={
+                              readOnly || commandBlocked("design.slideNumbers")
                             }
+                            onChange={() => runCommand("design.slideNumbers")}
                           />{" "}
                           Show slide numbers
                         </label>
@@ -4117,7 +4774,14 @@ export function PresentationStudio({
                   <LocalAutocompleteTextarea
                     surface="slide_text"
                     value={slide.speakerNotes ?? ""}
-                    readOnly={readOnly}
+                    // Per slide, because a deck can have a notes page for one
+                    // slide and none for the next. This surface writes to the
+                    // slide in the row rather than the active one, so it reads
+                    // that slide's own honesty flag.
+                    readOnly={
+                      readOnly ||
+                      slide.nativeCompatibility?.speakerNotes === "unsupported"
+                    }
                     {...targetAttrs(`/slides/${index}/speakerNotes`)}
                     placeholder="What you will say on this slide."
                     onFocus={() => onActiveRegionChange?.(`${slide.id}:notes`)}
@@ -4128,6 +4792,13 @@ export function PresentationStudio({
                     }
                     textareaClassName="min-h-[104px] w-full resize-y rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-2 text-caption leading-relaxed text-[var(--text-primary)] outline-none focus:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))]"
                   />
+                  {slide.nativeCompatibility?.speakerNotes ===
+                  "unsupported" ? (
+                    <p className="presentation-refusal">
+                      This deck has no notes page for this slide, so a note here
+                      could not be written into the file.
+                    </p>
+                  ) : null}
                 </label>
               </article>
             ))}
@@ -4226,7 +4897,15 @@ export function PresentationStudio({
               aria-label={
                 rehearsalMode ? "Rehearsal mode" : "Presentation mode"
               }
-              onMouseMove={revealPresentChrome}
+              onMouseMove={(event) => {
+                revealPresentChrome();
+                if (!pointerVisible) return;
+                const frame = event.currentTarget.getBoundingClientRect();
+                setPointerAt({
+                  x: ((event.clientX - frame.left) / frame.width) * 100,
+                  y: ((event.clientY - frame.top) / frame.height) * 100,
+                });
+              }}
             >
               <header>
                 <span>
@@ -4241,7 +4920,7 @@ export function PresentationStudio({
                   <button
                     type="button"
                     aria-pressed={presentLayout === "audience"}
-                    onClick={() => setPresentLayout("audience")}
+                    onClick={() => runCommand("present.layout", "audience")}
                     title="Audience: the slide fills this screen"
                   >
                     <MonitorPlay className="h-4 w-4" />
@@ -4251,7 +4930,7 @@ export function PresentationStudio({
                     type="button"
                     aria-pressed={presentLayout === "speaker"}
                     onClick={() => {
-                      setPresentLayout("speaker");
+                      runCommand("present.layout", "speaker");
                       setPresenterNotesVisible(true);
                     }}
                     title="Speaker: this slide, the next slide, and notes"
@@ -4262,7 +4941,7 @@ export function PresentationStudio({
                   <button
                     type="button"
                     aria-pressed={presenterNotesVisible}
-                    onClick={togglePresenterNotes}
+                    onClick={() => runCommand("present.toggleNotes")}
                     title="Show or hide speaker notes. Shortcut: S"
                   >
                     <StickyNote className="h-4 w-4" />
@@ -4270,13 +4949,25 @@ export function PresentationStudio({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPresentBlackout(true)}
+                    aria-pressed={pointerVisible}
+                    onClick={() => runCommand("present.pointer")}
+                    title="Laser pointer: follows your cursor on this screen"
+                  >
+                    <MousePointer2 className="h-4 w-4" />
+                    Laser
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => runCommand("present.blackout")}
                     title="Black the screen. Shortcut: B"
                   >
                     <MonitorOff className="h-4 w-4" />
                     Black
                   </button>
-                  <button type="button" onClick={stopPresenting}>
+                  <button
+                    type="button"
+                    onClick={() => runCommand("present.stop")}
+                  >
                     <X className="h-5 w-5" /> Exit
                   </button>
                 </span>
@@ -4383,6 +5074,16 @@ export function PresentationStudio({
                 Slide {presentIndex + 1} of {presentedDeck.slides.length}.{" "}
                 {presentedDeck.slides[presentIndex]!.title}
               </span>
+              {/* The laser follows the presenter's own cursor. It is drawn over
+                  the run and never recorded, which is why the command that
+                  turns it on declares no undo. */}
+              {pointerVisible && pointerAt && !presentBlackout ? (
+                <span
+                  className="presentation-laser"
+                  aria-hidden="true"
+                  style={{ left: `${pointerAt.x}%`, top: `${pointerAt.y}%` }}
+                />
+              ) : null}
             </div>,
             document.body,
           )

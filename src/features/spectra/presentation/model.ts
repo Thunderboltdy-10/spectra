@@ -39,6 +39,8 @@ export type PresentationSlide = {
   layoutId?: string;
   masterId?: string;
   sectionId?: string;
+  /** Kept in the deck and skipped while presenting. */
+  hidden?: boolean;
   background?: string;
   transition?: {
     kind: "none" | "fade" | "push" | "dissolve";
@@ -49,6 +51,12 @@ export type PresentationSlide = {
   nativeCompatibility?: {
     transition?: "preserved";
     animations?: "preserved";
+    /**
+     * The linked deck has no notes page for this slide, so Spectra can hold a
+     * note but cannot write it into the file. Carried so the notes command and
+     * the notes surfaces can refuse before taking the text rather than after.
+     */
+    speakerNotes?: "unsupported";
   };
 };
 
@@ -442,6 +450,7 @@ export function normalizePresentationContent(
               sectionId: sectionIdMap.get(slide.sectionId) ?? slide.sectionId,
             }
           : {}),
+        ...(slide.hidden === true ? { hidden: true } : {}),
         ...(typeof slide.background === "string" && slide.background.trim()
           ? { background: slide.background.slice(0, 100) }
           : {}),
@@ -488,7 +497,8 @@ export function normalizePresentationContent(
             }
           : {}),
         ...(nativeCompatibility.transition === "preserved" ||
-        nativeCompatibility.animations === "preserved"
+        nativeCompatibility.animations === "preserved" ||
+        nativeCompatibility.speakerNotes === "unsupported"
           ? {
               nativeCompatibility: {
                 ...(nativeCompatibility.transition === "preserved"
@@ -496,6 +506,9 @@ export function normalizePresentationContent(
                   : {}),
                 ...(nativeCompatibility.animations === "preserved"
                   ? { animations: "preserved" as const }
+                  : {}),
+                ...(nativeCompatibility.speakerNotes === "unsupported"
+                  ? { speakerNotes: "unsupported" as const }
                   : {}),
               },
             }

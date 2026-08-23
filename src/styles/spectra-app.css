@@ -19061,7 +19061,14 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 .spectra-editor-workbar {
   container-name: artifact-workbar;
   container-type: inline-size;
-  display: flex;
+  /* Two rails, not two halves. The tab strip owns the first row and the active
+     tab's commands own the second, both starting at the same left edge. The
+     previous lead/trail split pushed the commands into a right-aligned cluster,
+     which left a quarter of a wide bar empty and made the tabs read as just more
+     buttons sitting above more buttons. */
+  display: grid;
+  grid-template-rows: 26px minmax(32px, auto);
+  align-content: center;
   min-width: 0;
   flex-shrink: 0;
   position: relative;
@@ -19071,14 +19078,49 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   height: 72px;
   min-height: 72px;
   box-sizing: border-box;
-  flex-wrap: nowrap !important;
-  align-items: center;
-  gap: 6px;
+  gap: 4px;
   border: 1px solid var(--border-default);
   border-radius: 10px;
   background: var(--bg-elevated);
-  padding: 4px 6px;
+  padding: 5px 8px 6px;
   box-shadow: 0 8px 24px -22px rgba(31, 44, 37, 0.22);
+}
+
+/* Rail one. The rule under it is what separates "where am I" from "what can I
+   do" — without it the two rows read as one undifferentiated field of buttons. */
+.spectra-workbar-rail-tabs {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.spectra-workbar-rail-meta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
+/* Rail two. Commands fill from the left; only genuinely trailing status is
+   pushed to the right edge. */
+.spectra-workbar-rail-commands {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.spectra-workbar-commands {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
 }
 
 .spectra-artifact-studio[data-studio-mode="tab"] .spectra-editor-workbar {
@@ -19088,17 +19130,8 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   margin-right: auto !important;
 }
 
-/* The elastic half. Truncates so the trailing cluster never leaves the bar. */
-.spectra-workbar-lead {
-  display: grid;
-  grid-template-rows: 30px minmax(32px, 1fr);
-  min-width: 0;
-  flex: 1 1 auto;
-  align-content: center;
-  gap: 6px;
-  overflow: hidden;
-}
-
+/* Kept for the studios that still mount their own control cluster inside the
+   command rail (Sheets' formula bar, the presentation stage tools). */
 .spectra-workbar-controls {
   display: flex;
   min-width: 0;
@@ -19156,43 +19189,95 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 .spectra-command-tabs {
   display: flex;
   min-width: 0;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 1px;
+  flex: 1 1 auto;
+  align-items: stretch;
+  gap: 2px;
   overflow: hidden;
   padding: 0;
   border-radius: 0;
   background: transparent;
 }
 
+/* A tab is navigation, so it is set like a label rather than like a control:
+   larger than the command row, no rounded pill, and the selected one is marked
+   by a rule sitting on the divider below it — the one signal a button never
+   has. Sharing the command row's pill was what made these read as buttons. */
 .spectra-command-tab {
-  height: 28px;
+  position: relative;
+  height: 26px;
   flex: 0 0 auto;
-  padding: 0 8px;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 600;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px 5px 0 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--text-small);
+  font-weight: 550;
+  letter-spacing: 0.005em;
   white-space: nowrap;
+  transition: color 120ms ease, background 120ms ease;
 }
 
+.spectra-command-tab:hover {
+  background: color-mix(in oklab, var(--brand-primary) 5%, transparent);
+  color: var(--text-secondary);
+}
+
+/* Beats the shared `[aria-selected]` accent block below, which paints every
+   workbar button the same way. A tab must not look like a pressed toggle. */
+.spectra-editor-workbar .spectra-command-tab[aria-selected="true"] {
+  background: transparent;
+  box-shadow: none;
+  color: var(--brand-primary);
+  font-weight: 680;
+}
+
+.spectra-command-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  bottom: -1px;
+  left: 6px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--brand-primary);
+}
+
+/* The customizer.
+ *
+ * An artifact type registers dozens of commands, so this panel is a table, not
+ * a scatter of glyphs: one row per command, one column per decision, a heading
+ * per tab, and a search field above. Column order matches the legend, and every
+ * control is an icon with a real accessible name — the previous ★/Aa/✎/× row
+ * was unreadable the moment there were more than a dozen commands. */
 .spectra-command-custom-row {
   display: grid;
-  grid-template-columns: minmax(118px, 1fr) minmax(72px, 86px) repeat(7, 26px);
+  grid-template-columns: minmax(150px, 1fr) minmax(74px, 88px) 54px 26px 54px 54px;
   align-items: center;
-  gap: 2px;
-  padding: 3px 4px;
-  border-top: 1px solid var(--border-subtle);
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.spectra-command-custom-row:hover {
+  background: var(--bg-secondary);
 }
 
 .spectra-workbar-customizer {
   display: grid;
-  gap: 2px;
-  min-width: min(620px, 78vw);
+  gap: 1px;
+  min-width: min(660px, 82vw);
+  max-height: min(52vh, 460px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .spectra-workbar-customizer-heading {
-  padding: 5px 6px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 6px 4px;
   color: var(--text-tertiary);
   font-size: var(--text-micro);
   font-weight: 700;
@@ -19200,33 +19285,150 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   text-transform: uppercase;
 }
 
-.spectra-command-custom-row select {
-  height: 26px;
+.spectra-workbar-customizer-heading span {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* Sticky, so the tab a row belongs to stays legible while scrolling a long set. */
+.spectra-workbar-customizer .spectra-workbar-customizer-group > .spectra-workbar-customizer-heading {
+  position: sticky;
+  top: 30px;
+  z-index: 1;
+  background: var(--bg-elevated, var(--bg-primary));
+}
+
+.spectra-workbar-customizer-search {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 6px;
+  background: var(--bg-elevated, var(--bg-primary));
+}
+
+.spectra-workbar-customizer-search input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--text-micro);
   outline: none;
 }
 
-.spectra-command-custom-row > span {
+.spectra-workbar-customizer-search input:focus-visible {
+  border-color: var(--border-strong, var(--accent-primary));
+}
+
+.spectra-workbar-customizer-legend {
+  position: sticky;
+  top: 38px;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(74px, 88px) 54px 26px 54px 54px;
+  gap: 3px;
+  padding: 0 6px 4px;
+  background: var(--bg-elevated, var(--bg-primary));
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.spectra-workbar-customizer-legend-name {
+  text-align: left;
+}
+
+.spectra-workbar-customizer-empty {
+  padding: 10px 6px 12px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+
+.spectra-command-custom-row select,
+.spectra-command-custom-rename {
+  min-width: 0;
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  outline: none;
+}
+
+.spectra-command-custom-rename {
+  font-size: var(--text-micro);
+  color: var(--text-primary);
+}
+
+.spectra-command-custom-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
   overflow: hidden;
   color: var(--text-primary);
   font-size: var(--text-micro);
   font-weight: 600;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.spectra-command-custom-row > button {
+.spectra-command-custom-shortcut {
+  flex: 0 0 auto;
+  padding: 1px 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+/* Paired icon buttons (order, label, visibility) share one cell. */
+.spectra-command-custom-order {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.spectra-command-custom-row button {
   display: grid;
-  width: 26px;
-  height: 26px;
+  width: 25px;
+  height: 25px;
   place-items: center;
   border-radius: 6px;
   color: var(--text-secondary);
   font-size: 11px;
 }
 
-.spectra-command-custom-row > button:hover:not(:disabled) {
-  background: var(--bg-secondary);
+.spectra-command-custom-row button:hover:not(:disabled) {
+  background: var(--bg-tertiary, var(--bg-secondary));
   color: var(--text-primary);
+}
+
+.spectra-command-custom-row button:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.spectra-command-custom-row button[data-active="true"] {
+  color: var(--accent-primary);
+}
+
+.spectra-command-custom-row[data-hidden="true"] .spectra-command-custom-name {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
 }
 
 .spectra-command-custom-row[draggable="true"] {
@@ -19239,31 +19441,61 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   opacity: 0.62;
 }
 
-.spectra-command-tab-custom-row {
-  grid-template-columns: minmax(104px, 1fr) repeat(2, 26px);
-}
-
-.spectra-editor-workbar[data-workbar-expanded="true"] {
-  height: 98px;
-  min-height: 98px;
+.spectra-workbar-tab-order {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: 34px 34px;
+  gap: 1px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.spectra-command-tab-custom-row {
+  display: grid;
+  grid-template-columns: minmax(104px, 1fr) 26px 26px;
   align-items: center;
-  padding-block: 6px;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: var(--text-micro);
+  font-weight: 600;
 }
 
-.spectra-editor-workbar[data-workbar-expanded="true"] .spectra-workbar-lead {
-  grid-column: 1 / -1;
+.spectra-command-tab-custom-row:hover {
+  background: var(--bg-secondary);
 }
 
-.spectra-editor-workbar[data-workbar-expanded="true"] .spectra-workbar-trail {
-  grid-column: 1 / -1;
-  justify-content: flex-end;
-  width: 100%;
+.spectra-command-tab-custom-row button {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-secondary);
 }
 
-/* The bounded half. Actions, the primary verb and the one overflow menu. */
+.spectra-command-tab-custom-row button:hover:not(:disabled) {
+  background: var(--bg-tertiary, var(--bg-secondary));
+  color: var(--text-primary);
+}
+
+.spectra-command-tab-custom-row button:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+/* The expanded form gives each command group a labelled column, so it needs a
+   taller command rail — the tab rail is unchanged. */
+.spectra-editor-workbar[data-workbar-expanded="true"] {
+  height: 104px;
+  min-height: 104px;
+  grid-template-rows: 26px minmax(60px, auto);
+}
+
+.spectra-editor-workbar[data-workbar-expanded="true"] .spectra-workbar-rail-commands {
+  align-items: flex-end;
+}
+
+/* Genuinely trailing: status, a sync pill, the primary verb. Never commands. */
 .spectra-workbar-trail {
   display: flex;
   flex: 0 0 auto;
@@ -19486,9 +19718,13 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   white-space: nowrap;
 }
 
-.spectra-editor-workbar :is(button, [role="tab"])[data-active="true"],
-.spectra-editor-workbar :is(button, [role="tab"])[aria-selected="true"],
-.spectra-editor-workbar .is-active {
+/* The pressed-toggle accent, for controls only. Tabs are deliberately excluded:
+   they carry their own selected treatment (accent text plus the rule on the
+   divider), and painting them as pressed pills is what made the tab strip read
+   as a second row of buttons. */
+.spectra-editor-workbar :is(button, [role="tab"])[data-active="true"]:not([role="tab"]),
+.spectra-editor-workbar :is(button, [role="tab"])[aria-selected="true"]:not([role="tab"]),
+.spectra-editor-workbar .is-active:not([role="tab"]) {
   background: color-mix(in oklab, var(--brand-primary) 11%, var(--bg-elevated));
   color: color-mix(in oklab, var(--brand-primary) 80%, var(--text-primary));
   box-shadow: inset 0 0 0 1px
@@ -19599,9 +19835,297 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Workbar controls.
+
+   A font picker, a size stepper, a colour well and an alignment group are
+   commands with a value, so they sit in the bar at the same 32px rhythm as an
+   action button and borrow the same quiet treatment: no filled backgrounds
+   until hover, one hairline border, tabular figures where a number changes.
+   --------------------------------------------------------------------------- */
+
+.spectra-workbar-control {
+  display: inline-flex;
+  height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-primary);
+  padding: 0 7px;
+  color: var(--text-primary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.spectra-workbar-control:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--border-default);
+  background: var(--bg-hover);
+}
+
+.spectra-workbar-control:disabled,
+.spectra-workbar-control[aria-disabled="true"] {
+  opacity: 0.45;
+}
+
+.spectra-workbar-control-select {
+  min-width: 0;
+  max-width: 12rem;
+  text-align: left;
+}
+
+.spectra-workbar-control-select[data-empty="true"] {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.spectra-workbar-control-numeric {
+  gap: 1px;
+  padding: 0 2px;
+}
+
+.spectra-workbar-control-numeric-input {
+  width: 3.1ch;
+  min-width: 3.1ch;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  text-align: center;
+  outline: none;
+}
+
+.spectra-workbar-control-numeric-input::placeholder {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.spectra-workbar-control-step {
+  display: grid;
+  width: 20px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-secondary);
+}
+
+.spectra-workbar-control-step:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.spectra-workbar-control-step:disabled {
+  opacity: 0.35;
+}
+
+.spectra-workbar-control-color {
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 8px;
+}
+
+.spectra-workbar-color-bar {
+  display: block;
+  width: 15px;
+  height: 3px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgb(45 31 17 / 0.18);
+}
+
+/* No colour is a state, not an absence: the well shows a slash rather than
+   going blank, so "Automatic" reads as a choice. */
+.spectra-workbar-color-bar[data-empty="true"] {
+  background: linear-gradient(
+    to bottom right,
+    transparent 44%,
+    var(--text-tertiary) 44%,
+    var(--text-tertiary) 56%,
+    transparent 56%
+  );
+  box-shadow: inset 0 0 0 1px var(--border-default);
+}
+
+.spectra-workbar-control-segmented {
+  gap: 1px;
+  border-color: transparent;
+  background: var(--bg-secondary);
+  padding: 2px;
+}
+
+.spectra-workbar-segment {
+  display: grid;
+  min-width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 5px;
+  padding: 0 4px;
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.spectra-workbar-segment:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.spectra-workbar-segment[data-active="true"] {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.spectra-workbar-segment:disabled {
+  opacity: 0.4;
+}
+
+.spectra-workbar-control-popover {
+  position: fixed;
+  z-index: 341;
+  display: grid;
+  min-width: 104px;
+  gap: 1px;
+  overflow-y: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius, 12px);
+  background: var(--bg-elevated);
+  padding: 5px;
+  box-shadow: var(--shadow-lg);
+}
+
+.spectra-workbar-control-option {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 0 6px;
+  color: var(--text-primary);
+  font-size: var(--text-micro);
+  font-weight: 550;
+  text-align: left;
+}
+
+.spectra-workbar-control-option:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.spectra-workbar-control-option[aria-selected="true"] {
+  font-weight: 700;
+}
+
+.spectra-workbar-control-option:disabled {
+  opacity: 0.42;
+}
+
+.spectra-workbar-control-check {
+  display: grid;
+  width: 12px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--text-secondary);
+}
+
+.spectra-workbar-control-option-hint {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.spectra-workbar-color-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 22px);
+  gap: 4px;
+  padding: 2px;
+}
+
+.spectra-workbar-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgb(45 31 17 / 0.16);
+}
+
+.spectra-workbar-color-swatch:hover,
+.spectra-workbar-color-swatch[data-selected="true"] {
+  box-shadow:
+    inset 0 0 0 1px rgb(45 31 17 / 0.2),
+    0 0 0 2px var(--bg-elevated),
+    0 0 0 3px var(--text-primary);
+}
+
+.spectra-workbar-color-clear {
+  grid-column: 1 / -1;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.spectra-workbar-color-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* The overflow rendering: the control is already open, because a menu that
+   opens a second menu loses the pointer on the way. */
+.spectra-workbar-control-row {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid var(--border-subtle);
+  padding: 5px 4px 6px;
+}
+
+.spectra-workbar-control-row:first-child {
+  border-top: 0;
+}
+
+.spectra-workbar-control-row-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spectra-workbar-control-row-options {
+  display: grid;
+  max-height: 188px;
+  gap: 1px;
+  overflow-y: auto;
+}
+
+/* Per-command density is a real preference, so it has to change something.
+   `compact` sheds the label at every width and keeps the icon; `medium` keeps
+   the label even where the container query would otherwise shed it. */
+.spectra-artifact-workbar-action[data-workbar-density="compact"] {
+  width: 32px;
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.spectra-artifact-workbar-action[data-workbar-density="compact"] span {
+  font-size: 0;
+}
+
 /* Label shedding. The accessible name stays on the button, so a shed label
    costs nothing to a screen reader or to a pointer with a tooltip. */
 @container artifact-workbar (max-width: 720px) {
+  .spectra-workbar-control-select {
+    max-width: 8.5rem;
+  }
+
   .spectra-command-tabs {
     max-width: 100%;
     overflow-x: auto;
@@ -19638,6 +20162,20 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 
   .presentation-present-action {
     white-space: nowrap;
+  }
+}
+
+/* `medium` is the user saying "keep this one legible". It has to outrank the
+   shedding rules above, so it is declared after them. */
+@container artifact-workbar (max-width: 720px) {
+  .spectra-artifact-workbar-action[data-workbar-density="medium"] {
+    width: auto;
+    justify-content: flex-start;
+    padding-inline: 9px;
+  }
+
+  .spectra-artifact-workbar-action[data-workbar-density="medium"] span {
+    font-size: var(--text-micro);
   }
 }
 

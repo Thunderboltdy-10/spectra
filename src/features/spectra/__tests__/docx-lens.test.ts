@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
+import type { XmlElement } from "@ariadng/office/xml";
 import {
   DocxLensError,
   docxLens,
@@ -11,6 +13,23 @@ const fixture = (name: string) =>
   readFile(join(process.cwd(), "fixtures", "office", "docx", name)).then(
     (bytes) => new Uint8Array(bytes),
   );
+
+/** Every element in the main part, so a test can count Word markup directly. */
+function mainElements(root: XmlElement): XmlElement[] {
+  const found = [root];
+  for (const child of root.children) {
+    if (child.kind === "element") found.push(...mainElements(child as XmlElement));
+  }
+  return found;
+}
+
+async function countWml(payload: Uint8Array, localName: string) {
+  const document = await Document.open(payload);
+  return mainElements(document.body()).filter(
+    (element) =>
+      element.namespaceUri() === WML_NAMESPACE && element.localName === localName,
+  ).length;
+}
 
 describe("DOCX preservation lens", () => {
   it("retains omitted native blocks when materializing a partial live projection", async () => {
@@ -143,6 +162,75 @@ describe("DOCX preservation lens", () => {
       "Heading2",
       "Heading3",
     ]);
+  });
+
+  it("raises a native placeholder only for content the file actually carries", async () => {
+    // A placeholder is a claim about this document — "there is a text box here,
+    // and it is safe" — so it may only follow detection. The region rows say
+    // what Spectra is able to write, and reading those as placeholders would
+    // announce tracked changes in every file that has none.
+    const textBox = await docxLens.open(await fixture("floating-textbox.docx"));
+    expect(
+      textBox.projection.nativeBinding.nativePlaceholders.map((entry) => entry.feature),
+    ).toEqual(["textBox"]);
+
+    const revisions = await docxLens.open(await fixture("tracked-changes.docx"));
+    expect(
+      revisions.projection.nativeBinding.nativePlaceholders.map((entry) => entry.feature),
+    ).toContain("trackedChanges");
+
+    const plain = await docxLens.open(await fixture("complex-structure.docx"));
+    expect(plain.projection.nativeBinding.nativePlaceholders).toEqual([]);
+    // The region is still preserved for the command surface, which is a
+    // different statement from "this file has revisions in it".
+    expect(
+      plain.fidelityMap.entries.find(
+        (entry) => entry.regionId === "docx:region:trackedChanges",
+      ),
+    ).toMatchObject({ class: "PRESERVED", readOnly: true });
+  });
+
+  it("writes text beside a picture run instead of over it", async () => {
+    // The text box in this file lives inside the paragraph's only run. Rewriting
+    // that run is how a round-trip loses a drawing while reporting success, so
+    // the new text has to become a new run and the box has to survive.
+    const source = await fixture("floating-textbox.docx");
+    expect(await countWml(source, "txbxContent")).toBe(1);
+    const opened = await docxLens.open(source);
+    const target = opened.projection.blocks[0]!;
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "replace-paragraph",
+      regionId: target.id,
+      text: "Typed beside the Word text box.",
+    });
+    expect(await countWml(output, "txbxContent")).toBe(1);
+    expect(await countWml(output, "pict")).toBe(1);
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.blocks[0]?.text).toBe("Typed beside the Word text box.");
+  });
+
+  it("steps an indent by half an inch without snapping a style's outdent to the grid", async () => {
+    // `ProductHead` in this file resolves to -3254 twips. Writing `level × 720`
+    // would move the heading on the printed page, so one step is one step.
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    const heading = opened.projection.blocks.find(
+      (block) => block.text === "Complexity",
+    );
+    expect(heading?.attrs?.paragraphFormat).toMatchObject({ indentLevel: -5 });
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "format-paragraph",
+      regionId: heading!.id,
+      format: { indentLevel: -4 },
+    });
+    const document = await Document.open(output);
+    const indents = mainElements(document.body())
+      .filter(
+        (element) =>
+          element.namespaceUri() === WML_NAMESPACE && element.localName === "ind",
+      )
+      .map((element) => element.getAttributeNs(WML_NAMESPACE, "left"));
+    expect(indents).toContain("-2534");
   });
 
   it("reports protected and corrupt files honestly", async () => {

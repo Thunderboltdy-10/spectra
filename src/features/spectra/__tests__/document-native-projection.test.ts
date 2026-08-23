@@ -3,6 +3,7 @@ import {
   blocksFromJson,
   documentJsonFromContent,
 } from "../components/artifact-studio";
+import { withDocumentFormatting } from "../components/document-studio";
 import { documentContentToProseMirrorJson } from "../work/models/yjs/document-adapter";
 
 describe("native document projection", () => {
@@ -72,6 +73,41 @@ describe("native document projection", () => {
       type: "heading",
       attrs: { level: 3, styleId: "Heading3" },
     });
+  });
+
+  it("keeps a Word outdent when the paragraph is edited for another reason", () => {
+    // A Word style may put a heading out into the left margin. Reporting that as
+    // indent level 0 would make the very next save pull it back in, so the sign
+    // has to survive the trip through the editor's attributes.
+    const json = {
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { blockId: "docx:paragraph:2", level: 1, indentLevel: -5 },
+          content: [{ type: "text", text: "Complexity" }],
+        },
+        {
+          type: "paragraph",
+          attrs: { blockId: "docx:paragraph:3", indentLevel: 2 },
+          content: [{ type: "text", text: "Body" }],
+        },
+      ],
+    };
+    const projected = withDocumentFormatting(
+      {
+        blocks: [
+          { id: "docx:paragraph:2", type: "heading", text: "Complexity" },
+          { id: "docx:paragraph:3", type: "paragraph", text: "Body" },
+        ],
+      },
+      json,
+    );
+    const blocks = projected.blocks as {
+      attrs?: { paragraphFormat?: { indentLevel?: number } };
+    }[];
+    expect(blocks[0]?.attrs?.paragraphFormat?.indentLevel).toBe(-5);
+    expect(blocks[1]?.attrs?.paragraphFormat?.indentLevel).toBe(2);
   });
 
   it("repairs stale native heading nodes before a Yjs document is initialized", () => {

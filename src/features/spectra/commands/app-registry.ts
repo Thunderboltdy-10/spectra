@@ -35,8 +35,9 @@ function executeApp(commandId: string, ctx: CommandContext, params: unknown) {
 }
 
 function appCommand(
-  input: Omit<Command<unknown>, "domain" | "availability" | "execute"> & {
+  input: Omit<Command<unknown>, "domain" | "availability" | "execute" | "priority"> & {
     availability?: Command<unknown>["availability"];
+    priority?: Command<unknown>["priority"];
     executeApplication?: (ctx: CommandContext, params: unknown) => void | Promise<void>;
   },
 ): Command<unknown> {
@@ -44,6 +45,10 @@ function appCommand(
   return {
     ...command,
     domain: "app:product",
+    // App commands are reached from the palette, not from a width-constrained
+    // bar, so they have no shedding order of their own. "secondary" is the
+    // honest default: present, not pinned.
+    priority: input.priority ?? "secondary",
     availability: input.availability ?? enabled,
     execute: executeApplication ?? ((ctx, params) => executeApp(command.id, ctx, params)),
   };

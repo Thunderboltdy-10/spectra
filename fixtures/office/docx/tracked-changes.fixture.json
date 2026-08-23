@@ -1,1 +1,34 @@
-{"source":"Microsoft Open XML SDK Complex01 test asset","contains":["tracked revisions from multiple structures","fields","tables","content controls","text box","OLE","SmartArt","notes","comments","headers and footers"],"expected":{"safe plain regions":"NATIVE or EQUIVALENT","revision-bearing regions":"PRESERVED","accept/reject revisions":"unsupported-read-only"}}
+{
+  "source": "Microsoft Open XML SDK Complex01 test asset",
+  "contains": [
+    "tracked revisions from multiple structures",
+    "fields",
+    "tables",
+    "content controls",
+    "text box",
+    "OLE",
+    "SmartArt",
+    "notes",
+    "comments",
+    "headers and footers"
+  ],
+  "expected": {
+    "safe plain regions": "NATIVE or EQUIVALENT",
+    "revision-bearing regions": "PRESERVED",
+    "accept/reject revisions": "unsupported-read-only"
+  },
+  "refusedRegions": [
+    {
+      "commandId": "document.review.trackChanges.accept",
+      "region": "trackedChanges"
+    },
+    {
+      "commandId": "document.review.trackChanges.reject",
+      "region": "trackedChanges"
+    },
+    {
+      "commandId": "document.review.updateFields",
+      "region": "fields"
+    }
+  ]
+}

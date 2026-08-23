@@ -1,0 +1,129 @@
+{
+ "source": "Authored for Spectra as the representative deck",
+ "contains": [
+  "15 slides",
+  "4 notes slides",
+  "media",
+  "embedded workbook",
+  "transition",
+  "animation timing"
+ ],
+ "expected": {
+  "slides": "NATIVE",
+  "shapes": "NATIVE",
+  "speakerNotes": "EQUIVALENT",
+  "transitions": "PRESERVED",
+  "animations": "PRESERVED",
+  "media": "PRESERVED",
+  "ole": "PRESERVED",
+  "masters": "PRESERVED",
+  "layouts": "PRESERVED"
+ },
+ "mutations": [
+  {
+   "commandId": "presentation.notes.set",
+   "touch": [
+    "ppt/notesSlides"
+   ],
+   "preserve": [
+    "ppt/slides/slide1.xml",
+    "p:transition",
+    "p:timing",
+    "ppt/media",
+    "ppt/embeddings"
+   ]
+  },
+  {
+   "commandId": "presentation.accessibility.altText",
+   "touch": [
+    "ppt/slides"
+   ],
+   "preserve": [
+    "p:transition",
+    "p:timing",
+    "ppt/notesSlides",
+    "ppt/media"
+   ]
+  },
+  {
+   "commandId": "presentation.arrange.geometry.y",
+   "touch": [
+    "ppt/slides"
+   ],
+   "preserve": [
+    "p:transition",
+    "p:timing",
+    "ppt/notesSlides",
+    "ppt/media",
+    "ppt/embeddings"
+   ]
+  },
+  {
+   "commandId": "presentation.object.setText",
+   "touch": [
+    "ppt/slides"
+   ],
+   "preserve": [
+    "p:transition",
+    "p:timing",
+    "ppt/media"
+   ]
+  },
+  {
+   "commandId": "presentation.slide.delete",
+   "touch": [
+    "ppt/slides/slide15.xml",
+    "ppt/presentation.xml",
+    "ppt/notesSlides/notesSlide4.xml"
+   ],
+   "preserve": [
+    "ppt/slideMasters",
+    "ppt/media"
+   ]
+  },
+  {
+   "commandId": "presentation.slide.add",
+   "touch": [
+    "ppt/slides/slide16.xml",
+    "ppt/presentation.xml"
+   ],
+   "preserve": [
+    "ppt/slideMasters",
+    "ppt/slideLayouts",
+    "ppt/media",
+    "ppt/embeddings",
+    "ppt/notesSlides",
+    "p:transition",
+    "p:timing"
+   ]
+  },
+  {
+   "commandId": "presentation.slide.moveLater",
+   "touch": [
+    "ppt/presentation.xml"
+   ],
+   "preserve": [
+    "ppt/slides",
+    "ppt/slideMasters",
+    "ppt/notesSlides",
+    "ppt/media",
+    "ppt/embeddings",
+    "p:transition",
+    "p:timing"
+   ]
+  },
+  {
+   "commandId": "presentation.insert.textBox",
+   "touch": [
+    "ppt/slides/slide1.xml"
+   ],
+   "preserve": [
+    "p:transition",
+    "p:timing",
+    "ppt/notesSlides",
+    "ppt/media",
+    "ppt/embeddings"
+   ]
+  }
+ ]
+}

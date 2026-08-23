@@ -1,0 +1,119 @@
+/* Sheets canvas.
+   Grid, headers, selection, freeze lines, formula bar and the cell inspectors
+   for the Sheets studio. Split out of `spectra-app.css` so the grid can grow
+   without three editors editing one file. */
+
+/* View states the workbar toggles.
+   Each of these exists because a registered command has to change something a
+   person can see. A switch that flips a stored flag and paints nothing is worse
+   than a missing feature, so gridlines, headers, formula view and reference
+   tracing all land here. */
+
+.sheets-grid-frame[data-gridlines="off"] .sheets-cell {
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
+
+/* Header cells keep their own edges — the grid lines are the faint lines between
+   data cells, which is the distinction Excel draws too. */
+.sheets-grid-frame[data-headings="off"] > .sheets-grid-corner,
+.sheets-grid-frame[data-headings="off"] > .sheets-column-headers,
+.sheets-grid-frame[data-headings="off"] > .sheets-row-headers {
+  display: none;
+}
+
+/* Formula view is an audit view: the text is what matters, so it gets the
+   monospace treatment and stops competing with the numbers around it. */
+.sheets-cell-formula-text {
+  color: color-mix(in oklab, var(--text-primary) 78%, var(--brand-primary));
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+}
+
+/* Cells the active formula reads from. Dashed, so it never reads as a selection
+   the arrow keys would move. */
+.sheets-cell[data-traced="true"] {
+  outline: 1px dashed color-mix(in oklab, var(--brand-primary) 70%, transparent);
+  outline-offset: -1px;
+  background-color: color-mix(in oklab, var(--brand-primary) 5%, var(--bg-primary));
+}
+
+/* The active sheet's colour mark, beside the sheet selector in the workbar. */
+.sheets-tab-color {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-primary) 22%, transparent);
+}
+
+/* Inspector panels added with the command surface. */
+
+.sheets-border-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.sheets-function-list {
+  display: flex;
+  max-height: 260px;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sheets-function-entry {
+  display: grid;
+  width: 100%;
+  gap: 1px;
+  border-radius: var(--radius-control);
+  padding: 5px 7px;
+  text-align: left;
+}
+
+.sheets-function-entry:hover,
+.sheets-function-entry:focus-visible {
+  background: var(--bg-hover);
+}
+
+.sheets-function-name {
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+}
+
+.sheets-function-summary {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+/* Whether Spectra evaluates a function or hands it back to Excel unchanged. The
+   library says so on every row rather than letting a person find out later. */
+.sheets-function-native {
+  color: color-mix(in oklab, var(--text-secondary) 80%, transparent);
+  font-size: 10px;
+  letter-spacing: 0.01em;
+}
+
+/* The plain-sentence account of the active formula, above the library list. */
+.sheets-formula-explanation {
+  display: grid;
+  gap: 6px;
+}
+
+.sheets-formula-explanation code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  word-break: break-all;
+}
+
+.sheets-formula-explanation .sheets-function-entry {
+  cursor: default;
+}

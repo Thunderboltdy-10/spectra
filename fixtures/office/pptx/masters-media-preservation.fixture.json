@@ -1,0 +1,42 @@
+{
+ "source": "Authored for Spectra as the masters and diagram case",
+ "contains": [
+  "slide master",
+  "SmartArt diagram",
+  "media part"
+ ],
+ "expected": {
+  "slides": "NATIVE",
+  "masters": "PRESERVED",
+  "layouts": "PRESERVED",
+  "smartArt": "PRESERVED",
+  "media": "PRESERVED"
+ },
+ "mutations": [
+  {
+   "commandId": "presentation.slide.setTitle",
+   "touch": [
+    "ppt/slides/slide1.xml"
+   ],
+   "preserve": [
+    "ppt/slideMasters",
+    "ppt/slideLayouts",
+    "ppt/diagrams",
+    "ppt/media"
+   ]
+  },
+  {
+   "commandId": "presentation.slide.add",
+   "touch": [
+    "ppt/slides/slide3.xml",
+    "ppt/presentation.xml"
+   ],
+   "preserve": [
+    "ppt/slideMasters",
+    "ppt/slideLayouts",
+    "ppt/diagrams",
+    "ppt/media"
+   ]
+  }
+ ]
+}

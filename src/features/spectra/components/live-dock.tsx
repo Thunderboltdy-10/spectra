@@ -790,7 +790,7 @@ export function LiveDock({
                         setExpandedInputRunId(tab.runId);
                       }
                     }}
-                    className="min-w-0 flex-1 py-1 text-left"
+                    className="dock-tab-identity w-fit min-w-0 max-w-[calc(100%-4.5rem)] py-1 text-left"
                     title={model.title}
                   >
                     <span className="flex items-center gap-1.5">
@@ -834,7 +834,7 @@ export function LiveDock({
                   <button
                     type="button"
                     onClick={() => openQuickChat(tab)}
-                    className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    className="dock-tab-icon ml-auto flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     aria-label={`Open ${model.title} conversation`}
                     title="Open conversation"
                   >
@@ -857,7 +857,7 @@ export function LiveDock({
 
                 {!expanded ? (
                   <div
-                    className="fixed z-30 hidden w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)] group-hover:block group-focus-within:block group-has-[.dock-tab-icon:hover]:hidden"
+                    className="pointer-events-none fixed z-30 hidden w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)] group-has-[.dock-tab-identity:hover]:block group-has-[.dock-tab-identity:focus-visible]:block"
                     style={
                       {
                         positionAnchor: disclosureAnchor,

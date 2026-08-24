@@ -129,7 +129,14 @@ export async function materializeDocxArtifact(
   const local = workTruth.replicas.find(
     (replica) => replica.kind === "local" && replica.state !== "unavailable",
   );
-  if (!local) throw new Error("LOCAL_REPLICA_UNAVAILABLE");
+  if (!local) {
+    return {
+      state: "cloud_saved" as const,
+      hash,
+      status:
+        "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
+    };
+  }
   const queued = await convexMutation<
     {
       workId: Id<"spectraArtifacts">;

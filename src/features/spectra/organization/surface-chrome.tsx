@@ -100,7 +100,7 @@ export function SurfaceSearch({
   className?: string;
 }) {
   return (
-    <div className={cn("relative w-[240px] shrink-0", className)}>
+    <div className={cn("relative min-w-9 w-[240px] max-w-full shrink", className)}>
       <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
       <input
         value={value}

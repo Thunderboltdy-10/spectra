@@ -136,6 +136,19 @@ beforeEach(() => {
     disconnect() {}
   }
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => 1200,
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get() {
+      const mode = (this as HTMLElement).getAttribute?.("data-measure-mode");
+      if (mode === "icon") return 32;
+      if (mode === "full") return 80;
+      return (this as HTMLElement).clientWidth || 40;
+    },
+  });
 });
 
 afterEach(() => {
@@ -172,7 +185,11 @@ describe("artifact workbar", () => {
   });
 
   it("never lists an action in both the bar and the overflow menu", () => {
-    renderWorkbar(documentDefaults(), "tight");
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => 280,
+    });
+    renderWorkbar(documentDefaults());
 
     const bar = screen.getByRole("toolbar", { name: "Document workbar" });
     fireEvent.click(within(bar).getByRole("button", { name: /More/i }));
@@ -185,9 +202,10 @@ describe("artifact workbar", () => {
     const present = (scope: HTMLElement, label: string) => {
       const exact = new RegExp(`^${label}$`);
       return (
-        within(scope).queryAllByLabelText(exact).length > 0 ||
         within(scope).queryAllByRole("button", { name: exact }).length > 0 ||
-        within(scope).queryAllByRole("menuitem", { name: exact }).length > 0
+        within(scope).queryAllByRole("menuitem", { name: exact }).length > 0 ||
+        within(scope).queryAllByRole("spinbutton", { name: exact }).length > 0 ||
+        within(scope).queryAllByRole("combobox", { name: exact }).length > 0
       );
     };
 
@@ -203,14 +221,19 @@ describe("artifact workbar", () => {
   });
 
   it("sheds to the overflow menu as the pane tightens instead of clipping", () => {
-    const { unmount } = renderWorkbar(documentDefaults(), "comfortable");
-    const comfortable = screen.queryAllByRole("button").length;
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => 960,
+    });
+    const { unmount } = renderWorkbar(documentDefaults());
+    expect(screen.queryByRole("button", { name: /More/i })).toBeNull();
     unmount();
 
-    renderWorkbar(documentDefaults(), "tight");
-    const tight = screen.queryAllByRole("button").length;
-    // Fewer controls in the row, and an overflow trigger to reach the rest.
-    expect(tight).toBeLessThan(comfortable);
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get: () => 200,
+    });
+    renderWorkbar(documentDefaults());
     expect(screen.getByRole("button", { name: /More/i })).toBeTruthy();
   });
 
@@ -260,85 +283,23 @@ describe("artifact workbar", () => {
 });
 
 describe("workbar customization", () => {
-  function openCustomizer() {
-    fireEvent.click(screen.getByRole("button", { name: /Customize document workbar/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Customize workbar/i }));
-  }
-
-  it("filters a long command list by name, label and id", () => {
+  it("customizes on the live bar instead of opening a separate panel", () => {
     renderWorkbar(documentDefaults());
-    openCustomizer();
-
-    const search = screen.getByRole("searchbox", { name: /Find a command/i });
-    fireEvent.change(search, { target: { value: "font" } });
-    expect(screen.getByRole("group", { name: "Customize Font" })).toBeTruthy();
-    expect(screen.queryByRole("group", { name: "Customize Outline" })).toBeNull();
-
-    // Matching on the id too, so "format.italic" finds Italic.
-    fireEvent.change(search, { target: { value: "format.ital" } });
-    expect(screen.getByRole("group", { name: "Customize Italic" })).toBeTruthy();
-
-    fireEvent.change(search, { target: { value: "zzz" } });
-    expect(screen.getByText(/No command matches/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Customize/i }));
+    const bar = screen.getByRole("toolbar", { name: "Document workbar" });
+    expect(bar.getAttribute("data-workbar-customizing")).toBeTruthy();
+    expect(screen.queryByRole("searchbox", { name: /Find a command/i })).toBeNull();
   });
 
-  it("persists a rename without changing the command id", () => {
+  it("exposes reset on the bar, not inside a customize panel", () => {
     renderWorkbar(documentDefaults());
-    openCustomizer();
-
-    fireEvent.click(screen.getByRole("button", { name: "Rename Outline" }));
-    const field = screen.getByRole("textbox", { name: "Rename Outline" });
-    fireEvent.change(field, { target: { value: "Navigator" } });
-    fireEvent.keyDown(field, { key: "Enter" });
-
-    const layout = (workbarStore.value as Record<string, { commands?: Record<string, { label?: string }> }>).document;
-    // The label the person sees changed; the id the AI and the shortcut use did not.
-    expect(layout?.commands?.["document.navigate.outline"]?.label).toBe("Navigator");
-    expect(Object.keys(layout?.commands ?? {})).toEqual(["document.navigate.outline"]);
+    expect(screen.getByRole("button", { name: /Reset this workbar/i })).toBeTruthy();
   });
 
-  it("hides and restores a command, and resets just that one", () => {
-    renderWorkbar(documentDefaults());
-    openCustomizer();
-
-    const row = screen.getByRole("group", { name: "Customize Italic" });
-    fireEvent.click(within(row).getByRole("button", { name: "Hide Italic" }));
-    const stored = () =>
-      (workbarStore.value as Record<string, { commands?: Record<string, { hidden?: boolean } | undefined> }>)
-        .document;
-    expect(stored()?.commands?.["document.format.italic"]?.hidden).toBe(true);
-
-    fireEvent.click(within(screen.getByRole("group", { name: "Customize Italic" }))
-      .getByRole("button", { name: "Reset Italic to its default" }));
-    expect(stored()?.commands?.["document.format.italic"]).toBeUndefined();
-  });
-
-  it("moves a command between tabs and back to where it shipped from", () => {
-    renderWorkbar([
-      ...documentDefaults(),
-      { id: "insert.table", label: "Table", tab: "Insert", onSelect: () => {} },
-    ]);
-    openCustomizer();
-
-    const row = screen.getByRole("group", { name: "Customize Table" });
-    fireEvent.click(within(row).getByRole("button", { name: "Pin Table in General" }));
-    let layout = (workbarStore.value as Record<string, { commands?: Record<string, { pinned?: boolean; tab?: string }> }>).document;
-    expect(layout?.commands?.["document.insert.table"]).toMatchObject({ pinned: true, tab: "General" });
-
-    fireEvent.click(within(screen.getByRole("group", { name: "Customize Table" }))
-      .getByRole("button", { name: "Unpin Table from General" }));
-    layout = (workbarStore.value as Record<string, { commands?: Record<string, { pinned?: boolean; tab?: string }> }>).document;
-    // Unpinning returns it to its own category, not to General's leftovers.
-    expect(layout?.commands?.["document.insert.table"]).toMatchObject({ pinned: false, tab: "Insert" });
-  });
-
-  it("writes only its own type's layout", () => {
+  it("writes only its own type's layout when expanding", () => {
     workbarStore.value = { sheets: { expanded: true } };
     renderWorkbar(documentDefaults());
-    openCustomizer();
-
-    fireEvent.click(screen.getByRole("button", { name: "Hide Italic" }));
-    // A document edit must not take a snapshot of the sheets layout with it.
+    fireEvent.click(screen.getByRole("button", { name: /Expand workbar/i }));
     expect((workbarStore.value as Record<string, unknown>).sheets).toEqual({ expanded: true });
     expect((workbarStore.value as Record<string, unknown>).document).toBeTruthy();
   });

@@ -740,7 +740,7 @@ export function LibraryOrganizer({
         }}
       />
 
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] px-4 py-2.5">
+      <header className="flex shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-[var(--border-subtle)] px-4 py-2.5">
         {/* The rail toggle sits with the location it uncovers, and the view
             switch with the rows it reshapes — both views, one row of chrome. */}
         {showRail ? (
@@ -759,7 +759,7 @@ export function LibraryOrganizer({
         {toolbarLead}
         <nav
           aria-label="Location"
-          className="flex min-w-0 flex-1 items-center gap-0.5 text-[13px]"
+          className="flex min-w-max flex-1 items-center gap-0.5 overflow-x-auto text-[13px]"
         >
           {searching ? (
             <span className="truncate text-[var(--text-secondary)]">
@@ -794,7 +794,7 @@ export function LibraryOrganizer({
                 />
               ) : null}
               {crumbs.map((node, index) => (
-                <div key={node.nodeId} className="flex min-w-0 items-center">
+                <div key={node.nodeId} className="flex items-center">
                   <ChevronRight
                     aria-hidden
                     className="size-3.5 shrink-0 text-[var(--text-tertiary)]"
@@ -820,6 +820,7 @@ export function LibraryOrganizer({
           value={term}
           onChange={setTerm}
           scopeLabel={floorLabel}
+          className="min-w-9 w-[min(240px,28vw)] shrink"
         />
 
         <SurfaceTypeFilter filter={filter} onChange={setFilter} />
@@ -1168,7 +1169,7 @@ function Crumb({
       )}
     >
       {icon ? <Home className="size-3.5 shrink-0" strokeWidth={1.9} /> : null}
-      <span className="truncate">{label}</span>
+      <span className="whitespace-nowrap">{label}</span>
     </button>
   );
 }

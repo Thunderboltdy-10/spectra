@@ -726,7 +726,7 @@ function placeholderFor(entry: LensFidelityEntry): DocxNativePlaceholder | null 
         id: entry.regionId,
         feature: entry.feature,
         label,
-        detail: `${label} is kept safe in the original Word package.`,
+        detail: "It stays in the Word file, unchanged. You can keep writing around it.",
       }
     : null;
 }

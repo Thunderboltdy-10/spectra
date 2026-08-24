@@ -1733,8 +1733,10 @@ export function SheetsStudio({
   );
 
   useEffect(() => {
-    setFormulaDraft(cellInput(activeCell));
-    setNameDraft(selectionLabel);
+    const nextFormula = cellInput(activeCell);
+    const nextName = selectionLabel;
+    setFormulaDraft((current) => (current === nextFormula ? current : nextFormula));
+    setNameDraft((current) => (current === nextName ? current : nextName));
   }, [activeAddress, activeCell, selectionLabel]);
   useEffect(() => {
     const rowId =
@@ -2277,7 +2279,7 @@ export function SheetsStudio({
       0,
       trackAtOffset(columnOffsets, element.scrollLeft) - 2,
     );
-    setViewport({
+    const next = {
       rowStart,
       rowEnd: Math.min(
         visibleRowIndices.length - 1,
@@ -2291,6 +2293,31 @@ export function SheetsStudio({
       ),
       scrollLeft: element.scrollLeft,
       scrollTop: element.scrollTop,
+    };
+    setViewport((current) => {
+      if (
+        current.rowStart === next.rowStart &&
+        current.rowEnd === next.rowEnd &&
+        current.columnStart === next.columnStart &&
+        current.columnEnd === next.columnEnd &&
+        current.scrollLeft === next.scrollLeft &&
+        current.scrollTop === next.scrollTop
+      ) {
+        return current;
+      }
+      // A one-cell window flicker (scrollbar appearing, toast landing) must
+      // not re-render the grid. In tab mode that loop hit React's update cap.
+      if (
+        current.scrollLeft === next.scrollLeft &&
+        current.scrollTop === next.scrollTop &&
+        current.rowStart === next.rowStart &&
+        current.columnStart === next.columnStart &&
+        Math.abs(current.rowEnd - next.rowEnd) <= 1 &&
+        Math.abs(current.columnEnd - next.columnEnd) <= 1
+      ) {
+        return current;
+      }
+      return next;
     });
   }, [bounds.columns, columnOffsets, rowOffsets, visibleRowIndices.length]);
 
@@ -4173,7 +4200,7 @@ export function SheetsStudio({
       ...(mountedNative
         ? {
             preservedNote:
-              "Spectra keeps this workbook's Excel comments exactly as they were saved.",
+              "Comments",
           }
         : {}),
     },
@@ -4790,6 +4817,7 @@ export function SheetsStudio({
                       <input
                         autoFocus
                         value={editingValue}
+                        onFocus={(event) => event.currentTarget.select()}
                         {...targetAttrs(
                           `/sheets/${activeSheetIndex}/cells/${address}/${
                             editingValue.startsWith("=") || cell?.formula

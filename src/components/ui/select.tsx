@@ -37,6 +37,10 @@ const SelectTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       "flex min-w-0 items-center justify-between gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] font-medium text-[var(--text-primary)] outline-none transition-colors",
+      // SelectValue must stay a direct child of Trigger. An extra span around
+      // it makes Radix ItemText re-render until the tree blows the update cap
+      // (sheet/slide pickers in a tight tab workbar were the first to hit it).
+      "[&>[data-radix-select-value]]:min-w-0 [&>[data-radix-select-value]]:truncate [&>[data-radix-select-value]]:text-left",
       "hover:bg-[var(--bg-hover)]",
       "focus-visible:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]",
       // `--text-placeholder` and `--text-tertiary` both fail WCAG AA against
@@ -48,8 +52,7 @@ const SelectTrigger = React.forwardRef<
     )}
     {...props}
   >
-    {/* The value truncates; the trigger never grows a control bar. */}
-    <span className="min-w-0 truncate text-left">{children}</span>
+    {children}
     <SelectPrimitive.Icon asChild>
       <ChevronDown
         aria-hidden="true"
@@ -189,6 +192,8 @@ export function SelectField({
   // call site: with nothing to choose, the control says so and cannot be
   // opened onto an empty menu.
   const empty = options.length === 0;
+  const matched = options.some((option) => option.value === value);
+  const resolvedValue = empty || !matched ? undefined : value;
 
   const trigger = (
     <SelectTrigger
@@ -207,7 +212,7 @@ export function SelectField({
 
   const control = (
     <Select
-      value={value}
+      value={resolvedValue}
       onValueChange={onChange}
       disabled={disabled || empty}
     >

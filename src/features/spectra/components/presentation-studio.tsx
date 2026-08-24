@@ -3866,12 +3866,12 @@ export function PresentationStudio({
                     <LocalAutocompleteTextarea
                       surface="slide_text"
                       value={activeSlide.speakerNotes ?? ""}
-                      readOnly={readOnly || commandBlocked("notes.set")}
+                      readOnly={readOnly}
                       aria-label={`Speaker notes for slide ${activeSlideIndex + 1}`}
                       {...targetAttrs(
                         `/slides/${activeSlideIndex}/speakerNotes`,
                       )}
-                      placeholder="Add private speaking prompts, source reminders, or rehearsal cues."
+                      placeholder="No speaker notes"
                       className="presentation-notes-field"
                       onFocus={() =>
                         onActiveRegionChange?.(`${activeSlide.id}:notes`)
@@ -3885,11 +3885,7 @@ export function PresentationStudio({
                       }
                       textareaClassName="w-full"
                     />
-                    {commandRefusal("notes.set") ? (
-                      <p className="presentation-refusal">
-                        {commandRefusal("notes.set")}
-                      </p>
-                    ) : null}
+                    {null}
                   </>
                 ) : null}
               </section>
@@ -4778,12 +4774,9 @@ export function PresentationStudio({
                     // slide and none for the next. This surface writes to the
                     // slide in the row rather than the active one, so it reads
                     // that slide's own honesty flag.
-                    readOnly={
-                      readOnly ||
-                      slide.nativeCompatibility?.speakerNotes === "unsupported"
-                    }
+                    readOnly={readOnly}
                     {...targetAttrs(`/slides/${index}/speakerNotes`)}
-                    placeholder="What you will say on this slide."
+                    placeholder="No speaker notes"
                     onFocus={() => onActiveRegionChange?.(`${slide.id}:notes`)}
                     onValueChange={(speakerNotes) =>
                       mutate((draft) => {
@@ -4792,13 +4785,6 @@ export function PresentationStudio({
                     }
                     textareaClassName="min-h-[104px] w-full resize-y rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-2 text-caption leading-relaxed text-[var(--text-primary)] outline-none focus:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))]"
                   />
-                  {slide.nativeCompatibility?.speakerNotes ===
-                  "unsupported" ? (
-                    <p className="presentation-refusal">
-                      This deck has no notes page for this slide, so a note here
-                      could not be written into the file.
-                    </p>
-                  ) : null}
                 </label>
               </article>
             ))}
@@ -5041,7 +5027,7 @@ export function PresentationStudio({
                           <strong>Notes</strong>
                           <p>
                             {presentedDeck.slides[presentIndex]!.speakerNotes ||
-                              "No speaker notes for this slide."}
+                              "No speaker notes"}
                           </p>
                         </section>
                       ) : null}

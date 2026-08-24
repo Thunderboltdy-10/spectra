@@ -569,9 +569,9 @@ export function CommandBar({
       </button>
       <div className="spectra-command-surface flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
         {showInlineBubbles ? bubbles : null}
-        <div className="flex items-end gap-2">
+        <div className="flex items-center gap-2">
           {context ? (
-            <div className="mb-0.5 flex shrink-0 self-end">{context}</div>
+            <div className="flex shrink-0 self-center">{context}</div>
           ) : null}
           <div className="relative min-w-0 flex-1">
             {autocomplete.suggestion ? (

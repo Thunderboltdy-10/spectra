@@ -56,7 +56,7 @@ export function findBindings(adapter: FindAdapter): CommandBinding[] {
       label: "Replace",
       icon: Replace,
       priority: "secondary",
-      general: true,
+      general: false,
       requires: "edit",
       shortcut: "Mod+H",
       active: adapter.replaceOpen,

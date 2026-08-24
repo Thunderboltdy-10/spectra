@@ -4203,7 +4203,7 @@ export function SpectraShell({
                     composerThread
                       ? `Continue ${composerThread.title}...`
                       : commandFocusArtifact
-                        ? `Ask Spectra anything about this ${workTypeMeta[commandFocusArtifact.blueprintKey]?.label?.toLowerCase() ?? "work"}...`
+                        ? `Ask Spectra about ${commandFocusArtifact.title}`
                         : workspace
                           ? `Ask Spectra anything about this workspace...`
                           : "Ask Spectra anything..."

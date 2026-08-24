@@ -10407,7 +10407,9 @@ async function executeOperation(
           await materializeDocxArtifact(
             input.artifactId as Id<"spectraArtifacts">,
             live.content,
-          );
+          ).catch((error: unknown) => {
+            console.warn("[spectra] native Word copy was not updated", error);
+          });
         } else if (
           (artifact.blueprintKey === "sheets" ||
             artifact.blueprintKey === "presentation") &&
@@ -10417,7 +10419,9 @@ async function executeOperation(
           await materializeOfficeArtifact(
             input.artifactId as Id<"spectraArtifacts">,
             live.content,
-          );
+          ).catch((error: unknown) => {
+            console.warn("[spectra] native Office copy was not updated", error);
+          });
         }
       }
     }

@@ -479,7 +479,7 @@ export const applyGeneratedMetadata = mutation({
     if (
       !run ||
       run.threadId !== args.threadId ||
-      run.status !== "running" ||
+      (run.status !== "running" && run.status !== "completed") ||
       run.executionId !== args.executionId
     )
       throw new Error("This title belongs to an older run attempt.");

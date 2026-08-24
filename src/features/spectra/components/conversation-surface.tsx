@@ -1140,11 +1140,13 @@ function ProgressTrace({
   steps,
   active,
   hasOutput = false,
+  summary,
 }: {
   steps: SpectraLiveExchange["steps"];
   active: boolean;
   /** True once assistant text (or terminal failure UI) has started. */
   hasOutput?: boolean;
+  summary?: string;
 }) {
   const reduceMotion = useReducedMotion();
   const [groupOpen, setGroupOpen] = useState(true);
@@ -1390,6 +1392,11 @@ function ProgressTrace({
                 </AnimatePresence>
               </div>
             )}
+            {finished && summary?.trim() ? (
+              <p className="mt-2 text-[12px] leading-5 text-[var(--text-secondary)]">
+                {summary.trim()}
+              </p>
+            ) : null}
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -1537,6 +1544,7 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
         Boolean(trace.run.finalSummary) ||
         !["queued", "running"].includes(trace.run.status)
       }
+      summary={trace.run.finalSummary}
     />
   );
 }
@@ -2348,6 +2356,11 @@ export function ConversationSurface({
                       hasOutput={
                         Boolean(liveExchange.content) ||
                         liveExchange.status === "failed"
+                      }
+                      summary={
+                        liveExchange.status === "streaming"
+                          ? undefined
+                          : liveExchange.content?.slice(0, 180)
                       }
                     />
                     {liveExchange.content ? (

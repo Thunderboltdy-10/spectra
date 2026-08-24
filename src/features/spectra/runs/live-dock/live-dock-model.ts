@@ -1,3 +1,5 @@
+import { humanizeNativeError } from "../../lenses/humanize-native-error";
+
 export type LiveDockTruthState =
   | "working"
   | "waiting"
@@ -104,6 +106,13 @@ export function publicSpectraFailureText(
   const clean = compactText(value);
   if (!clean) return fallback;
   if (
+    /LOCAL_REPLICA|NATIVE_PAYLOAD|PPTX_NOTES_PART|[A-Z]{3,}_[A-Z0-9_]{3,}/.test(
+      clean,
+    )
+  ) {
+    return humanizeNativeError(clean);
+  }
+  if (
     /(?:typeerror|referenceerror|syntaxerror|work_yjs_|stack trace|\.tsx?:\d+|cannot read propert|json\.stringify|could not safely complete)/i.test(
       clean,
     )
@@ -130,11 +139,7 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
   const promptTitle = (compactText(source.run.userPrompt) ?? "")
     .replace(/[.!?].*$/, "")
     .slice(0, 56);
-  const title = titlePending
-    ? !["queued", "running"].includes(source.run.status) && promptTitle
-      ? promptTitle
-      : "Starting run"
-    : rawTitle;
+  const title = titlePending ? "Starting run" : rawTitle;
   const clarification =
     source.run.finalSummary ||
     source.card?.summary ||

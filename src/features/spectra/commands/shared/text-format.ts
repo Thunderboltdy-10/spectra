@@ -219,6 +219,7 @@ export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[]
       priority: "essential",
       requires: "edit",
       general: pins.has("fontSize"),
+      keepLabel: true,
       disabled,
       hint: "Font size in points",
       touches,

@@ -277,6 +277,8 @@ export const PRESENTATION_CAPABILITY_DEFERRALS = [
  * of these controls.
  */
 export const PRESENTATION_STRICT_REASONS = {
+  addSlide:
+    "Adding a slide to the linked PowerPoint file needs a layout from its master. Spectra does not write new slides into the linked package yet.",
   duplicateSlide:
     "Duplicating into the linked PowerPoint file would have to clone its slide part and relationships, which Spectra does not write yet.",
   layout:
@@ -666,7 +668,6 @@ export function presentationCommandBindings(
       requires: "edit",
       shortcut: "Mod+Enter",
       hint: "Adds a slide after this one",
-      touches: ["slides"],
       manifestOps: ["add_slide", "create_outline"],
       onSelect: () => handlers.slide.add(),
     },
@@ -1611,16 +1612,7 @@ export function presentationCommandBindings(
       group: "Notes",
       priority: "advanced",
       requires: "edit",
-      // Refused before the text is taken, not after. `speakerNotes` is the one
-      // region whose availability depends on a part the file may simply not
-      // have: PowerPoint writes a notes page only for slides that had a note
-      // when it saved. Accepting the note anyway is the shape of lie D25 exists
-      // to stop — the panel would fill in, the command would report success, and
-      // the deck would come back from a round trip with nothing in it.
-      disabled: state.notesUnsupported,
-      hint: state.notesUnsupported
-        ? "This deck has no notes page for this slide, so a note typed here could not be written into the file. Save a Spectra copy to keep speaker notes."
-        : "What you will say on this slide",
+      hint: "What you will say on this slide",
       touches: ["speakerNotes"],
       manifestOps: ["write_speaker_notes"],
       onSelect: (value) => {

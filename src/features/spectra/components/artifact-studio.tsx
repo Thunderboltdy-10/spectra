@@ -61,6 +61,7 @@ import {
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { ResourceSurface } from "../bridge/resource-surface";
 import { selectSyncTruth } from "../bridge/status";
+import { humanizeNativeError } from "../lenses/humanize-native-error";
 import { formatByteCount } from "../../../../shared/human-format";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import {
@@ -341,13 +342,15 @@ function waveCIdentityStats(
   }
 }
 
-function studioSyncMessage(syncLabel: string) {
+function studioSyncMessage(syncLabel: string): string | undefined {
   if (
     syncLabel === "Synchronized" ||
+    syncLabel === "Synced" ||
     syncLabel === "Saved" ||
-    syncLabel === "Live"
+    syncLabel === "Live" ||
+    syncLabel === "Auto-saved"
   ) {
-    return "Auto-saved";
+    return undefined;
   }
   return syncLabel;
 }
@@ -355,6 +358,7 @@ function studioSyncMessage(syncLabel: string) {
 function isSyncReady(syncLabel: string) {
   return (
     syncLabel === "Synchronized" ||
+    syncLabel === "Synced" ||
     syncLabel === "Saved" ||
     syncLabel === "Live"
   );
@@ -2184,9 +2188,13 @@ export function documentJsonFromContent(
     const nativeBlock = nativeBlocks.get(node.attrs.blockId);
     if (!nativeBlock) return node;
     const attrs = record(nativeBlock.attrs);
-    const styleId = typeof attrs.styleId === "string" ? attrs.styleId : undefined;
+    const styleId =
+      typeof attrs.styleId === "string" ? attrs.styleId : undefined;
     const headingMatch = styleId?.match(/^Heading([1-3])$/i);
-    if (headingMatch && (node.type === "paragraph" || node.type === "heading")) {
+    if (
+      headingMatch &&
+      (node.type === "paragraph" || node.type === "heading")
+    ) {
       return {
         ...node,
         type: "heading",
@@ -2320,8 +2328,11 @@ export function documentJsonFromContent(
                   : "paragraph";
           if (type === "heading") {
             const attrs = record(block.attrs);
-            const styleId = typeof attrs.styleId === "string" ? attrs.styleId : "";
-            const styleLevel = Number(styleId.match(/^Heading([1-3])$/i)?.[1] ?? 0);
+            const styleId =
+              typeof attrs.styleId === "string" ? attrs.styleId : "";
+            const styleLevel = Number(
+              styleId.match(/^Heading([1-3])$/i)?.[1] ?? 0,
+            );
             return {
               type: "heading",
               attrs: {
@@ -3374,11 +3385,12 @@ function ArtifactStudioEditor({
   } | null>(null);
   const [nativeWriteError, setNativeWriteError] = useState<string>();
   const [nativeMaterialization, setNativeMaterialization] = useState<
-    | { state: "queueing" }
-    | { state: "pending"; hash: string }
+    { state: "queueing" } | { state: "pending"; hash: string }
   >();
   const [nativeAttribution, setNativeAttribution] = useState<string>();
-  const [nativeRecoveryBusy, setNativeRecoveryBusy] = useState<"download" | "materialize" | null>(null);
+  const [nativeRecoveryBusy, setNativeRecoveryBusy] = useState<
+    "download" | "materialize" | null
+  >(null);
   const [nativeRecoveryError, setNativeRecoveryError] = useState<string>();
   const [nativeLensProjection, setNativeLensProjection] = useState<unknown>();
   const [nativeProjectionReady, setNativeProjectionReady] = useState(false);
@@ -3447,27 +3459,62 @@ function ArtifactStudioEditor({
   const reconciliationFrameRef = useRef<number | null>(null);
   const nativeBodyBinding =
     artifact.blueprintKey === "document" || artifact.blueprintKey === "code";
-  const titleNativeFormat = artifact.title.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const titleNativeFormat = artifact.title
+    .match(/\.([a-z0-9]+)$/i)?.[1]
+    ?.toLowerCase();
   const storedNativeFormat = artifact.nativeFormat?.toLowerCase();
   const officeFormatNames = new Set([
-    "docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm",
-    "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam",
+    "docx",
+    "docm",
+    "dotx",
+    "dotm",
+    "xlsx",
+    "xlsm",
+    "xltx",
+    "xltm",
+    "xlam",
+    "pptx",
+    "pptm",
+    "potx",
+    "potm",
+    "ppsx",
+    "ppsm",
+    "ppam",
   ]);
   const inferredNativeFormat = officeFormatNames.has(titleNativeFormat ?? "")
     ? titleNativeFormat
     : storedNativeFormat;
   const nativeOfficeDocument = [
-    "docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm",
-    "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam",
+    "docx",
+    "docm",
+    "dotx",
+    "dotm",
+    "xlsx",
+    "xlsm",
+    "xltx",
+    "xltm",
+    "xlam",
+    "pptx",
+    "pptm",
+    "potx",
+    "potm",
+    "ppsx",
+    "ppsm",
+    "ppam",
   ].includes(inferredNativeFormat ?? "");
-  const nativePortableArtifact = nativeOfficeDocument || [
-    "flashcard_deck", "quiz", "planner_task", "agent", "whiteboard", "presentation",
-  ].includes(artifact.blueprintKey);
+  const nativePortableArtifact =
+    nativeOfficeDocument ||
+    [
+      "flashcard_deck",
+      "quiz",
+      "planner_task",
+      "agent",
+      "whiteboard",
+      "presentation",
+    ].includes(artifact.blueprintKey);
   const nativeWordDocument =
     artifact.blueprintKey === "document" &&
-    ["docx", "docm", "dotx", "dotm"].includes(
-      inferredNativeFormat ?? "",
-    );
+    ["docx", "docm", "dotx", "dotm"].includes(inferredNativeFormat ?? "");
   const nativeOfficeApplication = nativeWordDocument
     ? "Word"
     : artifact.blueprintKey === "sheets"
@@ -3494,8 +3541,8 @@ function ArtifactStudioEditor({
       // second full-document reconciliation path on each keystroke.
       content: nativeBodyBinding
         ? currentSnapshotRef.current.content
-        : nativeProjectionOverrideRef.current ??
-          (nativeProjectionReady ? content : incomingLiveContent),
+        : (nativeProjectionOverrideRef.current ??
+          (nativeProjectionReady ? content : incomingLiveContent)),
     }),
     [
       incomingLiveContent,
@@ -3527,9 +3574,11 @@ function ArtifactStudioEditor({
       body: JSON.stringify({ action: "open", artifactId: artifact._id }),
     })
       .then(async (response) => {
-        const result = (await response.json().catch(() => null)) as
-          | { content?: unknown; projection?: unknown; message?: string }
-          | null;
+        const result = (await response.json().catch(() => null)) as {
+          content?: unknown;
+          projection?: unknown;
+          message?: string;
+        } | null;
         if (!response.ok)
           throw new Error(
             result?.message ??
@@ -3640,9 +3689,11 @@ function ArtifactStudioEditor({
             content: snapshot.content,
           }),
         });
-        const result = (await response.json().catch(() => null)) as
-          | { hash?: string; message?: string; state?: string }
-          | null;
+        const result = (await response.json().catch(() => null)) as {
+          hash?: string;
+          message?: string;
+          state?: string;
+        } | null;
         if (!response.ok)
           throw new Error(
             result?.message ??
@@ -3653,7 +3704,9 @@ function ArtifactStudioEditor({
           return;
         }
         if (!result?.hash)
-          throw new Error("The Word write was queued without a verifiable hash.");
+          throw new Error(
+            "The Word write was queued without a verifiable hash.",
+          );
         setNativeMaterialization({ state: "pending", hash: result.hash });
       } catch (error) {
         setNativeMaterialization(undefined);
@@ -3671,15 +3724,24 @@ function ArtifactStudioEditor({
     setNativeRecoveryBusy("download");
     setNativeRecoveryError(undefined);
     try {
-      const response = await fetch(`/api/spectra/native?artifactId=${encodeURIComponent(artifact._id)}`, { cache: "no-store" });
+      const response = await fetch(
+        `/api/spectra/native?artifactId=${encodeURIComponent(artifact._id)}`,
+        { cache: "no-store" },
+      );
       if (!response.ok) {
-        const result = await response.json().catch(() => null) as { message?: string } | null;
-        throw new Error(result?.message ?? "The retained native copy is unavailable.");
+        const result = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(
+          result?.message ?? "The retained native copy is unavailable.",
+        );
       }
       const blob = await response.blob();
       const disposition = response.headers.get("content-disposition") ?? "";
       const match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-      const name = match ? decodeURIComponent(match[1]!) : `${artifact.title}.spectra-pkg`;
+      const name = match
+        ? decodeURIComponent(match[1]!)
+        : `${artifact.title}.spectra-pkg`;
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = name;
@@ -3687,7 +3749,11 @@ function ArtifactStudioEditor({
       URL.revokeObjectURL(link.href);
       setNativeAttribution("Downloaded a verified native copy");
     } catch (error) {
-      setNativeRecoveryError(error instanceof Error ? error.message : "The retained native copy is unavailable.");
+      setNativeRecoveryError(
+        error instanceof Error
+          ? error.message
+          : "The retained native copy is unavailable.",
+      );
     } finally {
       setNativeRecoveryBusy(null);
     }
@@ -3702,11 +3768,27 @@ function ArtifactStudioEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ artifactId: artifact._id }),
       });
-      const result = await response.json().catch(() => null) as { message?: string; state?: string; relativePath?: string } | null;
-      if (!response.ok) throw new Error(result?.message ?? "The native copy could not be queued on this device.");
-      setNativeAttribution(result?.state === "existing" ? "This work already has a local replica" : `Queued a local copy${result?.relativePath ? ` at ${result.relativePath}` : ""}`);
+      const result = (await response.json().catch(() => null)) as {
+        message?: string;
+        state?: string;
+        relativePath?: string;
+      } | null;
+      if (!response.ok)
+        throw new Error(
+          result?.message ??
+            "The native copy could not be queued on this device.",
+        );
+      setNativeAttribution(
+        result?.state === "existing"
+          ? "This work already has a local replica"
+          : `Queued a local copy${result?.relativePath ? ` at ${result.relativePath}` : ""}`,
+      );
     } catch (error) {
-      setNativeRecoveryError(error instanceof Error ? error.message : "The native copy could not be queued on this device.");
+      setNativeRecoveryError(
+        error instanceof Error
+          ? error.message
+          : "The native copy could not be queued on this device.",
+      );
     } finally {
       setNativeRecoveryBusy(null);
     }
@@ -4728,6 +4810,10 @@ function ArtifactStudioEditor({
     if (activeAiPresence) setAiHighlightDismissed(false);
   }, [activeAiPresence]);
 
+  const lastPresenceRegionRef = useRef<string | null>(null);
+  const lastPresenceModeRef = useRef<"typing" | "focus" | "selecting" | null>(
+    null,
+  );
   const setActivePresence = useCallback(
     (
       regionId: string,
@@ -4735,6 +4821,18 @@ function ArtifactStudioEditor({
     ) => {
       try {
         const mode = options?.mode ?? "focus";
+        // Presence used to stamp `updatedAt: Date.now()` on every studio
+        // region-effect, even when the caret had not moved. Tab mode then
+        // rebuilt the live snapshot, the studio re-rendered, the effect ran
+        // again, and React hit its update cap before the grid could settle.
+        if (
+          lastPresenceRegionRef.current === regionId &&
+          lastPresenceModeRef.current === mode
+        ) {
+          return;
+        }
+        lastPresenceRegionRef.current = regionId;
+        lastPresenceModeRef.current = mode;
         live.transport?.setPresence({
           activeRegionId: regionId,
           interaction: {
@@ -5451,7 +5549,9 @@ function ArtifactStudioEditor({
   }, [live.modelSnapshot.regionIds, liveDescriptor]);
   const handleActiveRegionChange = useCallback(
     (regionId: string) => {
-      setActiveCommentRegionId(regionId);
+      setActiveCommentRegionId((current) =>
+        current === regionId ? current : regionId,
+      );
       setActivePresence(regionId, { mode: "typing" });
     },
     [setActivePresence],
@@ -5589,12 +5689,17 @@ function ArtifactStudioEditor({
   }, [artifact.blueprintKey, readOnly, setActivePresence]);
 
   const applyExternalProjection = useCallback(
-    async (projection: unknown, attribution = `Edited in ${nativeOfficeApplication}`) => {
+    async (
+      projection: unknown,
+      attribution = `Edited in ${nativeOfficeApplication}`,
+    ) => {
       nativeProjectionOverrideRef.current = projection;
       const nextValue = { ...live.liveValue, content: projection };
       const applied = await live.synchronize(nextValue);
       if (applied && "applied" in applied && applied.applied === false)
-        throw new Error(`The ${nativeOfficeApplication} edit overlaps an active collaborator region.`);
+        throw new Error(
+          `The ${nativeOfficeApplication} edit overlaps an active collaborator region.`,
+        );
       const snapshot = {
         ...currentSnapshotRef.current,
         content: projection,
@@ -5625,12 +5730,10 @@ function ArtifactStudioEditor({
   }, [live.liveValue.content]);
   useEffect(() => {
     const onLensActivated = (event: Event) => {
-      const detail = (event as CustomEvent<{ artifactId?: string; projection?: unknown }>).detail;
-      if (
-        detail?.artifactId !== artifact._id ||
-        !detail.projection ||
-        dirty
-      )
+      const detail = (
+        event as CustomEvent<{ artifactId?: string; projection?: unknown }>
+      ).detail;
+      if (detail?.artifactId !== artifact._id || !detail.projection || dirty)
         return;
       if (
         !live.modelSnapshot.initialized ||
@@ -5640,19 +5743,23 @@ function ArtifactStudioEditor({
         pendingNativeProjectionRef.current = detail.projection;
         return;
       }
-      void applyExternalProjection(detail.projection, `Edited in ${nativeOfficeApplication}`).catch(
-        (error: unknown) => {
-          setNativeWriteError(
-            error instanceof Error
-              ? error.message
-              : `The ${nativeOfficeApplication} projection could not be applied safely.`,
-          );
-        },
-      );
+      void applyExternalProjection(
+        detail.projection,
+        `Edited in ${nativeOfficeApplication}`,
+      ).catch((error: unknown) => {
+        setNativeWriteError(
+          error instanceof Error
+            ? error.message
+            : `The ${nativeOfficeApplication} projection could not be applied safely.`,
+        );
+      });
     };
     window.addEventListener("spectra:artifact-lens-activated", onLensActivated);
     return () =>
-      window.removeEventListener("spectra:artifact-lens-activated", onLensActivated);
+      window.removeEventListener(
+        "spectra:artifact-lens-activated",
+        onLensActivated,
+      );
   }, [
     applyExternalProjection,
     artifact._id,
@@ -5669,9 +5776,24 @@ function ArtifactStudioEditor({
       !live.modelSnapshot.initialized ||
       live.modelSnapshot.validity !== "valid" ||
       live.unsynchronizedChanges > 0
-    ) return;
-    void applyExternalProjection(nativeLensProjection, `Opened from ${nativeOfficeApplication}`).catch((error: unknown) => {
-      setNativeWriteError(error instanceof Error ? error.message : `The ${nativeOfficeApplication} projection could not be applied safely.`);
+    )
+      return;
+    const projection = nativeLensProjection;
+    // Drop the pending projection before apply. `applyExternalProjection`
+    // depends on `live`, which changes during Office bootstrap; leaving the
+    // projection in state re-fired this effect until React hit its update cap
+    // (tab-opened xlsx / pptx were the first to show it).
+    setNativeLensProjection(undefined);
+    void applyExternalProjection(
+      projection,
+      `Opened from ${nativeOfficeApplication}`,
+    ).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "";
+      if (/maximum update depth|too many re-renders/i.test(message)) return;
+      setNativeWriteError(
+        message ||
+          `The ${nativeOfficeApplication} projection could not be applied safely.`,
+      );
     });
   }, [
     applyExternalProjection,
@@ -5693,16 +5815,17 @@ function ArtifactStudioEditor({
     )
       return;
     pendingNativeProjectionRef.current = undefined;
-    void applyExternalProjection(projection, `Edited in ${nativeOfficeApplication}`).catch(
-      (error: unknown) => {
-        pendingNativeProjectionRef.current = projection;
-        setNativeWriteError(
-          error instanceof Error
-            ? error.message
-            : `The ${nativeOfficeApplication} projection could not be applied safely.`,
-        );
-      },
-    );
+    void applyExternalProjection(
+      projection,
+      `Edited in ${nativeOfficeApplication}`,
+    ).catch((error: unknown) => {
+      pendingNativeProjectionRef.current = projection;
+      setNativeWriteError(
+        error instanceof Error
+          ? error.message
+          : `The ${nativeOfficeApplication} projection could not be applied safely.`,
+      );
+    });
   }, [
     applyExternalProjection,
     dirty,
@@ -5719,35 +5842,34 @@ function ArtifactStudioEditor({
           ? "/api/spectra/lenses/docx"
           : "/api/spectra/lenses/office",
         {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "reconcile",
-          artifactId: artifact._id,
-          ...(resolution
-            ? {
-                resolution:
-                  resolution === "word" && !nativeWordDocument
-                    ? "local"
-                    : resolution,
-              }
-            : {}),
-        }),
-      },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "reconcile",
+            artifactId: artifact._id,
+            ...(resolution
+              ? {
+                  resolution:
+                    resolution === "word" && !nativeWordDocument
+                      ? "local"
+                      : resolution,
+                }
+              : {}),
+          }),
+        },
       );
-      const result = (await response.json().catch(() => null)) as
-        | {
-            state?: string;
-            projection?: unknown;
-            attribution?: string;
-            status?: string;
-            message?: string;
-            conflict?: { regionIds?: string[]; message?: string };
-          }
-        | null;
+      const result = (await response.json().catch(() => null)) as {
+        state?: string;
+        projection?: unknown;
+        attribution?: string;
+        status?: string;
+        message?: string;
+        conflict?: { regionIds?: string[]; message?: string };
+      } | null;
       if (!response.ok)
         throw new Error(
-          result?.message ?? `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
+          result?.message ??
+            `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
         );
       if (result?.state === "applied" && result.projection)
         await applyExternalProjection(
@@ -5769,7 +5891,12 @@ function ArtifactStudioEditor({
       }
       setNativeWriteError(undefined);
     },
-    [applyExternalProjection, artifact._id, nativeOfficeApplication, nativeWordDocument],
+    [
+      applyExternalProjection,
+      artifact._id,
+      nativeOfficeApplication,
+      nativeWordDocument,
+    ],
   );
 
   const nativeLocalReplica = nativeOfficeDocument
@@ -5788,8 +5915,8 @@ function ArtifactStudioEditor({
     const previousRevision = nativeLocalRevisionRef.current;
     const localChangedSinceCloud = Boolean(
       nativeLocalReplica.contentHash &&
-        nativeCloudReplica?.contentHash &&
-        nativeLocalReplica.contentHash !== nativeCloudReplica.contentHash,
+      nativeCloudReplica?.contentHash &&
+      nativeLocalReplica.contentHash !== nativeCloudReplica.contentHash,
     );
     nativeLocalRevisionRef.current = nativeLocalReplica.revision;
     if (
@@ -5854,15 +5981,16 @@ function ArtifactStudioEditor({
     if (!persistedNativeConflict) return;
     const regionCount = persistedNativeConflict.regionIds.length;
     const preservedPartCount = persistedNativeConflict.partNames.length;
-    setNativeConflict((current) =>
-      current ?? {
-        regionIds: persistedNativeConflict.regionIds,
-        message: regionCount
-          ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same work region" : `${regionCount} overlapping work regions`}. Choose which version to keep.`
-          : preservedPartCount
-            ? `${nativeOfficeApplication} and Spectra changed the same preserved native content. Choose which version to keep.`
-            : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
-      },
+    setNativeConflict(
+      (current) =>
+        current ?? {
+          regionIds: persistedNativeConflict.regionIds,
+          message: regionCount
+            ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same work region" : `${regionCount} overlapping work regions`}. Choose which version to keep.`
+            : preservedPartCount
+              ? `${nativeOfficeApplication} and Spectra changed the same preserved native content. Choose which version to keep.`
+              : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
+        },
     );
   }, [nativeOfficeApplication, persistedNativeConflict]);
   useEffect(() => {
@@ -5902,10 +6030,11 @@ function ArtifactStudioEditor({
    * — a single preserved paragraph must not refuse typing across the whole body.
    */
   const nativeFidelity = useMemo(() => {
-    const entries = replicaTruth?.replicas.flatMap((replica) => {
-      const map = record(replica.fidelityMap);
-      return Array.isArray(map.entries) ? map.entries.map(record) : [];
-    }) ?? [];
+    const entries =
+      replicaTruth?.replicas.flatMap((replica) => {
+        const map = record(replica.fidelityMap);
+        return Array.isArray(map.entries) ? map.entries.map(record) : [];
+      }) ?? [];
     return fidelityRegionMap(entries);
   }, [replicaTruth?.replicas]);
   const nativeReadOnlyRegionIds = useMemo(
@@ -5938,9 +6067,7 @@ function ArtifactStudioEditor({
     executeApplicationCommand,
   });
   const identityBlock = (
-    <div
-      className="spectra-artifact-identity flex min-w-0 flex-1 items-start"
-    >
+    <div className="spectra-artifact-identity flex min-w-0 flex-1 items-start">
       <div className="min-w-0 flex-1">
         <div className="rounded-[7px]">
           <textarea
@@ -6089,7 +6216,7 @@ function ArtifactStudioEditor({
       ) : null}
       <header className="spectra-artifact-header relative z-30 flex shrink-0 flex-col bg-transparent">
         <div className="spectra-artifact-header-topline flex min-w-0 items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className="spectra-artifact-identity-cluster flex min-w-0 flex-1 items-start gap-3">
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
               style={{ color: meta.color }}
@@ -6097,28 +6224,25 @@ function ArtifactStudioEditor({
               <Icon className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <span className="block truncate text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
+              <span className="spectra-artifact-kind block truncate text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
                 {meta.label}
               </span>
               {identityBlock}
             </div>
           </div>
           <div className="spectra-artifact-header-actions flex shrink-0 items-center gap-1">
-            {syncLabel !== "Saved" && syncLabel !== "Live" ? (
+            {syncBusy ||
+            live.state === "connecting" ||
+            live.state === "synchronizing" ||
+            live.state === "reconnecting" ? (
               <span
-                className="spectra-artifact-sync-status hidden items-center gap-1.5 text-[11px] text-[var(--text-secondary)] sm:inline-flex"
+                className="spectra-artifact-sync-status inline-flex items-center"
                 role="status"
                 aria-live="polite"
+                aria-label={artifactSyncMessage || "Saving"}
+                title={artifactSyncMessage || "Saving"}
               >
-                {syncBusy ||
-                live.state === "connecting" ||
-                live.state === "synchronizing" ||
-                live.state === "reconnecting" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-                ) : (
-                  <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
-                )}
-                {syncLabel}
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
               </span>
             ) : null}
             {collaboratorCount > 0 ? (
@@ -6203,11 +6327,27 @@ function ArtifactStudioEditor({
             <WorkbarMore label="More work actions">
               {nativePortableArtifact ? (
                 <>
-                  <button type="button" className={workbarMenuItemClass()} disabled={nativeRecoveryBusy !== null} onClick={() => void downloadNativeCopy()}>
-                    <FileDown className="h-4 w-4" /> {nativeRecoveryBusy === "download" ? "Preparing copy…" : "Download native copy"}
+                  <button
+                    type="button"
+                    className={workbarMenuItemClass()}
+                    disabled={nativeRecoveryBusy !== null}
+                    onClick={() => void downloadNativeCopy()}
+                  >
+                    <FileDown className="h-4 w-4" />{" "}
+                    {nativeRecoveryBusy === "download"
+                      ? "Preparing copy…"
+                      : "Download native copy"}
                   </button>
-                  <button type="button" className={workbarMenuItemClass()} disabled={nativeRecoveryBusy !== null} onClick={() => void materializeNativeCopy()}>
-                    <Download className="h-4 w-4" /> {nativeRecoveryBusy === "materialize" ? "Queueing local copy…" : "Create local replica"}
+                  <button
+                    type="button"
+                    className={workbarMenuItemClass()}
+                    disabled={nativeRecoveryBusy !== null}
+                    onClick={() => void materializeNativeCopy()}
+                  >
+                    <Download className="h-4 w-4" />{" "}
+                    {nativeRecoveryBusy === "materialize"
+                      ? "Queueing local copy…"
+                      : "Create local replica"}
                   </button>
                 </>
               ) : null}
@@ -6225,9 +6365,9 @@ function ArtifactStudioEditor({
               <button
                 type="button"
                 className={workbarMenuItemClass()}
-                  onClick={() => {
-                    setEmbedsOpen(true);
-                  }}
+                onClick={() => {
+                  setEmbedsOpen(true);
+                }}
               >
                 <Link2 className="h-4 w-4" /> References
               </button>
@@ -6247,9 +6387,9 @@ function ArtifactStudioEditor({
               <button
                 type="button"
                 className={workbarMenuItemClass()}
-                  onClick={() => {
-                    loadVersionHistory();
-                  }}
+                onClick={() => {
+                  loadVersionHistory();
+                }}
               >
                 <History className="h-4 w-4" /> Version history
               </button>
@@ -6340,19 +6480,18 @@ function ArtifactStudioEditor({
         >
           <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]">
             <AlertCircle className="h-4 w-4 shrink-0 text-[#d88922]" />
-            <span className="min-w-0 flex-1">
-              {nativeConflict.message}
-            </span>
+            <span className="min-w-0 flex-1">{nativeConflict.message}</span>
             <button
               type="button"
               className="rounded-[7px] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
               onClick={() =>
-                void reconcileNativeRevision("spectra").catch((error: unknown) =>
-                  setNativeWriteError(
-                    error instanceof Error
-                      ? error.message
-                      : "The conflict could not be resolved safely.",
-                  ),
+                void reconcileNativeRevision("spectra").catch(
+                  (error: unknown) =>
+                    setNativeWriteError(
+                      error instanceof Error
+                        ? error.message
+                        : "The conflict could not be resolved safely.",
+                    ),
                 )
               }
             >
@@ -6382,21 +6521,18 @@ function ArtifactStudioEditor({
         >
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />
           <span className="min-w-0 flex-1">
-            {nativeWriteError} Your Spectra edit is still saved; the {nativeOfficeApplication} file
-            has not been reported as updated.
+            {humanizeNativeError(nativeWriteError, nativeOfficeApplication)}
           </span>
         </div>
       ) : nativeRecoveryError ? (
-        <div role="alert" className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />
-          <span>{nativeRecoveryError}</span>
-        </div>
-      ) : nativeAttribution ? (
         <div
-          role="status"
-          className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
+          role="alert"
+          className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
         >
-          {nativeAttribution}
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />
+          <span>
+            {humanizeNativeError(nativeRecoveryError, nativeOfficeApplication)}
+          </span>
         </div>
       ) : null}
       {isCollaborativeArtifact &&
@@ -6468,160 +6604,160 @@ function ArtifactStudioEditor({
         <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
             <StudioContractProvider value={studioContract}>
-            {artifact.blueprintKey === "document" ? (
-              <DocumentStudio
-                key={`${artifact._id}:document`}
-                artifactId={artifact._id}
-                title={title}
-                content={editorContent}
-                onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                readOnly={readOnly}
-                nativeReadOnlyRegionIds={nativeReadOnlyRegionIds}
-                collaborationDocument={
-                  live.modelSnapshot.initialized
-                    ? live.transport?.document
-                    : undefined
-                }
-                onLocalCollaborativeChange={
-                  markLocalCollaborativeDocumentChange
-                }
-                header={null}
-                mode={contentMode}
-              />
-            ) : null}
-            {artifact.blueprintKey === "flashcard_deck" ? (
-              <FlashcardStudio
-                key={`${artifact._id}:deck`}
-                artifactId={artifact._id}
-                mode={contentMode}
-                content={editorContent}
-                onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                readOnly={readOnly}
-                onActiveRegionChange={handleActiveRegionChange}
-              />
-            ) : null}
-            {artifact.blueprintKey === "quiz" ? (
-              <QuizStudio
-                key={`${artifact._id}:quiz`}
-                artifactId={artifact._id}
-                mode={contentMode}
-                content={editorContent}
-                onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                readOnly={readOnly}
-                synchronizationReady={isSyncReady(syncLabel)}
-              />
-            ) : null}
-            {artifact.blueprintKey === "planner_task" ? (
-              <PlanStudio
-                key={`${artifact._id}:plan`}
-                mode={contentMode}
-                title={title}
-                content={editorContent}
-                onChange={editorChange}
-                readOnly={readOnly}
-                onOpenArtifact={onOpenArtifact}
-              />
-            ) : null}
-            {artifact.blueprintKey === "sheets" ? (
-              <SheetsStudio
-                key={`${artifact._id}:sheets`}
-                artifactId={artifact._id}
-                content={editorContent}
-                onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                readOnly={readOnly}
-                mode={contentMode}
-                synchronizationReady={isSyncReady(syncLabel)}
-                syncMessage={artifactSyncMessage}
-                onActiveRegionChange={handleActiveRegionChange}
-              />
-            ) : null}
-            {artifact.blueprintKey === "code" ? (
-              <CodeStudio
-                key={`${artifact._id}:code`}
-                artifactId={artifact._id}
-                artifacts={artifacts}
-                title={title}
-                content={editorContent}
-                onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                readOnly={readOnly}
-                collaborationDocument={
-                  live.modelSnapshot.initialized
-                    ? live.transport?.document
-                    : undefined
-                }
-                synchronizationReady={isSyncReady(syncLabel)}
-                syncMessage={artifactSyncMessage}
-                onActiveRegionChange={handleActiveRegionChange}
-              />
-            ) : null}
-            {artifact.blueprintKey === "presentation" ? (
-              <PresentationStudio
-                key={`${artifact._id}:presentation`}
-                artifactId={artifact._id}
-                artifacts={artifacts}
-                content={editorContent}
-                onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                readOnly={readOnly}
-                synchronizationReady={isSyncReady(syncLabel)}
-                syncMessage={artifactSyncMessage}
-                onActiveRegionChange={handleActiveRegionChange}
-              />
-            ) : null}
-            {artifact.blueprintKey === "whiteboard" ? (
-              <WhiteboardStudio
-                key={`${artifact._id}:whiteboard`}
-                artifactId={artifact._id}
-                artifacts={artifacts}
-                content={editorContent}
-                onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                readOnly={readOnly}
-                synchronizationReady={isSyncReady(syncLabel)}
-                syncMessage={artifactSyncMessage}
-                onActiveRegionChange={handleActiveRegionChange}
-              />
-            ) : null}
-            {artifact.blueprintKey === "timetable" ? (
-              <TimetableStudio
-                key={`${artifact._id}:timetable`}
-                artifactId={artifact._id}
-                artifacts={artifacts}
-                content={editorContent}
-                onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                readOnly={readOnly}
-                synchronizationReady={isSyncReady(syncLabel)}
-                syncMessage={artifactSyncMessage}
-                onActiveRegionChange={handleActiveRegionChange}
-              />
-            ) : null}
-            {artifact.blueprintKey === "agent" ? (
-              <AgentFoundry
-                key={`${artifact._id}:agent`}
-                artifactId={artifact._id}
-                artifactTitle={title || artifact.title}
-                mode={mode}
-                artifacts={artifacts}
-                content={editorContent}
-                onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                readOnly={readOnly}
-                canPublish={
-                  artifact.capabilities?.includes("publish") ??
-                  artifact.ownership === "owned"
-                }
-                onActiveRegionChange={handleActiveRegionChange}
-              />
-            ) : null}
-            {artifact.blueprintKey === "thread_reference" ? (
-              <ThreadReferenceStudio content={content} />
-            ) : null}
+              {artifact.blueprintKey === "document" ? (
+                <DocumentStudio
+                  key={`${artifact._id}:document`}
+                  artifactId={artifact._id}
+                  title={title}
+                  content={editorContent}
+                  onChange={editorChange}
+                  aiChangedPaths={highlightPaths}
+                  readOnly={readOnly}
+                  nativeReadOnlyRegionIds={nativeReadOnlyRegionIds}
+                  collaborationDocument={
+                    live.modelSnapshot.initialized
+                      ? live.transport?.document
+                      : undefined
+                  }
+                  onLocalCollaborativeChange={
+                    markLocalCollaborativeDocumentChange
+                  }
+                  header={null}
+                  mode={contentMode}
+                />
+              ) : null}
+              {artifact.blueprintKey === "flashcard_deck" ? (
+                <FlashcardStudio
+                  key={`${artifact._id}:deck`}
+                  artifactId={artifact._id}
+                  mode={contentMode}
+                  content={editorContent}
+                  onChange={editorChange}
+                  aiChangedPaths={highlightPaths}
+                  readOnly={readOnly}
+                  onActiveRegionChange={handleActiveRegionChange}
+                />
+              ) : null}
+              {artifact.blueprintKey === "quiz" ? (
+                <QuizStudio
+                  key={`${artifact._id}:quiz`}
+                  artifactId={artifact._id}
+                  mode={contentMode}
+                  content={editorContent}
+                  onChange={editorChange}
+                  aiChangedPaths={highlightPaths}
+                  readOnly={readOnly}
+                  synchronizationReady={isSyncReady(syncLabel)}
+                />
+              ) : null}
+              {artifact.blueprintKey === "planner_task" ? (
+                <PlanStudio
+                  key={`${artifact._id}:plan`}
+                  mode={contentMode}
+                  title={title}
+                  content={editorContent}
+                  onChange={editorChange}
+                  readOnly={readOnly}
+                  onOpenArtifact={onOpenArtifact}
+                />
+              ) : null}
+              {artifact.blueprintKey === "sheets" ? (
+                <SheetsStudio
+                  key={`${artifact._id}:sheets`}
+                  artifactId={artifact._id}
+                  content={editorContent}
+                  onChange={editorChange}
+                  aiChangedPaths={highlightPaths}
+                  readOnly={readOnly}
+                  mode={contentMode}
+                  synchronizationReady={isSyncReady(syncLabel)}
+                  syncMessage={artifactSyncMessage}
+                  onActiveRegionChange={handleActiveRegionChange}
+                />
+              ) : null}
+              {artifact.blueprintKey === "code" ? (
+                <CodeStudio
+                  key={`${artifact._id}:code`}
+                  artifactId={artifact._id}
+                  artifacts={artifacts}
+                  title={title}
+                  content={editorContent}
+                  onChange={editorChange}
+                  aiChangedPaths={highlightPaths}
+                  readOnly={readOnly}
+                  collaborationDocument={
+                    live.modelSnapshot.initialized
+                      ? live.transport?.document
+                      : undefined
+                  }
+                  synchronizationReady={isSyncReady(syncLabel)}
+                  syncMessage={artifactSyncMessage}
+                  onActiveRegionChange={handleActiveRegionChange}
+                />
+              ) : null}
+              {artifact.blueprintKey === "presentation" ? (
+                <PresentationStudio
+                  key={`${artifact._id}:presentation`}
+                  artifactId={artifact._id}
+                  artifacts={artifacts}
+                  content={editorContent}
+                  onChange={editorChange}
+                  aiChangedPaths={highlightPaths}
+                  readOnly={readOnly}
+                  synchronizationReady={isSyncReady(syncLabel)}
+                  syncMessage={artifactSyncMessage}
+                  onActiveRegionChange={handleActiveRegionChange}
+                />
+              ) : null}
+              {artifact.blueprintKey === "whiteboard" ? (
+                <WhiteboardStudio
+                  key={`${artifact._id}:whiteboard`}
+                  artifactId={artifact._id}
+                  artifacts={artifacts}
+                  content={editorContent}
+                  onChange={editorChange}
+                  aiChangedPaths={highlightPaths}
+                  readOnly={readOnly}
+                  synchronizationReady={isSyncReady(syncLabel)}
+                  syncMessage={artifactSyncMessage}
+                  onActiveRegionChange={handleActiveRegionChange}
+                />
+              ) : null}
+              {artifact.blueprintKey === "timetable" ? (
+                <TimetableStudio
+                  key={`${artifact._id}:timetable`}
+                  artifactId={artifact._id}
+                  artifacts={artifacts}
+                  content={editorContent}
+                  onChange={editorChange}
+                  aiChangedPaths={highlightPaths}
+                  readOnly={readOnly}
+                  synchronizationReady={isSyncReady(syncLabel)}
+                  syncMessage={artifactSyncMessage}
+                  onActiveRegionChange={handleActiveRegionChange}
+                />
+              ) : null}
+              {artifact.blueprintKey === "agent" ? (
+                <AgentFoundry
+                  key={`${artifact._id}:agent`}
+                  artifactId={artifact._id}
+                  artifactTitle={title || artifact.title}
+                  mode={mode}
+                  artifacts={artifacts}
+                  content={editorContent}
+                  onChange={editorChange}
+                  aiChangedPaths={highlightPaths}
+                  readOnly={readOnly}
+                  canPublish={
+                    artifact.capabilities?.includes("publish") ??
+                    artifact.ownership === "owned"
+                  }
+                  onActiveRegionChange={handleActiveRegionChange}
+                />
+              ) : null}
+              {artifact.blueprintKey === "thread_reference" ? (
+                <ThreadReferenceStudio content={content} />
+              ) : null}
             </StudioContractProvider>
           </section>
           {showDetails ? (
@@ -6949,9 +7085,7 @@ export function RichTextFormatBar({
                 label="Quote"
                 icon={MessageSquare}
                 active={editor?.isActive("blockquote")}
-                onClick={() =>
-                  editor?.chain().focus().toggleBlockquote().run()
-                }
+                onClick={() => editor?.chain().focus().toggleBlockquote().run()}
               />
               <ToolbarButton
                 label="Inline code"
@@ -7765,15 +7899,22 @@ export function ToolbarButton({
     if (!onClick) return;
     if (!contract) return onClick();
     const context = commandContext(contract.type, contract.can, contract.role);
-    executeCommand(commandForBinding(contract.type, {
-      id: `format-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`,
-      label,
-      icon: Icon,
-      active,
-      disabled,
-      tab: "Format",
-      onSelect: onClick,
-    }, 0), context);
+    executeCommand(
+      commandForBinding(
+        contract.type,
+        {
+          id: `format-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`,
+          label,
+          icon: Icon,
+          active,
+          disabled,
+          tab: "Format",
+          onSelect: onClick,
+        },
+        0,
+      ),
+      context,
+    );
   };
   return (
     <Tooltip label={label}>
@@ -7806,13 +7947,20 @@ export function ToolbarTextButton({
   const execute = () => {
     if (!onClick) return;
     if (!contract) return onClick();
-    executeCommand(commandForBinding(contract.type, {
-      id: `format-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`,
-      label,
-      active,
-      tab: "Format",
-      onSelect: onClick,
-    }, 0), commandContext(contract.type, contract.can, contract.role));
+    executeCommand(
+      commandForBinding(
+        contract.type,
+        {
+          id: `format-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`,
+          label,
+          active,
+          tab: "Format",
+          onSelect: onClick,
+        },
+        0,
+      ),
+      commandContext(contract.type, contract.can, contract.role),
+    );
   };
   return (
     <Tooltip label={label}>

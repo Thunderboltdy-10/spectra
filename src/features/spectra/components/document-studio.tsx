@@ -747,7 +747,22 @@ export function DocumentStudio({
           : []),
         Underline,
         TiptapLink.configure({ openOnClick: false, autolink: true }),
-        Table.configure({ resizable: true, lastColumnResizable: true }),
+        Table.extend({
+          addAttributes() {
+            return {
+              ...this.parent?.(),
+              spectraAuthored: {
+                default: false,
+                parseHTML: (element) =>
+                  element.getAttribute("data-spectra-authored") === "true",
+                renderHTML: (attributes) =>
+                  attributes.spectraAuthored
+                    ? { "data-spectra-authored": "true" }
+                    : {},
+              },
+            };
+          },
+        }).configure({ resizable: true, lastColumnResizable: true }),
         TableRow,
         TableCell,
         TableHeader,
@@ -1820,10 +1835,11 @@ export function DocumentStudio({
           ),
       },
       fontSize: {
-        ...(typeof textStyleAttrs.fontSize === "string" &&
-        Number.parseFloat(textStyleAttrs.fontSize)
-          ? { value: Number.parseFloat(textStyleAttrs.fontSize) }
-          : {}),
+        value:
+          typeof textStyleAttrs.fontSize === "string" &&
+          Number.parseFloat(textStyleAttrs.fontSize)
+            ? Number.parseFloat(textStyleAttrs.fontSize)
+            : 11,
         set: (size) =>
           withEdit(() => editor!.chain().focus().setFontSize(`${size}px`).run()),
       },
@@ -1954,7 +1970,12 @@ export function DocumentStudio({
     insert: {
       table: () =>
         withEdit(() =>
-          editor!.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+          editor!
+            .chain()
+            .focus()
+            .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+            .updateAttributes("table", { spectraAuthored: true })
+            .run(),
         ),
       image: () => imageRef.current?.click(),
       link: () =>
@@ -2026,12 +2047,16 @@ export function DocumentStudio({
       toggleHeaderRow: () => withEdit(() => editor!.chain().focus().toggleHeaderRow().run()),
       headerRowActive: Boolean(editor?.isActive("tableHeader")),
       deleteTable: () => withEdit(() => editor!.chain().focus().deleteTable().run()),
-      ...(strictNative
-        ? {
-            nativeStructureReason:
-              "Spectra edits the text inside a linked Word table, not its shape. Adding or removing rows would rewrite the table definition, so it is unavailable here.",
-          }
-        : {}),
+      ...(() => {
+        const currentTable = activeNode(["table"]);
+        const authoredHere = currentTable?.attrs.spectraAuthored === true;
+        return strictNative && inTable && !authoredHere
+          ? {
+              nativeStructureReason:
+                "This table came from the Word file. Spectra can edit the text in its cells; changing rows or columns would rewrite the table definition, so that stays in Word.",
+            }
+          : {};
+      })(),
     },
     image: {
       active: Boolean(activeImage),
@@ -2600,35 +2625,7 @@ export function DocumentStudio({
             </button>
           </div>
         ) : null}
-        {nativePlaceholders.length && !nativeNoticeDismissed ? (
-          <div className="spectra-document-native-features" role="note">
-            <FileText className="h-4 w-4 shrink-0" />
-            <span>
-              <strong>
-                {nativePlaceholders.length === 1
-                  ? nativePlaceholders[0]!.label
-                  : `${nativePlaceholders.length} Word features preserved`}
-              </strong>
-              <small>
-                {nativePlaceholders.length === 1
-                  ? nativePlaceholders[0]!.detail
-                  : "They remain intact in the Word file and are read-only here."}
-              </small>
-            </span>
-            <em>Preserved</em>
-            <button
-              type="button"
-              aria-label="Dismiss preserved features notice"
-              title="Dismiss"
-              onClick={() => {
-                window.localStorage.setItem(nativeNoticeKey, "dismissed");
-                setNativeNoticeDismissed(true);
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        ) : null}
+        {null}
         {pendingTemplate ? (
           <div className="spectra-document-confirm" role="status">
             <span>

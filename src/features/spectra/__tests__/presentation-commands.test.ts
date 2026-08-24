@@ -247,25 +247,17 @@ describe("presentation command set", () => {
     );
   });
 
-  it("refuses a speaker note the linked deck has nowhere to put", () => {
-    // A deck PowerPoint saved with no notes page for this slide. Spectra can
-    // hold the note, but it cannot write it, so the command has to say no before
-    // it takes the text — otherwise the panel fills in, the command reports
-    // success, and a round trip brings back a deck with nothing in it.
+  it("lets a person type speaker notes even when the linked file has no notes page", () => {
+    // Spectra keeps the notes. The lens skips the native notes part when the
+    // file has none, so the command stays enabled and the placeholder stays
+    // "No speaker notes" rather than a refusal.
     const withoutNotesPage = presentationCommandBindings(
       presentationStubHandlers({ notesUnsupported: true }),
     );
     const index = withoutNotesPage.findIndex((binding) => binding.id === "notes.set");
     expect(index).toBeGreaterThanOrEqual(0);
-    const refused = commandForBinding("presentation", withoutNotesPage[index]!, index);
-    const availability = refused.availability(fullContext());
-    expect(availability.state).toBe("disabled");
-    expect(
-      availability.state === "disabled" ? availability.reason : "",
-    ).toContain("no notes page");
-    // And with a notes page, the same command is live in the same context.
-    const allowed = commands().find((command) => command.id === "presentation.notes.set");
-    expect(allowed!.availability(fullContext()).state).toBe("enabled");
+    const command = commandForBinding("presentation", withoutNotesPage[index]!, index);
+    expect(command.availability(fullContext()).state).toBe("enabled");
   });
 
   it("passes the office capability audit with one command per operation", () => {

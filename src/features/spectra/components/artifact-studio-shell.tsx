@@ -197,13 +197,25 @@ export function useStudioDensity(
     const element = ref.current;
     if (!element) return;
     const measure = (width: number) => {
-      const next: StudioDensity =
-        width >= preferredInlineSize
-          ? "comfortable"
-          : width > minInlineSize
-            ? "compact"
-            : "tight";
-      setDensity((current) => (current === next ? current : next));
+      setDensity((current) => {
+        const next: StudioDensity =
+          width >= preferredInlineSize
+            ? "comfortable"
+            : width > minInlineSize
+              ? "compact"
+              : "tight";
+        if (current === next) return current;
+        // A 24px band around each threshold absorbs the scrollbar appearing
+        // and the workbar shedding labels, which otherwise flip density every
+        // frame in a tab and take the studio past React's update cap.
+        const band = 24;
+        if (current === "comfortable" && width >= preferredInlineSize - band)
+          return current;
+        if (current === "compact" && width > minInlineSize && width < preferredInlineSize + band)
+          return current;
+        if (current === "tight" && width <= minInlineSize + band) return current;
+        return next;
+      });
     };
     measure(element.getBoundingClientRect().width);
     const observer = new ResizeObserver((entries) => {

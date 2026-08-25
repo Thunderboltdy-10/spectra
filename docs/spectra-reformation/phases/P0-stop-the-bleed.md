@@ -75,3 +75,17 @@ All I-units are verified by their owning checks plus V1/V2 filed; Pablo's pass i
 - Deliberate visual convergences to tokens (radius-controls 8–10px→8px, dialog radius→surface, title sizes→heading, hand shadows→shadow-lg, danger buttons→destructive variant) — judgment calls, flag anything that reads wrong.
 - Field notes recorded: 5 pre-existing tsc errors (I1/I2 area), lint's pre-existing zero-warning breach + new warn census, check:copy's pre-existing crash, opencode*.json key handling (excluded from commit).
 - Status: IMPLEMENTED. No acceptance claimed; awaiting paired verification. Full repository sweep deferred per program rules.
+
+## Verifier log — P0.V1 (2026-08-25)
+
+- Attempted all ten Part XXIII experiments from a fresh verifier session; evidence: `.shots/reformation/P0.V1/2026-08-25-runtime-experiments.md` and the live same-tab Chrome baseline.
+- PNA/HTTPS-to-loopback was inconclusive because the Chrome evaluation sandbox blocked page `fetch`; Bridge was absent at the start and the isolated responder was stopped.
+- Hostile SDT-wrapped DOCX confirmed DOC-5 topology/region-index drift; the route table guard passed but direct lens materialization still wrote.
+- The stable-byte kernel passed slow-write tests, but production `bridge-app` does not call `StabilityTracker`; BR-3 is a SYSTEMIC runtime-wiring finding.
+- `subst` preserved file access but changed the path-derived mount key; BR-4/CS-11 identity/adoption risk is SYSTEMIC, with cloud delete deliberately unrun.
+- OneDrive metadata was read-only (329,790 files); live rescan was not run against real user files, leaving BR-5 open.
+- Six pairing offers overwrite one pending core slot (WC-1); revocation was not run because it is destructive and has no product UI caller.
+- DO route and persisted-room mismatches both returned 403; SEC-1 passed the isolated boundary probe.
+- Equivalent Spectra packages differed after 1.1s (PKG-1 SYSTEMIC); 150MB payloads were rejected before network at the 100MB guard, while BR-6 whole-pass behavior remains open.
+- Relevant checks: DOCX 13/13; realtime 11/11; DO probe 2/2; Rust watcher 9/9, server 5/5, sync 2/2.
+- Verdict: **REJECTED** — confirmed systemic findings plus unsafe/inconclusive field probes; no product code or tests were patched or weakened.

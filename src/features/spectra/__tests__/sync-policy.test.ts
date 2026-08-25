@@ -115,7 +115,7 @@ describe("N6 effective sync policy", () => {
 });
 
 describe("storage strategy transitions", () => {
-  const verifiedLocal = { hasCloud: true, cloudHasPayload: true, hasActiveLocal: true, localIsVerified: true, hasProtectedPending: false };
+  const verifiedLocal = { hasCloud: true, cloudHasPayload: true, hasActiveLocal: true, localIsVerified: true, replicasAgree: true, hasProtectedPending: false };
 
   it("keeps the logical item and unlinks without deleting the physical file", () => {
     expect(planStorageStrategyTransition("spectra", verifiedLocal)).toMatchObject({ localAction: "unlink", cloudAction: "retain", completion: "verified" });
@@ -143,6 +143,7 @@ describe("storage strategy transitions", () => {
       cloudHasPayload: true,
       hasActiveLocal: false,
       localIsVerified: false,
+      replicasAgree: true,
       hasProtectedPending: false,
     })).toMatchObject({
       localAction: "materialize",
@@ -163,6 +164,7 @@ describe("storage strategy transitions", () => {
       cloudHasPayload: false,
       hasActiveLocal: true,
       localIsVerified: true,
+      replicasAgree: true,
       hasProtectedPending: false,
     })).toMatchObject({
       requiresCloudMaterialization: true,
@@ -173,6 +175,7 @@ describe("storage strategy transitions", () => {
       cloudHasPayload: false,
       hasActiveLocal: true,
       localIsVerified: true,
+      replicasAgree: true,
       hasProtectedPending: false,
     })).toMatchObject({
       requiresCloudMaterialization: true,
@@ -185,6 +188,7 @@ describe("storage strategy transitions", () => {
       cloudHasPayload: true,
       hasActiveLocal: true,
       localIsVerified: true,
+      replicasAgree: true,
       hasProtectedPending: false,
     };
     for (const preset of ["spectra", "device", "both", "linked"] as const) {
@@ -194,5 +198,15 @@ describe("storage strategy transitions", () => {
       expect(plan.completion).toBe("verified");
       expect(plan.localAction).not.toBe("materialize");
     }
+  });
+  it("requires byte reconciliation before a strategy can discard a replica", () => {
+    expect(() => planStorageStrategyTransition("spectra", {
+      ...verifiedLocal,
+      replicasAgree: false,
+    })).toThrow("STORAGE_STRATEGY_RECONCILIATION_REQUIRED");
+  });
+  it("keeps linked work metadata-only in Spectra", () => {
+    expect(planStorageStrategyTransition("linked", verifiedLocal).cloudAction)
+      .toBe("metadata-only");
   });
 });

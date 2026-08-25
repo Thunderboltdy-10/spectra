@@ -297,7 +297,7 @@ export async function materializeOfficeArtifact(
     entries: baseOpened.fidelityMap.entries,
     parts: comparison.parts,
   });
-  const stored = await uploadNativePayload(output, hash, cloudTruth.nativeFormat);
+  const stored = await uploadNativePayload(workId, output, hash, cloudTruth.nativeFormat);
   const local = workTruth.replicas.find(
     (replica) => replica.kind === "local" && replica.state !== "unavailable",
   );
@@ -313,8 +313,7 @@ export async function materializeOfficeArtifact(
     workId,
     payloadRef: stored.payloadRef,
     contentHash: hash,
-    baseRevision: local.revision,
-    idempotencyKey: crypto.randomUUID(),
+    baseRevision: cloudTruth.revision,
     fidelityMap: next.fidelityMap,
     regionIds,
     partNames: comparison.parts
@@ -584,13 +583,12 @@ export async function POST(request: Request) {
         isSheet ? xlsxLens.open(output) : pptxLens.open(output),
         comparePackages(local.payload, output),
       ]);
-      const stored = await uploadNativePayload(output, hash, local.truth.nativeFormat);
+      const stored = await uploadNativePayload(workId, output, hash, local.truth.nativeFormat);
       const queued = await convexMutation("replicas:queueMaterialization", {
         workId,
         payloadRef: stored.payloadRef,
         contentHash: hash,
         baseRevision: local.truth.revision,
-        idempotencyKey: crypto.randomUUID(),
         fidelityMap: next.fidelityMap,
         regionIds: [...new Set([...spectraChanged, ...conflictRegionIds])],
         partNames: comparison.parts
@@ -629,6 +627,7 @@ export async function POST(request: Request) {
         partNames: diff.preservedPartChanges,
         conflictRegionIds:
           input.resolution === "local" ? [] : conflictRegionIds,
+        resolution: input.resolution === "local" ? "local" : undefined,
       },
     );
     const application = isSheet ? "Excel" : "PowerPoint";

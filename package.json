@@ -148,6 +148,7 @@
     "postcss": "^8.5.10"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
@@ -162,6 +163,7 @@
     "@types/ws": "^8.18.1",
     "@vitest/ui": "^4.0.18",
     "concurrently": "^9.2.4",
+    "convex-test": "^0.0.54",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "jsdom": "^28.0.0",

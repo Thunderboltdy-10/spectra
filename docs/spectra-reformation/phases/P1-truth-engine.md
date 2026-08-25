@@ -37,3 +37,19 @@ Goal cards: first-run pairing by a novice; mount a real folder; toggle each stor
 ## Exit gate
 
 Property + chaos suites green in their owning verification units; journey PASS; budgets (quiet mount, idle product) met; no `pending`/`current` lie reproducible by the verifier; Pablo pass. P2 starts only after P1.I1 + P1.I2 ACCEPTED.
+
+## Implementer log — P1.I1 (2026-08-25)
+
+- Rebuilt replica transitions around retained revision evidence; enqueue, discovery, and external reports no longer stamp unverified agreement.
+- Added the executable compensation table, derived byte/strategy intent keys, indexed expiry/redrive paths, and structured sweeper repair logs.
+- Persisted native payload + semantic projection bases and advance them only after write read-back or external reconciliation.
+- F6 now stages policy, verifies Bridge materialization, rolls back on failure/expiry, and clears cloud bytes for metadata-only device/linked outcomes.
+- Conflict rows retain both payload identities; resolution is revision/region-scoped, Spectra wins waits for write verification, and keep-both creates a real fork.
+- Payload uploads are denied server-side for metadata-only/none policy; reference reconciliation protects current, pending, base, request, and open-conflict bytes before GC.
+- Added the automatic one-time migration that distrusts legacy labels, verifies retained revisions, repairs duplicates, and records divergence instead of overwriting it.
+- Deleted the superseded `removeLocalReplica` path and removed caller-supplied random keys from the materialization/strategy seams.
+- Incidental UI call-site edits followed `/frontend-design` and `/design-taste-frontend`; no visual behavior or styling changed.
+- Relevant checks: Convex production-module tests + focused policy contracts, 3 files/32 tests; changed-file ESLint; diff check; secret scan.
+- `tsc --noEmit` has the same five pre-existing blockers recorded in STATE §1; this unit adds no TypeScript error and no gate was weakened.
+- “Spectra only” unlinks but does not delete the user’s physical file; the transition records that consequence explicitly pending any separately approved destructive workflow.
+- Status: IMPLEMENTED. No acceptance or verifier verdict claimed; the repository-wide sweep remains deferred until paired verification.

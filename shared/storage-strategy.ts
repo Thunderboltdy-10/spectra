@@ -5,6 +5,7 @@ export type StorageStrategyFacts = {
   cloudHasPayload: boolean;
   hasActiveLocal: boolean;
   localIsVerified: boolean;
+  replicasAgree: boolean;
   hasProtectedPending: boolean;
 };
 
@@ -33,6 +34,13 @@ export function planStorageStrategyTransition(
     throw new Error("STORAGE_STRATEGY_LOCAL_TARGET_REQUIRED");
   if (requiresLocal && facts.hasActiveLocal && !facts.localIsVerified)
     throw new Error("STORAGE_STRATEGY_LOCAL_NOT_VERIFIED");
+  if (
+    facts.hasCloud &&
+    facts.cloudHasPayload &&
+    facts.hasActiveLocal &&
+    !facts.replicasAgree
+  )
+    throw new Error("STORAGE_STRATEGY_RECONCILIATION_REQUIRED");
   if (requiresCloud && !facts.hasCloud && !canCreateCloudFromLocal)
     throw new Error("STORAGE_STRATEGY_CLOUD_REPLICA_REQUIRED");
   const requiresCloudMaterialization =
@@ -53,7 +61,10 @@ export function planStorageStrategyTransition(
         : needsMaterialization
           ? "materialize"
           : "retain",
-    cloudAction: toPreset === "device" ? "metadata-only" : "retain",
+    cloudAction:
+      toPreset === "device" || toPreset === "linked"
+        ? "metadata-only"
+        : "retain",
     protectedOriginal: toPreset === "linked",
     completion:
       needsMaterialization || requiresCloudMaterialization ? "pending" : "verified",

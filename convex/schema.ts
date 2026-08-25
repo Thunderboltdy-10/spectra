@@ -1430,6 +1430,7 @@ export default defineSchema({
       "updatedAt",
     ])
     .index("by_account_blueprint", ["ownerAccountId", "blueprintKey"])
+    .index("by_pending_payload_ref", ["pendingPayloadRef"])
     .index("by_blueprint_status_updated", [
       "blueprintKey",
       "status",
@@ -1535,11 +1536,13 @@ export default defineSchema({
     before: v.any(),
     after: v.optional(v.any()),
     errorCode: v.optional(v.string()),
+    expiresAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_account_key", ["accountId", "idempotencyKey"])
-    .index("by_work_created", ["workId", "createdAt"]),
+    .index("by_work_created", ["workId", "createdAt"])
+    .index("by_state_updated", ["state", "updatedAt"]),
 
   syncStructureDecisions: defineTable({
     accountId: v.id("accounts"),
@@ -1595,6 +1598,12 @@ export default defineSchema({
     revision: v.string(),
     baseRevision: v.optional(v.string()),
     contentHash: v.optional(v.string()),
+    projectionBasePayloadRef: v.optional(v.string()),
+    projectionBaseRevision: v.optional(v.string()),
+    projectionBaseContent: v.optional(v.any()),
+    projectionBaseContentHash: v.optional(v.string()),
+    projectionBaseTextIndex: v.optional(v.string()),
+    projectionBaseFidelityMap: v.optional(v.any()),
     state: v.union(v.literal("current"), v.literal("ahead"), v.literal("behind"), v.literal("diverged"), v.literal("pending"), v.literal("error"), v.literal("unavailable")),
     lastVerifiedAt: v.optional(v.number()),
     errorCode: v.optional(v.string()),
@@ -1609,6 +1618,9 @@ export default defineSchema({
     .index("by_device_resource", ["deviceId", "localResourceId"])
     .index("by_device_mount_path", ["deviceId", "mountId", "relativePath"])
     .index("by_work_kind", ["workId", "kind"])
+    .index("by_payload_ref", ["payloadRef"])
+    .index("by_pending_payload_ref", ["pendingPayloadRef"])
+    .index("by_projection_base_payload_ref", ["projectionBasePayloadRef"])
     .index("by_state_updated", ["state", "updatedAt"]),
 
   syncOperations: defineTable({
@@ -1638,12 +1650,29 @@ export default defineSchema({
     partNames: v.array(v.string()),
     localRevision: v.string(),
     spectraRevision: v.string(),
-    state: v.union(v.literal("open"), v.literal("resolved-merged"), v.literal("resolved-local"), v.literal("resolved-spectra"), v.literal("forked")),
+    localPayloadRef: v.optional(v.string()),
+    spectraPayloadRef: v.optional(v.string()),
+    state: v.union(
+      v.literal("open"),
+      v.literal("resolving-spectra"),
+      v.literal("resolved-merged"),
+      v.literal("resolved-local"),
+      v.literal("resolved-spectra"),
+      v.literal("forked"),
+      v.literal("abandoned"),
+    ),
+    resolutionRequestId: v.optional(v.id("bridgeWriteRequests")),
+    forkedWorkId: v.optional(v.id("spectraArtifacts")),
+    errorCode: v.optional(v.string()),
     createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
     resolvedAt: v.optional(v.number()),
   })
     .index("by_work_state", ["workId", "state"])
-    .index("by_account_state", ["accountId", "state"]),
+    .index("by_account_state", ["accountId", "state"])
+    .index("by_local_payload_ref", ["localPayloadRef"])
+    .index("by_spectra_payload_ref", ["spectraPayloadRef"])
+    .index("by_state_updated", ["state", "updatedAt"]),
 
   bridgeWriteRequests: defineTable({
     accountId: v.id("accounts"),
@@ -1660,6 +1689,10 @@ export default defineSchema({
     idempotencyKey: v.string(),
     regionIds: v.array(v.string()),
     partNames: v.array(v.string()),
+    projectionBaseContent: v.optional(v.any()),
+    projectionBaseContentHash: v.optional(v.string()),
+    projectionBaseTextIndex: v.optional(v.string()),
+    projectionBaseFidelityMap: v.optional(v.any()),
     state: v.union(
       v.literal("pending"),
       v.literal("claimed"),
@@ -1670,12 +1703,15 @@ export default defineSchema({
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
     claimedAt: v.optional(v.number()),
+    attemptCount: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_device_state", ["deviceId", "state"])
     .index("by_work_created", ["workId", "createdAt"])
     .index("by_account_key", ["accountId", "idempotencyKey"])
+    .index("by_payload_state", ["payloadRef", "state"])
     .index("by_state_updated", ["state", "updatedAt"]),
 
   bridgeFsRequests: defineTable({
@@ -1722,11 +1758,25 @@ export default defineSchema({
     mediaType: v.string(),
     refCount: v.number(),
     state: v.union(v.literal("active"), v.literal("quarantined"), v.literal("released")),
+    releasedAt: v.optional(v.number()),
     createdAt: v.number(),
     verifiedAt: v.number(),
   })
     .index("by_account_hash", ["accountId", "hash"])
-    .index("by_storage", ["storageId"]),
+    .index("by_storage", ["storageId"])
+    .index("by_state_verified", ["state", "verifiedAt"]),
+
+  replicaTruthMigrations: defineTable({
+    key: v.string(),
+    state: v.union(v.literal("running"), v.literal("complete"), v.literal("failed")),
+    cursor: v.optional(v.string()),
+    scanned: v.number(),
+    repaired: v.number(),
+    conflicts: v.number(),
+    errorCode: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 
   spectraRuntimeBuilds: defineTable({
     artifactId: v.id("spectraArtifacts"),

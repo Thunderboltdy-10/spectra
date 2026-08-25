@@ -16,6 +16,18 @@ crons.interval(
   {},
 );
 crons.interval(
+  "sweep-replica-truth",
+  { minutes: 2 },
+  internal.replicas.sweepReplicaTruth,
+  {},
+);
+crons.interval(
+  "reconcile-legacy-replica-truth",
+  { minutes: 1 },
+  internal.replicas.reconcileReplicaTruthMigration,
+  {},
+);
+crons.interval(
   "schedule-planner-reminders",
   { minutes: 1 },
   internal.plannerReminders.dispatchDue,

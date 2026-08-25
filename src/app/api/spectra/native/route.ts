@@ -57,7 +57,7 @@ async function ensurePortablePayload(workId: Id<"spectraArtifacts">) {
   const payload = createSpectraPackage({ artifactType: artifact.blueprintKey as (typeof SPECTRA_PACKAGE_TYPES)[number], schemaVersion: 1, createdByVersion: "spectra-n5", content: artifact.content ?? {} });
   const hash = await sha256Payload(payload);
   const mediaType = mediaTypes["spectra-pkg"]!;
-  const stored = await uploadNativePayload(payload, hash, "spectra-pkg");
+  const stored = await uploadNativePayload(workId, payload, hash, "spectra-pkg");
   await convexMutation("replicas:attachPortablePayload", { workId, payloadRef: stored.payloadRef, contentHash: hash, nativeFormat: "spectra-pkg" });
   return { truth: { url: null, bytes: payload.byteLength, hash, mediaType, payloadRef: stored.payloadRef, nativeFormat: "spectra-pkg" }, payload };
 }

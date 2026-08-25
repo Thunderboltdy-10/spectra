@@ -35,6 +35,12 @@ export type NativePayloadTruth = {
   state: string;
   nativeFormat: string;
   fidelityMap?: unknown;
+  projectionBasePayloadRef?: string;
+  projectionBaseRevision?: string;
+  projectionBaseContent?: unknown;
+  projectionBaseContentHash?: string;
+  projectionBaseTextIndex?: string;
+  projectionBaseFidelityMap?: unknown;
   compatibilityProfile: "strict-native" | "enhanced" | "spectra-native";
 };
 
@@ -59,14 +65,15 @@ export async function fetchVerifiedNativePayload(
 }
 
 export async function uploadNativePayload(
+  workId: Id<"spectraArtifacts">,
   payload: Uint8Array,
   hash: string,
   nativeFormat: string,
 ) {
   const mediaType = nativeMediaTypes[nativeFormat] ?? "application/octet-stream";
-  const uploadUrl = await convexMutation<Record<string, never>, string>(
+  const uploadUrl = await convexMutation<{ workId: Id<"spectraArtifacts"> }, string>(
     "payloads:issueUpload",
-    {},
+    { workId },
   );
   const response = await fetch(uploadUrl, {
     method: "POST",
@@ -81,12 +88,14 @@ export async function uploadNativePayload(
   return convexMutation<
     {
       hash: string;
+      workId: Id<"spectraArtifacts">;
       storageId: Id<"_storage">;
       bytes: number;
       mediaType: string;
     },
     { payloadRef: string; deduplicated: boolean }
   >("payloads:put", {
+    workId,
     hash,
     storageId: stored.storageId as Id<"_storage">,
     bytes: payload.byteLength,

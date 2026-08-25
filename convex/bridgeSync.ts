@@ -1,15 +1,24 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 import { createFolderNode, placeSourceNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode } from "./orgTreeShared";
 import { z } from "zod";
-import { chooseReplicaContinuity } from "./bridgeIdentity";
-import { activeReplicaWriteTarget } from "./bridgeIdentity";
-import { computeEffectivePolicy } from "./syncPolicy";
+import {
+  activeReplicaWriteTarget,
+  chooseReplicaContinuity,
+  latestActiveWriteForReplica,
+} from "./bridgeIdentity";
+import { assertPayloadWriteAllowed, computeEffectivePolicy } from "./syncPolicy";
 import { decideMissingResourceAction, policyIncludesPath } from "../shared/sync-policy";
 import { policyAllowsTrigger } from "../shared/sync-policy";
+import type { SyncPolicyValues } from "../shared/sync-policy";
 import { formatByteCount } from "../shared/human-format";
+import {
+  BRIDGE_WRITE_EXPIRES_MS,
+  deriveSyncIdempotencyKey,
+} from "../shared/replica-truth";
 
 async function digest(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -32,6 +41,31 @@ async function ensureFolderPath(ctx: Parameters<typeof createFolderNode>[0], acc
     parentId = existing?._id ?? (await createFolderNode(ctx, { accountId, schoolId, name, parentId }))._id;
   }
   return parentId;
+}
+
+async function failStorageTransitionForRequest(
+  ctx: MutationCtx,
+  request: Doc<"bridgeWriteRequests">,
+  errorCode: string,
+  now: number,
+) {
+  const transitions = await ctx.db.query("storageStrategyTransitions")
+    .withIndex("by_work_created", (q) => q.eq("workId", request.workId))
+    .order("desc")
+    .take(20);
+  const transition = transitions.find((candidate) =>
+    candidate.state === "pending" &&
+    String((candidate.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? "") === String(request._id),
+  );
+  if (!transition) return;
+  const before = transition.before as { hadItemPolicy?: boolean; policy?: SyncPolicyValues };
+  const policy = await ctx.db.query("syncPolicies")
+    .withIndex("by_account_scope", (q) => q.eq("accountId", transition.accountId).eq("scopeKind", "item").eq("scopeId", String(transition.workId)))
+    .unique();
+  if (policy && before.hadItemPolicy && before.policy)
+    await ctx.db.patch(policy._id, { ...before.policy, updatedAt: now });
+  else if (policy) await ctx.db.delete(policy._id);
+  await ctx.db.patch(transition._id, { state: "failed", errorCode, updatedAt: now });
 }
 
 export const registerMount = mutation({
@@ -120,7 +154,13 @@ export const reconcileMissingResources = mutation({
         .unique();
       const action = decideMissingResourceAction(policy.structure, Boolean(cloud?.payloadRef && cloud.contentHash));
       if (action === "restore-to-disk" && cloud?.payloadRef && cloud.contentHash && replica.deviceId && replica.mountId && replica.localResourceId && replica.relativePath) {
-        const idempotencyKey = `restore:${replica._id}:${cloud.contentHash}`;
+        const idempotencyKey = await deriveSyncIdempotencyKey({
+          workId: String(replica.workId),
+          target: String(replica.deviceId),
+          baseRevision: replica.revision,
+          targetRevision: cloud.contentHash,
+          direction: "cloud-to-local",
+        });
         const existing = await ctx.db.query("bridgeWriteRequests")
           .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey))
           .unique();
@@ -141,7 +181,13 @@ export const reconcileMissingResources = mutation({
             idempotencyKey,
             regionIds: [],
             partNames: [],
+            projectionBaseContent: cloud.projectionBaseContent,
+            projectionBaseContentHash: cloud.projectionBaseContentHash,
+            projectionBaseTextIndex: cloud.projectionBaseTextIndex,
+            projectionBaseFidelityMap: cloud.projectionBaseFidelityMap,
             state: "pending",
+            attemptCount: 0,
+            expiresAt: now + BRIDGE_WRITE_EXPIRES_MS,
             createdAt: now,
             updatedAt: now,
           });
@@ -171,84 +217,22 @@ export const reconcileMissingResources = mutation({
   },
 });
 
-/** Re-drive claims lost with a dead Bridge and surface writes with no journal. */
+/** Re-drive structure claims. Replica byte writes are compensated by
+ * replicas:sweepReplicaTruth so there is exactly one owner for that machine. */
 export const sweepStaleBridgeWork = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
     const cutoff = now - 2 * 60_000;
-    const [abandonedWrites, abandonedFs] = await Promise.all([
-      ctx.db
-        .query("bridgeWriteRequests")
-        .withIndex("by_state_updated", (q) =>
-          q.eq("state", "claimed").lt("updatedAt", cutoff),
-        )
-        .take(100),
-      ctx.db
-        .query("bridgeFsRequests")
-        .withIndex("by_state_updated", (q) =>
-          q.eq("state", "claimed").lt("updatedAt", cutoff),
-        )
-        .take(100),
-    ]);
-    await Promise.all([
-      ...abandonedWrites.map((request) =>
-        ctx.db.patch(request._id, {
-          state: "pending",
-          claimedAt: undefined,
-          updatedAt: now,
-        }),
-      ),
-      ...abandonedFs.map((request) =>
-        ctx.db.patch(request._id, {
-          state: "pending",
-          claimedAt: undefined,
-          updatedAt: now,
-        }),
-      ),
-    ]);
-
-    const [staleReplicas, pendingWrites, pendingFs] = await Promise.all([
-      ctx.db
-        .query("workReplicas")
-        .withIndex("by_state_updated", (q) =>
-          q.eq("state", "pending").lt("updatedAt", cutoff),
-        )
-        .take(100),
-      ctx.db
-        .query("bridgeWriteRequests")
-        .withIndex("by_state_updated", (q) =>
-          q.eq("state", "pending").lt("updatedAt", now),
-        )
-        .take(500),
-      ctx.db
-        .query("bridgeFsRequests")
-        .withIndex("by_state_updated", (q) =>
-          q.eq("state", "pending").lt("updatedAt", now),
-        )
-        .take(500),
-    ]);
-    let failedReplicas = 0;
-    for (const replica of staleReplicas) {
-      const active =
-        pendingWrites.some((request) => request.replicaId === replica._id) ||
-        pendingFs.some((request) => request.replicaId === replica._id) ||
-        abandonedWrites.some((request) => request.replicaId === replica._id) ||
-        abandonedFs.some((request) => request.replicaId === replica._id);
-      if (active) continue;
-      await ctx.db.patch(replica._id, {
-        state: "error",
-        errorCode: "BRIDGE_WRITE_ABANDONED",
-        errorMessage: "The Bridge write did not finish. Try again.",
-        errorAt: now,
-        updatedAt: now,
-      });
-      failedReplicas += 1;
-    }
-    return {
-      redriven: abandonedWrites.length + abandonedFs.length,
-      failedReplicas,
-    };
+    const abandonedFs = await ctx.db.query("bridgeFsRequests")
+      .withIndex("by_state_updated", (q) => q.eq("state", "claimed").lt("updatedAt", cutoff))
+      .take(100);
+    await Promise.all(abandonedFs.map((request) => ctx.db.patch(request._id, {
+      state: "pending",
+      claimedAt: undefined,
+      updatedAt: now,
+    })));
+    return { redriven: abandonedFs.length };
   },
 });
 
@@ -300,23 +284,95 @@ export const discoverResource = mutation({
         mount: String(mount._id),
         item: String(existingReplica.workId),
       });
+      const existingCloud = scored.find(({ candidate }) => candidate._id === existingReplica._id)?.cloud;
+      const activeWrite = latestActiveWriteForReplica(
+        await ctx.db.query("bridgeWriteRequests")
+          .withIndex("by_work_created", (q) => q.eq("workId", existingReplica.workId))
+          .order("desc")
+          .take(50),
+        existingReplica._id,
+      );
       const nativePayloadAllowed = policy.cloudContent === "full";
       const changed = Boolean(input.contentHash && input.contentHash !== existingReplica.contentHash);
       const previousPath = existingReplica.relativePath;
       const verifiedAt = Date.now();
+      const writeObservedAsExpected = Boolean(
+        activeWrite &&
+        (!input.contentHash || input.contentHash === activeWrite.baseRevision || input.contentHash === activeWrite.targetRevision),
+      );
+      const unexpectedDuringWrite = Boolean(activeWrite && input.contentHash && !writeObservedAsExpected);
+      const replicasDisagree = Boolean(
+        input.contentHash &&
+        existingCloud?.contentHash &&
+        input.contentHash !== existingCloud.contentHash &&
+        !writeObservedAsExpected,
+      );
+      const nextState = unexpectedDuringWrite || replicasDisagree
+        ? "diverged" as const
+        : activeWrite
+          ? "pending" as const
+          : !input.contentHash
+            ? "ahead" as const
+            : existingCloud?.payloadRef && existingCloud.contentHash === input.contentHash
+              ? "current" as const
+              : nativePayloadAllowed
+                ? "ahead" as const
+                : "current" as const;
       await ctx.db.patch(existingReplica._id, {
         mountId: mount._id,
         localResourceId: input.localResourceId,
         relativePath: input.relativePath,
-        ...(changed
-          ? { state: "ahead" as const }
-          : existingReplica.state === "unavailable"
-            ? { state: "current" as const, unavailableReason: undefined, errorCode: undefined, errorMessage: undefined, errorAt: undefined }
-            : {}),
+        ...(!nativePayloadAllowed && input.contentHash
+          ? {
+              baseRevision: changed ? existingReplica.revision : existingReplica.baseRevision,
+              revision: input.contentHash,
+              contentHash: input.contentHash,
+            }
+          : {}),
+        state: nextState,
+        ...(existingReplica.state === "unavailable"
+          ? { unavailableReason: undefined, errorCode: undefined, errorMessage: undefined, errorAt: undefined }
+          : {}),
         lastVerifiedAt: input.contentHash ? verifiedAt : existingReplica.lastVerifiedAt,
         lastSeenScanId: mount.lastScanId,
         updatedAt: verifiedAt,
       });
+      if (unexpectedDuringWrite && activeWrite) {
+        await ctx.db.patch(activeWrite._id, {
+          state: "conflicted",
+          errorCode: "external-save-during-write",
+          claimedAt: undefined,
+          updatedAt: verifiedAt,
+        });
+        const operation = await ctx.db.query("syncOperations")
+          .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", activeWrite.idempotencyKey))
+          .unique();
+        if (operation) await ctx.db.patch(operation._id, { state: "conflicted", errorCode: "external-save-during-write", updatedAt: verifiedAt });
+      }
+      if ((unexpectedDuringWrite || replicasDisagree) && input.contentHash && existingCloud?.contentHash) {
+        await ctx.db.patch(existingCloud._id, { state: "diverged", updatedAt: verifiedAt });
+        const existingConflict = await ctx.db.query("syncConflicts")
+          .withIndex("by_work_state", (q) => q.eq("workId", existingReplica.workId).eq("state", "open"))
+          .filter((q) => q.and(
+            q.eq(q.field("localRevision"), input.contentHash),
+            q.eq(q.field("spectraRevision"), existingCloud.revision),
+          ))
+          .first();
+        if (!existingConflict) await ctx.db.insert("syncConflicts", {
+          accountId: actor.accountId,
+          workId: existingReplica.workId,
+          replicaIds: [existingReplica._id, existingCloud._id],
+          regionIds: activeWrite?.regionIds ?? [],
+          partNames: activeWrite?.partNames ?? [],
+          localRevision: input.contentHash,
+          spectraRevision: existingCloud.revision,
+          localPayloadRef: existingReplica.contentHash === input.contentHash ? existingReplica.payloadRef : undefined,
+          spectraPayloadRef: existingCloud.payloadRef,
+          state: "open",
+          createdAt: verifiedAt,
+          updatedAt: verifiedAt,
+        });
+      }
       if (previousPath && previousPath !== input.relativePath) {
         if (policy.structure === "mirror-from-disk" || policy.structure === "mirror-both") {
           const node = await findPrimaryNode(ctx, actor.accountId, "work", String(existingReplica.workId));
@@ -391,7 +447,7 @@ export const discoverResource = mutation({
     const parentId = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, mount.rootOrgNodeId, parts);
     const now = Date.now();
     const workId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: actor.accountId, schoolId: actor.schoolId, blueprintKey: "resource", resourceClass: "resource", nativeFormat: input.nativeFormat, compatibilityProfile: "strict-native", title, summary: formatByteCount(input.size), content: null, schemaVersion: 1, contentHash: input.contentHash, tags: [], status: "active", createdFrom: { source: "manual" }, createdAt: now, updatedAt: now });
-    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId, kind: "local", deviceId: device._id, mountId: mount._id, localResourceId: input.localResourceId, relativePath: input.relativePath, nativeFormat: input.nativeFormat, revision: input.contentHash ?? `discovered:${input.localResourceId}`, contentHash: input.contentHash, state: "current", lastVerifiedAt: now, lastSeenScanId: mount.lastScanId, updatedAt: now });
+    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId, kind: "local", deviceId: device._id, mountId: mount._id, localResourceId: input.localResourceId, relativePath: input.relativePath, nativeFormat: input.nativeFormat, revision: input.contentHash ?? `discovered:${input.localResourceId}`, contentHash: input.contentHash, state: input.contentHash && mountPolicy.cloudContent !== "full" ? "current" : "ahead", lastVerifiedAt: input.contentHash ? now : undefined, lastSeenScanId: mount.lastScanId, updatedAt: now });
     await placeSourceNode(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, kind: "work", sourceId: String(workId), name: title, target: { parentId }, typeKey: "resource", placedByAccountId: actor.accountId });
     if (discoveryRequest) await ctx.db.delete(discoveryRequest._id);
     return {
@@ -476,12 +532,11 @@ export const beginPayloadUpload = mutation({
     const replica = await ctx.db.get(args.replicaId);
     if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id)
       throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
-    const policy = await computeEffectivePolicy(ctx, device.accountId, { account: String(device.accountId), mount: replica.mountId ? String(replica.mountId) : undefined, item: String(replica.workId) });
-    if (policy.source.kind !== "default" && policy.cloudContent !== "full")
-      throw new Error(policy.cloudContent === "none" ? "CLOUD_CONTENT_DISABLED" : "CLOUD_CONTENT_METADATA_ONLY");
+    await assertPayloadWriteAllowed(ctx, device.accountId, replica.workId, replica.mountId);
     const existing = await ctx.db.query("payloadObjects")
       .withIndex("by_account_hash", (q) => q.eq("accountId", device.accountId).eq("hash", input.hash))
       .unique();
+    if (existing?.state === "quarantined") throw new Error("PAYLOAD_HASH_QUARANTINED");
     if (existing?.state === "active")
       return { deduplicated: true as const, payloadRef: String(existing._id) };
     return { deduplicated: false as const, uploadUrl: await ctx.storage.generateUploadUrl() };
@@ -509,25 +564,40 @@ export const commitPayloadUpload = mutation({
     const replica = await ctx.db.get(args.replicaId);
     if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id)
       throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
+    try {
+      await assertPayloadWriteAllowed(ctx, device.accountId, replica.workId, replica.mountId);
+    } catch (error) {
+      if (args.storageId) await ctx.storage.delete(args.storageId);
+      throw error;
+    }
     let payload = await ctx.db.query("payloadObjects")
       .withIndex("by_account_hash", (q) => q.eq("accountId", device.accountId).eq("hash", input.hash))
       .unique();
-    if (!payload) {
+    if (payload?.state === "quarantined") {
+      if (args.storageId && args.storageId !== payload.storageId) await ctx.storage.delete(args.storageId);
+      throw new Error("PAYLOAD_HASH_QUARANTINED");
+    }
+    if (!payload || payload.state === "released") {
       if (!args.storageId) throw new Error("PAYLOAD_STORAGE_REQUIRED");
       const metadata = await ctx.db.system.get(args.storageId);
       if (!metadata || metadata.size !== input.bytes) throw new Error("PAYLOAD_SIZE_MISMATCH");
-      const payloadId = await ctx.db.insert("payloadObjects", {
-        accountId: device.accountId,
-        hash: input.hash,
-        storageId: args.storageId,
-        bytes: input.bytes,
-        mediaType: input.mediaType,
-        refCount: 1,
-        state: "active",
-        createdAt: Date.now(),
-        verifiedAt: Date.now(),
-      });
-      payload = (await ctx.db.get(payloadId))!;
+      if (payload) {
+        await ctx.db.patch(payload._id, { storageId: args.storageId, bytes: input.bytes, mediaType: input.mediaType, refCount: 0, state: "active", releasedAt: undefined, verifiedAt: Date.now() });
+        payload = (await ctx.db.get(payload._id))!;
+      } else {
+        const payloadId = await ctx.db.insert("payloadObjects", {
+          accountId: device.accountId,
+          hash: input.hash,
+          storageId: args.storageId,
+          bytes: input.bytes,
+          mediaType: input.mediaType,
+          refCount: 0,
+          state: "active",
+          createdAt: Date.now(),
+          verifiedAt: Date.now(),
+        });
+        payload = (await ctx.db.get(payloadId))!;
+      }
     } else if (args.storageId && args.storageId !== payload.storageId) {
       await ctx.storage.delete(args.storageId);
     }
@@ -540,14 +610,19 @@ export const commitPayloadUpload = mutation({
     const isFirstCloudPayload = !cloud?.payloadRef;
     const cloudChangedSinceReplicaBase = Boolean(
       cloud?.payloadRef &&
-      replica.baseRevision &&
       cloud.contentHash &&
-      cloud.contentHash !== replica.baseRevision &&
+      cloud.contentHash !== (replica.baseRevision ?? replica.contentHash) &&
       cloud.contentHash !== input.hash,
     );
     const externalChange = Boolean(replica.payloadRef && replica.contentHash !== input.hash);
     if (cloudChangedSinceReplicaBase && !isFirstCloudPayload) {
-      const operationKey = `external:${replica._id}:${input.hash}`;
+      const operationKey = await deriveSyncIdempotencyKey({
+        workId: String(replica.workId),
+        target: String(replica.deviceId ?? device._id),
+        baseRevision: replica.revision,
+        targetRevision: input.hash,
+        direction: "external",
+      });
       const existingOperation = await ctx.db.query("syncOperations")
         .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", operationKey))
         .unique();
@@ -574,17 +649,38 @@ export const commitPayloadUpload = mutation({
           createdAt: now,
           updatedAt: now,
         });
-        await ctx.db.insert("syncConflicts", {
-          accountId: device.accountId,
-          workId: replica.workId,
-          replicaIds: [replica._id, cloud._id],
-          regionIds: [],
-          partNames: [],
-          localRevision: input.hash,
-          spectraRevision: cloud.revision,
-          state: "open",
-          createdAt: now,
-        });
+        const existingConflict = await ctx.db.query("syncConflicts")
+          .withIndex("by_work_state", (q) => q.eq("workId", replica.workId).eq("state", "open"))
+          .filter((q) => q.and(
+            q.eq(q.field("localRevision"), input.hash),
+            q.eq(q.field("spectraRevision"), cloud.revision),
+          ))
+          .first();
+        if (!existingConflict) await ctx.db.insert("syncConflicts", {
+            accountId: device.accountId,
+            workId: replica.workId,
+            replicaIds: [replica._id, cloud._id],
+            regionIds: [],
+            partNames: [],
+            localRevision: input.hash,
+            spectraRevision: cloud.revision,
+            localPayloadRef: String(payload._id),
+            spectraPayloadRef: cloud.payloadRef,
+            state: "open",
+            createdAt: now,
+            updatedAt: now,
+          });
+      }
+      const activeWrites = await ctx.db.query("bridgeWriteRequests")
+        .withIndex("by_work_created", (q) => q.eq("workId", replica.workId))
+        .order("desc")
+        .take(50);
+      for (const request of activeWrites.filter((candidate) => candidate.replicaId === replica._id && (candidate.state === "pending" || candidate.state === "claimed"))) {
+        await ctx.db.patch(request._id, { state: "conflicted", errorCode: "external-save-during-write", claimedAt: undefined, updatedAt: now });
+        const pendingOperation = await ctx.db.query("syncOperations")
+          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
+          .unique();
+        if (pendingOperation) await ctx.db.patch(pendingOperation._id, { state: "conflicted", errorCode: "external-save-during-write", updatedAt: now });
       }
       await ctx.db.patch(cloud._id, { state: "diverged", updatedAt: now });
       await ctx.db.patch(device._id, { lastSeenAt: now });
@@ -652,7 +748,7 @@ export const commitPayloadUpload = mutation({
       const local = await ctx.db.get(replica._id);
       if (local) {
         await ctx.db.patch(local._id, cloudTransition.toPreset === "spectra"
-          ? { state: "unavailable", unavailableReason: "removed-by-user", updatedAt: now }
+          ? { state: "unavailable", unavailableReason: "unlinked-by-user", updatedAt: now }
           : { state: "current", unavailableReason: undefined, lastVerifiedAt: now, updatedAt: now });
       }
       await ctx.db.patch(cloudTransition._id, {
@@ -666,19 +762,31 @@ export const commitPayloadUpload = mutation({
       });
     }
     if (externalChange) {
+      const externalKey = await deriveSyncIdempotencyKey({
+        workId: String(replica.workId),
+        target: String(replica.deviceId ?? device._id),
+        baseRevision: replica.revision,
+        targetRevision: input.hash,
+        direction: "external",
+      });
+      const existingExternal = await ctx.db.query("syncOperations")
+        .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", externalKey))
+        .unique();
+      if (!existingExternal) {
       await ctx.db.insert("syncOperations", {
         accountId: device.accountId,
         workId: replica.workId,
         replicaId: replica._id,
-        idempotencyKey: `external:${replica._id}:${input.hash}`,
+        idempotencyKey: externalKey,
         direction: "external",
         revisionBefore: replica.revision,
         revisionAfter: input.hash,
-        state: "pending",
+        state: "applied",
         actorKind: "external-edit",
         createdAt: now,
         updatedAt: now,
       });
+      }
     }
     await ctx.db.patch(device._id, { lastSeenAt: now });
     return { payloadRef: String(payload._id), externalChange };
@@ -698,6 +806,17 @@ export const claimWrite = mutation({
       .filter((q) => q.lt(q.field("claimedAt"), now - 60_000))
       .take(20);
     for (const request of [...pending, ...abandonedClaims]) {
+      if ((request.expiresAt ?? request.createdAt + BRIDGE_WRITE_EXPIRES_MS) <= now) {
+        await ctx.db.patch(request._id, { state: "failed", errorCode: "write-expired", errorMessage: "The save did not finish. Try again.", claimedAt: undefined, updatedAt: now });
+        const expiredOperation = await ctx.db.query("syncOperations")
+          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
+          .unique();
+        if (expiredOperation) await ctx.db.patch(expiredOperation._id, { state: "failed", errorCode: "write-expired", updatedAt: now });
+        const expiredReplica = await ctx.db.get(request.replicaId);
+        if (expiredReplica) await ctx.db.patch(expiredReplica._id, { state: "error", errorCode: "write-expired", errorAt: now, updatedAt: now });
+        await failStorageTransitionForRequest(ctx, request, "write-expired", now);
+        continue;
+      }
       const payloadId = ctx.db.normalizeId("payloadObjects", request.payloadRef);
       const [payload, mount, replica] = await Promise.all([
         payloadId ? ctx.db.get(payloadId) : null,
@@ -723,14 +842,24 @@ export const claimWrite = mutation({
           .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
           .unique();
         if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
+        if (replica) await ctx.db.patch(replica._id, errorCode === "target-unavailable"
+          ? { state: "unavailable", unavailableReason: "write-target-unavailable", updatedAt: now }
+          : { state: "error", errorCode, errorAt: now, updatedAt: now });
+        await failStorageTransitionForRequest(ctx, request, errorCode, now);
         continue;
       }
       const payloadUrl = await ctx.storage.getUrl(payload.storageId);
       if (!payloadUrl) {
         await ctx.db.patch(request._id, { state: "failed", errorCode: "payload-unavailable", errorMessage: "The retained payload has no download URL.", updatedAt: now });
+        const operation = await ctx.db.query("syncOperations")
+          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
+          .unique();
+        if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "payload-unavailable", updatedAt: now });
+        await ctx.db.patch(replica._id, { state: "error", errorCode: "payload-unavailable", errorAt: now, updatedAt: now });
+        await failStorageTransitionForRequest(ctx, request, "payload-unavailable", now);
         continue;
       }
-      await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, updatedAt: now });
+      await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, attemptCount: (request.attemptCount ?? 0) + 1, updatedAt: now });
       return { request: {
         requestId: request._id,
         replicaId: request.replicaId,
@@ -785,6 +914,14 @@ export const completeWrite = mutation({
       return { state: "pending" as const };
     }
     if (args.outcome === "verified") {
+      if (!args.actualRevision || args.actualRevision !== request.targetRevision) {
+        await ctx.db.patch(request._id, { state: "failed", errorCode: "readback-revision-mismatch", errorMessage: "The file changed before Spectra could verify the save.", updatedAt: now });
+        if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "readback-revision-mismatch", updatedAt: now });
+        const mismatchedReplica = await ctx.db.get(request.replicaId);
+        if (mismatchedReplica) await ctx.db.patch(mismatchedReplica._id, { state: "error", errorCode: "readback-revision-mismatch", errorAt: now, updatedAt: now });
+        await failStorageTransitionForRequest(ctx, request, "readback-revision-mismatch", now);
+        return { state: "failed" as const };
+      }
       const [mount, replica] = await Promise.all([
         ctx.db.get(request.mountId),
         ctx.db.get(request.replicaId),
@@ -797,6 +934,7 @@ export const completeWrite = mutation({
           updatedAt: now,
         });
         if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "target-unavailable", updatedAt: now });
+        await failStorageTransitionForRequest(ctx, request, "target-unavailable", now);
         return { state: "failed" as const };
       }
       const protectedApply = Boolean(
@@ -805,18 +943,32 @@ export const completeWrite = mutation({
         replica.pendingContentHash === request.contentHash,
       );
       const work = protectedApply ? await ctx.db.get(request.workId) : null;
-      const cloud = protectedApply
-        ? await ctx.db
-            .query("workReplicas")
-            .withIndex("by_work_kind", (q) => q.eq("workId", request.workId).eq("kind", "cloud"))
-            .unique()
-        : null;
+      const cloud = await ctx.db
+        .query("workReplicas")
+        .withIndex("by_work_kind", (q) => q.eq("workId", request.workId).eq("kind", "cloud"))
+        .unique();
+      const queuedWrites = await ctx.db.query("bridgeWriteRequests")
+        .withIndex("by_work_created", (q) => q.eq("workId", request.workId))
+        .order("desc")
+        .take(50);
+      const hasNewerWrite = queuedWrites.some((candidate) =>
+        candidate._id !== request._id &&
+        candidate.replicaId === request.replicaId &&
+        (candidate.state === "pending" || candidate.state === "claimed") &&
+        candidate.baseRevision === request.targetRevision,
+      );
       await ctx.db.patch(request.replicaId, {
         payloadRef: request.payloadRef,
-        baseRevision: request.baseRevision,
+        baseRevision: request.targetRevision,
         revision: request.targetRevision,
         contentHash: request.contentHash,
-        state: "current",
+        projectionBasePayloadRef: request.payloadRef,
+        projectionBaseRevision: request.targetRevision,
+        projectionBaseContent: request.projectionBaseContent,
+        projectionBaseContentHash: request.projectionBaseContentHash,
+        projectionBaseTextIndex: request.projectionBaseTextIndex,
+        projectionBaseFidelityMap: request.projectionBaseFidelityMap,
+        state: hasNewerWrite ? "pending" : "current",
         lastVerifiedAt: now,
         errorCode: undefined,
         errorMessage: undefined,
@@ -846,28 +998,45 @@ export const completeWrite = mutation({
           updatedAt: now,
         });
       }
-      if (protectedApply && cloud) {
+      if (cloud) {
         await ctx.db.patch(cloud._id, {
-          payloadRef: request.payloadRef,
-          baseRevision: cloud.revision,
-          revision: request.targetRevision,
-          contentHash: request.contentHash,
-          state: "current",
-          lastVerifiedAt: now,
+          ...(hasNewerWrite ? {} : { payloadRef: request.payloadRef }),
+          baseRevision: request.targetRevision,
+          ...(hasNewerWrite ? {} : { revision: request.targetRevision, contentHash: request.contentHash }),
+          projectionBasePayloadRef: request.payloadRef,
+          projectionBaseRevision: request.targetRevision,
+          projectionBaseContent: request.projectionBaseContent,
+          projectionBaseContentHash: request.projectionBaseContentHash,
+          projectionBaseTextIndex: request.projectionBaseTextIndex,
+          projectionBaseFidelityMap: request.projectionBaseFidelityMap,
+          state: hasNewerWrite ? "ahead" : "current",
+          lastVerifiedAt: hasNewerWrite ? cloud.lastVerifiedAt : now,
           updatedAt: now,
         });
       }
       await ctx.db.patch(request._id, { state: "verified", errorCode: undefined, errorMessage: undefined, updatedAt: now });
       if (operation) await ctx.db.patch(operation._id, { state: "verified", updatedAt: now });
       if (strategyTransition) {
-        if (strategyTransition.toPreset === "device") {
+        if (strategyTransition.toPreset === "device" || strategyTransition.toPreset === "linked") {
           const transitionCloud = await ctx.db.query("workReplicas")
             .withIndex("by_work_kind", (q) => q.eq("workId", request.workId).eq("kind", "cloud"))
             .unique();
-          if (transitionCloud) await ctx.db.patch(transitionCloud._id, { payloadRef: undefined, state: "current", updatedAt: now });
+          if (transitionCloud) await ctx.db.patch(transitionCloud._id, { payloadRef: undefined, contentHash: undefined, state: "unavailable", unavailableReason: "metadata-only", lastVerifiedAt: undefined, updatedAt: now });
+          await ctx.db.patch(request.replicaId, {
+            payloadRef: undefined,
+            pendingPayloadRef: undefined,
+            projectionBasePayloadRef: undefined,
+            updatedAt: now,
+          });
         }
         await ctx.db.patch(strategyTransition._id, { state: "verified", updatedAt: now });
       }
+      const resolvingConflicts = await ctx.db.query("syncConflicts")
+        .withIndex("by_work_state", (q) => q.eq("workId", request.workId).eq("state", "resolving-spectra"))
+        .take(50);
+      await Promise.all(resolvingConflicts
+        .filter((conflict) => conflict.resolutionRequestId === request._id)
+        .map((conflict) => ctx.db.patch(conflict._id, { state: "resolved-spectra", resolvedAt: now, updatedAt: now })));
       return { state: "verified" as const };
     }
     const conflicted = args.outcome === "conflicted";
@@ -885,7 +1054,7 @@ export const completeWrite = mutation({
       updatedAt: now,
     });
     if (operation) await ctx.db.patch(operation._id, { state: conflicted ? "conflicted" : "failed", errorCode: args.errorCode, updatedAt: now });
-    if (strategyTransition) await ctx.db.patch(strategyTransition._id, { state: "failed", errorCode: args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"), updatedAt: now });
+    if (strategyTransition) await failStorageTransitionForRequest(ctx, request, args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"), now);
     if (conflicted) {
       await ctx.db.insert("syncConflicts", {
         accountId: device.accountId,
@@ -895,10 +1064,19 @@ export const completeWrite = mutation({
         partNames: request.partNames,
         localRevision: args.actualRevision ?? request.baseRevision,
         spectraRevision: request.targetRevision,
+        localPayloadRef: undefined,
+        spectraPayloadRef: request.payloadRef,
         state: "open",
         createdAt: now,
+        updatedAt: now,
       });
     }
+    const resolvingConflicts = await ctx.db.query("syncConflicts")
+      .withIndex("by_work_state", (q) => q.eq("workId", request.workId).eq("state", "resolving-spectra"))
+      .take(50);
+    await Promise.all(resolvingConflicts
+      .filter((conflict) => conflict.resolutionRequestId === request._id)
+      .map((conflict) => ctx.db.patch(conflict._id, { state: "open", resolutionRequestId: undefined, errorCode: args.errorCode ?? "resolution-write-failed", updatedAt: now })));
     return { state: conflicted ? "conflicted" as const : "failed" as const };
   },
 });
@@ -934,11 +1112,12 @@ export const detachGrant = mutation({
       for (const replica of replicas)
         await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: "mount-detached", updatedAt: now });
       for (const request of [...pending, ...claimed]) {
-        await ctx.db.patch(request._id, { state: "failed", errorCode: "mount-detached", errorMessage: "The selected Bridge folder was removed.", updatedAt: now });
+        await ctx.db.patch(request._id, { state: "failed", errorCode: "mount-detached", errorMessage: "The selected Bridge folder was removed.", claimedAt: undefined, updatedAt: now });
         const operation = await ctx.db.query("syncOperations")
           .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey))
           .unique();
         if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "mount-detached", updatedAt: now });
+        await failStorageTransitionForRequest(ctx, request, "mount-detached", now);
       }
     }
     return true;
@@ -975,9 +1154,12 @@ export const migrateCloudReplicaPage = mutation({
       if (local) { localOnly += 1; continue; }
       missing += 1;
       if (!args.dryRun) {
-        const now = Date.now(); const revision = work.contentHash ?? String(work.currentVersionId ?? work._id);
-        const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: work._id, kind: "cloud", nativeFormat: work.nativeFormat ?? "spectra-pkg", revision, contentHash: work.contentHash, state: "current", lastVerifiedAt: now, updatedAt: now });
-        await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: work._id, replicaId, idempotencyKey: `migration:${work._id}`, direction: "migration", revisionAfter: revision, state: "verified", actorKind: "migration", createdAt: now, updatedAt: now });
+        const now = Date.now();
+        const linked = work.resourceClass === "resource" || ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam"].includes(work.nativeFormat ?? "");
+        const revision = linked ? `missing:${work._id}` : work.contentHash ?? String(work.currentVersionId ?? work._id);
+        const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: work._id, kind: "cloud", nativeFormat: work.nativeFormat ?? "spectra-native", revision, contentHash: linked ? undefined : work.contentHash, state: linked ? "error" : "current", lastVerifiedAt: linked ? undefined : now, errorCode: linked ? "replica-payload-missing" : undefined, errorAt: linked ? now : undefined, updatedAt: now });
+        const idempotencyKey = await deriveSyncIdempotencyKey({ workId: String(work._id), target: "cloud", baseRevision: revision, targetRevision: revision, direction: "migration" });
+        await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: work._id, replicaId, idempotencyKey, direction: "migration", revisionAfter: revision, state: linked ? "failed" : "verified", actorKind: "migration", errorCode: linked ? "replica-payload-missing" : undefined, createdAt: now, updatedAt: now });
         inserted += 1;
       }
     }
@@ -992,15 +1174,34 @@ export const reportRevision = mutation({
     const { device } = await requireDevice(ctx, input.credential);
     const replica = await ctx.db.get(args.replicaId); if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id) throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
     const policy = await computeEffectivePolicy(ctx, device.accountId, { account: String(device.accountId), mount: replica.mountId ? String(replica.mountId) : undefined, item: String(replica.workId) });
-    const existing = await ctx.db.query("syncOperations").withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", input.idempotencyKey)).unique(); if (existing) return { state: existing.state, operationId: existing._id };
+    const idempotencyKey = await deriveSyncIdempotencyKey({
+      workId: String(replica.workId),
+      target: String(replica.deviceId ?? device._id),
+      baseRevision: input.revisionBefore,
+      targetRevision: input.revisionAfter,
+      direction: "external",
+    });
+    const existing = await ctx.db.query("syncOperations").withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", idempotencyKey)).unique(); if (existing) return { state: existing.state, operationId: existing._id };
     const now = Date.now();
     if (replica.revision !== input.revisionBefore) {
-      const operationId = await ctx.db.insert("syncOperations", { accountId: device.accountId, workId: replica.workId, replicaId: replica._id, idempotencyKey: input.idempotencyKey, direction: "local-to-cloud", revisionBefore: input.revisionBefore, revisionAfter: input.revisionAfter, state: "conflicted", actorKind: "external-edit", errorCode: "stale-revision", createdAt: now, updatedAt: now });
+      const operationId = await ctx.db.insert("syncOperations", { accountId: device.accountId, workId: replica.workId, replicaId: replica._id, idempotencyKey, direction: "external", revisionBefore: input.revisionBefore, revisionAfter: input.revisionAfter, state: "conflicted", actorKind: "external-edit", errorCode: "stale-revision", createdAt: now, updatedAt: now });
       await ctx.db.patch(replica._id, { state: "diverged", updatedAt: now }); return { state: "conflicted" as const, operationId };
     }
-    const deferred = policy.source.kind !== "default" && !policyAllowsTrigger(policy.timing, "watch");
-    const operationId = await ctx.db.insert("syncOperations", { accountId: device.accountId, workId: replica.workId, replicaId: replica._id, idempotencyKey: input.idempotencyKey, direction: "local-to-cloud", revisionBefore: input.revisionBefore, revisionAfter: input.revisionAfter, state: deferred ? "pending" : "verified", actorKind: "external-edit", createdAt: now, updatedAt: now });
-    await ctx.db.patch(replica._id, { revision: input.revisionAfter, baseRevision: input.revisionBefore, contentHash: input.contentHash, state: deferred ? "ahead" : "current", lastVerifiedAt: deferred ? replica.lastVerifiedAt : now, updatedAt: now });
-    await ctx.db.patch(device._id, { lastSeenAt: now }); return { state: deferred ? "pending" as const : "verified" as const, operationId };
+    const cloud = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
+      .unique();
+    const cloudPayloadId = cloud?.payloadRef ? ctx.db.normalizeId("payloadObjects", cloud.payloadRef) : null;
+    const cloudPayload = cloudPayloadId ? await ctx.db.get(cloudPayloadId) : null;
+    const replicasAgree = Boolean(
+      cloud &&
+      cloud.contentHash === input.contentHash &&
+      cloudPayload?.state === "active" &&
+      cloudPayload.hash === input.contentHash,
+    );
+    const deferred = !policyAllowsTrigger(policy.timing, "watch");
+    const operationId = await ctx.db.insert("syncOperations", { accountId: device.accountId, workId: replica.workId, replicaId: replica._id, idempotencyKey, direction: "external", revisionBefore: input.revisionBefore, revisionAfter: input.revisionAfter, state: replicasAgree ? "verified" : "applied", actorKind: "external-edit", errorCode: deferred && !replicasAgree ? "reconciliation-deferred" : undefined, createdAt: now, updatedAt: now });
+    await ctx.db.patch(replica._id, { revision: input.revisionAfter, baseRevision: input.revisionBefore, contentHash: input.contentHash, state: replicasAgree ? "current" : "ahead", lastVerifiedAt: replicasAgree ? now : replica.lastVerifiedAt, updatedAt: now });
+    if (replicasAgree && cloud) await ctx.db.patch(cloud._id, { revision: input.revisionAfter, baseRevision: input.revisionAfter, state: "current", lastVerifiedAt: now, updatedAt: now });
+    await ctx.db.patch(device._id, { lastSeenAt: now }); return { state: replicasAgree ? "verified" as const : "applied" as const, operationId };
   },
 });

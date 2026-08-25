@@ -146,7 +146,7 @@ export async function materializeDocxArtifact(
     comparePackages(payload, output),
   ]);
   assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
-  const stored = await uploadNativePayload(output, hash, truth.nativeFormat);
+  const stored = await uploadNativePayload(workId, output, hash, truth.nativeFormat);
   const local = workTruth.replicas.find(
     (replica) => replica.kind === "local" && replica.state !== "unavailable",
   );
@@ -164,7 +164,6 @@ export async function materializeDocxArtifact(
       payloadRef: string;
       contentHash: string;
       baseRevision: string;
-      idempotencyKey: string;
       fidelityMap: unknown;
       regionIds: string[];
       partNames: string[];
@@ -178,8 +177,7 @@ export async function materializeDocxArtifact(
     workId,
     payloadRef: stored.payloadRef,
     contentHash: hash,
-    baseRevision: local.revision,
-    idempotencyKey: crypto.randomUUID(),
+    baseRevision: truth.revision,
     fidelityMap: next.fidelityMap,
     regionIds,
     partNames: comparison.parts
@@ -393,14 +391,13 @@ export async function POST(request: Request) {
         comparePackages(local.payload, output),
       ]);
       assertPreservationKept({ entries: externalOpened.fidelityMap.entries, parts: comparison.parts });
-      const stored = await uploadNativePayload(output, hash, local.truth.nativeFormat);
+      const stored = await uploadNativePayload(workId, output, hash, local.truth.nativeFormat);
       const queued = await convexMutation<
         {
           workId: Id<"spectraArtifacts">;
           payloadRef: string;
           contentHash: string;
           baseRevision: string;
-          idempotencyKey: string;
           fidelityMap: unknown;
           regionIds: string[];
           partNames: string[];
@@ -412,7 +409,6 @@ export async function POST(request: Request) {
         payloadRef: stored.payloadRef,
         contentHash: hash,
         baseRevision: local.truth.revision,
-        idempotencyKey: crypto.randomUUID(),
         fidelityMap: next.fidelityMap,
         regionIds: [...new Set([...spectraChanged, ...conflictRegionIds])],
         partNames: comparison.parts
@@ -445,6 +441,7 @@ export async function POST(request: Request) {
         regionIds: string[];
         partNames: string[];
         conflictRegionIds: string[];
+        resolution?: "local" | "merged";
       },
       { state: "applied" | "conflicted" }
     >("replicas:recordExternalReconciliation", {
@@ -457,6 +454,7 @@ export async function POST(request: Request) {
       regionIds: [...externalChanged],
       partNames: diff.preservedPartChanges,
       conflictRegionIds: input.resolution === "word" ? [] : conflictRegionIds,
+      resolution: input.resolution === "word" ? "local" : undefined,
     });
     return NextResponse.json({
       state: recorded.state,

@@ -120,7 +120,6 @@ export function ResourceSurface({
       if (action === "apply")
         await applyProtectedPending({
           workId: artifact._id as never,
-          idempotencyKey: crypto.randomUUID(),
         });
       else if (action === "fork")
         await forkProtectedPending({ workId: artifact._id as never });
@@ -143,7 +142,6 @@ export function ResourceSurface({
       await transitionStorageStrategy({
         workId: artifact._id as never,
         toPreset,
-        idempotencyKey: crypto.randomUUID(),
         ...(toPreset !== "spectra" && !truth?.replicas.some((replica) => replica.kind === "local") && activeMounts?.[0]
           ? { mountId: activeMounts[0]._id, relativePath: artifact.title }
           : {}),

@@ -128,6 +128,29 @@ export async function computeEffectivePolicy(
   return resolveEffectivePolicy(requested, policies);
 }
 
+/** Payload bytes may enter Spectra only when the effective policy for the
+ * exact work permits full cloud content. Call this at both upload issuance and
+ * commit time so a policy change cannot race an already-issued URL. */
+export async function assertPayloadWriteAllowed(
+  ctx: QueryCtx | MutationCtx,
+  accountId: Id<"accounts">,
+  workId: Id<"spectraArtifacts">,
+  mountId?: Id<"bridgeMounts">,
+) {
+  const policy = await computeEffectivePolicy(ctx, accountId, {
+    account: String(accountId),
+    mount: mountId ? String(mountId) : undefined,
+    item: String(workId),
+  });
+  if (policy.cloudContent !== "full")
+    throw new Error(
+      policy.cloudContent === "none"
+        ? "CLOUD_CONTENT_DISABLED"
+        : "CLOUD_CONTENT_METADATA_ONLY",
+    );
+  return policy;
+}
+
 export const effective = query({
   args: { mountId: v.optional(v.string()), workspaceId: v.optional(v.string()), folderId: v.optional(v.string()), itemId: v.optional(v.string()) },
   handler: async (ctx, args) => {

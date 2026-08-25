@@ -16,7 +16,10 @@ type ContextualTipProps = {
 const STORAGE_PREFIX = "ai-school-tip-dismissed-session:";
 
 function normalizeTipId(message: string) {
-  return message.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return message
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export function ContextualTip({
@@ -29,7 +32,10 @@ export function ContextualTip({
 }: ContextualTipProps) {
   const [mounted, setMounted] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const resolvedTipId = useMemo(() => tipId ?? normalizeTipId(message), [message, tipId]);
+  const resolvedTipId = useMemo(
+    () => tipId ?? normalizeTipId(message),
+    [message, tipId],
+  );
   const storageKey = `${STORAGE_PREFIX}${resolvedTipId}`;
 
   useEffect(() => {
@@ -65,7 +71,12 @@ export function ContextualTip({
       aria-live="polite"
     >
       <div className="flex-1 overflow-hidden">
-        <p key={message} className="animate-in fade-in slide-in-from-bottom-1 duration-300 truncate text-[11px] leading-relaxed text-[var(--text-secondary)]">{message}</p>
+        <p
+          key={message}
+          className="animate-in fade-in slide-in-from-bottom-1 duration-300 truncate text-micro leading-relaxed text-[var(--text-secondary)]"
+        >
+          {message}
+        </p>
       </div>
       {actionLabel && onAction ? (
         <button

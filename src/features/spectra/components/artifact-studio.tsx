@@ -6224,7 +6224,7 @@ function ArtifactStudioEditor({
               <Icon className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <span className="spectra-artifact-kind block truncate text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
+              <span className="spectra-artifact-kind block truncate text-micro font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
                 {meta.label}
               </span>
               {identityBlock}
@@ -6567,7 +6567,7 @@ function ArtifactStudioEditor({
         >
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[#d88922]" />
           <span className="min-w-0 flex-1">{liveRecovery.message}</span>
-          <span className="shrink-0 font-mono text-[10px] text-[var(--text-tertiary)]">
+          <span className="shrink-0 font-mono text-micro text-[var(--text-tertiary)]">
             {liveRecovery.reference}
           </span>
         </div>

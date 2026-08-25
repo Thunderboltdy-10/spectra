@@ -775,7 +775,7 @@ export function AgentLibraryShell({
           onShare={(artifact) => setShareTarget(artifact)}
           onDirtyChange={studio.setDirty}
         />
-        <WorkbenchLiveStack zIndex={220}>
+        <WorkbenchLiveStack>
           {artifactQuickChat}
         </WorkbenchLiveStack>
       </div>
@@ -944,13 +944,13 @@ export function AgentLibraryShell({
         />
       ) : null}
       {studio.mode === "split" ? (
-        <WorkbenchLiveStack zIndex={220}>
+        <WorkbenchLiveStack>
           {artifactQuickChat}
         </WorkbenchLiveStack>
       ) : null}
 
       {!studio.activeArtifact ? (
-        <WorkbenchLiveStack zIndex={220}>
+        <WorkbenchLiveStack>
             <CommandBar
               className="w-full"
               placeholder="Ask Spectra anything about agents…"

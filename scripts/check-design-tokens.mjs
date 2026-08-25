@@ -35,12 +35,20 @@ function walk(dir, out = []) {
 
 const globalsPath = join(ROOT, "src/app/globals.css");
 const globals = readFileSync(globalsPath, "utf8");
+const tokensPath = join(ROOT, "src/styles/spectra-tokens.css");
+const appCssPath = join(ROOT, "src/styles/spectra-app.css");
+const appCss = readFileSync(appCssPath, "utf8");
 
-/* 1. Single canonical :root block */
-const rootBlocks = [...globals.matchAll(/^[ \t]*:root\s*\{/gm)];
-if (rootBlocks.length !== 1) {
+/* 1. The canonical :root lives in spectra-app.css.
+      globals.css became an import manifest (tokens moved to src/styles/ during
+      the wave-Y redesign); the property is unchanged — exactly one light :root
+      block declaring --brand-primary, plus its one dark remap. */
+const canonicalRoots = [
+  ...appCss.matchAll(/^[ \t]*:root\s*\{[^}]*--brand-primary\s*:/gms),
+];
+if (canonicalRoots.length !== 1) {
   failures.push(
-    `globals.css must have exactly one top-level :root token block; found ${rootBlocks.length}`,
+    `spectra-app.css must hold exactly one :root block declaring --brand-primary; found ${canonicalRoots.length}`,
   );
 }
 
@@ -50,18 +58,49 @@ if (globals.includes("data-theme-palette")) {
     "globals.css re-introduces the removed data-theme-palette system",
   );
 }
-if (
-  /--brand-primary\s*:/.test(globals.slice(globals.indexOf("}\n\n.dark"))) &&
-  !globals.includes("Canonical design tokens")
-) {
-  /* Handled by check 1 + 5; kept simple. */
-}
 
-/* 5. --brand-primary declared once */
-const brandDecls = globals.match(/--brand-primary\s*:/g) ?? [];
+/* 5. --brand-primary declared once per theme */
+const brandDecls = appCss.match(/--brand-primary\s*:/g) ?? [];
 if (brandDecls.length > 2) {
   failures.push(
     `--brand-primary declared ${brandDecls.length} times (allowed: light + dark)`,
+  );
+}
+
+/* 6. The stacking contract (ARCHITECTURE-PLATFORM §3): seven named layers,
+      exact values, strict order, plus the Tailwind v4 --z-index-* theme wiring
+      that makes z-modal & co. exist. */
+const LAYERS = [
+  ["base", 0],
+  ["chrome", 40],
+  ["dropdown", 60],
+  ["panel", 80],
+  ["modal", 100],
+  ["composer-dock", 120],
+  ["toast", 140],
+];
+const tokens = readFileSync(tokensPath, "utf8");
+for (let index = 0; index < LAYERS.length; index += 1) {
+  const [name, value] = LAYERS[index];
+  if (!new RegExp(`--z-${name}\\s*:\\s*${value}(?:px)?\\s*;`).test(tokens)) {
+    failures.push(
+      `spectra-tokens.css is missing the --z-${name}: ${value} layer token`,
+    );
+  }
+  if (!new RegExp(`--z-index-${name}\\s*:`).test(tokens)) {
+    failures.push(
+      `spectra-tokens.css is missing the @theme wiring --z-index-${name} (z-${name} would not exist)`,
+    );
+  }
+}
+
+/* 7. The global input focus suppression (DS-4) never comes back. */
+for (const match of appCss.matchAll(
+  /^(input|textarea|select):focus-visible[^{]*\{[^}]*outline:\s*none\s*!important/gms,
+)) {
+  const line = appCss.slice(0, match.index).split("\n").length;
+  failures.push(
+    `spectra-app.css:${line} re-introduces the global :focus-visible suppression (DS-4: keyboard-invisible inputs)`,
   );
 }
 

@@ -302,13 +302,13 @@ export function BridgeSettings() {
                     : ""}
                 </div>
                 {mount.doubleSyncRisk ? (
-                  <div className="mt-1 text-[10px] text-[var(--warning)]">
+                  <div className="mt-1 text-micro text-[var(--warning)]">
                     Provider-managed folder detected. Conflict windows may be wider.
                   </div>
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span className="text-[10px] capitalize text-[var(--text-tertiary)]">
+                <span className="text-micro capitalize text-[var(--text-tertiary)]">
                   {mount.state.replace("-", " ")}
                 </span>
                 {mount.state === "error" || mount.state === "selected" || mount.state === "unavailable" || mount.state === "waiting" ? (

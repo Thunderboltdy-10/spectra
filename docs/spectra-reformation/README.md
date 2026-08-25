@@ -35,8 +35,9 @@ Dependency order. Within a phase, units marked parallel-safe may run concurrentl
 
 ```
 P0  Stop the Bleed & Build the Rails   contained critical fixes, Convex I/O P0,
-                                       security quick wins, repo hygiene; design
-                                       baseline and verifier experiments deferred
+                                       security quick wins, repo hygiene, design
+                                       baseline, falsification experiments,
+                                       honest baseline
 P1  The Truth Engine                   bytes-canonical replica machine, journal-first
                                        Bridge, one status presenter, sync-as-toggles
 P2  Fidelity at Full Surface           one schema per format, 3-way merge, stable

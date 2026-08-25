@@ -131,7 +131,7 @@ export const OrganizerRow = memo(function OrganizerRow({
       )}
 
       {inContext ? (
-        <span className="shrink-0 rounded-[4px] bg-[color-mix(in_oklab,var(--accent-mint)_14%,var(--bg-elevated))] px-1.5 py-px text-[10px] font-medium uppercase tracking-[0.06em] text-[var(--accent-mint)]">
+        <span className="shrink-0 rounded-[4px] bg-[color-mix(in_oklab,var(--accent-mint)_14%,var(--bg-elevated))] px-1.5 py-px text-micro font-medium uppercase tracking-[0.06em] text-[var(--accent-mint)]">
           Context
         </span>
       ) : null}

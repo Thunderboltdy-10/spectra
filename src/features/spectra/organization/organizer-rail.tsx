@@ -90,7 +90,7 @@ export function OrganizerRail({
         />
       </div>
 
-      <div className="mt-4 px-2 text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
+      <div className="mt-4 px-2 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
         Quick views
       </div>
       <div className="mt-1 flex flex-col">
@@ -238,7 +238,7 @@ function RailBranch({
               </span>
               <span className="min-w-0 flex-1 truncate">{node.name}</span>
               {node.kind === "workspace" && node.workspace?.status === "archived" ? (
-                <span className="shrink-0 text-[10px] uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+                <span className="shrink-0 text-micro uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
                   Archived
                 </span>
               ) : null}

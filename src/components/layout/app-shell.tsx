@@ -739,7 +739,7 @@ function ShellNavigation() {
             </button>
           ) : null}
           {notificationsOpen ? (
-            <section className="fixed right-4 top-4 z-[80] w-[340px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.18)]">
+            <section className="fixed right-4 top-4 z-panel w-[340px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.18)]">
               <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
                 <div>
                   <strong className="text-[12px]">Notifications</strong>
@@ -805,7 +805,7 @@ function ShellNavigation() {
           />
           <section
             aria-label="Choose a workspace"
-            className="fixed inset-x-3 bottom-[84px] z-[51] max-h-[min(70dvh,560px)] overflow-hidden rounded-[20px] border bg-[var(--bg-elevated)] shadow-[0_24px_70px_rgba(18,23,34,.24)] md:hidden"
+            className="fixed inset-x-3 bottom-[84px] z-panel max-h-[min(70dvh,560px)] overflow-hidden rounded-[20px] border bg-[var(--bg-elevated)] shadow-[0_24px_70px_rgba(18,23,34,.24)] md:hidden"
             style={{ borderColor: "var(--border-default)" }}
           >
             <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
@@ -877,7 +877,7 @@ function ShellNavigation() {
           />
           <section
             aria-label="Notifications"
-            className="fixed inset-x-3 bottom-[84px] z-[51] max-h-[min(72dvh,620px)] overflow-hidden rounded-[20px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_24px_70px_rgba(18,23,34,.24)] md:hidden"
+            className="fixed inset-x-3 bottom-[84px] z-panel max-h-[min(72dvh,620px)] overflow-hidden rounded-[20px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_24px_70px_rgba(18,23,34,.24)] md:hidden"
           >
             <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
               <div>
@@ -952,7 +952,7 @@ function ShellNavigation() {
 
       <nav
         aria-label="Spectra navigation"
-        className="spectra-thin-scrollbar fixed inset-x-3 bottom-3 z-[52] flex h-16 items-center gap-1 overflow-x-auto rounded-[22px] border px-2 shadow-[0_18px_60px_-22px_rgba(11,18,36,.55)] backdrop-blur-xl md:hidden"
+        className="spectra-thin-scrollbar fixed inset-x-3 bottom-3 z-chrome flex h-16 items-center gap-1 overflow-x-auto rounded-[22px] border px-2 shadow-[0_18px_60px_-22px_rgba(11,18,36,.55)] backdrop-blur-xl md:hidden"
         style={{
           borderColor: "var(--border-default)",
           background:

@@ -51,6 +51,22 @@ nextjs-portal {
   --surface-radius: 14px;
 }
 
+/* §Layers — the only stacking contract (ARCHITECTURE-PLATFORM §3).
+   Numeric z-index in feature code is lint-banned; every overlay names one of
+   these seven layers and portals through Dialog/Popover with a `layer` prop.
+   The order is deliberate: the composer dock stays reachable above modals
+   (120 > 100), and transient surfaces (tooltip, capture pickers, toasts)
+   outrank everything so they never disappear behind work. */
+:root {
+  --z-base: 0;
+  --z-chrome: 40;
+  --z-dropdown: 60;
+  --z-panel: 80;
+  --z-modal: 100;
+  --z-composer-dock: 120;
+  --z-toast: 140;
+}
+
 /* §Type scale — the existing seven steps (micro 11 / caption 12 / ui 13 /
    body 14 / editor 16 / title 17 / display 30) were too sparse to absorb the
    real call sites, which is why hundreds of `text-[Npx]` literals grew around
@@ -125,6 +141,14 @@ nextjs-portal {
 
   --ease-standard: var(--ease-standard);
   --ease-out-expo: var(--ease-out-expo);
+
+  --z-index-base: var(--z-base);
+  --z-index-chrome: var(--z-chrome);
+  --z-index-dropdown: var(--z-dropdown);
+  --z-index-panel: var(--z-panel);
+  --z-index-modal: var(--z-modal);
+  --z-index-composer-dock: var(--z-composer-dock);
+  --z-index-toast: var(--z-toast);
 
   --animate-surface-in: spectra-surface-in 420ms var(--ease-standard) both;
   --animate-fade-in: chat-fade-in 240ms var(--ease-standard) both;

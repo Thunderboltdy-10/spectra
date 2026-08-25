@@ -4,6 +4,7 @@ import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Check, Ellipsis, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LAYER_CLASS, type SpectraLayer } from "./layers";
 
 /**
  * Spectra's one menu. Every overflow, "more actions" and three-dot control uses
@@ -21,14 +22,18 @@ const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, style, sideOffset = 6, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & {
+    /** Stacking layer. Inside a dialog, pass the dialog's layer ("modal"). */
+    layer?: SpectraLayer;
+  }
+>(({ className, style, sideOffset = 6, layer = "dropdown", ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-[340] max-h-[min(70dvh,32rem)] min-w-[11rem] overflow-y-auto rounded-card border border-[var(--border-default)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
+        "max-h-[min(70dvh,32rem)] min-w-[11rem] overflow-y-auto rounded-card border border-[var(--border-default)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
+        LAYER_CLASS[layer],
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className,
       )}
@@ -202,7 +207,10 @@ export function OverflowMenu<T extends string>({
         )}
         style={{ width: size, height: size }}
       >
-        <TriggerIcon aria-hidden="true" className="pointer-events-none size-4" />
+        <TriggerIcon
+          aria-hidden="true"
+          className="pointer-events-none size-4"
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className={contentClassName}>
         {value === undefined ? (

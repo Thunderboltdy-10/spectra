@@ -16,6 +16,12 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SelectField } from "@/components/ui/select";
 import {
   getSpectraShareState,
@@ -405,27 +411,11 @@ export function ShareDialog({
     }
   }
 
-  useEffect(() => {
-    if (!open) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open]);
-
-  if (!open) return null;
   return (
-    <div
-      className="fixed inset-0 z-[400] flex items-center justify-center bg-[color-mix(in_oklab,var(--text-primary)_18%,transparent)] p-4 backdrop-blur-[2px]"
-      onPointerDown={onClose}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="share-dialog-title"
-        className="flex max-h-[min(720px,calc(100vh-32px))] w-full max-w-[560px] flex-col overflow-hidden rounded-[13px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_28px_90px_rgba(27,20,12,0.24)]"
-        onPointerDown={(event) => event.stopPropagation()}
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent
+        hideCloseButton
+        className="flex max-h-[min(720px,calc(100vh-32px))] max-w-[560px] flex-col gap-0 overflow-hidden p-0"
       >
         <header className="flex items-start justify-between border-b border-[var(--border-default)] px-5 py-4">
           <div className="flex min-w-0 items-start gap-3">
@@ -433,16 +423,11 @@ export function ShareDialog({
               <Share2 className="h-4 w-4" />
             </span>
             <div className="min-w-0">
-              <h2
-                id="share-dialog-title"
-                className="font-display text-[21px] font-semibold text-[var(--text-primary)]"
-              >
-                Share {title}
-              </h2>
-              <p className="mt-1 text-[12px] leading-5 text-[var(--text-secondary)]">
+              <DialogTitle>Share {title}</DialogTitle>
+              <DialogDescription className="mt-1">
                 Invite members of your school. They decide whether to accept
                 before this appears in Shared.
-              </p>
+              </DialogDescription>
             </div>
           </div>
           <button
@@ -477,7 +462,7 @@ export function ShareDialog({
                 <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[var(--text-tertiary)]" />
               ) : null}
             </div>
-            <SelectField
+            <SelectField layer="modal"
               ariaLabel="Invitation permission"
               value={level}
               onChange={(next) => setLevel(next as ShareLevel)}
@@ -597,7 +582,7 @@ export function ShareDialog({
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                        <SelectField
+                        <SelectField layer="modal"
                           ariaLabel={`Permission for ${request.requester?.name ?? "requester"}`}
                           value={
                             requestLevels[request.requestId] ??
@@ -694,7 +679,7 @@ export function ShareDialog({
                     </div>
                   </div>
                   {share.status === "accepted" ? (
-                    <SelectField
+                    <SelectField layer="modal"
                       ariaLabel={`Permission for ${share.account?.name ?? "member"}`}
                       value={share.level}
                       disabled={busyKey === `level:${share.invitationId}`}
@@ -787,7 +772,7 @@ export function ShareDialog({
                             : ""}
                         </div>
                       </div>
-                      <SelectField
+                      <SelectField layer="modal"
                         ariaLabel={`Access to this work for ${entry.account.name}`}
                         value={selected}
                         disabled={
@@ -920,7 +905,7 @@ export function ShareDialog({
               >
                 Expiry
               </label>
-              <SelectField
+              <SelectField layer="modal"
                 id="public-expiry"
                 ariaLabel="Expiry"
                 value={publicExpiry}
@@ -949,7 +934,7 @@ export function ShareDialog({
             </div>
           </section>
         </div>
-      </section>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -10,20 +10,18 @@ import { WorkbenchLiveStack } from "./workbench-live-stack";
  * attachment hosting, or the Live Dock mount anymore.
  */
 export function WorkbenchDockShell({
-  zIndex,
   attachmentsHostRef,
   dock,
   selection,
   composer,
 }: {
-  zIndex: number;
   attachmentsHostRef: (node: HTMLDivElement | null) => void;
   dock: ComponentProps<typeof LiveDock>;
   selection?: ReactNode;
   composer: ReactNode;
 }) {
   return (
-    <WorkbenchLiveStack zIndex={zIndex}>
+    <WorkbenchLiveStack>
       <div ref={attachmentsHostRef} />
       <LiveDock {...dock} />
       {selection}

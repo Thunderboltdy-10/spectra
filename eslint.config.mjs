@@ -1,6 +1,7 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import spectraDesignRules from "./scripts/eslint/spectra-design-rules.mjs";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -20,6 +21,28 @@ const eslintConfig = defineConfig([
           destructuredArrayIgnorePattern: "^_",
         },
       ],
+    },
+  },
+  /*
+   * Design-system baseline (P0.I4, ARCHITECTURE-PLATFORM §3): warn while the
+   * adoption sweep burns the pre-existing escapes down; directories that are
+   * clean flip to "error" below, starting with the primitive floor itself.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    plugins: { spectra: spectraDesignRules },
+    rules: {
+      "spectra/no-arbitrary-value-classes": "warn",
+      "spectra/no-numeric-z-index": "warn",
+      "spectra/no-raw-hex-in-styles": "warn",
+    },
+  },
+  {
+    files: ["src/components/ui/**/*.{ts,tsx}"],
+    rules: {
+      "spectra/no-arbitrary-value-classes": "error",
+      "spectra/no-numeric-z-index": "error",
+      "spectra/no-raw-hex-in-styles": "error",
     },
   },
   // Override default ignores of eslint-config-next.

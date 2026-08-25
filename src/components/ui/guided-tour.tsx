@@ -27,10 +27,16 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function firstVisibleTarget(selector: string) {
-  const candidates = Array.from(document.querySelectorAll<HTMLElement>(selector));
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>(selector),
+  );
   for (const element of candidates) {
     const styles = window.getComputedStyle(element);
-    if (styles.display === "none" || styles.visibility === "hidden" || styles.opacity === "0") {
+    if (
+      styles.display === "none" ||
+      styles.visibility === "hidden" ||
+      styles.opacity === "0"
+    ) {
       continue;
     }
     const rect = element.getBoundingClientRect();
@@ -53,7 +59,11 @@ function resolveTooltipPosition(
   if (position === "top") {
     return {
       left: defaultLeft,
-      top: clamp(rect.top - CALLOUT_GAP - 220, EDGE_GAP, viewport.height - 220 - EDGE_GAP),
+      top: clamp(
+        rect.top - CALLOUT_GAP - 220,
+        EDGE_GAP,
+        viewport.height - 220 - EDGE_GAP,
+      ),
     };
   }
   if (position === "left") {
@@ -70,25 +80,37 @@ function resolveTooltipPosition(
   }
   return {
     left: defaultLeft,
-    top: clamp(rect.bottom + CALLOUT_GAP, EDGE_GAP, viewport.height - 220 - EDGE_GAP),
+    top: clamp(
+      rect.bottom + CALLOUT_GAP,
+      EDGE_GAP,
+      viewport.height - 220 - EDGE_GAP,
+    ),
   };
 }
 
-export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps) {
+export function GuidedTour({
+  open,
+  steps,
+  onClose,
+  onComplete,
+}: GuidedTourProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
 
-  const findAvailableStepIndex = useCallback((fromIndex: number, direction: 1 | -1 = 1) => {
-    for (
-      let index = fromIndex;
-      direction === 1 ? index < steps.length : index >= 0;
-      index += direction
-    ) {
-      if (firstVisibleTarget(steps[index]?.selector ?? "")) return index;
-    }
-    return -1;
-  }, [steps]);
+  const findAvailableStepIndex = useCallback(
+    (fromIndex: number, direction: 1 | -1 = 1) => {
+      for (
+        let index = fromIndex;
+        direction === 1 ? index < steps.length : index >= 0;
+        index += direction
+      ) {
+        if (firstVisibleTarget(steps[index]?.selector ?? "")) return index;
+      }
+      return -1;
+    },
+    [steps],
+  );
 
   const step = steps[stepIndex];
   const isLastStep = stepIndex >= steps.length - 1;
@@ -122,7 +144,11 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
         if (backward >= 0) setStepIndex(backward);
         return;
       }
-      element.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+      element.scrollIntoView({
+        block: "center",
+        inline: "nearest",
+        behavior: "auto",
+      });
       requestAnimationFrame(() => {
         setTargetRect(element.getBoundingClientRect());
       });
@@ -146,10 +172,26 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
 
   const highlightedRect = useMemo(() => {
     if (!targetRect || viewport.width <= 0 || viewport.height <= 0) return null;
-    const left = clamp(targetRect.left - TARGET_PADDING, EDGE_GAP, viewport.width - EDGE_GAP);
-    const top = clamp(targetRect.top - TARGET_PADDING, EDGE_GAP, viewport.height - EDGE_GAP);
-    const right = clamp(targetRect.right + TARGET_PADDING, EDGE_GAP, viewport.width - EDGE_GAP);
-    const bottom = clamp(targetRect.bottom + TARGET_PADDING, EDGE_GAP, viewport.height - EDGE_GAP);
+    const left = clamp(
+      targetRect.left - TARGET_PADDING,
+      EDGE_GAP,
+      viewport.width - EDGE_GAP,
+    );
+    const top = clamp(
+      targetRect.top - TARGET_PADDING,
+      EDGE_GAP,
+      viewport.height - EDGE_GAP,
+    );
+    const right = clamp(
+      targetRect.right + TARGET_PADDING,
+      EDGE_GAP,
+      viewport.width - EDGE_GAP,
+    );
+    const bottom = clamp(
+      targetRect.bottom + TARGET_PADDING,
+      EDGE_GAP,
+      viewport.height - EDGE_GAP,
+    );
     return {
       left,
       top,
@@ -179,7 +221,10 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
   if (!open || !step) return null;
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-[120]" aria-hidden={!open}>
+    <div
+      className="pointer-events-none fixed inset-0 z-composer-dock"
+      aria-hidden={!open}
+    >
       {highlightedRect ? (
         <div
           className="pointer-events-none fixed rounded-xl border border-[color-mix(in_oklab,var(--accent-cyan)_58%,white)]"
@@ -205,10 +250,16 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
         <p className="text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
           Step {stepIndex + 1} of {steps.length}
         </p>
-        <h3 className="mt-1 text-base font-semibold text-[var(--text-primary)]">{step.title}</h3>
-        <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">{step.description}</p>
+        <h3 className="mt-1 text-base font-semibold text-[var(--text-primary)]">
+          {step.title}
+        </h3>
+        <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+          {step.description}
+        </p>
         {!highlightedRect ? (
-          <p className="mt-2 text-xs text-[var(--warning)]">Target is currently off-screen or unavailable.</p>
+          <p className="mt-2 text-xs text-[var(--warning)]">
+            Target is currently off-screen or unavailable.
+          </p>
         ) : null}
 
         <div className="mt-4 flex items-center justify-between gap-2">

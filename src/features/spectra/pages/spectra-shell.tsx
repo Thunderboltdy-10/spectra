@@ -1,19 +1,13 @@
 "use client";
 
 import {
-  BarChart3,
   BookOpen,
   CalendarCheck2,
   CheckCircle2,
-  Atom,
-  Brain,
-  Calculator,
   Download,
   ExternalLink,
   FileText,
   Files,
-  FlaskConical,
-  GraduationCap,
   HelpCircle,
   Home,
   Library,
@@ -22,7 +16,6 @@ import {
   PencilLine,
   Plus,
   Share2,
-  Sparkles,
   Sprout,
   Trash2,
   Users,
@@ -78,7 +71,10 @@ import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import { WorkbenchDockShell } from "./workbench-dock-shell";
-import { createApplicationCommandDispatcher, mergePreferences } from "../commands/application-dispatcher";
+import {
+  createApplicationCommandDispatcher,
+  mergePreferences,
+} from "../commands/application-dispatcher";
 import { useSpectraPreferences } from "../settings/preference-store";
 import {
   disengageFollowAi,
@@ -90,6 +86,16 @@ import {
   isProgrammaticFollowOpen,
 } from "../collaboration/follow";
 import { ShareDialog } from "../components/share-dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  ArtifactDeleteDialog,
+  PendingCreateDialog,
+  WorkspaceDeleteDialog,
+  WorkspaceEditDialog,
+  workspaceIconChoices,
+} from "../components/shell-dialogs";
 import { LibraryOrganizer } from "../organization/library-organizer";
 import type { ContainerTarget } from "../organization/work-board";
 import {
@@ -98,7 +104,11 @@ import {
   type BoardGroupBy,
 } from "../organization/tree-client";
 import { spectraBus } from "../events";
-import { syncSpectraManageBac, rememberSpectraMemory, correctSpectraMemory } from "../data/api";
+import {
+  syncSpectraManageBac,
+  rememberSpectraMemory,
+  correctSpectraMemory,
+} from "../data/api";
 import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
 import { previewText } from "../components/preview-text";
 import {
@@ -406,30 +416,6 @@ const createTypes: Array<{
   label: getWorkDefinition(key).userFacingName,
 }));
 
-const workspaceIconChoices = [
-  ["Sparkles", Sparkles],
-  ["BookOpen", BookOpen],
-  ["GraduationCap", GraduationCap],
-  ["Atom", Atom],
-  ["FlaskConical", FlaskConical],
-  ["Calculator", Calculator],
-  ["Brain", Brain],
-  ["Sprout", Sprout],
-  ["BarChart3", BarChart3],
-] as const;
-
-function smallButtonClass(tone: "normal" | "dark" | "danger" = "normal") {
-  if (tone === "dark")
-    return "inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--bg-primary)] disabled:opacity-45";
-  if (tone === "danger")
-    return "inline-flex h-8 items-center gap-1.5 rounded-[7px] px-2.5 text-[12px] font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] disabled:opacity-45";
-  return "inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
-}
-
-function menuItemClass() {
-  return "flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45";
-}
-
 function useOutsideClick<T extends HTMLElement>(
   open: boolean,
   onClose: () => void,
@@ -514,11 +500,7 @@ function WorkspaceHeader({
         <div className="flex items-center gap-2">
           {/* People and Settings are compact disclosing actions, not sections:
               they open a dialog, so they do not belong in the work nav. */}
-          <button
-            type="button"
-            onClick={onShareWorkspace}
-            className="flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-          >
+          <Button variant="secondary" size="md" onClick={onShareWorkspace}>
             <Users className="size-3.5 text-[var(--text-secondary)]" />
             People
             {workspace?.sharedWithCount ? (
@@ -526,7 +508,7 @@ function WorkspaceHeader({
                 {workspace.sharedWithCount}
               </span>
             ) : null}
-          </button>
+          </Button>
           <OverflowMenu
             label="More workspace actions"
             items={[
@@ -609,15 +591,15 @@ function SelectObjectsButton({
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={`flex h-8 shrink-0 items-center gap-1.5 rounded-[7px] border px-2.5 text-[12px] font-medium transition ${selectionMode ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"}`}
+    <Button
+      variant={selectionMode ? "primary" : "secondary"}
+      size="sm"
       aria-pressed={selectionMode}
+      onClick={onToggle}
     >
       <Files className="size-3.5" />
       {selectionMode ? "Done selecting" : "Select objects"}
-    </button>
+    </Button>
   );
 }
 
@@ -820,14 +802,10 @@ function Inspector({
                   label="Open work"
                   onClick={() => onOpenArtifact(selectedArtifact)}
                 />
-                <button
-                  type="button"
-                  className={smallButtonClass("danger")}
-                  onClick={onHide}
-                >
+                <Button variant="destructive" size="sm" onClick={onHide}>
                   <Trash2 className="h-4 w-4" />
                   Remove from workspace
-                </button>
+                </Button>
               </InspectorSection>
             </div>
           }
@@ -984,7 +962,9 @@ export function SpectraShell({
       window.localStorage,
       updateWorkbenchSurface(
         session,
-        requestedWorkspaceId ? { workspaceId: requestedWorkspaceId } : "library",
+        requestedWorkspaceId
+          ? { workspaceId: requestedWorkspaceId }
+          : "library",
       ),
     );
   }, [requestedWorkspaceId]);
@@ -1009,13 +989,15 @@ export function SpectraShell({
   const [hubGroupBy, setHubGroupBy] = useState<BoardGroupBy>("type");
   /* Set when the reader jumps from a board column to the folder it names, so the
      List view opens there instead of at the top of the workspace. */
-  const [boardFolderNodeId, setBoardFolderNodeId] = useState<string | null>(null);
+  const [boardFolderNodeId, setBoardFolderNodeId] = useState<string | null>(
+    null,
+  );
   /* The AI needs the Library location the reader is actually viewing, not only
      the route's entry node. Keep it separate from the one-shot board jump so
      ordinary breadcrumb/folder navigation does not remount the organizer. */
-  const [currentLibraryNodeId, setCurrentLibraryNodeId] = useState<string | null>(
-    requestedNodeId,
-  );
+  const [currentLibraryNodeId, setCurrentLibraryNodeId] = useState<
+    string | null
+  >(requestedNodeId);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [, setLoading] = useState(true);
   const [, setWorkspaceLoading] = useState(false);
@@ -1141,10 +1123,7 @@ export function SpectraShell({
       kind: "work" | "thread" | "workspace";
       sourceId: string;
     }> = [];
-    const add = (
-      kind: "work" | "thread" | "workspace",
-      sourceId?: string,
-    ) => {
+    const add = (kind: "work" | "thread" | "workspace", sourceId?: string) => {
       if (!sourceId) return;
       const key = `${kind}:${sourceId}`;
       if (seen.has(key)) return;
@@ -1523,23 +1502,60 @@ export function SpectraShell({
           summary: live.summary ?? artifact.summary,
           updatedAt: live.activityAt,
           placements,
-          placementStatus: placements.length ? ("workspace" as const) : artifact.placementStatus,
+          placementStatus: placements.length
+            ? ("workspace" as const)
+            : artifact.placementStatus,
         };
       }),
     [liveIdentityByKey, snapshotArtifacts],
   );
   useEffect(() => {
     const known = new Set(allArtifacts.map((artifact) => artifact._id));
-    const missing = [...new Set(openObjects.filter((object) => object.type === "artifact" && !known.has(object.id)).map((object) => object.id))];
+    const missing = [
+      ...new Set(
+        openObjects
+          .filter(
+            (object) => object.type === "artifact" && !known.has(object.id),
+          )
+          .map((object) => object.id),
+      ),
+    ];
     if (!overview || missing.length === 0) return;
     let cancelled = false;
-    void Promise.all(missing.map((artifactId) => getSpectraArtifact(artifactId).then(({ artifact }) => ({ artifactId, artifact })).catch(() => ({ artifactId, artifact: null })))).then((loaded) => {
+    void Promise.all(
+      missing.map((artifactId) =>
+        getSpectraArtifact(artifactId)
+          .then(({ artifact }) => ({ artifactId, artifact }))
+          .catch(() => ({ artifactId, artifact: null })),
+      ),
+    ).then((loaded) => {
       if (cancelled) return;
-      for (const item of loaded) if (!item.artifact) setObjectAvailability("artifact", item.artifactId);
-      const artifacts = loaded.map((item) => item.artifact).filter((artifact): artifact is SpectraArtifact => artifact !== null);
-      if (artifacts.length > 0) setOverview((current) => current ? { ...current, artifacts: [...artifacts.filter((artifact) => !current.artifacts.some((item) => item._id === artifact._id)), ...current.artifacts] } : current);
+      for (const item of loaded)
+        if (!item.artifact) setObjectAvailability("artifact", item.artifactId);
+      const artifacts = loaded
+        .map((item) => item.artifact)
+        .filter((artifact): artifact is SpectraArtifact => artifact !== null);
+      if (artifacts.length > 0)
+        setOverview((current) =>
+          current
+            ? {
+                ...current,
+                artifacts: [
+                  ...artifacts.filter(
+                    (artifact) =>
+                      !current.artifacts.some(
+                        (item) => item._id === artifact._id,
+                      ),
+                  ),
+                  ...current.artifacts,
+                ],
+              }
+            : current,
+        );
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [allArtifacts, openObjects, overview, setObjectAvailability]);
   const runs = overview?.runs ?? [];
   const studio = useArtifactStudioState(
@@ -1547,25 +1563,33 @@ export function SpectraShell({
     allArtifacts,
   );
   const applicationCommandDispatcher = useMemo(
-    () => createApplicationCommandDispatcher({
-      openArtifact: (artifactId, surfaceMode) => {
-        const artifact = allArtifacts.find((item) => item._id === artifactId);
-        if (!artifact) throw new Error(`APPLICATION_COMMAND_TARGET_NOT_FOUND: ${artifactId}`);
-        if (surfaceMode === "full") studio.openTab(artifact);
-        else openArtifactPanel(artifact);
-      },
-      navigate: (destination, targetId) => {
-        if (destination === "calendar") router.push("/calendar");
-        else if (destination === "settings") router.push(targetId ? `/settings?section=${encodeURIComponent(targetId)}` : "/settings");
-        else if (destination === "workspace") {
-          if (targetId) goToWorkspaceHub(targetId);
-          else goToHomeHub();
-        }
-        else goToHomeHub();
-      },
-      replacePreferences,
-      preferences,
-    }),
+    () =>
+      createApplicationCommandDispatcher({
+        openArtifact: (artifactId, surfaceMode) => {
+          const artifact = allArtifacts.find((item) => item._id === artifactId);
+          if (!artifact)
+            throw new Error(
+              `APPLICATION_COMMAND_TARGET_NOT_FOUND: ${artifactId}`,
+            );
+          if (surfaceMode === "full") studio.openTab(artifact);
+          else openArtifactPanel(artifact);
+        },
+        navigate: (destination, targetId) => {
+          if (destination === "calendar") router.push("/calendar");
+          else if (destination === "settings")
+            router.push(
+              targetId
+                ? `/settings?section=${encodeURIComponent(targetId)}`
+                : "/settings",
+            );
+          else if (destination === "workspace") {
+            if (targetId) goToWorkspaceHub(targetId);
+            else goToHomeHub();
+          } else goToHomeHub();
+        },
+        replacePreferences,
+        preferences,
+      }),
     // These shell handlers are intentionally recreated with the current
     // mounted studio state; the dispatcher must never retain a stale panel
     // callback while a user changes workspace or artifact focus.
@@ -1574,27 +1598,44 @@ export function SpectraShell({
   );
 
   useEffect(() => {
-    const removeSettings = spectraBus.handle("settings.change", ({ patch, section }) => {
-      replacePreferences(mergePreferences(preferences, patch));
-      router.push(section ? `/settings?section=${encodeURIComponent(section)}` : "/settings");
-    });
-    const removeSync = spectraBus.handle("sync.policy.change", async ({ targetIds, patch }) => {
-      if (targetIds.length === 0) throw new Error("SYNC_TARGETS_REQUIRED");
-      await patchItemSyncPolicies({ itemIds: targetIds, patch, idempotencyKey: crypto.randomUUID() });
-    });
-    const removeMemory = spectraBus.handle("memory.write", async ({ action, content, memoryId }) => {
-      if (action === "revise") {
-        if (!memoryId) throw new Error("MEMORY_ID_REQUIRED");
-        await correctSpectraMemory(memoryId, content);
-      } else {
-        await rememberSpectraMemory({
-          proposition: content,
-          scope: "private_global",
-          claimType: "inferred_preference",
-          captureReason: "AI memory write through the shared command path.",
+    const removeSettings = spectraBus.handle(
+      "settings.change",
+      ({ patch, section }) => {
+        replacePreferences(mergePreferences(preferences, patch));
+        router.push(
+          section
+            ? `/settings?section=${encodeURIComponent(section)}`
+            : "/settings",
+        );
+      },
+    );
+    const removeSync = spectraBus.handle(
+      "sync.policy.change",
+      async ({ targetIds, patch }) => {
+        if (targetIds.length === 0) throw new Error("SYNC_TARGETS_REQUIRED");
+        await patchItemSyncPolicies({
+          itemIds: targetIds,
+          patch,
+          idempotencyKey: crypto.randomUUID(),
         });
-      }
-    });
+      },
+    );
+    const removeMemory = spectraBus.handle(
+      "memory.write",
+      async ({ action, content, memoryId }) => {
+        if (action === "revise") {
+          if (!memoryId) throw new Error("MEMORY_ID_REQUIRED");
+          await correctSpectraMemory(memoryId, content);
+        } else {
+          await rememberSpectraMemory({
+            proposition: content,
+            scope: "private_global",
+            claimType: "inferred_preference",
+            captureReason: "AI memory write through the shared command path.",
+          });
+        }
+      },
+    );
     const removeSharing = spectraBus.handle("sharing.change", async (input) => {
       if (input.action === "invite") {
         await postSpectra({
@@ -1605,15 +1646,29 @@ export function SpectraShell({
           level: input.level ?? "read",
         });
       } else if (input.action === "change_level") {
-        await postSpectra({ action: "changeShareLevel", invitationId: input.invitationId ?? "", level: input.level ?? "read" });
+        await postSpectra({
+          action: "changeShareLevel",
+          invitationId: input.invitationId ?? "",
+          level: input.level ?? "read",
+        });
       } else {
-        await postSpectra({ action: "revokeShareAccess", resourceType: input.resourceType, resourceId: input.resourceId, grantId: input.grantId ?? "" });
+        await postSpectra({
+          action: "revokeShareAccess",
+          resourceType: input.resourceType,
+          resourceId: input.resourceId,
+          grantId: input.grantId ?? "",
+        });
       }
     });
-    const removeManageBac = spectraBus.handle("managebac.sync", async ({ purpose }) => {
-      await syncSpectraManageBac("manual");
-      window.dispatchEvent(new CustomEvent("spectra:managebac-ai-sync", { detail: { purpose } }));
-    });
+    const removeManageBac = spectraBus.handle(
+      "managebac.sync",
+      async ({ purpose }) => {
+        await syncSpectraManageBac("manual");
+        window.dispatchEvent(
+          new CustomEvent("spectra:managebac-ai-sync", { detail: { purpose } }),
+        );
+      },
+    );
     return () => {
       removeSettings();
       removeSync();
@@ -2403,13 +2458,18 @@ export function SpectraShell({
     }
     function onAiNavigate(event: Event) {
       if (!isFollowingAi()) return;
-      const detail = (event as CustomEvent<{ route?: string; target?: string }>).detail;
+      const detail = (event as CustomEvent<{ route?: string; target?: string }>)
+        .detail;
       if (!detail?.route) return;
       if (detail.route === "library" || detail.route === "workspace") {
         if (detail.target) goToWorkspaceHub(detail.target);
         else goToHomeHub();
       } else if (detail.route === "settings") {
-        router.push(detail.target ? `/settings?section=${encodeURIComponent(detail.target)}` : "/settings");
+        router.push(
+          detail.target
+            ? `/settings?section=${encodeURIComponent(detail.target)}`
+            : "/settings",
+        );
       } else if (detail.route === "calendar") {
         router.push("/calendar");
       }
@@ -2559,7 +2619,12 @@ export function SpectraShell({
     }
     void getSpectraArtifact(artifactId)
       .then(({ artifact }) => {
-        setOverview((current) => current && !current.artifacts.some((item) => item._id === artifact._id) ? { ...current, artifacts: [artifact, ...current.artifacts] } : current);
+        setOverview((current) =>
+          current &&
+          !current.artifacts.some((item) => item._id === artifact._id)
+            ? { ...current, artifacts: [artifact, ...current.artifacts] }
+            : current,
+        );
         openArtifactPanel(artifact);
       })
       .catch(() => toast.error("That work could not be opened."));
@@ -3144,9 +3209,10 @@ export function SpectraShell({
       );
     } catch (error) {
       if (importJobId)
-        await abortArtifactImportUpload(importJobId, "Library import failed").catch(
-          () => undefined,
-        );
+        await abortArtifactImportUpload(
+          importJobId,
+          "Library import failed",
+        ).catch(() => undefined);
       toast.error(
         describeFailure(error, { fallback: "Could not import this file." })
           .message,
@@ -3512,130 +3578,38 @@ export function SpectraShell({
           persistent
         />
         <div className="spectra-workbench-frame relative flex min-h-0 flex-1">
-          {pendingCreateType ? (
-            <div
-              className="absolute inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] backdrop-blur-[2px]"
-              onPointerDown={() => setPendingCreateType(null)}
-            >
-              <div
-                className="w-[min(390px,calc(100vw-32px))] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_24px_70px_rgba(27,20,12,0.2)]"
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                <h2 className="font-display text-[19px] font-semibold text-[var(--text-primary)]">
-                  Where should this{" "}
-                  {workTypeMeta[pendingCreateType].label.toLowerCase()} live?
-                </h2>
-                <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
-                  Choose a workspace or keep it in General.
-                </p>
-                <div className="mt-4 max-h-[300px] space-y-1 overflow-y-auto">
-                  <button
-                    type="button"
-                    className={menuItemClass()}
-                    onClick={() => {
-                      const type = pendingCreateType;
-                      setPendingCreateType(null);
-                      void createArtifact(
-                        createDefaultArtifactPayload(type),
-                        undefined,
-                      );
-                    }}
-                  >
-                    <Home className="h-4 w-4" />
-                    General
-                  </button>
-                  {workspaces.map((target) => (
-                    <button
-                      key={target._id}
-                      type="button"
-                      className={menuItemClass()}
-                      onClick={() => {
-                        const type = pendingCreateType;
-                        setPendingCreateType(null);
-                        void createArtifact(
-                          createDefaultArtifactPayload(type),
-                          target._id,
-                        );
-                      }}
-                    >
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ background: workspaceAccent(target, 0).color }}
-                      />
-                      {target.title}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {workspaceDeleteOpen && workspace ? (
-            <div
-              className="absolute inset-0 z-[95] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] backdrop-blur-[2px]"
-              onPointerDown={() => setWorkspaceDeleteOpen(false)}
-            >
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="workspace-delete-title"
-                className="w-[min(480px,calc(100vw-32px))] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_28%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.22)]"
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                <h2
-                  id="workspace-delete-title"
-                  className="font-display text-[21px] font-semibold text-[var(--text-primary)]"
-                >
-                  Permanently remove {workspace.title}?
-                </h2>
-                <p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">
-                  This removes the workspace and its placements. Artifacts,
-                  threads, and AI run history remain available and are never
-                  deleted with their workspace.
-                </p>
-                <label className="mt-4 block text-[12px] font-medium text-[var(--text-primary)]">
-                  Type{" "}
-                  <span className="select-all font-mono">
-                    Remove {workspace.title} permanently
-                  </span>
-                </label>
-                <input
-                  autoFocus
-                  aria-label="Workspace deletion confirmation"
-                  value={workspaceDeleteConfirmation}
-                  onChange={(event) =>
-                    setWorkspaceDeleteConfirmation(event.target.value)
-                  }
-                  className="mt-2 h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none"
-                />
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className={smallButtonClass()}
-                    onClick={() => setWorkspaceDeleteOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[var(--danger)] px-3 text-[13px] font-medium text-white disabled:opacity-40"
-                    disabled={
-                      workspaceDeleteConfirmation !==
-                        `Remove ${workspace.title} permanently` ||
-                      busyKey === `workspace:delete:${selectedWorkspaceId}`
-                    }
-                    onClick={() => void permanentlyDeleteWorkspace()}
-                  >
-                    {busyKey === `workspace:delete:${selectedWorkspaceId}` ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                    Delete permanently
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          <PendingCreateDialog
+            open={pendingCreateType !== null}
+            typeLabel={
+              pendingCreateType
+                ? workTypeMeta[pendingCreateType].label.toLowerCase()
+                : ""
+            }
+            workspaces={workspaces.map((target) => ({
+              id: target._id,
+              title: target.title,
+              accentColor: workspaceAccent(target, 0).color,
+            }))}
+            onCancel={() => setPendingCreateType(null)}
+            onSelect={(workspaceId) => {
+              const type = pendingCreateType;
+              setPendingCreateType(null);
+              if (!type) return;
+              void createArtifact(
+                createDefaultArtifactPayload(type),
+                workspaceId,
+              );
+            }}
+          />
+          <WorkspaceDeleteDialog
+            open={workspaceDeleteOpen && !!workspace}
+            workspaceTitle={workspace?.title ?? ""}
+            confirmation={workspaceDeleteConfirmation}
+            onConfirmationChange={setWorkspaceDeleteConfirmation}
+            busy={busyKey === `workspace:delete:${selectedWorkspaceId}`}
+            onCancel={() => setWorkspaceDeleteOpen(false)}
+            onConfirm={() => void permanentlyDeleteWorkspace()}
+          />
           {workspaceShareOpen && workspaceHeader ? (
             <ShareDialog
               open
@@ -3664,176 +3638,73 @@ export function SpectraShell({
               }}
             />
           ) : null}
-          {workspaceEditOpen && workspaceHeader ? (
-            <div
-              className="absolute inset-0 z-[94] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] p-5 backdrop-blur-[2px]"
-              onPointerDown={() => setWorkspaceEditOpen(false)}
-            >
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="workspace-edit-title"
-                className="w-full max-w-[430px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]"
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                <h2
-                  id="workspace-edit-title"
-                  className="font-display text-[21px] font-semibold text-[var(--text-primary)]"
-                >
-                  Edit workspace
-                </h2>
-                <label className="mt-4 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-                  Icon
-                </label>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {workspaceIconChoices.map(([key, Icon]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setWorkspaceEditIcon(key)}
-                      className={`flex h-10 w-10 items-center justify-center rounded-[9px] border transition ${workspaceEditIcon === key ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] text-[var(--accent-cyan)]" : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
-                      aria-label={key}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </button>
-                  ))}
-                </div>
-                <input
-                  autoFocus
-                  aria-label="Workspace name"
-                  value={workspaceEditTitle}
-                  onChange={(event) =>
-                    setWorkspaceEditTitle(event.target.value)
-                  }
-                  className="mt-4 h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none"
-                />
-                <textarea
-                  aria-label="Workspace description"
-                  value={workspaceEditDescription}
-                  onChange={(event) =>
-                    setWorkspaceEditDescription(event.target.value)
-                  }
-                  placeholder="Short description"
-                  className="mt-2 min-h-[84px] w-full resize-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none"
-                />
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className={smallButtonClass()}
-                    onClick={() => setWorkspaceEditOpen(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className={smallButtonClass("dark")}
-                    disabled={
-                      !workspaceEditTitle.trim() ||
-                      busyKey === `workspace:update:${workspaceHeader._id}`
-                    }
-                    onClick={() => void updateWorkspaceMetadata()}
-                  >
-                    {busyKey === `workspace:update:${workspaceHeader._id}` ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="h-4 w-4" />
-                    )}
-                    Save
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {artifactDeletePending ? (
-            <div
-              className="absolute inset-0 z-[96] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] p-5 backdrop-blur-[2px]"
-              onPointerDown={() => setArtifactDeletePending(null)}
-            >
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="artifact-delete-title"
-                className="w-full max-w-[440px] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]"
-                onPointerDown={(event) => event.stopPropagation()}
-              >
-                <h2
-                  id="artifact-delete-title"
-                  className="font-display text-[21px] font-semibold text-[var(--text-primary)]"
-                >
-                  Delete {artifactDeletePending.title}?
-                </h2>
-                <p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">
-                  This work item, its placements, version history, and directly
-                  linked run history will be permanently removed.
-                </p>
-                <div className="mt-5 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setArtifactDeletePending(null)}
-                    className={smallButtonClass()}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busyKey === `delete:${artifactDeletePending._id}`}
-                    onClick={() =>
-                      void permanentlyDeleteArtifact(
-                        artifactDeletePending,
-                        true,
-                      )
-                    }
-                    className="flex h-9 items-center gap-2 rounded-[8px] bg-[var(--danger)] px-3 text-[12px] font-medium text-white disabled:opacity-45"
-                  >
-                    {busyKey === `delete:${artifactDeletePending._id}` ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                    Delete permanently
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
+          <WorkspaceEditDialog
+            open={workspaceEditOpen && !!workspaceHeader}
+            icon={workspaceEditIcon}
+            onIconChange={setWorkspaceEditIcon}
+            title={workspaceEditTitle}
+            onTitleChange={setWorkspaceEditTitle}
+            description={workspaceEditDescription}
+            onDescriptionChange={setWorkspaceEditDescription}
+            busy={busyKey === `workspace:update:${workspaceHeader?._id}`}
+            onCancel={() => setWorkspaceEditOpen(false)}
+            onSave={() => void updateWorkspaceMetadata()}
+          />
+          <ArtifactDeleteDialog
+            open={artifactDeletePending !== null}
+            artifactTitle={artifactDeletePending?.title ?? ""}
+            busy={busyKey === `delete:${artifactDeletePending?._id}`}
+            onCancel={() => setArtifactDeletePending(null)}
+            onConfirm={() => {
+              if (!artifactDeletePending) return;
+              void permanentlyDeleteArtifact(artifactDeletePending, true);
+            }}
+          />
           {workspaceCreateOpen ? (
             <div
               ref={workspaceCreateRef}
-              className="absolute left-3 top-5 z-40 w-[min(330px,calc(100vw-24px))] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[0_18px_44px_rgba(27,20,12,0.16)]"
+              className="absolute left-3 top-5 z-dropdown w-[min(330px,calc(100vw-24px))] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)]"
             >
               <div className="mb-3">
-                <div className="font-display text-[18px] font-semibold text-[var(--text-primary)]">
+                <div className="text-heading font-semibold text-[var(--text-primary)]">
                   New workspace
                 </div>
-                <div className="mt-1 text-[12px] text-[var(--text-secondary)]">
+                <div className="mt-1 text-caption text-[var(--text-secondary)]">
                   Create a subject space that stays connected to related work.
                 </div>
               </div>
-              <input
+              <Input
+                aria-label="Workspace name"
                 value={newWorkspaceTitle}
                 onChange={(event) => setNewWorkspaceTitle(event.target.value)}
                 placeholder="Subject or project name"
-                className="h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
               />
-              <textarea
+              <Textarea
+                aria-label="Workspace description"
                 value={newWorkspaceDescription}
                 onChange={(event) =>
                   setNewWorkspaceDescription(event.target.value)
                 }
                 placeholder="Short description"
-                className="mt-2 min-h-[70px] w-full resize-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                className="mt-2 min-h-[70px] resize-none placeholder:text-[var(--text-tertiary)]"
               />
               <div className="mt-3">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                <div className="mb-2 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
                   Icon
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div
+                  className="flex flex-wrap gap-2"
+                  role="radiogroup"
+                  aria-label="Workspace icon"
+                >
                   {workspaceIconChoices.map(([key, Icon]) => (
                     <button
                       key={key}
                       type="button"
+                      role="radio"
+                      aria-checked={newWorkspaceIcon === key}
                       onClick={() => setNewWorkspaceIcon(key)}
-                      className={`flex h-9 w-9 items-center justify-center rounded-[8px] border transition ${newWorkspaceIcon === key ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] text-[var(--accent-cyan)]" : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)]"}`}
+                      className={`flex h-9 w-9 items-center justify-center rounded-control border outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] ${newWorkspaceIcon === key ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] text-[var(--accent-cyan)]" : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)]"}`}
                       aria-label={key}
                     >
                       <Icon className="h-4 w-4" />
@@ -3842,19 +3713,19 @@ export function SpectraShell({
                 </div>
               </div>
               <div className="mt-3 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className={smallButtonClass()}
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => {
                     setWorkspaceCreateOpen(false);
                     setWorkspaceCreateParentNodeId(null);
                   }}
                 >
                   Cancel
-                </button>
-                <button
-                  type="button"
-                  className={smallButtonClass("dark")}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
                   disabled={
                     !newWorkspaceTitle.trim() || busyKey === "workspace:create"
                   }
@@ -3866,7 +3737,7 @@ export function SpectraShell({
                     <Plus className="h-4 w-4" />
                   )}
                   Create
-                </button>
+                </Button>
               </div>
             </div>
           ) : null}
@@ -4120,7 +3991,6 @@ export function SpectraShell({
             </section>
           )}
           <WorkbenchDockShell
-            zIndex={220}
             attachmentsHostRef={setAttachmentsHost}
             dock={{
               workspaceId: selectedWorkspaceId,

@@ -22,7 +22,8 @@
     "fidelity:docx": "tsx scripts/fidelity-harness/docx.ts",
     "fidelity:office": "tsx scripts/fidelity-harness/office.ts",
     "build:realtime": "wrangler deploy --dry-run --config workers/collaboration/wrangler.toml",
-    "convex:dev": "convex dev"
+    "convex:dev": "convex dev",
+    "lint:design": "node scripts/report-design-census.mjs"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.79",
@@ -51,6 +52,7 @@
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-popover": "^1.1.23",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-separator": "^1.1.8",

@@ -81,7 +81,7 @@ export function CookieConsentManager() {
   return (
     <>
       {showBanner ? (
-        <section className="fixed inset-x-4 bottom-4 z-[110] mx-auto w-full max-w-3xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)] sm:inset-x-0">
+        <section className="fixed inset-x-4 bottom-4 z-chrome mx-auto w-full max-w-3xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)] sm:inset-x-0">
           <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Cookie Preferences</p>
           <h2 className="mt-1 font-display text-2xl text-[var(--text-primary)]">Your privacy choices</h2>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
@@ -126,7 +126,7 @@ export function CookieConsentManager() {
       ) : null}
 
       {settingsOpen ? (
-        <div className="fixed inset-0 z-[115]">
+        <div className="fixed inset-0 z-modal">
           <button
             type="button"
             className="absolute inset-0 bg-black/40"

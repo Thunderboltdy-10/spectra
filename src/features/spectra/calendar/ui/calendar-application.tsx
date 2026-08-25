@@ -266,7 +266,7 @@ function CalendarDatePicker({
           </div>
         ) : (
           <>
-            <div className="spectra-calendar-date-grid mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <div className="spectra-calendar-date-grid mb-1 text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
                 <span key={`${day}-${index}`} className="grid h-6 place-items-center">
                   {day}

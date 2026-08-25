@@ -4265,7 +4265,11 @@ body {
 .spectra-workbar-primary:disabled {
   opacity: 1;
   cursor: not-allowed;
-  background: color-mix(in oklab, var(--text-primary) 72%, var(--bg-elevated)) !important;
+  background: color-mix(
+    in oklab,
+    var(--text-primary) 72%,
+    var(--bg-elevated)
+  ) !important;
   color: var(--bg-primary) !important;
 }
 
@@ -4421,20 +4425,6 @@ body {
 ::selection {
   background: var(--selection-bg);
   color: var(--text-primary);
-}
-
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
-}
-
-input[data-search-input]:focus,
-input[data-search-input]:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
-  border-color: transparent !important;
 }
 
 button:not(:disabled),
@@ -7496,7 +7486,8 @@ button[data-spectra-context-trigger="true"]::after {
 .presentation-slide-rail > button[data-active="true"] {
   background: color-mix(in oklab, var(--text-primary) 6%, var(--bg-primary));
   color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-primary) 22%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--text-primary) 22%, transparent);
 }
 
 .presentation-slide-rail > button[data-dragging="true"] {
@@ -8950,7 +8941,8 @@ button[data-spectra-context-trigger="true"]::after {
   justify-content: center;
 }
 
-.presentation-presenter[data-layout="audience"] .presentation-presenter-current {
+.presentation-presenter[data-layout="audience"]
+  .presentation-presenter-current {
   grid-area: 1 / 1;
 }
 
@@ -8959,7 +8951,9 @@ button[data-spectra-context-trigger="true"]::after {
   grid-row: 1 / 3;
 }
 
-.presentation-presenter[data-layout="audience"] .presentation-presenter-current .presentation-canvas {
+.presentation-presenter[data-layout="audience"]
+  .presentation-presenter-current
+  .presentation-canvas {
   width: min(100vw, calc(100vh * 16 / 9));
   height: min(100vh, calc(100vw * 9 / 16));
   max-height: 100vh;
@@ -8973,7 +8967,9 @@ button[data-spectra-context-trigger="true"]::after {
   pointer-events: auto;
 }
 
-.presentation-presenter[data-layout="speaker"] .presentation-presenter-current .presentation-canvas {
+.presentation-presenter[data-layout="speaker"]
+  .presentation-presenter-current
+  .presentation-canvas {
   width: 100%;
   max-height: 100%;
 }
@@ -8997,7 +8993,7 @@ button[data-spectra-context-trigger="true"]::after {
 .presentation-presenter-next span,
 .presentation-presenter-notes strong {
   color: #a7a9a1;
-  font-size: 10px;
+  font-size: var(--text-micro);
   font-weight: 650;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -9557,7 +9553,8 @@ button[data-spectra-context-trigger="true"]::after {
   background: color-mix(in oklab, var(--sheet-header) 94%, white);
 }
 .sheets-column-header[data-freeze-edge="true"] {
-  box-shadow: 1px 0 0 color-mix(in oklab, var(--text-primary) 18%, var(--sheet-grid-line));
+  box-shadow: 1px 0 0
+    color-mix(in oklab, var(--text-primary) 18%, var(--sheet-grid-line));
 }
 .sheets-row-headers {
   position: relative;
@@ -9585,7 +9582,8 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--text-primary);
 }
 .sheets-row-header[data-freeze-edge="true"] {
-  box-shadow: 0 1px 0 color-mix(in oklab, var(--text-primary) 18%, var(--sheet-grid-line));
+  box-shadow: 0 1px 0
+    color-mix(in oklab, var(--text-primary) 18%, var(--sheet-grid-line));
 }
 .sheets-track-grip {
   touch-action: none;
@@ -9665,12 +9663,18 @@ button[data-spectra-context-trigger="true"]::after {
     color-mix(in oklab, var(--text-primary) 16%, var(--sheet-grid-line));
 }
 .sheets-cell[data-freeze-column-edge="true"] {
-  border-right-color: color-mix(in oklab, var(--text-primary) 20%, var(--sheet-grid-line));
-  box-shadow: inset -1px 0 color-mix(in oklab, var(--text-primary) 14%, transparent);
+  border-right-color: color-mix(
+    in oklab,
+    var(--text-primary) 20%,
+    var(--sheet-grid-line)
+  );
+  box-shadow: inset -1px 0
+    color-mix(in oklab, var(--text-primary) 14%, transparent);
 }
 .sheets-cell[data-freeze-row-edge="true"][data-freeze-column-edge="true"] {
   box-shadow:
-    inset 0 -1px color-mix(in oklab, var(--text-primary) 16%, var(--sheet-grid-line)),
+    inset 0 -1px
+      color-mix(in oklab, var(--text-primary) 16%, var(--sheet-grid-line)),
     inset -1px 0 color-mix(in oklab, var(--text-primary) 14%, transparent);
 }
 .sheets-cell[data-active="true"] {
@@ -12088,7 +12092,10 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-calendar-grid {
   display: grid;
-  grid-template-columns: 54px repeat(var(--loaded-days, 7), var(--day-width, 140px));
+  grid-template-columns: 54px repeat(
+      var(--loaded-days, 7),
+      var(--day-width, 140px)
+    );
   width: max-content;
   min-width: 100%;
   overflow: visible;
@@ -12204,7 +12211,10 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .spectra-editor-workbar .spectra-rich-text-format-bar [role="toolbar"] button,
-.spectra-editor-workbar .spectra-rich-text-format-bar [role="toolbar"] [role="combobox"] {
+.spectra-editor-workbar
+  .spectra-rich-text-format-bar
+  [role="toolbar"]
+  [role="combobox"] {
   height: 32px;
 }
 
@@ -12825,7 +12835,9 @@ button[data-spectra-context-trigger="true"]::after {
   grid-template-columns: auto minmax(0, 1fr) auto 30px 30px 30px;
 }
 
-.spectra-document-studio[data-compact] .spectra-document-findbar [data-find-replace] {
+.spectra-document-studio[data-compact]
+  .spectra-document-findbar
+  [data-find-replace] {
   display: none;
 }
 
@@ -15765,7 +15777,8 @@ body {
   .presentation-slide-rail
   > button[data-active="true"] {
   background: color-mix(in oklab, var(--text-primary) 6%, var(--bg-primary));
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-primary) 22%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--text-primary) 22%, transparent);
 }
 
 .spectra-artifact-studio[data-blueprint="presentation"]
@@ -15923,7 +15936,8 @@ body {
   overflow: visible;
 }
 
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-identity-cluster {
+.spectra-artifact-studio[data-studio-mode="tab"]
+  .spectra-artifact-identity-cluster {
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
@@ -15939,13 +15953,15 @@ body {
   max-height: 1.35em;
 }
 
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header-topline {
+.spectra-artifact-studio[data-studio-mode="tab"]
+  .spectra-artifact-header-topline {
   min-height: 32px;
   justify-content: space-between;
   gap: 8px;
 }
 
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header-actions {
+.spectra-artifact-studio[data-studio-mode="tab"]
+  .spectra-artifact-header-actions {
   flex-shrink: 0;
   flex-wrap: nowrap;
 }
@@ -15957,12 +15973,18 @@ body {
   white-space: nowrap;
 }
 
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header-topline,
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header-topline > .flex {
+.spectra-artifact-studio[data-studio-mode="tab"]
+  .spectra-artifact-header-topline,
+.spectra-artifact-studio[data-studio-mode="tab"]
+  .spectra-artifact-header-topline
+  > .flex {
   align-items: center;
 }
 
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header-topline > .flex > span {
+.spectra-artifact-studio[data-studio-mode="tab"]
+  .spectra-artifact-header-topline
+  > .flex
+  > span {
   height: 1.5rem;
   width: 1.5rem;
 }
@@ -17365,8 +17387,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
    bold/link/list/equation controls used by the long-form editor. */
 .spectra-rich-text-editor[data-rich-text-variant="compact"] [role="toolbar"],
 .spectra-rich-text-editor[data-rich-text-variant="card"] [role="toolbar"],
-.spectra-rich-text-editor[data-rich-text-collapsible="true"]
-  [role="toolbar"] {
+.spectra-rich-text-editor[data-rich-text-collapsible="true"] [role="toolbar"] {
   min-height: 0;
   max-height: 0;
   padding-top: 0;
@@ -19290,11 +19311,13 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   border-radius: 5px 5px 0 0;
   background: transparent;
   color: var(--text-tertiary);
-  font-size: 10.5px;
+  font-size: var(--text-micro);
   font-weight: 550;
   letter-spacing: 0.005em;
   white-space: nowrap;
-  transition: color 120ms ease, background 120ms ease;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
 }
 
 .spectra-command-tab:hover {
@@ -19331,7 +19354,10 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
  * was unreadable the moment there were more than a dozen commands. */
 .spectra-command-custom-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(74px, 88px) 54px 26px 54px 54px;
+  grid-template-columns: minmax(150px, 1fr) minmax(
+      74px,
+      88px
+    ) 54px 26px 54px 54px;
   align-items: center;
   gap: 3px;
   padding: 2px 6px;
@@ -19370,7 +19396,9 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 }
 
 /* Sticky, so the tab a row belongs to stays legible while scrolling a long set. */
-.spectra-workbar-customizer .spectra-workbar-customizer-group > .spectra-workbar-customizer-heading {
+.spectra-workbar-customizer
+  .spectra-workbar-customizer-group
+  > .spectra-workbar-customizer-heading {
   position: sticky;
   top: 30px;
   z-index: 1;
@@ -19409,12 +19437,15 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   top: 38px;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(74px, 88px) 54px 26px 54px 54px;
+  grid-template-columns: minmax(150px, 1fr) minmax(
+      74px,
+      88px
+    ) 54px 26px 54px 54px;
   gap: 3px;
   padding: 0 6px 4px;
   background: var(--bg-elevated, var(--bg-primary));
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--text-micro);
   font-weight: 700;
   letter-spacing: 0.05em;
   text-align: center;
@@ -19440,7 +19471,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   border-radius: 6px;
   background: var(--bg-primary);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--text-micro);
   outline: none;
 }
 
@@ -19468,7 +19499,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   border-radius: 4px;
   color: var(--text-tertiary);
   font-family: inherit;
-  font-size: 9px;
+  font-size: var(--text-micro);
   font-weight: 600;
 }
 
@@ -19570,7 +19601,8 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   grid-template-rows: 26px minmax(60px, auto);
 }
 
-.spectra-editor-workbar[data-workbar-expanded="true"] .spectra-workbar-rail-commands {
+.spectra-editor-workbar[data-workbar-expanded="true"]
+  .spectra-workbar-rail-commands {
   align-items: flex-end;
 }
 
@@ -19600,9 +19632,9 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 
 .spectra-workbar-command-group-label {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--text-micro);
   font-weight: 700;
-  letter-spacing: .05em;
+  letter-spacing: 0.05em;
   line-height: 1;
   text-transform: uppercase;
 }
@@ -19818,8 +19850,10 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
    they carry their own selected treatment (accent text plus the rule on the
    divider), and painting them as pressed pills is what made the tab strip read
    as a second row of buttons. */
-.spectra-editor-workbar :is(button, [role="tab"])[data-active="true"]:not([role="tab"]),
-.spectra-editor-workbar :is(button, [role="tab"])[aria-selected="true"]:not([role="tab"]),
+.spectra-editor-workbar
+  :is(button, [role="tab"])[data-active="true"]:not([role="tab"]),
+.spectra-editor-workbar
+  :is(button, [role="tab"])[aria-selected="true"]:not([role="tab"]),
 .spectra-editor-workbar .is-active:not([role="tab"]) {
   background: color-mix(in oklab, var(--brand-primary) 11%, var(--bg-elevated));
   color: color-mix(in oklab, var(--brand-primary) 80%, var(--text-primary));
@@ -20129,7 +20163,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 .spectra-workbar-control-option-hint {
   flex: 0 0 auto;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: var(--text-micro);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -20189,7 +20223,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   gap: 6px;
   padding: 0 4px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: var(--text-micro);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;

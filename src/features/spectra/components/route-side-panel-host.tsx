@@ -154,7 +154,7 @@ export function RouteSidePanelHost() {
 
   if (!eligible || (!work && !thread)) return null;
   return (
-    <div className="spectra-wave-y relative z-[88] flex h-full max-w-[calc(100vw-76px)] shrink-0">
+    <div className="spectra-wave-y relative z-panel flex h-full max-w-[calc(100vw-76px)] shrink-0">
       {studio.mode === "split" && studio.activeArtifact ? (
         <ArtifactStudio
           mode="split"

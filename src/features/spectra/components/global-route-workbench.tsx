@@ -73,7 +73,7 @@ export function GlobalRouteWorkbench() {
     );
 
   return (
-    <WorkbenchLiveStack zIndex={40}>
+    <WorkbenchLiveStack>
       <div ref={setAttachmentsHost} />
       <LiveDock
         optimistic={runEngine.liveExchange}

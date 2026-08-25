@@ -27,7 +27,7 @@
 .sheets-cell-formula-text {
   color: color-mix(in oklab, var(--text-primary) 78%, var(--brand-primary));
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--text-micro);
 }
 
 /* Cells the active formula reads from. Dashed, so it never reads as a selection
@@ -98,7 +98,7 @@
    library says so on every row rather than letting a person find out later. */
 .sheets-function-native {
   color: color-mix(in oklab, var(--text-secondary) 80%, transparent);
-  font-size: 10px;
+  font-size: var(--text-micro);
   letter-spacing: 0.01em;
 }
 
@@ -110,7 +110,7 @@
 
 .sheets-formula-explanation code {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--text-micro);
   word-break: break-all;
 }
 

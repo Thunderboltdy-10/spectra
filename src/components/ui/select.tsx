@@ -4,6 +4,7 @@ import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LAYER_CLASS, type SpectraLayer } from "./layers";
 
 /**
  * Spectra's one Select. Replaces every native `<select>`: an OS dropdown cannot
@@ -65,32 +66,48 @@ SelectTrigger.displayName = SelectPrimitive.Trigger.displayName;
 
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", style, ...props }, ref) => (
-  <SelectPrimitive.Portal>
-    <SelectPrimitive.Content
-      ref={ref}
-      position={position}
-      sideOffset={4}
-      className={cn(
-        "relative z-[340] max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-        className,
-      )}
-      style={{
-        backgroundColor: "var(--bg-elevated)",
-        borderColor: "var(--border-default)",
-        ...style,
-      }}
-      {...props}
-    >
-      {/* The viewport must size to its content and scroll. Pinning it to
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content> & {
+    /** Stacking layer. Inside a dialog, pass the dialog's layer ("modal"). */
+    layer?: SpectraLayer;
+  }
+>(
+  (
+    {
+      className,
+      children,
+      position = "popper",
+      style,
+      layer = "dropdown",
+      ...props
+    },
+    ref,
+  ) => (
+    <SelectPrimitive.Portal>
+      <SelectPrimitive.Content
+        ref={ref}
+        position={position}
+        sideOffset={4}
+        className={cn(
+          "relative max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+          LAYER_CLASS[layer],
+          className,
+        )}
+        style={{
+          backgroundColor: "var(--bg-elevated)",
+          borderColor: "var(--border-default)",
+          ...style,
+        }}
+        {...props}
+      >
+        {/* The viewport must size to its content and scroll. Pinning it to
           `--radix-select-trigger-height` clamps the list to one row. */}
-      <SelectPrimitive.Viewport className="max-h-72 overflow-y-auto p-1.5">
-        {children}
-      </SelectPrimitive.Viewport>
-    </SelectPrimitive.Content>
-  </SelectPrimitive.Portal>
-));
+        <SelectPrimitive.Viewport className="max-h-72 overflow-y-auto p-1.5">
+          {children}
+        </SelectPrimitive.Viewport>
+      </SelectPrimitive.Content>
+    </SelectPrimitive.Portal>
+  ),
+);
 SelectContent.displayName = SelectPrimitive.Content.displayName;
 
 const SelectItem = React.forwardRef<
@@ -172,6 +189,7 @@ export function SelectField({
   className,
   triggerClassName,
   contentClassName,
+  layer,
 }: {
   label?: string;
   ariaLabel?: string;
@@ -185,6 +203,8 @@ export function SelectField({
   className?: string;
   triggerClassName?: string;
   contentClassName?: string;
+  /** Stacking layer for the opened list; "modal" when the field sits in one. */
+  layer?: SpectraLayer;
 }) {
   const uid = React.useId();
   const labelId = label ? `${uid}-label` : undefined;
@@ -205,7 +225,9 @@ export function SelectField({
       className={cn(label ? "w-full" : undefined, triggerClassName)}
     >
       <SelectValue
-        placeholder={placeholder ?? (empty ? "Nothing to choose yet" : "Select")}
+        placeholder={
+          placeholder ?? (empty ? "Nothing to choose yet" : "Select")
+        }
       />
     </SelectTrigger>
   );
@@ -217,7 +239,7 @@ export function SelectField({
       disabled={disabled || empty}
     >
       {trigger}
-      <SelectContent className={contentClassName}>
+      <SelectContent className={contentClassName} layer={layer}>
         {options.map((option) => (
           <SelectItem
             key={option.value}
@@ -231,7 +253,8 @@ export function SelectField({
     </Select>
   );
 
-  if (!label) return className ? <div className={className}>{control}</div> : control;
+  if (!label)
+    return className ? <div className={className}>{control}</div> : control;
 
   return (
     <div className={cn("block min-w-0", className)}>

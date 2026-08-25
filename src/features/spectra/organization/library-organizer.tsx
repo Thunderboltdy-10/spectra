@@ -912,7 +912,7 @@ export function LibraryOrganizer({
           </section>
         ) : (
         <section className="@container/rows flex min-w-0 flex-1 flex-col">
-          <div className="flex h-7 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4 pr-3.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+          <div className="flex h-7 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4 pr-3.5 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
             <span className="w-[22px] shrink-0" />
             <ColumnLabel
               label="Name"
@@ -1124,14 +1124,14 @@ function ColumnLabel({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors hover:text-[var(--text-secondary)]",
+        "flex items-center gap-1 text-micro font-semibold uppercase tracking-[0.08em] transition-colors hover:text-[var(--text-secondary)]",
         sorted ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)]",
         className,
       )}
     >
       {label}
       {sorted ? (
-        <span aria-hidden className="text-[9px]">
+        <span aria-hidden className="text-micro">
           {sorted === "asc" ? "▲" : "▼"}
         </span>
       ) : null}

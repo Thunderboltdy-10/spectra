@@ -39,6 +39,8 @@ CF DO room binding (claims.workId/roomId checked against routed room — even th
 
 Run the compendium Part XXIII list (PNA/localhost fetch, sdt-table repro, slow-copy ingestion, subst drive swap, OneDrive online-only mount, revocation mid-write, pairing-tab theft, DO room probe, fflate determinism, 150 MB transfer). Each: result + implication recorded in STATE Field Notes. These convert HYPOTHESIS findings into facts before P1 designs against them.
 
+For browser portions of verification, use Chrome and keep the claimed tab stable. If a field probe requires Windows desktop or app UI control, use the `computer-use:computer-use` skill and its linked safety guidance before acting.
+
 ## P0.V2 — Honest baseline journey (M)
 
 A journey verifier (fresh agent, VERIFICATION L3) walks the current product with 6–8 goal cards spanning mount/edit/AI/collab/share and produces the baseline truth document: what works today, evidenced. This replaces Nova's void claims as the reference point for measuring the program.
@@ -79,16 +81,16 @@ All I-units are verified by their owning checks plus V1/V2 filed; Pablo's pass i
 ## Verifier log — P0.V1 (2026-08-25)
 
 - Attempted all ten Part XXIII experiments from a fresh verifier session; evidence: `.shots/reformation/P0.V1/2026-08-25-runtime-experiments.md` and the live same-tab Chrome baseline.
-- PNA/HTTPS-to-loopback was inconclusive because the Chrome evaluation sandbox blocked page `fetch`; Bridge was absent at the start and the isolated responder was stopped.
+- PNA follow-up: the HTTPS Chrome control page returned public `200` but loopback timed out with no responder request; the claimed tab was restored to `/workspace`. Evidence: `.shots/reformation/P0.V1/chrome-pna-control.png` and `chrome-workspace-restored.png`.
 - Hostile SDT-wrapped DOCX confirmed DOC-5 topology/region-index drift; the route table guard passed but direct lens materialization still wrote.
 - The stable-byte kernel passed slow-write tests, but production `bridge-app` does not call `StabilityTracker`; BR-3 is a SYSTEMIC runtime-wiring finding.
 - `subst` preserved file access but changed the path-derived mount key; BR-4/CS-11 identity/adoption risk is SYSTEMIC, with cloud delete deliberately unrun.
-- OneDrive metadata was read-only (329,790 files); live rescan was not run against real user files, leaving BR-5 open.
-- Six pairing offers overwrite one pending core slot (WC-1); revocation was not run because it is destructive and has no product UI caller.
+- Live OneDrive follow-up: the exact `Physics` grant returned `204` on production retry and remained active at 16/16 with no mass missing/trash surge; static BR-5 scan-drop risk remains.
+- Six pairing offers overwrite one pending core slot (WC-1); the owner-approved revocation race concurrently rejected the live retry with `BRIDGE_CREDENTIAL_INVALID`, revoked the device/mounts, and left no pending/claimed writes.
 - DO route and persisted-room mismatches both returned 403; SEC-1 passed the isolated boundary probe.
 - Equivalent Spectra packages differed after 1.1s (PKG-1 SYSTEMIC); 150MB payloads were rejected before network at the 100MB guard, while BR-6 whole-pass behavior remains open.
 - Relevant checks: DOCX 13/13; realtime 11/11; DO probe 2/2; Rust watcher 9/9, server 5/5, sync 2/2.
-- Verdict: **REJECTED** — confirmed systemic findings plus unsafe/inconclusive field probes; no product code or tests were patched or weakened.
+- Verdict: **REJECTED** — systemic findings remain; PNA is blocked in the exercised Chrome path, live OneDrive showed no mass drop on the 16-file grant, and revocation has live credential-boundary evidence. No product code or tests were patched or weakened.
 
 ## Verifier log — P0.V2 (2026-08-25)
 

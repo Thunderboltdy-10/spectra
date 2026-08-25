@@ -2,7 +2,7 @@
 
 Run date: 2026-08-25
 Role: verifier; no product code changed.
-Verdict: REJECTED with systemic findings and four field probes left unsafe or inconclusive.
+Verdict: REJECTED with systemic findings; the initial run left four field probes unsafe or inconclusive, and the owner-approved follow-up outcomes are filed below.
 
 ## Part XXIII results
 
@@ -37,3 +37,15 @@ Verdict: REJECTED with systemic findings and four field probes left unsafe or in
 - The full repository sweep and package-wide Rust `granted_tree` run were not executed; paired verification is not complete and the fixture was intentionally removed by P0.I5.
 
 Evidence includes the live same-tab baseline at `chrome-workspace-baseline.png`. The temporary HTTPS probe tab was closed; all subsequent browser work stayed on the claimed Spectra tab.
+
+## Follow-up field probes — 2026-08-25
+
+The owner approved the three previously deferred live checks. No product code or tests were changed.
+
+11. **HTTPS → loopback PNA — BLOCKED in Chrome.** On the existing claimed Chrome tab, an HTTPS control page successfully fetched a public same-origin endpoint (`public:200`) but its `fetch('http://127.0.0.1:47615/pna')` timed out (`local:Error:timeout`). A local responder was listening with `Access-Control-Allow-Private-Network: true` and recorded no request, so the request was blocked before reaching the Bridge listener. The capture is `chrome-pna-control.png`; no browser-console reason was available, so the finding is recorded as a blocked runtime path rather than a browser diagnostic claim. The tab was restored to `/workspace` and `chrome-workspace-restored.png` captures the restored state; the concurrent `/chat` tab was not touched.
+
+12. **Live OneDrive rescan — NO MASS DROP OBSERVED, BR-5 risk remains.** The production Bridge status identified the exact active grant `Physics` at `<local-workspace>`, with 16/16 files synced before the probe. The real `/v1/mount/retry` returned `204`; immediate status remained `active`, 16/16, with no missing-resource or trash surge. The root's 16 files were read-only metadata-observed as reparse-backed. This exercises the real path without clearing the static scan-drop/mirror-from-disk risk for hydration or transient-open failures.
+
+13. **`revokeDevice` concurrent-write race — PASS at the credential boundary.** The authenticated account/Bridge status agreed on active device `n97r82wtx870k8y49a3zqj48sh8cv3vf` (`THUNDERBOLTDY10`) before mutation. A retry for the live `Physics` grant was started concurrently with `revokeDevice`: the mutation exited 0, while the in-flight retry failed cleanly with `BRIDGE_CREDENTIAL_INVALID`, not a partial write. Cloud readback showed the device `revoked`, the `Physics` and controlled-fixture mounts `revoked`, 22 replicas `unavailable`, 15 existing writes `verified` with no pending/claimed writes, and the unrelated `hi` mount `detached`. The Bridge process was then stopped to prevent post-revocation retry churn.
+
+The systemic DOC-5, BR-3, BR-4/CS-11, WC-1, and PKG-1 findings remain. CS-10's server-side revocation path now has live evidence, but the zero-product-caller gap remains; BR-5 remains a systemic risk despite the clean 16-file rescan. P0.V1 therefore remains **REJECTED**. Follow-up captures: `chrome-pna-result.png`, `chrome-pna-control.png`, and `chrome-workspace-restored.png`.

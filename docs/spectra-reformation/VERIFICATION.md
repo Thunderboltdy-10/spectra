@@ -41,6 +41,8 @@ For the truth engine and Bridge (Tier-R work):
 
 Executed by verifier agents who receive **only**: the Reformation docs, a goal card, and a browser. No implementation knowledge, no file paths, no "click the third button". This is deliberate: the agent must experience the product the way a person does — not knowing where features live, what the app expects, or which state it is in.
 
+Browser journeys use Chrome; keep one claimed tab for a sequence when same-tab continuity matters. If a verification requires Windows desktop or app UI control, use the `computer-use:computer-use` skill and follow its `SKILL.md`, guidance, API, and confirmation rules before acting.
+
 **Goal cards** are written per phase (examples): *"You have a folder of last year's schoolwork on this PC. Get it into Spectra without changing anything. Then improve the conclusion of one essay and make sure the change is really in the Word file."* — *"Your teacher shared a deck with you. Study it, then make your own copy with three extra cards."* — *"Ask the AI to reorganize your Biology workspace. Confirm you can tell exactly what it did and undo one thing it did."*
 
 **Protocol:** fresh profile or clean state where the card demands it; the agent narrates intent before each action; captures a numbered screenshot **sequence** at every meaningful step (including intermediate/streaming states); records console/network anomalies; and files findings with severity + a one-line "what a real user would feel here". The rubric grades four axes: task success, state honesty (did labels ever disagree with reality?), recoverability (when stuck, was there a door?), and feel (jank, confusion, dead ends).

@@ -89,3 +89,15 @@ All I-units are verified by their owning checks plus V1/V2 filed; Pablo's pass i
 - Equivalent Spectra packages differed after 1.1s (PKG-1 SYSTEMIC); 150MB payloads were rejected before network at the 100MB guard, while BR-6 whole-pass behavior remains open.
 - Relevant checks: DOCX 13/13; realtime 11/11; DO probe 2/2; Rust watcher 9/9, server 5/5, sync 2/2.
 - Verdict: **REJECTED** — confirmed systemic findings plus unsafe/inconclusive field probes; no product code or tests were patched or weakened.
+
+## Verifier log — P0.V2 (2026-08-25)
+
+- Ran seven goal cards in the existing signed-in Chrome tab, ending back at `/chat`; numbered same-tab evidence and narrative: `.shots/reformation/P0.V2/manifest.md`.
+- Chat context selection, streaming, browse/open, comments entry, and studio sharing worked on the exercised paths.
+- The controlled DOCX edit appeared and settled visually, but the marker disappeared after close/reopen with no unsaved warning.
+- Library artifact `Share…` silently closed while studio `Share work` opened; these are divergent user-facing outcomes.
+- Bridge offline state was visible, but `0 of 1`, engine policy terms, and `Failed to fetch` made recovery and mount truth unclear.
+- Live Dock exposed raw internal failure tokens and retained a prior conversation title beside a new document focus.
+- Focused checks: 5 Vitest files, 56 tests passed; no product code or tests were changed.
+- Findings are SYSTEMIC: persistence/status compensation, plain-word failure surfaces, pairing recovery, offline counts, sync-policy humanization, share-entry consistency, and AI target legibility.
+- Verdict: **REJECTED**. Full repository sweep remains deferred until paired verification; no acceptance claim is made.

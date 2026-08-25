@@ -92,12 +92,14 @@ All I-units are verified by their owning checks plus V1/V2 filed; Pablo's pass i
 
 ## Verifier log — P0.V2 (2026-08-25)
 
-- Ran seven goal cards in the existing signed-in Chrome tab, ending back at `/chat`; numbered same-tab evidence and narrative: `.shots/reformation/P0.V2/manifest.md`.
+- Ran eight goal cards in the existing signed-in Chrome tab, ending back at `/chat`; numbered same-tab evidence and narrative: `.shots/reformation/P0.V2/manifest.md`.
 - Chat context selection, streaming, browse/open, comments entry, and studio sharing worked on the exercised paths.
 - The controlled DOCX edit appeared and settled visually, but the marker disappeared after close/reopen with no unsaved warning.
 - Library artifact `Share…` silently closed while studio `Share work` opened; these are divergent user-facing outcomes.
 - Bridge offline state was visible, but `0 of 1`, engine policy terms, and `Failed to fetch` made recovery and mount truth unclear.
 - Live Dock exposed raw internal failure tokens and retained a prior conversation title beside a new document focus.
+- Adversarial L3 card: the fresh marker was visible and settled in Spectra; its downloaded native `.docx` reopened in Microsoft Word without the marker. Evidence: `.shots/reformation/P0.V2/33-adversarial-spectra-open.png`–`36-word-native-readback.png`.
+- The original `.tmp-n4-mount` source was absent after hygiene cleanup, so the readback used Spectra’s physical native-copy download; Word opened it read-only and no native save occurred.
 - Focused checks: 5 Vitest files, 56 tests passed; no product code or tests were changed.
-- Findings are SYSTEMIC: persistence/status compensation, plain-word failure surfaces, pairing recovery, offline counts, sync-policy humanization, share-entry consistency, and AI target legibility.
+- Findings are SYSTEMIC: native write/persistence seam, persistence/status compensation, plain-word failure surfaces, pairing recovery, offline counts, sync-policy humanization, share-entry consistency, and AI target legibility.
 - Verdict: **REJECTED**. Full repository sweep remains deferred until paired verification; no acceptance claim is made.

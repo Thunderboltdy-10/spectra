@@ -7,7 +7,10 @@ import {
   DocxLensError,
   docxLens,
 } from "../lenses/docx-lens";
-import { contentProjection } from "@/app/api/spectra/lenses/docx/route";
+import {
+  assertChangedTablesSupported,
+  contentProjection,
+} from "@/app/api/spectra/lenses/docx/route";
 
 const fixture = (name: string) =>
   readFile(join(process.cwd(), "fixtures", "office", "docx", name)).then(
@@ -55,6 +58,20 @@ describe("DOCX preservation lens", () => {
     });
     const reopened = await docxLens.open(output);
     expect(reopened.projection.blocks.at(-1)?.text).toBe(added.text);
+  });
+
+  it("refuses changed table blocks until the native table path is lossless", () => {
+    const base = {
+      blocks: [{ id: "table-1", type: "table" as const, text: "A | B" }],
+      outline: [],
+      nativeBinding: { semanticDigest: "base", format: "docx" },
+    };
+    const next = {
+      ...base,
+      blocks: [{ ...base.blocks[0], text: "A* | B" }],
+    };
+    expect(() => assertChangedTablesSupported(base, next, ["table-1"]))
+      .toThrowError(/cannot be safely rewritten/iu);
   });
 
   it("returns the original package for a semantic no-op", async () => {

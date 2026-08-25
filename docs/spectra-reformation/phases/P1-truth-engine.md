@@ -2,7 +2,7 @@
 
 **Goal:** after P1, no state label in Spectra can lie, no sync state can strand, renames don't tombstone, a quiet mount is silent, and one presenter speaks for sync everywhere. This is the hardest phase and the foundation of every later one: a correct merge (P2) over a lying replica machine is still a lie.
 
-**Prerequisites:** P0.I1, P0.I3 accepted. **Architecture:** ARCHITECTURE-TRUTH (all), CANON R1–R4, R14–R15.
+**Prerequisites:** P0.I1 and P0.I2 accepted. **Architecture:** ARCHITECTURE-TRUTH (all), CANON R1–R4, R14–R15.
 
 **Findings absorbed:** CS-1..CS-12 (whole cloud-sync part), BR-1..BR-9 (Bridge macro layer), WC-1..WC-5 (pairing/client), ST-1/ST-2 (status), PL-1 placement leaks touching replicas, DOC-3's stale-base window (the truth half; the merge half is P2).
 
@@ -36,4 +36,4 @@ Goal cards: first-run pairing by a novice; mount a real folder; toggle each stor
 
 ## Exit gate
 
-Property + chaos suites green in CI; journey PASS; budgets (quiet mount, idle product) met; no `pending`/`current` lie reproducible by the verifier; Pablo pass. P2 starts only after P1.I1 + P1.I2 ACCEPTED.
+Property + chaos suites green in their owning verification units; journey PASS; budgets (quiet mount, idle product) met; no `pending`/`current` lie reproducible by the verifier; Pablo pass. P2 starts only after P1.I1 + P1.I2 ACCEPTED.

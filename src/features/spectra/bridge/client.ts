@@ -69,10 +69,15 @@ export async function bridgeStatus(signal?: AbortSignal): Promise<BridgeStatus |
   try {
     let response = await authorizedBridgeRequest("/v1/status", { signal });
     if (!response && typeof window !== "undefined") {
+      const token = loadBridgeSession();
+      if (!token) return null;
       const resume = await fetch(`${BRIDGE_URL}/v1/session/resume`, {
         method: "POST",
         signal,
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
         cache: "no-store",
       });
       if (resume.ok) {

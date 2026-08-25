@@ -200,7 +200,6 @@ export function initialStructureRequestState(
 export type MissingResourceAction =
   | "keep-unavailable"
   | "restore-to-disk"
-  | "trash-in-spectra"
   | "ask";
 
 /** The server-side decision for a file that vanished between mount scans. */
@@ -208,8 +207,6 @@ export function decideMissingResourceAction(
   mode: StructureMode,
   cloudPayloadAvailable: boolean,
 ): MissingResourceAction {
-  if (mode === "mirror-from-disk" || mode === "mirror-both")
-    return "trash-in-spectra";
   if (mode === "mirror-to-disk" && cloudPayloadAvailable)
     return "restore-to-disk";
   if (mode === "ask") return "ask";

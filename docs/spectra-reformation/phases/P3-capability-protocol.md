@@ -6,7 +6,7 @@
 
 ## P3.I1 — IR core + Office formatting family (H)
 
-The `CapabilityDefinition` schema and derivation pipeline (registry projection, AI tool schema generation, gating composition, ghost build gate) proven on the worst-mismatch family first: Office text/cell formatting (~15 commands ↔ `format_blocks` ↔ `format-runs` today). Deliverables: definitions module per type family; generated `CommandBinding`s rendering pixel-identically through the existing workbar (no visual change — this unit is plumbing); generated `propose_operation` schemas (consumed for real in P4, validated now); the ghost gate in CI; `capability-audit.ts` retargeted at the IR.
+The `CapabilityDefinition` schema and derivation pipeline (registry projection, AI tool schema generation, gating composition, ghost build gate) proven on the worst-mismatch family first: Office text/cell formatting (~15 commands ↔ `format_blocks` ↔ `format-runs` today). Deliverables: definitions module per type family; generated `CommandBinding`s rendering pixel-identically through the existing workbar (no visual change — this unit is plumbing); generated `propose_operation` schemas (consumed for real in P4, validated now); the ghost gate in the owning unit; `capability-audit.ts` retargeted at the IR.
 
 ## P3.I2 — Full IR migration (M)
 
@@ -26,4 +26,4 @@ Generated parity tests (every definition reachable in UI; every AI-exposed defin
 
 ## Exit gate
 
-Ghost gate + conformance suites in CI; the "add one capability" walk-through (a real new small capability added as the acceptance demo, touching only definition + handler + delta) recorded as evidence; V1 PASS; Pablo pass.
+Ghost gate + conformance suites in their owning units; the "add one capability" walk-through (a real new small capability added as the acceptance demo, touching only definition + handler + delta) recorded as evidence; V1 PASS; Pablo pass.

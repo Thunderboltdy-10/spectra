@@ -72,6 +72,18 @@ describe("Live Dock V2", () => {
     expect(deriveLiveDockTab(source({ run })).state).toBe(expected);
   });
 
+  it("does not leave a completed run labelled as starting", () => {
+    const model = deriveLiveDockTab(
+      source({
+        threadTitle: "Starting run",
+        card: { title: "Spectra", summary: "Finished the comparison." },
+        run: { status: "completed", userPrompt: "Compare the evidence" },
+      }),
+    );
+    expect(model.title).toBe("Compare the evidence");
+    expect(model.titlePending).toBe(false);
+  });
+
   it("expands only one required-input run and compresses its peers", () => {
     const a = source({
       runId: "a",

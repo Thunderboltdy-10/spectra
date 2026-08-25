@@ -77,6 +77,17 @@ function currentAiEffects(artifact: Doc<"spectraArtifacts">, now = Date.now()) {
   );
 }
 
+/** List/search rows carry identity and state only; content is fetched by get. */
+function summaryArtifact(artifact: Record<string, unknown>) {
+  const { content: _content, textIndex: _textIndex, ...summary } = artifact;
+  if (summary.aiPreview && typeof summary.aiPreview === "object") {
+    const { content: _previewContent, ...preview } =
+      summary.aiPreview as Record<string, unknown>;
+    return { ...summary, aiPreview: preview, updatedAt: artifact.updatedAt as number };
+  }
+  return { ...summary, updatedAt: artifact.updatedAt as number };
+}
+
 function effectsForRun(
   artifact: Doc<"spectraArtifacts">,
   runId: Id<"spectraAiRuns">,
@@ -399,7 +410,7 @@ export const list = query({
           decision.allowed && decision.level ? decision.level : "read",
         );
         return {
-          ...projected,
+          ...summaryArtifact(projected as Record<string, unknown>),
           placements,
           ownership,
           accessLevel: decision.allowed ? decision.level : null,

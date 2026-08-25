@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { comparePackages } from "@ariadng/office/preservation";
 import { z } from "zod";
+import { assertPreservationKept } from "@/features/spectra/commands/office/preservation-guard";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
@@ -98,6 +99,24 @@ export function changedRegions(before: DocxProjection, after: DocxProjection) {
   return [...new Set(changed)];
 }
 
+/** Tables are exposed for reading, but the interim projection cannot safely
+ * round-trip their cell structure through the paragraph materializer. */
+export function assertChangedTablesSupported(
+  before: DocxProjection,
+  after: DocxProjection,
+  regionIds: readonly string[],
+) {
+  const changed = new Set(regionIds);
+  const blocks = [...before.blocks, ...after.blocks];
+  const table = blocks.find((block) => changed.has(block.id) && block.type === "table");
+  if (table) {
+    throw new DocxLensError(
+      "DOCX_TABLE_WRITE_UNSUPPORTED",
+      "Tables in linked Word files cannot be safely rewritten yet. Edit a paragraph outside the table, or save the table change in Word.",
+    );
+  }
+}
+
 /** Queue one verified DOCX payload for the Bridge. Used by both the human
  * editor endpoint and AI artifact updates so native materialization cannot be
  * accidentally omitted by a second caller. */
@@ -115,6 +134,7 @@ export async function materializeDocxArtifact(
   const opened = await docxLens.open(payload, "strict-native");
   const projection = contentProjection(content, opened.projection);
   const regionIds = changedRegions(opened.projection, projection);
+  assertChangedTablesSupported(opened.projection, projection, regionIds);
   const output = await docxLens.materialize({
     projection,
     carry: opened.preservedCarry,
@@ -125,6 +145,7 @@ export async function materializeDocxArtifact(
     docxLens.open(output, "strict-native"),
     comparePackages(payload, output),
   ]);
+  assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
   const stored = await uploadNativePayload(output, hash, truth.nativeFormat);
   const local = workTruth.replicas.find(
     (replica) => replica.kind === "local" && replica.state !== "unavailable",
@@ -349,6 +370,7 @@ export async function POST(request: Request) {
     ]);
     const current = contentProjection(artifact.content, baseOpened.projection);
     const spectraChanged = new Set(changedRegions(baseOpened.projection, current));
+    assertChangedTablesSupported(baseOpened.projection, current, [...spectraChanged]);
     const externalChanged = new Set(diff.changes
       .filter((change) => change.kind !== "preserved-part-replaced")
       .map((change) => change.regionId));
@@ -370,6 +392,7 @@ export async function POST(request: Request) {
         docxLens.open(output, "strict-native"),
         comparePackages(local.payload, output),
       ]);
+      assertPreservationKept({ entries: externalOpened.fidelityMap.entries, parts: comparison.parts });
       const stored = await uploadNativePayload(output, hash, local.truth.nativeFormat);
       const queued = await convexMutation<
         {

@@ -17,7 +17,7 @@ Grouped by the audit's root-cause classes, closed class-wide (R12 discipline):
 
 ## P6.I2 — Design-system adoption sweep (M)
 
-ESLint rules escalate warn→error directory-by-directory as codemods land; top-offender files first (artifact-studio 425 escapes, managebac 360, conversation-surface 296); radius/type/z values onto tokens; brand violet unified; dark-mode hardcoded-light patches fixed at cause; `spectra-app.css` burn-down (remediation selectors deleted with their causes; !important count tracked in CI as a ratchet). A11y: icon-button names (439 missing), contrast fixes (tertiary/placeholder), focus-visible verified product-wide. Component consolidation: dialogs (done P0/P6 remainder), tooltips→1, skeletons→1, spinners→1, empty states→1 voice.
+ESLint rules escalate warn→error directory-by-directory as codemods land; top-offender files first (artifact-studio 425 escapes, managebac 360, conversation-surface 296); radius/type/z values onto tokens; brand violet unified; dark-mode hardcoded-light patches fixed at cause; `spectra-app.css` burn-down (remediation selectors deleted with their causes; !important count tracked as a ratchet in the owning unit). A11y: icon-button names (439 missing), contrast fixes (tertiary/placeholder), focus-visible verified product-wide. Component consolidation: dialogs (done P0/P6 remainder), tooltips→1, skeletons→1, spinners→1, empty states→1 voice.
 
 ## P6.I3 — Remaining decompositions + dead-code sweep (S)
 

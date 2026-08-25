@@ -37,6 +37,7 @@ export type ComparedPart = {
   name: string;
   verdict: string;
   note?: string;
+  diffs?: readonly { path: string }[];
 };
 
 /** Enough of a lens entry to know what it preserves and where. */
@@ -44,6 +45,7 @@ export type PreservationEntry = {
   feature?: unknown;
   class?: unknown;
   partName?: unknown;
+  pathPattern?: unknown;
   readOnly?: unknown;
   reason?: unknown;
 };
@@ -70,14 +72,21 @@ export function preservationViolations(input: {
   entries: readonly PreservationEntry[];
   parts: readonly ComparedPart[];
 }): PreservationViolation[] {
-  const claimed = new Map<string, string>();
+  const claimed = new Map<string, { feature: string; pathPattern?: string }>();
   for (const entry of input.entries) {
     const preserved = entry.class === "PRESERVED" || entry.readOnly === true;
     if (!preserved || typeof entry.partName !== "string" || !entry.partName) continue;
     const key = normalize(entry.partName);
     // First claim wins, so the message names one feature rather than a list. Any
     // of them is enough to explain why the part must not change.
-    if (!claimed.has(key)) claimed.set(key, typeof entry.feature === "string" ? entry.feature : "");
+    if (!claimed.has(key)) {
+      claimed.set(key, {
+        feature: typeof entry.feature === "string" ? entry.feature : "",
+        ...(typeof entry.pathPattern === "string" && entry.pathPattern
+          ? { pathPattern: entry.pathPattern }
+          : {}),
+      });
+    }
   }
 
   const violations: PreservationViolation[] = [];
@@ -85,8 +94,19 @@ export function preservationViolations(input: {
     if (part.verdict !== "different") continue;
     if (part.note && PRESENCE_NOTES.has(part.note)) continue;
     const key = normalize(part.name);
-    const feature = claimed.get(key);
-    if (feature === undefined) continue;
+    const claim = claimed.get(key);
+    if (claim === undefined) continue;
+    if (
+      claim.pathPattern &&
+      !(part.diffs ?? []).some((diff) =>
+        diff.path.split("/").some((segment) => {
+          const localName = segment.replace(/\[\d+\]$/, "").split(":").pop();
+          return localName === claim.pathPattern;
+        }),
+      )
+    )
+      continue;
+    const feature = claim.feature;
     const region = regionsForLensFeature(feature)[0];
     violations.push({
       partName: key,

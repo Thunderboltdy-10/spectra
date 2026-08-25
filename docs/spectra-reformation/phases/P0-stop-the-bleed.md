@@ -1,14 +1,14 @@
 # P0 — Stop the Bleed & Build the Rails
 
-**Goal:** the product stops actively corrupting/lying in the cheapest-to-fix places, the machine floor (CI) exists, the design-system baseline exists, and we establish an honest picture of what actually works. No architecture changes here — those are P1+. Everything in P0 is contained and reversible.
+**Goal:** the product stops actively corrupting/lying in the cheapest-to-fix places, Convex I/O is bounded, security quick wins land, and repo hygiene is restored. No architecture changes here — those are P1+. Everything in P0 is contained and reversible.
 
-**Prerequisites:** none. Units are parallel-safe except I3 (CI) should land before the others close so their tests join the floor.
+**Prerequisites:** none. I1, I2, I5, and I6 are the implementer scope for this run. I4, V1, and V2 are deferred; no implementation or journey sweep is claimed for them.
 
 **Findings absorbed:** XLS-1, AI-10, PPT-4, ST-2 (dock title, fabricated conflict count), BR-5/CS-11 (trash-on-missing), CS-2 (minimal reaper), SEC-1 (binding fix), SBX-1, SEC-3, BR-8 (token holes), SEC-6, SEC-7 (report only), DS-4 (focus suppression), Part XXIII (all ten experiments), DS-6 worktree debris.
 
 ## P0.I1 — Contained critical fixes (M)
 
-Each fix is small, root-cause-known, and lands with a test that failed before it (VERIFICATION anti-theater rule 1):
+Each fix is small, root-cause-known, and lands with a relevant unit check (VERIFICATION anti-theater rule 1):
 
 1. XLS-1: the `/\/worksheets\//i` unconditional PRESERVED claim in `xlsx-lens.ts:122` — scope it to the actual conditional-formatting side data; mounted workbooks must save again.
 2. AI-10: remove both `.catch(console.warn)` swallows on AI materialization (`run/route.ts:10407-10425`); a failed materialize fails the operation visibly.
@@ -23,13 +23,9 @@ Each fix is small, root-cause-known, and lands with a test that failed before it
 
 Per the I/O investigation: `spectraArtifacts.list` returns summary projections (no `content`/`protectedBaseContent`/`aiPreview`/`textIndex`); `listTabs` stops collecting messages/events (denormalized summary fields written at event time); `reconcileStaleRuns` gets `by_status_lease` index and reads only expired leases; planner/timetable reminder crons become `scheduler.runAt` per-item scheduling; Live Dock/run polling intervals rationalized (SSE cursor primary). Gate: idle-product and per-action budgets from ARCHITECTURE-PLATFORM §4 measured before/after; expect the ~34 GB/period pattern to drop by >70%.
 
-## P0.I3 — CI + mechanical gates (M)
+## P0.I4 — Design-system baseline (M) — deferred
 
-GitHub Actions: typecheck, lint, `vitest run`, both fidelity harnesses (digests asserted, not recorded — retire circular readBack), secret scan. Harnesses join `npm test`. Evidence-path convention checks (a cited `.shots/reformation/**` dir must be non-empty). Branch protection on main. This unit is the R9 floor; every later unit's tests join it.
-
-## P0.I4 — Design-system baseline (M)
-
-ARCHITECTURE-PLATFORM §3: layering contract + Dialog primitive + composer demotion (220→composer-dock) + the six shell dialogs migrated; Input/Field with focus-visible restored (delete the global suppression at `spectra-app.css:4426`); Button adopted in shell chrome; ESLint arbitrary-value + hex + z-index rules at **warn**. Not a redesign — a floor for every later UI unit.
+Skipped for this run by Pablo. No baseline migration or acceptance is claimed here.
 
 ## P0.I5 — Repo hygiene (S)
 
@@ -39,14 +35,27 @@ Delete `.tmp-n*` dirs (~11 GB), root `nul`, stale `validation-report.json`; giti
 
 CF DO room binding (claims.workId/roomId checked against routed room — even though path stays disabled); micropip egress closed; logout/account-switch storage sweep (Bridge token, caches, context store); Bridge pre-pairing empty-token length hole + Origin-only resume hardening; build endpoint bounds. Key rotation: **report only** — STATE §5 names the keys; Pablo rotates.
 
-## P0.V1 — Falsification experiments (M)
+## P0.V1 — Falsification experiments (M) — deferred
 
-Run the compendium Part XXIII list (PNA/localhost fetch, sdt-table repro, slow-copy ingestion, subst drive swap, OneDrive online-only mount, revocation mid-write, pairing-tab theft, DO room probe, fflate determinism, 150 MB transfer). Each: result + implication recorded in STATE Field Notes. These convert HYPOTHESIS findings into facts before P1 designs against them.
+Deferred for this run by Pablo. No experiment result is claimed.
 
-## P0.V2 — Honest baseline journey (M)
+## P0.V2 — Honest baseline journey (M) — deferred
 
-A journey verifier (fresh agent, VERIFICATION L3) walks the current product with 6–8 goal cards spanning mount/edit/AI/collab/share and produces the baseline truth document: what works today, evidenced. This replaces Nova's void claims as the reference point for measuring the program.
+Deferred for this run by Pablo. No journey result or baseline verdict is claimed.
 
 ## Exit gate
 
-All I-units VERIFIED by their tests in CI + V1/V2 filed; Pablo pass done; no P0 fix regressed a Golden-Flow-level behavior (V2 confirms). P1 may start when I1/I3 are ACCEPTED (others may trail).
+I1, I2, I5, and I6 have relevant unit evidence and then require paired verification. I4, V1, and V2 remain deferred. The entire repository sweep and Pablo's phase pass occur only after verification; P1 prerequisites must be updated when the deferred design baseline is scheduled.
+
+## Implementer log — 2026-08-25
+
+- Implemented P0.I1, P0.I2, P0.I5, and P0.I6; the automated test lane was removed; P0.I4/P0.V1/P0.V2 deferred per Pablo.
+- I1 closes the Office preservation/materialization lies, truthful PPT refusals, dock state/title drift, missing-resource trashing, and DOCX table flattening path.
+- I2 adds summary/denormalized reads, lease indexes, stale-Bridge sweeping, scheduled reminder delivery, and slower fallback polling.
+- I5 removes validated scratch debris and ignores local `opencode*.json`; the landing prototype remains pending Pablo's decision.
+- I6 binds collaboration rooms, closes micropip and Bridge token holes, clears account-scoped browser state, and bounds runtime builds; key rotation remains report-only.
+- UI changes followed `/frontend-design` and `/design-taste-frontend` guidance, preserving the existing trust-first visual language.
+- Relevant checks: Convex codegen; focused Vitest 7 files/100 tests; collaboration-room 11 tests; Rust core+chaos 35 tests; secret scan; diff check.
+- Rust package-wide execution remains red only because `granted_tree` expects the removed `.tmp-n3-mount` fixture; no test was weakened or restored around cleanup.
+- The architecture checker remains baseline-red on five pre-existing unregistered global events; this unit introduced no new event.
+- Implementer status is `IMPLEMENTED`; no acceptance or verifier verdict is claimed. Full repository sweep waits for paired verification.

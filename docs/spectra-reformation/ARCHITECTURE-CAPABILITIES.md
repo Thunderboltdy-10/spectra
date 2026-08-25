@@ -33,7 +33,7 @@ CapabilityDefinition {
 
 ## 3. The ghost gate (build-time, CANON R6)
 
-A CI check cross-validates, per format: every definition with `native.delta` names a delta kind the lens actually implements (imported, not string-matched); every lens delta kind is claimed by ≥1 definition; every definition without `native.delta` is unavailable in strict-native with a reason. Hyperlink-style ghosts (enabled UI, no write path — DOC-10) become impossible to ship, not impossible to write.
+A per-unit contract check cross-validates, per format: every definition with `native.delta` names a delta kind the lens actually implements (imported, not string-matched); every lens delta kind is claimed by ≥1 definition; every definition without `native.delta` is unavailable in strict-native with a reason. Hyperlink-style ghosts (enabled UI, no write path — DOC-10) become impossible to ship, not impossible to write.
 
 ## 4. Input paths route through the IR (kills the bypass families)
 

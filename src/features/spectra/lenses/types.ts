@@ -14,6 +14,8 @@ export type LensFidelityEntry = {
   feature: string;
   class: LensFidelityClass;
   partName?: string;
+  /** Optional XML element name that scopes a package-part preservation claim. */
+  pathPattern?: string;
   readOnly?: boolean;
   reason?: string;
 };
@@ -86,4 +88,3 @@ export interface SpectraLens<P, D> {
     fidelityMap: LensFidelityMap,
   ): LensCapabilitySet;
 }
-

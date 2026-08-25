@@ -1608,7 +1608,8 @@ export default defineSchema({
     .index("by_mount", ["mountId"])
     .index("by_device_resource", ["deviceId", "localResourceId"])
     .index("by_device_mount_path", ["deviceId", "mountId", "relativePath"])
-    .index("by_work_kind", ["workId", "kind"]),
+    .index("by_work_kind", ["workId", "kind"])
+    .index("by_state_updated", ["state", "updatedAt"]),
 
   syncOperations: defineTable({
     accountId: v.id("accounts"),
@@ -1674,7 +1675,8 @@ export default defineSchema({
   })
     .index("by_device_state", ["deviceId", "state"])
     .index("by_work_created", ["workId", "createdAt"])
-    .index("by_account_key", ["accountId", "idempotencyKey"]),
+    .index("by_account_key", ["accountId", "idempotencyKey"])
+    .index("by_state_updated", ["state", "updatedAt"]),
 
   bridgeFsRequests: defineTable({
     accountId: v.id("accounts"),
@@ -1709,7 +1711,8 @@ export default defineSchema({
     .index("by_device_state", ["deviceId", "state"])
     .index("by_account_state", ["accountId", "state"])
     .index("by_account_key", ["accountId", "idempotencyKey"])
-    .index("by_work_created", ["workId", "createdAt"]),
+    .index("by_work_created", ["workId", "createdAt"])
+    .index("by_state_updated", ["state", "updatedAt"]),
 
   payloadObjects: defineTable({
     accountId: v.id("accounts"),
@@ -2630,8 +2633,11 @@ export default defineSchema({
     occurrenceStart: v.number(),
     scheduledFor: v.number(),
     idempotencyKey: v.string(),
+    status: v.optional(
+      v.union(v.literal("pending"), v.literal("delivered"), v.literal("failed")),
+    ),
     createdAt: v.number(),
-    deliveredAt: v.number(),
+    deliveredAt: v.optional(v.number()),
     readAt: v.optional(v.number()),
   })
     .index("by_idempotency", ["idempotencyKey"])
@@ -3104,6 +3110,13 @@ export default defineSchema({
     ),
     planIntent: v.optional(v.any()),
     finalSummary: v.optional(v.string()),
+    dockSummary: v.optional(
+      v.object({
+        checkpointSummary: v.optional(v.string()),
+        recentSteps: v.array(v.string()),
+        inputRequest: v.optional(v.any()),
+      }),
+    ),
     suggestedThreadTitle: v.optional(v.string()),
     suggestedThreadSummary: v.optional(v.string()),
     error: v.optional(v.string()),
@@ -3168,7 +3181,8 @@ export default defineSchema({
     .index("by_account_submission", ["ownerAccountId", "submissionKey"])
     .index("by_workspace", ["workspaceId"])
     .index("by_thread", ["threadId"])
-    .index("by_artifact", ["artifactId"]),
+    .index("by_artifact", ["artifactId"])
+    .index("by_status_lease", ["status", "leaseExpiresAt"]),
 
   spectraRunJobs: defineTable({
     runId: v.id("spectraAiRuns"),

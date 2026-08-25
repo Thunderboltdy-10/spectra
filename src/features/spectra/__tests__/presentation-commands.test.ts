@@ -247,17 +247,25 @@ describe("presentation command set", () => {
     );
   });
 
-  it("lets a person type speaker notes even when the linked file has no notes page", () => {
-    // Spectra keeps the notes. The lens skips the native notes part when the
-    // file has none, so the command stays enabled and the placeholder stays
-    // "No speaker notes" rather than a refusal.
+  it("refuses speaker notes when the linked file has no notes page", () => {
+    // Accepting text here would tell a person the note was written while the
+    // native package has nowhere to store it.
     const withoutNotesPage = presentationCommandBindings(
       presentationStubHandlers({ notesUnsupported: true }),
     );
     const index = withoutNotesPage.findIndex((binding) => binding.id === "notes.set");
     expect(index).toBeGreaterThanOrEqual(0);
     const command = commandForBinding("presentation", withoutNotesPage[index]!, index);
-    expect(command.availability(fullContext()).state).toBe("enabled");
+    expect(command.availability(fullContext()).state).toBe("disabled");
+    expect(command.availability(fullContext()).reason).toContain("no notes page");
+  });
+
+  it("refuses adding a slide to a linked PowerPoint deck", () => {
+    const add = commands().find((command) => command.id === "presentation.slide.add");
+    expect(add?.availability(fullContext("strict-native"))).toMatchObject({
+      state: "disabled",
+      reason: PRESENTATION_STRICT_REASONS.addSlide,
+    });
   });
 
   it("passes the office capability audit with one command per operation", () => {

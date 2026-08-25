@@ -6245,6 +6245,25 @@ function ArtifactStudioEditor({
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
               </span>
             ) : null}
+            {!syncBusy &&
+            artifactSyncMessage &&
+            live.state !== "connecting" &&
+            live.state !== "synchronizing" &&
+            live.state !== "reconnecting" ? (
+              <span
+                className={`spectra-artifact-sync-message max-w-[13rem] truncate text-[11px] ${
+                  syncState === "error"
+                    ? "text-[var(--danger)]"
+                    : "text-[var(--text-secondary)]"
+                }`}
+                role="status"
+                aria-live="polite"
+                data-sync-state={syncState}
+                title={artifactSyncMessage}
+              >
+                {artifactSyncMessage}
+              </span>
+            ) : null}
             {collaboratorCount > 0 ? (
               <CollaborationPresenceIndicator
                 presence={displayPresence}

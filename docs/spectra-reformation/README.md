@@ -34,9 +34,9 @@ If two documents disagree, the higher one wins. If a Reformation document seems 
 Dependency order. Within a phase, units marked parallel-safe may run concurrently; verification units are executed by **different agents** than the implementation they verify (PROCESS §2).
 
 ```
-P0  Stop the Bleed & Build the Rails   contained critical fixes, Convex I/O P0, CI,
-                                       design-system baseline, security quick wins,
-                                       falsification experiments, honest baseline
+P0  Stop the Bleed & Build the Rails   contained critical fixes, Convex I/O P0,
+                                       security quick wins, repo hygiene; design
+                                       baseline and verifier experiments deferred
 P1  The Truth Engine                   bytes-canonical replica machine, journal-first
                                        Bridge, one status presenter, sync-as-toggles
 P2  Fidelity at Full Surface           one schema per format, 3-way merge, stable
@@ -69,6 +69,6 @@ P8  The Release Gate                   chaos + multiplayer finale, release verdi
 3. Paste the launch prompt template (PROCESS §5) filled in with the unit ID.
 4. When the implementer reports done, launch the paired **verification unit with a different agent** — never the same session, never the same context.
 5. Accept only when the verifier's verdict is recorded in STATE. Your own ten-minute pass remains the final control; it caught what every automated layer missed last time.
-6. Answer stop-and-ask items before relaunching. A pending question blocks the next unit.
+6. Answer stop-and-ask items before relaunching. A pending question blocks the next unit. Relevant tests belong to their owning unit; the entire repository sweep waits until paired verification has run.
 
 Between units: commit. Never change branch. Keys rotation (STATE §5) is yours and blocks nothing except public exposure risk.

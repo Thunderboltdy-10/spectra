@@ -139,6 +139,71 @@ const vResultAction = v.object({
   targetId: v.optional(v.string()),
 });
 
+function eventStep(type: string, payload: unknown) {
+  if (!["progress", "checkpoint", "operation_result"].includes(type))
+    return undefined;
+  const record =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {};
+  const item =
+    record.runItem && typeof record.runItem === "object"
+      ? (record.runItem as Record<string, unknown>)
+      : {};
+  const itemPayload =
+    item.payload && typeof item.payload === "object"
+      ? (item.payload as Record<string, unknown>)
+      : {};
+  const checkpoint =
+    itemPayload.checkpoint && typeof itemPayload.checkpoint === "object"
+      ? (itemPayload.checkpoint as Record<string, unknown>)
+      : {};
+  const value =
+    typeof checkpoint.summary === "string"
+      ? checkpoint.summary
+      : typeof record.detail === "string"
+        ? record.detail
+        : typeof record.title === "string"
+          ? record.title
+          : typeof record.message === "string"
+            ? record.message
+            : undefined;
+  return value?.trim() || undefined;
+}
+
+function collapseDockSteps(values: readonly string[]) {
+  return values.reduce<string[]>((steps, value) => {
+    const previous = steps.at(-1);
+    if (!previous) return [value];
+    if (previous === value) return steps;
+    const prior = previous.toLocaleLowerCase();
+    const next = value.toLocaleLowerCase();
+    if (prior.startsWith(next) || next.startsWith(prior))
+      return [...steps.slice(0, -1), value.length >= previous.length ? value : previous];
+    return [...steps, value];
+  }, []).slice(-8);
+}
+
+function dockSummaryAfterEvents(
+  run: Doc<"spectraAiRuns">,
+  events: readonly { type: string; payload: unknown }[],
+) {
+  const steps = events.flatMap((event) => {
+    const value = eventStep(event.type, event.payload);
+    return value ? [value] : [];
+  });
+  if (!steps.length) return run.dockSummary;
+  const recentSteps = collapseDockSteps([
+    ...(run.dockSummary?.recentSteps ?? []),
+    ...steps,
+  ]);
+  return {
+    ...(run.dockSummary ?? {}),
+    checkpointSummary: recentSteps.at(-1),
+    recentSteps,
+  };
+}
+
 async function requireActor(ctx: Parameters<typeof getAuthenticatedActor>[0]) {
   const actor = await getAuthenticatedActor(ctx);
   if (!actor)
@@ -358,6 +423,7 @@ export const beginRun = mutation({
       submissionKey: args.submissionKey,
       executionId,
       eventSequence: 1,
+      leaseExpiresAt: now + 2 * 60_000,
       phase: "created",
       heartbeatAt: now,
       attemptCount: 1,
@@ -750,6 +816,9 @@ export const appendEvent = mutation({
       eventSequence: sequence,
       heartbeatAt: now,
       updatedAt: now,
+      ...(dockSummaryAfterEvents(run, [{ type: args.type, payload: args.payload }])
+        ? { dockSummary: dockSummaryAfterEvents(run, [{ type: args.type, payload: args.payload }]) }
+        : {}),
     });
     return { ignored: false, sequence };
   },
@@ -821,6 +890,9 @@ export const appendEvents = mutation({
       eventSequence: sequence,
       heartbeatAt: now,
       updatedAt: now,
+      ...(dockSummaryAfterEvents(run, unique)
+        ? { dockSummary: dockSummaryAfterEvents(run, unique) }
+        : {}),
     });
     return { ignored: false, sequence, count: unique.length };
   },
@@ -949,164 +1021,23 @@ export const listTabs = query({
     return (
       await Promise.all(
         [...canonicalByThread.values()].map(async (tab) => {
-          const [run, thread, cards, messages, events] = await Promise.all([
+          const [run, thread, cards] = await Promise.all([
             ctx.db.get(tab.runId),
             ctx.db.get(tab.threadId),
             ctx.db
               .query("spectraResultCards")
               .withIndex("by_run", (q) => q.eq("runId", tab.runId))
-              .collect(),
-            ctx.db
-              .query("spectraMessages")
-              .withIndex("by_run", (q) => q.eq("runId", tab.runId))
-              .collect(),
-            ctx.db
-              .query("spectraRunEvents")
-              .withIndex("by_run_sequence", (q) => q.eq("runId", tab.runId))
-              .collect(),
+              .order("desc")
+              .take(1),
           ]);
-          const latestAssistant = messages
-            .filter((message) => message.role === "assistant")
-            .sort((a, b) => b.createdAt - a.createdAt)[0];
-          const rawChoices = latestAssistant?.metadata?.choices as
-            | { question?: unknown; options?: unknown; questions?: unknown }
-            | undefined;
-          const choiceSelection = latestAssistant?.metadata?.choiceSelection;
-          const choiceAlreadyAnswered = Boolean(
-            choiceSelection && typeof choiceSelection === "object",
-          );
-          const parseOptions = (value: unknown) =>
-            Array.isArray(value)
-              ? value.flatMap(
-                  (
-                    option,
-                  ): Array<{ title: string; description?: string | null }> => {
-                    if (!option || typeof option !== "object") return [];
-                    const row = option as {
-                      title?: unknown;
-                      description?: unknown;
-                    };
-                    if (typeof row.title !== "string" || !row.title.trim())
-                      return [];
-                    return [
-                      {
-                        title: row.title.trim(),
-                        description:
-                          typeof row.description === "string"
-                            ? row.description
-                            : null,
-                      },
-                    ];
-                  },
-                )
-              : [];
-          const options = parseOptions(rawChoices?.options);
-          const batchQuestions = Array.isArray(rawChoices?.questions)
-            ? rawChoices.questions.flatMap((question, index) => {
-                if (!question || typeof question !== "object") return [];
-                const row = question as {
-                  id?: unknown;
-                  question?: unknown;
-                  options?: unknown;
-                };
-                const prompt =
-                  typeof row.question === "string" ? row.question.trim() : "";
-                const questionOptions = parseOptions(row.options);
-                return prompt && questionOptions.length >= 2
-                  ? [
-                      {
-                        id:
-                          typeof row.id === "string" && row.id.trim()
-                            ? row.id.trim()
-                            : `question-${index + 1}`,
-                        prompt,
-                        options: questionOptions,
-                      },
-                    ]
-                  : [];
-              })
-            : [];
-          const inputRequest =
-            !latestAssistant ||
-            choiceAlreadyAnswered ||
-            thread?.lastRunId !== tab.runId
-              ? null
-              : batchQuestions.length >= 2
-                ? {
-                    kind: "choice_batch" as const,
-                    messageId: latestAssistant._id,
-                    questions: batchQuestions.slice(0, 4),
-                  }
-                : typeof rawChoices?.question === "string" &&
-                    rawChoices.question.trim() &&
-                    options.length >= 2 &&
-                    options.length <= 6
-                  ? {
-                      kind: "choice" as const,
-                      messageId: latestAssistant._id,
-                      prompt: rawChoices.question.trim(),
-                      options,
-                    }
-                  : null;
-          const meaningfulSteps = events
-            .filter(
-              (event) =>
-                event.type === "progress" ||
-                event.type === "checkpoint" ||
-                event.type === "operation_result",
-            )
-            .sort((a, b) => a.sequence - b.sequence)
-            .flatMap((event): string[] => {
-              const payload =
-                event.payload && typeof event.payload === "object"
-                  ? (event.payload as Record<string, unknown>)
-                  : {};
-              const item =
-                payload.runItem && typeof payload.runItem === "object"
-                  ? (payload.runItem as Record<string, unknown>)
-                  : {};
-              const itemPayload =
-                item.payload && typeof item.payload === "object"
-                  ? (item.payload as Record<string, unknown>)
-                  : {};
-              const checkpoint =
-                itemPayload.checkpoint &&
-                typeof itemPayload.checkpoint === "object"
-                  ? (itemPayload.checkpoint as Record<string, unknown>)
-                  : {};
-              const value =
-                (typeof checkpoint.summary === "string" &&
-                  checkpoint.summary) ||
-                (typeof payload.detail === "string" && payload.detail) ||
-                (typeof payload.title === "string" && payload.title) ||
-                (typeof payload.message === "string" && payload.message);
-              return value && value.trim() ? [value.trim()] : [];
-            });
-          const collapsedSteps = meaningfulSteps.reduce<string[]>(
-            (steps, value) => {
-              const previous = steps.at(-1);
-              if (!previous) return [value];
-              if (previous === value) return steps;
-              const prior = previous.toLocaleLowerCase();
-              const next = value.toLocaleLowerCase();
-              if (prior.startsWith(next) || next.startsWith(prior))
-                return [
-                  ...steps.slice(0, -1),
-                  value.length >= previous.length ? value : previous,
-                ];
-              return [...steps, value];
-            },
-            [],
-          );
-          const checkpointSummary = collapsedSteps.at(-1);
           return {
             ...tab,
             run,
             thread,
-            card: cards.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null,
-            inputRequest,
-            checkpointSummary,
-            recentSteps: collapsedSteps.slice(-8),
+            card: cards[0] ?? null,
+            inputRequest: run?.dockSummary?.inputRequest ?? null,
+            checkpointSummary: run?.dockSummary?.checkpointSummary,
+            recentSteps: run?.dockSummary?.recentSteps ?? [],
           };
         }),
       )
@@ -1118,21 +1049,23 @@ export const reconcileStaleRuns = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-    const active = await ctx.db
-      .query("spectraAiRuns")
-      .filter((q) =>
-        q.or(
-          q.eq(q.field("status"), "queued"),
-          q.eq(q.field("status"), "running"),
-        ),
-      )
-      .collect();
+    const [queued, running] = await Promise.all([
+      ctx.db
+        .query("spectraAiRuns")
+        .withIndex("by_status_lease", (q) =>
+          q.eq("status", "queued").lt("leaseExpiresAt", now),
+        )
+        .take(100),
+      ctx.db
+        .query("spectraAiRuns")
+        .withIndex("by_status_lease", (q) =>
+          q.eq("status", "running").lt("leaseExpiresAt", now),
+        )
+        .take(100),
+    ]);
+    const active = [...queued, ...running];
     let interrupted = 0;
     for (const run of active) {
-      const leaseExpired =
-        (run.leaseExpiresAt ??
-          (run.heartbeatAt ?? run.updatedAt) + 5 * 60_000) < now;
-      if (!leaseExpired) continue;
       const [operations, messages] = await Promise.all([
         ctx.db
           .query("spectraOperations")

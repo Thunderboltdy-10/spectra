@@ -477,7 +477,7 @@ export function LiveDock({
     void refresh(true);
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh(true);
-    }, 2_000);
+    }, 5_000);
     return () => window.clearInterval(timer);
   }, [optimistic, optimistic?.runId, optimistic?.status, refresh, story]);
 
@@ -857,7 +857,7 @@ export function LiveDock({
 
                 {!expanded ? (
                   <div
-                    className="pointer-events-none fixed z-30 hidden w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)] group-has-[.dock-tab-identity:hover]:block group-has-[.dock-tab-identity:focus-visible]:block"
+                    className="pointer-events-none fixed z-30 hidden w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)] group-hover:block group-focus-within:block group-has-[.dock-tab-icon:hover]:hidden"
                     style={
                       {
                         positionAnchor: disclosureAnchor,

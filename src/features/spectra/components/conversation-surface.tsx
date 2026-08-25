@@ -2570,9 +2570,12 @@ export function ThreadConversation({
         trace.run.status === "awaiting_resolution",
     );
     if (!active) return;
+    // Durable run events are cursor-polled by useSpectraRun. Keep this full
+    // thread projection as a slow recovery refresh rather than re-reading all
+    // messages and events every two seconds.
     const timer = window.setInterval(
       () => void refresh().catch(() => undefined),
-      2_000,
+      10_000,
     );
     return () => window.clearInterval(timer);
   }, [detail?.traces, refresh]);

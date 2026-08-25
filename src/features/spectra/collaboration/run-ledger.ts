@@ -414,8 +414,7 @@ export function useRunLedger(
   );
 }
 
-/** Test-only reset. */
-export function __resetRunLedger(): void {
+export function clearRunLedger(): void {
   runs.clear();
   memory.clear();
   memoryLoaded = false;
@@ -427,4 +426,9 @@ export function __resetRunLedger(): void {
       // ignore
     }
   }
+}
+
+/** Test-only reset. */
+export function __resetRunLedger(): void {
+  clearRunLedger();
 }

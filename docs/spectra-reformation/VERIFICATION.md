@@ -2,12 +2,12 @@
 
 Nova's verification failed in a specific way: honest agents verified the layer they built, with perfect knowledge, at single checkpoints, and graded themselves. All four properties are reversed here. Verification has **layers** (L0–L5); every phase brief states which layers gate which units. "The feature can be demonstrated" and "a human can use this reliably" are different claims and are verified by different layers.
 
-## L0 — The machine floor (CI)
+## L0 — The per-unit machine floor
 
-Runs on every commit; failing is blocking. Built in P0, grows monotonically (CANON R9):
+Each owning unit runs the relevant checks; failing evidence is blocking for that unit. The full repository sweep is phase-gated after paired verification (CANON R9):
 
 - typecheck, lint (`--max-warnings=0`), unit suite
-- **fidelity harnesses** (`fidelity:docx`, `fidelity:office`) — promoted into the default suite; their semantic digests are *asserted against expectations*, not merely recorded (TEST-1's circular readBack is retired)
+- **fidelity harnesses** (`fidelity:docx`, `fidelity:office`) — run by the owning fidelity unit; their semantic digests are *asserted against expectations*, not merely recorded (TEST-1's circular readBack is retired)
 - **seam contract tests** (L1, below) once they exist
 - secret scan; schema-drift checks (Convex validators ↔ TS types via `z.infer` where introduced)
 - design-token rule (warn → error per P6 schedule); bounded-read lint where mechanically checkable
@@ -34,7 +34,7 @@ Rules: contract tests import **production modules** (routes export their logic; 
 For the truth engine and Bridge (Tier-R work):
 
 - **Model-based state machine tests**: generate interleavings of {enqueue, claim, write, complete, external save, crash, restart, network loss, lock, revoke} and assert the invariants from ARCHITECTURE-TRUTH §4: no lying `current`, no state without an exit (R2), convergence after quiescence, idempotent replay.
-- **Chaos runs**: kill mid-write and replay the journal; slow-writer ingestion (a file that takes 10s to copy must not yield a partial-bytes revision); lock storms; rename cascades; OneDrive placeholder mounts; clock skew. Dated reports, in CI where feasible, on a schedule where not.
+- **Chaos runs**: kill mid-write and replay the journal; slow-writer ingestion (a file that takes 10s to copy must not yield a partial-bytes revision); lock storms; rename cascades; OneDrive placeholder mounts; clock skew. Dated reports belong to their verification unit.
 - **3-way merge property tests** (P2): random edit pairs (Spectra-side, Word-side) over fixtures; assert merge correctness or precise conflict — never silent loss, never invented changes.
 
 ## L3 — Journey verification (the human-shaped layer)
@@ -49,7 +49,7 @@ Executed by verifier agents who receive **only**: the Reformation docs, a goal c
 
 ## L4 — Budgets (CANON R10)
 
-Numeric, checked at phase gates and where possible in CI (ARCHITECTURE-PLATFORM §4 holds the table): Convex bytes read per user action and per idle minute; requests + largest payload at first paint per surface; keystroke main-thread time at fixture densities (40-page doc, 200k-cell workbook, 120-slide deck); presence cost per remote cursor; Bridge steady-state churn (zero mutations on a quiet 10k-file mount).
+Numeric, checked by the owning unit and at phase gates (ARCHITECTURE-PLATFORM §4 holds the table): Convex bytes read per user action and per idle minute; requests + largest payload at first paint per surface; keystroke main-thread time at fixture densities (40-page doc, 200k-cell workbook, 120-slide deck); presence cost per remote cursor; Bridge steady-state churn (zero mutations on a quiet 10k-file mount).
 
 ## L5 — Pablo's pass
 

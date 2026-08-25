@@ -45,7 +45,6 @@ import {
 import { ShareDialog } from "../components/share-dialog";
 import { ProductPageHeader } from "../components/product-page-header";
 import { useSpectraRun } from "../ai/use-spectra-run";
-import { normalizeFoundryContent } from "../agents/foundry";
 import {
   addSpectraPublicAgent,
   getSpectraArtifacts,
@@ -126,29 +125,15 @@ function subjectLabel(tags: string[], skills: string[]) {
 }
 
 function accessibleCard(artifact: SpectraArtifact): LibraryCard {
-  const content = normalizeFoundryContent(artifact.content);
-  // Foundry skills are the source; the legacy projection is the fallback for
-  // agents built before the Foundry.
-  const skills = (
-    content.foundry.skills.length > 0
-      ? content.foundry.skills
-          .filter((skill) => skill.status !== "deprecated")
-          .map((skill) => skill.name)
-      : content.skills
-          .filter((skill) => skill.enabled)
-          .map((skill) => skill.name)
-  ).filter(Boolean);
-  const capabilities = [...new Set([...skills, ...artifact.tags])].slice(0, 4);
+  const capabilities = [...new Set(artifact.tags)].slice(0, 4);
   return {
     id: artifact._id,
     section: artifact.ownership === "shared" ? "shared" : "yours",
     title: artifact.title,
     summary:
       artifact.summary?.trim() ||
-      content.foundry.mission.objective.trim() ||
-      content.profile.purpose.trim() ||
       "Configure this specialist agent for a focused learning workflow.",
-    subject: subjectLabel(artifact.tags, skills),
+    subject: subjectLabel(artifact.tags, []),
     capabilities,
     owner: artifact.owner ?? {
       name: artifact.ownership === "shared" ? "School member" : "You",
@@ -445,6 +430,26 @@ export function AgentLibraryShell({
   useEffect(() => {
     setFocusMode(activeAgentArtifactId ? "artifact" : "global");
   }, [activeAgentArtifactId]);
+
+  useEffect(() => {
+    if (!activeAgentArtifactId || activeAgentArtifact?.content !== undefined)
+      return;
+    let cancelled = false;
+    void getSpectraArtifact(activeAgentArtifactId)
+      .then(({ artifact }) => {
+        if (cancelled)
+          return;
+        setArtifacts((current) =>
+          current.map((candidate) =>
+            candidate._id === artifact._id ? artifact : candidate,
+          ),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAgentArtifact, activeAgentArtifactId]);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);

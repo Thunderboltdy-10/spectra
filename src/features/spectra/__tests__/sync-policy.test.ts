@@ -106,7 +106,8 @@ describe("N6 effective sync policy", () => {
   });
 
   it("makes vanished-file outcomes policy-specific and truthful", () => {
-    expect(decideMissingResourceAction("mirror-from-disk", true)).toBe("trash-in-spectra");
+    expect(decideMissingResourceAction("mirror-from-disk", true)).toBe("keep-unavailable");
+    expect(decideMissingResourceAction("mirror-both", true)).toBe("keep-unavailable");
     expect(decideMissingResourceAction("mirror-to-disk", true)).toBe("restore-to-disk");
     expect(decideMissingResourceAction("independent", true)).toBe("keep-unavailable");
     expect(decideMissingResourceAction("ask", false)).toBe("ask");

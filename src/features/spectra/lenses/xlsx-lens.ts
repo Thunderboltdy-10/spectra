@@ -101,10 +101,10 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
       entries.push({
         regionId: id,
         feature: formula ? (support === "recognized" ? "recognized-formula" : "unrecognized-formula") : "cell",
-        class: formula && support === "cached-only" ? "PRESERVED" : "NATIVE",
+        class: "NATIVE",
         partName: sheet.partName,
         ...(formula && support === "cached-only"
-          ? { reason: "Spectra shows Excel's cached value and preserves the native formula text. Formula text remains editable." }
+          ? { class: "EXTENSION" as const, reason: "Spectra shows Excel's cached value and preserves the native formula text. Formula text remains editable." }
           : {}),
       });
       return {
@@ -119,13 +119,30 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
   }
   const partNames = workbook.office.package.parts().map((part) => part.name);
   const preserved: Array<[string, RegExp]> = [
-    ["pivot", /\/pivot/i], ["chart", /\/charts\//i], ["conditional-formatting", /\/worksheets\//i],
+    ["pivot", /\/pivot/i], ["chart", /\/charts\//i],
     ["external-link", /\/externalLinks\//i], ["comment", /\/comments/i], ["sparkline", /sparkline/i],
     ["unknown-extension", /unknown|future|extension/i],
   ];
   for (const [feature, pattern] of preserved) {
     const partName = partNames.find((name) => pattern.test(name));
     if (partName) entries.push({ regionId: `xlsx:feature:${feature}`, feature, class: "PRESERVED", partName, readOnly: true });
+  }
+  for (const sheet of workbook.sheets()) {
+    const doc = await workbook.office.xml(sheet.partName);
+    if (
+      descendants(doc.root).some(
+        (node) => node.namespaceUri() === SML && node.localName === "conditionalFormatting",
+      )
+    ) {
+      entries.push({
+        regionId: `xlsx:feature:conditional-formatting:${sheet.sheetId}`,
+        feature: "conditional-formatting",
+        class: "PRESERVED",
+        partName: sheet.partName,
+        pathPattern: "conditionalFormatting",
+        readOnly: true,
+      });
+    }
   }
   if (workbook.office.format.macroEnabled) {
     const partName = partNames.find((name) => /\/xl\/vbaProject\.bin$/i.test(name));

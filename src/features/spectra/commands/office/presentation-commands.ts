@@ -668,6 +668,11 @@ export function presentationCommandBindings(
       requires: "edit",
       shortcut: "Mod+Enter",
       hint: "Adds a slide after this one",
+      touches: ["slides"],
+      strictNative: {
+        available: false,
+        reason: PRESENTATION_STRICT_REASONS.addSlide,
+      },
       manifestOps: ["add_slide", "create_outline"],
       onSelect: () => handlers.slide.add(),
     },
@@ -1612,7 +1617,10 @@ export function presentationCommandBindings(
       group: "Notes",
       priority: "advanced",
       requires: "edit",
-      hint: "What you will say on this slide",
+      disabled: state.notesUnsupported,
+      hint: state.notesUnsupported
+        ? "This linked deck has no notes page, so speaker notes cannot be written safely."
+        : "What you will say on this slide",
       touches: ["speakerNotes"],
       manifestOps: ["write_speaker_notes"],
       onSelect: (value) => {

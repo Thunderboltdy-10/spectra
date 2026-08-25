@@ -1,4 +1,5 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
@@ -6,6 +7,7 @@ import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 const DELIVERY_WINDOW = 5 * MINUTE;
+const SCHEDULE_HORIZON = 31 * DAY;
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -102,7 +104,7 @@ function occurrenceNear(
   );
 }
 
-function dueOccurrence(
+function scheduledOccurrence(
   event: Record<string, unknown>,
   reminderMinutes: number,
   now: number,
@@ -112,7 +114,10 @@ function dueOccurrence(
   return occurrenceNear(start, event.recurrence, reminderMinutes, now).find(
     (occurrence) => {
       const scheduled = occurrence - reminderMinutes * MINUTE;
-      return scheduled <= now && scheduled > now - DELIVERY_WINDOW;
+      return (
+        scheduled <= now + SCHEDULE_HORIZON &&
+        scheduled > now - DELIVERY_WINDOW
+      );
     },
   );
 }
@@ -187,7 +192,7 @@ export const dispatchDue = internalMutation({
           });
       }
       for (const candidate of candidates.slice(0, 20_000)) {
-        const occurrenceStart = dueOccurrence(
+        const occurrenceStart = scheduledOccurrence(
           candidate.event,
           candidate.minutes,
           now,
@@ -206,7 +211,7 @@ export const dispatchDue = internalMutation({
           )
           .unique();
         if (existing) continue;
-        await ctx.db.insert("timetableReminderDeliveries", {
+        const deliveryId = await ctx.db.insert("timetableReminderDeliveries", {
           artifactId: artifact._id,
           schoolId: state.schoolId,
           recipientAccountId: state.accountId,
@@ -219,13 +224,32 @@ export const dispatchDue = internalMutation({
           occurrenceStart,
           scheduledFor: occurrenceStart - candidate.minutes * MINUTE,
           idempotencyKey,
+          status: "pending",
           createdAt: now,
-          deliveredAt: now,
         });
+        await ctx.scheduler.runAt(
+          Math.max(now, occurrenceStart - candidate.minutes * MINUTE),
+          internal.timetableReminders.deliver,
+          { deliveryId },
+        );
         delivered += 1;
       }
     }
     return { scanned: states.length, delivered };
+  },
+});
+
+export const deliver = internalMutation({
+  args: { deliveryId: v.id("timetableReminderDeliveries") },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.deliveryId);
+    if (!row || row.status === "delivered") return { delivered: false };
+    const now = Date.now();
+    await ctx.db.patch(row._id, {
+      status: "delivered",
+      deliveredAt: now,
+    });
+    return { delivered: true };
   },
 });
 
@@ -247,7 +271,7 @@ export const listMine = query({
       .take(limit * 3);
     const visible = [];
     for (const row of rows) {
-      if (args.unreadOnly && row.readAt) continue;
+      if (row.status === "pending" || (args.unreadOnly && row.readAt)) continue;
       const artifact = await ctx.db.get(row.artifactId);
       if (!artifact || artifact.status !== "active") continue;
       const access = await evaluateAccessForActor(

@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 import { createFolderNode, placeSourceNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode } from "./orgTreeShared";
@@ -111,7 +111,6 @@ export const reconcileMissingResources = mutation({
     if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || mount.lastScanId !== args.scanId) throw new Error("MOUNT_SCAN_NOT_CURRENT");
     const replicas = await ctx.db.query("workReplicas").withIndex("by_mount", (q) => q.eq("mountId", mount._id)).take(10_000);
     let unavailable = 0;
-    let trashed = 0;
     let restoring = 0;
     for (const replica of replicas) {
       if (replica.kind !== "local" || replica.lastSeenScanId === args.scanId || replica.state === "unavailable") continue;
@@ -164,15 +163,92 @@ export const reconcileMissingResources = mutation({
         restoring += 1;
         continue;
       }
-      const reason = action === "trash-in-spectra" ? "deleted-on-disk" : action === "ask" ? "missing-awaiting-decision" : "missing-on-disk";
+      const reason = action === "ask" ? "missing-awaiting-decision" : "missing-on-disk";
       await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: reason, updatedAt: Date.now() });
       unavailable += 1;
-      if (action === "trash-in-spectra") {
-        const node = await findPrimaryNode(ctx, actor.accountId, "work", String(replica.workId));
-        if (node) { await trashNode(ctx, node); trashed += 1; }
-      }
     }
-    return { unavailable, trashed, restoring };
+    return { unavailable, restoring };
+  },
+});
+
+/** Re-drive claims lost with a dead Bridge and surface writes with no journal. */
+export const sweepStaleBridgeWork = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const cutoff = now - 2 * 60_000;
+    const [abandonedWrites, abandonedFs] = await Promise.all([
+      ctx.db
+        .query("bridgeWriteRequests")
+        .withIndex("by_state_updated", (q) =>
+          q.eq("state", "claimed").lt("updatedAt", cutoff),
+        )
+        .take(100),
+      ctx.db
+        .query("bridgeFsRequests")
+        .withIndex("by_state_updated", (q) =>
+          q.eq("state", "claimed").lt("updatedAt", cutoff),
+        )
+        .take(100),
+    ]);
+    await Promise.all([
+      ...abandonedWrites.map((request) =>
+        ctx.db.patch(request._id, {
+          state: "pending",
+          claimedAt: undefined,
+          updatedAt: now,
+        }),
+      ),
+      ...abandonedFs.map((request) =>
+        ctx.db.patch(request._id, {
+          state: "pending",
+          claimedAt: undefined,
+          updatedAt: now,
+        }),
+      ),
+    ]);
+
+    const [staleReplicas, pendingWrites, pendingFs] = await Promise.all([
+      ctx.db
+        .query("workReplicas")
+        .withIndex("by_state_updated", (q) =>
+          q.eq("state", "pending").lt("updatedAt", cutoff),
+        )
+        .take(100),
+      ctx.db
+        .query("bridgeWriteRequests")
+        .withIndex("by_state_updated", (q) =>
+          q.eq("state", "pending").lt("updatedAt", now),
+        )
+        .take(500),
+      ctx.db
+        .query("bridgeFsRequests")
+        .withIndex("by_state_updated", (q) =>
+          q.eq("state", "pending").lt("updatedAt", now),
+        )
+        .take(500),
+    ]);
+    let failedReplicas = 0;
+    for (const replica of staleReplicas) {
+      const active =
+        pendingWrites.some((request) => request.replicaId === replica._id) ||
+        pendingFs.some((request) => request.replicaId === replica._id) ||
+        abandonedWrites.some((request) => request.replicaId === replica._id) ||
+        abandonedFs.some((request) => request.replicaId === replica._id);
+      if (active) continue;
+      await ctx.db.patch(replica._id, {
+        state: "error",
+        errorCode: "BRIDGE_WRITE_ABANDONED",
+        errorMessage: "The Bridge write did not finish. Try again.",
+        errorAt: now,
+        updatedAt: now,
+      });
+      failedReplicas += 1;
+    }
+    return {
+      redriven: abandonedWrites.length + abandonedFs.length,
+      failedReplicas,
+    };
   },
 });
 

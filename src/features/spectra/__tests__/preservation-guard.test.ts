@@ -138,4 +138,38 @@ describe("native preservation guard", () => {
     expect(thrown?.message).toContain("2 other preserved parts");
     expect(thrown?.message).toContain("/xl/charts/chart1.xml");
   });
+
+  it("scopes an XML preservation claim to its declared element", () => {
+    const entry = {
+      feature: "conditional-formatting",
+      class: "PRESERVED",
+      partName: "/xl/worksheets/sheet1.xml",
+      pathPattern: "conditionalFormatting",
+      readOnly: true,
+    };
+    expect(
+      preservationViolations({
+        entries: [entry],
+        parts: [
+          {
+            name: "xl/worksheets/sheet1.xml",
+            verdict: "different",
+            diffs: [{ path: "/x:worksheet/x:sheetData/x:row[1]/x:c[1]/x:v" }],
+          },
+        ],
+      }),
+    ).toEqual([]);
+    expect(
+      preservationViolations({
+        entries: [entry],
+        parts: [
+          {
+            name: "xl/worksheets/sheet1.xml",
+            verdict: "different",
+            diffs: [{ path: "/x:worksheet/x:conditionalFormatting[1]/x:cfRule" }],
+          },
+        ],
+      }),
+    ).toHaveLength(1);
+  });
 });

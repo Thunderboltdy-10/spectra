@@ -26,7 +26,7 @@ export type SyncTruth = {
 
 export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
   const { replicas, openConflictCount, pendingCount } = input;
-  if (openConflictCount > 0 || replicas.some((replica) => replica.state === "diverged")) return { key: "conflict", label: `${Math.max(1, openConflictCount)} conflict${openConflictCount === 1 ? "" : "s"}`, detail: "Replicas changed incompatibly. Nothing was overwritten.", tone: "danger" };
+  if (openConflictCount > 0 || replicas.some((replica) => replica.state === "diverged")) return { key: "conflict", label: openConflictCount > 0 ? `${openConflictCount} conflict${openConflictCount === 1 ? "" : "s"}` : "Edit conflict", detail: "Replicas changed incompatibly. Nothing was overwritten.", tone: "danger" };
   const error = replicas.find((replica) => replica.state === "error");
   if (error) return { key: "error", label: "Could not synchronize", detail: error.errorCode ? `Synchronization stopped: ${error.errorCode}.` : "Synchronization stopped with an error.", tone: "danger" };
   if (pendingCount > 0 || replicas.some((replica) => replica.state === "pending")) return { key: replicas.length > 1 ? "syncing" : "saving", label: replicas.length > 1 ? "Syncing…" : "Saving…", detail: "A verified operation is still in progress.", tone: "neutral" };

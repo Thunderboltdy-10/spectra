@@ -20,7 +20,6 @@ export const APPROVED_PYODIDE_PACKAGES = new Set([
   "numpy",
   "pandas",
   "matplotlib",
-  "micropip",
   "scipy",
   "scikit-learn",
   "sympy",

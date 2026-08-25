@@ -1,4 +1,5 @@
 import { verifyConnectionToken } from "./auth";
+import type { ConnectionClaims } from "./protocol";
 import { drainProjectionOutbox } from "./projection-outbox";
 import type { RoomMessage, SocketAttachment } from "./protocol";
 import { RealtimeRoomCore } from "./room-core";
@@ -32,6 +33,11 @@ function decode(value: string) {
       ? new Uint8Array(item.$bytes)
       : item,
   ) as RoomMessage;
+}
+
+function roomBindingError(claims: ConnectionClaims, routeWorkId: string) {
+  if (claims.workId !== routeWorkId) return "ROOM_WORK_BINDING_MISMATCH";
+  return null;
 }
 
 export class CollaborationRoom {
@@ -88,7 +94,32 @@ export class CollaborationRoom {
       token,
       this.env.SPECTRA_COLLAB_TOKEN_SECRET,
     );
+    const routeWorkId = url.pathname.split("/")[2]
+      ? decodeURIComponent(url.pathname.split("/")[2]!)
+      : "";
+    const bindingError = roomBindingError(claims, routeWorkId);
+    if (bindingError)
+      return new Response(bindingError, { status: 403 });
     await this.room.load();
+    const bindings = [
+      ...this.state.storage.sql.exec<{ key: string; value: string }>(
+        "SELECT key,value FROM room_metadata WHERE key IN ('work_id','room_id')",
+      ),
+    ];
+    const persisted = new Map(bindings.map((row) => [row.key, row.value]));
+    if (
+      (persisted.get("work_id") && persisted.get("work_id") !== claims.workId) ||
+      (persisted.get("room_id") && persisted.get("room_id") !== claims.roomId)
+    )
+      return new Response("ROOM_IDENTITY_BINDING_MISMATCH", { status: 403 });
+    this.state.storage.sql.exec(
+      "INSERT OR IGNORE INTO room_metadata(key,value) VALUES('work_id',?)",
+      claims.workId,
+    );
+    this.state.storage.sql.exec(
+      "INSERT OR IGNORE INTO room_metadata(key,value) VALUES('room_id',?)",
+      claims.roomId,
+    );
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];

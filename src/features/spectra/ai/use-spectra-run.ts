@@ -12,6 +12,7 @@ import {
   getSpectraRunTabs,
   postSpectra,
   type SpectraResultCard,
+  type SpectraRunTab,
 } from "../data/api";
 import type { CommandAttachment } from "../components/command-bar";
 import { getRunLedger, recordRunEvent } from "../collaboration/run-ledger";
@@ -443,10 +444,20 @@ export function useSpectraRun({
     if (!observeDurableRuns) return;
     let disposed = false;
     let timer: number | undefined;
+    let tabSnapshot: SpectraRunTab[] = [];
+    let tabsFetchedAt = 0;
     const poll = async () => {
       let observedActive = false;
       try {
-        const { runTabs } = await getSpectraRunTabs({ limit: 120 });
+        // The cursor endpoint is the live transport. Refresh the tab index only
+        // for discovery/recovery; polling the full tab projection per cursor
+        // tick re-reads every run's summary while progress is streaming.
+        if (!tabSnapshot.length || Date.now() - tabsFetchedAt >= 10_000) {
+          const result = await getSpectraRunTabs({ limit: 120 });
+          tabSnapshot = result.runTabs;
+          tabsFetchedAt = Date.now();
+        }
+        const runTabs = tabSnapshot;
         if (disposed) return;
         const relevant = runTabs.filter((tab) => {
           if (threadId) return tab.threadId === threadId;
@@ -609,8 +620,8 @@ export function useSpectraRun({
         // A transient observer failure must not interrupt the authoritative run.
       } finally {
         if (!disposed)
-          // Active runs poll aggressively so first progress meets the <5s
-          // budget; idle tabs stay quiet. Hidden tabs keep a slow heartbeat.
+          // Active runs use the cursor stream aggressively; the tab index above
+          // is deliberately slower. Hidden tabs keep a slow heartbeat.
           timer = window.setTimeout(
             poll,
             document.visibilityState === "visible"

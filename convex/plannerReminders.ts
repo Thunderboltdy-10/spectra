@@ -1,8 +1,11 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
+
+const SCHEDULE_HORIZON = 31 * 24 * 60 * 60_000;
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -101,7 +104,11 @@ export const dispatchDue = internalMutation({
             : baseDueAt;
         for (const reminder of reminders) {
           const scheduledFor = dueAt - reminder.minutesBefore * 60_000;
-          if (scheduledFor > now || now > dueAt + 24 * 60 * 60_000) continue;
+          if (
+            scheduledFor > now + SCHEDULE_HORIZON ||
+            now > dueAt + 24 * 60 * 60_000
+          )
+            continue;
           const idempotencyKey =
             `${artifact._id}:${recipientAccountId}:${reminder.id}:${dueAt}`.slice(
               0,
@@ -114,7 +121,7 @@ export const dispatchDue = internalMutation({
             )
             .unique();
           if (existing) continue;
-          await ctx.db.insert("plannerReminderDeliveries", {
+          const deliveryId = await ctx.db.insert("plannerReminderDeliveries", {
             artifactId: artifact._id,
             schoolId: artifact.schoolId,
             recipientAccountId,
@@ -126,17 +133,37 @@ export const dispatchDue = internalMutation({
             dueAt,
             scheduledFor,
             idempotencyKey,
-            status: "delivered",
-            attempts: 1,
+            status: "pending",
+            attempts: 0,
             createdAt: now,
             updatedAt: now,
-            deliveredAt: now,
           });
+          await ctx.scheduler.runAt(
+            Math.max(now, scheduledFor),
+            internal.plannerReminders.deliver,
+            { deliveryId },
+          );
           delivered += 1;
         }
       }
     }
     return { scanned: artifacts.length, delivered };
+  },
+});
+
+export const deliver = internalMutation({
+  args: { deliveryId: v.id("plannerReminderDeliveries") },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.deliveryId);
+    if (!row || row.status !== "pending") return { delivered: false };
+    const now = Date.now();
+    await ctx.db.patch(row._id, {
+      status: "delivered",
+      attempts: row.attempts + 1,
+      updatedAt: now,
+      deliveredAt: now,
+    });
+    return { delivered: true };
   },
 });
 

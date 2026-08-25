@@ -55,6 +55,59 @@ function cleanContent(value: string) {
     .slice(0, 60_000);
 }
 
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function choiceRequest(metadata: unknown, messageId: string) {
+  const choices = record(record(metadata).choices);
+  const parseOptions = (value: unknown) =>
+    Array.isArray(value)
+      ? value.flatMap((option) => {
+          const row = record(option);
+          return typeof row.title === "string" && row.title.trim()
+            ? [{
+                title: row.title.trim(),
+                description:
+                  typeof row.description === "string" ? row.description : null,
+              }]
+            : [];
+        })
+      : [];
+  const options = parseOptions(choices.options);
+  const questions = Array.isArray(choices.questions)
+    ? choices.questions.flatMap((question, index) => {
+        const row = record(question);
+        const prompt = typeof row.question === "string" ? row.question.trim() : "";
+        const questionOptions = parseOptions(row.options);
+        return prompt && questionOptions.length >= 2
+          ? [{
+              id: typeof row.id === "string" && row.id.trim() ? row.id.trim() : `question-${index + 1}`,
+              prompt,
+              options: questionOptions,
+            }]
+          : [];
+      })
+    : [];
+  if (questions.length >= 2)
+    return { kind: "choice_batch", messageId, questions: questions.slice(0, 4) };
+  if (
+    typeof choices.question === "string" &&
+    choices.question.trim() &&
+    options.length >= 2 &&
+    options.length <= 6
+  )
+    return {
+      kind: "choice",
+      messageId,
+      prompt: choices.question.trim(),
+      options,
+    };
+  return null;
+}
+
 async function requireActor(ctx: Parameters<typeof getAuthenticatedActor>[0]) {
   const actor = await getAuthenticatedActor(ctx);
   if (!actor)
@@ -185,6 +238,12 @@ export const appendMessage = mutation({
             lastRunId: args.runId,
             updatedAt: now,
           });
+          await ctx.db.patch(args.runId, {
+            dockSummary: {
+              ...(run.dockSummary ?? { recentSteps: [] }),
+              inputRequest: choiceRequest(args.metadata, existing._id) ?? undefined,
+            },
+          });
           return existing._id;
         }
       }
@@ -212,6 +271,16 @@ export const appendMessage = mutation({
       lastRunId: args.runId ?? thread.lastRunId,
       updatedAt: now,
     });
+    if (args.role === "assistant" && args.runId) {
+      const run = await ctx.db.get(args.runId);
+      if (run)
+        await ctx.db.patch(run._id, {
+          dockSummary: {
+            ...(run.dockSummary ?? { recentSteps: [] }),
+            inputRequest: choiceRequest(args.metadata, messageId) ?? undefined,
+          },
+        });
+    }
     if (args.role === "user" || args.role === "assistant")
       await incrementOperationalCounter(ctx, {
         schoolId: actor.schoolId,
@@ -277,6 +346,10 @@ export const selectMessageChoice = mutation({
         });
         await ctx.db.patch(run._id, {
           eventSequence: sequence,
+          dockSummary: {
+            ...(run.dockSummary ?? { recentSteps: [] }),
+            inputRequest: undefined,
+          },
           updatedAt: now,
         });
       }

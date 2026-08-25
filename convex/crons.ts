@@ -10,13 +10,19 @@ crons.interval(
   {},
 );
 crons.interval(
-  "deliver-planner-reminders",
+  "sweep-stale-bridge-work",
+  { minutes: 2 },
+  internal.bridgeSync.sweepStaleBridgeWork,
+  {},
+);
+crons.interval(
+  "schedule-planner-reminders",
   { minutes: 1 },
   internal.plannerReminders.dispatchDue,
   {},
 );
 crons.interval(
-  "deliver-timetable-reminders",
+  "schedule-timetable-reminders",
   { minutes: 1 },
   internal.timetableReminders.dispatchDue,
   {},

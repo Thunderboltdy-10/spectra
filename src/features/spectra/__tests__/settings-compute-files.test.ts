@@ -231,6 +231,7 @@ describe("Phase 8 settings, compute, files and autocomplete", () => {
 
   it("bounds the launch-path Python runtime and retains its explicit server fallback", () => {
     expect(APPROVED_PYODIDE_PACKAGES.has("numpy")).toBe(true);
+    expect(APPROVED_PYODIDE_PACKAGES.has("micropip")).toBe(false);
     expect(APPROVED_PYODIDE_PACKAGES.has("requests")).toBe(false);
     expect(
       pythonRuntimeFallback({ worker: true, wasm: true, sourceBytes: 200 }),

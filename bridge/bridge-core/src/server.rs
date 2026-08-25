@@ -165,6 +165,26 @@ impl ServerState {
             token.as_slice(),
         ))
     }
+    pub fn session_token_matches(&self, supplied: &str) -> bool {
+        if !self.is_paired() {
+            return false;
+        }
+        let supplied = base64::Engine::decode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            supplied,
+        )
+        .unwrap_or_default();
+        let expected = self.session_token.read().unwrap();
+        expected.len() == 32
+            && supplied.len() == 32
+            && bool::from(supplied.ct_eq(expected.as_slice()))
+    }
+    pub fn resume_session_with_token(&self, origin: &str, token: &str) -> Option<String> {
+        if !self.session_token_matches(token) {
+            return None;
+        }
+        self.resume_session(origin)
+    }
     fn local_status(&self) -> LocalBridgeStatus {
         let cloud_seen_at = self.cloud_seen_at.load(Ordering::Relaxed);
         LocalBridgeStatus {
@@ -341,7 +361,14 @@ async fn resume(State(state): State<Arc<ServerState>>, request: Request) -> Resp
         .headers()
         .get("origin")
         .and_then(|value| value.to_str().ok());
-    match origin.and_then(|value| state.resume_session(value)) {
+    let token = request
+        .headers()
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    match origin.and_then(|value| {
+        token.and_then(|token| state.resume_session_with_token(value, token))
+    }) {
         Some(session_token) => Json(serde_json::json!({
             "paired": true,
             "sessionToken": session_token,
@@ -367,9 +394,11 @@ async fn authenticate(
             base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, v).ok()
         })
         .unwrap_or_default();
-    let token_ok = {
+    let token_ok = state.is_paired() && {
         let expected = state.session_token.read().unwrap();
-        supplied.len() == expected.len() && bool::from(supplied.ct_eq(expected.as_slice()))
+        expected.len() == 32
+            && supplied.len() == 32
+            && bool::from(supplied.ct_eq(expected.as_slice()))
     };
     if !allowed || !token_ok {
         return (StatusCode::UNAUTHORIZED, "Bridge session is not authorized").into_response();
@@ -471,5 +500,12 @@ mod tests {
         let token = state.pair("http://localhost:3000".into());
         assert_eq!(state.resume_session("http://localhost:3000"), Some(token));
         assert_eq!(state.resume_session("http://evil.test"), None);
+        assert_eq!(state.resume_session_with_token("http://localhost:3000", "wrong"), None);
+    }
+    #[test]
+    fn unpaired_empty_token_cannot_authenticate_or_resume() {
+        let state = ServerState::unpaired();
+        assert!(!state.session_token_matches(""));
+        assert_eq!(state.resume_session_with_token("http://localhost:3000", ""), None);
     }
 }

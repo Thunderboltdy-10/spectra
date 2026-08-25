@@ -22,7 +22,7 @@ ARCHITECTURE-FIDELITY §6 list: serial dates, `^` associativity, whole-column re
 
 ## P2.I5 — Corpus + seam contract harness (M)
 
-ARCHITECTURE-FIDELITY §5: realistic fixtures (verified sidecars), sequence fixtures, and the L1 harness running the *production* pipeline per format in CI — with named tests for every Part III–V CRITICAL shown failing against pre-fix code where feasible. The old direct-lens harness remains as an engine-level layer; it no longer counts as product evidence by itself.
+ARCHITECTURE-FIDELITY §5: realistic fixtures (verified sidecars), sequence fixtures, and the L1 harness running the *production* pipeline per format in its owning verification unit — with named tests for every Part III–V CRITICAL shown failing against pre-fix code where feasible. The old direct-lens harness remains as an engine-level layer; it no longer counts as product evidence by itself.
 
 ## P2.V1 — Office coexistence verification (H)
 
@@ -34,4 +34,4 @@ Pablo supplies (or verifier synthesizes) a folder of realistic school documents;
 
 ## Exit gate
 
-L1 harness green in CI for all formats; every write capability has diff-visibility + identity + seam test, or visible refusal; V1/V2 PASS; no corruption reproducible by the verifier's adversarial session; Pablo pass on his own real files.
+L1 harness green in the owning verification units for all formats; every write capability has diff-visibility + identity + seam test, or visible refusal; V1/V2 PASS; no corruption reproducible by the verifier's adversarial session; Pablo pass on his own real files.

@@ -131,7 +131,7 @@ function distinct(value: string | undefined, title: string) {
 export function deriveLiveDockTab(source: LiveDockTabSource) {
   const rawTitle =
     source.threadTitle?.trim() || source.card?.title?.trim() || "";
-  const titlePending =
+  const genericTitle =
     !rawTitle ||
     ["new conversation", "spectra", "starting run"].includes(
       rawTitle.toLocaleLowerCase(),
@@ -139,7 +139,13 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
   const promptTitle = (compactText(source.run.userPrompt) ?? "")
     .replace(/[.!?].*$/, "")
     .slice(0, 56);
-  const title = titlePending ? "Starting run" : rawTitle;
+  const titlePending =
+    genericTitle && ["queued", "running"].includes(source.run.status);
+  const title = genericTitle
+    ? titlePending
+      ? "Starting run"
+      : promptTitle || "Completed run"
+    : rawTitle;
   const clarification =
     source.run.finalSummary ||
     source.card?.summary ||

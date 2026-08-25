@@ -30,4 +30,4 @@ Wrong-target suite (multi-artifact, similar names, cross-type, thread-attached);
 
 ## Exit gate
 
-Wrong-target suite zero-miss in CI; honesty suite green; rubric scores at or above the bar Pablo sets on V1's first grading round; choreography journeys PASS; Pablo pass (including his original two-artifact repro, which must now resolve correctly or ask).
+Wrong-target suite zero-miss in its owning verification unit; honesty suite green; rubric scores at or above the bar Pablo sets on V1's first grading round; choreography journeys PASS; Pablo pass (including his original two-artifact repro, which must now resolve correctly or ask).

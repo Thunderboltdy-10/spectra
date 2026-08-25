@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useConvex } from "convex/react";
+import { useConvex, useConvexAuth } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import {
   DEFAULT_SPECTRA_PREFERENCES,
@@ -38,7 +38,9 @@ function layerFromPreferences(
   sections: "account" | "device",
 ): PreferenceLayerValues {
   const values: PreferenceLayerValues = {};
-  for (const section of Object.keys(preferences).filter((key) => key !== "version") as PreferenceSection[]) {
+  for (const section of Object.keys(preferences).filter(
+    (key) => key !== "version",
+  ) as PreferenceSection[]) {
     const isDevice = DEVICE_SECTIONS.has(section);
     if ((sections === "device") === isDevice) {
       (values as Record<string, unknown>)[section] = preferences[section];
@@ -116,16 +118,33 @@ export function useSpectraPreferences({
   const [hydrated, setHydrated] = useState(false);
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const convex = useConvex() as ReturnType<typeof useConvex> | undefined;
-  const [remoteLayers, setRemoteLayers] = useState<Array<{
-    scope: PreferenceScope;
-    values: unknown;
-    updatedAt: number;
-  }>>();
-  const writeLayer = useCallback((args: {
-    scope: PreferenceScope;
-    scopeKey: string;
-    values: PreferenceLayerValues;
-  }) => convex?.mutation(api.accountPreferences.writeLayer, args) ?? Promise.resolve(null), [convex]);
+  /*
+   * Account-scoped queries require a session. Public surfaces (the landing
+   * page among them) mount this hook signed out; subscribing anyway made the
+   * server answer AUTH_NOT_SIGNED_IN on a loop. A signed-out device keeps its
+   * local preferences and nothing else. In this app a mounted Convex client
+   * implies the auth provider is mounted too, so this call cannot throw.
+   */
+  const { isAuthenticated } = useConvexAuth();
+  const signedIn = isAuthenticated === true;
+  const [remoteLayers, setRemoteLayers] = useState<
+    Array<{
+      scope: PreferenceScope;
+      values: unknown;
+      updatedAt: number;
+    }>
+  >();
+  const writeLayer = useCallback(
+    (args: {
+      scope: PreferenceScope;
+      scopeKey: string;
+      values: PreferenceLayerValues;
+    }) => {
+      if (!convex || !signedIn) return Promise.resolve(null);
+      return convex.mutation(api.accountPreferences.writeLayer, args);
+    },
+    [convex, signedIn],
+  );
   const migrated = useRef(false);
   const initialCache = useRef<SpectraPreferences | null>(null);
 
@@ -139,11 +158,12 @@ export function useSpectraPreferences({
   }, []);
 
   useEffect(() => {
-    if (!convex || !currentDeviceId) return;
-    const watch = convex.watchQuery(
-      api.accountPreferences.layers,
-      { deviceId: currentDeviceId, workspaceId, workType },
-    );
+    if (!convex || !currentDeviceId || !signedIn) return;
+    const watch = convex.watchQuery(api.accountPreferences.layers, {
+      deviceId: currentDeviceId,
+      workspaceId,
+      workType,
+    });
     const publish = () => {
       try {
         const value = watch.localQueryResult();
@@ -154,19 +174,22 @@ export function useSpectraPreferences({
     };
     publish();
     return watch.onUpdate(publish);
-  }, [convex, currentDeviceId, workspaceId, workType]);
+  }, [convex, currentDeviceId, workspaceId, workType, signedIn]);
 
   const resolvedRemote = useMemo(() => {
     if (!remoteLayers) return null;
-    return resolvePreferences(remoteLayers.map((layer) => ({
-      scope: layer.scope,
-      values: layer.values as PreferenceLayerValues,
-    })));
+    return resolvePreferences(
+      remoteLayers.map((layer) => ({
+        scope: layer.scope,
+        values: layer.values as PreferenceLayerValues,
+      })),
+    );
   }, [remoteLayers]);
 
   useEffect(() => {
     if (!resolvedRemote || !hydrated) return;
-    if (!remoteLayers?.length && !window.localStorage.getItem(MIGRATION_KEY)) return;
+    if (!remoteLayers?.length && !window.localStorage.getItem(MIGRATION_KEY))
+      return;
     setPreferences(resolvedRemote);
     writeDevicePreferences(window.localStorage, resolvedRemote);
     applyDocumentPreferences(resolvedRemote);
@@ -174,41 +197,76 @@ export function useSpectraPreferences({
   }, [hydrated, remoteLayers?.length, resolvedRemote]);
 
   useEffect(() => {
-    if (!convex || !hydrated || !currentDeviceId || !remoteLayers || migrated.current) return;
+    if (
+      !convex ||
+      !hydrated ||
+      !currentDeviceId ||
+      !remoteLayers ||
+      migrated.current
+    )
+      return;
     migrated.current = true;
     if (window.localStorage.getItem(MIGRATION_KEY)) return;
-    const cached = initialCache.current ?? readDevicePreferences(window.localStorage);
+    const cached =
+      initialCache.current ?? readDevicePreferences(window.localStorage);
     const writes = [
-      writeLayer({ scope: "device" as const, scopeKey: currentDeviceId, values: layerFromPreferences(cached, "device") }),
+      writeLayer({
+        scope: "device" as const,
+        scopeKey: currentDeviceId,
+        values: layerFromPreferences(cached, "device"),
+      }),
     ];
     if (!remoteLayers.some((layer) => layer.scope === "account")) {
-      writes.push(writeLayer({ scope: "account", scopeKey: "account", values: layerFromPreferences(cached, "account") }));
+      writes.push(
+        writeLayer({
+          scope: "account",
+          scopeKey: "account",
+          values: layerFromPreferences(cached, "account"),
+        }),
+      );
     }
-    void Promise.all(writes).then(() => window.localStorage.setItem(MIGRATION_KEY, "true"));
+    void Promise.all(writes).then(() =>
+      window.localStorage.setItem(MIGRATION_KEY, "true"),
+    );
   }, [convex, currentDeviceId, hydrated, remoteLayers, writeLayer]);
 
-  const persistSection = useCallback(<K extends PreferenceSection>(
-    section: K,
-    next: SpectraPreferences,
-  ) => {
-    if (!currentDeviceId) return;
-    const scope = DEVICE_SECTIONS.has(section) ? "device" : "account";
-    const scopeKey = scope === "device" ? currentDeviceId : "account";
-    void writeLayer({ scope, scopeKey, values: { [section]: next[section] } });
-  }, [currentDeviceId, writeLayer]);
+  const persistSection = useCallback(
+    <K extends PreferenceSection>(section: K, next: SpectraPreferences) => {
+      if (!currentDeviceId) return;
+      const scope = DEVICE_SECTIONS.has(section) ? "device" : "account";
+      const scopeKey = scope === "device" ? currentDeviceId : "account";
+      void writeLayer({
+        scope,
+        scopeKey,
+        values: { [section]: next[section] },
+      });
+    },
+    [currentDeviceId, writeLayer],
+  );
 
-  const replace = useCallback((next: SpectraPreferences) => {
-    setPreferences(next);
-    writeDevicePreferences(window.localStorage, next);
-    applyDocumentPreferences(next);
-    spectraBus.emit("settings.changed", { preferences: next });
-    if (currentDeviceId) {
-      void Promise.all([
-        writeLayer({ scope: "account", scopeKey: "account", values: layerFromPreferences(next, "account") }),
-        writeLayer({ scope: "device", scopeKey: currentDeviceId, values: layerFromPreferences(next, "device") }),
-      ]);
-    }
-  }, [currentDeviceId, writeLayer]);
+  const replace = useCallback(
+    (next: SpectraPreferences) => {
+      setPreferences(next);
+      writeDevicePreferences(window.localStorage, next);
+      applyDocumentPreferences(next);
+      spectraBus.emit("settings.changed", { preferences: next });
+      if (currentDeviceId) {
+        void Promise.all([
+          writeLayer({
+            scope: "account",
+            scopeKey: "account",
+            values: layerFromPreferences(next, "account"),
+          }),
+          writeLayer({
+            scope: "device",
+            scopeKey: currentDeviceId,
+            values: layerFromPreferences(next, "device"),
+          }),
+        ]);
+      }
+    },
+    [currentDeviceId, writeLayer],
+  );
 
   const update = useCallback(
     <K extends PreferenceSection>(

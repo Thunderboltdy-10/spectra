@@ -224,7 +224,8 @@ function proofPass(t: number, rest: number): number {
   }
   if (t < REVEAL.down[0]) return PROOF_TARGET;
   return (
-    PROOF_TARGET + (rest - PROOF_TARGET) * band(t, REVEAL.down[0], REVEAL.down[1])
+    PROOF_TARGET +
+    (rest - PROOF_TARGET) * band(t, REVEAL.down[0], REVEAL.down[1])
   );
 }
 
@@ -350,16 +351,17 @@ export const CANVAS_MARGIN = 28;
 /**
  * The scale that makes one scene exactly one frame.
  *
- * Fit-to-width alone was the reason a held scene still could not be seen: a
- * laptop showed 670 canvas px of a scene authored at 840, so a third of every
- * composition was always outside the window. Fitting to *both* axes and taking
- * the smaller factor means the held scene is the frame, whatever shape the
- * window is — wide windows get margin at the sides, short ones at the top.
+ * Fitted to *both* axes and taking the smaller factor, so a held scene is the
+ * frame rather than a crop of one. The result is capped at 1: the canvas never
+ * renders larger than authored. Upscaling was what made every surface read as
+ * zoomed in — a 640px composition blown up to fill a 900px window turns body
+ * text into headline text. Big windows get margin around the scene instead,
+ * which is where the environment field lives anyway.
  */
 export function fitFor(viewport: Viewport): number {
   const byWidth = (viewport.width - CANVAS_MARGIN * 2) / LANDING_WIDTH;
   const byHeight = (viewport.height - CANVAS_MARGIN * 2) / SCENE_FRAME;
-  return Math.max(0.2, Math.min(byWidth, byHeight));
+  return Math.max(0.2, Math.min(1, byWidth, byHeight));
 }
 
 /* ------------------------------------------------------------------ *
@@ -442,7 +444,8 @@ export function zoomFor(
   const end = revealZoom(viewport, fit);
   /* During the travel the zoom is already interpolating from the previous
      scene's value, so only the held portion is ours to drive. */
-  if (camera.arrive < 1) return start + (end - start) * easeInOut(camera.arrive);
+  if (camera.arrive < 1)
+    return start + (end - start) * easeInOut(camera.arrive);
   return end;
 }
 
@@ -502,5 +505,3 @@ export function shellFor(viewport: Viewport): {
   const panelLeft = sidebar + SHELL.gap;
   return { sidebar, panelLeft, panelRight: panelLeft + width };
 }
-
-

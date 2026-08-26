@@ -1,5 +1,7 @@
 # P1.V1 truth-machine property report — 2026-08-26
 
+**Current status: VERIFIED on independent rerun after fix `708b09a`. The original rejected run remains below as historical evidence.**
+
 ## Scope
 
 - Verifier unit: P1.V1, grading P1.I1.
@@ -39,3 +41,26 @@ Suspected root seam: `convex/bridgeSync.ts` derives `externalChange` from the al
 ## Verdict
 
 **REJECTED.** P1.I1 owns the systemic class. P1.V1 must be rerun after the class is fixed; P1.V2 does not start first.
+
+## Independent rerun — 2026-08-26
+
+### Integrity and code inspection
+
+- Inspected fix commit `708b09a` and current `commitPayloadUpload` truth derivation before execution.
+- `git diff --exit-code 38ee810..708b09a -- convex/replica-truth.property.test.ts` passed: the verifier-owned property suite is unchanged from its failing introduction commit.
+- The fix derives external-operation identity from the retained common base, demotes an unchanged cloud to `behind`, preserves that base across later saves, and returns exact applied/conflicted replays before replica, operation, transition, or conflict mutation.
+
+### Rerun results
+
+- Unchanged property suite: 1 file / 2 tests passed, including all 24 deterministic traces × 18 actions and exact replay snapshot equality.
+- Focused truth-machine suite: 3 files / 35 tests passed (`convex/replicas.test.ts`, replica-truth contracts, sync-policy/storage contracts).
+- Independent ephemeral concurrent-change probe: 1 file / 1 test passed, then removed. A queued Spectra revision and a different external revision produced two `diverged` replicas, one conflicted write request, two conflicted operations, and one open conflict retaining both payload identities.
+- Exact replay of that conflicted external journal entry returned the same result and changed no replica, request, operation, or conflict truth.
+- Changed-file/harness ESLint passed with zero warnings; secret scan passed across 1,919 tracked files.
+- The repository-wide sweep was not run, per the rerun instruction.
+
+### Finding disposition and verdict
+
+P1.V1-F1 is independently falsified against current code: external saves now leave local `ahead` and stale cloud `behind`; successive saves retain the verified common base; concurrent changes remain conflicts; exact replay is truth-idempotent.
+
+**PASS.** P1.V1 is VERIFIED and P1.I1 is ACCEPTED under PROCESS §2. No product or existing test code was changed by the verifier. P1.V2 was not started.

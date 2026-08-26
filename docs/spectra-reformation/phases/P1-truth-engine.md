@@ -115,3 +115,17 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - No product code or existing assertion was changed. Harness ESLint passes; TypeScript adds no error beyond the five pre-existing blockers in STATE §1.
 - Evidence: `.shots/reformation/P1.V1/2026-08-26-property-report.md`.
 - Verdict: **REJECTED**. Owner P1.I1; rerun P1.V1 before P1.V2.
+
+## Verifier rerun log — P1.V1 (2026-08-26)
+
+- Inspected fix commit `708b09a` and current production truth; no product code was changed.
+- Confirmed `convex/replica-truth.property.test.ts` is unchanged from failing verifier commit `38ee810`.
+- Unchanged property suite passed 1 file / 2 tests, including all 24 deterministic traces × 18 actions.
+- Focused truth-machine suites passed 3 files / 35 tests.
+- External save now leaves local `ahead` and stale cloud `behind`; successive saves retain the original verified common base.
+- An ephemeral production-module probe verified concurrent Spectra/external revisions create an open conflict retaining both payload identities; it passed 1/1 and was removed.
+- Exact replay changed no replica, request, operation, or conflict truth in either the ordinary or conflicted sequence.
+- Changed-file/harness ESLint and secret scan passed; the repository-wide sweep was not run by instruction.
+- P1.V1-F1 is independently falsified and closed class-wide.
+- Evidence: `.shots/reformation/P1.V1/2026-08-26-property-report.md`.
+- Verdict: **PASS**. P1.V1 VERIFIED; P1.I1 ACCEPTED. P1.V2 was not started.

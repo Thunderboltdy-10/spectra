@@ -188,3 +188,14 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Taste: Open on device deleted (no honest OS-open path). Live signed-in pairing/toggle/Word journey is P1.V3, not this unit.
 - Relevant checks: focused Vitest `sync-toggles` + `sync-presentation` 12/12; `bridge-contract` 9 pass / 2 pre-existing I2 string-scans still red (restore key; `toPreset === "device"`) and not rewritten. Rust core `--lib` 40/40 (was 37); chaos 13/13 unchanged; `cargo check` bridge-app OK; new-file ESLint; secret scan. `tsc --noEmit` retains the five recorded blockers plus `bridge-chaos.test.ts:172`; this unit adds none.
 - Status: IMPLEMENTED. No acceptance or verifier verdict claimed.
+
+## Verifier log — P1.V3 (2026-08-26)
+
+- Website-only pairing/settings/sync. Bridge in hidden tray; GUI not driven. Isolated `Downloads\spectra-p1v3-fixture`, not OneDrive Documents, not PS 6/PS 8.
+- Bridge-down: honest **Not running**. Bridge-up unpaired: still **Not running** (`use-bridge` unpaired → disconnected → that label). **Connect this device** from the site then showed **Connected**.
+- Account radios match canon; left on Both; consequence sentences not verified (no imported file).
+- Picker reached the isolated fixture. Live Convex: `Could not find public function for 'bridgeSync:discoverResourcesPage'` (and Library `presentationsForAccount`). Fixture folder empty. Physics (real OneDrive) showed Request IDs plus `Provider-managed folder detected; conflict windows may be wider` / **Needs attention**.
+- Browser offline on Settings → **Not running**, no Offline banner (`AppShell` vs `spectra-shell`). Real Bridge kill → **Not running** / **Waiting for Bridge** became true (no `0 of N`).
+- Word refused `P1V3-essay.docx` (shots 20–21). Provenance: 17:31 PowerShell stub, 942 bytes, no `[Content_Types].xml`, SHA-256 unchanged after mount/Word. Not filed as Bridge rewrite. Do not reuse this stub.
+- Focused Vitest 42 pass / 2 pre-existing I2 string-scans, not rewritten. No product code changed. `convex dev` was not running; do not `convex push` the real account.
+- Verdict: **REJECTED**. Evidence: `.shots/reformation/P1.V3/manifest.md`.

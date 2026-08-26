@@ -216,3 +216,14 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - I4 still owns Offline vs Not connected vs Not running on Files and devices. This unit does not retouch that mapping.
 - Relevant checks: focused Vitest 3 files / 29 tests including an AppShell-mount contract; new-file ESLint; secret scan. No `convex push`. Did not run P1.V3.
 - Status: IMPLEMENTED. No acceptance claimed. P1.V3 rerun remains independent.
+
+## Verifier rerun log — P1.V3 (2026-08-26)
+
+- Independent rerun after `f6f60fb` / `7a31c25`. Convex serving (`convex dev --typecheck=disable`). No product code or assertions changed.
+- Isolated valid OOXML at `Downloads\spectra-p1v3-rerun-fixture` (not the 942-byte stub, not OneDrive, not PS 6/PS 8). Bridge + Word on hidden desktop `P1V3Rerun`, then cleaned up.
+- Header holds: down → **Not running**; unpaired-running (after clearing session) → **Not connected**; browser-offline → **Offline** plus AppShell banner. No Request IDs / missing-function dumps; Physics jargon humanized.
+- New 1-file mount stayed **Reading folder** / Bridge `scanning` for minutes; Library never listed the folder. Physics stayed 16/16. Owner **P1.I2**.
+- Folder chips said **Waiting for Bridge** while the header was Offline and while it was Not connected with Bridge running. `mountStateLabel` ignores reachability. Owner **P1.I4**.
+- Toggles match canon wording; consequence-on-a-real-file, mid-save kill, and Word↔Spectra roundtrip did not finish (no imported file). Word opened the valid fixture; not filed as native corruption.
+- Focused Vitest 45 pass / 2 pre-existing I2 string-scans, not rewritten.
+- Verdict: **REJECTED**. Evidence: `.shots/reformation/P1.V3/rerun/manifest.md`. I3/I4 stay IMPLEMENTED, not ACCEPTED. P1.I2 reopened for the scan hang.

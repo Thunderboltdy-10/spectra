@@ -1,5 +1,7 @@
 # P1.V3 — Sync journey verification
 
+Independent rerun (after I3/I4 rejection-fixes and Convex serving current source): `.shots/reformation/P1.V3/rerun/manifest.md`. This file is the first-rejection record and is not the current verdict.
+
 Run date: 2026-08-26
 Verifier surface: signed-in Playwright Chrome (`.playwright-cli/spectra-session`); Settings / Files and devices / Library on `http://localhost:3000`; Bridge started in tray on a hidden desktop (GUI not driven); native folder picker and Word captured there. Isolated folder `<local-workspace>` — not OneDrive Documents, not Pablo's open Word files.
 Scope: novice pairing; mount a real folder; toggle each storage option and verify the consequence is true; kill network mid-edit; kill Bridge mid-save; edit in Word while Spectra is open and closed; any label that disagrees with reality fails the card.

@@ -14,6 +14,14 @@ pub struct OsFileIdentity {
 pub trait Platform: Send + Sync {
     fn file_identity(&self, file: &File) -> io::Result<OsFileIdentity>;
     fn is_locked(&self, path: &Path) -> io::Result<bool>;
+    /// Opens a reader that proves no writer owns the file for the lifetime of
+    /// the returned handle. Platforms with mandatory share semantics override
+    /// this; platforms that cannot offer a writer-completion proof fail closed
+    /// with `None` so callers conservatively retry instead of promoting bytes.
+    fn open_stable_reader(&self, path: &Path) -> io::Result<Option<File>> {
+        let _ = path;
+        Ok(None)
+    }
     fn recycle(&self, path: &Path) -> anyhow::Result<()>;
     fn store_credential(&self, account_id: &str, credential: &str) -> anyhow::Result<()>;
     fn read_credential(&self, account_id: &str) -> anyhow::Result<Option<String>>;
@@ -40,11 +48,15 @@ mod host {
     use super::*;
     use std::mem::zeroed;
     use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle, MOVEFILE_REPLACE_EXISTING,
-        MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        BY_HANDLE_FILE_INFORMATION, FILE_SHARE_READ, GetFileInformationByHandle,
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
+
+    const ERROR_SHARING_VIOLATION_CODE: i32 = 32;
+    const ERROR_LOCK_VIOLATION_CODE: i32 = 33;
 
     #[async_trait]
     impl Platform for HostPlatform {
@@ -62,9 +74,26 @@ mod host {
         }
 
         fn is_locked(&self, path: &Path) -> io::Result<bool> {
-            match File::options().read(true).write(true).open(path) {
-                Ok(_) => Ok(false),
-                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Ok(true),
+            Ok(self.open_stable_reader(path)?.is_none())
+        }
+
+        fn open_stable_reader(&self, path: &Path) -> io::Result<Option<File>> {
+            let mut options = File::options();
+            // Rust's normal Windows File open shares writes and deletes. A
+            // FILE_SHARE_READ-only handle is different: it cannot coexist
+            // with an existing writer, and no writer can open until this
+            // reader (and its hash pass) is dropped.
+            options.read(true).share_mode(FILE_SHARE_READ);
+            match options.open(path) {
+                Ok(file) => Ok(Some(file)),
+                Err(error)
+                    if matches!(
+                        error.raw_os_error(),
+                        Some(ERROR_SHARING_VIOLATION_CODE | ERROR_LOCK_VIOLATION_CODE)
+                    ) =>
+                {
+                    Ok(None)
+                }
                 Err(error) => Err(error),
             }
         }

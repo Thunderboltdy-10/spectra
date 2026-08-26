@@ -1,11 +1,8 @@
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs::File;
 use std::sync::Arc;
 
-use spectra_bridge_core::fs::{
-    FsError, Grant, GrantRegistry, SafeWriter, WriteRequest, sha256_file,
-};
+use spectra_bridge_core::fs::{FsError, Grant, GrantRegistry, SafeWriter, WriteRequest};
 use spectra_bridge_core::identity::{AdoptionCandidate, adopt, local_resource_id};
 use spectra_bridge_core::journal::{Journal, OpState, ResourceRecord};
 use spectra_bridge_core::platform::{HostPlatform, OsFileIdentity, Platform};
@@ -21,7 +18,7 @@ use spectra_bridge_core::sync::{
 };
 use spectra_bridge_core::watcher::{
     MountWatcher, StabilityTracker, WatcherConfig, office_lock_exists, office_lock_paths,
-    relative_key, scan_mount,
+    relative_key, scan_mount, stable_file_snapshot,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -424,12 +421,11 @@ fn adopt_resource_record(
     journal: &Journal,
     path: &std::path::Path,
     hash: &str,
+    os_identity: &OsFileIdentity,
     generation: u64,
 ) -> anyhow::Result<(ResourceRecord, Option<ResourceRecord>)> {
     let relative_path = relative_key(grant.device_root(), path);
     anyhow::ensure!(!relative_path.is_empty(), "changed path is the mount root");
-    let file = File::open(path)?;
-    let os_identity = HostPlatform.file_identity(&file)?;
     let candidates = journal
         .resources_for_grant(&grant.id)?
         .into_iter()
@@ -447,13 +443,13 @@ fn adopt_resource_record(
         .collect::<Vec<_>>();
     let adopted_id = adopt(
         &candidates,
-        Some(&os_identity),
+        Some(os_identity),
         &relative_path,
         hash,
         generation,
     )
     .map(|candidate| candidate.local_resource_id.clone())
-    .unwrap_or_else(|| local_resource_id(&os_identity));
+    .unwrap_or_else(|| local_resource_id(os_identity));
     let previous = journal.resource_by_id(&adopted_id)?;
     Ok((
         ResourceRecord {
@@ -481,7 +477,20 @@ fn enqueue_stable_change(
     hash: &str,
     generation: u64,
 ) -> anyhow::Result<bool> {
-    let (resource, previous) = adopt_resource_record(grant, journal, path, hash, generation)?;
+    let snapshot = stable_file_snapshot(path)?
+        .ok_or_else(|| anyhow::anyhow!("file writer is still active"))?;
+    anyhow::ensure!(
+        snapshot.fingerprint == hash,
+        "file changed after its quiescence proof"
+    );
+    let (resource, previous) = adopt_resource_record(
+        grant,
+        journal,
+        path,
+        hash,
+        &snapshot.os_identity,
+        generation,
+    )?;
     let unchanged = previous.as_ref().is_some_and(|candidate| {
         candidate.available
             && candidate.path_key == resource.path_key
@@ -533,7 +542,7 @@ fn enqueue_stable_change(
                 previous_relative_path: previous_path.map(str::to_owned),
                 hash: Some(hash.to_owned()),
                 revision_before: before.map(str::to_owned),
-                size: Some(path.metadata()?.len()),
+                size: Some(snapshot.size),
                 native_format: Some(native_format(path)),
             },
         };
@@ -641,8 +650,11 @@ async fn upload_discovered_resource(
         canonical.starts_with(grant.device_root()),
         "payload path escaped its selected folder"
     );
-    let bytes = std::fs::read(&canonical)?;
+    let mut snapshot = stable_file_snapshot(&canonical)?
+        .ok_or_else(|| anyhow::anyhow!("file writer is still active"))?;
+    let bytes = snapshot.read_bytes()?;
     let hash = hex::encode(sha2::Sha256::digest(&bytes));
+    drop(snapshot);
     anyhow::ensure!(
         resource.content_hash.as_deref() == Some(hash.as_str()),
         "file changed before payload upload"
@@ -715,13 +727,28 @@ async fn finish_delivered_change(
         let _ = enqueue_missing_path(&grant, journal, &target, generation);
         return Ok(());
     }
-    if office_lock_exists(&target) || HostPlatform.is_locked(&target).unwrap_or(true) {
+    if office_lock_exists(&target) {
         return journal.retry_queue(
             delivery.item.id,
             Backoff::delay_for_attempt(delivery.item.attempts),
         );
     }
-    let bytes = match std::fs::read(&target) {
+    let mut snapshot = match stable_file_snapshot(&target) {
+        Ok(Some(snapshot)) => snapshot,
+        Ok(None) => {
+            return journal.retry_queue(
+                delivery.item.id,
+                Backoff::delay_for_attempt(delivery.item.attempts),
+            );
+        }
+        Err(_) => {
+            return journal.retry_queue(
+                delivery.item.id,
+                Backoff::delay_for_attempt(delivery.item.attempts),
+            );
+        }
+    };
+    let bytes = match snapshot.read_bytes() {
         Ok(bytes) => bytes,
         Err(_) => {
             return journal.retry_queue(
@@ -731,6 +758,7 @@ async fn finish_delivered_change(
         }
     };
     let hash = hex::encode(sha2::Sha256::digest(&bytes));
+    drop(snapshot);
     if post_hash != Some(hash.as_str()) {
         return journal.fail_queue(
             &delivery.item,
@@ -816,23 +844,35 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             scan_complete = false;
             continue;
         }
-        let content_hash = match entry.content_hash.or_else(|| sha256_file(&entry_path).ok()) {
-            Some(hash) => hash,
-            None => {
+        let snapshot = match stable_file_snapshot(&entry_path) {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => {
+                locked_files += 1;
+                scan_complete = false;
+                continue;
+            }
+            Err(_) => {
                 isolated_failures += 1;
                 scan_complete = false;
                 continue;
             }
         };
-        let (record, _) =
-            match adopt_resource_record(grant, journal, &entry_path, &content_hash, generation) {
-                Ok(record) => record,
-                Err(_) => {
-                    isolated_failures += 1;
-                    scan_complete = false;
-                    continue;
-                }
-            };
+        let content_hash = snapshot.fingerprint;
+        let (record, _) = match adopt_resource_record(
+            grant,
+            journal,
+            &entry_path,
+            &content_hash,
+            &snapshot.os_identity,
+            generation,
+        ) {
+            Ok(record) => record,
+            Err(_) => {
+                isolated_failures += 1;
+                scan_complete = false;
+                continue;
+            }
+        };
         if journal.upsert_resource(&record).is_err() {
             isolated_failures += 1;
             scan_complete = false;
@@ -841,7 +881,7 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         files.push(DiscoveredResource {
             local_resource_id: record.local_resource_id,
             relative_path: entry.relative_path,
-            size: entry.size,
+            size: snapshot.size,
             content_hash: Some(content_hash),
             native_format,
         });

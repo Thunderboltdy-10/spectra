@@ -1616,6 +1616,7 @@ export default defineSchema({
     .index("by_account_state", ["accountId", "state"])
     .index("by_mount", ["mountId"])
     .index("by_device_resource", ["deviceId", "localResourceId"])
+    .index("by_device_state", ["deviceId", "state"])
     .index("by_device_mount_path", ["deviceId", "mountId", "relativePath"])
     .index("by_work_kind", ["workId", "kind"])
     .index("by_payload_ref", ["payloadRef"])

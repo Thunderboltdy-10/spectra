@@ -1,6 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -8,9 +10,8 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use walkdir::WalkDir;
 
-use crate::fs::sha256_file;
 use crate::identity::local_resource_id;
-use crate::platform::Platform;
+use crate::platform::{HostPlatform, OsFileIdentity, Platform};
 
 #[derive(Debug, Clone)]
 pub struct WatcherConfig {
@@ -336,9 +337,103 @@ struct Candidate {
     first_stable_at: Instant,
 }
 
+#[derive(Debug, Clone)]
+struct FingerprintSnapshot {
+    size: u64,
+    modified: Option<SystemTime>,
+    fingerprint: String,
+}
+
+#[derive(Debug)]
+pub struct StableFileSnapshot {
+    pub size: u64,
+    pub fingerprint: String,
+    pub os_identity: OsFileIdentity,
+    modified: Option<SystemTime>,
+    _reader_lease: File,
+}
+
+impl StableFileSnapshot {
+    /// Reads the bytes through the same writer-exclusive lease used for the
+    /// fingerprint. The lease remains held until the snapshot is dropped.
+    pub fn read_bytes(&mut self) -> std::io::Result<Vec<u8>> {
+        self._reader_lease.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::with_capacity(self.size as usize);
+        self._reader_lease.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+}
+
+fn hash_reader(file: &mut File) -> std::io::Result<String> {
+    let mut digest = sha2::Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(hex::encode(digest.finalize()))
+}
+
+fn fingerprint_snapshot(file: &mut File) -> anyhow::Result<Option<FingerprintSnapshot>> {
+    let before = file.metadata()?;
+    if !before.is_file() {
+        return Ok(None);
+    }
+    let fingerprint = hash_reader(file)?;
+    let after = file.metadata()?;
+    let before_modified = before.modified().ok();
+    let after_modified = after.modified().ok();
+    if before.len() != after.len() || before_modified != after_modified {
+        return Ok(None);
+    }
+    Ok(Some(FingerprintSnapshot {
+        size: after.len(),
+        modified: after_modified,
+        fingerprint,
+    }))
+}
+
+fn stable_file_snapshot_with(
+    platform: &dyn Platform,
+    path: &Path,
+) -> anyhow::Result<Option<StableFileSnapshot>> {
+    if office_lock_exists(path) {
+        return Ok(None);
+    }
+    let Some(mut file) = (match platform.open_stable_reader(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }) else {
+        return Ok(None);
+    };
+    let os_identity = platform.file_identity(&file)?;
+    let Some(snapshot) = fingerprint_snapshot(&mut file)? else {
+        return Ok(None);
+    };
+    Ok(Some(StableFileSnapshot {
+        size: snapshot.size,
+        fingerprint: snapshot.fingerprint,
+        os_identity,
+        modified: snapshot.modified,
+        _reader_lease: file,
+    }))
+}
+
+/// Reads and hashes through a platform handle that remains writer-exclusive
+/// for the whole pass. `None` means the file is missing, Office-owned, or an
+/// external writer still has an incompatible handle open.
+pub fn stable_file_snapshot(path: &Path) -> anyhow::Result<Option<StableFileSnapshot>> {
+    stable_file_snapshot_with(&HostPlatform, path)
+}
+
 pub struct StabilityTracker {
     window: Duration,
     candidates: HashMap<PathBuf, Candidate>,
+    platform: Arc<dyn Platform>,
 }
 
 impl StabilityTracker {
@@ -346,6 +441,7 @@ impl StabilityTracker {
         Self {
             window,
             candidates: HashMap::new(),
+            platform: Arc::new(HostPlatform),
         }
     }
 
@@ -354,24 +450,40 @@ impl StabilityTracker {
             self.candidates.remove(path);
             return Ok(None);
         }
-        let metadata = match path.metadata() {
-            Ok(value) if value.is_file() => value,
-            _ => {
-                self.candidates.remove(path);
-                return Ok(None);
-            }
-        };
-        let current = (metadata.len(), metadata.modified().ok());
-        // Provider-backed folders can rewrite bytes without changing size or
-        // timestamp resolution. Include a content fingerprint in the
-        // candidate identity so an intermediate revision cannot be emitted.
-        let fingerprint = sha256_file(path)?;
+        let (snapshot, writer_complete) =
+            match stable_file_snapshot_with(self.platform.as_ref(), path)? {
+                Some(snapshot) => (
+                    FingerprintSnapshot {
+                        size: snapshot.size,
+                        modified: snapshot.modified,
+                        fingerprint: snapshot.fingerprint,
+                    },
+                    true,
+                ),
+                None if path.is_file() => {
+                    // An active writer may pause longer than the timer. We may
+                    // remember its provisional fingerprint to preserve the
+                    // quiescence history, but it can never authorize emission.
+                    let mut file = File::open(path)?;
+                    let Some(snapshot) = fingerprint_snapshot(&mut file)? else {
+                        self.candidates.remove(path);
+                        return Ok(None);
+                    };
+                    (snapshot, false)
+                }
+                None => {
+                    self.candidates.remove(path);
+                    return Ok(None);
+                }
+            };
+        let current = (snapshot.size, snapshot.modified);
+        let fingerprint = snapshot.fingerprint;
         match self.candidates.get_mut(path) {
             Some(candidate)
                 if (candidate.size, candidate.modified, &candidate.fingerprint)
                     == (current.0, current.1, &fingerprint) =>
             {
-                if now.duration_since(candidate.first_stable_at) >= self.window {
+                if writer_complete && now.duration_since(candidate.first_stable_at) >= self.window {
                     self.candidates.remove(path);
                     Ok(Some(fingerprint))
                 } else {

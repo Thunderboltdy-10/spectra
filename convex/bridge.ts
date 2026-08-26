@@ -1,8 +1,13 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { z } from "zod";
 import { createFolderNode } from "./orgTreeShared";
+import type { SyncPolicyValues } from "../shared/sync-policy";
+
+const REVOCATION_PAGE_SIZE = 100;
 
 const originSchema = z.string().url().refine((value) => {
   const url = new URL(value); return url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname));
@@ -14,6 +19,60 @@ async function digest(value: string) {
 }
 
 function randomSecret() { return `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll("-", ""); }
+
+async function failRevokedWrite(
+  ctx: MutationCtx,
+  accountId: Id<"accounts">,
+  request: Doc<"bridgeWriteRequests">,
+  now: number,
+) {
+  await ctx.db.patch(request._id, {
+    state: "failed",
+    errorCode: "device-revoked",
+    errorMessage: "The target Bridge device was revoked.",
+    claimedAt: undefined,
+    retryAt: undefined,
+    updatedAt: now,
+  });
+  const operation = await ctx.db.query("syncOperations")
+    .withIndex("by_account_key", (q) => q.eq("accountId", accountId).eq("idempotencyKey", request.idempotencyKey))
+    .unique();
+  if (operation) {
+    await ctx.db.patch(operation._id, {
+      state: "failed",
+      errorCode: "device-revoked",
+      updatedAt: now,
+    });
+  }
+
+  const transitions = await ctx.db.query("storageStrategyTransitions")
+    .withIndex("by_work_created", (q) => q.eq("workId", request.workId))
+    .order("desc")
+    .take(20);
+  const transition = transitions.find((candidate) =>
+    candidate.state === "pending" &&
+    String((candidate.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? "") === String(request._id),
+  );
+  if (!transition) return;
+  const before = transition.before as { hadItemPolicy?: boolean; policy?: SyncPolicyValues };
+  const policy = await ctx.db.query("syncPolicies")
+    .withIndex("by_account_scope", (q) =>
+      q.eq("accountId", transition.accountId)
+        .eq("scopeKind", "item")
+        .eq("scopeId", String(transition.workId)),
+    )
+    .unique();
+  if (policy && before.hadItemPolicy && before.policy) {
+    await ctx.db.patch(policy._id, { ...before.policy, updatedAt: now });
+  } else if (policy) {
+    await ctx.db.delete(policy._id);
+  }
+  await ctx.db.patch(transition._id, {
+    state: "failed",
+    errorCode: "device-revoked",
+    updatedAt: now,
+  });
+}
 
 export const requestPairing = mutation({
   args: { browserOrigin: v.string() },
@@ -112,22 +171,92 @@ export const registerMount = mutation({
   },
 });
 
-export const revokeDevice = mutation({ args: { deviceId: v.id("bridgeDevices") }, handler: async (ctx, { deviceId }) => {
-  const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-  const device = await ctx.db.get(deviceId); if (!device || device.accountId !== actor.accountId) throw new Error("BRIDGE_DEVICE_INVALID");
-  const now = Date.now();
-  await ctx.db.patch(deviceId, { state: "revoked", credentialHash: `revoked:${crypto.randomUUID()}`, lastSeenAt: now });
-  const [replicas, mounts, pending, claimed] = await Promise.all([
-    ctx.db.query("workReplicas").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId)).filter((q) => q.eq(q.field("deviceId"), deviceId)).take(2_000),
-    ctx.db.query("bridgeMounts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).filter((q) => q.eq(q.field("deviceId"), deviceId)).take(500),
-    ctx.db.query("bridgeWriteRequests").withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", "pending")).take(2_000),
-    ctx.db.query("bridgeWriteRequests").withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", "claimed")).take(2_000),
-  ]);
-  for (const replica of replicas) await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: "device-revoked", updatedAt: now });
-  for (const mount of mounts) await ctx.db.patch(mount._id, { state: "revoked", updatedAt: now });
-  for (const request of [...pending, ...claimed]) {
-    await ctx.db.patch(request._id, { state: "failed", errorCode: "device-revoked", errorMessage: "The target Bridge device was revoked.", updatedAt: now });
-    const operation = await ctx.db.query("syncOperations").withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey)).unique();
-    if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "device-revoked", updatedAt: now });
-  }
-} });
+export const revokeDevice = mutation({
+  args: { deviceId: v.id("bridgeDevices") },
+  handler: async (ctx, { deviceId }) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const device = await ctx.db.get(deviceId);
+    if (!device || device.accountId !== actor.accountId)
+      throw new Error("BRIDGE_DEVICE_INVALID");
+    const now = Date.now();
+    await ctx.db.patch(deviceId, {
+      state: "revoked",
+      credentialHash: `revoked:${crypto.randomUUID()}`,
+      lastSeenAt: now,
+    });
+
+    let replicasRevoked = 0;
+    for (const state of ["current", "ahead", "behind", "diverged", "pending", "error"] as const) {
+      while (true) {
+        const replicas = await ctx.db.query("workReplicas")
+          .withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", state))
+          .take(REVOCATION_PAGE_SIZE);
+        if (!replicas.length) break;
+        for (const replica of replicas) {
+          await ctx.db.patch(replica._id, {
+            state: "unavailable",
+            unavailableReason: "device-revoked",
+            updatedAt: now,
+          });
+          replicasRevoked += 1;
+        }
+      }
+    }
+
+    let mountsRevoked = 0;
+    for (const state of ["active", "detached"] as const) {
+      while (true) {
+        const mounts = await ctx.db.query("bridgeMounts")
+          .withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", state))
+          .take(REVOCATION_PAGE_SIZE);
+        if (!mounts.length) break;
+        for (const mount of mounts) {
+          await ctx.db.patch(mount._id, { state: "revoked", updatedAt: now });
+          mountsRevoked += 1;
+        }
+      }
+    }
+
+    let writesFailed = 0;
+    for (const state of ["pending", "claimed"] as const) {
+      while (true) {
+        const requests = await ctx.db.query("bridgeWriteRequests")
+          .withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", state))
+          .take(REVOCATION_PAGE_SIZE);
+        if (!requests.length) break;
+        for (const request of requests) {
+          await failRevokedWrite(ctx, actor.accountId, request, now);
+          writesFailed += 1;
+        }
+      }
+    }
+
+    let structureRequestsFailed = 0;
+    for (const state of ["approval-required", "pending", "claimed"] as const) {
+      while (true) {
+        const requests = await ctx.db.query("bridgeFsRequests")
+          .withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", state))
+          .take(REVOCATION_PAGE_SIZE);
+        if (!requests.length) break;
+        for (const request of requests) {
+          await ctx.db.patch(request._id, {
+            state: "failed",
+            errorCode: "device-revoked",
+            errorMessage: "The target Bridge device was revoked.",
+            claimedAt: undefined,
+            updatedAt: now,
+          });
+          structureRequestsFailed += 1;
+        }
+      }
+    }
+
+    return {
+      replicasRevoked,
+      mountsRevoked,
+      writesFailed,
+      structureRequestsFailed,
+    };
+  },
+});

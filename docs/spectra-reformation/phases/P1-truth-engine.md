@@ -144,3 +144,13 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Bridge compile, Rustfmt, verifier-test ESLint, diff check (owned files), and secret scan pass; full repository sweep deferred by instruction.
 - Evidence: `.shots/reformation/P1.V2/2026-08-26-chaos-report.md`.
 - Verdict: **REJECTED**. Owner P1.I2; rerun P1.V2 unchanged after both findings are fixed.
+
+## Implementer rejection-fix log — P1.I2 / P1.V2-F1-F2 (2026-08-26)
+
+- Triage retained: F1 **HIGH · SYSTEMIC** stable-byte proof; F2 **HIGH · LOCAL** bounded revocation cleanup.
+- Windows watcher ingestion now opens a `FILE_SHARE_READ`-only lease, hashes through that handle, and cannot emit while an incompatible writer remains open; platforms without an equivalent proof fail closed and retry.
+- Enqueue rechecks the proven fingerprint, repair scans use the same snapshot, and payload upload reads through the writer-exclusive lease so promoted bytes cannot race the proof.
+- `revokeDevice` uses a new `workReplicas.by_device_state` index and drains every non-unavailable replica state in batches of 100; mounts and pending/claimed write and structure requests are drained through their existing device-state indexes.
+- The verifier-owned slow-writer and 2,001-replica tests were unchanged. Rust core 37/37 and chaos 13/13 pass; focused Convex 4 files / 19 tests pass; Bridge compile, changed-file ESLint, Rustfmt, owned diff check, and secret scan pass.
+- Package-wide Rust still stops only at the documented missing `granted_tree` fixture. `tsc --noEmit` retains the five recorded blockers plus the unchanged verifier-test typing error at `convex/bridge-chaos.test.ts:172`.
+- Status: **IMPLEMENTED**. P1.V2 remains REJECTED pending an independent unchanged rerun; no acceptance is claimed.

@@ -678,39 +678,63 @@ export const commitPayloadUpload = mutation({
     const cloud = await ctx.db.query("workReplicas")
       .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
       .unique();
-    const isFirstCloudPayload = !cloud?.payloadRef;
+    const uploadedPayloadRef = String(payload._id);
+    // The retained base is the last verified agreement, not the local
+    // revision observed immediately before this upload. Keeping it stable is
+    // what lets later local saves distinguish an unchanged cloud from a real
+    // concurrent cloud edit.
+    const retainedBaseRevision = replica.baseRevision ?? replica.contentHash ?? replica.revision;
+    const externalKey = await deriveSyncIdempotencyKey({
+      workId: String(replica.workId),
+      target: String(replica.deviceId ?? device._id),
+      baseRevision: retainedBaseRevision,
+      targetRevision: input.hash,
+      direction: "external",
+    });
+    const existingExternal = await ctx.db.query("syncOperations")
+      .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", externalKey))
+      .unique();
+    const exactReplay = Boolean(
+      existingExternal &&
+      replica.payloadRef === uploadedPayloadRef &&
+      replica.revision === input.hash &&
+      replica.contentHash === input.hash,
+    );
+    if (exactReplay) {
+      await ctx.db.patch(device._id, { lastSeenAt: now });
+      const replayResult = {
+        payloadRef: uploadedPayloadRef,
+        externalChange: existingExternal?.revisionBefore !== input.hash,
+      };
+      return existingExternal?.state === "conflicted"
+        ? { ...replayResult, conflicted: true as const }
+        : replayResult;
+    }
+
+    const cloudRevision = cloud?.contentHash ?? cloud?.revision;
+    const cloudMatchesUpload = Boolean(cloud?.payloadRef && cloudRevision === input.hash);
+    const cloudNeedsFirstPayload = !cloud?.payloadRef;
     const cloudChangedSinceReplicaBase = Boolean(
       cloud?.payloadRef &&
-      cloud.contentHash &&
-      cloud.contentHash !== (replica.baseRevision ?? replica.contentHash) &&
-      cloud.contentHash !== input.hash,
+      cloudRevision !== retainedBaseRevision &&
+      cloudRevision !== input.hash,
     );
-    const externalChange = Boolean(replica.payloadRef && replica.contentHash !== input.hash);
-    if (cloudChangedSinceReplicaBase && !isFirstCloudPayload) {
-      const operationKey = await deriveSyncIdempotencyKey({
-        workId: String(replica.workId),
-        target: String(replica.deviceId ?? device._id),
-        baseRevision: replica.revision,
-        targetRevision: input.hash,
-        direction: "external",
-      });
-      const existingOperation = await ctx.db.query("syncOperations")
-        .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", operationKey))
-        .unique();
+    const externalChange = replica.payloadRef !== uploadedPayloadRef || replica.contentHash !== input.hash;
+    if (cloudChangedSinceReplicaBase && !cloudNeedsFirstPayload) {
       await ctx.db.patch(replica._id, {
-        payloadRef: String(payload._id),
-        baseRevision: replica.revision,
+        payloadRef: uploadedPayloadRef,
+        baseRevision: retainedBaseRevision,
         revision: input.hash,
         contentHash: input.hash,
         state: "diverged",
         updatedAt: now,
       });
-      if (!existingOperation) {
+      if (!existingExternal) {
         await ctx.db.insert("syncOperations", {
           accountId: device.accountId,
           workId: replica.workId,
           replicaId: replica._id,
-          idempotencyKey: operationKey,
+          idempotencyKey: externalKey,
           direction: "external",
           revisionBefore: replica.revision,
           revisionAfter: input.hash,
@@ -720,28 +744,34 @@ export const commitPayloadUpload = mutation({
           createdAt: now,
           updatedAt: now,
         });
-        const existingConflict = await ctx.db.query("syncConflicts")
-          .withIndex("by_work_state", (q) => q.eq("workId", replica.workId).eq("state", "open"))
-          .filter((q) => q.and(
-            q.eq(q.field("localRevision"), input.hash),
-            q.eq(q.field("spectraRevision"), cloud.revision),
-          ))
-          .first();
-        if (!existingConflict) await ctx.db.insert("syncConflicts", {
-            accountId: device.accountId,
-            workId: replica.workId,
-            replicaIds: [replica._id, cloud._id],
-            regionIds: [],
-            partNames: [],
-            localRevision: input.hash,
-            spectraRevision: cloud.revision,
-            localPayloadRef: String(payload._id),
-            spectraPayloadRef: cloud.payloadRef,
-            state: "open",
-            createdAt: now,
-            updatedAt: now,
-          });
+      } else if (existingExternal.state !== "conflicted") {
+        await ctx.db.patch(existingExternal._id, {
+          state: "conflicted",
+          errorCode: "stale-revision",
+          updatedAt: now,
+        });
       }
+      const existingConflict = await ctx.db.query("syncConflicts")
+        .withIndex("by_work_state", (q) => q.eq("workId", replica.workId).eq("state", "open"))
+        .filter((q) => q.and(
+          q.eq(q.field("localRevision"), input.hash),
+          q.eq(q.field("spectraRevision"), cloud.revision),
+        ))
+        .first();
+      if (!existingConflict) await ctx.db.insert("syncConflicts", {
+        accountId: device.accountId,
+        workId: replica.workId,
+        replicaIds: [replica._id, cloud._id],
+        regionIds: [],
+        partNames: [],
+        localRevision: input.hash,
+        spectraRevision: cloud.revision,
+        localPayloadRef: uploadedPayloadRef,
+        spectraPayloadRef: cloud.payloadRef,
+        state: "open",
+        createdAt: now,
+        updatedAt: now,
+      });
       const activeWrites = await ctx.db.query("bridgeWriteRequests")
         .withIndex("by_work_created", (q) => q.eq("workId", replica.workId))
         .order("desc")
@@ -755,14 +785,15 @@ export const commitPayloadUpload = mutation({
       }
       await ctx.db.patch(cloud._id, { state: "diverged", updatedAt: now });
       await ctx.db.patch(device._id, { lastSeenAt: now });
-      return { payloadRef: String(payload._id), externalChange: true, conflicted: true };
+      return { payloadRef: uploadedPayloadRef, externalChange: true, conflicted: true };
     }
+    const replicasAgree = cloudNeedsFirstPayload || cloudMatchesUpload;
     await ctx.db.patch(replica._id, {
-      payloadRef: String(payload._id),
-      baseRevision: externalChange ? replica.revision : replica.baseRevision,
+      payloadRef: uploadedPayloadRef,
+      baseRevision: replicasAgree ? input.hash : retainedBaseRevision,
       revision: input.hash,
       contentHash: input.hash,
-      state: externalChange ? "ahead" : "current",
+      state: replicasAgree ? "current" : "ahead",
       lastVerifiedAt: now,
       updatedAt: now,
     });
@@ -772,10 +803,11 @@ export const commitPayloadUpload = mutation({
         workId: replica.workId,
         kind: "cloud",
         nativeFormat: replica.nativeFormat,
-        payloadRef: String(payload._id),
+        payloadRef: uploadedPayloadRef,
         preservedCarryVersion: 1,
         compatibilityProfile: "strict-native",
         revision: input.hash,
+        baseRevision: input.hash,
         contentHash: input.hash,
         state: "current",
         lastVerifiedAt: now,
@@ -786,15 +818,27 @@ export const commitPayloadUpload = mutation({
       // native payload arrives. Attach that retained payload now; never
       // replace an already-retained divergent cloud version here.
       await ctx.db.patch(cloud._id, {
-        payloadRef: String(payload._id),
+        payloadRef: uploadedPayloadRef,
         preservedCarryVersion: 1,
         nativeFormat: replica.nativeFormat,
         revision: input.hash,
+        baseRevision: input.hash,
         contentHash: input.hash,
         state: "current",
         lastVerifiedAt: now,
         updatedAt: now,
       });
+    } else if (cloudMatchesUpload) {
+      await ctx.db.patch(cloud._id, {
+        baseRevision: input.hash,
+        state: "current",
+        lastVerifiedAt: now,
+        updatedAt: now,
+      });
+    } else {
+      // The upload verified newer local bytes only. The cloud payload remains
+      // retained at the common base, so it is behind rather than current.
+      await ctx.db.patch(cloud._id, { state: "behind", updatedAt: now });
     }
     // Complete a local -> Spectra F6 transition only after the uploaded
     // payload is attached to the cloud replica. Until this point the local
@@ -832,18 +876,7 @@ export const commitPayloadUpload = mutation({
         updatedAt: now,
       });
     }
-    if (externalChange) {
-      const externalKey = await deriveSyncIdempotencyKey({
-        workId: String(replica.workId),
-        target: String(replica.deviceId ?? device._id),
-        baseRevision: replica.revision,
-        targetRevision: input.hash,
-        direction: "external",
-      });
-      const existingExternal = await ctx.db.query("syncOperations")
-        .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", externalKey))
-        .unique();
-      if (!existingExternal) {
+    if (!existingExternal) {
       await ctx.db.insert("syncOperations", {
         accountId: device.accountId,
         workId: replica.workId,
@@ -852,15 +885,14 @@ export const commitPayloadUpload = mutation({
         direction: "external",
         revisionBefore: replica.revision,
         revisionAfter: input.hash,
-        state: "applied",
+        state: replicasAgree ? "verified" : "applied",
         actorKind: "external-edit",
         createdAt: now,
         updatedAt: now,
       });
-      }
     }
     await ctx.db.patch(device._id, { lastSeenAt: now });
-    return { payloadRef: String(payload._id), externalChange };
+    return { payloadRef: uploadedPayloadRef, externalChange };
   },
 });
 

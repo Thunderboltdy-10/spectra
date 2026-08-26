@@ -184,6 +184,112 @@ describe("replica truth machine", () => {
     expect([truth.cloud?.state, truth.local?.state]).not.toContain("current");
   });
 
+  it("keeps an external upload and its exact replay on the same replica truth", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const input = {
+      credential: bridgeCredential,
+      replicaId: fixture.localId,
+      hash: nextHash,
+      bytes: 4,
+      mediaType: "application/test",
+      payloadRef: String(fixture.nextPayloadId),
+    };
+
+    const first = await t.mutation(api.bridgeSync.commitPayloadUpload, input);
+    const afterFirst = await t.run(async (ctx) => ({
+      cloud: await ctx.db.get(fixture.cloudId),
+      local: await ctx.db.get(fixture.localId),
+      operations: await ctx.db.query("syncOperations").collect(),
+      conflicts: await ctx.db.query("syncConflicts").collect(),
+    }));
+    const replay = await t.mutation(api.bridgeSync.commitPayloadUpload, input);
+    const afterReplay = await t.run(async (ctx) => ({
+      cloud: await ctx.db.get(fixture.cloudId),
+      local: await ctx.db.get(fixture.localId),
+      operations: await ctx.db.query("syncOperations").collect(),
+      conflicts: await ctx.db.query("syncConflicts").collect(),
+    }));
+
+    expect(first).toMatchObject({ externalChange: true });
+    expect(replay).toEqual(first);
+    expect(afterFirst.local).toMatchObject({
+      state: "ahead",
+      revision: nextHash,
+      baseRevision: baseHash,
+      contentHash: nextHash,
+    });
+    expect(afterFirst.cloud).toMatchObject({
+      state: "behind",
+      revision: baseHash,
+      baseRevision: baseHash,
+      contentHash: baseHash,
+    });
+    expect(afterFirst.operations).toHaveLength(1);
+    expect(afterFirst.operations[0]).toMatchObject({
+      direction: "external",
+      revisionBefore: baseHash,
+      revisionAfter: nextHash,
+      state: "applied",
+    });
+    expect(afterFirst.conflicts).toEqual([]);
+    expect(afterReplay).toEqual(afterFirst);
+  });
+
+  it("retains the verified common base across successive external saves", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const thirdHash = "c".repeat(64);
+    const thirdPayloadId = await t.run(async (ctx) => {
+      const storageId = await ctx.storage.store(new Blob(["third"]));
+      return ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId,
+        hash: thirdHash,
+        storageId,
+        bytes: 5,
+        mediaType: "application/test",
+        refCount: 0,
+        state: "active",
+        createdAt: Date.now(),
+        verifiedAt: Date.now(),
+      });
+    });
+
+    await t.mutation(api.bridgeSync.commitPayloadUpload, {
+      credential: bridgeCredential,
+      replicaId: fixture.localId,
+      hash: nextHash,
+      bytes: 4,
+      mediaType: "application/test",
+      payloadRef: String(fixture.nextPayloadId),
+    });
+    await t.mutation(api.bridgeSync.commitPayloadUpload, {
+      credential: bridgeCredential,
+      replicaId: fixture.localId,
+      hash: thirdHash,
+      bytes: 5,
+      mediaType: "application/test",
+      payloadRef: String(thirdPayloadId),
+    });
+
+    const truth = await t.run(async (ctx) => ({
+      cloud: await ctx.db.get(fixture.cloudId),
+      local: await ctx.db.get(fixture.localId),
+      operations: await ctx.db.query("syncOperations").collect(),
+      conflicts: await ctx.db.query("syncConflicts").collect(),
+    }));
+    expect(truth.local).toMatchObject({
+      state: "ahead",
+      revision: thirdHash,
+      baseRevision: baseHash,
+      contentHash: thirdHash,
+    });
+    expect(truth.cloud).toMatchObject({ state: "behind", revision: baseHash, contentHash: baseHash });
+    expect(truth.operations).toHaveLength(2);
+    expect(new Set(truth.operations.map((operation) => operation.idempotencyKey)).size).toBe(2);
+    expect(truth.conflicts).toEqual([]);
+  });
+
   it("compensates an expired claimed write and its dependent rows", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

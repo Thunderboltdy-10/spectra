@@ -74,6 +74,18 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - “Spectra only” unlinks but does not delete the user’s physical file; the transition records that consequence explicitly pending any separately approved destructive workflow.
 - Status: IMPLEMENTED. No acceptance or verifier verdict claimed; the repository-wide sweep remains deferred until paired verification.
 
+## Implementer rejection-fix log — P1.I1 / P1.V1-F1 (2026-08-26)
+
+- Triage: **HIGH · SYSTEMIC** — external-save truth and keys depended on event novelty and a moving local revision.
+- `commitPayloadUpload` now derives replica state from retained payload/base relations and keeps the verified common base stable across successive Word saves.
+- A local-only upload leaves local `ahead` and demotes the unchanged cloud to `behind`; only byte equality can make either side `current`.
+- External operation keys now use the retained base, and an already-applied matching target returns before any replica, operation, conflict, or transition mutation.
+- Conflict recording no longer depends on whether its operation row already exists.
+- Added focused regressions for exact replay and successive external saves; the verifier-owned property suite was not changed.
+- Relevant checks: 4 focused files / 36 tests pass, including P1.V1's 24-seed property suite; changed-file ESLint passes.
+- `tsc --noEmit` retains exactly the five pre-existing blockers in STATE §1 and adds none.
+- Status: IMPLEMENTED. P1.V1 remains REJECTED pending independent rerun; no acceptance is claimed and P1.V2/P1.I2/I3/I4 were untouched.
+
 ## Implementer log — P1.I2 (2026-08-26)
 
 - Replaced per-event/full-tree sync with changed-path classification, per-path StabilityTracker quiescence, and a six-hour repair reconcile.

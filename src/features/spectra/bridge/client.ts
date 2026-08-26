@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { humanizePublicFailure } from "./humanize";
 
 export const BRIDGE_URL = "http://127.0.0.1:47615";
 export const BRIDGE_PROTOCOL_VERSION = "1.0";
@@ -44,6 +45,14 @@ export type BridgeDiscovery =
   | { kind: "running"; health: BridgeHealth }
   | { kind: "not-running" }
   | { kind: "port-taken" };
+/** What Files and devices may say. Session pairing is not the same as process liveness. */
+export type BridgeReachability =
+  | "offline"
+  | "not-running"
+  | "port-taken"
+  | "update-required"
+  | "running"
+  | "connected";
 export const BRIDGE_SESSION_STORAGE_KEY = "spectra.bridge.session";
 export const BRIDGE_STATUS_CACHE_KEY = "spectra.bridge.status";
 
@@ -74,12 +83,88 @@ export function interpretHealthPayload(input: {
   return { kind: "not-running" };
 }
 
+export function presentBridgeReachability(input: {
+  online: boolean;
+  discovery: BridgeDiscovery;
+  sessionPaired: boolean;
+}): BridgeReachability {
+  if (!input.online) return "offline";
+  if (input.discovery.kind === "not-running") return "not-running";
+  if (input.discovery.kind === "port-taken") return "port-taken";
+  if (
+    protocolMajor(input.discovery.health.protocolVersion) !==
+    protocolMajor(BRIDGE_PROTOCOL_VERSION)
+  ) {
+    return "update-required";
+  }
+  return input.sessionPaired ? "connected" : "running";
+}
+
+export function bridgeReachabilityCopy(kind: BridgeReachability): {
+  label: string;
+  detail: string;
+} {
+  if (kind === "offline") {
+    return {
+      label: "Offline",
+      detail:
+        "This browser is offline. Spectra cannot check Spectra Bridge until you reconnect.",
+    };
+  }
+  if (kind === "not-running") {
+    return {
+      label: "Not running",
+      detail:
+        "Spectra Bridge is not running on this PC. Open it to use files that live here.",
+    };
+  }
+  if (kind === "port-taken") {
+    return {
+      label: "Connection blocked",
+      detail:
+        "Something else is using the Spectra Bridge connection on this PC. Close the other app, then try again.",
+    };
+  }
+  if (kind === "update-required") {
+    return {
+      label: "Update required",
+      detail:
+        "This copy of Spectra Bridge is too old for this Spectra. Update it to keep using files on this PC.",
+    };
+  }
+  if (kind === "running") {
+    return {
+      label: "Not connected",
+      detail:
+        "Spectra Bridge is running on this PC. Connect this device to use files that live here.",
+    };
+  }
+  return {
+    label: "Connected",
+    detail:
+      "Runs quietly in the system tray. Files on this PC stay ordinary files.",
+  };
+}
+
+export function rememberedFolderDetail(kind: BridgeReachability): string {
+  if (kind === "offline") {
+    return "This folder is remembered. Spectra cannot check it while this browser is offline.";
+  }
+  if (kind === "running") {
+    return "This folder is remembered. Connect this device to use it.";
+  }
+  if (kind === "port-taken") {
+    return "This folder is remembered. Spectra Bridge cannot use it until the connection is free.";
+  }
+  return "This folder is remembered. Open Spectra Bridge to use it.";
+}
+
 export function bridgeDiscoveryMessage(discovery: BridgeDiscovery): string {
   if (discovery.kind === "not-running") {
-    return "Spectra Bridge is not running on this PC. Open it, then try again.";
+    return bridgeReachabilityCopy("not-running").detail;
   }
   if (discovery.kind === "port-taken") {
-    return "Something else is using the Spectra Bridge connection on this PC. Close the other app, then try again.";
+    return bridgeReachabilityCopy("port-taken").detail;
   }
   return "";
 }
@@ -87,7 +172,9 @@ export function bridgeDiscoveryMessage(discovery: BridgeDiscovery): string {
 export function pairingFailureMessage(
   error: unknown,
   discovery?: BridgeDiscovery | null,
+  online = true,
 ): string {
+  if (!online) return bridgeReachabilityCopy("offline").detail;
   if (discovery && discovery.kind !== "running") {
     return bridgeDiscoveryMessage(discovery);
   }
@@ -97,17 +184,10 @@ export function pairingFailureMessage(
       : typeof error === "string"
         ? error
         : "";
-  if (/failed to fetch|networkerror|load failed|econnrefused/i.test(raw)) {
-    return "Spectra Bridge is not running on this PC. Open it, then try again.";
-  }
   if (/pairing offer expired|pairing expired/i.test(raw)) {
     return "This connection attempt timed out. Try again.";
   }
-  if (!raw.trim() || /^[A-Z][A-Z0-9_]{4,}$/.test(raw.trim())) {
-    return "Spectra Bridge could not connect. Open it on this PC, then try again.";
-  }
-  return raw.replace(/\b[A-Z][A-Z0-9_]{5,}\b/g, "").replace(/\s+/g, " ").trim()
-    || "Spectra Bridge could not connect. Open it on this PC, then try again.";
+  return humanizePublicFailure(error);
 }
 
 export async function discoverBridge(signal?: AbortSignal): Promise<BridgeDiscovery> {

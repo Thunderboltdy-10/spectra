@@ -55,6 +55,16 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
       "This computer is no longer connected to Spectra. Open Spectra Bridge on this PC to continue.",
   },
   {
+    test: /could not find public function|discoverResourcesPage|presentationsForAccount|bridgeSync:/i,
+    message: () =>
+      "Spectra could not list files in this folder right now. The files on this PC are unchanged.",
+  },
+  {
+    test: /provider-managed folder|conflict windows may be wider/i,
+    message: () =>
+      "This folder is also managed by another program. Conflicts may take longer to notice.",
+  },
+  {
     test: /failed to fetch|networkerror|load failed|econnrefused/i,
     message: () =>
       "Spectra Bridge is not running on this PC. Open it, then try again.",
@@ -123,6 +133,23 @@ function rawText(error: unknown): string {
   return String(error ?? "");
 }
 
+function stripInternalNoise(raw: string): string {
+  return raw
+    .replace(/\[Request ID:[^\]]*\]/gi, "")
+    .replace(/Request ID:\s*[A-Za-z0-9_-]+/gi, "")
+    .replace(/['`][a-zA-Z][a-zA-Z0-9]*:[a-zA-Z0-9_]+['`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Cloud listing failed; the folder itself is not broken. */
+export function isCloudDiscoveryFailure(error: unknown): boolean {
+  const raw = rawText(error);
+  return /could not find public function|discoverResourcesPage|presentationsForAccount|bridgeSync:|\[Request ID:|Request ID:/i.test(
+    raw,
+  );
+}
+
 /** Words for a replica state. Never the enum itself. */
 export function humanizeReplicaState(state: string): string {
   return REPLICA_STATE_WORDS[state] ?? "Needs attention";
@@ -147,6 +174,9 @@ export function humanizePublicFailure(
   for (const entry of CODE_MESSAGES) {
     if (entry.test.test(raw)) return entry.message(app);
   }
+  if (isCloudDiscoveryFailure(raw)) {
+    return "Spectra could not list files in this folder right now. The files on this PC are unchanged.";
+  }
   if (!raw || /^[A-Z][A-Z0-9_]{4,}$/.test(raw) || /[A-Z]{3,}_[A-Z0-9_]{3,}/.test(raw)) {
     return `Spectra could not finish this step. Keep working here, or open the file from Library with Spectra Bridge connected.`;
   }
@@ -157,7 +187,13 @@ export function humanizePublicFailure(
   ) {
     return `Spectra could not finish this step. Your work on this device is still here.`;
   }
-  const stripped = raw.replace(/\b[A-Z][A-Z0-9_]{5,}\b/g, "").replace(/\s+/g, " ").trim();
+  const stripped = stripInternalNoise(raw)
+    .replace(/\b[A-Z][A-Z0-9_]{5,}\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (/convex|public function|request id/i.test(stripped)) {
+    return "Spectra could not list files in this folder right now. The files on this PC are unchanged.";
+  }
   return stripped || `Spectra could not finish this step. Your work on this device is still here.`;
 }
 

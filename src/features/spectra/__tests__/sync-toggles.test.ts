@@ -15,8 +15,14 @@ import {
   interpretHealthPayload,
   pairingFailureMessage,
   parseBridgeHealth,
+  presentBridgeReachability,
+  bridgeReachabilityCopy,
 } from "../bridge/client";
 import { presentSync } from "../bridge/status";
+import {
+  humanizePublicFailure,
+  isCloudDiscoveryFailure,
+} from "../bridge/humanize";
 
 const settings = fs.readFileSync(
   path.join(process.cwd(), "src/features/spectra/bridge/bridge-settings.tsx"),
@@ -104,6 +110,67 @@ describe("sync toggles (P1.I4)", () => {
       pairingFailureMessage("Failed to fetch", { kind: "port-taken" }),
     ).toContain("Something else is using");
     expect(pairingFailureMessage("Failed to fetch")).not.toMatch(/Failed to fetch/i);
+    expect(
+      pairingFailureMessage("Failed to fetch", { kind: "not-running" }, false),
+    ).toContain("offline");
+    expect(
+      pairingFailureMessage("Failed to fetch", { kind: "not-running" }, false),
+    ).not.toMatch(/Not running/i);
+  });
+
+  it("does not call a running unpaired Bridge Not running", () => {
+    const health = parseBridgeHealth({
+      version: "0.2",
+      paired: true,
+      protocolVersion: "1.0",
+      port: 47615,
+    });
+    expect(health).not.toBeNull();
+    const running = presentBridgeReachability({
+      online: true,
+      discovery: { kind: "running", health: health! },
+      sessionPaired: false,
+    });
+    expect(running).toBe("running");
+    expect(bridgeReachabilityCopy(running).label).toBe("Not connected");
+    expect(bridgeReachabilityCopy(running).label).not.toBe("Not running");
+    expect(
+      presentBridgeReachability({
+        online: false,
+        discovery: { kind: "not-running" },
+        sessionPaired: false,
+      }),
+    ).toBe("offline");
+    expect(bridgeReachabilityCopy("offline").label).toBe("Offline");
+    expect(
+      presentBridgeReachability({
+        online: true,
+        discovery: { kind: "not-running" },
+        sessionPaired: false,
+      }),
+    ).toBe("not-running");
+    expect(bridgeReachabilityCopy("not-running").label).toBe("Not running");
+    expect(settings).toContain("bridgeReachabilityCopy");
+  });
+
+  it("speaks listing failures as unavailable-truth, never Convex jargon", () => {
+    const convexMiss =
+      "Could not find public function for 'bridgeSync:discoverResourcesPage'. Request ID: abc-123";
+    expect(isCloudDiscoveryFailure(convexMiss)).toBe(true);
+    expect(humanizePublicFailure(convexMiss)).toContain(
+      "could not list files",
+    );
+    expect(humanizePublicFailure(convexMiss)).not.toMatch(
+      /discoverResourcesPage|Request ID|bridgeSync:/i,
+    );
+    expect(
+      humanizePublicFailure(
+        "Selected on this device. Provider-managed folder detected; conflict windows may be wider.",
+      ),
+    ).toContain("managed by another program");
+    expect(humanizePublicFailure(convexMiss)).not.toContain("Needs attention");
+    expect(settings).toContain("Waiting for Spectra");
+    expect(settings).toContain("humanizePublicFailure");
   });
 
   it("offers Reconnect when the replica is unavailable on this device", () => {

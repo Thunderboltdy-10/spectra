@@ -300,9 +300,11 @@ export function ResourceSurface({
                   ? "Open this file as an editable Spectra Document. Unsupported Word features remain in the original package and unrelated edits do not rewrite them."
                   : OFFICE_LENS.has(format)
                     ? `Open this file as editable Spectra ${["xlsx", "xlsm", "xltx", "xltm", "xlam"].includes(format) ? "Sheets" : "Presentation"}. Native features Spectra cannot edit remain preserved in the original package.`
-                    : bridge.state === "connected"
-                      ? "Open Spectra Bridge on this PC to use the file in its selected folder."
-                      : "This file lives on a computer. Connect Spectra Bridge to use it here."}
+                    : bridge.reachability === "connected"
+                      ? "This file is in a selected folder on this PC."
+                      : bridge.reachability === "running"
+                        ? "Spectra Bridge is running on this PC. Connect this device to use this file."
+                        : "This file lives on a computer. Connect Spectra Bridge to use it here."}
               </p>
               {DOCUMENT_LENS.has(format) || OFFICE_LENS.has(format) ? (
                 <button

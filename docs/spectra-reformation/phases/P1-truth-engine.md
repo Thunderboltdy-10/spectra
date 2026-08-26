@@ -199,3 +199,12 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Word refused `P1V3-essay.docx` (shots 20–21). Provenance: 17:31 PowerShell stub, 942 bytes, no `[Content_Types].xml`, SHA-256 unchanged after mount/Word. Not filed as Bridge rewrite. Do not reuse this stub.
 - Focused Vitest 42 pass / 2 pre-existing I2 string-scans, not rewritten. No product code changed. `convex dev` was not running; do not `convex push` the real account.
 - Verdict: **REJECTED**. Evidence: `.shots/reformation/P1.V3/manifest.md`.
+
+## Implementer rejection-fix log — P1.I4 / P1.V3 (2026-08-26)
+
+- Triage: unpaired-running → Not running, browser-offline → Not running, and listing-failure → Needs attention are one reachability class. Raw Request IDs / `bridgeSync:` / provider-managed copy are R13. Missing Convex functions stay LOCAL env (no `convex push`).
+- `presentBridgeReachability` now separates offline, not-running, port-taken, running-unpaired, connected. A live unpaired Bridge is **Not connected**. Browser-offline is **Offline**, never Not running. I3 still owns the Settings Offline banner.
+- Mount rows humanize Bridge `detail`; discovery/listing failures say waiting-for-Spectra, not Needs attention, and never dump Request IDs. Provider-managed jargon is stripped; the existing "another program" sentence remains.
+- Taste: running-unpaired remembered folders say Connect this device, not Open Spectra Bridge.
+- Relevant checks: focused Vitest `sync-toggles` + `sync-presentation` 14/14. Two pre-existing I2 string-scans in `bridge-contract.test.ts` not rewritten. Changed-file ESLint clean. Did not `convex push`.
+- Status: IMPLEMENTED. No acceptance claimed. P1.V3 rerun remains independent after I3's banner and Convex actually serving current source.

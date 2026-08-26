@@ -12,10 +12,12 @@ import {
   pairingFailureMessage,
   pairingStatus,
   persistBridgeSession,
+  rememberedFolderDetail,
   removeBridgeFolder,
   requestBridgeUpdate,
   retryBridgeFolder,
   selectBridgeFolder,
+  bridgeReachabilityCopy,
 } from "./client";
 import { StorageToggleGroup } from "./storage-toggle-group";
 import {
@@ -25,14 +27,28 @@ import {
   storageChoiceFromPreset,
   type StorageChoice,
 } from "./sync-toggles";
+import {
+  humanizePublicFailure,
+  isCloudDiscoveryFailure,
+} from "./humanize";
 
-function mountStateLabel(state: string) {
+function mountStateLabel(state: string, discoveryFailed: boolean) {
+  if (discoveryFailed) return "Waiting for Spectra";
   if (state === "selected" || state === "active") return "Ready";
   if (state === "scanning") return "Reading folder";
   if (state === "disconnected" || state === "waiting") return "Waiting for Bridge";
   if (state === "unavailable") return "Not available";
   if (state === "error") return "Needs attention";
   return "Needs attention";
+}
+
+function stripProviderJargon(detail: string) {
+  return detail
+    .replace(
+      /\s*Provider-managed folder detected; conflict windows may be wider\.?/gi,
+      "",
+    )
+    .trim();
 }
 
 export function BridgeSettings() {
@@ -65,6 +81,7 @@ export function BridgeSettings() {
   useEffect(() => stopPairingPoll, [stopPairingPoll]);
   const storageChoice = storageChoiceFromPreset(effectivePolicy?.preset);
   const connected = local.state === "connected";
+  const reachability = local.reachability;
   const discovery = local.discovery;
   async function beginPairing() {
     setBusy(true);
@@ -73,7 +90,7 @@ export function BridgeSettings() {
       setError(undefined);
       const found = await discoverBridge();
       if (found.kind !== "running") {
-        setError(pairingFailureMessage("Failed to fetch", found));
+        setError(pairingFailureMessage("Failed to fetch", found, local.online));
         setPairing(null);
         return;
       }
@@ -106,7 +123,7 @@ export function BridgeSettings() {
       }, Math.max(0, result.expiresAt - Date.now()));
     } catch (reason) {
       const found = await discoverBridge().catch(() => discovery);
-      setError(pairingFailureMessage(reason, found));
+      setError(pairingFailureMessage(reason, found, local.online));
       setPairing(null);
     } finally {
       setBusy(false);
@@ -119,9 +136,7 @@ export function BridgeSettings() {
       await action();
       await local.refresh();
     } catch (reason) {
-      setError(
-        pairingFailureMessage(reason, local.discovery),
-      );
+      setError(pairingFailureMessage(reason, local.discovery, local.online));
     } finally {
       setFolderBusy(null);
     }
@@ -140,7 +155,18 @@ export function BridgeSettings() {
     return [...ids].map((id) => {
       const live = byGrant.get(id);
       const cloud = cloudByGrant.get(id);
-      if (live && connected) return live;
+      if (live && connected) {
+        const discoveryFailed = isCloudDiscoveryFailure(live.detail);
+        const cleaned = stripProviderJargon(live.detail);
+        return {
+          ...live,
+          detail: humanizePublicFailure(
+            cleaned || "Selected on this device",
+          ),
+          state: discoveryFailed ? "waiting" : live.state,
+          discoveryFailed,
+        };
+      }
       return {
         id,
         label: live?.label ?? cloud?.rootLabel ?? "Selected folder",
@@ -150,16 +176,21 @@ export function BridgeSettings() {
             : (cloud?.state ?? live?.state ?? "unavailable")
           : "disconnected",
         detail: connected
-          ? (live?.detail ??
-            "This folder is remembered and will resume when its device is available.")
-          : "This folder is remembered. Open Spectra Bridge to use it.",
+          ? humanizePublicFailure(
+              stripProviderJargon(
+                live?.detail ??
+                  "This folder is remembered and will resume when its device is available.",
+              ),
+            )
+          : rememberedFolderDetail(reachability),
         synced: live?.synced ?? 0,
         total: live?.total || cloud?.fileCount || 0,
         doubleSyncRisk:
           live?.doubleSyncRisk ?? cloud?.doubleSyncRisk ?? false,
+        discoveryFailed: isCloudDiscoveryFailure(live?.detail ?? ""),
       };
     });
-  }, [cloudOverview?.mounts, connected, local.status]);
+  }, [cloudOverview?.mounts, connected, local.status, reachability]);
   async function setStorageChoice(choice: StorageChoice) {
     const preset = policyPresetFromToggles(choice, false);
     await overridePolicy({
@@ -167,24 +198,12 @@ export function BridgeSettings() {
       idempotencyKey: `account:${preset}:${Date.now()}`,
     });
   }
-  const stateLabel =
-    local.state === "update-required"
-      ? "Update required"
-      : connected
-        ? "Connected"
-        : discovery.kind === "port-taken"
-          ? "Connection blocked"
-          : "Not running";
+  const reachabilityCopy = bridgeReachabilityCopy(reachability);
+  const stateLabel = reachabilityCopy.label;
   const stateDetail =
-    local.state === "update-required"
-      ? "This copy of Spectra Bridge is too old for this Spectra. Update it to keep using files on this PC."
-      : connected
-        ? local.status?.cloudConnected
-          ? "Runs quietly in the system tray. Files on this PC stay ordinary files."
-          : "The Bridge is running. Spectra Cloud has not been reached recently. Changes remain queued safely."
-        : discovery.kind === "port-taken"
-          ? "Something else is using the Spectra Bridge connection on this PC. Close the other app, then try again."
-          : "Spectra Bridge is not running on this PC. Open it to use files that live here.";
+    reachability === "connected" && !local.status?.cloudConnected
+      ? "The Bridge is running. Spectra Cloud has not been reached recently. Changes remain queued safely."
+      : reachabilityCopy.detail;
   return (
     <div className="grid gap-8">
       <section className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10">
@@ -206,7 +225,7 @@ export function BridgeSettings() {
                 {stateDetail}
               </p>
             </div>
-            {local.state === "update-required" ? (
+            {reachability === "update-required" ? (
               <Button
                 size="sm"
                 disabled={updating}
@@ -318,7 +337,9 @@ export function BridgeSettings() {
                         ? ""
                         : ""}
                   </div>
-                  {count.kind === "unavailable" && !connected ? (
+                  {count.kind === "unavailable" &&
+                  !connected &&
+                  reachability === "not-running" ? (
                     <div className="mt-1 text-micro text-[var(--text-tertiary)]">
                       {count.sentence}
                     </div>
@@ -333,7 +354,9 @@ export function BridgeSettings() {
                 <div className="flex shrink-0 items-center gap-2">
                   <StatusBadge
                     tone={
-                      mount.state === "error"
+                      mount.discoveryFailed
+                        ? "attention"
+                        : mount.state === "error"
                         ? "failure"
                         : connected &&
                             (mount.state === "selected" ||
@@ -342,7 +365,7 @@ export function BridgeSettings() {
                           : "attention"
                     }
                   >
-                    {mountStateLabel(mount.state)}
+                    {mountStateLabel(mount.state, Boolean(mount.discoveryFailed))}
                   </StatusBadge>
                   {mount.state === "error" ||
                   mount.state === "selected" ||

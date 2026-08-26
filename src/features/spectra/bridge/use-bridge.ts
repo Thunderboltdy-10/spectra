@@ -6,8 +6,10 @@ import {
   discoverBridge,
   loadBridgeStatusCache,
   persistBridgeStatusCache,
+  presentBridgeReachability,
   type BridgeDiscovery,
   type BridgeHealth,
+  type BridgeReachability,
   type BridgeStatus,
 } from "./client";
 
@@ -21,6 +23,17 @@ export function useBridgeHealth() {
   // The effect restores it immediately before the first network refresh.
   const [status, setStatus] = useState<BridgeStatus | null>(null);
   const [checked, setChecked] = useState(false);
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    const syncOnline = () => setOnline(navigator.onLine);
+    syncOnline();
+    window.addEventListener("online", syncOnline);
+    window.addEventListener("offline", syncOnline);
+    return () => {
+      window.removeEventListener("online", syncOnline);
+      window.removeEventListener("offline", syncOnline);
+    };
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     const cached = loadBridgeStatusCache();
@@ -57,9 +70,14 @@ export function useBridgeHealth() {
     };
   }, []);
   const publicState = bridgeConnectionState(health);
+  const reachability: BridgeReachability = presentBridgeReachability({
+    online,
+    discovery,
+    sessionPaired: Boolean(status?.paired),
+  });
   const state =
-    publicState === "update-required"
-      ? publicState
+    publicState === "update-required" || reachability === "update-required"
+      ? "update-required"
       : status?.paired
         ? "connected"
         : "disconnected";
@@ -69,6 +87,8 @@ export function useBridgeHealth() {
     checked,
     state,
     discovery,
+    online,
+    reachability,
     refresh: async () => {
       const [nextDiscovery, nextStatus] = await Promise.all([
         discoverBridge(),

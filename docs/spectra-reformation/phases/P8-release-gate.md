@@ -4,6 +4,8 @@
 
 **Prerequisites:** P1–P7 accepted. **Architecture:** all. This phase is verification-led: V-units drive; the I-unit is a fix window.
 
+**Difficulty (PROCESS §4):** V1 = Hard / GPT 5.6 Sol xhigh. I1, V2 = Medium-thinking / Grok 4.6 High (V2 may be Sol if Pablo wants a harder grader than the fix window).
+
 ## P8.V1 — Chaos + multiplayer finale (H)
 
 The full composition matrix, sustained:
@@ -15,13 +17,19 @@ The full composition matrix, sustained:
 - **Full flow matrix fresh**: every P-flow and F-flow equivalent (the goal-card library accumulated across P1–P7) re-run from clean profiles on the production build (`next build`, deployed gateway, real Bridge install — not dev mode).
 - **Connector paper test** (PRODUCT §8): the Google Docs adapter exercise against the IR + lens contracts; gaps become Field Notes for the next program.
 
-## P8.I1 — Finale fix window (M)
+**Model: GPT 5.6 Sol xhigh.** Never concurrent with another live-product verifier.
+
+## P8.I1 — Finale fix window (MT)
 
 Findings from V1, triaged (R12), fixed class-wide. Anything deferred is named in the verdict with its risk — deferral is a decision with an owner, never silence.
 
-## P8.V2 — Release verdict (M)
+Escalate a finding to Sol if the fix is itself Hard.
+
+## P8.V2 — Release verdict (MT)
 
 A written verdict against PRODUCT §6's disqualifiers, item by item, with evidence links: corruption, silent loss, false sync claims, unpersisted-success reports, Bridge recovery, collaboration truth, AI usefulness, performance on modest hardware, backend cost per active user (measured), security posture (keys rotated — confirm with Pablo, holes closed). Plus: the open-risk register, the deferred-scope register (school assessment slice, mobile, connectors, autocomplete), and operational runbooks (gateway deploy/restart, Bridge release, Convex deploy, incident basics). **Go / no-go is Pablo's call on this document.**
+
+**Model: Grok 4.6 High** (or Sol). Pablo signs.
 
 ## Exit gate
 

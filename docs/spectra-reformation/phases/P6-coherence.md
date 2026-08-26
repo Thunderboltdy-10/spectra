@@ -4,7 +4,9 @@
 
 **Prerequisites:** P0.I4 (baseline) long accepted; P1–P5 substantially accepted (this phase polishes truth, it doesn't create it). **Architecture:** ARCHITECTURE-PLATFORM §3, PRODUCT §5, CANON R13/R16, D41–D44. **Findings absorbed:** Part XVIII wholesale (UX-1..14), Part XIX (DS-1..6), remaining ORG-*, a11y items from DS-4.
 
-## P6.I1 — UX debt closure (M)
+**Difficulty (PROCESS §4):** I1, I2, V1 = Medium-thinking / Grok 4.6 High. I3 = Simple / GPT 5.6 Luna Max.
+
+## P6.I1 — UX debt closure (MT)
 
 Grouped by the audit's root-cause classes, closed class-wide (R12 discipline):
 
@@ -15,17 +17,23 @@ Grouped by the audit's root-cause classes, closed class-wide (R12 discipline):
 - **First-run**: fresh-account experience with guidance instead of empty-board vacuum; load-failure states get retry (UX-11).
 - **Board completes**: drag-and-drop or explicit move affordances incl. keyboard (UX-6); footer stops advertising what doesn't exist.
 
-## P6.I2 — Design-system adoption sweep (M)
+**Owns P0.V2 SYSTEMIC** Library Share silent no-op (divergent Library `Share…` vs studio `Share work`). Do not delay P1 for it; no P1 brief claims it.
+
+## P6.I2 — Design-system adoption sweep (MT)
 
 ESLint rules escalate warn→error directory-by-directory as codemods land; top-offender files first (artifact-studio 425 escapes, managebac 360, conversation-surface 296); radius/type/z values onto tokens; brand violet unified; dark-mode hardcoded-light patches fixed at cause; `spectra-app.css` burn-down (remediation selectors deleted with their causes; !important count tracked as a ratchet in the owning unit). A11y: icon-button names (439 missing), contrast fixes (tertiary/placeholder), focus-visible verified product-wide. Component consolidation: dialogs (done P0/P6 remainder), tooltips→1, skeletons→1, spinners→1, empty states→1 voice.
+
+Not Medium-simple: census codemods sit next to a11y and consolidation taste. Grok, not Luna.
 
 ## P6.I3 — Remaining decompositions + dead-code sweep (S)
 
 Tier-2/3 god-file splits (content adapters, history, chrome, readonly viewers); shadow window-CustomEvent bus folded into `spectraBus` (dead listeners/emitters deleted); dead barrels, orphan tables documented or dropped (ORG-4), schema tombstones cleaned; `wire-or-delete` sweep across flagged dead affordances not already handled.
 
-## P6.V1 — Whole-product convergence audit (M)
+## P6.V1 — Whole-product convergence audit (MT)
 
 The absorbed N10: an audit sweep (AS) plus journey verification at realistic density (10k-node Library, large artifacts) across every primary surface — reuse audit (D41: one control, one name, one shape), bounded-read audit (D42, Network panel), viewport framing (D44), both color schemes, keyboard-only pass, fresh-user cards for every major flow. Findings triaged; LOCAL fixed in-phase; SYSTEMIC escalate.
+
+**Model: Grok 4.6 High.**
 
 ## Exit gate
 

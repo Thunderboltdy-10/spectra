@@ -54,7 +54,7 @@ P8  The Release Gate                   chaos + multiplayer finale, release verdi
                                        (N12 absorbed)
 ```
 
-**Why this order.** Truth before fidelity (a correct merge over a lying replica state is still a lie). Fidelity before protocol (the IR maps to lens deltas; those must be real first). Protocol before AI (AI tools derive from the IR). AI before embeds (embeds consume the unified model). Coherence and identity after correctness. The finale is a gate, not a hope — and this time it cannot be postponed, because P8 *is* the release.
+**Why this order.** Truth before fidelity (a correct merge over a lying replica machine is still a lie). Fidelity before protocol (the IR maps to lens deltas; those must be real first). Protocol before AI (AI tools derive from the IR). AI before embeds (embeds consume the unified model). Coherence and identity after correctness. The finale is a gate, not a hope — and this time it cannot be postponed, because P8 *is* the release.
 
 ## Explicitly out of scope (deferred, not forgotten)
 
@@ -66,10 +66,10 @@ P8  The Release Gate                   chaos + multiplayer finale, release verdi
 ## How Pablo runs this
 
 1. Open `STATE.md` §0, find the lowest OPEN unit whose prerequisites are ACCEPTED.
-2. Check its **difficulty tag** (Simple / Medium / Hard) and route it to the tool/model of your choice (PROCESS §4 explains what each tag demands).
+2. Check its **difficulty tag** (Simple / Medium-simple / Medium-thinking / Hard) and route it to the named model in PROCESS §4 (GPT 5.6 Luna Max, Grok 4.6 High, GPT 5.6 Sol xhigh). Remaining-unit ranking lives there.
 3. Paste the launch prompt template (PROCESS §5) filled in with the unit ID.
-4. When the implementer reports done, launch the paired **verification unit with a different agent** — never the same session, never the same context.
+4. When the implementer reports done, launch the paired **verification unit with a different agent** — never the same session, never the same context. Verifier close-out is PROCESS §5.1.
 5. Accept only when the verifier's verdict is recorded in STATE. Your own ten-minute pass remains the final control; it caught what every automated layer missed last time.
 6. Answer stop-and-ask items before relaunching. A pending question blocks the next unit. Relevant tests belong to their owning unit; the entire repository sweep waits until paired verification has run.
 
-Between units: commit. Never change branch. Keys rotation (STATE §5) is yours and blocks nothing except public exposure risk.
+Between units: commit. Never change branch. Keys rotation (STATE §5) is yours and blocks nothing except public exposure risk. Never two live-product verifiers at once; Hard units are serial.

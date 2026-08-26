@@ -4,9 +4,11 @@
 
 **Prerequisites:** none. Units are parallel-safe.
 
+**Difficulty (PROCESS §4):** I1, I2, I5, I6, V1, V2 were **Medium-simple** in the field — Luna was fine (contained known fixes; V-rows caught huge lies). I4 is **Medium-thinking** (design-system used a stronger model on purpose). Do not generalize P0's Luna success to P1.
+
 **Findings absorbed:** XLS-1, AI-10, PPT-4, ST-2 (dock title, fabricated conflict count), BR-5/CS-11 (trash-on-missing), CS-2 (minimal reaper), SEC-1 (binding fix), SBX-1, SEC-3, BR-8 (token holes), SEC-6, SEC-7 (report only), DS-4 (focus suppression), Part XXIII (all ten experiments), DS-6 worktree debris.
 
-## P0.I1 — Contained critical fixes (M)
+## P0.I1 — Contained critical fixes (MS)
 
 Each fix is small, root-cause-known, and lands with a relevant unit check (VERIFICATION anti-theater rule 1):
 
@@ -19,31 +21,50 @@ Each fix is small, root-cause-known, and lands with a relevant unit check (VERIF
 7. Minimal sweeper cron: stranded `pending` replicas and abandoned claims get re-driven or failed truthfully (full compensation tables come in P1; this stops eternal "Saving…").
 8. DOC-1 interim guard: until P2 unifies schemas, table blocks refuse the flattening path (honest strict-native refusal on table-region edits through the broken adapter) — corruption stops today, capability returns in P2.
 
-## P0.I2 — Convex I/O P0 (M)
+## P0.I2 — Convex I/O P0 (MS)
 
 Per the I/O investigation: `spectraArtifacts.list` returns summary projections (no `content`/`protectedBaseContent`/`aiPreview`/`textIndex`); `listTabs` stops collecting messages/events (denormalized summary fields written at event time); `reconcileStaleRuns` gets `by_status_lease` index and reads only expired leases; planner/timetable reminder crons become `scheduler.runAt` per-item scheduling; Live Dock/run polling intervals rationalized (SSE cursor primary). Gate: idle-product and per-action budgets from ARCHITECTURE-PLATFORM §4 measured before/after; expect the ~34 GB/period pattern to drop by >70%.
 
-## P0.I4 — Design-system baseline (M)
+## P0.I4 — Design-system baseline (MT)
 
-ARCHITECTURE-PLATFORM §3: layering contract + Dialog primitive + composer demotion (220→composer-dock) + the six shell dialogs migrated; Input/Field with focus-visible restored (delete the global suppression at `spectra-app.css:4426`); Button adopted in shell chrome; ESLint arbitrary-value + hex + z-index rules at **warn**. Not a redesign — a floor for every later UI unit.
+ARCHITECTURE-PLATFORM §3: layering contract + Dialog primitive + composer demotion (220→composer-dock) + the six shell dialogs migrated; Input/Field with focus-visible restored (delete the global suppression at `spectra-app.css:4426`); Button adopted in shell chrome; ESLint arbitrary-value + hex + z-index rules at **warn**. Not a redesign — a floor for every later UI unit. Stronger model on purpose — this is not a Luna unit.
 
 ## P0.I5 — Repo hygiene (S)
 
 Delete `.tmp-n*` dirs (~11 GB), root `nul`, stale `validation-report.json`; gitignore `opencode*.json` (keep local); decide `ai-education-workspace-landing-page/` with Pablo; `.gitignore` audit.
 
-## P0.I6 — Security quick wins (M)
+## P0.I6 — Security quick wins (MS)
 
 CF DO room binding (claims.workId/roomId checked against routed room — even though path stays disabled); micropip egress closed; logout/account-switch storage sweep (Bridge token, caches, context store); Bridge pre-pairing empty-token length hole + Origin-only resume hardening; build endpoint bounds. Key rotation: **report only** — STATE §5 names the keys; Pablo rotates.
 
-## P0.V1 — Falsification experiments (M)
+## P0.V1 — Falsification experiments (MS)
 
 Run the compendium Part XXIII list (PNA/localhost fetch, sdt-table repro, slow-copy ingestion, subst drive swap, OneDrive online-only mount, revocation mid-write, pairing-tab theft, DO room probe, fflate determinism, 150 MB transfer). Each: result + implication recorded in STATE Field Notes. These convert HYPOTHESIS findings into facts before P1 designs against them.
 
 For browser portions of verification, use Chrome and keep the claimed tab stable. If a field probe requires Windows desktop or app UI control, use the `computer-use:computer-use` skill and its linked safety guidance before acting.
 
-## P0.V2 — Honest baseline journey (M)
+Luna was the right verifier here because the bugs were huge (unwired StabilityTracker, path-derived mount keys, SDT table identity, pairing slot overwrite, non-canonical packages). P1 verifiers are not this phase.
+
+## P0.V2 — Honest baseline journey (MS)
 
 A journey verifier (fresh agent, VERIFICATION L3) walks the current product with 6–8 goal cards spanning mount/edit/AI/collab/share and produces the baseline truth document: what works today, evidenced. This replaces Nova's void claims as the reference point for measuring the program.
+
+Luna still caught the big lies (lost edits, unwired recovery, silent Share, raw tokens) because they were loud. Do not route P1.V3 on that basis.
+
+## P0.V1/V2 SYSTEMIC owner map
+
+Keep class-wide. Owned by the unit already assigned. **Do not dump into P1.I1** — I1 correctly refused (collides with I2/I3/I4, P2, P4, P6; violates Hard sizing). Full table: PROCESS §4.8.
+
+| Finding | Owner |
+|---|---|
+| BR-3 (`StabilityTracker` unused by `bridge-app`) | P1.I2 |
+| BR-4 / CS-11 (path-derived `mount_root_key`) | P1.I1/I2 replica/Bridge split as those briefs already draw it |
+| V2 lost-edit / status / Bridge-recovery | P1.I1 truth half; P1.I3 presenter; P1.I4 Bridge recovery/pairing surfaces. Do not pile presenter/recovery into I1. |
+| WC-1 (six pairing offers, last code kept) | P1.I4 |
+| DOC-5 (SDT-wrapped table / lens identity) | P2.I1 |
+| PKG-1 (identical packages, different SHA) | P2.I1 |
+| Library Share silent no-op | P6.I1. Do not delay P1. No P1 brief claims it. |
+| AI target/context legibility | P4.I2 |
 
 ## Exit gate
 

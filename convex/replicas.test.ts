@@ -354,6 +354,41 @@ describe("replica truth machine", () => {
     expect(policy.preset).toBe("spectra");
   });
 
+  it("parks a locked write outside the eligible claim window", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    });
+    const claimed = await t.mutation(api.bridgeSync.claimWrite, {
+      credential: bridgeCredential,
+    });
+    const requestId = queued.requestId as Id<"bridgeWriteRequests">;
+    expect(claimed.request?.requestId).toBe(requestId);
+    await t.mutation(api.bridgeSync.completeWrite, {
+      credential: bridgeCredential,
+      requestId,
+      outcome: "waiting",
+      errorCode: "office-locked",
+      errorMessage: "Waiting for Office",
+    });
+
+    const immediate = await t.mutation(api.bridgeSync.claimWrite, {
+      credential: bridgeCredential,
+    });
+    expect(immediate.request).toBeNull();
+    const request = await t.run(async (ctx) => ctx.db.get(requestId));
+    expect(request).toMatchObject({ state: "pending", errorCode: "office-locked" });
+    expect(request?.retryAt).toBeGreaterThan(Date.now());
+  });
+
   it("reconciles legacy labels from retained payload hashes", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

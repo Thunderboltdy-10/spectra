@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
@@ -21,7 +21,9 @@ impl Default for WatcherConfig {
     fn default() -> Self {
         Self {
             stability_window: Duration::from_millis(750),
-            reconciliation_interval: Duration::from_secs(5 * 60),
+            // Watcher deltas are the normal engine. A full walk is only a
+            // repair for missed OS events, not a five-minute sync rhythm.
+            reconciliation_interval: Duration::from_secs(6 * 60 * 60),
         }
     }
 }
@@ -42,6 +44,7 @@ impl WatcherConfig {
 pub struct MountWatcher {
     _watcher: RecommendedWatcher,
     events: std::sync::mpsc::Receiver<notify::Result<Event>>,
+    root: PathBuf,
     pub config: WatcherConfig,
 }
 
@@ -55,11 +58,29 @@ impl MountWatcher {
         Ok(Self {
             _watcher: watcher,
             events,
+            root: root.to_owned(),
             config,
         })
     }
     pub fn drain(&self) -> Vec<notify::Result<Event>> {
         self.events.try_iter().collect()
+    }
+
+    pub fn drain_paths(&self) -> ChangeBatch {
+        let mut paths = Vec::new();
+        let mut errors = Vec::new();
+        for event in self.drain() {
+            match event {
+                Ok(event) => paths.extend(event.paths),
+                Err(error) => errors.push(ScanFailure {
+                    relative_path: "<watcher>".into(),
+                    reason: error.to_string(),
+                }),
+            }
+        }
+        let mut batch = classify_changed_paths(&self.root, paths);
+        batch.failures.extend(errors);
+        batch
     }
 }
 
@@ -78,7 +99,98 @@ pub struct ScanEntry {
 #[serde(rename_all = "camelCase")]
 pub struct ScanPage {
     pub entries: Vec<ScanEntry>,
+    pub failures: Vec<ScanFailure>,
     pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanFailure {
+    pub relative_path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChangeBatch {
+    pub existing_files: Vec<PathBuf>,
+    pub missing_paths: Vec<PathBuf>,
+    pub failures: Vec<ScanFailure>,
+}
+
+pub fn classify_changed_paths(
+    root: &Path,
+    paths: impl IntoIterator<Item = PathBuf>,
+) -> ChangeBatch {
+    let mut existing = BTreeSet::new();
+    let mut missing = BTreeSet::new();
+    let mut failures = Vec::new();
+    for path in paths {
+        if path == root || !path.starts_with(root) {
+            continue;
+        }
+        if is_office_lock_file(&path) {
+            if let Some(parent) = path.parent() {
+                match std::fs::read_dir(parent) {
+                    Ok(entries) => {
+                        for entry in entries {
+                            match entry {
+                                Ok(entry) => {
+                                    let candidate = entry.path();
+                                    if candidate.is_file() && !is_office_lock_file(&candidate) {
+                                        existing.insert(candidate);
+                                    }
+                                }
+                                Err(error) => failures.push(ScanFailure {
+                                    relative_path: relative_key(root, parent),
+                                    reason: error.to_string(),
+                                }),
+                            }
+                        }
+                    }
+                    Err(error) => failures.push(ScanFailure {
+                        relative_path: relative_key(root, &path),
+                        reason: error.to_string(),
+                    }),
+                }
+            }
+            continue;
+        }
+        if path.is_dir() {
+            for entry in WalkDir::new(&path).follow_links(false) {
+                match entry {
+                    Ok(entry)
+                        if entry.file_type().is_file() && !is_office_lock_file(entry.path()) =>
+                    {
+                        existing.insert(entry.into_path());
+                    }
+                    Ok(_) => {}
+                    Err(error) => failures.push(ScanFailure {
+                        relative_path: error
+                            .path()
+                            .map(|path| relative_key(root, path))
+                            .unwrap_or_else(|| relative_key(root, &path)),
+                        reason: error.to_string(),
+                    }),
+                }
+            }
+        } else if path.is_file() {
+            existing.insert(path);
+        } else {
+            missing.insert(path);
+        }
+    }
+    ChangeBatch {
+        existing_files: existing.into_iter().collect(),
+        missing_paths: missing.into_iter().collect(),
+        failures,
+    }
+}
+
+pub fn relative_key(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 pub fn scan_page<P: Platform>(
@@ -88,34 +200,98 @@ pub fn scan_page<P: Platform>(
     limit: usize,
 ) -> anyhow::Result<ScanPage> {
     let limit = limit.clamp(1, 500);
-    let mut paths = WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path() != root)
-        .filter(|entry| !is_office_lock_file(entry.path()))
-        .collect::<Vec<_>>();
-    paths.sort_by(|a, b| a.path().cmp(b.path()));
+    let snapshot = scan_mount(platform, root)?;
     let start = cursor
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let mut entries = Vec::with_capacity(limit);
-    for entry in paths.iter().skip(start).take(limit) {
-        let path = entry.path();
-        let relative = path
-            .strip_prefix(root)?
-            .to_string_lossy()
-            .replace('\\', "/");
-        let metadata = entry.metadata()?;
+    let entries = snapshot
+        .entries
+        .iter()
+        .skip(start)
+        .take(limit)
+        .cloned()
+        .collect::<Vec<_>>();
+    let next = start + entries.len();
+    Ok(ScanPage {
+        entries,
+        failures: if start == 0 {
+            snapshot.failures
+        } else {
+            Vec::new()
+        },
+        next_cursor: (next < snapshot.entries.len()).then(|| next.to_string()),
+    })
+}
+
+/// A repair scan walks the selected tree exactly once. The caller pages the
+/// resulting resources to the cloud; repeating the filesystem walk for every
+/// cloud page would turn a 10k-file mount into quadratic local work.
+pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<ScanPage> {
+    let mut paths = WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|entry| match entry {
+            Ok(entry) if entry.path() != root && !is_office_lock_file(entry.path()) => {
+                Some((entry.path().to_owned(), Some(entry), None))
+            }
+            Ok(_) => None,
+            Err(error) => Some((
+                error.path().unwrap_or(root).to_owned(),
+                None,
+                Some(error.to_string()),
+            )),
+        })
+        .collect::<Vec<_>>();
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut entries = Vec::with_capacity(paths.len());
+    let mut failures = Vec::new();
+    for (path, entry, walk_error) in &paths {
+        if let Some(reason) = walk_error {
+            failures.push(ScanFailure {
+                relative_path: relative_key(root, path),
+                reason: reason.clone(),
+            });
+            continue;
+        }
+        let Some(entry) = entry else { continue };
+        let relative = relative_key(root, path);
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                failures.push(ScanFailure {
+                    relative_path: relative,
+                    reason: error.to_string(),
+                });
+                continue;
+            }
+        };
         let is_directory = metadata.is_dir();
         let resource_id = if is_directory {
             format!(
                 "dir_{}",
-                hex::encode(sha2::Sha256::digest(relative.as_bytes()))[..24].to_string()
+                &hex::encode(sha2::Sha256::digest(relative.as_bytes()))[..24]
             )
         } else {
-            let file = File::open(path)?;
-            local_resource_id(&platform.file_identity(&file)?)
+            let file = match File::open(path) {
+                Ok(file) => file,
+                Err(error) => {
+                    failures.push(ScanFailure {
+                        relative_path: relative,
+                        reason: error.to_string(),
+                    });
+                    continue;
+                }
+            };
+            match platform.file_identity(&file) {
+                Ok(identity) => local_resource_id(&identity),
+                Err(error) => {
+                    failures.push(ScanFailure {
+                        relative_path: relative,
+                        reason: error.to_string(),
+                    });
+                    continue;
+                }
+            }
         };
         entries.push(ScanEntry {
             local_resource_id: resource_id,
@@ -126,10 +302,10 @@ pub fn scan_page<P: Platform>(
             double_sync_risk: is_double_sync_path(path),
         });
     }
-    let next = start + entries.len();
     Ok(ScanPage {
         entries,
-        next_cursor: (next < paths.len()).then(|| next.to_string()),
+        failures,
+        next_cursor: None,
     })
 }
 
@@ -483,5 +659,36 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn folder_event_expands_only_that_subtree() {
+        let dir = tempdir().unwrap();
+        let changed = dir.path().join("renamed");
+        std::fs::create_dir_all(changed.join("nested")).unwrap();
+        std::fs::write(changed.join("one.docx"), b"one").unwrap();
+        std::fs::write(changed.join("nested/two.xlsx"), b"two").unwrap();
+        std::fs::write(dir.path().join("untouched.pptx"), b"untouched").unwrap();
+
+        let batch = classify_changed_paths(dir.path(), [changed]);
+        let relative = batch
+            .existing_files
+            .iter()
+            .map(|path| relative_key(dir.path(), path))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            relative,
+            vec!["renamed/nested/two.xlsx", "renamed/one.docx"]
+        );
+        assert!(batch.missing_paths.is_empty());
+    }
+
+    #[test]
+    fn removed_path_is_reported_without_scanning_the_mount() {
+        let dir = tempdir().unwrap();
+        let removed = dir.path().join("old/report.docx");
+        let batch = classify_changed_paths(dir.path(), [removed.clone()]);
+        assert!(batch.existing_files.is_empty());
+        assert_eq!(batch.missing_paths, vec![removed]);
     }
 }

@@ -34,46 +34,12 @@ pub struct LocalBridgeStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", content = "payload", rename_all = "camelCase")]
-pub enum BrowserRequest {
-    MountsList,
-    TreeScan(TreeScanRequest),
-    FileStat(ResourceRequest),
-    FileRead(ResourceRequest),
-    WatchSubscribe { mount_id: String },
-    StatusSubscribe,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct TreeScanRequest {
-    pub mount_id: String,
-    pub cursor: Option<String>,
-    pub limit: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ResourceRequest {
-    pub resource_id: String,
-    pub revision: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingOffer {
     pub challenge: String,
     pub short_code: String,
     pub browser_origin: String,
     pub expires_at: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", content = "payload", rename_all = "camelCase")]
-pub enum BrowserResponse {
-    Ready { protocol_version: String },
-    Error { code: String, message: String },
-    Pong,
 }
 
 pub fn protocol_major(value: &str) -> Option<u32> {

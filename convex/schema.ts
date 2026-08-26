@@ -1703,12 +1703,14 @@ export default defineSchema({
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
     claimedAt: v.optional(v.number()),
+    retryAt: v.optional(v.number()),
     attemptCount: v.optional(v.number()),
     expiresAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_device_state", ["deviceId", "state"])
+    .index("by_device_state_retry", ["deviceId", "state", "retryAt"])
     .index("by_work_created", ["workId", "createdAt"])
     .index("by_account_key", ["accountId", "idempotencyKey"])
     .index("by_payload_state", ["payloadRef", "state"])

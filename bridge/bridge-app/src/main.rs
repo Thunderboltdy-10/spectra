@@ -1,21 +1,27 @@
 use sha2::Digest;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs::File;
 use std::sync::Arc;
 
 use spectra_bridge_core::fs::{
     FsError, Grant, GrantRegistry, SafeWriter, WriteRequest, sha256_file,
 };
-use spectra_bridge_core::journal::Journal;
-use spectra_bridge_core::platform::{HostPlatform, Platform};
+use spectra_bridge_core::identity::{AdoptionCandidate, adopt, local_resource_id};
+use spectra_bridge_core::journal::{Journal, OpState, ResourceRecord};
+use spectra_bridge_core::platform::{HostPlatform, OsFileIdentity, Platform};
 use spectra_bridge_core::protocol::{LocalMountStatus, PairingOffer};
 use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
-    DiscoveredResource, ReplicaMigrationPage, claim_fs_request, claim_write, complete_fs_request,
-    complete_write, detach_mount, discover_resource, drain_cloud_queue, exchange_pairing,
+    Backoff, ClaimPrecondition, ClaimedWrite, DeliveredChange, DiscoveredRegistration,
+    DiscoveredResource, QueuedChangeEnvelope, ReplicaMigrationPage, ReportedChange,
+    claim_fs_request, claim_write, complete_fs_request, complete_write, detach_mount,
+    discover_resources_page, drain_cloud_queue, exchange_pairing, inspect_claim_target,
     migrate_cloud_replica_page, reconcile_missing_resources, register_mount, resume_pairing,
     set_mount_availability, upload_resource_payload,
 };
 use spectra_bridge_core::watcher::{
-    MountWatcher, WatcherConfig, office_lock_exists, office_lock_paths, scan_page,
+    MountWatcher, StabilityTracker, WatcherConfig, office_lock_exists, office_lock_paths,
+    relative_key, scan_mount,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -341,6 +347,425 @@ async fn run_replica_migration(
     Ok(())
 }
 
+fn native_format(path: &std::path::Path) -> String {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file")
+        .to_ascii_lowercase()
+}
+
+fn carries_native_payload(format: &str) -> bool {
+    [
+        "docx",
+        "docm",
+        "dotx",
+        "dotm",
+        "xlsx",
+        "xlsm",
+        "xltx",
+        "xltm",
+        "xlam",
+        "pptx",
+        "pptm",
+        "potx",
+        "potm",
+        "ppsx",
+        "ppsm",
+        "ppam",
+        "spectra-pkg",
+    ]
+    .contains(&format)
+}
+
+fn media_type(format: &str) -> &'static str {
+    match format {
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docm" | "dotm" => "application/vnd.ms-word.document.macroEnabled.12",
+        "dotx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+        "xlsx" | "xltx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsm" | "xltm" | "xlam" => "application/vnd.ms-excel.sheet.macroEnabled.12",
+        "pptm" | "potm" | "ppsm" | "ppam" => {
+            "application/vnd.ms-powerpoint.presentation.macroEnabled.12"
+        }
+        "potx" => "application/vnd.openxmlformats-officedocument.presentationml.template",
+        "spectra-pkg" => "application/vnd.spectra.package+zip",
+        _ => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+}
+
+fn derived_change_key(
+    grant_id: &str,
+    resource_id: &str,
+    previous_path: Option<&str>,
+    path: &str,
+    before: Option<&str>,
+    after: Option<&str>,
+    op: &str,
+) -> String {
+    let mut digest = sha2::Sha256::new();
+    for value in [
+        "spectra-bridge-change-v1",
+        grant_id,
+        resource_id,
+        previous_path.unwrap_or(""),
+        path,
+        before.unwrap_or(""),
+        after.unwrap_or(""),
+        op,
+    ] {
+        digest.update(value.as_bytes());
+        digest.update([0]);
+    }
+    hex::encode(digest.finalize())
+}
+
+fn adopt_resource_record(
+    grant: &Grant,
+    journal: &Journal,
+    path: &std::path::Path,
+    hash: &str,
+    generation: u64,
+) -> anyhow::Result<(ResourceRecord, Option<ResourceRecord>)> {
+    let relative_path = relative_key(grant.device_root(), path);
+    anyhow::ensure!(!relative_path.is_empty(), "changed path is the mount root");
+    let file = File::open(path)?;
+    let os_identity = HostPlatform.file_identity(&file)?;
+    let candidates = journal
+        .resources_for_grant(&grant.id)?
+        .into_iter()
+        .map(|resource| AdoptionCandidate {
+            local_resource_id: resource.local_resource_id,
+            path_key: resource.path_key,
+            content_hash: resource.content_hash.unwrap_or_default(),
+            os_identity: match (resource.volume, resource.file_index) {
+                (Some(volume), Some(file_index)) => Some(OsFileIdentity { volume, file_index }),
+                _ => None,
+            },
+            available: resource.available,
+            last_seen_generation: resource.last_seen_generation,
+        })
+        .collect::<Vec<_>>();
+    let adopted_id = adopt(
+        &candidates,
+        Some(&os_identity),
+        &relative_path,
+        hash,
+        generation,
+    )
+    .map(|candidate| candidate.local_resource_id.clone())
+    .unwrap_or_else(|| local_resource_id(&os_identity));
+    let previous = journal.resource_by_id(&adopted_id)?;
+    Ok((
+        ResourceRecord {
+            local_resource_id: adopted_id,
+            grant_id: grant.id.clone(),
+            path_key: relative_path,
+            volume: Some(os_identity.volume),
+            file_index: Some(os_identity.file_index),
+            content_hash: Some(hash.to_owned()),
+            revision: previous
+                .as_ref()
+                .and_then(|resource| resource.revision.clone()),
+            available: true,
+            unavailable_reason: None,
+            last_seen_generation: generation,
+        },
+        previous,
+    ))
+}
+
+fn enqueue_stable_change(
+    grant: &Grant,
+    journal: &Journal,
+    path: &std::path::Path,
+    hash: &str,
+    generation: u64,
+) -> anyhow::Result<bool> {
+    let (resource, previous) = adopt_resource_record(grant, journal, path, hash, generation)?;
+    let unchanged = previous.as_ref().is_some_and(|candidate| {
+        candidate.available
+            && candidate.path_key == resource.path_key
+            && candidate.content_hash.as_deref() == Some(hash)
+            && candidate.revision.as_deref() == Some(hash)
+    });
+    journal.upsert_resource(&resource)?;
+    if unchanged {
+        return Ok(false);
+    }
+    let mount_id = journal
+        .config(&format!("cloud_mount:{}", grant.id))?
+        .ok_or_else(|| anyhow::anyhow!("cloud mount is not registered yet"))?;
+    let before = previous.as_ref().and_then(|candidate| {
+        candidate
+            .content_hash
+            .as_deref()
+            .or(candidate.revision.as_deref())
+    });
+    let previous_path = previous
+        .as_ref()
+        .filter(|candidate| candidate.path_key != resource.path_key)
+        .map(|candidate| candidate.path_key.as_str());
+    let key = derived_change_key(
+        &grant.id,
+        &resource.local_resource_id,
+        previous_path,
+        &resource.path_key,
+        before,
+        Some(hash),
+        "upsert",
+    );
+    let operation = journal.begin_intent(
+        &key,
+        "cloud.report-change",
+        Some(&resource.local_resource_id),
+        before,
+        Some(hash),
+    )?;
+    if operation.state != OpState::Verified {
+        let envelope = QueuedChangeEnvelope {
+            grant_id: grant.id.clone(),
+            mount_id,
+            change: ReportedChange {
+                journal_id: operation.op_id.clone(),
+                resource_id: resource.local_resource_id,
+                op: "upsert".into(),
+                relative_path: Some(resource.path_key),
+                previous_relative_path: previous_path.map(str::to_owned),
+                hash: Some(hash.to_owned()),
+                revision_before: before.map(str::to_owned),
+                size: Some(path.metadata()?.len()),
+                native_format: Some(native_format(path)),
+            },
+        };
+        journal.enqueue(
+            &operation.op_id,
+            "outbound-change",
+            &serde_json::to_string(&envelope)?,
+        )?;
+    }
+    Ok(true)
+}
+
+fn enqueue_missing_path(
+    grant: &Grant,
+    journal: &Journal,
+    path: &std::path::Path,
+    generation: u64,
+) -> anyhow::Result<usize> {
+    let relative_path = relative_key(grant.device_root(), path);
+    let mount_id = journal
+        .config(&format!("cloud_mount:{}", grant.id))?
+        .ok_or_else(|| anyhow::anyhow!("cloud mount is not registered yet"))?;
+    let mut queued = 0;
+    for resource in journal.resources_with_path_prefix(&grant.id, &relative_path)? {
+        if !resource.available {
+            continue;
+        }
+        journal.mark_resource_unavailable(
+            &resource.local_resource_id,
+            "missing-on-disk",
+            generation,
+        )?;
+        let key = derived_change_key(
+            &grant.id,
+            &resource.local_resource_id,
+            None,
+            &resource.path_key,
+            resource
+                .content_hash
+                .as_deref()
+                .or(resource.revision.as_deref()),
+            None,
+            "unavailable",
+        );
+        let operation = journal.begin_intent(
+            &key,
+            "cloud.report-change",
+            Some(&resource.local_resource_id),
+            resource
+                .content_hash
+                .as_deref()
+                .or(resource.revision.as_deref()),
+            None,
+        )?;
+        if operation.state != OpState::Verified {
+            let envelope = QueuedChangeEnvelope {
+                grant_id: grant.id.clone(),
+                mount_id: mount_id.clone(),
+                change: ReportedChange {
+                    journal_id: operation.op_id.clone(),
+                    resource_id: resource.local_resource_id,
+                    op: "unavailable".into(),
+                    relative_path: Some(resource.path_key),
+                    previous_relative_path: None,
+                    hash: None,
+                    revision_before: resource.content_hash.or(resource.revision),
+                    size: None,
+                    native_format: None,
+                },
+            };
+            journal.enqueue(
+                &operation.op_id,
+                "outbound-change",
+                &serde_json::to_string(&envelope)?,
+            )?;
+            queued += 1;
+        }
+    }
+    Ok(queued)
+}
+
+async fn upload_discovered_resource(
+    deployment: &str,
+    credential: &str,
+    grant: &Grant,
+    resource: &DiscoveredResource,
+    registration: &DiscoveredRegistration,
+) -> anyhow::Result<()> {
+    if !registration.needs_payload || !carries_native_payload(&resource.native_format) {
+        return Ok(());
+    }
+    let replica_id = registration
+        .replica_id
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("Bridge registration returned no replica id"))?;
+    let relative = std::path::Path::new(&resource.relative_path);
+    let candidate = grant.device_root().join(relative);
+    anyhow::ensure!(candidate.exists(), "file disappeared before payload upload");
+    anyhow::ensure!(
+        !office_lock_exists(&candidate),
+        "Office is still saving this file"
+    );
+    let canonical = candidate.canonicalize()?;
+    anyhow::ensure!(
+        canonical.starts_with(grant.device_root()),
+        "payload path escaped its selected folder"
+    );
+    let bytes = std::fs::read(&canonical)?;
+    let hash = hex::encode(sha2::Sha256::digest(&bytes));
+    anyhow::ensure!(
+        resource.content_hash.as_deref() == Some(hash.as_str()),
+        "file changed before payload upload"
+    );
+    upload_resource_payload(
+        deployment,
+        credential,
+        replica_id,
+        &bytes,
+        &hash,
+        media_type(&resource.native_format),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn finish_delivered_change(
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    deployment: &str,
+    credential: &str,
+    delivery: DeliveredChange,
+) -> anyhow::Result<()> {
+    let post_hash = delivery.envelope.change.hash.as_deref();
+    if !delivery.result.needs_payload {
+        return journal.acknowledge_change(
+            &delivery.item,
+            &delivery.envelope.change.resource_id,
+            post_hash,
+        );
+    }
+    let Some(replica_id) = delivery.result.replica_id.as_deref() else {
+        return journal.fail_queue(
+            &delivery.item,
+            "payload-target-missing",
+            "The cloud did not return a payload target",
+        );
+    };
+    let Some(grant) = grants
+        .device_grants()
+        .into_iter()
+        .find(|grant| grant.id == delivery.envelope.grant_id)
+    else {
+        return journal.fail_queue(
+            &delivery.item,
+            "grant-unavailable",
+            "The selected folder is no longer available",
+        );
+    };
+    let Some(relative_path) = delivery.envelope.change.relative_path.as_deref() else {
+        return journal.fail_queue(
+            &delivery.item,
+            "payload-path-missing",
+            "The queued payload path is missing",
+        );
+    };
+    let target = match grants.resolve(&grant.id, std::path::Path::new(relative_path)) {
+        Ok(path) => path,
+        Err(error) => {
+            return journal.fail_queue(&delivery.item, "payload-path-invalid", &error.to_string());
+        }
+    };
+    if !target.exists() {
+        journal.fail_queue(
+            &delivery.item,
+            "file-missing-before-upload",
+            "The file was removed before its bytes could be uploaded",
+        )?;
+        let generation = journal.next_generation(&grant.id)?;
+        let _ = enqueue_missing_path(&grant, journal, &target, generation);
+        return Ok(());
+    }
+    if office_lock_exists(&target) || HostPlatform.is_locked(&target).unwrap_or(true) {
+        return journal.retry_queue(
+            delivery.item.id,
+            Backoff::delay_for_attempt(delivery.item.attempts),
+        );
+    }
+    let bytes = match std::fs::read(&target) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return journal.retry_queue(
+                delivery.item.id,
+                Backoff::delay_for_attempt(delivery.item.attempts),
+            );
+        }
+    };
+    let hash = hex::encode(sha2::Sha256::digest(&bytes));
+    if post_hash != Some(hash.as_str()) {
+        return journal.fail_queue(
+            &delivery.item,
+            "file-changed-before-upload",
+            "The file changed again before its queued bytes could be uploaded",
+        );
+    }
+    let format = delivery
+        .envelope
+        .change
+        .native_format
+        .as_deref()
+        .unwrap_or("file");
+    match upload_resource_payload(
+        deployment,
+        credential,
+        replica_id,
+        &bytes,
+        &hash,
+        media_type(format),
+    )
+    .await
+    {
+        Ok(_) => journal.acknowledge_change(
+            &delivery.item,
+            &delivery.envelope.change.resource_id,
+            Some(&hash),
+        ),
+        Err(_) => journal.retry_queue(
+            delivery.item.id,
+            Backoff::delay_for_attempt(delivery.item.attempts),
+        ),
+    }
+}
+
 async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     set_mount_status(
         journal,
@@ -359,49 +784,67 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "Bridge credential is unavailable".to_string())?;
     let deployment = deployment_url(journal)?;
-    let mut cursor = None;
+    let generation = journal
+        .next_generation(&grant.id)
+        .map_err(|error| error.to_string())?;
     let mut files = Vec::new();
     let owner_lock_paths = office_lock_paths(grant.device_root(), 500);
     let scan_id = uuid::Uuid::new_v4().to_string();
     let mut double_sync_risk = false;
     let mut locked_files = 0usize;
-    loop {
-        let page = scan_page(&HostPlatform, grant.device_root(), cursor.as_deref(), 500)
-            .map_err(|error| error.to_string())?;
-        for entry in page.entries {
-            if entry.is_directory {
+    let mut isolated_failures = 0usize;
+    let mut scan_complete = true;
+    let scan = scan_mount(&HostPlatform, grant.device_root()).map_err(|error| error.to_string())?;
+    for _failure in scan.failures {
+        isolated_failures += 1;
+        scan_complete = false;
+    }
+    for entry in scan.entries {
+        if entry.is_directory {
+            continue;
+        }
+        double_sync_risk |= entry.double_sync_risk;
+        let native_format = std::path::Path::new(&entry.relative_path)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("file")
+            .to_ascii_lowercase();
+        let entry_path = grant.device_root().join(&entry.relative_path);
+        let locked = office_lock_exists(&entry_path);
+        if locked {
+            locked_files += 1;
+            scan_complete = false;
+            continue;
+        }
+        let content_hash = match entry.content_hash.or_else(|| sha256_file(&entry_path).ok()) {
+            Some(hash) => hash,
+            None => {
+                isolated_failures += 1;
+                scan_complete = false;
                 continue;
             }
-            double_sync_risk |= entry.double_sync_risk;
-            let native_format = std::path::Path::new(&entry.relative_path)
-                .extension()
-                .and_then(|value| value.to_str())
-                .unwrap_or("file")
-                .to_ascii_lowercase();
-            let entry_path = grant.device_root().join(&entry.relative_path);
-            let locked = office_lock_exists(&entry_path);
-            if locked {
-                locked_files += 1;
-            }
-            // Never hash a file while Office owns it. The next watcher pass
-            // will pick it up after the owner lock disappears.
-            let content_hash = if locked {
-                None
-            } else {
-                entry.content_hash.or_else(|| sha256_file(&entry_path).ok())
+        };
+        let (record, _) =
+            match adopt_resource_record(grant, journal, &entry_path, &content_hash, generation) {
+                Ok(record) => record,
+                Err(_) => {
+                    isolated_failures += 1;
+                    scan_complete = false;
+                    continue;
+                }
             };
-            files.push(DiscoveredResource {
-                local_resource_id: entry.local_resource_id,
-                relative_path: entry.relative_path,
-                size: entry.size,
-                content_hash,
-                native_format,
-            });
+        if journal.upsert_resource(&record).is_err() {
+            isolated_failures += 1;
+            scan_complete = false;
+            continue;
         }
-        cursor = page.next_cursor;
-        if cursor.is_none() {
-            break;
-        }
+        files.push(DiscoveredResource {
+            local_resource_id: record.local_resource_id,
+            relative_path: entry.relative_path,
+            size: entry.size,
+            content_hash: Some(content_hash),
+            native_format,
+        });
     }
     set_mount_status(
         journal,
@@ -433,132 +876,65 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     journal
         .set_config(&format!("cloud_mount:{}", grant.id), &mount_id)
         .map_err(|error| error.to_string())?;
-    for (index, resource) in files.iter().enumerate() {
-        let registration = discover_resource(&deployment, &credential, &mount_id, resource)
+    let mut processed = 0usize;
+    for page in files.chunks(100) {
+        let registrations = discover_resources_page(&deployment, &credential, &mount_id, page)
             .await
             .map_err(|error| error.to_string())?;
-        if registration.skipped {
+        for (resource, registration) in page.iter().zip(registrations.iter()) {
+            processed += 1;
+            if registration.skipped {
+                if registration.reason.as_deref() != Some("approval-required") {
+                    isolated_failures += 1;
+                }
+            } else if upload_discovered_resource(
+                &deployment,
+                &credential,
+                grant,
+                resource,
+                registration,
+            )
+            .await
+            .is_err()
+            {
+                isolated_failures += 1;
+            } else {
+                let _ = journal.mark_resource_reported(
+                    &resource.local_resource_id,
+                    resource.content_hash.as_deref(),
+                );
+            }
             set_mount_status(
                 journal,
                 &grant.id,
-                "waiting",
-                registration
-                    .reason
-                    .as_deref()
-                    .unwrap_or("Waiting for approval in Spectra"),
-                index + 1,
+                "syncing",
+                "Making files available in Spectra…",
+                processed,
                 files.len(),
             )?;
-            continue;
         }
-        if registration.needs_payload
-            && [
-                "docx",
-                "docm",
-                "dotx",
-                "dotm",
-                "xlsx",
-                "xlsm",
-                "xltx",
-                "xltm",
-                "xlam",
-                "pptx",
-                "pptm",
-                "potx",
-                "potm",
-                "ppsx",
-                "ppsm",
-                "ppam",
-                "spectra-pkg",
-            ]
-            .contains(&resource.native_format.as_str())
-        {
-            let replica_id = registration
-                .replica_id
-                .as_deref()
-                .ok_or_else(|| "Bridge registration returned no replica id".to_string())?;
-            let relative = std::path::Path::new(&resource.relative_path);
-            if relative.is_absolute()
-                || relative.components().any(|part| {
-                    matches!(
-                        part,
-                        std::path::Component::ParentDir
-                            | std::path::Component::RootDir
-                            | std::path::Component::Prefix(_)
-                    )
-                })
-            {
-                return Err("payload path escaped its selected folder".into());
-            }
-            let candidate = grant.device_root().join(relative);
-            if office_lock_exists(&candidate) {
-                // The mount remains usable and unrelated files continue to
-                // sync. This specific file is retried after Word releases it.
-                continue;
-            }
-            let canonical = candidate
-                .canonicalize()
-                .map_err(|error| error.to_string())?;
-            if !canonical.starts_with(grant.device_root()) {
-                return Err("payload path escaped its selected folder".into());
-            }
-            let bytes = std::fs::read(&canonical).map_err(|error| error.to_string())?;
-            let hash = hex::encode(sha2::Sha256::digest(&bytes));
-            if resource.content_hash.as_deref() != Some(hash.as_str()) {
-                return Err(format!(
-                    "{} changed while it was being read; retrying after it settles",
-                    resource.relative_path
-                ));
-            }
-            let media_type = match resource.native_format.as_str() {
-                "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "docm" | "dotm" => "application/vnd.ms-word.document.macroEnabled.12",
-                "dotx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
-                "xlsx" | "xltx" => {
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                }
-                "xlsm" | "xltm" | "xlam" => "application/vnd.ms-excel.sheet.macroEnabled.12",
-                "pptm" | "potm" | "ppsm" | "ppam" => {
-                    "application/vnd.ms-powerpoint.presentation.macroEnabled.12"
-                }
-                "potx" => "application/vnd.openxmlformats-officedocument.presentationml.template",
-                "spectra-pkg" => "application/vnd.spectra.package+zip",
-                _ => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            };
-            upload_resource_payload(
-                &deployment,
-                &credential,
-                replica_id,
-                &bytes,
-                &hash,
-                media_type,
-            )
+    }
+    if scan_complete {
+        reconcile_missing_resources(&deployment, &credential, &mount_id, &scan_id)
             .await
             .map_err(|error| error.to_string())?;
-        }
-        set_mount_status(
-            journal,
-            &grant.id,
-            "syncing",
-            "Making files available in Spectra…",
-            index + 1,
-            files.len(),
-        )?;
     }
-    reconcile_missing_resources(&deployment, &credential, &mount_id, &scan_id)
-        .await
-        .map_err(|error| error.to_string())?;
-    if locked_files > 0 {
+    if locked_files > 0 || isolated_failures > 0 {
         set_mount_status(
             journal,
             &grant.id,
             "waiting",
             &format!(
-                "Waiting for Office to finish saving {locked_files} file{}",
-                if locked_files == 1 { "" } else { "s" }
+                "{} file{} will retry after the next change or repair scan",
+                locked_files + isolated_failures,
+                if locked_files + isolated_failures == 1 {
+                    ""
+                } else {
+                    "s"
+                }
             ),
-            files.len().saturating_sub(locked_files),
-            files.len(),
+            files.len().saturating_sub(isolated_failures),
+            files.len() + locked_files,
         )
     } else {
         set_mount_status(
@@ -572,129 +948,265 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     }
 }
 
-async fn drain_write_requests(
+async fn process_write_request(
     grants: &Arc<GrantRegistry>,
     journal: &Arc<Journal>,
     deployment: &str,
     credential: &str,
-) -> anyhow::Result<usize> {
-    use sha2::Digest;
-    let mut handled = 0;
-    for _ in 0..20 {
-        let Some(request) = claim_write(deployment, credential).await? else {
-            break;
-        };
-        let response = match reqwest::Client::new()
-            .get(&request.payload_url)
-            .send()
-            .await
-        {
-            Ok(response) => response.error_for_status(),
-            Err(error) => Err(error),
-        };
-        let payload = match response {
-            Ok(response) => response.bytes().await?.to_vec(),
-            Err(error) => {
-                complete_write(
-                    deployment,
-                    credential,
-                    &request.request_id,
-                    "failed",
-                    None,
-                    Some(("payload-download-failed", &error.to_string())),
-                )
-                .await?;
-                handled += 1;
-                continue;
-            }
-        };
-        let payload_hash = hex::encode(sha2::Sha256::digest(&payload));
-        if payload_hash != request.content_hash {
+    request: ClaimedWrite,
+) -> anyhow::Result<bool> {
+    let relative = std::path::Path::new(&request.relative_path);
+    let target = match grants.resolve(&request.grant_id, relative) {
+        Ok(target) => target,
+        Err(error) => {
             complete_write(
                 deployment,
                 credential,
                 &request.request_id,
                 "failed",
                 None,
+                Some(("target-unavailable", &error.to_string())),
+            )
+            .await?;
+            return Ok(true);
+        }
+    };
+    let actual_revision = match inspect_claim_target(&HostPlatform, &target, &request.base_revision)
+    {
+        ClaimPrecondition::Ready { revision } => revision,
+        ClaimPrecondition::Missing => {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "conflicted",
+                None,
                 Some((
-                    "payload-hash-mismatch",
-                    "downloaded payload did not match its verified hash",
+                    "externally-deleted",
+                    "The file was removed outside Spectra; it was not recreated.",
                 )),
             )
             .await?;
-            handled += 1;
-            continue;
+            return Ok(true);
         }
-        let relative = std::path::Path::new(&request.relative_path);
-        let target = grants.resolve(&request.grant_id, relative)?;
-        let actual_revision = target.exists().then(|| sha256_file(&target)).transpose()?;
-        let known_revision = actual_revision
-            .as_deref()
-            .unwrap_or(request.base_revision.as_str());
-        let writer = SafeWriter::new(grants.clone(), journal.clone(), Arc::new(HostPlatform));
-        let result = writer.write(WriteRequest {
-            grant_id: &request.grant_id,
-            relative_path: relative,
-            resource_id: &request.local_resource_id,
-            base_revision: &request.base_revision,
-            known_revision,
-            bytes: &payload,
-            expected_hash: &request.content_hash,
-            idempotency_key: &request.idempotency_key,
-        });
-        match result {
-            Ok(_) => {
-                complete_write(
-                    deployment,
-                    credential,
-                    &request.request_id,
-                    "verified",
-                    Some(&request.target_revision),
-                    None,
-                )
-                .await?;
-                handled += 1;
-            }
-            Err(FsError::FileLocked) => {
-                complete_write(
-                    deployment,
-                    credential,
-                    &request.request_id,
-                    "waiting",
-                    actual_revision.as_deref(),
-                    Some(("office-locked", "Waiting for Office to finish saving")),
-                )
-                .await?;
-                break;
-            }
-            Err(FsError::StaleRevision) => {
-                complete_write(
-                    deployment,
-                    credential,
-                    &request.request_id,
-                    "conflicted",
-                    actual_revision.as_deref(),
-                    Some((
-                        "stale-revision",
-                        "Word changed this file before Spectra could write it",
-                    )),
-                )
-                .await?;
-                handled += 1;
-            }
+        ClaimPrecondition::Locked => {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "waiting",
+                None,
+                Some(("office-locked", "Waiting for Office to finish saving")),
+            )
+            .await?;
+            return Ok(false);
+        }
+        ClaimPrecondition::Stale { revision } => {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "conflicted",
+                Some(&revision),
+                Some((
+                    "stale-revision",
+                    "The file changed before Spectra could write it.",
+                )),
+            )
+            .await?;
+            return Ok(true);
+        }
+        ClaimPrecondition::Unreadable { message } => {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "waiting",
+                None,
+                Some(("file-read-failed", &message)),
+            )
+            .await?;
+            return Ok(false);
+        }
+    };
+    let response = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()?
+        .get(&request.payload_url)
+        .send()
+        .await
+    {
+        Ok(response) => response.error_for_status(),
+        Err(error) => Err(error),
+    };
+    let payload = match response {
+        Ok(response) => match response.bytes().await {
+            Ok(bytes) => bytes.to_vec(),
             Err(error) => {
                 complete_write(
                     deployment,
                     credential,
                     &request.request_id,
-                    "failed",
-                    actual_revision.as_deref(),
-                    Some(("write-failed", &error.to_string())),
+                    "waiting",
+                    None,
+                    Some(("payload-download-failed", &error.to_string())),
                 )
                 .await?;
-                handled += 1;
+                return Ok(false);
             }
+        },
+        Err(error) => {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "waiting",
+                None,
+                Some(("payload-download-failed", &error.to_string())),
+            )
+            .await?;
+            return Ok(false);
         }
+    };
+    let payload_hash = hex::encode(sha2::Sha256::digest(&payload));
+    if payload_hash != request.content_hash {
+        complete_write(
+            deployment,
+            credential,
+            &request.request_id,
+            "failed",
+            None,
+            Some((
+                "payload-hash-mismatch",
+                "downloaded payload did not match its verified hash",
+            )),
+        )
+        .await?;
+        return Ok(true);
+    }
+    let writer = SafeWriter::new(grants.clone(), journal.clone(), Arc::new(HostPlatform));
+    let result = writer.write(WriteRequest {
+        grant_id: &request.grant_id,
+        relative_path: relative,
+        resource_id: &request.local_resource_id,
+        base_revision: &request.base_revision,
+        known_revision: &actual_revision,
+        bytes: &payload,
+        expected_hash: &request.content_hash,
+        idempotency_key: &request.idempotency_key,
+    });
+    match result {
+        Ok(_) => {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "verified",
+                Some(&request.target_revision),
+                None,
+            )
+            .await?;
+            Ok(true)
+        }
+        Err(FsError::FileLocked) => {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "waiting",
+                Some(&actual_revision),
+                Some(("office-locked", "Waiting for Office to finish saving")),
+            )
+            .await?;
+            Ok(false)
+        }
+        Err(FsError::StaleRevision) => {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "conflicted",
+                Some(&actual_revision),
+                Some((
+                    "stale-revision",
+                    "Word changed this file before Spectra could write it",
+                )),
+            )
+            .await?;
+            Ok(true)
+        }
+        Err(error) => {
+            complete_write(
+                deployment,
+                credential,
+                &request.request_id,
+                "failed",
+                Some(&actual_revision),
+                Some(("write-failed", &error.to_string())),
+            )
+            .await?;
+            Ok(true)
+        }
+    }
+}
+
+async fn drain_write_requests(
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    deployment: &str,
+    credential: &str,
+) -> anyhow::Result<usize> {
+    let mut by_replica = BTreeMap::<String, Vec<ClaimedWrite>>::new();
+    for _ in 0..20 {
+        let Some(request) = claim_write(deployment, credential).await? else {
+            break;
+        };
+        by_replica
+            .entry(request.replica_id.clone())
+            .or_default()
+            .push(request);
+    }
+    let mut tasks = tokio::task::JoinSet::new();
+    for requests in by_replica.into_values() {
+        let grants = grants.clone();
+        let journal = journal.clone();
+        let deployment = deployment.to_owned();
+        let credential = credential.to_owned();
+        tasks.spawn(async move {
+            let mut handled = 0;
+            let mut requests = requests.into_iter();
+            while let Some(request) = requests.next() {
+                if process_write_request(&grants, &journal, &deployment, &credential, request)
+                    .await?
+                {
+                    handled += 1;
+                } else {
+                    // Preserve ordering for one file: a parked write must be
+                    // retried before a later revision for the same replica.
+                    for blocked in requests {
+                        complete_write(
+                            &deployment,
+                            &credential,
+                            &blocked.request_id,
+                            "waiting",
+                            None,
+                            Some((
+                                "prior-write-pending",
+                                "Waiting for an earlier save to finish",
+                            )),
+                        )
+                        .await?;
+                    }
+                    break;
+                }
+            }
+            Ok::<usize, anyhow::Error>(handled)
+        });
+    }
+    let mut handled = 0;
+    while let Some(result) = tasks.join_next().await {
+        handled += result??;
     }
     Ok(handled)
 }
@@ -841,9 +1353,12 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
         let config = WatcherConfig::for_root(std::path::Path::new(grant.device_root()));
         let mut watcher =
             MountWatcher::start(std::path::Path::new(grant.device_root()), config.clone()).ok();
+        let mut stability = StabilityTracker::new(config.stability_window);
+        let mut pending_files = HashSet::<std::path::PathBuf>::new();
+        let mut pending_missing = HashMap::<std::path::PathBuf, std::time::Instant>::new();
         let mut last_reconciliation = std::time::Instant::now();
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             if !grants
                 .device_grants()
                 .iter()
@@ -913,16 +1428,117 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                         }
                     }
                 }
+                stability = StabilityTracker::new(config.stability_window);
+                pending_files.clear();
+                pending_missing.clear();
                 last_reconciliation = std::time::Instant::now();
             }
-            let changed = watcher
+            let batch = watcher
                 .as_ref()
-                .is_some_and(|watcher| !watcher.drain().is_empty());
-            if changed {
-                tokio::time::sleep(config.stability_window).await;
-                let _ = sync_grant(&grant, &journal).await;
-                last_reconciliation = std::time::Instant::now();
-            } else if last_reconciliation.elapsed() >= config.reconciliation_interval {
+                .map(MountWatcher::drain_paths)
+                .unwrap_or_default();
+            let observed_at = std::time::Instant::now();
+            for path in batch.existing_files {
+                pending_missing.remove(&path);
+                pending_files.insert(path);
+            }
+            for path in batch.missing_paths {
+                pending_files.remove(&path);
+                pending_missing.entry(path).or_insert(observed_at);
+            }
+            if !batch.failures.is_empty() {
+                let _ = set_mount_status(
+                    &journal,
+                    &grant.id,
+                    "waiting",
+                    "A file could not be read yet; other files continue syncing.",
+                    0,
+                    0,
+                );
+            }
+
+            let mut generation = None;
+            let mut isolated_failures = 0usize;
+            for path in pending_files.clone() {
+                if !path.exists() {
+                    pending_files.remove(&path);
+                    pending_missing.entry(path).or_insert(observed_at);
+                    continue;
+                }
+                match stability.observe(&path, observed_at) {
+                    Ok(Some(hash)) => {
+                        let current_generation = match generation {
+                            Some(value) => value,
+                            None => match journal.next_generation(&grant.id) {
+                                Ok(value) => {
+                                    generation = Some(value);
+                                    value
+                                }
+                                Err(_) => {
+                                    isolated_failures += 1;
+                                    continue;
+                                }
+                            },
+                        };
+                        match enqueue_stable_change(
+                            &grant,
+                            &journal,
+                            &path,
+                            &hash,
+                            current_generation,
+                        ) {
+                            Ok(_) => {
+                                pending_files.remove(&path);
+                            }
+                            Err(_) => isolated_failures += 1,
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(_) => isolated_failures += 1,
+                }
+            }
+            let settled_missing = pending_missing
+                .iter()
+                .filter(|(_, first_seen)| {
+                    observed_at.duration_since(**first_seen) >= config.stability_window
+                })
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>();
+            for path in settled_missing {
+                let current_generation = match generation {
+                    Some(value) => value,
+                    None => match journal.next_generation(&grant.id) {
+                        Ok(value) => {
+                            generation = Some(value);
+                            value
+                        }
+                        Err(_) => {
+                            isolated_failures += 1;
+                            continue;
+                        }
+                    },
+                };
+                match enqueue_missing_path(&grant, &journal, &path, current_generation) {
+                    Ok(_) => {
+                        pending_missing.remove(&path);
+                    }
+                    Err(_) => isolated_failures += 1,
+                }
+            }
+            if isolated_failures > 0 {
+                let _ = set_mount_status(
+                    &journal,
+                    &grant.id,
+                    "waiting",
+                    "A changed file could not be synced yet; unrelated files continue.",
+                    0,
+                    0,
+                );
+            } else if generation.is_some() {
+                let _ =
+                    set_mount_status(&journal, &grant.id, "active", "Changes queued safely", 0, 0);
+            }
+            if last_reconciliation.elapsed() >= config.reconciliation_interval {
                 let _ = sync_grant(&grant, &journal).await;
                 last_reconciliation = std::time::Instant::now();
             }
@@ -1290,6 +1906,7 @@ fn main() {
                 // stale pre-shutdown revision. New grants are reconciled by
                 // add_mount before their watcher starts.
                 let mut restored_grants_reconciled = false;
+                let mut last_compaction = std::time::Instant::now();
                 loop {
                     if let (Ok(url), Ok(Some(device_id))) = (
                         deployment_url(&sync_journal),
@@ -1316,7 +1933,47 @@ fn main() {
                                     }
                                     restored_grants_reconciled = true;
                                 }
-                                let _ = drain_cloud_queue(&sync_journal, &url, &credential).await;
+                                match drain_cloud_queue(&sync_journal, &url, &credential).await {
+                                    Ok(deliveries) => {
+                                        let mut delivery_failed = false;
+                                        let mut delivery_tasks = tokio::task::JoinSet::new();
+                                        for delivery in deliveries {
+                                            let grants = sync_grants.clone();
+                                            let journal = sync_journal.clone();
+                                            let deployment = url.clone();
+                                            let device_credential = credential.clone();
+                                            delivery_tasks.spawn(async move {
+                                                finish_delivered_change(
+                                                    &grants,
+                                                    &journal,
+                                                    &deployment,
+                                                    &device_credential,
+                                                    delivery,
+                                                )
+                                                .await
+                                            });
+                                        }
+                                        while let Some(result) = delivery_tasks.join_next().await {
+                                            if !matches!(result, Ok(Ok(()))) {
+                                                delivery_failed = true;
+                                            }
+                                        }
+                                        if delivery_failed {
+                                            let _ = sync_journal.set_config(
+                                                "outbound_queue_error",
+                                                "One file change will retry; unrelated files continued.",
+                                            );
+                                        } else {
+                                            let _ = sync_journal.delete_config("outbound_queue_error");
+                                        }
+                                    }
+                                    Err(error) => {
+                                        let _ = sync_journal.set_config(
+                                            "outbound_queue_error",
+                                            &error.to_string(),
+                                        );
+                                    }
+                                }
                                 let _ = drain_structure_requests(
                                     &sync_grants,
                                     &sync_journal,
@@ -1336,6 +1993,27 @@ fn main() {
                                         .set_config("write_queue_error", &error.to_string());
                                 } else {
                                     let _ = sync_journal.delete_config("write_queue_error");
+                                }
+                                if last_compaction.elapsed()
+                                    >= std::time::Duration::from_secs(6 * 60 * 60)
+                                {
+                                    let older_than = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as i64
+                                        - 7 * 24 * 60 * 60 * 1_000;
+                                    match sync_journal.compact_verified(older_than) {
+                                        Ok(_) => {
+                                            let _ = sync_journal.delete_config("journal_compaction_error");
+                                        }
+                                        Err(error) => {
+                                            let _ = sync_journal.set_config(
+                                                "journal_compaction_error",
+                                                &error.to_string(),
+                                            );
+                                        }
+                                    }
+                                    last_compaction = std::time::Instant::now();
                                 }
                             }
                         }

@@ -53,3 +53,19 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - `tsc --noEmit` has the same five pre-existing blockers recorded in STATE §1; this unit adds no TypeScript error and no gate was weakened.
 - “Spectra only” unlinks but does not delete the user’s physical file; the transition records that consequence explicitly pending any separately approved destructive workflow.
 - Status: IMPLEMENTED. No acceptance or verifier verdict claimed; the repository-wide sweep remains deferred until paired verification.
+
+## Implementer log — P1.I2 (2026-08-26)
+
+- Replaced per-event/full-tree sync with changed-path classification, per-path StabilityTracker quiescence, and a six-hour repair reconcile.
+- Repair scans walk once, batch discovery in pages of 100, preserve per-file scan failures, and never infer absence from an incomplete or locked scan.
+- Wired the SQLite `resources` mapping to OS identity, path/hash adoption, rename/folder-move continuity, restart persistence, and explicit unavailable state.
+- Delete/recreate with changed bytes receives a new identity; ambiguous hash adoption refuses to guess and cloud duplicates are preserved unavailable, not deleted.
+- Wired durable outbound change intents, queue dedupe, deterministic keys, per-item acknowledgement/failure, bounded backoff, HTTP timeouts, and six-hour compaction.
+- Added batched `reportChanges`, paged missing-resource reconciliation, concurrent payload delivery, and per-file failure isolation.
+- Claim-time existence/lock/revision checks now precede payload download; externally deleted files conflict instead of being recreated.
+- Indexed parked write retries and process unrelated replicas concurrently while preserving order within one replica.
+- Deleted the decorative WebSocket request/session protocol; health, pairing, status, and HTTP mount surfaces remain.
+- Relevant checks: Rust core 37/37; Rust chaos 9/9; Convex production-module tests 13/13; Bridge compile; changed-file ESLint; Rustfmt; diff check; secret scan.
+- `tsc --noEmit` retains exactly the five pre-existing errors recorded in STATE §1 and adds none from P1.I2.
+- The package-wide Rust command still cannot start the stale `granted_tree` fixture recorded in STATE §1; its assertion was not weakened or rewritten.
+- Status: IMPLEMENTED. No acceptance/verifier verdict claimed; the repository-wide sweep remains deferred until paired verification.

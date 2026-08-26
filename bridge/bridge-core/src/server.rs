@@ -4,19 +4,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use axum::extract::{Request, State, WebSocketUpgrade};
+use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures_util::StreamExt;
 use rand::RngCore;
 use subtle::ConstantTimeEq;
 
-use crate::protocol::{
-    BrowserResponse, HealthResponse, LocalBridgeStatus, LocalMountStatus, PairingOffer,
-};
+use crate::protocol::{HealthResponse, LocalBridgeStatus, LocalMountStatus, PairingOffer};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 pub struct ServerState {
@@ -169,11 +166,9 @@ impl ServerState {
         if !self.is_paired() {
             return false;
         }
-        let supplied = base64::Engine::decode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            supplied,
-        )
-        .unwrap_or_default();
+        let supplied =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, supplied)
+                .unwrap_or_default();
         let expected = self.session_token.read().unwrap();
         expected.len() == 32
             && supplied.len() == 32
@@ -216,7 +211,6 @@ impl ServerState {
 
 pub fn router(state: Arc<ServerState>) -> Router {
     let protected = Router::new()
-        .route("/v1/session", get(session))
         .route("/v1/status", get(status))
         .route("/v1/mount/select", post(select_mount))
         .route("/v1/mount/retry", post(retry_mount))
@@ -366,9 +360,9 @@ async fn resume(State(state): State<Arc<ServerState>>, request: Request) -> Resp
         .get("authorization")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "));
-    match origin.and_then(|value| {
-        token.and_then(|token| state.resume_session_with_token(value, token))
-    }) {
+    match origin
+        .and_then(|value| token.and_then(|token| state.resume_session_with_token(value, token)))
+    {
         Some(session_token) => Json(serde_json::json!({
             "paired": true,
             "sessionToken": session_token,
@@ -411,24 +405,6 @@ fn unix_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
-}
-
-async fn session(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(|mut socket| async move {
-        let ready = BrowserResponse::Ready {
-            protocol_version: crate::PROTOCOL_VERSION.into(),
-        };
-        let _ = socket
-            .send(axum::extract::ws::Message::Text(
-                serde_json::to_string(&ready).unwrap().into(),
-            ))
-            .await;
-        while let Some(Ok(message)) = socket.next().await {
-            if matches!(message, axum::extract::ws::Message::Close(_)) {
-                break;
-            }
-        }
-    })
 }
 
 pub async fn serve(state: Arc<ServerState>) -> anyhow::Result<()> {
@@ -500,12 +476,18 @@ mod tests {
         let token = state.pair("http://localhost:3000".into());
         assert_eq!(state.resume_session("http://localhost:3000"), Some(token));
         assert_eq!(state.resume_session("http://evil.test"), None);
-        assert_eq!(state.resume_session_with_token("http://localhost:3000", "wrong"), None);
+        assert_eq!(
+            state.resume_session_with_token("http://localhost:3000", "wrong"),
+            None
+        );
     }
     #[test]
     fn unpaired_empty_token_cannot_authenticate_or_resume() {
         let state = ServerState::unpaired();
         assert!(!state.session_token_matches(""));
-        assert_eq!(state.resume_session_with_token("http://localhost:3000", ""), None);
+        assert_eq!(
+            state.resume_session_with_token("http://localhost:3000", ""),
+            None
+        );
     }
 }

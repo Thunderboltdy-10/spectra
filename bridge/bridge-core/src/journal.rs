@@ -58,6 +58,21 @@ pub struct QueueItem {
     pub available_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceRecord {
+    pub local_resource_id: String,
+    pub grant_id: String,
+    pub path_key: String,
+    pub volume: Option<u64>,
+    pub file_index: Option<u128>,
+    pub content_hash: Option<String>,
+    pub revision: Option<String>,
+    pub available: bool,
+    pub unavailable_reason: Option<String>,
+    pub last_seen_generation: u64,
+}
+
 pub struct Journal {
     connection: Mutex<Connection>,
 }
@@ -87,6 +102,7 @@ impl Journal {
              PRAGMA synchronous=FULL;
              CREATE TABLE IF NOT EXISTS resources (
                local_resource_id TEXT PRIMARY KEY, path_key TEXT NOT NULL,
+               grant_id TEXT NOT NULL DEFAULT '',
                volume TEXT, file_index TEXT, content_hash TEXT,
                revision TEXT, available INTEGER NOT NULL DEFAULT 1,
                unavailable_reason TEXT, last_seen_generation INTEGER NOT NULL DEFAULT 0
@@ -108,6 +124,186 @@ impl Journal {
                resource_id TEXT PRIMARY KEY, last_op_id TEXT NOT NULL,
                post_hash TEXT, compacted_at INTEGER NOT NULL
              );",
+        )?;
+        let has_grant_id = {
+            let connection = self.connection.lock().unwrap();
+            let mut statement = connection.prepare("PRAGMA table_info(resources)")?;
+            let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+            columns
+                .collect::<Result<Vec<_>, _>>()?
+                .iter()
+                .any(|column| column == "grant_id")
+        };
+        if !has_grant_id {
+            self.connection.lock().unwrap().execute(
+                "ALTER TABLE resources ADD COLUMN grant_id TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
+        self.connection.lock().unwrap().execute_batch(
+            "CREATE INDEX IF NOT EXISTS resources_by_grant_path
+               ON resources(grant_id, path_key);
+             CREATE INDEX IF NOT EXISTS resources_by_grant_generation
+               ON resources(grant_id, last_seen_generation);
+             CREATE INDEX IF NOT EXISTS queue_by_due
+               ON queue(available_at, id);",
+        )?;
+        Ok(())
+    }
+
+    pub fn next_generation(&self, grant_id: &str) -> anyhow::Result<u64> {
+        let key = format!("resource_generation:{grant_id}");
+        let next = self
+            .config(&key)?
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0)
+            .saturating_add(1);
+        self.set_config(&key, &next.to_string())?;
+        Ok(next)
+    }
+
+    pub fn upsert_resource(&self, resource: &ResourceRecord) -> anyhow::Result<()> {
+        self.connection.lock().unwrap().execute(
+            "INSERT INTO resources(
+               local_resource_id,grant_id,path_key,volume,file_index,content_hash,
+               revision,available,unavailable_reason,last_seen_generation
+             ) VALUES(?,?,?,?,?,?,?,?,?,?)
+             ON CONFLICT(local_resource_id) DO UPDATE SET
+               grant_id=excluded.grant_id,
+               path_key=excluded.path_key,
+               volume=excluded.volume,
+               file_index=excluded.file_index,
+               content_hash=excluded.content_hash,
+               available=excluded.available,
+               unavailable_reason=excluded.unavailable_reason,
+               last_seen_generation=excluded.last_seen_generation",
+            params![
+                resource.local_resource_id,
+                resource.grant_id,
+                resource.path_key,
+                resource.volume.map(|value| value.to_string()),
+                resource.file_index.map(|value| value.to_string()),
+                resource.content_hash,
+                resource.revision,
+                i64::from(resource.available),
+                resource.unavailable_reason,
+                resource.last_seen_generation as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn resource_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ResourceRecord> {
+        let volume = row
+            .get::<_, Option<String>>(3)?
+            .and_then(|value| value.parse().ok());
+        let file_index = row
+            .get::<_, Option<String>>(4)?
+            .and_then(|value| value.parse().ok());
+        Ok(ResourceRecord {
+            local_resource_id: row.get(0)?,
+            grant_id: row.get(1)?,
+            path_key: row.get(2)?,
+            volume,
+            file_index,
+            content_hash: row.get(5)?,
+            revision: row.get(6)?,
+            available: row.get::<_, i64>(7)? != 0,
+            unavailable_reason: row.get(8)?,
+            last_seen_generation: row.get::<_, i64>(9)?.max(0) as u64,
+        })
+    }
+
+    pub fn resource_by_id(
+        &self,
+        local_resource_id: &str,
+    ) -> anyhow::Result<Option<ResourceRecord>> {
+        Ok(self
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
+                    revision,available,unavailable_reason,last_seen_generation
+             FROM resources WHERE local_resource_id=?",
+                [local_resource_id],
+                Self::resource_from_row,
+            )
+            .optional()?)
+    }
+
+    pub fn resource_by_path(
+        &self,
+        grant_id: &str,
+        path_key: &str,
+    ) -> anyhow::Result<Option<ResourceRecord>> {
+        Ok(self
+            .connection
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
+                    revision,available,unavailable_reason,last_seen_generation
+             FROM resources WHERE grant_id=? AND path_key=? LIMIT 1",
+                params![grant_id, path_key],
+                Self::resource_from_row,
+            )
+            .optional()?)
+    }
+
+    pub fn resources_for_grant(&self, grant_id: &str) -> anyhow::Result<Vec<ResourceRecord>> {
+        let connection = self.connection.lock().unwrap();
+        let mut statement = connection.prepare(
+            "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
+                    revision,available,unavailable_reason,last_seen_generation
+             FROM resources WHERE grant_id=? ORDER BY path_key",
+        )?;
+        let rows = statement.query_map([grant_id], Self::resource_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn resources_with_path_prefix(
+        &self,
+        grant_id: &str,
+        path_prefix: &str,
+    ) -> anyhow::Result<Vec<ResourceRecord>> {
+        let exact = path_prefix.trim_end_matches('/');
+        let prefix = format!("{exact}/%");
+        let connection = self.connection.lock().unwrap();
+        let mut statement = connection.prepare(
+            "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
+                    revision,available,unavailable_reason,last_seen_generation
+             FROM resources
+             WHERE grant_id=? AND (path_key=? OR path_key LIKE ?)
+             ORDER BY path_key",
+        )?;
+        let rows =
+            statement.query_map(params![grant_id, exact, prefix], Self::resource_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn mark_resource_unavailable(
+        &self,
+        local_resource_id: &str,
+        reason: &str,
+        generation: u64,
+    ) -> anyhow::Result<()> {
+        self.connection.lock().unwrap().execute(
+            "UPDATE resources SET available=0, unavailable_reason=?, last_seen_generation=?
+             WHERE local_resource_id=?",
+            params![reason, generation as i64, local_resource_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_resource_reported(
+        &self,
+        local_resource_id: &str,
+        revision: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.connection.lock().unwrap().execute(
+            "UPDATE resources SET revision=COALESCE(?,revision) WHERE local_resource_id=?",
+            params![revision, local_resource_id],
         )?;
         Ok(())
     }
@@ -255,8 +451,11 @@ impl Journal {
 
     pub fn enqueue(&self, op_id: &str, direction: &str, payload: &str) -> anyhow::Result<()> {
         self.connection.lock().unwrap().execute(
-            "INSERT INTO queue(op_id,direction,payload,available_at) VALUES(?,?,?,?)",
-            params![op_id, direction, payload, unix_ms()],
+            "INSERT INTO queue(op_id,direction,payload,available_at)
+             SELECT ?,?,?,? WHERE NOT EXISTS(
+               SELECT 1 FROM queue WHERE op_id=? AND direction=?
+             )",
+            params![op_id, direction, payload, unix_ms(), op_id, direction],
         )?;
         Ok(())
     }
@@ -280,6 +479,41 @@ impl Journal {
             .lock()
             .unwrap()
             .execute("DELETE FROM queue WHERE id=?", [id])?;
+        Ok(())
+    }
+    pub fn acknowledge_change(
+        &self,
+        item: &QueueItem,
+        resource_id: &str,
+        post_hash: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut connection = self.connection.lock().unwrap();
+        let tx = connection.transaction()?;
+        tx.execute(
+            "UPDATE ops SET state='verified', post_hash=COALESCE(?,post_hash),
+                    error_code=NULL, error_message=NULL, updated_at=?
+             WHERE op_id=?",
+            params![post_hash, unix_ms(), item.op_id],
+        )?;
+        tx.execute(
+            "UPDATE resources SET revision=COALESCE(?,revision)
+             WHERE local_resource_id=?",
+            params![post_hash, resource_id],
+        )?;
+        tx.execute("DELETE FROM queue WHERE id=?", [item.id])?;
+        tx.commit()?;
+        Ok(())
+    }
+    pub fn fail_queue(&self, item: &QueueItem, code: &str, message: &str) -> anyhow::Result<()> {
+        let mut connection = self.connection.lock().unwrap();
+        let tx = connection.transaction()?;
+        tx.execute(
+            "UPDATE ops SET state='failed', error_code=?, error_message=?, updated_at=?
+             WHERE op_id=?",
+            params![code, message, unix_ms(), item.op_id],
+        )?;
+        tx.execute("DELETE FROM queue WHERE id=?", [item.id])?;
+        tx.commit()?;
         Ok(())
     }
     pub fn retry_queue(&self, id: i64, delay: Duration) -> anyhow::Result<()> {
@@ -330,5 +564,92 @@ mod tests {
         let found = journal.by_key("k").unwrap().unwrap();
         assert_eq!(found.state, OpState::Verified);
         assert_eq!(found.post_hash.as_deref(), Some("hash"));
+    }
+
+    #[test]
+    fn resource_identity_survives_rename_and_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("journal.sqlite");
+        {
+            let journal = Journal::open(&path).unwrap();
+            journal
+                .upsert_resource(&ResourceRecord {
+                    local_resource_id: "lr_stable".into(),
+                    grant_id: "grant_one".into(),
+                    path_key: "before/report.docx".into(),
+                    volume: Some(7),
+                    file_index: Some(42),
+                    content_hash: Some("a".repeat(64)),
+                    revision: Some("a".repeat(64)),
+                    available: true,
+                    unavailable_reason: None,
+                    last_seen_generation: 1,
+                })
+                .unwrap();
+            let mut renamed = journal.resource_by_id("lr_stable").unwrap().unwrap();
+            renamed.path_key = "after/report.docx".into();
+            renamed.last_seen_generation = 2;
+            journal.upsert_resource(&renamed).unwrap();
+        }
+        let reopened = Journal::open(&path).unwrap();
+        assert!(
+            reopened
+                .resource_by_path("grant_one", "before/report.docx")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            reopened
+                .resource_by_path("grant_one", "after/report.docx")
+                .unwrap()
+                .unwrap()
+                .local_resource_id,
+            "lr_stable"
+        );
+    }
+
+    #[test]
+    fn outbound_change_is_deduplicated_and_acknowledged_atomically() {
+        let journal = Journal::in_memory().unwrap();
+        let op = journal
+            .begin_intent(
+                "derived-change",
+                "cloud.report-change",
+                Some("lr_1"),
+                Some("old"),
+                None,
+            )
+            .unwrap();
+        journal.enqueue(&op.op_id, "outbound-change", "{}").unwrap();
+        journal.enqueue(&op.op_id, "outbound-change", "{}").unwrap();
+        let queued = journal.due_queue(10).unwrap();
+        assert_eq!(queued.len(), 1);
+        journal
+            .acknowledge_change(&queued[0], "lr_1", Some("new"))
+            .unwrap();
+        assert!(journal.due_queue(10).unwrap().is_empty());
+        assert_eq!(
+            journal.by_key("derived-change").unwrap().unwrap().state,
+            OpState::Verified
+        );
+    }
+
+    #[test]
+    fn scheduled_compaction_keeps_only_the_resource_checkpoint() {
+        let journal = Journal::in_memory().unwrap();
+        let operation = journal
+            .begin_intent(
+                "compact-me",
+                "cloud.report-change",
+                Some("lr_1"),
+                None,
+                None,
+            )
+            .unwrap();
+        journal
+            .transition(&operation.op_id, OpState::Verified, Some("hash"), None)
+            .unwrap();
+        assert_eq!(journal.compact_verified(unix_ms() + 1).unwrap(), 1);
+        assert!(journal.by_key("compact-me").unwrap().is_none());
     }
 }

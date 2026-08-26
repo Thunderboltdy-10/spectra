@@ -12,7 +12,6 @@ import {
 } from "./bridgeIdentity";
 import { assertPayloadWriteAllowed, computeEffectivePolicy } from "./syncPolicy";
 import { decideMissingResourceAction, policyIncludesPath } from "../shared/sync-policy";
-import { policyAllowsTrigger } from "../shared/sync-policy";
 import type { SyncPolicyValues } from "../shared/sync-policy";
 import { formatByteCount } from "../shared/human-format";
 import {
@@ -138,15 +137,22 @@ export const registerMount = mutation({
 
 /** Reconcile resources absent from a completed scan without deleting bytes. */
 export const reconcileMissingResources = mutation({
-  args: { credential: v.string(), mountId: v.id("bridgeMounts"), scanId: v.string() },
+  args: {
+    credential: v.string(),
+    mountId: v.id("bridgeMounts"),
+    scanId: v.string(),
+    cursor: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const { device, actor } = await requireDevice(ctx, args.credential);
     const mount = await ctx.db.get(args.mountId);
     if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || mount.lastScanId !== args.scanId) throw new Error("MOUNT_SCAN_NOT_CURRENT");
-    const replicas = await ctx.db.query("workReplicas").withIndex("by_mount", (q) => q.eq("mountId", mount._id)).take(10_000);
+    const page = await ctx.db.query("workReplicas")
+      .withIndex("by_mount", (q) => q.eq("mountId", mount._id))
+      .paginate({ cursor: args.cursor ?? null, numItems: 100 });
     let unavailable = 0;
     let restoring = 0;
-    for (const replica of replicas) {
+    for (const replica of page.page) {
       if (replica.kind !== "local" || replica.lastSeenScanId === args.scanId || replica.state === "unavailable") continue;
       const policy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id), item: String(replica.workId) });
       const cloud = await ctx.db.query("workReplicas")
@@ -186,6 +192,7 @@ export const reconcileMissingResources = mutation({
             projectionBaseTextIndex: cloud.projectionBaseTextIndex,
             projectionBaseFidelityMap: cloud.projectionBaseFidelityMap,
             state: "pending",
+            retryAt: now,
             attemptCount: 0,
             expiresAt: now + BRIDGE_WRITE_EXPIRES_MS,
             createdAt: now,
@@ -213,7 +220,12 @@ export const reconcileMissingResources = mutation({
       await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: reason, updatedAt: Date.now() });
       unavailable += 1;
     }
-    return { unavailable, restoring };
+    return {
+      unavailable,
+      restoring,
+      continueCursor: page.continueCursor,
+      isDone: page.isDone,
+    };
   },
 });
 
@@ -236,13 +248,21 @@ export const sweepStaleBridgeWork = internalMutation({
   },
 });
 
-export const discoverResource = mutation({
-  args: { credential: v.string(), mountId: v.id("bridgeMounts"), localResourceId: v.string(), relativePath: v.string(), size: v.number(), contentHash: v.optional(v.string()), nativeFormat: v.string() },
-  handler: async (ctx, args) => {
-    const { device, actor } = await requireDevice(ctx, args.credential);
-    const mount = await ctx.db.get(args.mountId);
-    if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || !mount.rootOrgNodeId || mount.state !== "active") throw new Error("MOUNT_NOT_ACTIVE");
-    const input = z.object({ localResourceId: z.string().regex(/^lr_[a-f0-9]+$/), relativePath: z.string().min(1).max(1024).refine((value) => !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes("..")), size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER), contentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), nativeFormat: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/) }).parse(args);
+const discoveredResourceSchema = z.object({
+  localResourceId: z.string().regex(/^lr_[a-f0-9]+$/),
+  relativePath: z.string().min(1).max(1024).refine((value) => !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes("..")),
+  size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  nativeFormat: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/),
+});
+
+async function discoverResourceForMount(
+  ctx: MutationCtx,
+  device: Doc<"bridgeDevices">,
+  actor: { accountId: Id<"accounts">; schoolId: Id<"schools"> },
+  mount: Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
+  input: z.infer<typeof discoveredResourceSchema>,
+) {
     const isOfficeOwnerLock = input.relativePath.replaceAll("\\", "/").split("/").pop()?.startsWith("~$") ?? false;
     if (isOfficeOwnerLock) {
       // A previous Bridge version could have projected an Office owner-lock
@@ -266,7 +286,10 @@ export const discoverResource = mutation({
     const mountPolicy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id) });
     const byResource = await ctx.db.query("workReplicas").withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", input.localResourceId)).take(20);
     const byPath = await ctx.db.query("workReplicas").withIndex("by_device_mount_path", (q) => q.eq("deviceId", device._id).eq("mountId", mount._id).eq("relativePath", input.relativePath)).take(20);
-    const candidates = [...byResource, ...byPath].filter((candidate, index, all) => all.findIndex((entry) => entry._id === candidate._id) === index);
+    const pathContinuity = byPath.filter((candidate) =>
+      candidate.state !== "unavailable" || candidate.contentHash === input.contentHash,
+    );
+    const candidates = [...byResource, ...pathContinuity].filter((candidate, index, all) => all.findIndex((entry) => entry._id === candidate._id) === index);
     const scored = await Promise.all(candidates.map(async (candidate) => ({
       candidate,
       cloud: await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", candidate.workId).eq("kind", "cloud")).first(),
@@ -388,9 +411,14 @@ export const discoverResource = mutation({
       for (const duplicate of candidates.filter((candidate) => candidate._id !== existingReplica._id)) {
         const duplicateCloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", duplicate.workId).eq("kind", "cloud")).first();
         if (duplicateCloud) continue;
-        await ctx.db.patch(duplicate.workId, { status: "deleted", updatedAt: Date.now() });
-        await purgeSourceNodes(ctx, "work", String(duplicate.workId));
-        await ctx.db.delete(duplicate._id);
+        // Ambiguous identity is not evidence of deletion. Preserve both
+        // logical works and make the losing candidate explicitly unavailable
+        // until reconciliation can establish stable ownership.
+        await ctx.db.patch(duplicate._id, {
+          state: "unavailable",
+          unavailableReason: "identity-collision",
+          updatedAt: Date.now(),
+        });
       }
       return {
         workId: existingReplica.workId,
@@ -457,6 +485,49 @@ export const discoverResource = mutation({
       payloadHash: undefined,
       needsPayload: mountPolicy.cloudContent === "full" && ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"].includes(input.nativeFormat),
     };
+}
+
+export const discoverResourcesPage = mutation({
+  args: {
+    credential: v.string(),
+    mountId: v.id("bridgeMounts"),
+    resources: v.array(v.object({
+      localResourceId: v.string(),
+      relativePath: v.string(),
+      size: v.number(),
+      contentHash: v.optional(v.string()),
+      nativeFormat: v.string(),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const { device, actor } = await requireDevice(ctx, args.credential);
+    const mount = await ctx.db.get(args.mountId);
+    if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || !mount.rootOrgNodeId || mount.state !== "active")
+      throw new Error("MOUNT_NOT_ACTIVE");
+    if (!args.resources.length || args.resources.length > 100)
+      throw new Error("DISCOVERY_PAGE_SIZE_INVALID");
+    const registrations = [];
+    for (const rawResource of args.resources) {
+      const parsed = discoveredResourceSchema.safeParse(rawResource);
+      if (!parsed.success) {
+        registrations.push({
+          skipped: true as const,
+          reason: "resource-metadata-invalid" as const,
+        });
+        continue;
+      }
+      // Valid resource mutations remain one Convex transaction. An
+      // infrastructure failure rolls the page back for replay instead of
+      // leaving a half-created work after an in-handler catch.
+      registrations.push(await discoverResourceForMount(
+        ctx,
+        device,
+        actor,
+        mount as Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
+        parsed.data,
+      ));
+    }
+    return { registrations };
   },
 });
 
@@ -798,9 +869,18 @@ export const claimWrite = mutation({
   handler: async (ctx, args) => {
     const { device } = await requireDevice(ctx, args.credential);
     const now = Date.now();
-    const pending = await ctx.db.query("bridgeWriteRequests")
-      .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending"))
+    const readyPending = await ctx.db.query("bridgeWriteRequests")
+      .withIndex("by_device_state_retry", (q) =>
+        q.eq("deviceId", device._id).eq("state", "pending").lte("retryAt", now),
+      )
       .take(20);
+    const legacyPending = await ctx.db.query("bridgeWriteRequests")
+      .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending"))
+      .filter((q) => q.eq(q.field("retryAt"), undefined))
+      .take(20);
+    const pending = [...readyPending, ...legacyPending]
+      .filter((request, index, all) => all.findIndex((candidate) => candidate._id === request._id) === index)
+      .slice(0, 20);
     const abandonedClaims = await ctx.db.query("bridgeWriteRequests")
       .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "claimed"))
       .filter((q) => q.lt(q.field("claimedAt"), now - 60_000))
@@ -859,7 +939,7 @@ export const claimWrite = mutation({
         await failStorageTransitionForRequest(ctx, request, "payload-unavailable", now);
         continue;
       }
-      await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, attemptCount: (request.attemptCount ?? 0) + 1, updatedAt: now });
+      await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, retryAt: undefined, attemptCount: (request.attemptCount ?? 0) + 1, updatedAt: now });
       return { request: {
         requestId: request._id,
         replicaId: request.replicaId,
@@ -906,6 +986,7 @@ export const completeWrite = mutation({
     if (args.outcome === "waiting") {
       await ctx.db.patch(request._id, {
         state: "pending",
+        retryAt: now + 5_000,
         errorCode: args.errorCode ?? "office-locked",
         errorMessage: args.errorMessage,
         claimedAt: undefined,
@@ -1167,41 +1248,133 @@ export const migrateCloudReplicaPage = mutation({
   },
 });
 
-export const reportRevision = mutation({
-  args: { credential: v.string(), replicaId: v.id("workReplicas"), idempotencyKey: v.string(), revisionBefore: v.string(), revisionAfter: v.string(), contentHash: v.string() },
+export const reportChanges = mutation({
+  args: {
+    credential: v.string(),
+    mountId: v.id("bridgeMounts"),
+    changes: v.array(v.object({
+      journalId: v.string(),
+      resourceId: v.string(),
+      op: v.string(),
+      relativePath: v.optional(v.string()),
+      previousRelativePath: v.optional(v.string()),
+      hash: v.optional(v.string()),
+      revisionBefore: v.optional(v.string()),
+      size: v.optional(v.number()),
+      nativeFormat: v.optional(v.string()),
+    })),
+  },
   handler: async (ctx, args) => {
-    const input = z.object({ credential: z.string().min(32).max(256), idempotencyKey: z.string().uuid(), revisionBefore: z.string().min(1).max(200), revisionAfter: z.string().min(1).max(200), contentHash: z.string().regex(/^[a-f0-9]{64}$/) }).parse(args);
-    const { device } = await requireDevice(ctx, input.credential);
-    const replica = await ctx.db.get(args.replicaId); if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id) throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
-    const policy = await computeEffectivePolicy(ctx, device.accountId, { account: String(device.accountId), mount: replica.mountId ? String(replica.mountId) : undefined, item: String(replica.workId) });
-    const idempotencyKey = await deriveSyncIdempotencyKey({
-      workId: String(replica.workId),
-      target: String(replica.deviceId ?? device._id),
-      baseRevision: input.revisionBefore,
-      targetRevision: input.revisionAfter,
-      direction: "external",
+    const { device, actor } = await requireDevice(ctx, args.credential);
+    const mount = await ctx.db.get(args.mountId);
+    if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || !mount.rootOrgNodeId || mount.state !== "active")
+      throw new Error("MOUNT_NOT_ACTIVE");
+    if (!args.changes.length || args.changes.length > 100)
+      throw new Error("REPORT_CHANGE_BATCH_SIZE_INVALID");
+    const changeSchema = z.object({
+      journalId: z.string().regex(/^op_[a-f0-9]{32}$/),
+      resourceId: z.string().regex(/^lr_[a-f0-9]+$/),
+      op: z.enum(["upsert", "unavailable"]),
+      relativePath: z.string().min(1).max(1024).optional(),
+      previousRelativePath: z.string().min(1).max(1024).optional(),
+      hash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+      revisionBefore: z.string().min(1).max(200).optional(),
+      size: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+      nativeFormat: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/).optional(),
     });
-    const existing = await ctx.db.query("syncOperations").withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", idempotencyKey)).unique(); if (existing) return { state: existing.state, operationId: existing._id };
-    const now = Date.now();
-    if (replica.revision !== input.revisionBefore) {
-      const operationId = await ctx.db.insert("syncOperations", { accountId: device.accountId, workId: replica.workId, replicaId: replica._id, idempotencyKey, direction: "external", revisionBefore: input.revisionBefore, revisionAfter: input.revisionAfter, state: "conflicted", actorKind: "external-edit", errorCode: "stale-revision", createdAt: now, updatedAt: now });
-      await ctx.db.patch(replica._id, { state: "diverged", updatedAt: now }); return { state: "conflicted" as const, operationId };
+    const results = [];
+    for (const rawChange of args.changes) {
+      const journalId = rawChange.journalId;
+      const parsed = changeSchema.safeParse(rawChange);
+      if (!parsed.success) {
+        results.push({
+          journalId,
+          state: "rejected",
+          errorCode: "report-change-invalid",
+        });
+        continue;
+      }
+      const change = parsed.data;
+      if (change.op === "unavailable") {
+        const replicas = await ctx.db.query("workReplicas")
+          .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", change.resourceId))
+          .take(20);
+        const replica = replicas.find((candidate) => candidate.mountId === mount._id);
+        if (replica) {
+          await ctx.db.patch(replica._id, {
+            state: "unavailable",
+            unavailableReason: "missing-on-disk",
+            updatedAt: Date.now(),
+          });
+        }
+        results.push({ journalId, state: replica ? "unavailable" : "already-unavailable" });
+        continue;
+      }
+      if (!change.relativePath || change.size === undefined || !change.hash || !change.nativeFormat) {
+        results.push({
+          journalId,
+          state: "rejected",
+          errorCode: "report-change-metadata-required",
+        });
+        continue;
+      }
+      const registration = await discoverResourceForMount(
+        ctx,
+        device,
+        actor,
+        mount as Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
+        discoveredResourceSchema.parse({
+          localResourceId: change.resourceId,
+          relativePath: change.relativePath,
+          size: change.size,
+          contentHash: change.hash,
+          nativeFormat: change.nativeFormat,
+        }),
+      );
+      if (registration.skipped || !registration.replicaId) {
+        results.push({
+          journalId,
+          state: "skipped",
+          errorCode: registration.reason ?? "resource-skipped",
+        });
+        continue;
+      }
+      if (change.revisionBefore && !registration.needsPayload) {
+        const operationKey = await deriveSyncIdempotencyKey({
+          workId: String(registration.workId),
+          target: String(device._id),
+          baseRevision: change.revisionBefore,
+          targetRevision: change.hash,
+          direction: "external",
+        });
+        const existingOperation = await ctx.db.query("syncOperations")
+          .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", operationKey))
+          .unique();
+        if (!existingOperation) {
+          const now = Date.now();
+          await ctx.db.insert("syncOperations", {
+            accountId: actor.accountId,
+            workId: registration.workId!,
+            replicaId: registration.replicaId,
+            idempotencyKey: operationKey,
+            direction: "external",
+            revisionBefore: change.revisionBefore,
+            revisionAfter: change.hash,
+            state: "applied",
+            actorKind: "external-edit",
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      results.push({
+        journalId,
+        state: registration.needsPayload ? "payload-required" : "applied",
+        replicaId: String(registration.replicaId),
+        needsPayload: registration.needsPayload,
+      });
     }
-    const cloud = await ctx.db.query("workReplicas")
-      .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
-      .unique();
-    const cloudPayloadId = cloud?.payloadRef ? ctx.db.normalizeId("payloadObjects", cloud.payloadRef) : null;
-    const cloudPayload = cloudPayloadId ? await ctx.db.get(cloudPayloadId) : null;
-    const replicasAgree = Boolean(
-      cloud &&
-      cloud.contentHash === input.contentHash &&
-      cloudPayload?.state === "active" &&
-      cloudPayload.hash === input.contentHash,
-    );
-    const deferred = !policyAllowsTrigger(policy.timing, "watch");
-    const operationId = await ctx.db.insert("syncOperations", { accountId: device.accountId, workId: replica.workId, replicaId: replica._id, idempotencyKey, direction: "external", revisionBefore: input.revisionBefore, revisionAfter: input.revisionAfter, state: replicasAgree ? "verified" : "applied", actorKind: "external-edit", errorCode: deferred && !replicasAgree ? "reconciliation-deferred" : undefined, createdAt: now, updatedAt: now });
-    await ctx.db.patch(replica._id, { revision: input.revisionAfter, baseRevision: input.revisionBefore, contentHash: input.contentHash, state: replicasAgree ? "current" : "ahead", lastVerifiedAt: replicasAgree ? now : replica.lastVerifiedAt, updatedAt: now });
-    if (replicasAgree && cloud) await ctx.db.patch(cloud._id, { revision: input.revisionAfter, baseRevision: input.revisionAfter, state: "current", lastVerifiedAt: now, updatedAt: now });
-    await ctx.db.patch(device._id, { lastSeenAt: now }); return { state: replicasAgree ? "verified" as const : "applied" as const, operationId };
+    await ctx.db.patch(device._id, { lastSeenAt: Date.now() });
+    return { results };
   },
 });

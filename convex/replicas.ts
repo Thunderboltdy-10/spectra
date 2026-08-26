@@ -159,7 +159,7 @@ export const transitionStorageStrategy = mutation({
         const localId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId: args.workId, kind: "local", deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, nativeFormat: cloud.nativeFormat, payloadRef: undefined, revision: initialRevision, baseRevision: cloud.revision, contentHash: undefined, state: "pending", fidelityMap: cloud.fidelityMap, preservedCarryVersion: 1, compatibilityProfile: cloud.compatibilityProfile ?? "strict-native", updatedAt: now });
         activeLocal = (await ctx.db.get(localId)) ?? undefined;
         const writeKey = await deriveSyncIdempotencyKey({ workId: String(args.workId), target: String(mount.deviceId), baseRevision: initialRevision, targetRevision: cloud.contentHash, direction: "cloud-to-local" });
-        materializationRequestId = await ctx.db.insert("bridgeWriteRequests", { accountId: actor.accountId, workId: args.workId, replicaId: localId, deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, payloadRef: cloud.payloadRef, baseRevision: initialRevision, targetRevision: cloud.contentHash, contentHash: cloud.contentHash, idempotencyKey: writeKey, regionIds: [], partNames: [], projectionBaseContent: work.content, projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex, projectionBaseFidelityMap: cloud.fidelityMap, state: "pending", attemptCount: 0, expiresAt: now + BRIDGE_WRITE_EXPIRES_MS, createdAt: now, updatedAt: now });
+        materializationRequestId = await ctx.db.insert("bridgeWriteRequests", { accountId: actor.accountId, workId: args.workId, replicaId: localId, deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, payloadRef: cloud.payloadRef, baseRevision: initialRevision, targetRevision: cloud.contentHash, contentHash: cloud.contentHash, idempotencyKey: writeKey, regionIds: [], partNames: [], projectionBaseContent: work.content, projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex, projectionBaseFidelityMap: cloud.fidelityMap, state: "pending", retryAt: now, attemptCount: 0, expiresAt: now + BRIDGE_WRITE_EXPIRES_MS, createdAt: now, updatedAt: now });
         await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: args.workId, replicaId: localId, idempotencyKey: writeKey, direction: "cloud-to-local", revisionBefore: initialRevision, revisionAfter: cloud.contentHash, state: "pending", actorKind: "user", createdAt: now, updatedAt: now });
         createdLocal = true;
         locals = [...locals, activeLocal!];
@@ -614,6 +614,7 @@ export const queueMaterialization = mutation({
       projectionBaseTextIndex: work.textIndex,
       projectionBaseFidelityMap: args.fidelityMap,
       state: "pending",
+      retryAt: now,
       attemptCount: 0,
       expiresAt: now + BRIDGE_WRITE_EXPIRES_MS,
       createdAt: now,
@@ -734,7 +735,7 @@ export const applyProtectedPending = mutation({
       baseRevision: local.pendingBaseRevision, targetRevision: local.pendingContentHash, contentHash: local.pendingContentHash,
       idempotencyKey, regionIds: [], partNames: [], projectionBaseContent: work.content,
       projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex,
-      projectionBaseFidelityMap: local.fidelityMap, state: "pending", attemptCount: 0,
+      projectionBaseFidelityMap: local.fidelityMap, state: "pending", retryAt: now, attemptCount: 0,
       expiresAt: now + BRIDGE_WRITE_EXPIRES_MS, createdAt: now, updatedAt: now,
     });
     await ctx.db.patch(local._id, { state: "pending", updatedAt: now });
@@ -879,7 +880,7 @@ export const createLocalReplica = mutation({
       baseRevision, targetRevision: input.contentHash, contentHash: input.contentHash, idempotencyKey,
       regionIds: [], partNames: [], projectionBaseContent: work.content,
       projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex,
-      projectionBaseFidelityMap: args.fidelityMap, state: "pending", attemptCount: 0,
+      projectionBaseFidelityMap: args.fidelityMap, state: "pending", retryAt: now, attemptCount: 0,
       expiresAt: now + BRIDGE_WRITE_EXPIRES_MS, createdAt: now, updatedAt: now,
     });
     await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: args.workId, replicaId, idempotencyKey, direction: "cloud-to-local", revisionBefore: baseRevision, revisionAfter: input.contentHash, state: "pending", actorKind: "restore", createdAt: now, updatedAt: now });

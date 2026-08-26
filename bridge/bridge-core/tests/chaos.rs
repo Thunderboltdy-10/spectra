@@ -9,7 +9,9 @@ use sha2::{Digest, Sha256};
 use spectra_bridge_core::fs::{FsError, GrantRegistry, SafeWriter, WriteRequest};
 use spectra_bridge_core::journal::{Journal, OpState};
 use spectra_bridge_core::platform::{OsFileIdentity, Platform};
-use spectra_bridge_core::sync::{CloudResult, accept_cloud_result};
+use spectra_bridge_core::sync::{
+    Backoff, ClaimPrecondition, CloudResult, accept_cloud_result, inspect_claim_target,
+};
 use tempfile::tempdir;
 
 #[derive(Default)]
@@ -221,4 +223,64 @@ fn restart_preserves_a_full_queue_and_cloud_rejects_stale_revision() {
         250
     );
     assert!(accept_cloud_result(CloudResult::StaleRevision).is_err());
+}
+
+#[test]
+fn externally_deleted_claim_is_refused_before_safe_writer_can_recreate_it() {
+    let dir = tempdir().unwrap();
+    let missing = dir.path().join("removed.docx");
+    assert_eq!(
+        inspect_claim_target(&ChaosPlatform::default(), &missing, "base"),
+        ClaimPrecondition::Missing
+    );
+    assert!(!missing.exists());
+}
+
+#[test]
+fn stale_claim_is_detected_before_payload_download_or_write() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("changed.docx");
+    fs::write(&path, b"external bytes").unwrap();
+    let expected = hex::encode(Sha256::digest(b"external bytes"));
+    assert_eq!(
+        inspect_claim_target(&ChaosPlatform::default(), &path, "old revision"),
+        ClaimPrecondition::Stale { revision: expected }
+    );
+    assert_eq!(fs::read(path).unwrap(), b"external bytes");
+}
+
+#[test]
+fn retrying_one_outbound_change_does_not_block_the_next() {
+    let journal = Journal::in_memory().unwrap();
+    let first = journal
+        .begin_intent(
+            "first-change",
+            "cloud.report-change",
+            Some("lr_1"),
+            None,
+            None,
+        )
+        .unwrap();
+    let second = journal
+        .begin_intent(
+            "second-change",
+            "cloud.report-change",
+            Some("lr_2"),
+            None,
+            None,
+        )
+        .unwrap();
+    journal
+        .enqueue(&first.op_id, "outbound-change", "{}")
+        .unwrap();
+    journal
+        .enqueue(&second.op_id, "outbound-change", "{}")
+        .unwrap();
+    let due = journal.due_queue(10).unwrap();
+    journal
+        .retry_queue(due[0].id, Backoff::delay_for_attempt(7))
+        .unwrap();
+    let still_due = journal.due_queue(10).unwrap();
+    assert_eq!(still_due.len(), 1);
+    assert_eq!(still_due[0].op_id, second.op_id);
 }

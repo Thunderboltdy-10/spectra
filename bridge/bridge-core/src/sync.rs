@@ -1,7 +1,22 @@
-use crate::journal::Journal;
+use crate::journal::{Journal, QueueItem};
+use crate::platform::Platform;
 use crate::protocol::PairingOffer;
+use crate::watcher::office_lock_exists;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::time::Duration;
+
+const CLOUD_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const CLOUD_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const PAYLOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn cloud_client(timeout: Duration) -> anyhow::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .connect_timeout(CLOUD_CONNECT_TIMEOUT)
+        .timeout(timeout)
+        .build()?)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloudResult {
@@ -9,6 +24,44 @@ pub enum CloudResult {
     AlreadyApplied,
     StaleRevision,
     Retryable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClaimPrecondition {
+    Ready { revision: String },
+    Missing,
+    Locked,
+    Stale { revision: String },
+    Unreadable { message: String },
+}
+
+pub fn inspect_claim_target<P: Platform>(
+    platform: &P,
+    path: &Path,
+    base_revision: &str,
+) -> ClaimPrecondition {
+    if !path.exists() {
+        return ClaimPrecondition::Missing;
+    }
+    if office_lock_exists(path) {
+        return ClaimPrecondition::Locked;
+    }
+    match platform.is_locked(path) {
+        Ok(true) => return ClaimPrecondition::Locked,
+        Err(error) => {
+            return ClaimPrecondition::Unreadable {
+                message: error.to_string(),
+            };
+        }
+        Ok(false) => {}
+    }
+    match crate::fs::sha256_file(path) {
+        Ok(revision) if revision == base_revision => ClaimPrecondition::Ready { revision },
+        Ok(revision) => ClaimPrecondition::Stale { revision },
+        Err(error) => ClaimPrecondition::Unreadable {
+            message: error.to_string(),
+        },
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +89,12 @@ impl Backoff {
         let shift = self.attempts.min(16);
         self.attempts = self.attempts.saturating_add(1);
         self.floor.saturating_mul(1_u32 << shift).min(self.ceiling)
+    }
+
+    pub fn delay_for_attempt(attempts: u32) -> Duration {
+        Duration::from_millis(500)
+            .saturating_mul(1_u32 << attempts.min(7))
+            .min(Duration::from_secs(60))
     }
 }
 
@@ -74,7 +133,7 @@ async fn mutation<T: for<'de> Deserialize<'de>>(
     path: &str,
     args: serde_json::Value,
 ) -> anyhow::Result<T> {
-    let response = reqwest::Client::new()
+    let response = cloud_client(CLOUD_REQUEST_TIMEOUT)?
         .post(format!(
             "{}/api/mutation",
             deployment_url.trim_end_matches('/')
@@ -128,6 +187,66 @@ pub struct DiscoveredRegistration {
     #[serde(default)]
     pub skipped: bool,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveryPageResponse {
+    registrations: Vec<DiscoveredRegistration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportedChange {
+    pub journal_id: String,
+    pub resource_id: String,
+    pub op: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_relative_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision_before: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_format: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedChangeEnvelope {
+    pub grant_id: String,
+    pub mount_id: String,
+    pub change: ReportedChange,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportChangeResult {
+    pub journal_id: String,
+    pub state: String,
+    #[serde(default)]
+    pub replica_id: Option<String>,
+    #[serde(default)]
+    pub needs_payload: bool,
+    #[serde(default)]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReportChangesResponse {
+    results: Vec<ReportChangeResult>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeliveredChange {
+    pub item: QueueItem,
+    pub envelope: QueuedChangeEnvelope,
+    pub result: ReportChangeResult,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -210,19 +329,54 @@ pub async fn register_mount(
     mutation(deployment_url, "bridgeSync:registerMount", serde_json::json!({ "credential": credential, "rootLabel": root_label, "grantId": grant_id, "rootKey": root_key, "scanId": scan_id, "fileCount": file_count, "doubleSyncRisk": double_sync_risk, "ownerLockPaths": owner_lock_paths })).await
 }
 
-pub async fn discover_resource(
+pub async fn discover_resources_page(
     deployment_url: &str,
     credential: &str,
     mount_id: &str,
-    resource: &DiscoveredResource,
-) -> anyhow::Result<DiscoveredRegistration> {
-    let mut args = serde_json::to_value(resource)?;
-    let object = args
-        .as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("resource payload is not an object"))?;
-    object.insert("credential".into(), credential.into());
-    object.insert("mountId".into(), mount_id.into());
-    mutation(deployment_url, "bridgeSync:discoverResource", args).await
+    resources: &[DiscoveredResource],
+) -> anyhow::Result<Vec<DiscoveredRegistration>> {
+    anyhow::ensure!(
+        !resources.is_empty() && resources.len() <= 100,
+        "discovery page must contain 1..=100 resources"
+    );
+    let response: DiscoveryPageResponse = mutation(
+        deployment_url,
+        "bridgeSync:discoverResourcesPage",
+        serde_json::json!({
+            "credential": credential,
+            "mountId": mount_id,
+            "resources": resources,
+        }),
+    )
+    .await?;
+    anyhow::ensure!(
+        response.registrations.len() == resources.len(),
+        "discovery page response length did not match the request"
+    );
+    Ok(response.registrations)
+}
+
+pub async fn report_changes(
+    deployment_url: &str,
+    credential: &str,
+    mount_id: &str,
+    changes: &[ReportedChange],
+) -> anyhow::Result<Vec<ReportChangeResult>> {
+    anyhow::ensure!(
+        !changes.is_empty() && changes.len() <= 100,
+        "change batch must contain 1..=100 changes"
+    );
+    let response: ReportChangesResponse = mutation(
+        deployment_url,
+        "bridgeSync:reportChanges",
+        serde_json::json!({
+            "credential": credential,
+            "mountId": mount_id,
+            "changes": changes,
+        }),
+    )
+    .await?;
+    Ok(response.results)
 }
 
 pub async fn reconcile_missing_resources(
@@ -231,12 +385,35 @@ pub async fn reconcile_missing_resources(
     mount_id: &str,
     scan_id: &str,
 ) -> anyhow::Result<()> {
-    let _: serde_json::Value = mutation(
-        deployment_url,
-        "bridgeSync:reconcileMissingResources",
-        serde_json::json!({ "credential": credential, "mountId": mount_id, "scanId": scan_id }),
-    )
-    .await?;
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ReconcilePage {
+        continue_cursor: Option<String>,
+        is_done: bool,
+    }
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut args = serde_json::json!({
+            "credential": credential,
+            "mountId": mount_id,
+            "scanId": scan_id,
+        });
+        if let Some(value) = cursor.as_ref() {
+            args.as_object_mut()
+                .expect("reconcile args are an object")
+                .insert("cursor".into(), serde_json::Value::String(value.clone()));
+        }
+        let page: ReconcilePage =
+            mutation(deployment_url, "bridgeSync:reconcileMissingResources", args).await?;
+        if page.is_done {
+            break;
+        }
+        cursor = page.continue_cursor;
+        anyhow::ensure!(
+            cursor.is_some(),
+            "missing-resource reconciliation did not advance"
+        );
+    }
     Ok(())
 }
 
@@ -270,7 +447,7 @@ pub async fn upload_resource_payload(
         let upload_url = intent
             .upload_url
             .ok_or_else(|| anyhow::anyhow!("payload upload URL missing"))?;
-        let response = reqwest::Client::new()
+        let response = cloud_client(PAYLOAD_REQUEST_TIMEOUT)?
             .post(upload_url)
             .header(reqwest::header::CONTENT_TYPE, media_type)
             .body(bytes.to_vec())
@@ -469,37 +646,86 @@ pub async fn drain_cloud_queue(
     journal: &Journal,
     deployment_url: &str,
     credential: &str,
-) -> anyhow::Result<usize> {
-    let client = reqwest::Client::new();
-    let mut handled = 0;
+) -> anyhow::Result<Vec<DeliveredChange>> {
+    let mut grouped = BTreeMap::<String, Vec<(QueueItem, QueuedChangeEnvelope)>>::new();
     for item in journal.due_queue(100)? {
-        let mut args: serde_json::Value = serde_json::from_str(&item.payload)?;
-        let object = args
-            .as_object_mut()
-            .ok_or_else(|| anyhow::anyhow!("queued payload is not an object"))?;
-        object.insert(
-            "credential".into(),
-            serde_json::Value::String(credential.to_owned()),
-        );
-        let result = client.post(format!("{}/api/mutation", deployment_url.trim_end_matches('/'))).json(&serde_json::json!({ "path": "bridgeSync:reportRevision", "format": "json", "args": args })).send().await;
-        match result {
-            Ok(response) if response.status().is_success() => {
-                let body: serde_json::Value = response.json().await?;
-                if body.get("status").and_then(|value| value.as_str()) == Some("success") {
-                    journal.acknowledge_queue(item.id)?;
-                    handled += 1;
-                } else {
-                    journal.retry_queue(item.id, Duration::from_secs(60))?;
+        if item.direction != "outbound-change" {
+            journal.fail_queue(
+                &item,
+                "unknown-queue-direction",
+                "Unsupported outbound journal entry",
+            )?;
+            continue;
+        }
+        match serde_json::from_str::<QueuedChangeEnvelope>(&item.payload) {
+            Ok(envelope) => {
+                let current = journal.resource_by_id(&envelope.change.resource_id)?;
+                let still_current = current.as_ref().is_some_and(|resource| {
+                    if envelope.change.op == "unavailable" {
+                        !resource.available
+                    } else {
+                        resource.available
+                            && envelope.change.relative_path.as_deref()
+                                == Some(resource.path_key.as_str())
+                            && envelope.change.hash.as_deref() == resource.content_hash.as_deref()
+                    }
+                });
+                if !still_current {
+                    journal.fail_queue(
+                        &item,
+                        "change-superseded",
+                        "A newer local file event replaced this queued change",
+                    )?;
+                    continue;
                 }
+                grouped
+                    .entry(envelope.mount_id.clone())
+                    .or_default()
+                    .push((item, envelope));
             }
-            _ => {
-                let delay =
-                    Duration::from_millis(500).saturating_mul(1_u32 << item.attempts.min(7));
-                journal.retry_queue(item.id, delay.min(Duration::from_secs(60)))?;
+            Err(error) => journal.fail_queue(
+                &item,
+                "invalid-queued-change",
+                &error.to_string().chars().take(500).collect::<String>(),
+            )?,
+        }
+    }
+    let mut delivered = Vec::new();
+    for (mount_id, batch) in grouped {
+        let changes = batch
+            .iter()
+            .map(|(_, envelope)| envelope.change.clone())
+            .collect::<Vec<_>>();
+        let results = match report_changes(deployment_url, credential, &mount_id, &changes).await {
+            Ok(results) => results,
+            Err(_) => {
+                for (item, _) in batch {
+                    journal.retry_queue(item.id, Backoff::delay_for_attempt(item.attempts))?;
+                }
+                continue;
+            }
+        };
+        let by_journal = results
+            .into_iter()
+            .map(|result| (result.journal_id.clone(), result))
+            .collect::<BTreeMap<_, _>>();
+        for (item, envelope) in batch {
+            match by_journal.get(&envelope.change.journal_id) {
+                Some(result) if result.error_code.is_none() => delivered.push(DeliveredChange {
+                    item,
+                    envelope,
+                    result: result.clone(),
+                }),
+                Some(result) => journal.fail_queue(
+                    &item,
+                    result.error_code.as_deref().unwrap_or("change-rejected"),
+                    "The cloud rejected this file change",
+                )?,
+                None => journal.retry_queue(item.id, Backoff::delay_for_attempt(item.attempts))?,
             }
         }
     }
-    Ok(handled)
+    Ok(delivered)
 }
 
 #[cfg(test)]
@@ -517,5 +743,50 @@ mod tests {
         }
         b.success();
         assert_eq!(b.next_delay(), Duration::from_millis(500));
+    }
+
+    #[tokio::test]
+    async fn superseded_queue_entry_is_failed_without_contacting_cloud() {
+        let journal = Journal::in_memory().unwrap();
+        let operation = journal
+            .begin_intent(
+                "superseded",
+                "cloud.report-change",
+                Some("lr_dead"),
+                None,
+                None,
+            )
+            .unwrap();
+        let envelope = QueuedChangeEnvelope {
+            grant_id: "grant_dead".into(),
+            mount_id: "mount_dead".into(),
+            change: ReportedChange {
+                journal_id: operation.op_id.clone(),
+                resource_id: "lr_dead".into(),
+                op: "unavailable".into(),
+                relative_path: Some("old.docx".into()),
+                previous_relative_path: None,
+                hash: None,
+                revision_before: None,
+                size: None,
+                native_format: None,
+            },
+        };
+        journal
+            .enqueue(
+                &operation.op_id,
+                "outbound-change",
+                &serde_json::to_string(&envelope).unwrap(),
+            )
+            .unwrap();
+
+        let delivered = drain_cloud_queue(&journal, "http://127.0.0.1:1", "unused")
+            .await
+            .unwrap();
+        assert!(delivered.is_empty());
+        assert_eq!(
+            journal.by_key("superseded").unwrap().unwrap().state,
+            crate::journal::OpState::Failed
+        );
     }
 }

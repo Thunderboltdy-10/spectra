@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
 import { useBridgeHealth } from "./use-bridge";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, useConvexAuth } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { POLICY_PRESETS } from "../../../../shared/sync-policy";
 import {
@@ -44,8 +44,16 @@ function stripProviderJargon(detail: string) {
 
 export function BridgeSettings() {
   const local = useBridgeHealth();
-  const effectivePolicy = useQuery(api.syncPolicy.effective, {});
-  const cloudOverview = useQuery(api.bridge.overview, {});
+  const { isAuthenticated } = useConvexAuth();
+  const cloudEnabled = local.online && isAuthenticated;
+  const effectivePolicy = useQuery(
+    api.syncPolicy.effective,
+    cloudEnabled ? {} : "skip",
+  );
+  const cloudOverview = useQuery(
+    api.bridge.overview,
+    cloudEnabled ? {} : "skip",
+  );
   const overridePolicy = useMutation(api.syncPolicy.overrideAccount);
   const requestPairing = useMutation(api.bridge.requestPairing);
   const [pairing, setPairing] = useState<{

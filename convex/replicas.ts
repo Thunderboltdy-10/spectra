@@ -18,6 +18,7 @@ import {
   BRIDGE_WRITE_EXPIRES_MS,
   PAYLOAD_RELEASE_GRACE_MS,
   STRATEGY_TRANSITION_EXPIRES_MS,
+  STRATEGY_TRANSITION_STALL_MS,
   deriveProjectionSnapshotHash,
   deriveStorageTransitionIdempotencyKey,
   deriveSyncIdempotencyKey,
@@ -71,10 +72,15 @@ export const transitionStorageStrategy = mutation({
     ]);
     let activeLocal = locals.find((replica) => replica.state !== "unavailable" && replica.unavailableReason !== "removed-by-user" && replica.unavailableReason !== "unlinked-by-user");
     const verifiedCloudPayload = cloud ? await verifiedReplicaPayload(ctx, cloud) : null;
+    const verifiedLocalPayload = activeLocal ? await verifiedReplicaPayload(ctx, activeLocal) : null;
+    const hashedPayload = !verifiedCloudPayload && !verifiedLocalPayload
+      ? await payloadForHash(ctx, actor.accountId, activeLocal?.contentHash)
+      : null;
+    const attachablePayload = verifiedCloudPayload ?? verifiedLocalPayload ?? hashedPayload;
     const requiresLocal = args.toPreset === "device" || args.toPreset === "both" || args.toPreset === "linked";
     const strategyPlan = planStorageStrategyTransition(args.toPreset, {
       hasCloud: Boolean(cloud),
-      cloudHasPayload: Boolean(verifiedCloudPayload),
+      cloudHasPayload: Boolean(attachablePayload),
       hasActiveLocal: Boolean(activeLocal),
       localIsVerified: Boolean(activeLocal && activeLocal.state === "current" && activeLocal.contentHash && activeLocal.lastVerifiedAt),
       replicasAgree: Boolean(
@@ -181,8 +187,24 @@ export const transitionStorageStrategy = mutation({
       });
       if (args.toPreset === "spectra") {
         // A metadata-only cloud row is not a completed migration. Keep the
-        // local source active until the normal Bridge discovery/upload path
-        // has attached and verified the native payload in Spectra.
+        // local source active until a verified native payload is attached.
+        // Prefer a retained payload object (including one unlinked by This PC)
+        // over waiting for a Bridge change event that may never fire.
+        if (attachablePayload && cloud) {
+          await ctx.db.patch(cloud._id, {
+            payloadRef: String(attachablePayload._id),
+            contentHash: attachablePayload.hash,
+            revision: attachablePayload.hash,
+            baseRevision: attachablePayload.hash,
+            state: "current",
+            lastVerifiedAt: now,
+            unavailableReason: undefined,
+            errorCode: undefined,
+            errorMessage: undefined,
+            errorAt: undefined,
+            updatedAt: now,
+          });
+        }
         if (!strategyPlan.requiresCloudMaterialization) {
           for (const local of locals) await ctx.db.patch(local._id, { state: "unavailable", unavailableReason: "unlinked-by-user", protectedOriginal: undefined, updatedAt: now });
         }
@@ -194,6 +216,21 @@ export const transitionStorageStrategy = mutation({
         await ctx.db.patch(activeLocal!._id, { protectedOriginal: undefined, state: createdLocal ? "pending" : activeLocal!.state === "unavailable" ? "behind" : activeLocal!.state, updatedAt: now });
         await ctx.db.patch(args.workId, { protectedOriginal: false, updatedAt: now });
       } else if (args.toPreset === "both") {
+        if (attachablePayload && cloud && !verifiedCloudPayload) {
+          await ctx.db.patch(cloud._id, {
+            payloadRef: String(attachablePayload._id),
+            contentHash: attachablePayload.hash,
+            revision: attachablePayload.hash,
+            baseRevision: attachablePayload.hash,
+            state: "current",
+            lastVerifiedAt: now,
+            unavailableReason: undefined,
+            errorCode: undefined,
+            errorMessage: undefined,
+            errorAt: undefined,
+            updatedAt: now,
+          });
+        }
         await ctx.db.patch(activeLocal!._id, { protectedOriginal: undefined, state: activeLocal!.state === "unavailable" ? "behind" : activeLocal!.state, updatedAt: now });
         await ctx.db.patch(args.workId, { protectedOriginal: false, updatedAt: now });
       } else if (args.toPreset === "linked") {
@@ -211,7 +248,7 @@ export const transitionStorageStrategy = mutation({
           updatedAt: now,
         });
       }
-      const after = { preset: args.toPreset, cloudPayloadRef: args.toPreset === "device" || args.toPreset === "linked" ? undefined : cloud?.payloadRef, localReplicaIds: locals.map((replica) => String(replica._id)), physicalLocalAction: args.toPreset === "spectra" ? "leave-file-in-place" : "retain", materializationRequestId: materializationRequestId ? String(materializationRequestId) : undefined };
+      const after = { preset: args.toPreset, cloudPayloadRef: args.toPreset === "device" || args.toPreset === "linked" ? undefined : attachablePayload ? String(attachablePayload._id) : cloud?.payloadRef, localReplicaIds: locals.map((replica) => String(replica._id)), physicalLocalAction: args.toPreset === "spectra" ? "leave-file-in-place" : "retain", materializationRequestId: materializationRequestId ? String(materializationRequestId) : undefined };
       const finalState = createdLocal || strategyPlan.requiresCloudMaterialization ? "pending" : strategyPlan.completion;
       await ctx.db.patch(transitionId, { state: finalState, after, updatedAt: Date.now() });
       return { state: finalState as "pending" | "verified", transitionId, materializationRequestId: materializationRequestId ?? null };
@@ -1262,6 +1299,18 @@ async function verifiedReplicaPayload(
     : null;
 }
 
+async function payloadForHash(
+  ctx: MutationCtx,
+  accountId: Id<"accounts">,
+  hash: string | undefined,
+) {
+  if (!hash) return null;
+  const payload = await ctx.db.query("payloadObjects")
+    .withIndex("by_account_hash", (q) => q.eq("accountId", accountId).eq("hash", hash))
+    .unique();
+  return payload?.state === "active" ? payload : null;
+}
+
 async function verifiedReplicaRevision(
   ctx: MutationCtx,
   replica: Doc<"workReplicas">,
@@ -1383,17 +1432,57 @@ export const sweepReplicaTruth = internalMutation({
       .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", now))
       .take(100);
     let failedTransitions = 0;
+    let verifiedTransitions = 0;
     for (const transition of transitions) {
-      if ((transition.expiresAt ?? transition.createdAt + STRATEGY_TRANSITION_EXPIRES_MS) > now) continue;
-      await restoreTransitionPolicy(ctx, transition, now);
+      if (transition.toPreset === "spectra" || transition.toPreset === "both") {
+        const cloud = await ctx.db.query("workReplicas")
+          .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "cloud"))
+          .unique();
+        const payload = cloud ? await verifiedReplicaPayload(ctx, cloud) : null;
+        if (payload) {
+          if (transition.toPreset === "spectra") {
+            const locals = await ctx.db.query("workReplicas")
+              .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "local"))
+              .take(20);
+            for (const local of locals) {
+              if (local.state === "unavailable") continue;
+              await ctx.db.patch(local._id, {
+                state: "unavailable",
+                unavailableReason: "unlinked-by-user",
+                protectedOriginal: undefined,
+                updatedAt: now,
+              });
+            }
+          }
+          await ctx.db.patch(transition._id, {
+            state: "verified",
+            after: {
+              ...(transition.after as Record<string, unknown> | undefined),
+              cloudPayloadRef: String(payload._id),
+              physicalLocalAction: transition.toPreset === "spectra" ? "leave-file-in-place" : "retain",
+            },
+            updatedAt: now,
+          });
+          verifiedTransitions += 1;
+          continue;
+        }
+      }
       const requestId = ctx.db.normalizeId(
         "bridgeWriteRequests",
         String((transition.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? ""),
       );
       const request = requestId ? await ctx.db.get(requestId) : null;
-      if (request && (request.state === "pending" || request.state === "claimed"))
-        await failWriteRequest(ctx, request, "strategy-transition-expired", now);
-      await ctx.db.patch(transition._id, { state: "failed", errorCode: "strategy-transition-expired", updatedAt: now });
+      const liveWrite = request && (request.state === "pending" || request.state === "claimed");
+      const stalled = (transition.updatedAt ?? transition.createdAt) + STRATEGY_TRANSITION_STALL_MS <= now;
+      const expired = (transition.expiresAt ?? transition.createdAt + STRATEGY_TRANSITION_EXPIRES_MS) <= now;
+      if (!expired && !(stalled && !liveWrite)) continue;
+      await restoreTransitionPolicy(ctx, transition, now);
+      if (liveWrite) await failWriteRequest(ctx, request, expired ? "strategy-transition-expired" : "strategy-transition-failed", now);
+      await ctx.db.patch(transition._id, {
+        state: "failed",
+        errorCode: expired ? "strategy-transition-expired" : "strategy-transition-failed",
+        updatedAt: now,
+      });
       failedTransitions += 1;
     }
 
@@ -1446,7 +1535,7 @@ export const sweepReplicaTruth = internalMutation({
       await ctx.db.patch(payload._id, { refCount: 0, state: "released", releasedAt: now });
       releasedPayloads += 1;
     }
-    const repairs = { redriven, failedWrites, orphanedReplicas, orphanedOperations, failedTransitions, reopenedConflicts, abandonedConflicts, releasedPayloads };
+    const repairs = { redriven, failedWrites, orphanedReplicas, orphanedOperations, failedTransitions, verifiedTransitions, reopenedConflicts, abandonedConflicts, releasedPayloads };
     if (Object.values(repairs).some((count) => count > 0))
       console.info("replica-truth-sweeper", repairs);
     return repairs;

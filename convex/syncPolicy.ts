@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { getAuthenticatedActor } from "./identityShared";
+import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import {
   resolveEffectivePolicy,
   type EffectiveSyncPolicy,
@@ -154,8 +154,8 @@ export async function assertPayloadWriteAllowed(
 export const effective = query({
   args: { mountId: v.optional(v.string()), workspaceId: v.optional(v.string()), folderId: v.optional(v.string()), itemId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const actor = await getAuthenticatedActor(ctx);
-    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const actor = await getOptionalAuthenticatedActor(ctx);
+    if (!actor) return null;
     return computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: args.mountId, workspace: args.workspaceId, folder: args.folderId, item: args.itemId });
   },
 });

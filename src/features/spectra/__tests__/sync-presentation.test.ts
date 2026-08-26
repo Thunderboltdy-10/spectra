@@ -3,10 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   isPresentationReady,
+  locationLabel,
   presentSync,
   replicaDisclosure,
   selectSyncTruth,
 } from "../bridge/status";
+import { humanizePublicFailure } from "../bridge/humanize";
 
 describe("sync presentation (P1.I3)", () => {
   it("treats saved-locally as ready so a verified device copy does not block checkpoints", () => {
@@ -89,6 +91,55 @@ describe("sync presentation (P1.I3)", () => {
     expect(lines[0]).toContain("This device · Up to date");
   });
 
+  it("never says Up to date of a file Word still holds", () => {
+    const lines = replicaDisclosure(
+      [
+        {
+          kind: "local",
+          state: "current",
+          lastVerifiedAt: Date.now() - 9 * 60_000,
+          errorCode: "office-locked",
+        },
+      ],
+      Date.now(),
+    );
+    expect(lines[0]).toContain("Waiting for Word to finish saving");
+    expect(lines[0]).not.toContain("Up to date");
+    const presentation = presentSync({
+      replicas: [
+        {
+          kind: "local",
+          state: "current",
+          lastVerifiedAt: 1,
+          errorCode: "office-locked",
+        },
+      ],
+      openConflictCount: 0,
+      replicaPendingCount: 0,
+      online: true,
+    });
+    expect(presentation.label).toBe("Waiting for Word");
+    expect(presentation.ready).toBe(false);
+  });
+
+  it("keeps Location and replica availability on the same places", () => {
+    expect(
+      locationLabel([
+        { kind: "local", state: "current" },
+        { kind: "cloud", state: "unavailable" },
+      ]),
+    ).toBe("This device");
+    expect(
+      replicaDisclosure(
+        [
+          { kind: "local", state: "current", lastVerifiedAt: Date.now() },
+          { kind: "cloud", state: "unavailable" },
+        ],
+        Date.now(),
+      ).join(" "),
+    ).toContain("Spectra · Not available here");
+  });
+
   it("mounts the product Offline banner on AppShell so Settings sees it", () => {
     const root = process.cwd();
     const appShell = fs.readFileSync(
@@ -106,6 +157,26 @@ describe("sync presentation (P1.I3)", () => {
     expect(appShell).toContain("<ProductOfflineBanner");
     expect(workbench).not.toContain("ProductOfflineBanner");
     expect(settings).toContain("<AppShell");
+    const settingsApp = fs.readFileSync(
+      path.join(root, "src/features/spectra/settings/ui/settings-application.tsx"),
+      "utf8",
+    );
+    const bridgeSettings = fs.readFileSync(
+      path.join(root, "src/features/spectra/bridge/bridge-settings.tsx"),
+      "utf8",
+    );
+    const errorBoundary = fs.readFileSync(
+      path.join(root, "src/components/global-error-boundary.tsx"),
+      "utf8",
+    );
+    expect(settingsApp).toContain("IsolatedErrorBoundary");
+    expect(bridgeSettings).toContain('cloudEnabled ? {} : "skip"');
+    expect(errorBoundary).toContain("humanizePublicFailure");
+    expect(errorBoundary).not.toContain("this.state.error.message");
+    const convexAuth = [
+      "[CONVEX Q(syncPolicy:effective)] [Request ID: 681785b0f916633b] Server Error Uncaught Error: AUTH_NOT_SIGNED_IN: Sign in to continue.",
+    ];
+    expect(humanizePublicFailure(convexAuth[0])).not.toMatch(/Request ID|AUTH_NOT_SIGNED_IN|syncPolicy:effective/i);
   });
 
   it("offers Reconnect when the local copy is unavailable", () => {

@@ -19,7 +19,7 @@ import {
   bridgeReachabilityCopy,
   folderChipLabel,
 } from "../bridge/client";
-import { presentSync } from "../bridge/status";
+import { locationLabel, presentSync } from "../bridge/status";
 import {
   humanizePublicFailure,
   isCloudDiscoveryFailure,
@@ -172,6 +172,16 @@ describe("sync toggles (P1.I4)", () => {
       discoveryFailed: false,
       reachability: "not-running",
     })).toBe("Waiting for Bridge");
+    expect(folderChipLabel({
+      state: "waiting",
+      discoveryFailed: false,
+      reachability: "connected",
+    })).toBe("Waiting to retry");
+    expect(folderChipLabel({
+      state: "waiting",
+      discoveryFailed: false,
+      reachability: "connected",
+    })).not.toBe("Waiting for Bridge");
     expect(settings).toContain("folderChipLabel");
   });
 
@@ -224,5 +234,33 @@ describe("sync toggles (P1.I4)", () => {
     expect(resource).not.toMatch(/Image preview/i);
     expect(settings).toContain("Update Bridge");
     expect(settings).toContain("onClick");
+  });
+
+  it("makes Location agree with the replica list", () => {
+    expect(
+      locationLabel([
+        { kind: "local", state: "current" },
+        { kind: "cloud", state: "unavailable" },
+      ]),
+    ).toBe("This device");
+    expect(
+      locationLabel([
+        { kind: "local", state: "current" },
+        { kind: "cloud", state: "unavailable" },
+      ]),
+    ).not.toBe("This device + Spectra");
+    expect(
+      locationLabel([
+        { kind: "local", state: "unavailable" },
+        { kind: "cloud", state: "current" },
+      ]),
+    ).toBe("Spectra");
+    expect(
+      locationLabel([
+        { kind: "local", state: "current" },
+        { kind: "cloud", state: "current" },
+      ]),
+    ).toBe("This device + Spectra");
+    expect(resource).toContain("locationLabel");
   });
 });

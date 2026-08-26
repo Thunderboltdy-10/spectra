@@ -5,6 +5,7 @@ import { useNow } from "@/hooks/use-now";
 import {
   presentSync,
   replicaDisclosure,
+  replicaHasNativeLock,
   type PresentSyncInput,
   type ReplicaTruth,
   type SyncPresentation,
@@ -64,8 +65,12 @@ export function useSyncPresentation(
     ],
   );
   const disclosure = useMemo(
-    () => replicaDisclosure(replicas, now || Date.now()),
-    [now, replicas],
+    () =>
+      replicaDisclosure(replicas, now || Date.now(), {
+        nativeActivity: rest.nativeActivity,
+        nativeLocked: replicas.some(replicaHasNativeLock),
+      }),
+    [now, replicas, rest.nativeActivity],
   );
   return { ...presentation, disclosure };
 }

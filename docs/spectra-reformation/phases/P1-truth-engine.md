@@ -245,3 +245,15 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Waiting chip on the old stub said Waiting for Bridge while Connected (W5, I4). DOCX lens 400 / unfinished-control next to Synced (W6, P2.I1). Mid-edit in Spectra never ran (F6 strand).
 - Focused Vitest 45 pass / 2 pre-existing I2 string-scans, not rewritten. Shots `12` and `20` are yml-only; `13`/`21` cover those moments. Do not `convex push`.
 - Verdict: **REJECTED**. Evidence: `.shots/reformation/P1.V3/walk/manifest.md`. Next **P1.I1**.
+
+## Implementer rejection-fix log — P1.I1/I3/I4 / P1.V3-W1–W5 (2026-08-26)
+
+- W1 SYSTEMIC CS-3/F6: Keep in Spectra stayed pending because completion waited on a Bridge change event after This PC stripped payload refs. Attach a retained payload by hash/ref, unlink without deleting the disk file, and sweep-complete when cloud bytes exist; stall-fail pending F6 with no live write after 2 minutes so radios can exit.
+- W2 SYSTEMIC: Location used “local current ⇒ This device + Spectra”. `locationLabel` now names only present replicas, so Location, chips, and the replica list agree.
+- W3 SYSTEMIC: Watcher hashed nothing while Word held the file, so replica stayed current. Bridge now reports `locked`; presenter/disclosure say “Waiting for Word”, never Up to date, under `office-locked`.
+- W4 SYSTEMIC R13: `setOffline` made `syncPolicy:effective` throw AUTH_NOT_SIGNED_IN into GlobalErrorBoundary. Queries return null without identity; Settings skips Convex while offline; IsolatedErrorBoundary wraps Settings; the global dump uses the humanizer (no Request IDs).
+- W5 LOCAL: `folderChipLabel` mapped `waiting` to Waiting for Bridge. Connected + waiting is **Waiting to retry**.
+- Out of scope: W6 / P2.I1 / lens 400. I2 row unchanged (lock report is the W3 engine half).
+- Checks: focused Vitest 79 pass; property 2/2; bridge-app `cargo check` OK; two pre-existing I2 string-scans in `bridge-contract.test.ts` not rewritten. No `convex push`. Did not run P1.V3.
+- Status: **IMPLEMENTED**. P1.V3 remains REJECTED pending an independent walk. No acceptance claimed.
+

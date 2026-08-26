@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
-import { getAuthenticatedActor } from "./identityShared";
+import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { z } from "zod";
 import { createFolderNode } from "./orgTreeShared";
 import type { SyncPolicyValues } from "../shared/sync-policy";
@@ -133,7 +133,8 @@ export const resumePairing = mutation({
 export const devices = query({ args: {}, handler: async (ctx) => { const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED"); return ctx.db.query("bridgeDevices").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).take(50); } });
 
 export const overview = query({ args: {}, handler: async (ctx) => {
-  const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+  const actor = await getOptionalAuthenticatedActor(ctx);
+  if (!actor) return null;
   const devices = await ctx.db.query("bridgeDevices").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).take(50);
   const mounts = await ctx.db.query("bridgeMounts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId)).filter((q) => q.neq(q.field("state"), "revoked")).take(200);
   return { devices: devices.map(({ credentialHash: _credentialHash, ...device }) => device), mounts };

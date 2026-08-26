@@ -55,6 +55,11 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
       "This computer is no longer connected to Spectra. Open Spectra Bridge on this PC to continue.",
   },
   {
+    test: /AUTH_NOT_SIGNED_IN|not authenticated/i,
+    message: () =>
+      "This device is offline, or Spectra could not confirm you are signed in. You can keep working here.",
+  },
+  {
     test: /could not find public function|discoverResourcesPage|presentationsForAccount|bridgeSync:/i,
     message: () =>
       "Spectra could not list files in this folder right now. The files on this PC are unchanged.",
@@ -145,7 +150,8 @@ function stripInternalNoise(raw: string): string {
 /** Cloud listing failed; the folder itself is not broken. */
 export function isCloudDiscoveryFailure(error: unknown): boolean {
   const raw = rawText(error);
-  return /could not find public function|discoverResourcesPage|presentationsForAccount|bridgeSync:|\[Request ID:|Request ID:/i.test(
+  if (/AUTH_NOT_SIGNED_IN/i.test(raw)) return false;
+  return /could not find public function|discoverResourcesPage|presentationsForAccount|bridgeSync:/i.test(
     raw,
   );
 }

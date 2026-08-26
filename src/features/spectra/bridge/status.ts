@@ -183,13 +183,50 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
   };
 }
 
+export function replicaHasNativeLock(replica: ReplicaTruth): boolean {
+  return Boolean(replica.errorCode && /office-locked/i.test(replica.errorCode));
+}
+
+export function replicaIsPresent(replica: ReplicaTruth): boolean {
+  return replica.state !== "unavailable";
+}
+
+/** Location, chips, and the replica list must name the same places. */
+export function locationLabel(replicas: readonly ReplicaTruth[]): string {
+  const local = replicas.some(
+    (replica) => replica.kind === "local" && replicaIsPresent(replica),
+  );
+  const cloud = replicas.some(
+    (replica) => replica.kind === "cloud" && replicaIsPresent(replica),
+  );
+  if (local && cloud) return "This device + Spectra";
+  if (local) return "This device";
+  if (cloud) return "Spectra";
+  return "Not available here";
+}
+
 export function replicaDisclosure(
   replicas: readonly ReplicaTruth[],
   now = Date.now(),
+  activity?: { nativeLocked?: boolean; nativeActivity?: boolean },
 ) {
   return replicas.map((replica) => {
     const location = replica.kind === "local" ? "This device" : "Spectra";
+    const locked =
+      replicaHasNativeLock(replica) ||
+      (replica.kind === "local" && Boolean(activity?.nativeLocked));
+    if (locked) {
+      return `${location} · Waiting for Word to finish saving`;
+    }
+    if (
+      replica.kind === "local" &&
+      replica.state === "current" &&
+      activity?.nativeActivity
+    ) {
+      return `${location} · Saving`;
+    }
     const state = humanizeReplicaState(replica.state);
+    if (replica.state === "unavailable") return `${location} · ${state}`;
     if (replica.lastVerifiedAt === undefined)
       return `${location} · ${state} · Not yet verified`;
     return `${location} · ${state} · Last verified ${formatElapsedSince(replica.lastVerifiedAt, now)}`;
@@ -210,9 +247,10 @@ function activityPending(input: PresentSyncInput) {
     input.transportState === "synchronizing" ||
     input.transportState === "reconnecting" ||
     input.transportState === "unsynchronized";
+  const nativeLocked = input.replicas.some(replicaHasNativeLock);
   return (
     input.replicaPendingCount +
-    (input.dirty || input.nativeActivity || transportBusy ? 1 : 0)
+    (input.dirty || input.nativeActivity || nativeLocked || transportBusy ? 1 : 0)
   );
 }
 
@@ -302,6 +340,17 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
         state: "offline",
         label: "Reconnecting",
         detail: "Connection interrupted. Your draft stays on this device.",
+        tone: "warning",
+        ready: false,
+      };
+    }
+    if (input.replicas.some(replicaHasNativeLock)) {
+      return {
+        key: truth.key,
+        state: "saving",
+        label: "Waiting for Word",
+        detail:
+          "Word still has this file open. Spectra will verify it after Word finishes saving.",
         tone: "warning",
         ready: false,
       };

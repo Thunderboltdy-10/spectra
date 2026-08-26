@@ -1,6 +1,8 @@
 export const BRIDGE_CLAIM_REDRIVE_MS = 2 * 60_000;
 export const BRIDGE_WRITE_EXPIRES_MS = 30 * 60_000;
 export const STRATEGY_TRANSITION_EXPIRES_MS = 30 * 60_000;
+/** F6 without an in-flight write must not lock the radios for the 30-minute write window. */
+export const STRATEGY_TRANSITION_STALL_MS = 2 * 60_000;
 export const PAYLOAD_RELEASE_GRACE_MS = 24 * 60 * 60_000;
 
 export type SyncIntentDirection =

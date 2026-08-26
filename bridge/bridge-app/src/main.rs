@@ -629,6 +629,67 @@ fn enqueue_missing_path(
     Ok(queued)
 }
 
+fn enqueue_locked_path(
+    grant: &Grant,
+    journal: &Journal,
+    path: &std::path::Path,
+) -> anyhow::Result<usize> {
+    let relative_path = relative_key(grant.device_root(), path);
+    let mount_id = journal
+        .config(&format!("cloud_mount:{}", grant.id))?
+        .ok_or_else(|| anyhow::anyhow!("cloud mount is not registered yet"))?;
+    let mut queued = 0;
+    for resource in journal.resources_with_path_prefix(&grant.id, &relative_path)? {
+        if !resource.available {
+            continue;
+        }
+        let before = resource
+            .content_hash
+            .as_deref()
+            .or(resource.revision.as_deref());
+        let key = derived_change_key(
+            &grant.id,
+            &resource.local_resource_id,
+            None,
+            &resource.path_key,
+            before,
+            None,
+            "locked",
+        );
+        let operation = journal.begin_intent(
+            &key,
+            "cloud.report-change",
+            Some(&resource.local_resource_id),
+            before,
+            None,
+        )?;
+        if operation.state != OpState::Verified {
+            let envelope = QueuedChangeEnvelope {
+                grant_id: grant.id.clone(),
+                mount_id: mount_id.clone(),
+                change: ReportedChange {
+                    journal_id: operation.op_id.clone(),
+                    resource_id: resource.local_resource_id,
+                    op: "locked".into(),
+                    relative_path: Some(resource.path_key),
+                    previous_relative_path: None,
+                    hash: None,
+                    revision_before: resource.content_hash.or(resource.revision),
+                    size: None,
+                    native_format: None,
+                },
+            };
+            journal.enqueue(
+                &operation.op_id,
+                "outbound-change",
+                &serde_json::to_string(&envelope)?,
+            )?;
+            queued += 1;
+        }
+    }
+    Ok(queued)
+}
+
 async fn upload_discovered_resource(
     deployment: &str,
     credential: &str,
@@ -1514,6 +1575,19 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                 if !path.exists() {
                     pending_files.remove(&path);
                     pending_missing.entry(path).or_insert(observed_at);
+                    continue;
+                }
+                if office_lock_exists(&path) {
+                    if enqueue_locked_path(&grant, &journal, &path).is_ok() {
+                        let _ = set_mount_status(
+                            &journal,
+                            &grant.id,
+                            "waiting",
+                            "Word still has a file open. Spectra will verify it after Word finishes saving.",
+                            0,
+                            0,
+                        );
+                    }
                     continue;
                 }
                 match stability.observe(&path, observed_at) {

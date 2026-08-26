@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { IsolatedErrorBoundary } from "@/components/global-error-boundary";
 import { useTheme } from "@/components/theme-provider";
 import { useSpectraPreferences } from "../preference-store";
 import type { PreferenceSection, SpectraPreferences } from "../schema";
@@ -242,7 +243,15 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
             <h2 id="settings-section-title" className="sr-only">
               {SECTIONS.find((section) => section.id === active)?.label}
             </h2>
-            {body[active]}
+            <IsolatedErrorBoundary
+              fallback={
+                <p className="py-6 text-caption text-[var(--text-secondary)]" role="status">
+                  This device is offline. Settings that live on this PC still work; Spectra will return the rest when you reconnect.
+                </p>
+              }
+            >
+              {body[active]}
+            </IsolatedErrorBoundary>
           </div>
         </section>
       </div>

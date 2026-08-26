@@ -69,6 +69,13 @@ export async function getAuthenticatedActor(ctx: IdentityCtx) {
   };
 }
 
+/** Product queries must not crash the tree when the browser is offline. */
+export async function getOptionalAuthenticatedActor(ctx: IdentityCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) return null;
+  return getAuthenticatedActor(ctx);
+}
+
 export async function getActorForAccountId(ctx: IdentityCtx, accountId: Id<"accounts">) {
   const account = await ctx.db.get(accountId);
   if (!account || account.status !== "active" || !account.emailVerified) return null;

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { SpectraArtifact } from "../data/api";
 import { humanizePublicFailure } from "./humanize";
+import { locationLabel } from "./status";
 import { useSyncPresentation } from "./use-sync-presentation";
 import { useBridgeHealth } from "./use-bridge";
 import { BRIDGE_SETTINGS_HREF } from "./client";
@@ -386,12 +387,12 @@ export function ResourceSurface({
                 <div className="flex justify-between gap-3">
                   <dt className="text-[var(--text-tertiary)]">Location</dt>
                   <dd>
-                    {truth?.replicas.some(
-                      (replica) =>
-                        replica.kind === "local" && replica.state === "current",
-                    )
-                      ? "This device + Spectra"
-                      : "Spectra Cloud"}
+                    {locationLabel(
+                      (truth?.replicas ?? []).map((replica) => ({
+                        kind: replica.kind,
+                        state: replica.state,
+                      })),
+                    )}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3">

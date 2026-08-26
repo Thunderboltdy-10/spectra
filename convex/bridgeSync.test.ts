@@ -220,4 +220,52 @@ describe("Bridge incremental cloud seam", () => {
       }),
     ]));
   });
+
+  it("records a writer lock without claiming the file is up to date", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedBridge(t);
+    const discovered = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{
+        localResourceId: "lr_dddddddddddddddd",
+        relativePath: "Essay.docx",
+        size: 42,
+        contentHash: "a".repeat(64),
+        nativeFormat: "docx",
+      }],
+    });
+    const registration = discovered.registrations[0];
+    if (!("replicaId" in registration)) {
+      throw new Error(`Expected resource registration, got ${"reason" in registration ? registration.reason : "unknown"}`);
+    }
+    const replicaId = registration.replicaId;
+    await t.mutation(api.bridgeSync.reportChanges, {
+      credential,
+      mountId: fixture.mountId,
+      changes: [{
+        journalId: `op_${"4".repeat(32)}`,
+        resourceId: "lr_dddddddddddddddd",
+        op: "locked",
+      }],
+    });
+    const locked = await t.run(async (ctx) => ctx.db.get(replicaId));
+    expect(locked).toMatchObject({ errorCode: "office-locked" });
+    expect(locked?.state).not.toBe("error");
+    await t.mutation(api.bridgeSync.reportChanges, {
+      credential,
+      mountId: fixture.mountId,
+      changes: [{
+        journalId: `op_${"5".repeat(32)}`,
+        resourceId: "lr_dddddddddddddddd",
+        op: "upsert",
+        relativePath: "Essay.docx",
+        hash: "b".repeat(64),
+        size: 44,
+        nativeFormat: "docx",
+      }],
+    });
+    const verified = await t.run(async (ctx) => ctx.db.get(replicaId));
+    expect(verified?.errorCode).toBeUndefined();
+  });
 });

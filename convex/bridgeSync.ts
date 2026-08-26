@@ -353,7 +353,7 @@ async function discoverResourceForMount(
             }
           : {}),
         state: nextState,
-        ...(existingReplica.state === "unavailable"
+        ...(existingReplica.state === "unavailable" || existingReplica.errorCode === "office-locked"
           ? { unavailableReason: undefined, errorCode: undefined, errorMessage: undefined, errorAt: undefined }
           : {}),
         lastVerifiedAt: input.contentHash ? verifiedAt : existingReplica.lastVerifiedAt,
@@ -1306,7 +1306,7 @@ export const reportChanges = mutation({
     const changeSchema = z.object({
       journalId: z.string().regex(/^op_[a-f0-9]{32}$/),
       resourceId: z.string().regex(/^lr_[a-f0-9]+$/),
-      op: z.enum(["upsert", "unavailable"]),
+      op: z.enum(["upsert", "unavailable", "locked"]),
       relativePath: z.string().min(1).max(1024).optional(),
       previousRelativePath: z.string().min(1).max(1024).optional(),
       hash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -1327,6 +1327,22 @@ export const reportChanges = mutation({
         continue;
       }
       const change = parsed.data;
+      if (change.op === "locked") {
+        const replicas = await ctx.db.query("workReplicas")
+          .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", change.resourceId))
+          .take(20);
+        const replica = replicas.find((candidate) => candidate.mountId === mount._id && candidate.state !== "unavailable");
+        if (replica && replica.errorCode !== "office-locked") {
+          await ctx.db.patch(replica._id, {
+            errorCode: "office-locked",
+            errorMessage: "Waiting for Office to finish saving",
+            errorAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
+        results.push({ journalId, state: replica ? "locked" : "ignored" });
+        continue;
+      }
       if (change.op === "unavailable") {
         const replicas = await ctx.db.query("workReplicas")
           .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", change.resourceId))

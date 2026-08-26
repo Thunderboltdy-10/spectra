@@ -409,6 +409,74 @@ describe("replica truth machine", () => {
       .rejects.toThrow("CLOUD_CONTENT_METADATA_ONLY");
   });
 
+  it("finishes Keep in Spectra by attaching a retained payload without waiting on Bridge", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    await asUser.mutation(api.replicas.transitionStorageStrategy, {
+      workId: fixture.workId,
+      toPreset: "device",
+    });
+    const afterDevice = await t.run(async (ctx) => ({
+      cloud: await ctx.db.get(fixture.cloudId),
+      local: await ctx.db.get(fixture.localId),
+      payload: await ctx.db.get(fixture.basePayloadId),
+    }));
+    expect(afterDevice.cloud).toMatchObject({ state: "unavailable", unavailableReason: "metadata-only" });
+    expect(afterDevice.cloud?.payloadRef).toBeUndefined();
+    expect(afterDevice.local?.payloadRef).toBeUndefined();
+    expect(afterDevice.payload).toMatchObject({ state: "active", hash: baseHash });
+
+    const transition = await asUser.mutation(api.replicas.transitionStorageStrategy, {
+      workId: fixture.workId,
+      toPreset: "spectra",
+    });
+    expect(transition.state).toBe("verified");
+    const truth = await t.run(async (ctx) => ({
+      transition: await ctx.db.get(transition.transitionId),
+      cloud: await ctx.db.get(fixture.cloudId),
+      local: await ctx.db.get(fixture.localId),
+    }));
+    expect(truth.transition).toMatchObject({ state: "verified", toPreset: "spectra" });
+    expect(truth.cloud).toMatchObject({
+      state: "current",
+      payloadRef: String(fixture.basePayloadId),
+      contentHash: baseHash,
+    });
+    expect(truth.local).toMatchObject({ state: "unavailable", unavailableReason: "unlinked-by-user" });
+  });
+
+  it("sweeps a stalled pending storage transition so the radios can exit", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const stalledAt = Date.now() - 3 * 60_000;
+    await t.run(async (ctx) => {
+      await ctx.db.patch(fixture.cloudId, {
+        payloadRef: undefined,
+        contentHash: undefined,
+        state: "unavailable",
+        unavailableReason: "metadata-only",
+      });
+    });
+    const transitionId = await t.run(async (ctx) =>
+      ctx.db.insert("storageStrategyTransitions", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        idempotencyKey: "strategy_stall_test",
+        fromPreset: "both",
+        toPreset: "spectra",
+        state: "pending",
+        before: { hadItemPolicy: false, preset: "both" },
+        createdAt: stalledAt,
+        updatedAt: stalledAt,
+      }),
+    );
+    const result = await t.mutation(internal.replicas.sweepReplicaTruth, {});
+    expect(result.failedTransitions).toBe(1);
+    const transition = await t.run(async (ctx) => ctx.db.get(transitionId));
+    expect(transition).toMatchObject({ state: "failed", errorCode: "strategy-transition-failed" });
+  });
+
   it("makes linked storage metadata-only without losing the verified local revision", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

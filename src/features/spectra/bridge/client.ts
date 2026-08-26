@@ -172,9 +172,12 @@ export function folderChipLabel(input: {
   if (input.discoveryFailed) return "Waiting for Spectra";
   if (input.state === "selected" || input.state === "active") return "Ready";
   if (input.state === "scanning") return "Reading folder";
-  if (input.state === "disconnected" || input.state === "waiting") {
-    return "Waiting for Bridge";
+  if (input.state === "waiting") {
+    return input.reachability === "connected"
+      ? "Waiting to retry"
+      : "Waiting for Bridge";
   }
+  if (input.state === "disconnected") return "Waiting for Bridge";
   if (input.state === "unavailable") return "Not available";
   if (input.state === "error") return "Needs attention";
   return "Needs attention";

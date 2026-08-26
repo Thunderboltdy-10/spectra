@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 
 type Props = { children: ReactNode };
 type State = { hasError: boolean; error?: Error };
@@ -19,8 +20,28 @@ export class IsolatedErrorBoundary extends Component<
     return { failed: true };
   }
 
+  componentDidMount() {
+    window.addEventListener("online", this.recover);
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener("online", this.recover);
+  }
+
+  recover = () => {
+    if (this.state.failed) this.setState({ failed: false });
+  };
+
   render() {
-    if (this.state.failed) return this.props.fallback ?? null;
+    if (this.state.failed) {
+      return (
+        this.props.fallback ?? (
+          <p className="px-4 py-6 text-caption text-[var(--text-secondary)]" role="status">
+            This device is offline. You can keep working; Spectra will reconnect when it can.
+          </p>
+        )
+      );
+    }
     return this.props.children;
   }
 }
@@ -41,6 +62,7 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      const spoken = humanizePublicFailure(this.state.error);
       return (
         <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-[var(--bg-primary)] p-8 text-[var(--text-primary)]">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--bg-secondary)]">
@@ -53,13 +75,8 @@ export class GlobalErrorBoundary extends Component<Props, State> {
           <div className="max-w-md text-center">
             <h1 className="text-lg font-medium">Something went wrong</h1>
             <p className="mt-2 text-sm text-[var(--text-secondary)]">
-              An unexpected error occurred. Your conversations and data are safe.
+              {spoken}
             </p>
-            {this.state.error && (
-              <p className="mt-2 rounded-lg bg-[var(--bg-secondary)] p-2 text-xs text-[var(--text-tertiary)]">
-                {this.state.error.message}
-              </p>
-            )}
           </div>
           <div className="flex gap-3">
             <button

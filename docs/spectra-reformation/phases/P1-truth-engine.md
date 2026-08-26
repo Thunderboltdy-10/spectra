@@ -154,3 +154,13 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - The verifier-owned slow-writer and 2,001-replica tests were unchanged. Rust core 37/37 and chaos 13/13 pass; focused Convex 4 files / 19 tests pass; Bridge compile, changed-file ESLint, Rustfmt, owned diff check, and secret scan pass.
 - Package-wide Rust still stops only at the documented missing `granted_tree` fixture. `tsc --noEmit` retains the five recorded blockers plus the unchanged verifier-test typing error at `convex/bridge-chaos.test.ts:172`.
 - Status: **IMPLEMENTED**. P1.V2 remains REJECTED pending an independent unchanged rerun; no acceptance is claimed.
+
+## Verifier rerun log — P1.V2 (2026-08-26)
+
+- Re-ran the unchanged verifier harnesses against `f11e147`; no product code or assertions changed.
+- Rust chaos passed **13/13**, including slow-writer, kill/replay, locks, placeholders, quiet mount, 10k discovery, and revocation scenarios.
+- Rust core passed **37/37**; focused Convex suites passed **4 files / 19 tests** including 2,001-replica revocation.
+- Bridge compile, Rustfmt, verifier-test ESLint, diff check, and secret scan passed.
+- All-target Rust reached **50 passed** and only failed at the documented missing `.tmp-n3-mount` `granted_tree` fixture; no gate was weakened.
+- P1.V2-F1 stable-byte proof and P1.V2-F2 bounded revocation are independently falsified and closed.
+- Verdict: **PASS**. P1.V2 VERIFIED; P1.I2 ACCEPTED. Evidence: `.shots/reformation/P1.V2/2026-08-26-chaos-rerun-report.md`.

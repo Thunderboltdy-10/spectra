@@ -1,4 +1,4 @@
-import { humanizeNativeError } from "../../lenses/humanize-native-error";
+import { humanizePublicFailure } from "../../bridge/humanize";
 
 export type LiveDockTruthState =
   | "working"
@@ -105,20 +105,7 @@ export function publicSpectraFailureText(
     : "Spectra could not finish after exhausting its recovery options.";
   const clean = compactText(value);
   if (!clean) return fallback;
-  if (
-    /LOCAL_REPLICA|NATIVE_PAYLOAD|PPTX_NOTES_PART|[A-Z]{3,}_[A-Z0-9_]{3,}/.test(
-      clean,
-    )
-  ) {
-    return humanizeNativeError(clean);
-  }
-  if (
-    /(?:typeerror|referenceerror|syntaxerror|work_yjs_|stack trace|\.tsx?:\d+|cannot read propert|json\.stringify|could not safely complete)/i.test(
-      clean,
-    )
-  )
-    return fallback;
-  return clean;
+  return humanizePublicFailure(clean);
 }
 
 function distinct(value: string | undefined, title: string) {

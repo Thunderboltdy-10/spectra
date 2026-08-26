@@ -71,6 +71,7 @@ import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import { WorkbenchDockShell } from "./workbench-dock-shell";
+import { ProductOfflineBanner } from "../bridge/product-offline-banner";
 import {
   createApplicationCommandDispatcher,
   mergePreferences,
@@ -3577,6 +3578,7 @@ export function SpectraShell({
           onGoForward={navigateShellForward}
           persistent
         />
+        <ProductOfflineBanner />
         <div className="spectra-workbench-frame relative flex min-h-0 flex-1">
           <PendingCreateDialog
             open={pendingCreateType !== null}

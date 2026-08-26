@@ -25,8 +25,13 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/use-now";
+import { presentSync } from "../bridge/status";
+import { useProductOnline } from "../bridge/use-product-online";
+import type { StatusTone } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -196,6 +201,32 @@ export function LibraryOrganizer({
   onOpenContainer,
 }: LibraryOrganizerProps) {
   const now = useNow(60_000);
+  const productOnline = useProductOnline();
+  const replicaPresentations = useQuery(api.replicas.presentationsForAccount, {});
+  const syncByWorkId = useMemo(() => {
+    const map = new Map<string, { label: string; tone: StatusTone }>();
+    for (const row of replicaPresentations ?? []) {
+      const presentation = presentSync({
+        replicas: row.replicas,
+        openConflictCount: row.openConflictCount,
+        replicaPendingCount: row.pendingCount,
+        online: productOnline,
+      });
+      if (presentation.ready) continue;
+      map.set(row.workId, {
+        label: presentation.label,
+        tone:
+          presentation.tone === "positive"
+            ? "healthy"
+            : presentation.tone === "warning"
+              ? "attention"
+              : presentation.tone === "danger"
+                ? "failure"
+                : "neutral",
+      });
+    }
+    return map;
+  }, [productOnline, replicaPresentations]);
   const actions = useTreeActions();
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -1004,6 +1035,16 @@ export function LibraryOrganizer({
                     showLocation={flat}
                     now={now}
                     callbacks={rowCallbacks}
+                    syncLabel={
+                      node.sourceId
+                        ? syncByWorkId.get(node.sourceId)?.label
+                        : undefined
+                    }
+                    syncTone={
+                      node.sourceId
+                        ? syncByWorkId.get(node.sourceId)?.tone
+                        : undefined
+                    }
                   />
                 ))}
               </div>

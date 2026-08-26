@@ -60,8 +60,9 @@ import {
 } from "react";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { ResourceSurface } from "../bridge/resource-surface";
-import { selectSyncTruth } from "../bridge/status";
-import { humanizeNativeError } from "../lenses/humanize-native-error";
+import { headerSyncMessage } from "../bridge/status";
+import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
+import { useSyncPresentation } from "../bridge/use-sync-presentation";
 import { formatByteCount } from "../../../../shared/human-format";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import {
@@ -147,6 +148,12 @@ import {
   resolveAiHighlightPaths,
   updatingHighlightFallbackPaths,
 } from "./ai-region-path";
+import { useArtifactNativeSync } from "./artifact-native-sync";
+import {
+  UnsavedCloseDialog,
+  decideClose,
+  persistableTitle,
+} from "./artifact-persistence";
 import { workTypeMeta } from "./artifact-card";
 import {
   ArtifactCommentsPanel,
@@ -170,7 +177,6 @@ import {
   useStudioDensity,
   useOptionalStudioContract,
   type StudioInspectorPanel,
-  type StudioSyncState,
   type StudioTab,
 } from "./artifact-studio-shell";
 import { commandContext, commandForBinding, executeCommand } from "../commands";
@@ -342,27 +348,6 @@ function waveCIdentityStats(
   }
 }
 
-function studioSyncMessage(syncLabel: string): string | undefined {
-  if (
-    syncLabel === "Synchronized" ||
-    syncLabel === "Synced" ||
-    syncLabel === "Saved" ||
-    syncLabel === "Live" ||
-    syncLabel === "Auto-saved"
-  ) {
-    return undefined;
-  }
-  return syncLabel;
-}
-
-function isSyncReady(syncLabel: string) {
-  return (
-    syncLabel === "Synchronized" ||
-    syncLabel === "Synced" ||
-    syncLabel === "Saved" ||
-    syncLabel === "Live"
-  );
-}
 
 export type DeckCard = {
   id: string;
@@ -2875,25 +2860,7 @@ function rebaseCollaborativeSnapshot(
 }
 
 function collaborationFailureMessage(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  if (
-    message.includes("COLLABORATION_SYNC_TIMEOUT") ||
-    message.includes("COLLABORATION_NOT_SYNCHRONIZED")
-  )
-    return "This edit is still safely held on this device. Spectra will synchronize it when the live connection catches up.";
-  if (
-    message.includes("COLLABORATION_ACCESS_LOST") ||
-    message.includes("COLLABORATION_READ_ONLY")
-  )
-    return "Your editing access changed before this edit could synchronize.";
-  if (
-    message.includes("AI_ARTIFACT_SCHEMA_INVALID") ||
-    message.includes('"code"') ||
-    message.includes("expected array") ||
-    message.includes("Invalid input")
-  )
-    return "This draft contains an unfinished control that cannot synchronize yet. Your local work is preserved.";
-  return "This edit has not synchronized yet. Your local work is preserved while Spectra retries.";
+  return humanizePublicFailure(error);
 }
 
 export function ArtifactStudio({
@@ -3383,25 +3350,11 @@ function ArtifactStudioEditor({
     regionId?: string;
     queuePosition?: number;
   } | null>(null);
-  const [nativeWriteError, setNativeWriteError] = useState<string>();
-  const [nativeMaterialization, setNativeMaterialization] = useState<
-    { state: "queueing" } | { state: "pending"; hash: string }
-  >();
-  const [nativeAttribution, setNativeAttribution] = useState<string>();
   const [nativeRecoveryBusy, setNativeRecoveryBusy] = useState<
     "download" | "materialize" | null
   >(null);
   const [nativeRecoveryError, setNativeRecoveryError] = useState<string>();
-  const [nativeLensProjection, setNativeLensProjection] = useState<unknown>();
-  const [nativeProjectionReady, setNativeProjectionReady] = useState(false);
-  const [nativeConflict, setNativeConflict] = useState<{
-    regionIds: string[];
-    message: string;
-  } | null>(null);
-  const nativeReconciliationRevisionRef = useRef<string | undefined>(undefined);
-  const nativeProjectionArtifactRef = useRef<string | undefined>(undefined);
-  const nativeLensRefreshRef = useRef<string | undefined>(undefined);
-  const nativeLocalRevisionRef = useRef<string | undefined>(undefined);
+  const [unsavedCloseOpen, setUnsavedCloseOpen] = useState(false);
   const meta = workTypeMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const dirtyRef = useRef(dirty);
@@ -3454,8 +3407,6 @@ function ArtifactStudioEditor({
   const localSyncKeysRef = useRef(new Set<string>());
   const syncingRef = useRef(false);
   const nativeFallbackEditedRef = useRef(false);
-  const pendingNativeProjectionRef = useRef<unknown>(undefined);
-  const nativeProjectionOverrideRef = useRef<unknown>(undefined);
   const reconciliationFrameRef = useRef<number | null>(null);
   const nativeBodyBinding =
     artifact.blueprintKey === "document" || artifact.blueprintKey === "code";
@@ -3522,6 +3473,36 @@ function ArtifactStudioEditor({
       : artifact.blueprintKey === "presentation"
         ? "PowerPoint"
         : "Office";
+  const nativeSync = useArtifactNativeSync({
+    artifactId: artifact._id,
+    nativeOfficeDocument,
+    nativeWordDocument,
+    nativeOfficeApplication,
+    dirty,
+    userHasEditedRef,
+    reconcilingRemoteRef,
+    currentSnapshotRef,
+    live,
+    initialLiveValue,
+    replicas: replicaTruth?.replicas,
+    conflicts: replicaTruth?.conflicts,
+    setContent,
+    setBaseline,
+    setDirty,
+  });
+  const {
+    nativeWriteError,
+    setNativeWriteError,
+    nativeMaterialization,
+    nativeAttribution,
+    setNativeAttribution,
+    nativeProjectionReady,
+    nativeProjectionOverrideRef,
+    nativeConflict,
+    setNativeConflict,
+    queueNativeMaterialization,
+    reconcileNativeRevision,
+  } = nativeSync;
   const humanSummary = useCallback(
     (value: string | undefined) =>
       (value ?? "").replace(/^(\d+) bytes$/i, (_, bytes: string) =>
@@ -3558,166 +3539,6 @@ function ArtifactStudioEditor({
   const currentSnapshot = useMemo(
     () => ({ title, summary, tagDraft, content }),
     [content, summary, tagDraft, title],
-  );
-  useEffect(() => {
-    if (!nativeOfficeDocument || nativeLensRefreshRef.current === artifact._id)
-      return;
-    nativeLensRefreshRef.current = artifact._id;
-    let cancelled = false;
-    let completed = false;
-    const endpoint = nativeWordDocument
-      ? "/api/spectra/lenses/docx"
-      : "/api/spectra/lenses/office";
-    void fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "open", artifactId: artifact._id }),
-    })
-      .then(async (response) => {
-        const result = (await response.json().catch(() => null)) as {
-          content?: unknown;
-          projection?: unknown;
-          message?: string;
-        } | null;
-        if (!response.ok)
-          throw new Error(
-            result?.message ??
-              `The ${nativeOfficeApplication} file could not be opened safely.`,
-          );
-        if (!cancelled) {
-          completed = true;
-          const projection = result?.content ?? result?.projection;
-          if (projection !== undefined) {
-            // A native lens is the source of truth for the first render. Stage
-            // it before the Yjs acknowledgement so the artifact reconciliation
-            // effect cannot replace real Office geometry with the legacy
-            // persisted fallback while the live model is bootstrapping.
-            nativeProjectionOverrideRef.current = projection;
-            setNativeLensProjection(projection);
-            setNativeProjectionReady(true);
-          }
-          window.dispatchEvent(
-            new CustomEvent("spectra:artifact-lens-activated", {
-              detail: { artifactId: artifact._id, projection },
-            }),
-          );
-        }
-      })
-      .catch((error: unknown) => {
-        completed = true;
-        nativeLensRefreshRef.current = undefined;
-        if (!cancelled)
-          setNativeWriteError(
-            error instanceof Error
-              ? error.message
-              : `The ${nativeOfficeApplication} file could not be opened safely.`,
-          );
-      });
-    return () => {
-      cancelled = true;
-      // Lens activation refreshes the artifact object and can replace this
-      // effect while the request is still in flight. Allow the new instance
-      // to retry instead of leaving the stale Yjs bootstrap mounted forever.
-      if (!completed && nativeLensRefreshRef.current === artifact._id)
-        nativeLensRefreshRef.current = undefined;
-    };
-  }, [
-    artifact._id,
-    nativeOfficeApplication,
-    nativeOfficeDocument,
-    nativeWordDocument,
-  ]);
-  useEffect(() => {
-    if (
-      !nativeWordDocument ||
-      !live.modelSnapshot.initialized ||
-      live.modelSnapshot.validity !== "valid" ||
-      !live.modelSnapshot.value ||
-      dirty ||
-      userHasEditedRef.current ||
-      live.unsynchronizedChanges > 0
-    )
-      return;
-    // The persisted artifact content is only the opening bootstrap for a
-    // native document. Once the bound Y.XmlFragment is live, Bridge/native
-    // revisions are reconciled through the lens endpoint. Replaying this
-    // snapshot on every artifact.updatedAt change would overwrite a freshly
-    // typed native edit with a stale cloud projection.
-    if (nativeProjectionArtifactRef.current === artifact._id) return;
-    nativeProjectionArtifactRef.current = artifact._id;
-    const refreshedContent = initialLiveValue.content;
-    if (
-      JSON.stringify(live.modelSnapshot.value.content) ===
-      JSON.stringify(refreshedContent)
-    )
-      return;
-    void live
-      .synchronize({ ...initialLiveValue, content: refreshedContent })
-      .then((result) => {
-        if (result && "applied" in result && result.applied === false) {
-          nativeProjectionArtifactRef.current = undefined;
-          return;
-        }
-      })
-      .catch(() => {
-        nativeProjectionArtifactRef.current = undefined;
-      });
-  }, [
-    artifact._id,
-    dirty,
-    initialLiveValue,
-    live,
-    live.synchronize,
-    live.unsynchronizedChanges,
-    nativeWordDocument,
-  ]);
-  const queueNativeMaterialization = useCallback(
-    async (snapshot: { content?: unknown }) => {
-      if (!nativeOfficeDocument) return;
-      setNativeMaterialization({ state: "queueing" });
-      setNativeWriteError(undefined);
-      try {
-        const endpoint = nativeWordDocument
-          ? "/api/spectra/lenses/docx"
-          : "/api/spectra/lenses/office";
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "materialize",
-            artifactId: artifact._id,
-            content: snapshot.content,
-          }),
-        });
-        const result = (await response.json().catch(() => null)) as {
-          hash?: string;
-          message?: string;
-          state?: string;
-        } | null;
-        if (!response.ok)
-          throw new Error(
-            result?.message ??
-              "This edit could not be written safely to the Word file.",
-          );
-        if (result?.state === "unchanged") {
-          setNativeMaterialization(undefined);
-          return;
-        }
-        if (!result?.hash)
-          throw new Error(
-            "The Word write was queued without a verifiable hash.",
-          );
-        setNativeMaterialization({ state: "pending", hash: result.hash });
-      } catch (error) {
-        setNativeMaterialization(undefined);
-        setNativeWriteError(
-          error instanceof Error
-            ? error.message
-            : "This edit could not be written safely to the Word file.",
-        );
-      }
-    },
-    [artifact._id, nativeOfficeDocument, nativeWordDocument],
   );
   const downloadNativeCopy = useCallback(async () => {
     if (!nativePortableArtifact) return;
@@ -3780,7 +3601,7 @@ function ArtifactStudioEditor({
         );
       setNativeAttribution(
         result?.state === "existing"
-          ? "This work already has a local replica"
+          ? "This work already has a copy on this computer"
           : `Queued a local copy${result?.relativePath ? ` at ${result.relativePath}` : ""}`,
       );
     } catch (error) {
@@ -3798,11 +3619,14 @@ function ArtifactStudioEditor({
       if (
         artifact.blueprintKey === "thread_reference" ||
         permissionReadOnly ||
-        syncingRef.current ||
-        !snapshot.title.trim()
+        syncingRef.current
       )
         return false;
-      const key = snapshotKey(snapshot);
+      const titled = {
+        ...snapshot,
+        title: persistableTitle(snapshot.title),
+      };
+      const key = snapshotKey(titled);
       syncingRef.current = true;
       localSyncKeysRef.current.add(key);
       setSyncBusy(true);
@@ -3828,7 +3652,7 @@ function ArtifactStudioEditor({
           }
         }
         const nextLiveValue = {
-          title: snapshot.title.trim(),
+          title: persistableTitle(snapshot.title),
           ...(snapshot.summary.trim()
             ? { summary: snapshot.summary.trim() }
             : {}),
@@ -3875,7 +3699,8 @@ function ArtifactStudioEditor({
           // cannot leave the editor in an endless save loop. Never replace
           // keystrokes made while the network request was in flight.
           if (
-            snapshotKey(currentSnapshotRef.current) === snapshotKey(snapshot)
+            snapshotKey(currentSnapshotRef.current) === snapshotKey(snapshot) ||
+            snapshotKey(currentSnapshotRef.current) === snapshotKey(titled)
           ) {
             reconcilingRemoteRef.current = true;
             userHasEditedRef.current = false;
@@ -5162,7 +4987,7 @@ function ArtifactStudioEditor({
     function requestClose(event: Event) {
       const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail
         ?.artifactId;
-      if (artifactId === artifact._id) void closeAfterSynchronization();
+      if (artifactId === artifact._id) requestStudioClose();
     }
     function beforeUnload(event: BeforeUnloadEvent) {
       if (!dirty) return;
@@ -5202,7 +5027,7 @@ function ArtifactStudioEditor({
         return;
       }
       event.preventDefault();
-      void closeAfterSynchronization();
+      requestStudioClose();
     }
     window.addEventListener("spectra:request-artifact-close", requestClose);
     window.addEventListener("beforeunload", beforeUnload);
@@ -5215,7 +5040,7 @@ function ArtifactStudioEditor({
       window.removeEventListener("beforeunload", beforeUnload);
       window.removeEventListener("keydown", onKeyDown, true);
     };
-    // closeAfterSynchronization is declared later; dirty/panel flags already retrigger this effect.
+    // requestStudioClose reads latest dirty/panel flags via this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close handler closes over latest studio state
   }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen]);
 
@@ -5335,11 +5160,9 @@ function ArtifactStudioEditor({
 
   async function save() {
     if (readOnly || syncBusy) return false;
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle) return false;
     if (artifact.blueprintKey === "thread_reference") return false;
     const snapshot = {
-      title: trimmedTitle,
+      title: persistableTitle(title),
       summary: summary.trim(),
       tagDraft: tagsFromDraft(tagDraft).join(", "),
       content,
@@ -5347,13 +5170,25 @@ function ArtifactStudioEditor({
     return synchronizeDraft(snapshot);
   }
 
-  async function closeAfterSynchronization() {
-    if (!dirty) {
+  function requestStudioClose() {
+    if (decideClose(dirty) === "close") {
       onClose();
       return;
     }
+    setUnsavedCloseOpen(true);
+  }
+
+  async function saveAndClose() {
     const synchronized = await save();
-    if (synchronized) onClose();
+    if (!synchronized) return;
+    setUnsavedCloseOpen(false);
+    onClose();
+  }
+
+  async function discardAndClose() {
+    await discardQueuedDraft();
+    setUnsavedCloseOpen(false);
+    onClose();
   }
 
   async function discardQueuedDraft() {
@@ -5556,27 +5391,9 @@ function ArtifactStudioEditor({
     },
     [setActivePresence],
   );
-  const legacySyncLabel = readOnly
-    ? "Read-only"
-    : livePermissionLost
-      ? "Reconnecting"
-      : isCollaborativeArtifact
-        ? live.state === "reconnecting" || live.state === "unsynchronized"
-          ? "Reconnecting"
-          : live.state === "connecting" || live.state === "synchronizing"
-            ? "Synchronizing"
-            : syncBusy || live.unsynchronizedChanges > 0 || dirty
-              ? "Waiting to sync"
-              : live.modelSnapshot.validity === "invalid"
-                ? "Needs attention"
-                : "Live"
-        : syncBusy || dirty
-          ? "Saving…"
-          : "Saved";
-  const syncLabel = readOnly
-    ? "Read-only"
-    : replicaTruth
-      ? selectSyncTruth({
+  const presentation = useSyncPresentation(
+    replicaTruth
+      ? {
           replicas: replicaTruth.replicas.map((replica) => ({
             kind: replica.kind,
             state: replica.state,
@@ -5585,19 +5402,23 @@ function ArtifactStudioEditor({
             unavailableReason: replica.unavailableReason,
           })),
           openConflictCount: replicaTruth.openConflictCount,
-          pendingCount:
-            replicaTruth.pendingCount +
-            (syncBusy ||
-            dirty ||
-            live.unsynchronizedChanges > 0 ||
-            nativeMaterialization
-              ? 1
-              : 0),
-          online: !livePermissionLost,
-          queuedChangeCount: live.unsynchronizedChanges,
-        }).label
-      : legacySyncLabel;
-  const artifactSyncMessage = studioSyncMessage(syncLabel);
+          pendingCount: replicaTruth.pendingCount,
+        }
+      : null,
+    {
+      queuedChangeCount: live.unsynchronizedChanges,
+      transportState: live.state,
+      dirty: dirty || syncBusy,
+      nativeActivity: Boolean(nativeMaterialization),
+      readOnly,
+      collaborative: isCollaborativeArtifact,
+    },
+  );
+  const artifactSyncMessage = headerSyncMessage(presentation);
+  const syncTruth = useMemo(
+    () => ({ state: presentation.state, label: presentation.label }),
+    [presentation.label, presentation.state],
+  );
 
   /* ---- the studio contract ------------------------------------------
      One shell answer for permissions, modes, density and inspectors,
@@ -5661,23 +5482,6 @@ function ArtifactStudioEditor({
     () => ({ open: openInspector, show: showInspector, hide: hideInspector }),
     [hideInspector, openInspector, showInspector],
   );
-  const syncState: StudioSyncState = readOnly
-    ? "read_only"
-    : syncLabel === "Reconnecting"
-      ? "offline"
-      : syncLabel === "Synchronizing" || syncLabel === "Waiting to sync"
-        ? "pending"
-        : syncLabel === "Needs attention"
-          ? "error"
-          : syncLabel === "Saving…"
-            ? "saving"
-            : syncLabel === "Live"
-              ? "live"
-              : "saved";
-  const syncTruth = useMemo(
-    () => ({ state: syncState, label: syncLabel }),
-    [syncLabel, syncState],
-  );
 
   const markLocalCollaborativeDocumentChange = useCallback(() => {
     if (readOnly || artifact.blueprintKey !== "document") return;
@@ -5688,339 +5492,6 @@ function ArtifactStudioEditor({
     setActivePresence("artifact:structure", { mode: "typing" });
   }, [artifact.blueprintKey, readOnly, setActivePresence]);
 
-  const applyExternalProjection = useCallback(
-    async (
-      projection: unknown,
-      attribution = `Edited in ${nativeOfficeApplication}`,
-    ) => {
-      nativeProjectionOverrideRef.current = projection;
-      const nextValue = { ...live.liveValue, content: projection };
-      const applied = await live.synchronize(nextValue);
-      if (applied && "applied" in applied && applied.applied === false)
-        throw new Error(
-          `The ${nativeOfficeApplication} edit overlaps an active collaborator region.`,
-        );
-      const snapshot = {
-        ...currentSnapshotRef.current,
-        content: projection,
-      };
-      reconcilingRemoteRef.current = true;
-      userHasEditedRef.current = false;
-      setContent(projection);
-      setBaseline(snapshot);
-      setDirty(false);
-      setNativeAttribution(attribution);
-      setNativeConflict(null);
-      setNativeLensProjection(undefined);
-      setNativeProjectionReady(false);
-      window.requestAnimationFrame(() => {
-        reconcilingRemoteRef.current = false;
-      });
-    },
-    [live, nativeOfficeApplication],
-  );
-  useEffect(() => {
-    if (
-      nativeProjectionOverrideRef.current !== undefined &&
-      JSON.stringify(live.liveValue.content) ===
-        JSON.stringify(nativeProjectionOverrideRef.current)
-    ) {
-      nativeProjectionOverrideRef.current = undefined;
-    }
-  }, [live.liveValue.content]);
-  useEffect(() => {
-    const onLensActivated = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{ artifactId?: string; projection?: unknown }>
-      ).detail;
-      if (detail?.artifactId !== artifact._id || !detail.projection || dirty)
-        return;
-      if (
-        !live.modelSnapshot.initialized ||
-        live.modelSnapshot.validity !== "valid" ||
-        live.unsynchronizedChanges > 0
-      ) {
-        pendingNativeProjectionRef.current = detail.projection;
-        return;
-      }
-      void applyExternalProjection(
-        detail.projection,
-        `Edited in ${nativeOfficeApplication}`,
-      ).catch((error: unknown) => {
-        setNativeWriteError(
-          error instanceof Error
-            ? error.message
-            : `The ${nativeOfficeApplication} projection could not be applied safely.`,
-        );
-      });
-    };
-    window.addEventListener("spectra:artifact-lens-activated", onLensActivated);
-    return () =>
-      window.removeEventListener(
-        "spectra:artifact-lens-activated",
-        onLensActivated,
-      );
-  }, [
-    applyExternalProjection,
-    artifact._id,
-    dirty,
-    live.modelSnapshot.initialized,
-    live.modelSnapshot.validity,
-    live.unsynchronizedChanges,
-    nativeOfficeApplication,
-  ]);
-  useEffect(() => {
-    if (
-      !nativeLensProjection ||
-      dirty ||
-      !live.modelSnapshot.initialized ||
-      live.modelSnapshot.validity !== "valid" ||
-      live.unsynchronizedChanges > 0
-    )
-      return;
-    const projection = nativeLensProjection;
-    // Drop the pending projection before apply. `applyExternalProjection`
-    // depends on `live`, which changes during Office bootstrap; leaving the
-    // projection in state re-fired this effect until React hit its update cap
-    // (tab-opened xlsx / pptx were the first to show it).
-    setNativeLensProjection(undefined);
-    void applyExternalProjection(
-      projection,
-      `Opened from ${nativeOfficeApplication}`,
-    ).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : "";
-      if (/maximum update depth|too many re-renders/i.test(message)) return;
-      setNativeWriteError(
-        message ||
-          `The ${nativeOfficeApplication} projection could not be applied safely.`,
-      );
-    });
-  }, [
-    applyExternalProjection,
-    dirty,
-    live.modelSnapshot.initialized,
-    live.modelSnapshot.validity,
-    live.unsynchronizedChanges,
-    nativeLensProjection,
-    nativeOfficeApplication,
-  ]);
-  useEffect(() => {
-    const projection = pendingNativeProjectionRef.current;
-    if (
-      !projection ||
-      dirty ||
-      !live.modelSnapshot.initialized ||
-      live.modelSnapshot.validity !== "valid" ||
-      live.unsynchronizedChanges > 0
-    )
-      return;
-    pendingNativeProjectionRef.current = undefined;
-    void applyExternalProjection(
-      projection,
-      `Edited in ${nativeOfficeApplication}`,
-    ).catch((error: unknown) => {
-      pendingNativeProjectionRef.current = projection;
-      setNativeWriteError(
-        error instanceof Error
-          ? error.message
-          : `The ${nativeOfficeApplication} projection could not be applied safely.`,
-      );
-    });
-  }, [
-    applyExternalProjection,
-    dirty,
-    live.modelSnapshot.initialized,
-    live.modelSnapshot.validity,
-    live.unsynchronizedChanges,
-    nativeOfficeApplication,
-  ]);
-
-  const reconcileNativeRevision = useCallback(
-    async (resolution?: "word" | "spectra") => {
-      const response = await fetch(
-        nativeWordDocument
-          ? "/api/spectra/lenses/docx"
-          : "/api/spectra/lenses/office",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "reconcile",
-            artifactId: artifact._id,
-            ...(resolution
-              ? {
-                  resolution:
-                    resolution === "word" && !nativeWordDocument
-                      ? "local"
-                      : resolution,
-                }
-              : {}),
-          }),
-        },
-      );
-      const result = (await response.json().catch(() => null)) as {
-        state?: string;
-        projection?: unknown;
-        attribution?: string;
-        status?: string;
-        message?: string;
-        conflict?: { regionIds?: string[]; message?: string };
-      } | null;
-      if (!response.ok)
-        throw new Error(
-          result?.message ??
-            `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
-        );
-      if (result?.state === "applied" && result.projection)
-        await applyExternalProjection(
-          result.projection,
-          result.attribution ?? `Edited in ${nativeOfficeApplication}`,
-        );
-      else if (result?.state === "conflicted")
-        setNativeConflict({
-          regionIds: result.conflict?.regionIds ?? [],
-          message:
-            result.conflict?.message ??
-            `${nativeOfficeApplication} and Spectra changed the same work region.`,
-        });
-      else if (resolution === "spectra") {
-        setNativeConflict(null);
-        setNativeAttribution(
-          result?.status ?? "Waiting to save your Spectra version locally",
-        );
-      }
-      setNativeWriteError(undefined);
-    },
-    [
-      applyExternalProjection,
-      artifact._id,
-      nativeOfficeApplication,
-      nativeWordDocument,
-    ],
-  );
-
-  const nativeLocalReplica = nativeOfficeDocument
-    ? replicaTruth?.replicas
-        .filter(
-          (replica) =>
-            replica.kind === "local" && replica.state !== "unavailable",
-        )
-        .sort((left, right) => right.updatedAt - left.updatedAt)[0]
-    : undefined;
-  const nativeCloudReplica = nativeOfficeDocument
-    ? replicaTruth?.replicas.find((replica) => replica.kind === "cloud")
-    : undefined;
-  useEffect(() => {
-    if (!nativeOfficeDocument || !nativeLocalReplica) return;
-    const previousRevision = nativeLocalRevisionRef.current;
-    const localChangedSinceCloud = Boolean(
-      nativeLocalReplica.contentHash &&
-      nativeCloudReplica?.contentHash &&
-      nativeLocalReplica.contentHash !== nativeCloudReplica.contentHash,
-    );
-    nativeLocalRevisionRef.current = nativeLocalReplica.revision;
-    if (
-      (!previousRevision && !localChangedSinceCloud) ||
-      previousRevision === nativeLocalReplica.revision ||
-      nativeLocalReplica.state !== "current" ||
-      nativeMaterialization ||
-      dirty ||
-      live.unsynchronizedChanges > 0
-    )
-      return;
-    // Some Bridge filesystems report an Office save only after the local
-    // replica has already returned to `current`. A changed verified revision
-    // still needs semantic reconciliation; otherwise an open Spectra surface
-    // can keep showing the pre-Word snapshot indefinitely.
-    nativeReconciliationRevisionRef.current = `current:${nativeLocalReplica.revision}`;
-    const timer = window.setTimeout(() => {
-      void reconcileNativeRevision().catch((error: unknown) => {
-        setNativeWriteError(
-          error instanceof Error
-            ? error.message
-            : `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
-        );
-      });
-    }, 360);
-    return () => window.clearTimeout(timer);
-  }, [
-    dirty,
-    live.unsynchronizedChanges,
-    nativeLocalReplica,
-    nativeMaterialization,
-    nativeOfficeApplication,
-    nativeOfficeDocument,
-    nativeCloudReplica,
-    reconcileNativeRevision,
-  ]);
-  useEffect(() => {
-    if (!nativeMaterialization || !nativeLocalReplica) return;
-    if (
-      nativeMaterialization.state === "pending" &&
-      nativeLocalReplica.state === "current" &&
-      nativeLocalReplica.contentHash === nativeMaterialization.hash
-    ) {
-      setNativeMaterialization(undefined);
-      setNativeAttribution("Saved locally");
-    } else if (
-      nativeLocalReplica.state === "error" ||
-      nativeLocalReplica.state === "diverged"
-    ) {
-      setNativeMaterialization(undefined);
-    }
-  }, [nativeLocalReplica, nativeMaterialization]);
-  const reconcilableLocalRevision =
-    nativeLocalReplica?.state === "ahead" ||
-    nativeLocalReplica?.state === "diverged"
-      ? `${nativeLocalReplica.state}:${nativeLocalReplica.revision}`
-      : undefined;
-  const persistedNativeConflict = nativeOfficeDocument
-    ? replicaTruth?.conflicts[0]
-    : undefined;
-  useEffect(() => {
-    if (!persistedNativeConflict) return;
-    const regionCount = persistedNativeConflict.regionIds.length;
-    const preservedPartCount = persistedNativeConflict.partNames.length;
-    setNativeConflict(
-      (current) =>
-        current ?? {
-          regionIds: persistedNativeConflict.regionIds,
-          message: regionCount
-            ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same work region" : `${regionCount} overlapping work regions`}. Choose which version to keep.`
-            : preservedPartCount
-              ? `${nativeOfficeApplication} and Spectra changed the same preserved native content. Choose which version to keep.`
-              : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
-        },
-    );
-  }, [nativeOfficeApplication, persistedNativeConflict]);
-  useEffect(() => {
-    if (
-      !nativeOfficeDocument ||
-      !reconcilableLocalRevision ||
-      dirty ||
-      live.unsynchronizedChanges > 0 ||
-      nativeReconciliationRevisionRef.current === reconcilableLocalRevision
-    )
-      return;
-    nativeReconciliationRevisionRef.current = reconcilableLocalRevision;
-    const timer = window.setTimeout(() => {
-      void reconcileNativeRevision().catch((error: unknown) => {
-        setNativeWriteError(
-          error instanceof Error
-            ? error.message
-            : `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
-        );
-      });
-    }, 360);
-    return () => window.clearTimeout(timer);
-  }, [
-    reconcilableLocalRevision,
-    dirty,
-    live.unsynchronizedChanges,
-    reconcileNativeRevision,
-    nativeOfficeApplication,
-    nativeOfficeDocument,
-  ]);
   /**
    * The live fidelity map every command in the bar is gated by.
    *
@@ -6231,35 +5702,33 @@ function ArtifactStudioEditor({
             </div>
           </div>
           <div className="spectra-artifact-header-actions flex shrink-0 items-center gap-1">
-            {syncBusy ||
+            {(presentation.state === "saving" ||
+            presentation.state === "pending" ||
             live.state === "connecting" ||
-            live.state === "synchronizing" ||
-            live.state === "reconnecting" ? (
+            live.state === "synchronizing") &&
+            presentation.state !== "offline" &&
+            presentation.state !== "error" ? (
               <span
                 className="spectra-artifact-sync-status inline-flex items-center"
                 role="status"
                 aria-live="polite"
-                aria-label={artifactSyncMessage || "Saving"}
-                title={artifactSyncMessage || "Saving"}
+                aria-label={artifactSyncMessage || presentation.label}
+                title={presentation.detail || presentation.label}
               >
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
               </span>
             ) : null}
-            {!syncBusy &&
-            artifactSyncMessage &&
-            live.state !== "connecting" &&
-            live.state !== "synchronizing" &&
-            live.state !== "reconnecting" ? (
+            {artifactSyncMessage ? (
               <span
                 className={`spectra-artifact-sync-message max-w-[13rem] truncate text-[11px] ${
-                  syncState === "error"
+                  presentation.state === "error"
                     ? "text-[var(--danger)]"
                     : "text-[var(--text-secondary)]"
                 }`}
                 role="status"
                 aria-live="polite"
-                data-sync-state={syncState}
-                title={artifactSyncMessage}
+                data-sync-state={presentation.state}
+                title={presentation.detail || artifactSyncMessage}
               >
                 {artifactSyncMessage}
               </span>
@@ -6366,7 +5835,7 @@ function ArtifactStudioEditor({
                     <Download className="h-4 w-4" />{" "}
                     {nativeRecoveryBusy === "materialize"
                       ? "Queueing local copy…"
-                      : "Create local replica"}
+                      : "Keep a copy on this computer"}
                   </button>
                 </>
               ) : null}
@@ -6414,8 +5883,8 @@ function ArtifactStudioEditor({
               </button>
             </WorkbarMore>
             <IconButton
-              label={dirty ? "Synchronize before closing" : "Close"}
-              onClick={() => void closeAfterSynchronization()}
+              label={dirty ? "Save or discard before closing" : "Close"}
+              onClick={requestStudioClose}
               icon={X}
             />
           </div>
@@ -6666,7 +6135,7 @@ function ArtifactStudioEditor({
                   onChange={editorChange}
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
-                  synchronizationReady={isSyncReady(syncLabel)}
+                  synchronizationReady={presentation.ready}
                 />
               ) : null}
               {artifact.blueprintKey === "planner_task" ? (
@@ -6689,7 +6158,7 @@ function ArtifactStudioEditor({
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
                   mode={contentMode}
-                  synchronizationReady={isSyncReady(syncLabel)}
+                  synchronizationReady={presentation.ready}
                   syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
@@ -6709,7 +6178,7 @@ function ArtifactStudioEditor({
                       ? live.transport?.document
                       : undefined
                   }
-                  synchronizationReady={isSyncReady(syncLabel)}
+                  synchronizationReady={presentation.ready}
                   syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
@@ -6723,7 +6192,7 @@ function ArtifactStudioEditor({
                   onChange={editorChange}
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
-                  synchronizationReady={isSyncReady(syncLabel)}
+                  synchronizationReady={presentation.ready}
                   syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
@@ -6737,7 +6206,7 @@ function ArtifactStudioEditor({
                   onChange={editorChange}
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
-                  synchronizationReady={isSyncReady(syncLabel)}
+                  synchronizationReady={presentation.ready}
                   syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
@@ -6751,7 +6220,7 @@ function ArtifactStudioEditor({
                   onChange={editorChange}
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
-                  synchronizationReady={isSyncReady(syncLabel)}
+                  synchronizationReady={presentation.ready}
                   syncMessage={artifactSyncMessage}
                   onActiveRegionChange={handleActiveRegionChange}
                 />
@@ -6801,6 +6270,14 @@ function ArtifactStudioEditor({
           <span>{heldNotice.message}</span>
         </div>
       ) : null}
+      <UnsavedCloseDialog
+        open={unsavedCloseOpen}
+        title={title}
+        busy={syncBusy}
+        onSave={() => void saveAndClose()}
+        onDiscard={() => void discardAndClose()}
+        onKeepEditing={() => setUnsavedCloseOpen(false)}
+      />
       <ArtifactCommentsPanel
         open={commentsOpen}
         artifactId={artifact._id}

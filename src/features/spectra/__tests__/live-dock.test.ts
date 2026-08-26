@@ -5,6 +5,7 @@ import {
   allocateLiveDockWidths,
   closePreservesRunningJob,
   deriveLiveDockTab,
+  publicSpectraFailureText,
   selectExpandedInputRun,
   shouldAutoOpenConversationAfterSend,
   type LiveDockTabSource,
@@ -186,6 +187,17 @@ describe("Live Dock V2", () => {
     expect(global).toContain("<LiveDock");
     expect(global).toContain('"/library"');
     expect(global).toContain('"/workspace"');
+  });
+
+  it("never shows machine tokens in dock failure copy", () => {
+    for (const token of [
+      "AI_ARTIFACT_CONNECTION_CLOSED",
+      "LOCAL_REPLICA_UNAVAILABLE",
+    ]) {
+      const spoken = publicSpectraFailureText(token);
+      expect(spoken).not.toContain(token);
+      expect(spoken).not.toMatch(/[A-Z]{3,}_[A-Z0-9_]{3,}/);
+    }
   });
 
   it("keeps side-panel display separate from composer history and restores saved threads by id", () => {

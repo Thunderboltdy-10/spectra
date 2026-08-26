@@ -30,7 +30,7 @@ describe("N3 Bridge contract", () => {
     expect(selectSyncTruth({ replicas: [], openConflictCount: 1, pendingCount: 0 }).label).toBe("1 conflict");
     expect(selectSyncTruth({ replicas: [{ kind: "cloud", state: "diverged" }], openConflictCount: 0, pendingCount: 0 }).label).toBe("Edit conflict");
     expect(selectSyncTruth({ replicas: [], openConflictCount: 0, pendingCount: 1 }).label).toBe("Saving…");
-    expect(replicaDisclosure([{ kind: "local", state: "current", lastVerifiedAt: now }], now)[0]).toContain("This device · Current");
+    expect(replicaDisclosure([{ kind: "local", state: "current", lastVerifiedAt: now }], now)[0]).toContain("This device · Up to date");
   });
 
   it("maps exactly four presets through the single policy module", () => {

@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { ChevronRight, MoreHorizontal, Share2, Star } from "lucide-react";
+import { StatusBadge, type StatusTone } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { TreeNode } from "./tree-client";
 import { nodeIdentity, relativeTime } from "./node-identity";
@@ -37,6 +38,8 @@ export const OrganizerRow = memo(function OrganizerRow({
   showLocation,
   now,
   callbacks,
+  syncLabel,
+  syncTone = "attention",
 }: {
   node: TreeNode;
   top: number;
@@ -49,6 +52,8 @@ export const OrganizerRow = memo(function OrganizerRow({
   showLocation: boolean;
   now: number;
   callbacks: RowCallbacks;
+  syncLabel?: string;
+  syncTone?: StatusTone;
 }) {
   const identity = nodeIdentity(node);
   const Icon = identity.icon;
@@ -126,6 +131,14 @@ export const OrganizerRow = memo(function OrganizerRow({
               className="ml-1.5 inline-block size-1.5 animate-pulse rounded-full bg-[var(--brand-primary)] align-middle"
               aria-label="Spectra is working on this"
             />
+          ) : null}
+          {syncLabel ? (
+            <StatusBadge
+              tone={syncTone === "unknown" ? "neutral" : syncTone}
+              className="ml-1.5 align-middle"
+            >
+              {syncLabel}
+            </StatusBadge>
           ) : null}
         </span>
       )}

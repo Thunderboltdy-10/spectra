@@ -248,6 +248,56 @@ export const forWork = query({
   },
 });
 
+/** Summary replica truth for Library rows. Indexed, no content (ARCHITECTURE-PLATFORM §2). */
+export const presentationsForAccount = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) return [];
+    const replicaStates = ["diverged", "error", "pending", "unavailable"] as const;
+    const [openConflicts, resolvingConflicts, ...replicaBatches] = await Promise.all([
+      ctx.db.query("syncConflicts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "open")).take(100),
+      ctx.db.query("syncConflicts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "resolving-spectra")).take(100),
+      ...replicaStates.map((state) =>
+        ctx.db.query("workReplicas").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", state)).take(100),
+      ),
+    ]);
+    const byWork = new Map<string, {
+      replicas: Array<{
+        kind: "cloud" | "local";
+        state: "current" | "ahead" | "behind" | "diverged" | "pending" | "error" | "unavailable";
+        lastVerifiedAt?: number;
+        errorCode?: string;
+        unavailableReason?: string;
+      }>;
+      openConflictCount: number;
+      pendingCount: number;
+    }>();
+    const ensure = (workId: string) => {
+      const existing = byWork.get(workId);
+      if (existing) return existing;
+      const created = { replicas: [], openConflictCount: 0, pendingCount: 0 };
+      byWork.set(workId, created);
+      return created;
+    };
+    for (const conflict of [...openConflicts, ...resolvingConflicts]) {
+      ensure(String(conflict.workId)).openConflictCount += 1;
+    }
+    for (const replica of replicaBatches.flat()) {
+      const row = ensure(String(replica.workId));
+      row.replicas.push({
+        kind: replica.kind,
+        state: replica.state,
+        lastVerifiedAt: replica.lastVerifiedAt,
+        errorCode: replica.errorCode,
+        unavailableReason: replica.unavailableReason,
+      });
+      if (replica.state === "pending") row.pendingCount += 1;
+    }
+    return [...byWork.entries()].map(([workId, value]) => ({ workId, ...value }));
+  },
+});
+
 /** Count the currently available local replicas behind an application-level
  * sync-policy confirmation. The consequence is derived from owned data rather
  * than trusted from model-provided arguments. */

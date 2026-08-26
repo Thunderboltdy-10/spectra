@@ -10,7 +10,8 @@ import {
   Loader2,
 } from "lucide-react";
 import type { SpectraArtifact } from "../data/api";
-import { replicaDisclosure, selectSyncTruth } from "./status";
+import { humanizePublicFailure } from "./humanize";
+import { useSyncPresentation } from "./use-sync-presentation";
 import { useBridgeHealth } from "./use-bridge";
 
 const DOCUMENT_LENS = new Set(["docx", "docm", "dotx", "dotm"]);
@@ -61,20 +62,7 @@ export function ResourceSurface({
   );
   const revertPolicy = useMutation(api.syncPolicy.revert);
   const bridge = useBridgeHealth();
-  const replicas =
-    truth?.replicas.map((replica) => ({
-      kind: replica.kind,
-      state: replica.state,
-      lastVerifiedAt: replica.lastVerifiedAt,
-      errorCode: replica.errorCode,
-      unavailableReason: replica.unavailableReason,
-    })) ?? [];
-  const status = selectSyncTruth({
-    replicas,
-    openConflictCount: truth?.openConflictCount ?? 0,
-    pendingCount: truth?.pendingCount ?? 0,
-    online: bridge.state === "connected",
-  });
+  const presentation = useSyncPresentation(truth);
   const format = (
     artifact.nativeFormat ??
     artifact.title.split(".").pop() ??
@@ -252,10 +240,10 @@ export function ResourceSurface({
           </h1>
           <button
             type="button"
-            title={status.detail}
+            title={presentation.detail}
             className="mt-1 text-[11px] font-medium text-[var(--text-secondary)]"
           >
-            {status.label}
+            {presentation.label}
           </button>
         </div>
         <button
@@ -315,7 +303,7 @@ export function ResourceSurface({
                   className="mt-3 max-w-[430px] text-[11px] leading-5 text-[var(--danger)]"
                   role="alert"
                 >
-                  {openError} The file has not been changed.
+                  {humanizePublicFailure(openError)} The file has not been changed.
                 </p>
               ) : null}
             </div>
@@ -397,10 +385,10 @@ export function ResourceSurface({
             </div>
             <div>
               <h2 className="text-[12px] font-semibold text-[var(--text-primary)]">
-                Replicas
+                Where this file lives
               </h2>
               <ul className="mt-3 space-y-2 text-[11px] text-[var(--text-secondary)]">
-                {replicaDisclosure(replicas).map((line) => (
+                {presentation.disclosure.map((line) => (
                   <li key={line}>{line}</li>
                 ))}
               </ul>
@@ -410,7 +398,7 @@ export function ResourceSurface({
                 Storage strategy
               </h2>
               <p className="mt-1 text-[11px] leading-5 text-[var(--text-secondary)]">
-                Changing this keeps the same Spectra item. Removing a local replica leaves the file on disk.
+                Changing this keeps the same Spectra item. Removing a copy on this computer leaves the file on disk.
               </p>
               <div className="mt-3 grid gap-2">
                 {([
@@ -440,7 +428,7 @@ export function ResourceSurface({
                 </p>
               ) : strategyTransition?.state === "failed" ? (
                 <p className="mt-2 text-[11px] text-[var(--danger)]" role="alert">
-                  The last storage change did not finish: {strategyTransition.errorCode ?? "Bridge verification failed"}.
+                  The last storage change did not finish. {humanizePublicFailure(strategyTransition.errorCode ?? "write-failed")}
                 </p>
               ) : null}
             </div>

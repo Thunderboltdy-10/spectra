@@ -164,3 +164,16 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - All-target Rust reached **50 passed** and only failed at the documented missing `.tmp-n3-mount` `granted_tree` fixture; no gate was weakened.
 - P1.V2-F1 stable-byte proof and P1.V2-F2 bounded revocation are independently falsified and closed.
 - Verdict: **PASS**. P1.V2 VERIFIED; P1.I2 ACCEPTED. Evidence: `.shots/reformation/P1.V2/2026-08-26-chaos-rerun-report.md`.
+
+## Implementer log — P1.I3 (2026-08-26)
+
+- One presenter (`presentSync` / `useSyncPresentation`) now speaks the studio header, Library rows, resource surface, and Live Dock failures; `saved-locally` is ready (ST-1).
+- Product online is `navigator.onLine`; offline is selected before pending; zero queued still says Offline (UX-3).
+- Dirty close asks Save / Discard / Keep editing; a blank name persists as Untitled and does not trap X, Escape, or tab close (UX-1/UX-2).
+- Native lens open/apply/reconcile lives in `useArtifactNativeSync`; the studio duplicate path is deleted.
+- One humanizer strips machine tokens from dock, native, and sync copy (R13 / ST-2).
+- Library list rows subscribe to indexed `presentationsForAccount` and show conflict/error/offline/pending chips; board cards were left alone (more card chrome than this unit owns).
+- The offline banner sits under the tab rail so Library and the composer see the same sentence.
+- Taste: Untitled instead of a name prompt; Live stays off the header when copies agree; presenter `action` is not wired to Reconnect.
+- Relevant checks: focused Vitest 3 files / 27 tests; disclosure wording in `bridge-contract.test.ts`; new-file ESLint; secret scan. Two pre-existing I2 string-scan assertions in `bridge-contract.test.ts` remain red (restore key now derived; `device || linked`). `tsc --noEmit` retains the five recorded blockers plus `bridge-chaos.test.ts:172`; this unit adds none.
+- Status: IMPLEMENTED. No acceptance or verifier verdict claimed.

@@ -1,8 +1,9 @@
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
@@ -12,6 +13,7 @@ use spectra_bridge_core::platform::{OsFileIdentity, Platform};
 use spectra_bridge_core::sync::{
     Backoff, ClaimPrecondition, CloudResult, accept_cloud_result, inspect_claim_target,
 };
+use spectra_bridge_core::watcher::{MountWatcher, StabilityTracker, WatcherConfig, scan_mount};
 use tempfile::tempdir;
 
 #[derive(Default)]
@@ -19,6 +21,33 @@ struct ChaosPlatform {
     fail_before_write: Option<io::ErrorKind>,
     vanish_parent: bool,
     readback_failures: AtomicUsize,
+}
+
+struct PlaceholderPlatform;
+
+#[async_trait]
+impl Platform for PlaceholderPlatform {
+    fn file_identity(&self, _: &File) -> io::Result<OsFileIdentity> {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "provider placeholder is not hydrated",
+        ))
+    }
+    fn is_locked(&self, _: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
+    fn recycle(&self, _: &Path) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn store_credential(&self, _: &str, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn read_credential(&self, _: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
+    fn enable_autostart(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -283,4 +312,92 @@ fn retrying_one_outbound_change_does_not_block_the_next() {
     let still_due = journal.due_queue(10).unwrap();
     assert_eq!(still_due.len(), 1);
     assert_eq!(still_due[0].op_id, second.op_id);
+}
+
+#[test]
+fn slow_writer_pause_longer_than_quiescence_window_never_publishes_partial_bytes() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("slow-copy.docx");
+    let mut writer = File::create(&path).unwrap();
+    writer.write_all(b"partial package bytes").unwrap();
+    writer.sync_all().unwrap();
+
+    let started = Instant::now();
+    let mut tracker = StabilityTracker::new(Duration::from_millis(750));
+    assert_eq!(tracker.observe(&path, started).unwrap(), None);
+
+    // A real copy can pause longer than the quiescence window while its writer
+    // still owns the file. The partial prefix must not become a revision.
+    assert_eq!(
+        tracker
+            .observe(&path, started + Duration::from_millis(800))
+            .unwrap(),
+        None,
+    );
+
+    writer.write_all(b" and final package bytes").unwrap();
+    writer.sync_all().unwrap();
+    drop(writer);
+    assert_eq!(
+        tracker
+            .observe(&path, started + Duration::from_millis(900))
+            .unwrap(),
+        None,
+    );
+    assert!(
+        tracker
+            .observe(&path, started + Duration::from_millis(1_700))
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn provider_placeholder_failure_is_explicit_instead_of_looking_deleted() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("OneDrive");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("online-only.docx"), b"placeholder").unwrap();
+
+    let scan = scan_mount(&PlaceholderPlatform, &root).unwrap();
+    assert!(
+        scan.entries
+            .iter()
+            .all(|entry| entry.relative_path != "online-only.docx")
+    );
+    assert_eq!(scan.failures.len(), 1);
+    assert_eq!(scan.failures[0].relative_path, "online-only.docx");
+    assert!(scan.failures[0].reason.contains("not hydrated"));
+}
+
+#[test]
+fn ten_thousand_file_repair_scan_is_single_bounded_walk() {
+    let dir = tempdir().unwrap();
+    for index in 0..10_000 {
+        fs::write(dir.path().join(format!("{index:05}.docx")), b"x").unwrap();
+    }
+
+    let started = Instant::now();
+    let scan = scan_mount(&ChaosPlatform::default(), dir.path()).unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(scan.entries.len(), 10_000);
+    assert!(scan.failures.is_empty());
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "10k repair scan took {elapsed:?}"
+    );
+}
+
+#[test]
+fn quiet_mount_emits_no_watcher_delta_after_initial_snapshot() {
+    let dir = tempdir().unwrap();
+    for index in 0..100 {
+        fs::write(dir.path().join(format!("{index:03}.docx")), b"x").unwrap();
+    }
+    let watcher = MountWatcher::start(dir.path(), WatcherConfig::default()).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    let batch = watcher.drain_paths();
+    assert!(batch.existing_files.is_empty());
+    assert!(batch.missing_paths.is_empty());
+    assert!(batch.failures.is_empty());
 }

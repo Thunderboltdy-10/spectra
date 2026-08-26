@@ -129,3 +129,18 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - P1.V1-F1 is independently falsified and closed class-wide.
 - Evidence: `.shots/reformation/P1.V1/2026-08-26-property-report.md`.
 - Verdict: **PASS**. P1.V1 VERIFIED; P1.I1 ACCEPTED. P1.V2 was not started.
+
+## Verifier log — P1.V2 (2026-08-26)
+
+- Read the governing stack, P1.V2 finding families, current Bridge production paths, and existing Rust/Convex evidence; no product code changed.
+- Added verifier-owned Rust and Convex chaos harnesses for slow writers, placeholders, 10k discovery/quiet boundaries, claimed-write revocation, and >2,000 replica cleanup.
+- Kill/restart/replay, stale temp recovery, lost acknowledgement, double replay, lock parking/isolation, rename continuity, and explicit provider failures passed focused checks.
+- Local 10k repair discovery completed in one bounded walk under 10 seconds; a quiet watched fixture emitted no change batch.
+- Claimed-write revocation compensated device, mount, replica, request, and operation truth and rejected the old credential.
+- **P1.V2-F1 HIGH · SYSTEMIC (BR-3):** an open writer paused for 800 ms; the 750 ms tracker emitted the partial prefix SHA as a revision before final bytes arrived.
+- Root class: time/fingerprint quiescence is not writer-completion proof; the wired macro path can still promote partial bytes.
+- **P1.V2-F2 HIGH · LOCAL:** revoking a device with 2,001 replicas changed 2,000 to unavailable and left exactly one `current` because cleanup uses `.take(2_000)`.
+- Rust all-targets: 49 pass / 1 fail (F1). Focused Convex: 18 pass / 1 fail (F2). Existing Bridge/truth suites remain green.
+- Bridge compile, Rustfmt, verifier-test ESLint, diff check (owned files), and secret scan pass; full repository sweep deferred by instruction.
+- Evidence: `.shots/reformation/P1.V2/2026-08-26-chaos-report.md`.
+- Verdict: **REJECTED**. Owner P1.I2; rerun P1.V2 unchanged after both findings are fixed.

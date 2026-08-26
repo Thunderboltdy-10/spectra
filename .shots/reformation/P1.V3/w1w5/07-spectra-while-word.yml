@@ -1,0 +1,51 @@
+- complementary "Work studio" [ref=f21e979]:
+  - button "Resize Work studio" [ref=f21e980] [cursor=pointer]
+  - region "Last-year essay.docx file" [ref=f21e982]:
+    - generic [ref=f21e983]:
+      - generic [ref=f21e984]:
+        - heading "Last-year essay.docx" [level=1] [ref=f21e985]
+        - button "Saved locally" [ref=f21e986] [cursor=pointer]
+      - button "Close file" [ref=f21e987] [cursor=pointer]: ×
+    - generic [ref=f21e989]:
+      - generic [ref=f21e991]:
+        - paragraph [ref=f21e995]: DOCX file
+        - paragraph [ref=f21e996]: Open this file as an editable Spectra Document. Unsupported Word features remain in the original package and unrelated edits do not rewrite them.
+        - button "Open in Spectra" [disabled] [ref=f21e997]
+      - complementary [ref=f21e1001]:
+        - generic [ref=f21e1002]:
+          - heading "File details" [level=2] [ref=f21e1003]
+          - generic [ref=f21e1004]:
+            - generic [ref=f21e1005]:
+              - term [ref=f21e1006]: Format
+              - definition [ref=f21e1007]: DOCX
+            - generic [ref=f21e1008]:
+              - term [ref=f21e1009]: Location
+              - definition [ref=f21e1010]: This device
+            - generic [ref=f21e1011]:
+              - term [ref=f21e1012]: Profile
+              - definition [ref=f21e1013]: Strict native
+        - generic [ref=f21e1014]:
+          - heading "Where this file lives" [level=2] [ref=f21e1015]
+          - list [ref=f21e1016]:
+            - listitem [ref=f21e1066]: This device · Up to date · Last verified 8m ago
+            - listitem [ref=f21e1018]: Spectra · Not available here
+        - generic [ref=f21e1019]:
+          - heading "How this file is stored" [level=2] [ref=f21e1020]
+          - paragraph [ref=f21e1021]: Changing this keeps the same Spectra item. If Spectra stops using a copy on this computer, the file stays on disk.
+          - generic [ref=f21e1023]:
+            - radio "Keep on this computer Lives on this PC. Other devices see it listed but need this PC on to open it." [checked] [ref=f21e1057] [cursor=pointer]:
+              - generic [ref=f21e1025]: Keep on this computer
+              - generic [ref=f21e1058]: Lives on this PC. Other devices see it listed but need this PC on to open it.
+            - radio "Keep in Spectra" [ref=f21e1059] [cursor=pointer]
+            - radio "Both Recommended" [ref=f21e1029] [cursor=pointer]:
+              - generic [ref=f21e1030]:
+                - text: Both
+                - generic [ref=f21e1031]: Recommended
+            - generic [ref=f21e1060]:
+              - generic [ref=f21e1061]:
+                - generic [ref=f21e1062]: Read, don't change
+                - paragraph [ref=f21e1063]: Spectra can read these files but will never change them.
+              - switch "Read, don't change" [ref=f21e1064] [cursor=pointer]
+          - button "Use the account default" [ref=f21e1037] [cursor=pointer]
+          - alert [ref=f21e1065]: The last storage change did not finish. The last storage change did not finish. The file on this computer was not removed. The file on this computer was not removed.
+        - button "Download native copy" [disabled] [ref=f21e1040]

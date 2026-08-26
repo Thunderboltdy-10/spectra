@@ -257,3 +257,14 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Checks: focused Vitest 79 pass; property 2/2; bridge-app `cargo check` OK; two pre-existing I2 string-scans in `bridge-contract.test.ts` not rewritten. No `convex push`. Did not run P1.V3.
 - Status: **IMPLEMENTED**. P1.V3 remains REJECTED pending an independent walk. No acceptance claimed.
 
+## Verifier targeted walk log — P1.V3 W1–W5 (2026-08-26)
+
+- Independent walk after `d08d454`. No product code changed. Convex serving. Bridge rebuilt; Bridge + Word on `P1V3W15`, then cleaned up. Not the stub; not PS 6/PS 8.
+- W5: Connected + stub retry chip is **Waiting to retry**. Closed.
+- W2: Location **This device** matches replica list. Closed. Library row still said Unavailable (new W7, I3).
+- W1: Keep in Spectra pending ~70s; ~150s stall-fail restored This PC. Radios no longer strand. Completion still fails; duplicate “did not finish” (W8, I4). Disk file kept. W1 stays open on P1.I1.
+- W3: Word saved `WORD-LOCK` on the fixture; Spectra stayed **Up to date · Last verified 11m ago**. Not closed. Owner I3 (I2 if no lock report).
+- W4: real `setOffline` kept Settings; banner/header/chips **Offline**; no Request ID. Closed.
+- Focused Vitest 48 pass / 2 pre-existing I2 string-scans. Do not `convex push`.
+- Verdict: **REJECTED**. Evidence: `.shots/reformation/P1.V3/w1w5/manifest.md`. Next **P1.I1**.
+

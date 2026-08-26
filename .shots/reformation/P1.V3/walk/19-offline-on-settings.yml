@@ -1,0 +1,12 @@
+- generic [active] [ref=f16e1]:
+  - link "Skip to content" [ref=f16e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=f16e219]:
+    - generic [ref=f16e223]:
+      - heading "Something went wrong" [level=1] [ref=f16e224]
+      - paragraph [ref=f16e225]: An unexpected error occurred. Your conversations and data are safe.
+      - paragraph [ref=f16e226]: "[CONVEX Q(syncPolicy:effective)] [Request ID: 681785b0f916633b] Server Error Uncaught Error: AUTH_NOT_SIGNED_IN: Sign in to continue. Called by client"
+    - generic [ref=f16e227]:
+      - button "Try again" [ref=f16e228] [cursor=pointer]
+      - button "Reload page" [ref=f16e229] [cursor=pointer]
+  - alert [ref=f16e218]

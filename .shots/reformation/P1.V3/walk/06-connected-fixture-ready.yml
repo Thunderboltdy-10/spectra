@@ -1,0 +1,178 @@
+- generic [active] [ref=f13e1]:
+  - link "Skip to content" [ref=f13e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=f13e3]:
+    - generic [ref=f13e4]:
+      - complementary "Spectra navigation" [ref=f13e5]:
+        - generic [ref=f13e6]:
+          - button "Collapse sidebar" [ref=f13e7] [cursor=pointer]
+          - link "Spectra home" [ref=f13e11] [cursor=pointer]:
+            - /url: /workspace?home=1
+            - img "Spectra" [ref=f13e12]
+            - generic [ref=f13e21]: spectra
+        - generic [ref=f13e22]:
+          - textbox "⌘ K" [ref=f13e23]:
+            - /placeholder: Search
+          - generic: ⌘ K
+        - navigation "Main destinations" [ref=f13e24]:
+          - link "Chat" [ref=f13e25] [cursor=pointer]:
+            - /url: /chat
+          - link "Workspace" [ref=f13e29] [cursor=pointer]:
+            - /url: /workspace?home=1
+          - link "Library" [ref=f13e36] [cursor=pointer]:
+            - /url: /library
+          - link "Calendar" [ref=f13e41] [cursor=pointer]:
+            - /url: /calendar
+          - link "Agents" [ref=f13e47] [cursor=pointer]:
+            - /url: /agents
+          - link "School" [ref=f13e52] [cursor=pointer]:
+            - /url: /school
+          - link "Analytics" [ref=f13e59] [cursor=pointer]:
+            - /url: /analytics
+          - link "Admin" [ref=f13e183] [cursor=pointer]:
+            - /url: /admin
+          - link "Super Admin" [ref=f13e189] [cursor=pointer]:
+            - /url: /superadmin
+        - link "New chat" [ref=f13e63] [cursor=pointer]:
+          - /url: /chat
+        - generic [ref=f13e194]:
+          - heading "Recents" [level=2] [ref=f13e195]
+          - generic [ref=f13e196]:
+            - link "Workspace Artifact Types 1d ago" [ref=f13e197] [cursor=pointer]:
+              - /url: /chat?threadId=qs7580jh5pv87na6pd8fvyqvmh8d5vvj
+              - generic [ref=f13e198]: Workspace Artifact Types
+              - generic [ref=f13e199]: 1d ago
+            - link "Update Physics IA 2.docx 2d ago" [ref=f13e200] [cursor=pointer]:
+              - /url: /chat?threadId=qs7fc5hxgx4f8xvjh35nf205058d2pqg
+              - generic [ref=f13e201]: Update Physics IA 2.docx
+              - generic [ref=f13e202]: 2d ago
+            - link "Update Physics IA 2.docx 2d ago" [ref=f13e203] [cursor=pointer]:
+              - /url: /chat?threadId=qs73qesge9nfqn7nnyh3dnck298czwm3
+              - generic [ref=f13e204]: Update Physics IA 2.docx
+              - generic [ref=f13e205]: 2d ago
+            - link "New conversation 3d ago" [ref=f13e206] [cursor=pointer]:
+              - /url: /chat?threadId=qs7f8az0xvc06yf6gffwb9wqfs8d0dge
+              - generic [ref=f13e207]: New conversation
+              - generic [ref=f13e208]: 3d ago
+            - link "Physics IA Verification 4d ago" [ref=f13e209] [cursor=pointer]:
+              - /url: /chat?threadId=qs722wkpxqs51xsxtb86aws12s8cyj3a
+              - generic [ref=f13e210]: Physics IA Verification
+              - generic [ref=f13e211]: 4d ago
+            - link "N8 Folder Setup 4d ago" [ref=f13e212] [cursor=pointer]:
+              - /url: /chat?threadId=qs7f1stszgtfbe4kd4kcn28etx8cz4qp
+              - generic [ref=f13e213]: N8 Folder Setup
+              - generic [ref=f13e214]: 4d ago
+            - link "Physics Scratch Folder 4d ago" [ref=f13e215] [cursor=pointer]:
+              - /url: /chat?threadId=qs7c5f84grf7rbp2t9xsatr8xn8cy07n
+              - generic [ref=f13e216]: Physics Scratch Folder
+              - generic [ref=f13e217]: 4d ago
+            - link "Organize Arduino Sources 4d ago" [ref=f13e218] [cursor=pointer]:
+              - /url: /chat?threadId=qs7aqaewpavxg86z2frq4mr8td8cyfx8
+              - generic [ref=f13e219]: Organize Arduino Sources
+              - generic [ref=f13e220]: 4d ago
+            - link "Organize Arduino Sources 4d ago" [ref=f13e221] [cursor=pointer]:
+              - /url: /chat?threadId=qs73rsw3t06pshepzmy0v4r2nn8czfdw
+              - generic [ref=f13e222]: Organize Arduino Sources
+              - generic [ref=f13e223]: 4d ago
+            - link "Choose Arduino Source 4d ago" [ref=f13e224] [cursor=pointer]:
+              - /url: /chat?threadId=qs78w4vz2bpepv3mjwywyvksgs8cy910
+              - generic [ref=f13e225]: Choose Arduino Source
+              - generic [ref=f13e226]: 4d ago
+        - generic [ref=f13e67]:
+          - generic [ref=f13e68]:
+            - button "Share current page" [ref=f13e69] [cursor=pointer]
+            - button "Notifications, 1 unread" [ref=f13e227] [cursor=pointer]:
+              - generic [ref=f13e228]: "1"
+            - button "Settings" [ref=f13e80] [cursor=pointer]
+          - button "Manage account" [ref=f13e229] [cursor=pointer]:
+            - generic [ref=f13e230]: PM
+            - generic [ref=f13e231]:
+              - strong [ref=f13e232]: P MD
+              - generic [ref=f13e233]: school admin
+      - main [ref=f13e84]:
+        - generic [ref=f13e86]:
+          - main [ref=f13e87]:
+            - generic [ref=f13e88]:
+              - generic [ref=f13e89]:
+                - generic [ref=f13e90]:
+                  - paragraph [ref=f13e91]: Preferences
+                  - heading "Settings" [level=1] [ref=f13e92]
+                  - paragraph [ref=f13e93]: Only controls that change Spectra appear here. Changes follow your account and take effect immediately on every open surface.
+                - button "Restore defaults" [ref=f13e95] [cursor=pointer]
+              - region [ref=f13e99]:
+                - navigation "Settings sections" [ref=f13e100]:
+                  - button "Conversations" [ref=f13e101] [cursor=pointer]
+                  - button "Writing" [ref=f13e106] [cursor=pointer]
+                  - button "Appearance" [ref=f13e111] [cursor=pointer]
+                  - button "Workbars" [ref=f13e119] [cursor=pointer]
+                  - button "Files and devices" [ref=f13e122] [cursor=pointer]
+                  - button "More Settings sections" [ref=f13e130] [cursor=pointer]
+                - generic [ref=f13e131]:
+                  - heading "Files and devices" [level=2] [ref=f13e132]
+                  - generic [ref=f13e133]:
+                    - generic [ref=f13e134]:
+                      - generic [ref=f13e135]:
+                        - heading "Spectra Bridge" [level=2] [ref=f13e136]
+                        - paragraph [ref=f13e137]: Selected folders remain yours. Paths never leave this device.
+                      - generic [ref=f13e140]:
+                        - generic [ref=f13e141]: Connected
+                        - paragraph [ref=f13e142]: Runs quietly in the system tray. Files on this PC stay ordinary files.
+                    - generic [ref=f13e144]:
+                      - generic [ref=f13e145]:
+                        - heading "How files are stored" [level=2] [ref=f13e146]
+                        - paragraph [ref=f13e147]: New folders inherit this choice unless you change one.
+                      - generic [ref=f13e148]:
+                        - radio "Keep on this computer" [ref=f13e149] [cursor=pointer]
+                        - radio "Keep in Spectra" [ref=f13e234] [cursor=pointer]
+                        - radio "Both Recommended Edits anywhere update both. The file on your PC stays a normal file." [checked] [ref=f13e235] [cursor=pointer]:
+                          - generic [ref=f13e155]:
+                            - text: Both
+                            - generic [ref=f13e156]: Recommended
+                          - generic [ref=f13e236]: Edits anywhere update both. The file on your PC stays a normal file.
+                    - generic [ref=f13e157]:
+                      - generic [ref=f13e158]:
+                        - heading "Selected folders" [level=2] [ref=f13e159]
+                        - paragraph [ref=f13e160]: Choose and manage folders here. Windows only shows its native folder picker when you add one.
+                      - generic [ref=f13e161]:
+                        - button "Add folder" [ref=f13e271] [cursor=pointer]
+                        - generic [ref=f13e254]:
+                          - generic [ref=f13e255]:
+                            - generic [ref=f13e256]: spectra-p1v3-fixture
+                            - generic [ref=f13e257]: 1 file will retry after the next change or repair scan
+                          - generic [ref=f13e258]:
+                            - generic [ref=f13e259]: Waiting for Bridge
+                            - button "Retry" [ref=f13e272] [cursor=pointer]
+                            - button "Stop using" [ref=f13e261] [cursor=pointer]
+                        - generic [ref=f13e245]:
+                          - generic [ref=f13e246]:
+                            - generic [ref=f13e247]: Physics
+                            - generic [ref=f13e248]: Available in Spectra · 16 of 16 files
+                            - generic [ref=f13e249]: This folder is also managed by another program. Conflicts may take longer to notice.
+                          - generic [ref=f13e250]:
+                            - generic [ref=f13e251]: Ready
+                            - button "Stop using" [ref=f13e253] [cursor=pointer]
+                        - generic [ref=f13e262]:
+                          - generic [ref=f13e263]:
+                            - generic [ref=f13e264]: hi
+                            - generic [ref=f13e265]: Folder is unavailable on this device; reconnect the drive to resume.
+                          - generic [ref=f13e266]:
+                            - generic [ref=f13e267]: Not available
+                            - button "Retry" [ref=f13e273] [cursor=pointer]
+                            - button "Stop using" [ref=f13e269] [cursor=pointer]
+                        - generic [ref=f13e237]:
+                          - generic [ref=f13e238]:
+                            - generic [ref=f13e239]: spectra-p1v3-rerun-fixture
+                            - generic [ref=f13e240]: Available in Spectra · 1 of 1 files
+                          - generic [ref=f13e241]:
+                            - generic [ref=f13e242]: Ready
+                            - button "Stop using" [ref=f13e244] [cursor=pointer]
+          - generic [ref=f13e164]:
+            - button "Open actions" [ref=f13e165] [cursor=pointer]
+            - generic [ref=f13e168]:
+              - generic [ref=f13e170]:
+                - 'button "Choose AI focus: All Spectra objects" [ref=f13e171] [cursor=pointer]'
+                - generic [ref=f13e177]: Starting a new conversation. 0 context objects included.
+              - textbox "Ask Spectra from this page..." [ref=f13e179]
+              - button "Send command" [disabled] [ref=f13e180]
+    - region "Notifications alt+T"
+  - alert [ref=f13e270]

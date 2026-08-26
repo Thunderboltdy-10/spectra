@@ -227,3 +227,21 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Toggles match canon wording; consequence-on-a-real-file, mid-save kill, and Word↔Spectra roundtrip did not finish (no imported file). Word opened the valid fixture; not filed as native corruption.
 - Focused Vitest 45 pass / 2 pre-existing I2 string-scans, not rewritten.
 - Verdict: **REJECTED**. Evidence: `.shots/reformation/P1.V3/rerun/manifest.md`. I3/I4 stay IMPLEMENTED, not ACCEPTED. P1.I2 reopened for the scan hang.
+
+## Implementer rejection-fix log — P1.I2 / P1.V3-R1 (2026-08-26)
+
+- Triage: **SYSTEMIC** — the watcher was created before its initialization branch, so a newly selected mount never called the initial `sync_grant`; ordinary folders remained at `scanning` / “Reading folder metadata…” regardless of the `run_sync` snapshot path.
+- New grant watchers now initialize with no watcher and use the existing watcher-start branch to create the watcher and perform the initial repair sync. Reconnect behavior remains on the same path, while `stable_file_snapshot` and `scan_mount` continue to enforce the previously implemented stable-byte proof.
+- Checks: Rust core 40/40; unchanged Rust chaos 13/13; focused Convex suites 4 files / 19 tests; Bridge app `cargo check` passes. The exact `Downloads\\spectra-p1v3-rerun-fixture` contains the valid 43,336-byte OOXML fixture and was not modified.
+- Status: **IMPLEMENTED**. P1.V3 will rerun independently; no acceptance is claimed.
+
+## Verifier walk log — P1.V3 (2026-08-26)
+
+- Independent walk after I2 watcher-start fix. No product code or assertions changed. Isolated `Downloads\spectra-p1v3-rerun-fixture` (valid OOXML, not the 942-byte stub, not OneDrive, not PS 6/PS 8). Bridge + Word on hidden desktop `P1V3Walk`, then cleaned up.
+- Fixture left scanning: **Ready · 1 of 1 files**. Library listed the folder and **Last-year essay.docx**. P1.V3-R1 independently closed. I2 stays IMPLEMENTED until the uncommitted watcher-start lands.
+- Chips: Not connected / Offline / Waiting for Bridge after a real kill. P1.V3-R2 independently closed for those headers.
+- Keep in Spectra stranded minutes on “Bridge verifies the file” while Connected; Open in Spectra stayed disabled. **Owner P1.I1** (W1). Location still **This device + Spectra** vs Spectra not available. **Owner P1.I4** (W2).
+- Word opened the fixture; `WORD-OPEN` / `WORD-CLOSE` / `BRIDGE-KILL` persisted. Spectra stayed **Up to date · Last verified 9m ago** after bytes grew. **Owner P1.I3** (W3). Real `setOffline` crashed Settings with Convex Request ID. **Owner P1.I3** (W4). Spoofed offline chips were honest.
+- Waiting chip on the old stub said Waiting for Bridge while Connected (W5, I4). DOCX lens 400 / unfinished-control next to Synced (W6, P2.I1). Mid-edit in Spectra never ran (F6 strand).
+- Focused Vitest 45 pass / 2 pre-existing I2 string-scans, not rewritten. Shots `12` and `20` are yml-only; `13`/`21` cover those moments. Do not `convex push`.
+- Verdict: **REJECTED**. Evidence: `.shots/reformation/P1.V3/walk/manifest.md`. Next **P1.I1**.

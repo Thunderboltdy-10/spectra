@@ -1,0 +1,294 @@
+- generic [active] [ref=f11e1]:
+  - link "Skip to content" [ref=f11e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=f11e3]:
+    - generic [ref=f11e4]:
+      - complementary "Spectra navigation" [ref=f11e5]:
+        - generic [ref=f11e6]:
+          - button "Collapse sidebar" [ref=f11e7] [cursor=pointer]
+          - link "Spectra home" [ref=f11e11] [cursor=pointer]:
+            - /url: /workspace?home=1
+            - img "Spectra" [ref=f11e12]
+            - generic [ref=f11e21]: spectra
+        - generic [ref=f11e22]:
+          - textbox "⌘ K" [ref=f11e23]:
+            - /placeholder: Search
+          - generic: ⌘ K
+        - navigation "Main destinations" [ref=f11e24]:
+          - link "Chat" [ref=f11e25] [cursor=pointer]:
+            - /url: /chat
+          - link "Workspace" [ref=f11e29] [cursor=pointer]:
+            - /url: /workspace?home=1
+          - link "Library" [ref=f11e36] [cursor=pointer]:
+            - /url: /library
+          - link "Calendar" [ref=f11e41] [cursor=pointer]:
+            - /url: /calendar
+          - link "Agents" [ref=f11e47] [cursor=pointer]:
+            - /url: /agents
+          - link "School" [ref=f11e52] [cursor=pointer]:
+            - /url: /school
+          - link "Analytics" [ref=f11e59] [cursor=pointer]:
+            - /url: /analytics
+          - link "Admin" [ref=f11e230] [cursor=pointer]:
+            - /url: /admin
+          - link "Super Admin" [ref=f11e236] [cursor=pointer]:
+            - /url: /superadmin
+        - link "New chat" [ref=f11e63] [cursor=pointer]:
+          - /url: /chat
+        - generic [ref=f11e241]:
+          - heading "Recents" [level=2] [ref=f11e242]
+          - generic [ref=f11e243]:
+            - link "Workspace Artifact Types 1d ago" [ref=f11e244] [cursor=pointer]:
+              - /url: /chat?threadId=qs7580jh5pv87na6pd8fvyqvmh8d5vvj
+              - generic [ref=f11e245]: Workspace Artifact Types
+              - generic [ref=f11e246]: 1d ago
+            - link "Update Physics IA 2.docx 2d ago" [ref=f11e247] [cursor=pointer]:
+              - /url: /chat?threadId=qs7fc5hxgx4f8xvjh35nf205058d2pqg
+              - generic [ref=f11e248]: Update Physics IA 2.docx
+              - generic [ref=f11e249]: 2d ago
+            - link "Update Physics IA 2.docx 2d ago" [ref=f11e250] [cursor=pointer]:
+              - /url: /chat?threadId=qs73qesge9nfqn7nnyh3dnck298czwm3
+              - generic [ref=f11e251]: Update Physics IA 2.docx
+              - generic [ref=f11e252]: 2d ago
+            - link "New conversation 3d ago" [ref=f11e253] [cursor=pointer]:
+              - /url: /chat?threadId=qs7f8az0xvc06yf6gffwb9wqfs8d0dge
+              - generic [ref=f11e254]: New conversation
+              - generic [ref=f11e255]: 3d ago
+            - link "Physics IA Verification 4d ago" [ref=f11e256] [cursor=pointer]:
+              - /url: /chat?threadId=qs722wkpxqs51xsxtb86aws12s8cyj3a
+              - generic [ref=f11e257]: Physics IA Verification
+              - generic [ref=f11e258]: 4d ago
+            - link "N8 Folder Setup 4d ago" [ref=f11e259] [cursor=pointer]:
+              - /url: /chat?threadId=qs7f1stszgtfbe4kd4kcn28etx8cz4qp
+              - generic [ref=f11e260]: N8 Folder Setup
+              - generic [ref=f11e261]: 4d ago
+            - link "Physics Scratch Folder 4d ago" [ref=f11e262] [cursor=pointer]:
+              - /url: /chat?threadId=qs7c5f84grf7rbp2t9xsatr8xn8cy07n
+              - generic [ref=f11e263]: Physics Scratch Folder
+              - generic [ref=f11e264]: 4d ago
+            - link "Organize Arduino Sources 4d ago" [ref=f11e265] [cursor=pointer]:
+              - /url: /chat?threadId=qs7aqaewpavxg86z2frq4mr8td8cyfx8
+              - generic [ref=f11e266]: Organize Arduino Sources
+              - generic [ref=f11e267]: 4d ago
+            - link "Organize Arduino Sources 4d ago" [ref=f11e268] [cursor=pointer]:
+              - /url: /chat?threadId=qs73rsw3t06pshepzmy0v4r2nn8czfdw
+              - generic [ref=f11e269]: Organize Arduino Sources
+              - generic [ref=f11e270]: 4d ago
+            - link "Choose Arduino Source 4d ago" [ref=f11e271] [cursor=pointer]:
+              - /url: /chat?threadId=qs78w4vz2bpepv3mjwywyvksgs8cy910
+              - generic [ref=f11e272]: Choose Arduino Source
+              - generic [ref=f11e273]: 4d ago
+        - generic [ref=f11e67]:
+          - generic [ref=f11e68]:
+            - button "Share current page" [ref=f11e69] [cursor=pointer]
+            - button "Notifications, 1 unread" [ref=f11e274] [cursor=pointer]:
+              - generic [ref=f11e275]: "1"
+            - button "Settings" [ref=f11e80] [cursor=pointer]
+          - button "Manage account" [ref=f11e276] [cursor=pointer]:
+            - generic [ref=f11e277]: PM
+            - generic [ref=f11e278]:
+              - strong [ref=f11e279]: P MD
+              - generic [ref=f11e280]: school admin
+      - main [ref=f11e84]:
+        - generic [ref=f11e283]:
+          - generic [ref=f11e284]:
+            - button "Go back" [disabled]
+            - button "Go forward" [disabled]
+          - generic [ref=f11e285]:
+            - button "Home Close Home" [ref=f11e286] [cursor=pointer]:
+              - generic [ref=f11e289]: Home
+              - button "Close Home" [ref=f11e290]
+            - button "Open a new home view" [ref=f11e294] [cursor=pointer]
+        - generic [ref=f11e87]:
+          - button "Import a Spectra workspace manifest" [ref=f11e88]
+          - generic [ref=f11e90]:
+            - generic [ref=f11e92]:
+              - generic [ref=f11e100]:
+                - heading "Workspace" [level=1] [ref=f11e101]
+                - paragraph [ref=f11e102]: 5 workspaces, and everything filed across them.
+              - main [ref=f11e103]:
+                - generic [ref=f11e104]:
+                  - button [ref=f11e105]
+                  - generic [ref=f11e106]:
+                    - button "Hide the folder rail" [ref=f11e107] [cursor=pointer]
+                    - navigation "View" [ref=f11e111]:
+                      - button "List" [pressed] [ref=f11e112] [cursor=pointer]
+                      - button "Board" [ref=f11e115] [cursor=pointer]
+                    - navigation "Location"
+                    - textbox "Search Library" [ref=f11e122]
+                    - button "Filter by type" [ref=f11e123] [cursor=pointer]: All types
+                    - button "Sort" [ref=f11e125] [cursor=pointer]: Arrangement
+                    - button "New" [ref=f11e129] [cursor=pointer]
+                    - button "Select objects" [ref=f11e132] [cursor=pointer]
+                  - generic [ref=f11e137]:
+                    - navigation "Library folders" [ref=f11e138]:
+                      - button "Library" [ref=f11e139] [cursor=pointer]
+                      - tree "Top level" [ref=f11e296]:
+                        - treeitem "Expand General General" [ref=f11e297]:
+                          - generic [ref=f11e298]:
+                            - button "Expand General" [ref=f11e299] [cursor=pointer]
+                            - generic [ref=f11e307]: General
+                        - treeitem "Expand Spectra Launch Studio Spectra Launch Studio" [ref=f11e308]:
+                          - generic [ref=f11e309]:
+                            - button "Expand Spectra Launch Studio" [ref=f11e310] [cursor=pointer]
+                            - generic [ref=f11e318]: Spectra Launch Studio
+                        - treeitem "Expand Semester Two Semester Two" [ref=f11e319]:
+                          - generic [ref=f11e320]:
+                            - button "Expand Semester Two" [ref=f11e321] [cursor=pointer]
+                            - generic [ref=f11e327]: Semester Two
+                        - treeitem "Start here" [ref=f11e328]
+                        - treeitem "ManageBac class" [ref=f11e336]
+                        - treeitem "Expand Physics Physics" [ref=f11e344]:
+                          - generic [ref=f11e345]:
+                            - button "Expand Physics" [ref=f11e346] [cursor=pointer]
+                            - generic [ref=f11e352]: Physics
+                        - treeitem "Expand N4 controlled fixture N4 controlled fixture" [ref=f11e353]:
+                          - generic [ref=f11e354]:
+                            - button "Expand N4 controlled fixture" [ref=f11e355] [cursor=pointer]
+                            - generic [ref=f11e361]: N4 controlled fixture
+                        - treeitem "Expand .tmp-n5-office-fixture .tmp-n5-office-fixture" [ref=f11e362]:
+                          - generic [ref=f11e363]:
+                            - button "Expand .tmp-n5-office-fixture" [ref=f11e364] [cursor=pointer]
+                            - generic [ref=f11e370]: .tmp-n5-office-fixture
+                        - treeitem "Expand Physics Physics" [ref=f11e371]:
+                          - generic [ref=f11e372]:
+                            - button "Expand Physics" [ref=f11e373] [cursor=pointer]
+                            - generic [ref=f11e379]: Physics
+                        - treeitem "Expand .tmp-n4-mount .tmp-n4-mount" [ref=f11e380]:
+                          - generic [ref=f11e381]:
+                            - button "Expand .tmp-n4-mount" [ref=f11e382] [cursor=pointer]
+                            - generic [ref=f11e388]: .tmp-n4-mount
+                        - treeitem "N8 AI verification scratch" [ref=f11e389]
+                        - treeitem "Expand hi hi" [ref=f11e397]:
+                          - generic [ref=f11e398]:
+                            - button "Expand hi" [ref=f11e399] [cursor=pointer]
+                            - generic [ref=f11e405]: hi
+                        - treeitem "Expand Physics Physics" [ref=f11e406]:
+                          - generic [ref=f11e407]:
+                            - button "Expand Physics" [ref=f11e408] [cursor=pointer]
+                            - generic [ref=f11e414]: Physics
+                        - treeitem "spectra-p1v3-fixture" [ref=f11e415]
+                      - generic [ref=f11e150]: Quick views
+                      - generic [ref=f11e151]:
+                        - button "Recent" [ref=f11e152] [cursor=pointer]
+                        - button "Favorites" [ref=f11e156] [cursor=pointer]
+                        - button "Shared" [ref=f11e159] [cursor=pointer]
+                        - button "Trash" [ref=f11e165] [cursor=pointer]
+                    - generic [ref=f11e169]:
+                      - generic [ref=f11e170]:
+                        - button "Name" [ref=f11e171] [cursor=pointer]
+                        - button "Type" [ref=f11e172] [cursor=pointer]
+                        - button "Updated" [ref=f11e173] [cursor=pointer]
+                      - grid "Library items" [ref=f11e174]:
+                        - generic [ref=f11e421]:
+                          - row "General Workspace 19 Aug Pin General Actions for General" [ref=f11e422]:
+                            - generic [ref=f11e428]: General
+                            - generic [ref=f11e429]: Workspace
+                            - generic [ref=f11e430]: 19 Aug
+                            - generic [ref=f11e431]:
+                              - button "Pin General" [ref=f11e432] [cursor=pointer]
+                              - button "Actions for General" [ref=f11e435] [cursor=pointer]
+                          - row "Spectra Launch Studio Workspace 19 Aug Pin Spectra Launch Studio Actions for Spectra Launch Studio" [ref=f11e442]:
+                            - generic [ref=f11e448]: Spectra Launch Studio
+                            - generic [ref=f11e449]: Workspace
+                            - generic [ref=f11e450]: 19 Aug
+                            - generic [ref=f11e451]:
+                              - button "Pin Spectra Launch Studio" [ref=f11e452] [cursor=pointer]
+                              - button "Actions for Spectra Launch Studio" [ref=f11e455] [cursor=pointer]
+                          - row "Semester Two Folder 1 Pin Semester Two Actions for Semester Two" [ref=f11e462]:
+                            - generic [ref=f11e466]: Semester Two
+                            - generic [ref=f11e467]: Folder
+                            - generic [ref=f11e468]: "1"
+                            - generic [ref=f11e469]:
+                              - button "Pin Semester Two" [ref=f11e470] [cursor=pointer]
+                              - button "Actions for Semester Two" [ref=f11e473] [cursor=pointer]
+                          - row "Start here Workspace 20 Aug Pin Start here Actions for Start here" [ref=f11e480]:
+                            - generic [ref=f11e486]: Start here
+                            - generic [ref=f11e487]: Workspace
+                            - generic [ref=f11e488]: 20 Aug
+                            - generic [ref=f11e489]:
+                              - button "Pin Start here" [ref=f11e490] [cursor=pointer]
+                              - button "Actions for Start here" [ref=f11e493] [cursor=pointer]
+                          - row "ManageBac class Workspace 20 Aug Pin ManageBac class Actions for ManageBac class" [ref=f11e500]:
+                            - generic [ref=f11e506]: ManageBac class
+                            - generic [ref=f11e507]: Workspace
+                            - generic [ref=f11e508]: 20 Aug
+                            - generic [ref=f11e509]:
+                              - button "Pin ManageBac class" [ref=f11e510] [cursor=pointer]
+                              - button "Actions for ManageBac class" [ref=f11e513] [cursor=pointer]
+                          - row "Physics Folder 17 Pin Physics Actions for Physics" [ref=f11e520]:
+                            - generic [ref=f11e524]: Physics
+                            - generic [ref=f11e525]: Folder
+                            - generic [ref=f11e526]: "17"
+                            - generic [ref=f11e527]:
+                              - button "Pin Physics" [ref=f11e528] [cursor=pointer]
+                              - button "Actions for Physics" [ref=f11e531] [cursor=pointer]
+                          - row "N4 controlled fixture Folder 4 Pin N4 controlled fixture Actions for N4 controlled fixture" [ref=f11e538]:
+                            - generic [ref=f11e542]: N4 controlled fixture
+                            - generic [ref=f11e543]: Folder
+                            - generic [ref=f11e544]: "4"
+                            - generic [ref=f11e545]:
+                              - button "Pin N4 controlled fixture" [ref=f11e546] [cursor=pointer]
+                              - button "Actions for N4 controlled fixture" [ref=f11e549] [cursor=pointer]
+                          - row ".tmp-n5-office-fixture Folder 5 Pin .tmp-n5-office-fixture Actions for .tmp-n5-office-fixture" [ref=f11e556]:
+                            - generic [ref=f11e560]: .tmp-n5-office-fixture
+                            - generic [ref=f11e561]: Folder
+                            - generic [ref=f11e562]: "5"
+                            - generic [ref=f11e563]:
+                              - button "Pin .tmp-n5-office-fixture" [ref=f11e564] [cursor=pointer]
+                              - button "Actions for .tmp-n5-office-fixture" [ref=f11e567] [cursor=pointer]
+                          - row "Physics Folder 16 Pin Physics Actions for Physics" [ref=f11e574]:
+                            - generic [ref=f11e578]: Physics
+                            - generic [ref=f11e579]: Folder
+                            - generic [ref=f11e580]: "16"
+                            - generic [ref=f11e581]:
+                              - button "Pin Physics" [ref=f11e582] [cursor=pointer]
+                              - button "Actions for Physics" [ref=f11e585] [cursor=pointer]
+                          - row ".tmp-n4-mount Folder 1 Pin .tmp-n4-mount Actions for .tmp-n4-mount" [ref=f11e592]:
+                            - generic [ref=f11e596]: .tmp-n4-mount
+                            - generic [ref=f11e597]: Folder
+                            - generic [ref=f11e598]: "1"
+                            - generic [ref=f11e599]:
+                              - button "Pin .tmp-n4-mount" [ref=f11e600] [cursor=pointer]
+                              - button "Actions for .tmp-n4-mount" [ref=f11e603] [cursor=pointer]
+                          - row "N8 AI verification scratch Workspace 4d ago Pin N8 AI verification scratch Actions for N8 AI verification scratch" [ref=f11e610]:
+                            - generic [ref=f11e616]: N8 AI verification scratch
+                            - generic [ref=f11e617]: Workspace
+                            - generic [ref=f11e618]: 4d ago
+                            - generic [ref=f11e619]:
+                              - button "Pin N8 AI verification scratch" [ref=f11e620] [cursor=pointer]
+                              - button "Actions for N8 AI verification scratch" [ref=f11e623] [cursor=pointer]
+                          - row "hi Folder 2 Pin hi Actions for hi" [ref=f11e630]:
+                            - generic [ref=f11e634]: hi
+                            - generic [ref=f11e635]: Folder
+                            - generic [ref=f11e636]: "2"
+                            - generic [ref=f11e637]:
+                              - button "Pin hi" [ref=f11e638] [cursor=pointer]
+                              - button "Actions for hi" [ref=f11e641] [cursor=pointer]
+                          - row "Physics Folder 16 Pin Physics Actions for Physics" [ref=f11e648]:
+                            - generic [ref=f11e652]: Physics
+                            - generic [ref=f11e653]: Folder
+                            - generic [ref=f11e654]: "16"
+                            - generic [ref=f11e655]:
+                              - button "Pin Physics" [ref=f11e656] [cursor=pointer]
+                              - button "Actions for Physics" [ref=f11e659] [cursor=pointer]
+                          - row "spectra-p1v3-fixture Folder 0 Pin spectra-p1v3-fixture Actions for spectra-p1v3-fixture" [ref=f11e666]:
+                            - generic [ref=f11e670]: spectra-p1v3-fixture
+                            - generic [ref=f11e671]: Folder
+                            - generic [ref=f11e672]: "0"
+                            - generic [ref=f11e673]:
+                              - button "Pin spectra-p1v3-fixture" [ref=f11e674] [cursor=pointer]
+                              - button "Actions for spectra-p1v3-fixture" [ref=f11e677] [cursor=pointer]
+                      - generic [ref=f11e206]:
+                        - generic [ref=f11e207]: 14 items
+                        - generic [ref=f11e208]: Drag to move · hold Alt to leave a reference · F2 renames
+            - generic [ref=f11e211]:
+              - button "Open actions" [ref=f11e212] [cursor=pointer]
+              - generic [ref=f11e215]:
+                - generic [ref=f11e217]:
+                  - 'button "Choose AI focus: All Spectra objects" [ref=f11e218] [cursor=pointer]'
+                  - generic [ref=f11e224]: Starting a new conversation. 0 context objects included.
+                - textbox "Ask Spectra anything..." [ref=f11e226]
+                - button "Send command" [disabled] [ref=f11e227]
+    - region "Notifications alt+T"
+  - alert [ref=f11e684]

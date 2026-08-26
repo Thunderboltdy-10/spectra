@@ -9,16 +9,17 @@ use spectra_bridge_core::platform::{HostPlatform, OsFileIdentity, Platform};
 use spectra_bridge_core::protocol::{LocalMountStatus, PairingOffer};
 use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
-    Backoff, ClaimPrecondition, ClaimedWrite, DeliveredChange, DiscoveredRegistration,
-    DiscoveredResource, QueuedChangeEnvelope, ReplicaMigrationPage, ReportedChange,
-    claim_fs_request, claim_write, complete_fs_request, complete_write, detach_mount,
-    discover_resources_page, drain_cloud_queue, exchange_pairing, inspect_claim_target,
-    migrate_cloud_replica_page, reconcile_missing_resources, register_mount, resume_pairing,
-    set_mount_availability, upload_resource_payload,
+    Backoff, ClaimPrecondition, ClaimedPayloadUpload, ClaimedWrite, DeliveredChange,
+    DiscoveredRegistration, DiscoveredResource, QueuedChangeEnvelope, ReplicaMigrationPage,
+    ReportedChange, claim_fs_request, claim_pending_payload_upload, claim_write,
+    complete_fs_request, complete_write, detach_mount, discover_resources_page, drain_cloud_queue,
+    exchange_pairing, inspect_claim_target, migrate_cloud_replica_page,
+    reconcile_missing_resources, register_mount, resume_pairing, set_mount_availability,
+    upload_resource_payload,
 };
 use spectra_bridge_core::watcher::{
-    MountWatcher, StabilityTracker, WatcherConfig, office_lock_exists, office_lock_paths,
-    relative_key, scan_mount, stable_file_snapshot,
+    MountWatcher, StabilityTracker, WatcherConfig, file_held_by_office, is_office_lock_file,
+    office_lock_exists, office_lock_paths, relative_key, scan_mount, stable_file_snapshot,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -904,10 +905,11 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             .unwrap_or("file")
             .to_ascii_lowercase();
         let entry_path = grant.device_root().join(&entry.relative_path);
-        let locked = office_lock_exists(&entry_path);
+        let locked = file_held_by_office(&entry_path);
         if locked {
             locked_files += 1;
             scan_complete = false;
+            let _ = enqueue_locked_path(grant, journal, &entry_path);
             continue;
         }
         let snapshot = match stable_file_snapshot(&entry_path) {
@@ -1257,6 +1259,78 @@ async fn process_write_request(
     }
 }
 
+async fn drain_pending_payload_uploads(
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    deployment: &str,
+    credential: &str,
+) -> anyhow::Result<usize> {
+    let mut uploaded = 0usize;
+    for _ in 0..10 {
+        let Some(request) = claim_pending_payload_upload(deployment, credential).await? else {
+            break;
+        };
+        if !finish_pending_payload_upload(grants, journal, deployment, credential, request).await? {
+            break;
+        }
+        uploaded += 1;
+    }
+    Ok(uploaded)
+}
+
+async fn finish_pending_payload_upload(
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    deployment: &str,
+    credential: &str,
+    request: ClaimedPayloadUpload,
+) -> anyhow::Result<bool> {
+    let Some(grant) = grants
+        .device_grants()
+        .into_iter()
+        .find(|grant| grant.id == request.grant_id)
+    else {
+        return Ok(false);
+    };
+    let target = match grants.resolve(
+        &request.grant_id,
+        std::path::Path::new(&request.relative_path),
+    ) {
+        Ok(path) => path,
+        Err(_) => return Ok(false),
+    };
+    if !target.exists() || is_office_lock_file(&target) {
+        return Ok(false);
+    }
+    if file_held_by_office(&target) {
+        let _ = enqueue_locked_path(&grant, journal, &target);
+        return Ok(false);
+    }
+    let mut snapshot = match stable_file_snapshot(&target) {
+        Ok(Some(snapshot)) => snapshot,
+        Ok(None) | Err(_) => {
+            let _ = enqueue_locked_path(&grant, journal, &target);
+            return Ok(false);
+        }
+    };
+    let bytes = snapshot.read_bytes()?;
+    let hash = hex::encode(sha2::Sha256::digest(&bytes));
+    drop(snapshot);
+    if !carries_native_payload(&request.native_format) {
+        return Ok(false);
+    }
+    upload_resource_payload(
+        deployment,
+        credential,
+        &request.replica_id,
+        &bytes,
+        &hash,
+        media_type(&request.native_format),
+    )
+    .await?;
+    Ok(true)
+}
+
 async fn drain_write_requests(
     grants: &Arc<GrantRegistry>,
     journal: &Arc<Journal>,
@@ -1577,7 +1651,11 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                     pending_missing.entry(path).or_insert(observed_at);
                     continue;
                 }
-                if office_lock_exists(&path) {
+                if is_office_lock_file(&path) {
+                    pending_files.remove(&path);
+                    continue;
+                }
+                if file_held_by_office(&path) {
                     if enqueue_locked_path(&grant, &journal, &path).is_ok() {
                         let _ = set_mount_status(
                             &journal,
@@ -2118,6 +2196,13 @@ fn main() {
                                     }
                                 }
                                 let _ = drain_structure_requests(
+                                    &sync_grants,
+                                    &sync_journal,
+                                    &url,
+                                    &credential,
+                                )
+                                .await;
+                                let _ = drain_pending_payload_uploads(
                                     &sync_grants,
                                     &sync_journal,
                                     &url,

@@ -122,6 +122,21 @@ describe("sync presentation (P1.I3)", () => {
     expect(presentation.ready).toBe(false);
   });
 
+  it("does not call a This-PC file Unavailable when the local copy is current", () => {
+    const presentation = presentSync({
+      replicas: [
+        { kind: "local", state: "current", lastVerifiedAt: 1 },
+        { kind: "cloud", state: "unavailable", unavailableReason: "metadata-only" },
+      ],
+      openConflictCount: 0,
+      replicaPendingCount: 0,
+      online: true,
+    });
+    expect(presentation.label).not.toBe("Unavailable on this device");
+    expect(presentation.key).toBe("saved-locally");
+    expect(presentation.ready).toBe(true);
+  });
+
   it("keeps Location and replica availability on the same places", () => {
     expect(
       locationLabel([

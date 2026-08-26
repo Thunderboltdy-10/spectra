@@ -488,6 +488,33 @@ pub async fn upload_resource_payload(
     Ok(committed.payload_ref)
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimedPayloadUpload {
+    pub replica_id: String,
+    pub grant_id: String,
+    pub local_resource_id: String,
+    pub relative_path: String,
+    pub native_format: String,
+}
+
+pub async fn claim_pending_payload_upload(
+    deployment_url: &str,
+    credential: &str,
+) -> anyhow::Result<Option<ClaimedPayloadUpload>> {
+    #[derive(Deserialize)]
+    struct ClaimPayloadUploadResponse {
+        request: Option<ClaimedPayloadUpload>,
+    }
+    let response: ClaimPayloadUploadResponse = mutation(
+        deployment_url,
+        "bridgeSync:claimPendingPayloadUpload",
+        serde_json::json!({ "credential": credential }),
+    )
+    .await?;
+    Ok(response.request)
+}
+
 pub async fn claim_write(
     deployment_url: &str,
     credential: &str,

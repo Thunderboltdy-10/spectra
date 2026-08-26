@@ -268,3 +268,13 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Focused Vitest 48 pass / 2 pre-existing I2 string-scans. Do not `convex push`.
 - Verdict: **REJECTED**. Evidence: `.shots/reformation/P1.V3/w1w5/manifest.md`. Next **P1.I1**.
 
+## Implementer rejection-fix log — P1.I1/I2/I3/I4 / P1.V3-W1,W3,W7,W8 (2026-08-26)
+
+- W1 SYSTEMIC CS-3/F6: Keep in Spectra waited for a watcher change after metadata-only discovery never uploaded bytes. Bridge now claims `claimPendingPayloadUpload` and uploads the disk file; `commitPayloadUpload` still completes F6. Disk file stays. Sweeper does not stall-fail while Word holds the file.
+- W3 SYSTEMIC: only the `~$` owner file was reported; Word’s exclusive share-lock never reached Convex, so the replica stayed Up to date. Watcher and repair scan now report `office-locked` when `file_held_by_office` (owner file or writer share-lock). Presenter already says Waiting for Word given that code — not a fake chip.
+- W7 SYSTEMIC: `presentationsForAccount` passed only attention replicas into the same presenter, so a metadata-only cloud row looked like the only copy. The query now expands to the full replica set per work.
+- W8 LOCAL: the alert prefixed and suffixed the same humanizer sentences. It now prints `humanizePublicFailure` once.
+- Out of scope: W6 / P2.I1 / lens 400 / PS 6 / PS 8. Did not run P1.V3. No `convex push`.
+- Checks: focused Vitest 51 pass / 2 pre-existing I2 string-scans not rewritten; property suite included; Rust core 40/40; bridge-app `cargo check` OK; changed-file ESLint; secret scan.
+- Status: **IMPLEMENTED**. P1.V3 remains REJECTED pending an independent walk. No acceptance claimed.
+

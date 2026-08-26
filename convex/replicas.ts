@@ -321,15 +321,23 @@ export const presentationsForAccount = query({
       ensure(String(conflict.workId)).openConflictCount += 1;
     }
     for (const replica of replicaBatches.flat()) {
-      const row = ensure(String(replica.workId));
-      row.replicas.push({
+      ensure(String(replica.workId));
+    }
+    // Attention indexes omit current/ahead/behind. The presenter needs the
+    // full replica set or a This-PC file looks Unavailable (cloud metadata-only).
+    for (const workId of byWork.keys()) {
+      const row = ensure(workId);
+      const workReplicas = await ctx.db.query("workReplicas")
+        .withIndex("by_work", (q) => q.eq("workId", workId as Id<"spectraArtifacts">))
+        .take(20);
+      row.replicas = workReplicas.map((replica) => ({
         kind: replica.kind,
         state: replica.state,
         lastVerifiedAt: replica.lastVerifiedAt,
         errorCode: replica.errorCode,
         unavailableReason: replica.unavailableReason,
-      });
-      if (replica.state === "pending") row.pendingCount += 1;
+      }));
+      row.pendingCount = workReplicas.filter((replica) => replica.state === "pending").length;
     }
     return [...byWork.entries()].map(([workId, value]) => ({ workId, ...value }));
   },
@@ -1464,6 +1472,12 @@ export const sweepReplicaTruth = internalMutation({
             updatedAt: now,
           });
           verifiedTransitions += 1;
+          continue;
+        }
+        const locals = await ctx.db.query("workReplicas")
+          .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "local"))
+          .take(20);
+        if (locals.some((local) => local.errorCode === "office-locked" && local.state !== "unavailable")) {
           continue;
         }
       }

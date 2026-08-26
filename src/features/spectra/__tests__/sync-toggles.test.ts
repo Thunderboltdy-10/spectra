@@ -263,4 +263,14 @@ describe("sync toggles (P1.I4)", () => {
     ).toBe("This device + Spectra");
     expect(resource).toContain("locationLabel");
   });
+
+  it("prints the storage-change failure sentence once", () => {
+    expect(humanizePublicFailure("strategy-transition-failed")).toBe(
+      "The last storage change did not finish. The file on this computer was not removed.",
+    );
+    expect(resource).toContain(
+      'humanizePublicFailure(strategyTransition.errorCode ?? "strategy-transition-failed")',
+    );
+    expect(resource).not.toContain("The last storage change did not finish. {humanizePublicFailure");
+  });
 });

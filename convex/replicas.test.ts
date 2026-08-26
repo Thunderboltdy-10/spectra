@@ -446,6 +446,66 @@ describe("replica truth machine", () => {
     expect(truth.local).toMatchObject({ state: "unavailable", unavailableReason: "unlinked-by-user" });
   });
 
+  it("completes Keep in Spectra from disk-only bytes after Bridge uploads them", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    await asUser.mutation(api.replicas.transitionStorageStrategy, {
+      workId: fixture.workId,
+      toPreset: "device",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(fixture.basePayloadId, { state: "released" });
+    });
+    const transition = await asUser.mutation(api.replicas.transitionStorageStrategy, {
+      workId: fixture.workId,
+      toPreset: "spectra",
+    });
+    expect(transition.state).toBe("pending");
+    const claimed = await t.mutation(api.bridgeSync.claimPendingPayloadUpload, {
+      credential: bridgeCredential,
+    });
+    expect(claimed.request).toMatchObject({
+      replicaId: fixture.localId,
+      relativePath: "Truth.docx",
+    });
+    const storageId = await t.run(async (ctx) => ctx.storage.store(new Blob(["base"])));
+    await t.mutation(api.bridgeSync.commitPayloadUpload, {
+      credential: bridgeCredential,
+      replicaId: fixture.localId,
+      hash: baseHash,
+      bytes: 4,
+      mediaType: "application/test",
+      storageId,
+    });
+    const truth = await t.run(async (ctx) => ({
+      transition: await ctx.db.get(transition.transitionId),
+      cloud: await ctx.db.get(fixture.cloudId),
+      local: await ctx.db.get(fixture.localId),
+    }));
+    expect(truth.transition).toMatchObject({ state: "verified", toPreset: "spectra" });
+    expect(truth.cloud).toMatchObject({ state: "current", contentHash: baseHash });
+    expect(truth.cloud?.payloadRef).toBeTruthy();
+    expect(truth.local).toMatchObject({ state: "unavailable", unavailableReason: "unlinked-by-user" });
+  });
+
+  it("gives Library the full replica set so a This-PC file is not Unavailable", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    await asUser.mutation(api.replicas.transitionStorageStrategy, {
+      workId: fixture.workId,
+      toPreset: "device",
+    });
+    const rows = await asUser.query(api.replicas.presentationsForAccount, {});
+    const row = rows.find((candidate) => candidate.workId === fixture.workId);
+    expect(row?.replicas).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "local", state: "current" }),
+      expect.objectContaining({ kind: "cloud", state: "unavailable" }),
+    ]));
+    expect(row?.replicas.some((replica) => replica.kind === "local" && replica.state === "current")).toBe(true);
+  });
+
   it("sweeps a stalled pending storage transition so the radios can exit", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

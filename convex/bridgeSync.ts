@@ -896,6 +896,57 @@ export const commitPayloadUpload = mutation({
   },
 });
 
+/** Bridge polls this so Keep in Spectra can ingest disk bytes that were never
+ * uploaded (metadata-only discovery). Waiting for a watcher change never fires. */
+export const claimPendingPayloadUpload = mutation({
+  args: { credential: v.string() },
+  handler: async (ctx, args) => {
+    const { device } = await requireDevice(ctx, args.credential);
+    const replicaStates = ["current", "ahead", "pending"] as const;
+    const batches = await Promise.all(
+      replicaStates.map((state) =>
+        ctx.db.query("workReplicas")
+          .withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", state))
+          .take(20),
+      ),
+    );
+    for (const replica of batches.flat()) {
+      if (replica.kind !== "local" || !replica.mountId || !replica.relativePath || !replica.localResourceId) continue;
+      const transitions = await ctx.db.query("storageStrategyTransitions")
+        .withIndex("by_work_created", (q) => q.eq("workId", replica.workId))
+        .order("desc")
+        .take(10);
+      const transition = transitions.find(
+        (candidate) =>
+          candidate.state === "pending" &&
+          (candidate.toPreset === "spectra" || candidate.toPreset === "both"),
+      );
+      if (!transition) continue;
+      const cloud = await ctx.db.query("workReplicas")
+        .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
+        .unique();
+      if (cloud?.payloadRef) {
+        const payloadId = ctx.db.normalizeId("payloadObjects", cloud.payloadRef);
+        const payload = payloadId ? await ctx.db.get(payloadId) : null;
+        if (payload?.state === "active") continue;
+      }
+      const mount = await ctx.db.get(replica.mountId);
+      if (!mount || mount.deviceId !== device._id || mount.state !== "active") continue;
+      await ctx.db.patch(device._id, { lastSeenAt: Date.now() });
+      return {
+        request: {
+          replicaId: replica._id,
+          grantId: mount.grantId,
+          localResourceId: replica.localResourceId,
+          relativePath: replica.relativePath,
+          nativeFormat: replica.nativeFormat,
+        },
+      };
+    }
+    return { request: null };
+  },
+});
+
 export const claimWrite = mutation({
   args: { credential: v.string() },
   handler: async (ctx, args) => {

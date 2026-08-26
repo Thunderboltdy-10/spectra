@@ -463,7 +463,7 @@ export function ResourceSurface({
                 </p>
               ) : strategyTransition?.state === "failed" ? (
                 <p className="mt-2 text-micro text-[var(--danger)]" role="alert">
-                  The last storage change did not finish. {humanizePublicFailure(strategyTransition.errorCode ?? "write-failed")} The file on this computer was not removed.
+                  {humanizePublicFailure(strategyTransition.errorCode ?? "strategy-transition-failed")}
                 </p>
               ) : null}
             </div>

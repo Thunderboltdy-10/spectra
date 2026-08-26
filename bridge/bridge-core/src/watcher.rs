@@ -329,6 +329,13 @@ pub fn is_office_lock_file(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with("~$"))
 }
 
+/// Office owns the file through its `~$` owner lock **or** an exclusive writer
+/// handle. Word Compatibility Mode often holds the document without a matching
+/// owner-file name; the share-lock is the truthful signal.
+pub fn file_held_by_office(path: &Path) -> bool {
+    office_lock_exists(path) || HostPlatform.is_locked(path).unwrap_or(false)
+}
+
 #[derive(Debug, Clone)]
 struct Candidate {
     size: u64,
@@ -713,6 +720,9 @@ mod tests {
         std::fs::write(&path, b"bytes").unwrap();
         std::fs::write(dir.path().join("~$per.docx"), b"lock").unwrap();
         assert!(office_lock_exists(&path));
+        assert!(file_held_by_office(&path));
+        assert!(is_office_lock_file(&dir.path().join("~$per.docx")));
+        assert!(!is_office_lock_file(&path));
     }
 
     #[test]

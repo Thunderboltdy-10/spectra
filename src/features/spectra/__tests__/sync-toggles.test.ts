@@ -17,6 +17,7 @@ import {
   parseBridgeHealth,
   presentBridgeReachability,
   bridgeReachabilityCopy,
+  folderChipLabel,
 } from "../bridge/client";
 import { presentSync } from "../bridge/status";
 import {
@@ -151,6 +152,27 @@ describe("sync toggles (P1.I4)", () => {
     ).toBe("not-running");
     expect(bridgeReachabilityCopy("not-running").label).toBe("Not running");
     expect(settings).toContain("bridgeReachabilityCopy");
+    expect(folderChipLabel({
+      state: "disconnected",
+      discoveryFailed: false,
+      reachability: "offline",
+    })).toBe("Offline");
+    expect(folderChipLabel({
+      state: "disconnected",
+      discoveryFailed: false,
+      reachability: "running",
+    })).toBe("Not connected");
+    expect(folderChipLabel({
+      state: "disconnected",
+      discoveryFailed: true,
+      reachability: "offline",
+    })).not.toBe("Waiting for Bridge");
+    expect(folderChipLabel({
+      state: "disconnected",
+      discoveryFailed: false,
+      reachability: "not-running",
+    })).toBe("Waiting for Bridge");
+    expect(settings).toContain("folderChipLabel");
   });
 
   it("speaks listing failures as unavailable-truth, never Convex jargon", () => {
@@ -169,8 +191,15 @@ describe("sync toggles (P1.I4)", () => {
       ),
     ).toContain("managed by another program");
     expect(humanizePublicFailure(convexMiss)).not.toContain("Needs attention");
-    expect(settings).toContain("Waiting for Spectra");
+    expect(
+      folderChipLabel({
+        state: "error",
+        discoveryFailed: true,
+        reachability: "connected",
+      }),
+    ).toBe("Waiting for Spectra");
     expect(settings).toContain("humanizePublicFailure");
+    expect(settings).toContain("folderChipLabel");
   });
 
   it("offers Reconnect when the replica is unavailable on this device", () => {

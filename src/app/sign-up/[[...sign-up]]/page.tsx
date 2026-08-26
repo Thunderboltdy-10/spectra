@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SignUp } from "@clerk/nextjs";
 import { SpectraMark } from "@/components/spectra-mark";
+import { SignedInContinue } from "@/components/signed-in-continue";
 
 function getSearchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -62,7 +63,11 @@ function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
           </section>
 
           <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-            <SignUp forceRedirectUrl={redirectUrl} />
+            <SignedInContinue to={redirectUrl || "/workspace"} />
+            <SignUp
+              fallbackRedirectUrl={redirectUrl || "/workspace"}
+              forceRedirectUrl={redirectUrl || "/workspace"}
+            />
           </section>
         </div>
       </div>

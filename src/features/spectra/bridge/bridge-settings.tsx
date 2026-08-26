@@ -18,6 +18,7 @@ import {
   retryBridgeFolder,
   selectBridgeFolder,
   bridgeReachabilityCopy,
+  folderChipLabel,
 } from "./client";
 import { StorageToggleGroup } from "./storage-toggle-group";
 import {
@@ -31,16 +32,6 @@ import {
   humanizePublicFailure,
   isCloudDiscoveryFailure,
 } from "./humanize";
-
-function mountStateLabel(state: string, discoveryFailed: boolean) {
-  if (discoveryFailed) return "Waiting for Spectra";
-  if (state === "selected" || state === "active") return "Ready";
-  if (state === "scanning") return "Reading folder";
-  if (state === "disconnected" || state === "waiting") return "Waiting for Bridge";
-  if (state === "unavailable") return "Not available";
-  if (state === "error") return "Needs attention";
-  return "Needs attention";
-}
 
 function stripProviderJargon(detail: string) {
   return detail
@@ -365,7 +356,11 @@ export function BridgeSettings() {
                           : "attention"
                     }
                   >
-                    {mountStateLabel(mount.state, Boolean(mount.discoveryFailed))}
+                    {folderChipLabel({
+                      state: mount.state,
+                      discoveryFailed: Boolean(mount.discoveryFailed),
+                      reachability,
+                    })}
                   </StatusBadge>
                   {mount.state === "error" ||
                   mount.state === "selected" ||

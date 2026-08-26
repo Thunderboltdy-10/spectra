@@ -1396,8 +1396,14 @@ async fn drain_structure_requests(
 fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Journal>) {
     tauri::async_runtime::spawn(async move {
         let config = WatcherConfig::for_root(std::path::Path::new(grant.device_root()));
-        let mut watcher =
-            MountWatcher::start(std::path::Path::new(grant.device_root()), config.clone()).ok();
+        // Keep startup in the same path as reconnects.  A watcher can be
+        // created immediately for a newly selected folder, but that does not
+        // perform the initial repair scan; the `watcher.is_none()` branch
+        // below owns both watcher creation and the first `sync_grant` call.
+        // Starting with `Some` would leave a new mount at the initial
+        // `scanning` status forever because no filesystem event is guaranteed
+        // after selection.
+        let mut watcher = None;
         let mut stability = StabilityTracker::new(config.stability_window);
         let mut pending_files = HashSet::<std::path::PathBuf>::new();
         let mut pending_missing = HashMap::<std::path::PathBuf, std::time::Instant>::new();

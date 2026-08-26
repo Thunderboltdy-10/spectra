@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { LandingClient } from "./landing/landing-client";
+import { SignedInContinue } from "@/components/signed-in-continue";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Spectra: connected learning work",
@@ -42,5 +45,10 @@ export default async function HomePage({
       redirect(`/workspace${toQueryString(resolvedSearchParams)}`);
     }
   }
-  return <LandingClient />;
+  return (
+    <>
+      <SignedInContinue to={`/workspace${toQueryString(resolvedSearchParams)}`} />
+      <LandingClient />
+    </>
+  );
 }

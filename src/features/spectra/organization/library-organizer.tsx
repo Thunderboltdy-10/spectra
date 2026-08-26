@@ -25,8 +25,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import { IsolatedErrorBoundary } from "@/components/global-error-boundary";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/use-now";
 import { presentSync } from "../bridge/status";
@@ -169,6 +170,31 @@ type MenuState = {
 };
 
 
+function ReplicaPresentationLoader({
+  onRows,
+}: {
+  onRows: (
+    rows:
+      | ReadonlyArray<{
+          workId: string;
+          replicas: Parameters<typeof presentSync>[0]["replicas"];
+          openConflictCount: number;
+          pendingCount: number;
+        }>
+      | undefined,
+  ) => void;
+}) {
+  const { isAuthenticated } = useConvexAuth();
+  const rows = useQuery(
+    api.replicas.presentationsForAccount,
+    isAuthenticated ? {} : "skip",
+  );
+  useEffect(() => {
+    onRows(rows);
+  }, [onRows, rows]);
+  return null;
+}
+
 /** The two shapes one scope can take. */
 const VIEW_OPTIONS = [
   { key: "list" as const, label: "List", icon: Rows3 },
@@ -202,8 +228,17 @@ export function LibraryOrganizer({
 }: LibraryOrganizerProps) {
   const now = useNow(60_000);
   const productOnline = useProductOnline();
-  const replicaPresentations = useQuery(api.replicas.presentationsForAccount, {});
+  const [replicaRows, setReplicaRows] = useState<
+    | ReadonlyArray<{
+        workId: string;
+        replicas: Parameters<typeof presentSync>[0]["replicas"];
+        openConflictCount: number;
+        pendingCount: number;
+      }>
+    | undefined
+  >(undefined);
   const syncByWorkId = useMemo(() => {
+    const replicaPresentations = replicaRows;
     const map = new Map<string, { label: string; tone: StatusTone }>();
     for (const row of replicaPresentations ?? []) {
       const presentation = presentSync({
@@ -226,7 +261,7 @@ export function LibraryOrganizer({
       });
     }
     return map;
-  }, [productOnline, replicaPresentations]);
+  }, [productOnline, replicaRows]);
   const actions = useTreeActions();
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
@@ -757,6 +792,9 @@ export function LibraryOrganizer({
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
+      <IsolatedErrorBoundary>
+        <ReplicaPresentationLoader onRows={setReplicaRows} />
+      </IsolatedErrorBoundary>
       <input
         ref={importRef}
         type="file"

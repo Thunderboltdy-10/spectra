@@ -10,7 +10,8 @@ import { ConvexReactClient } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { LocalComputeCacheController } from "@/features/spectra/compute/cache/local-compute-cache-controller";
 import { clearAccountScopedStorage } from "@/lib/account-storage";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
@@ -32,12 +33,17 @@ function AccountStorageBoundary() {
   return null;
 }
 
+function PathScopedErrorBoundary({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  return <GlobalErrorBoundary key={pathname}>{children}</GlobalErrorBoundary>;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const content = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
     ? <LiveDataProvider>{children}</LiveDataProvider>
     : children;
   return (
-    <GlobalErrorBoundary>
+    <PathScopedErrorBoundary>
       <ThemeProvider>
         {content}
         <DynamicFavicon />
@@ -54,6 +60,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
           }}
         />
       </ThemeProvider>
-    </GlobalErrorBoundary>
+    </PathScopedErrorBoundary>
   );
 }

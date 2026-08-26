@@ -5,6 +5,26 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 type Props = { children: ReactNode };
 type State = { hasError: boolean; error?: Error };
 
+/** Swallows a subtree failure so a bad query cannot blank the whole product. */
+export class IsolatedErrorBoundary extends Component<
+  { children: ReactNode; fallback?: ReactNode },
+  { failed: boolean }
+> {
+  constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  render() {
+    if (this.state.failed) return this.props.fallback ?? null;
+    return this.props.children;
+  }
+}
+
 export class GlobalErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);

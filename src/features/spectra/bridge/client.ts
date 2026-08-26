@@ -159,6 +159,27 @@ export function rememberedFolderDetail(kind: BridgeReachability): string {
   return "This folder is remembered. Open Spectra Bridge to use it.";
 }
 
+/** Folder chips must not contradict the Bridge header. */
+export function folderChipLabel(input: {
+  state: string;
+  discoveryFailed: boolean;
+  reachability: BridgeReachability;
+}): string {
+  if (input.reachability === "offline") return "Offline";
+  if (input.reachability === "running") return "Not connected";
+  if (input.reachability === "port-taken") return "Connection blocked";
+  if (input.reachability === "update-required") return "Update required";
+  if (input.discoveryFailed) return "Waiting for Spectra";
+  if (input.state === "selected" || input.state === "active") return "Ready";
+  if (input.state === "scanning") return "Reading folder";
+  if (input.state === "disconnected" || input.state === "waiting") {
+    return "Waiting for Bridge";
+  }
+  if (input.state === "unavailable") return "Not available";
+  if (input.state === "error") return "Needs attention";
+  return "Needs attention";
+}
+
 export function bridgeDiscoveryMessage(discovery: BridgeDiscovery): string {
   if (discovery.kind === "not-running") {
     return bridgeReachabilityCopy("not-running").detail;

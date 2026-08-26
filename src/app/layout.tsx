@@ -75,6 +75,13 @@ export default function RootLayout({
   }
 
   return (
-    <ClerkProvider publishableKey={publishableKey}>{content}</ClerkProvider>
+    <ClerkProvider
+      publishableKey={publishableKey}
+      signInFallbackRedirectUrl="/workspace"
+      signUpFallbackRedirectUrl="/workspace"
+      afterSignOutUrl="/"
+    >
+      {content}
+    </ClerkProvider>
   );
 }

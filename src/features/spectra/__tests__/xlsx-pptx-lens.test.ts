@@ -100,6 +100,24 @@ describe("XLSX and PPTX fidelity lenses", () => {
     expect(preserved.value).toBe(5);
   });
 
+  it("propagates an omitted editor cell as a native clear", async () => {
+    const source = await workbookFixture();
+    const opened = await xlsxLens.open(source);
+    const sheet = opened.projection.sheets[0]!;
+    const edited = await xlsxLens.materialize({
+      projection: {
+        ...opened.projection,
+        sheets: opened.projection.sheets.map((candidate) => ({
+          ...candidate,
+          cells: candidate.cells.filter((cell) => cell.ref !== "A2"),
+        })),
+      },
+      carry: opened.preservedCarry,
+    });
+    const reopened = await xlsxLens.open(edited);
+    expect(reopened.projection.sheets.find((candidate) => candidate.id === sheet.id)?.cells.some((cell) => cell.ref === "A2")).toBe(false);
+  });
+
   it("keeps the XLSX native contract valid through normalization and Yjs", async () => {
     const opened = await xlsxLens.open(await workbookFixture());
     const content = xlsxArtifactContent(opened.projection);

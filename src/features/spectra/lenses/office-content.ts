@@ -1,7 +1,14 @@
 import type { PresentationContent } from "../presentation/model";
 import type { SheetsContent } from "../sheets/model";
-import type { PptxProjection } from "./pptx-lens";
-import type { XlsxProjection } from "./xlsx-lens";
+import { z } from "zod";
+import {
+  pptxProjectionSchema,
+  xlsxProjectionSchema,
+  type PptxOperation,
+  type PptxProjection,
+  type XlsxOperation,
+  type XlsxProjection,
+} from "./projection-contracts";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -150,4 +157,356 @@ export function pptxArtifactContent(
     }),
     nativeBinding: projection.nativeBinding,
   };
+}
+
+const xlsxEditorContentSchema = z
+  .object({
+    sheets: z.array(
+      z
+        .object({
+          id: z.string(),
+          cells: z.record(
+            z.string(),
+            z
+              .object({
+                value: z.unknown().optional(),
+                formula: z.string().optional(),
+              })
+              .passthrough(),
+          ),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+/** The one Sheets editor-model -> XLSX projection transform. */
+export function xlsxProjectionFromContent(
+  content: unknown,
+  base: XlsxProjection,
+): XlsxProjection {
+  const raw = xlsxEditorContentSchema.parse(content);
+  const byId = new Map(raw.sheets.map((sheet) => [sheet.id, sheet]));
+  const projection = xlsxProjectionSchema.parse({
+    ...base,
+    sheets: base.sheets.map((sheet) => {
+      const next = byId.get(sheet.id);
+      if (!next) return sheet;
+      const previousByRef = new Map(sheet.cells.map((cell) => [cell.ref, cell]));
+      const cells = Object.entries(next.cells).map(([rawRef, value]) => {
+        const ref = rawRef.toUpperCase();
+        const previous = previousByRef.get(ref);
+        const nextValue = value.value === undefined ? previous?.value ?? null : value.value;
+        if (
+          previous?.formula &&
+          !value.formula &&
+          JSON.stringify(nextValue) !== JSON.stringify(previous.value)
+        )
+          throw new Error(
+            `Formula ${sheet.name}!${ref} cannot be replaced by a literal through a value edit. Edit its formula text instead.`,
+          );
+        return {
+          ...(previous ?? {
+            id: `xlsx:${sheet.id.replace(/^xlsx:sheet:/, "")}:${ref}`,
+            ref,
+            value: null,
+          }),
+          value: nextValue,
+          ...(value.formula
+            ? {
+                formula: value.formula.replace(/^=/, ""),
+                formulaSupport: previous?.formulaSupport,
+              }
+            : previous?.formula
+              ? {
+                  formula: previous.formula,
+                  formulaSupport: previous.formulaSupport,
+                }
+              : {}),
+        };
+      });
+      return { ...sheet, cells };
+    }),
+  });
+  return projection;
+}
+
+export function xlsxOperationsBetween(
+  before: XlsxProjection,
+  after: XlsxProjection,
+): XlsxOperation[] {
+  const beforeSheets = new Map(before.sheets.map((sheet) => [sheet.id, sheet]));
+  const operations: XlsxOperation[] = [];
+  for (const sheet of after.sheets) {
+    const previous = beforeSheets.get(sheet.id);
+    if (!previous)
+      throw new Error(
+        "Adding worksheets to a mounted Excel file is not available in strict native mode yet.",
+      );
+    const oldCells = new Map(previous.cells.map((cell) => [cell.ref, cell]));
+    for (const cell of sheet.cells) {
+      const old = oldCells.get(cell.ref);
+      oldCells.delete(cell.ref);
+      if (!old) {
+        operations.push(
+          cell.formula
+            ? { kind: "set-formula", sheetId: sheet.id, ref: cell.ref, formula: cell.formula }
+            : { kind: "set-cell", sheetId: sheet.id, ref: cell.ref, value: cell.value },
+        );
+        continue;
+      }
+      if (cell.formula !== old.formula) {
+        if (!cell.formula)
+          throw new Error(
+            `Formula ${sheet.name}!${cell.ref} cannot be silently rewritten as a literal.`,
+          );
+        operations.push({
+          kind: "set-formula",
+          sheetId: sheet.id,
+          ref: cell.ref,
+          formula: cell.formula,
+        });
+      } else if (
+        !cell.formula &&
+        JSON.stringify(cell.value) !== JSON.stringify(old.value)
+      ) {
+        operations.push({
+          kind: "set-cell",
+          sheetId: sheet.id,
+          ref: cell.ref,
+          value: cell.value,
+        });
+      }
+    }
+    for (const ref of oldCells.keys())
+      operations.push({ kind: "clear-cell", sheetId: sheet.id, ref });
+  }
+  return operations;
+}
+
+export function xlsxProjectionUpdateFromContent(
+  content: unknown,
+  base: XlsxProjection,
+) {
+  const projection = xlsxProjectionFromContent(content, base);
+  return { projection, operations: xlsxOperationsBetween(base, projection) };
+}
+
+const pptxEditorContentSchema = z
+  .object({
+    slides: z.array(
+      z
+        .object({
+          id: z.string(),
+          title: z.string().optional(),
+          speakerNotes: z.string().optional(),
+          objects: z
+            .array(
+              z
+                .object({
+                  id: z.string().optional(),
+                  type: z.string(),
+                  content: z.unknown().optional(),
+                })
+                .passthrough(),
+            )
+            .optional(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+function editorObject(
+  value: Record<string, unknown>,
+  fallbackId: string,
+) {
+  return {
+    id: typeof value.id === "string" && value.id ? value.id : fallbackId,
+    type: value.type as PptxProjection["slides"][number]["objects"][number]["type"],
+    x: typeof value.x === "number" ? value.x : 80,
+    y: typeof value.y === "number" ? value.y : 300,
+    width: typeof value.width === "number" ? value.width : 600,
+    height: typeof value.height === "number" ? value.height : 80,
+    rotation: typeof value.rotation === "number" ? value.rotation : 0,
+    content: value.content ?? { text: "" },
+    ...value,
+  };
+}
+
+/** The one Presentation editor-model -> PPTX projection transform. */
+export function pptxProjectionFromContent(
+  content: unknown,
+  base: PptxProjection,
+): PptxProjection {
+  const raw = pptxEditorContentSchema.parse(content);
+  const baseById = new Map(base.slides.map((slide) => [slide.id, slide]));
+  if (!raw.slides.length) return base;
+  return pptxProjectionSchema.parse({
+    ...base,
+    slides: raw.slides.map((next, index) => {
+      const slide = baseById.get(next.id);
+      const incomingRawObjects = (next.objects ?? []).map((object) => object as Record<string, unknown>);
+      const incomingObjects = (slide ? incomingRawObjects : incomingRawObjects.map((object, objectIndex) =>
+        editorObject(
+          object,
+          `${next.id}:spectra:${objectIndex + 1}`,
+        ),
+      )) as Array<PptxProjection["slides"][number]["objects"][number]>;
+      const text = incomingObjects
+        .filter((object) => object.type === "text")
+        .map((object) => {
+          const value = object.content as { text?: unknown } | string;
+          return typeof value === "string"
+            ? value
+            : typeof value?.text === "string"
+              ? value.text
+              : "";
+        });
+      if (!slide)
+        return {
+          id: next.id,
+          index,
+          title: next.title ?? "",
+          text,
+          objects: incomingObjects,
+          hasTransition: false,
+          hasTiming: false,
+          speakerNotes: next.speakerNotes ?? "",
+        };
+      const incomingById = new Map(
+        incomingObjects.map((object) => [object.id, object]),
+      );
+      const objects = slide.objects.map((object) => {
+        const incoming = incomingById.get(object.id);
+        incomingById.delete(object.id);
+        return incoming
+          ? { ...object, ...incoming, content: incoming.content ?? object.content }
+          : object;
+      });
+      objects.push(
+        ...[...incomingById.values()].map((object, objectIndex) =>
+          editorObject(object, `${next.id}:spectra:${objectIndex + 1}`),
+        ),
+      );
+      return {
+        ...slide,
+        index,
+        title: next.title ?? slide.title,
+        speakerNotes: next.speakerNotes ?? slide.speakerNotes,
+        text: text.length ? text : slide.text,
+        objects,
+      };
+    }),
+  });
+}
+
+export function pptxOperationsBetween(
+  before: PptxProjection,
+  after: PptxProjection,
+): PptxOperation[] {
+  const previous = new Map(before.slides.map((slide) => [slide.id, slide]));
+  const operations: PptxOperation[] = [];
+  const kept = new Set(after.slides.map((slide) => slide.id));
+  for (const old of before.slides)
+    if (!kept.has(old.id))
+      operations.push({ kind: "remove-slide", slideId: old.id });
+  const layoutForNewSlideAt = (index: number) => {
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const candidate = previous.get(after.slides[cursor]!.id);
+      if (candidate?.layoutPartName) return candidate.layoutPartName;
+    }
+    return before.slides.find((slide) => slide.layoutPartName)?.layoutPartName;
+  };
+  after.slides.forEach((slide, slideIndex) => {
+    const old = previous.get(slide.id);
+    if (!old) {
+      const text = slide.objects
+        .filter((object) => object.type === "text")
+        .map((object) => {
+          const value = object.content as { text?: unknown } | undefined;
+          return typeof value?.text === "string" ? value.text : "";
+        })
+        .filter((line) => line.trim() && line.trim() !== slide.title.trim());
+      const layoutPartName = layoutForNewSlideAt(slideIndex);
+      operations.push({
+        kind: "add-slide",
+        slideId: slide.id,
+        ...(layoutPartName ? { layoutPartName } : {}),
+        ...(slide.title ? { title: slide.title } : {}),
+        ...(text.length ? { text } : {}),
+      });
+      return;
+    }
+    if (slide.title !== old.title)
+      operations.push({ kind: "set-title", slideId: slide.id, text: slide.title });
+    if (slide.speakerNotes !== old.speakerNotes && old.notesPartName)
+      operations.push({ kind: "set-notes", slideId: slide.id, text: slide.speakerNotes });
+    const oldObjects = new Map(old.objects.map((object) => [object.id, object]));
+    for (const object of slide.objects) {
+      const previousObject = oldObjects.get(object.id);
+      const value = object.content as
+        | { text?: unknown; nativeShapeId?: unknown }
+        | undefined;
+      const nextText = typeof value?.text === "string" ? value.text : "";
+      if (!previousObject) {
+        if (object.type === "text" && nextText)
+          operations.push({ kind: "add-text-box", slideId: slide.id, text: nextText });
+        continue;
+      }
+      const previousValue = previousObject.content as { text?: unknown } | undefined;
+      const previousText =
+        typeof previousValue?.text === "string" ? previousValue.text : "";
+      const nativeShapeId =
+        typeof value?.nativeShapeId === "string" ? value.nativeShapeId : undefined;
+      if (nativeShapeId && nextText !== previousText && !object.locked)
+        operations.push({
+          kind: "set-text",
+          slideId: slide.id,
+          paragraphIndex: 0,
+          shapeId: nativeShapeId,
+          text: nextText,
+        });
+      if (!nativeShapeId) continue;
+      if ((object.altText ?? "") !== (previousObject.altText ?? ""))
+        operations.push({
+          kind: "set-alt-text",
+          slideId: slide.id,
+          shapeId: nativeShapeId,
+          text: object.altText ?? "",
+        });
+      const moved = (["x", "y", "width", "height", "rotation"] as const).some(
+        (key) => Math.abs(object[key] - previousObject[key]) > 0.5,
+      );
+      if (moved && !object.locked)
+        operations.push({
+          kind: "set-geometry",
+          slideId: slide.id,
+          shapeId: nativeShapeId,
+          x: object.x,
+          y: object.y,
+          width: object.width,
+          height: object.height,
+          rotation: object.rotation,
+        });
+    }
+  });
+  const orderNow = before.slides
+    .filter((slide) => kept.has(slide.id))
+    .map((slide) => slide.id);
+  const orderNext = after.slides.map((slide) => slide.id);
+  if (
+    orderNext.length !== orderNow.length ||
+    orderNext.some((id, index) => id !== orderNow[index])
+  )
+    operations.push({ kind: "reorder-slides", order: orderNext });
+  return operations;
+}
+
+export function pptxProjectionUpdateFromContent(
+  content: unknown,
+  base: PptxProjection,
+) {
+  const projection = pptxProjectionFromContent(content, base);
+  return { projection, operations: pptxOperationsBetween(base, projection) };
 }

@@ -10,6 +10,7 @@ import {
   sha256Payload,
   type DocxProjection,
 } from "@/features/spectra/lenses/docx-lens";
+import { docxProjectionFromContent } from "@/features/spectra/lenses/document-projection";
 import {
   fetchVerifiedNativePayload,
   uploadNativePayload,
@@ -59,31 +60,7 @@ function artifactId(value: string) {
 }
 
 export function contentProjection(value: unknown, base: DocxProjection): DocxProjection {
-  const parsed = z.object({
-    blocks: z.array(z.object({
-      id: z.string().min(1).max(300),
-      type: z.enum(["paragraph", "heading", "list", "table"]),
-      text: z.string().max(2_000_000),
-      attrs: z.record(z.string(), z.unknown()).optional(),
-    }).passthrough()).max(100_000),
-    outline: z.array(z.object({ id: z.string(), title: z.string(), level: z.number() })).optional(),
-    nativeBinding: z.unknown().optional(),
-  }).passthrough().parse(value);
-  // Strict-native materialization cannot interpret an omitted block as a
-  // deletion: the lens deliberately refuses destructive Word edits. Merge
-  // the semantic projection onto the last verified native projection so a
-  // partial/stale Yjs projection never turns into a false native deletion.
-  const incomingById = new Map(parsed.blocks.map((block) => [block.id, block]));
-  const baseIds = new Set(base.blocks.map((block) => block.id));
-  const blocks = base.blocks.map((block) => incomingById.get(block.id) ?? block);
-  for (const block of parsed.blocks) {
-    if (!baseIds.has(block.id)) blocks.push(block);
-  }
-  return {
-    blocks,
-    outline: parsed.outline ?? base.outline,
-    nativeBinding: base.nativeBinding,
-  };
+  return docxProjectionFromContent(value, base).projection;
 }
 
 export function changedRegions(before: DocxProjection, after: DocxProjection) {
@@ -99,22 +76,14 @@ export function changedRegions(before: DocxProjection, after: DocxProjection) {
   return [...new Set(changed)];
 }
 
-/** Tables are exposed for reading, but the interim projection cannot safely
- * round-trip their cell structure through the paragraph materializer. */
+/** Compatibility hook retained for older callers. Table writes are now
+ * structured cell deltas and no longer need the former blanket refusal. */
 export function assertChangedTablesSupported(
-  before: DocxProjection,
-  after: DocxProjection,
-  regionIds: readonly string[],
+  _before: DocxProjection,
+  _after: DocxProjection,
+  _regionIds: readonly string[],
 ) {
-  const changed = new Set(regionIds);
-  const blocks = [...before.blocks, ...after.blocks];
-  const table = blocks.find((block) => changed.has(block.id) && block.type === "table");
-  if (table) {
-    throw new DocxLensError(
-      "DOCX_TABLE_WRITE_UNSUPPORTED",
-      "Tables in linked Word files cannot be safely rewritten yet. Edit a paragraph outside the table, or save the table change in Word.",
-    );
-  }
+  return true;
 }
 
 /** Queue one verified DOCX payload for the Bridge. Used by both the human
@@ -132,13 +101,11 @@ export async function materializeDocxArtifact(
     ),
   ]);
   const opened = await docxLens.open(payload, "strict-native");
-  const projection = contentProjection(content, opened.projection);
+  const { projection, operations } = docxProjectionFromContent(content, opened.projection);
   const regionIds = changedRegions(opened.projection, projection);
-  assertChangedTablesSupported(opened.projection, projection, regionIds);
-  const output = await docxLens.materialize({
-    projection,
-    carry: opened.preservedCarry,
-  });
+  const output = operations.length
+    ? await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations })
+    : payload;
   const hash = await sha256Payload(output);
   if (hash === truth.hash) return { state: "unchanged" as const, hash };
   const [next, comparison] = await Promise.all([
@@ -368,7 +335,6 @@ export async function POST(request: Request) {
     ]);
     const current = contentProjection(artifact.content, baseOpened.projection);
     const spectraChanged = new Set(changedRegions(baseOpened.projection, current));
-    assertChangedTablesSupported(baseOpened.projection, current, [...spectraChanged]);
     const externalChanged = new Set(diff.changes
       .filter((change) => change.kind !== "preserved-part-replaced")
       .map((change) => change.regionId));

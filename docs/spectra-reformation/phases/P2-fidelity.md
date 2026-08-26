@@ -43,3 +43,22 @@ Pablo supplies (or verifier synthesizes) a folder of realistic school documents;
 ## Exit gate
 
 L1 harness green in the owning verification units for all formats; every write capability has diff-visibility + identity + seam test, or visible refusal; V1/V2 PASS; no corruption reproducible by the verifier's adversarial session; Pablo pass on his own real files.
+
+## P2.I1 implementer log — 2026-08-27
+
+- TRIAGE: SYSTEMIC projection-boundary class across editor/Yjs, routes, lenses, and portable packages; held as one seam.
+- Added one Zod projection/operation contract per Office format and made lenses/routes import it.
+- Replaced the duplicate document JSON transforms with one typed table-aware transform shared by studio and Yjs.
+- DOCX now projects SDT/AlternateContent tables in native flow order, assigns stable region identities, and writes cell edits to the named table.
+- DOCX editor intent carries insert/delete/reorder/table-cell operations; partial AI projections remain additive, while full studio/Yjs projections propagate removals.
+- Read-only Word regions refuse both replacement and deletion; stale editor intent is not persisted into collaborative state.
+- XLSX absences become typed clear-cell operations; PPTX objects newly added to existing slides survive route composition.
+- DOCX materialization now runs the preservation guard; external diff compares full projected blocks.
+- `.spectra-pkg` output is canonical and fixed-time, import validates content/paths, and Library restores package content while retaining original bytes.
+- Focused Vitest: 5 files / 47 tests passed. Scoped ESLint: 0 errors / 198 existing large-shell warnings.
+- Secret scan passed across 2,067 tracked files; `git diff --check` passed.
+- `tsc --noEmit` retains only pre-existing blockers in bridge tests, replicas test, presentation commands, and agent library shell; no P2.I1 file fails.
+- Architecture check retains the five documented pre-existing global-event failures; no P2.I1-specific failure.
+- Full repository sweep and live Word/Excel/PowerPoint coexistence were not run; P2.V1 owns independent runtime verification.
+- Later owners unchanged: P2.I2 merge/CAS/broader identity; P2.I3 full native surface; P2.I4 sheets engine; P2.I5 corpus/harness.
+- Status: IMPLEMENTED only; no verification or acceptance claimed.

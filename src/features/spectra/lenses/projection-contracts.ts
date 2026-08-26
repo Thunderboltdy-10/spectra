@@ -1,0 +1,250 @@
+import { z } from "zod";
+
+const compatibilityProfileSchema = z.enum([
+  "strict-native",
+  "enhanced",
+  "spectra-native",
+]);
+const semanticDigestSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const nativeBindingBase = {
+  version: z.literal(1),
+  profile: compatibilityProfileSchema,
+  macroEnabled: z.boolean(),
+  semanticDigest: semanticDigestSchema,
+};
+
+const docxRunFormatSchema = z
+  .object({
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
+    underline: z.boolean().optional(),
+    strike: z.boolean().optional(),
+    fontFamily: z.string().nullable().optional(),
+    fontSizePoints: z.number().nullable().optional(),
+    color: z.string().nullable().optional(),
+    highlight: z.string().nullable().optional(),
+    shading: z.string().nullable().optional(),
+  })
+  .strict();
+
+const docxParagraphFormatSchema = z
+  .object({
+    alignment: z.enum(["left", "center", "right", "justify"]).nullable().optional(),
+    lineSpacing: z.number().nullable().optional(),
+    spacingAfterPoints: z.number().nullable().optional(),
+    indentLevel: z.number().nullable().optional(),
+    border: z.string().nullable().optional(),
+    shading: z.string().nullable().optional(),
+  })
+  .strict();
+
+export const docxProjectionBlockSchema = z
+  .object({
+    id: z.string().min(1).max(300),
+    type: z.enum(["paragraph", "heading", "list", "table"]),
+    text: z.string().max(2_000_000),
+    rows: z.array(z.array(z.string().max(250_000)).max(1_000)).max(100_000).optional(),
+    attrs: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+export const docxProjectionSchema = z
+  .object({
+    blocks: z.array(docxProjectionBlockSchema).max(100_000),
+    outline: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1),
+            title: z.string(),
+            level: z.number(),
+          })
+          .strict(),
+      )
+      .max(100_000),
+    nativeBinding: z
+      .object({
+        ...nativeBindingBase,
+        format: z.enum(["docx", "docm", "dotx", "dotm"]),
+        nativePlaceholders: z.array(
+          z
+            .object({
+              id: z.string(),
+              label: z.string(),
+              detail: z.string(),
+              feature: z.string(),
+            })
+            .strict(),
+        ),
+      })
+      .passthrough(),
+  })
+  .strict();
+
+export type DocxProjectionBlock = z.infer<typeof docxProjectionBlockSchema>;
+export type DocxProjection = z.infer<typeof docxProjectionSchema>;
+export type DocxRunFormat = z.infer<typeof docxRunFormatSchema>;
+export type DocxParagraphFormat = z.infer<typeof docxParagraphFormatSchema>;
+
+export const docxOperationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("replace-paragraph"), regionId: z.string(), text: z.string() }).strict(),
+  z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string() }).strict(),
+  z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("delete-region"), regionId: z.string() }).strict(),
+  z.object({ kind: z.literal("reorder-regions"), order: z.array(z.string()) }).strict(),
+  z.object({ kind: z.literal("apply-style"), regionId: z.string(), style: z.string() }).strict(),
+  z.object({ kind: z.literal("format-runs"), regionId: z.string(), format: docxRunFormatSchema }).strict(),
+  z.object({ kind: z.literal("format-paragraph"), regionId: z.string(), format: docxParagraphFormatSchema }).strict(),
+]);
+export const docxSemanticDeltaSchema = z.union([
+  docxOperationSchema,
+  z.object({ kind: z.literal("ai-edit"), operations: z.array(docxOperationSchema) }).strict(),
+]);
+export type DocxOperation = z.infer<typeof docxOperationSchema>;
+export type DocxSemanticDelta = z.infer<typeof docxSemanticDeltaSchema>;
+
+export const xlsxCellValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.date(),
+]);
+export const xlsxCellProjectionSchema = z
+  .object({
+    id: z.string(),
+    ref: z.string().regex(/^[A-Z]+[1-9][0-9]*$/),
+    value: xlsxCellValueSchema,
+    formula: z.string().optional(),
+    formulaSupport: z.enum(["recognized", "cached-only"]).optional(),
+    style: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+export const xlsxSheetProjectionSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    cells: z.array(xlsxCellProjectionSchema),
+    merges: z.array(z.string()).readonly(),
+  })
+  .strict();
+export const xlsxProjectionSchema = z
+  .object({
+    sheets: z.array(xlsxSheetProjectionSchema),
+    definedNames: z.array(
+      z.object({ name: z.string(), ref: z.string(), sheet: z.string().optional() }).strict(),
+    ),
+    nativeBinding: z
+      .object({
+        ...nativeBindingBase,
+        format: z.enum(["xlsx", "xlsm", "xltx", "xltm", "xlam"]),
+        recognizedFormulaFunctions: z.array(z.string()),
+      })
+      .strict(),
+  })
+  .strict();
+export type XlsxCellProjection = z.infer<typeof xlsxCellProjectionSchema>;
+export type XlsxSheetProjection = z.infer<typeof xlsxSheetProjectionSchema>;
+export type XlsxProjection = z.infer<typeof xlsxProjectionSchema>;
+
+export const xlsxOperationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("set-cell"), sheetId: z.string(), ref: z.string(), value: xlsxCellValueSchema }).strict(),
+  z.object({ kind: z.literal("set-formula"), sheetId: z.string(), ref: z.string(), formula: z.string() }).strict(),
+  z.object({ kind: z.literal("clear-cell"), sheetId: z.string(), ref: z.string() }).strict(),
+]);
+export const xlsxSemanticDeltaSchema = z.union([
+  xlsxOperationSchema,
+  z.object({ kind: z.literal("ai-edit"), operations: z.array(xlsxOperationSchema) }).strict(),
+]);
+export type XlsxOperation = z.infer<typeof xlsxOperationSchema>;
+export type XlsxSemanticDelta = z.infer<typeof xlsxSemanticDeltaSchema>;
+
+export const presentationObjectProjectionSchema = z
+  .object({
+    id: z.string(),
+    type: z.enum(["text", "shape", "image", "chart", "table", "embed", "video", "group"]),
+    x: z.number(),
+    y: z.number(),
+    width: z.number(),
+    height: z.number(),
+    rotation: z.number(),
+    content: z.unknown(),
+    style: z.record(z.string(), z.unknown()).optional(),
+    altText: z.string().optional(),
+    locked: z.boolean().optional(),
+    hidden: z.boolean().optional(),
+    readingOrder: z.number().optional(),
+    parentId: z.string().optional(),
+    componentId: z.string().optional(),
+    sourceBinding: z
+      .object({
+        artifactId: z.string(),
+        kind: z.enum(["artifact", "sheets_range"]),
+        range: z.string().optional(),
+        versionId: z.string().optional(),
+        live: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    animation: z
+      .object({
+        kind: z.enum(["none", "fade", "rise", "scale", "wipe"]),
+        durationMs: z.number().optional(),
+        delayMs: z.number().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .passthrough();
+export const pptxSlideProjectionSchema = z
+  .object({
+    id: z.string(),
+    index: z.number().int().nonnegative(),
+    title: z.string(),
+    text: z.array(z.string()),
+    objects: z.array(presentationObjectProjectionSchema),
+    layoutPartName: z.string().optional(),
+    hasTransition: z.boolean(),
+    hasTiming: z.boolean(),
+    speakerNotes: z.string(),
+    notesPartName: z.string().optional(),
+  })
+  .strict();
+export const pptxProjectionSchema = z
+  .object({
+    slides: z.array(pptxSlideProjectionSchema),
+    nativeBinding: z
+      .object({
+        ...nativeBindingBase,
+        format: z.enum(["pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam"]),
+      })
+      .strict(),
+  })
+  .strict();
+export type PptxSlideProjection = z.infer<typeof pptxSlideProjectionSchema>;
+export type PptxProjection = z.infer<typeof pptxProjectionSchema>;
+
+export const pptxOperationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("set-title"), slideId: z.string(), text: z.string() }).strict(),
+  z.object({ kind: z.literal("set-text"), slideId: z.string(), paragraphIndex: z.number().int().nonnegative(), text: z.string(), shapeId: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("add-text-box"), slideId: z.string(), text: z.string() }).strict(),
+  z.object({ kind: z.literal("set-notes"), slideId: z.string(), text: z.string() }).strict(),
+  z.object({ kind: z.literal("set-alt-text"), slideId: z.string(), shapeId: z.string(), text: z.string() }).strict(),
+  z.object({ kind: z.literal("set-geometry"), slideId: z.string(), shapeId: z.string(), x: z.number(), y: z.number(), width: z.number(), height: z.number(), rotation: z.number() }).strict(),
+  z.object({ kind: z.literal("add-slide"), slideId: z.string(), layoutPartName: z.string().optional(), title: z.string().optional(), text: z.array(z.string()).optional() }).strict(),
+  z.object({ kind: z.literal("remove-slide"), slideId: z.string() }).strict(),
+  z.object({ kind: z.literal("reorder-slides"), order: z.array(z.string()) }).strict(),
+]);
+export const pptxSemanticDeltaSchema = z.union([
+  pptxOperationSchema,
+  z.object({ kind: z.literal("ai-edit"), operations: z.array(pptxOperationSchema) }).strict(),
+]);
+export type PptxOperation = z.infer<typeof pptxOperationSchema>;
+export type PptxSemanticDelta = z.infer<typeof pptxSemanticDeltaSchema>;
+
+export const nativeEditorIntentSchema = z.discriminatedUnion("format", [
+  z.object({ format: z.literal("docx"), operations: z.array(docxOperationSchema) }).strict(),
+  z.object({ format: z.literal("xlsx"), operations: z.array(xlsxOperationSchema) }).strict(),
+  z.object({ format: z.literal("pptx"), operations: z.array(pptxOperationSchema) }).strict(),
+]);
+export type NativeEditorIntent = z.infer<typeof nativeEditorIntentSchema>;

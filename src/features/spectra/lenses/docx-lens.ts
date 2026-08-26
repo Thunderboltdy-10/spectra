@@ -11,16 +11,17 @@ import type {
   LensPreservedCarry,
   SpectraLens,
 } from "./types";
+import {
+  docxProjectionSchema,
+  type DocxParagraphFormat,
+  type DocxProjection,
+  type DocxProjectionBlock,
+  type DocxRunFormat,
+  type DocxSemanticDelta,
+} from "./projection-contracts";
 
 const W14_NAMESPACE =
   "http://schemas.microsoft.com/office/word/2010/wordml";
-
-export type DocxProjectionBlock = {
-  id: string;
-  type: "paragraph" | "heading" | "list" | "table";
-  text: string;
-  attrs?: Record<string, unknown>;
-};
 
 export type DocxNativePlaceholder = {
   id: string;
@@ -29,89 +30,7 @@ export type DocxNativePlaceholder = {
   feature: string;
 };
 
-export type DocxProjection = {
-  blocks: DocxProjectionBlock[];
-  outline: Array<{ id: string; title: string; level: number }>;
-  nativeBinding: {
-    version: 1;
-    format: "docx" | "docm" | "dotx" | "dotm";
-    profile: LensCompatibilityProfile;
-    macroEnabled: boolean;
-    semanticDigest: string;
-    nativePlaceholders: DocxNativePlaceholder[];
-  };
-};
-
-export type DocxRunFormat = {
-  bold?: boolean;
-  italic?: boolean;
-  underline?: boolean;
-  strike?: boolean;
-  /** A literal typeface name; theme indirection is never written. */
-  fontFamily?: string | null;
-  fontSizePoints?: number | null;
-  /** `RRGGBB`, without the hash. */
-  color?: string | null;
-  /** One of Word's named highlights, or null to remove it. */
-  highlight?: string | null;
-  /**
-   * Run shading as `RRGGBB` (`w:rPr/w:shd`). Spectra's highlighter offers soft
-   * tints that Word's named highlighter cannot hold, so the exact colour is
-   * written as character shading instead of being rounded to "yellow".
-   */
-  shading?: string | null;
-};
-
-export type DocxParagraphFormat = {
-  alignment?: "left" | "center" | "right" | "justify" | null;
-  /** Line spacing as a multiple of single. */
-  lineSpacing?: number | null;
-  spacingAfterPoints?: number | null;
-  /** Left indent in half-inch steps, the way the editor counts them. */
-  indentLevel?: number | null;
-  /** `none | all | top | bottom | left`. */
-  border?: string | null;
-  /** `RRGGBB` fill, or null to remove the shading. */
-  shading?: string | null;
-};
-
-export type DocxSemanticDelta =
-  | {
-      kind: "replace-paragraph";
-      regionId: string;
-      text: string;
-    }
-  | {
-      kind: "edit-table-cell";
-      regionId: string;
-      row: number;
-      column: number;
-      text: string;
-    }
-  | {
-      kind: "insert-paragraph";
-      text: string;
-      style?: string;
-    }
-  | {
-      kind: "apply-style";
-      regionId: string;
-      style: string;
-    }
-  | {
-      kind: "format-runs";
-      regionId: string;
-      format: DocxRunFormat;
-    }
-  | {
-      kind: "format-paragraph";
-      regionId: string;
-      format: DocxParagraphFormat;
-    }
-  | {
-      kind: "ai-edit";
-      operations: Exclude<DocxSemanticDelta, { kind: "ai-edit" }>[];
-    };
+export type { DocxParagraphFormat, DocxProjection, DocxProjectionBlock, DocxRunFormat, DocxSemanticDelta } from "./projection-contracts";
 
 export class DocxLensError extends Error {
   constructor(
@@ -119,7 +38,8 @@ export class DocxLensError extends Error {
       | "DOCX_PASSWORD_PROTECTED"
       | "DOCX_CORRUPT"
       | "DOCX_REGION_READ_ONLY"
-      | "DOCX_UNSUPPORTED_EDIT",
+      | "DOCX_UNSUPPORTED_EDIT"
+      | "DOCX_TABLE_WRITE_UNSUPPORTED",
     message: string,
   ) {
     super(message);
@@ -163,11 +83,240 @@ export async function sha256Payload(payload: Uint8Array) {
     .join("");
 }
 
-function paragraphRegionId(paragraph: Paragraph, index: number) {
+function stableHex(value: string) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0").toUpperCase();
+}
+
+function prospectiveParagraphId(paragraph: Paragraph, path: string) {
+  const nativeId = paragraph.element.getAttributeNs(W14_NAMESPACE, "paraId");
+  return nativeId?.toUpperCase() ?? stableHex(`spectra-docx:${path}`);
+}
+
+function paragraphRegionId(paragraph: Paragraph, path: string) {
   const nativeId = paragraph.element.getAttributeNs(W14_NAMESPACE, "paraId");
   return nativeId
     ? `docx:paragraph:${nativeId.toLowerCase()}`
-    : `docx:paragraph:${index}`;
+    : `docx:paragraph:${prospectiveParagraphId(paragraph, path).toLowerCase()}`;
+}
+
+type NativeTableCell = {
+  text(): string;
+  setText(text: string): void;
+  paragraphElements(): readonly XmlElement[];
+};
+type NativeTableRow = { cells(): readonly NativeTableCell[] };
+type NativeTable = {
+  element: XmlElement;
+  depth: number;
+  rows(): readonly NativeTableRow[];
+  rowCount(): number;
+  columnCount(): number;
+};
+type FlowEntry = { element: XmlElement; carrier: XmlElement; path: string };
+
+function shallowWmlChildren(root: XmlElement, name: string) {
+  const found: XmlElement[] = [];
+  const visit = (element: XmlElement) => {
+    for (const child of element.elements()) {
+      if (child.namespaceUri() === WML_NAMESPACE && child.localName === name) {
+        found.push(child);
+        continue;
+      }
+      if (child.namespaceUri() === WML_NAMESPACE && ["p", "tbl"].includes(child.localName)) continue;
+      visit(child);
+    }
+  };
+  visit(root);
+  return found;
+}
+
+function wrappedTable(element: XmlElement): NativeTable {
+  const rows = () => shallowWmlChildren(element, "tr").map((row) => ({
+    cells: () => shallowWmlChildren(row, "tc").map((cell) => ({
+      paragraphElements: () => shallowWmlChildren(cell, "p"),
+      text: () => shallowWmlChildren(cell, "p")
+        .flatMap((paragraph) => shallowWmlChildren(paragraph, "r"))
+        .flatMap((run) => run.children.filter((child) => child.kind === "text").map((child) => child.text))
+        .join(""),
+      setText: (text: string) => {
+        const preserved = cell.children.filter(
+          (child) => child.kind === "element" && child.namespaceUri() === WML_NAMESPACE && child.localName === "tcPr",
+        );
+        for (const child of [...cell.children]) cell.removeChild(child);
+        for (const child of preserved) cell.appendChild(child);
+        const paragraph = new XmlElement("p", "w");
+        const run = new XmlElement("r", "w");
+        const value = new XmlElement("t", "w");
+        value.appendChild(new XmlText(text));
+        run.appendChild(value);
+        paragraph.appendChild(run);
+        cell.appendChild(paragraph);
+      },
+    })),
+  }));
+  return {
+    element,
+    depth: 0,
+    rows,
+    rowCount: () => rows().length,
+    columnCount: () => Math.max(0, ...rows().map((row) => row.cells().length)),
+  };
+}
+
+function topLevelFlow(root: XmlElement): FlowEntry[] {
+  const entries: FlowEntry[] = [];
+  const visit = (element: XmlElement, carrier: XmlElement, path: string) => {
+    if (element.namespaceUri() === WML_NAMESPACE && ["p", "tbl"].includes(element.localName)) {
+      entries.push({ element, carrier, path });
+      return;
+    }
+    const children = element.elements();
+    if (element.namespaceUri() === WML_NAMESPACE && element.localName === "sdtContent") {
+      children.forEach((child, index) => visit(child, carrier, `${path}/${child.localName}[${index}]`));
+      return;
+    }
+    if (element.localName === "AlternateContent") {
+      const branch = children.find((child) => child.localName === "Choice") ??
+        children.find((child) => child.localName === "Fallback");
+      if (branch) visit(branch, carrier, `${path}/branch`);
+      return;
+    }
+    children.forEach((child, index) =>
+      visit(child, carrier, `${path}/${child.localName}[${index}]`),
+    );
+  };
+  root.elements().forEach((child, index) =>
+    visit(child, child, `/body/${child.localName}[${index}]`),
+  );
+  return entries;
+}
+
+function tableAnchor(table: NativeTable) {
+  return table
+    .rows()
+    .flatMap((row) => row.cells())
+    .flatMap((cell) => cell.paragraphElements())[0];
+}
+
+function tableRegionId(table: NativeTable, path: string) {
+  const anchor = tableAnchor(table);
+  const anchorId =
+    anchor?.getAttributeNs(W14_NAMESPACE, "paraId")?.toUpperCase() ??
+    stableHex(`spectra-docx-table:${path}`);
+  return `docx:table:${anchorId.toLowerCase()}`;
+}
+
+type NativeRegion = FlowEntry & {
+  id: string;
+  paragraph?: Paragraph;
+  table?: NativeTable;
+};
+
+function nativeRegions(document: Document): NativeRegion[] {
+  const tables = new Map(
+    document
+      .tables()
+      .filter((table) => table.depth === 0)
+      .map((table) => [table.element, table] as const),
+  );
+  const regions: NativeRegion[] = [];
+  for (const entry of topLevelFlow(document.body())) {
+    if (entry.element.localName === "p") {
+      const paragraph = Paragraph._wrap(document, entry.element);
+      regions.push({
+        ...entry,
+        id: paragraphRegionId(paragraph, entry.path),
+        paragraph,
+      });
+      continue;
+    }
+    const table = tables.get(entry.element) ?? wrappedTable(entry.element);
+    if (table)
+      regions.push({ ...entry, id: tableRegionId(table, entry.path), table });
+  }
+  return regions;
+}
+
+function ensureStableRegionIds(document: Document) {
+  const aliases = new Map<string, string>();
+  let changed = false;
+  for (const region of nativeRegions(document)) {
+    const id = region.id.split(":").at(-1)?.toUpperCase();
+    const anchor = region.paragraph?.element ?? (region.table ? tableAnchor(region.table) : undefined);
+    if (!anchor) continue;
+    const existing = anchor.getAttributeNs(W14_NAMESPACE, "paraId");
+    if (existing) {
+      aliases.set(region.id, region.id.replace(/[^:]+$/, existing.toLowerCase()));
+      continue;
+    }
+    if (!id || !/^[0-9A-F]{8}$/.test(id)) continue;
+    anchor.setAttributeNs(W14_NAMESPACE, "paraId", id);
+    aliases.set(region.id, region.id.replace(/[^:]+$/, id.toLowerCase()));
+    changed = true;
+  }
+  if (changed) document._markMainDirty();
+  return aliases;
+}
+
+function uniqueRegionById(document: Document, regionId: string) {
+  const matches = nativeRegions(document).filter((region) => region.id === regionId);
+  if (matches.length !== 1)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      matches.length
+        ? `The Word region ${regionId} is not uniquely identifiable.`
+        : `The Word region ${regionId} no longer exists.`,
+    );
+  return matches[0]!;
+}
+
+function movableCarrier(document: Document, region: NativeRegion) {
+  const body = document.body();
+  const sharing = nativeRegions(document).filter(
+    (candidate) => candidate.carrier === region.carrier,
+  );
+  if (region.carrier.parent !== body || sharing.length !== 1)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "This Word region shares a native wrapper with other content and cannot be moved or deleted safely.",
+    );
+  return region.carrier;
+}
+
+function insertedParagraphId(regionId: string | undefined) {
+  const native = regionId?.match(/^docx:paragraph:([a-f0-9]{8})$/i)?.[1];
+  return (native ?? stableHex(`spectra-docx-insert:${regionId ?? crypto.randomUUID()}`)).toUpperCase();
+}
+
+function insertParagraph(
+  document: Document,
+  operation: Extract<DocxSemanticDelta, { kind: "insert-paragraph" }>,
+) {
+  const body = document.body();
+  const paragraph = document.addParagraph(operation.text, {
+    ...(operation.style ? { style: safeStyleId(operation.style) } : {}),
+  });
+  const paraId = insertedParagraphId(operation.regionId);
+  paragraph.element.setAttributeNs(W14_NAMESPACE, "paraId", paraId);
+  const afterRegionId = operation.afterRegionId;
+  if (afterRegionId === undefined) return `docx:paragraph:${paraId.toLowerCase()}`;
+  const reference = afterRegionId === null
+    ? nativeRegions(document).find((region) => region.element !== paragraph.element)?.carrier
+    : (() => {
+        const after = uniqueRegionById(document, afterRegionId);
+        const carrier = movableCarrier(document, after);
+        const position = body.children.indexOf(carrier);
+        return body.children[position + 1] ?? null;
+      })();
+  if (reference !== paragraph.element)
+    body.insertBefore(paragraph.element, reference ?? null);
+  document._markMainDirty();
+  return `docx:paragraph:${paraId.toLowerCase()}`;
 }
 
 function safeStyleId(value: string) {
@@ -669,12 +818,6 @@ function changedFormatFields<T extends Record<string, unknown>>(
   return Object.keys(patch).length ? (patch as T) : undefined;
 }
 
-function tableText(rows: readonly { cells(): readonly { text(): string }[] }[]) {
-  return rows
-    .map((row) => row.cells().map((cell) => cell.text()).join(" | "))
-    .join("\n");
-}
-
 function parseTableText(value: string) {
   return value.split(/\r?\n/).map((row) =>
     row
@@ -818,18 +961,21 @@ async function projectDocument(
 ) {
   const fidelityEntries: LensFidelityEntry[] = [];
   const blocks: DocxProjectionBlock[] = [];
-  const bodyChildren = document.body().elements();
-  const topLevelTables = document.tables().filter((table) => table.depth === 0);
-  let paragraphIndex = 0;
-  let tableIndex = 0;
+  const bodyChildren = topLevelFlow(document.body());
+  const topLevelTables = new Map(
+    document
+      .tables()
+      .filter((table) => table.depth === 0)
+      .map((table) => [table.element, table] as const),
+  );
 
-  for (const element of bodyChildren) {
+  for (const { element, path } of bodyChildren) {
     if (
       element.namespaceUri() === WML_NAMESPACE &&
       element.localName === "p"
     ) {
       const paragraph = Paragraph._wrap(document, element);
-      const regionId = paragraphRegionId(paragraph, paragraphIndex);
+      const regionId = paragraphRegionId(paragraph, path);
       const styleId = paragraph.styleId();
       const list = paragraph.list();
       const readOnly = hasWml(
@@ -865,7 +1011,7 @@ async function projectDocument(
             : "paragraph",
         text: paragraph.text(),
         attrs: {
-          paragraphIndex,
+          nativePath: path,
           ...(semanticStyleId ? { styleId: semanticStyleId } : {}),
           ...(list ? { list } : {}),
           ...(readOnly ? { nativeReadOnly: true } : {}),
@@ -890,23 +1036,29 @@ async function projectDocument(
             }
           : {}),
       });
-      paragraphIndex += 1;
       continue;
     }
     if (
       element.namespaceUri() === WML_NAMESPACE &&
       element.localName === "tbl"
     ) {
-      const table = topLevelTables[tableIndex];
+      const table = topLevelTables.get(element) ?? wrappedTable(element);
       if (table) {
-        const regionId = `docx:table:${tableIndex}`;
-        const nested = document.tables().some((candidate) => candidate.depth > 0);
+        const regionId = tableRegionId(table, path);
+        const nested = descendants(table.element).some(
+          (candidate) =>
+            candidate !== table.element &&
+            candidate.namespaceUri() === WML_NAMESPACE &&
+            candidate.localName === "tbl",
+        );
+        const rows = table.rows().map((row) => row.cells().map((cell) => cell.text()));
         blocks.push({
           id: regionId,
           type: "table",
-          text: tableText(table.rows()),
+          text: rows.map((row) => row.join(" | ")).join("\n"),
+          rows,
           attrs: {
-            tableIndex,
+            nativePath: path,
             rowCount: table.rowCount(),
             columnCount: table.columnCount(),
             ...(nested ? { nativeReadOnly: true } : {}),
@@ -926,7 +1078,6 @@ async function projectDocument(
             : {}),
         });
       }
-      tableIndex += 1;
     }
   }
 
@@ -1029,10 +1180,10 @@ async function projectDocument(
     .filter((value): value is DocxNativePlaceholder => Boolean(value));
   const semanticDigest = await sha256Payload(
     new TextEncoder().encode(
-      JSON.stringify(blocks.map(({ id, type, text }) => ({ id, type, text }))),
+      JSON.stringify(blocks),
     ),
   );
-  const projection: DocxProjection = {
+  const projection = docxProjectionSchema.parse({
     blocks,
     outline: blocks.flatMap((block) =>
       block.type === "heading"
@@ -1053,7 +1204,7 @@ async function projectDocument(
       semanticDigest,
       nativePlaceholders: placeholders,
     },
-  };
+  });
   return { projection, fidelityMap };
 }
 
@@ -1070,97 +1221,116 @@ function assertEditable(map: LensFidelityMap, regionId: string) {
     );
 }
 
-function resolveParagraphIndex(
-  projection: DocxProjection,
-  block: DocxProjectionBlock,
-  paragraphCount: number,
-) {
-  const declared = Number(block.attrs?.paragraphIndex);
-  if (Number.isInteger(declared) && declared >= 0 && declared < paragraphCount)
-    return declared;
-  const blockIndex = projection.blocks.findIndex((candidate) => candidate.id === block.id);
-  if (blockIndex < 0) return -1;
-  return projection.blocks
-    .slice(0, blockIndex)
-    .filter((candidate) => candidate.type !== "table").length;
-}
-
 async function applyDelta(
   carry: LensPreservedCarry<DocxProjection>,
   delta: DocxSemanticDelta,
 ) {
   const document = await Document.open(carry.payload);
+  const aliases = ensureStableRegionIds(document);
   const opened = await projectDocument(document, carry.profile);
-  // Projection indexes only top-level body paragraphs. The generic
-  // document.paragraphs() collection also includes paragraphs inside table
-  // cells, so using it here shifts every paragraph after the first table and
-  // can make a valid AI or human edit target the wrong native region.
-  const paragraphs = document
-    .body()
-    .elements()
-    .filter(
-      (element) =>
-        element.namespaceUri() === WML_NAMESPACE && element.localName === "p",
-    )
-    .map((element) => Paragraph._wrap(document, element));
-  const tables = document.tables().filter((table) => table.depth === 0);
   const operations =
     delta.kind === "ai-edit" ? delta.operations : [delta];
+  const born = new Map<string, string>();
+  const resolveRegionId = (regionId: string) =>
+    born.get(regionId) ?? aliases.get(regionId) ?? regionId;
 
   for (const operation of operations) {
     if (operation.kind === "insert-paragraph") {
-      document.addParagraph(operation.text, {
-        ...(operation.style ? { style: safeStyleId(operation.style) } : {}),
+      const inserted = insertParagraph(document, {
+        ...operation,
+        ...(operation.afterRegionId
+          ? { afterRegionId: resolveRegionId(operation.afterRegionId) }
+          : {}),
       });
+      if (operation.regionId) born.set(operation.regionId, inserted);
       continue;
     }
-    assertEditable(opened.fidelityMap, operation.regionId);
-    const block = opened.projection.blocks.find(
-      (candidate) => candidate.id === operation.regionId,
-    );
-    if (!block)
-      throw new DocxLensError(
-        "DOCX_UNSUPPORTED_EDIT",
-        `The Word region ${operation.regionId} no longer exists.`,
+    if (operation.kind === "reorder-regions") {
+      const body = document.body();
+      const regions = nativeRegions(document);
+      const byId = new Map(regions.map((region) => [region.id, region]));
+      const resolvedOrder = operation.order.map(resolveRegionId);
+      const requested = resolvedOrder.map((regionId) => byId.get(regionId));
+      if (
+        requested.some((region) => !region) ||
+        requested.length !== regions.length ||
+        new Set(resolvedOrder).size !== resolvedOrder.length
+      )
+        throw new DocxLensError(
+          "DOCX_UNSUPPORTED_EDIT",
+          "The Word region order is incomplete or contains an unknown region.",
+        );
+      const carriers = regions.map((region) => [region.id, movableCarrier(document, region)] as const);
+      const carrierById = new Map(carriers);
+      const carrierNodes = carriers.map(([, carrier]) => carrier);
+      const carrierSet = new Set(carrierNodes);
+      const unmodeled = body.elements().filter(
+        (element) => element.localName !== "sectPr" && !carrierSet.has(element),
       );
+      if (unmodeled.length)
+        throw new DocxLensError(
+          "DOCX_UNSUPPORTED_EDIT",
+          "This Word document contains unmodeled body content, so its region order cannot be changed safely.",
+        );
+      const anchor = body.elements().find((element) => element.localName === "sectPr") ?? null;
+      carrierNodes.forEach((carrier) => body.removeChild(carrier));
+      for (const region of requested as NativeRegion[])
+        body.insertBefore(carrierById.get(region.id)!, anchor);
+      document._markMainDirty();
+      continue;
+    }
+    if (operation.kind === "delete-region") {
+      const regionId = resolveRegionId(operation.regionId);
+      assertEditable(opened.fidelityMap, regionId);
+      const region = uniqueRegionById(document, regionId);
+      const carrier = movableCarrier(document, region);
+      carrier.parent?.removeChild(carrier);
+      document._markMainDirty();
+      continue;
+    }
+    const regionId = resolveRegionId(operation.regionId);
+    assertEditable(opened.fidelityMap, regionId);
+    const region = uniqueRegionById(document, regionId);
+    const block = opened.projection.blocks.find((candidate) => candidate.id === regionId);
+    if (!block) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word region ${operation.regionId} no longer exists.`);
     if (operation.kind === "replace-paragraph") {
-      const index = resolveParagraphIndex(opened.projection, block, paragraphs.length);
-      const paragraph = paragraphs[index];
-      if (!paragraph)
+      if (!region.paragraph)
         throw new DocxLensError(
           "DOCX_UNSUPPORTED_EDIT",
-          `The target Word paragraph could not be resolved safely (region=${operation.regionId}, index=${index}, projectedParagraphs=${paragraphs.length}).`,
+          `The target Word region ${operation.regionId} is not a paragraph.`,
         );
-      replaceParagraphText(document, paragraph, operation.text);
+      replaceParagraphText(document, region.paragraph, operation.text);
     } else if (operation.kind === "apply-style") {
-      const index = resolveParagraphIndex(opened.projection, block, paragraphs.length);
-      const paragraph = paragraphs[index];
-      if (!paragraph)
+      if (!region.paragraph)
         throw new DocxLensError(
           "DOCX_UNSUPPORTED_EDIT",
-          `The target Word paragraph could not be resolved safely (style region=${operation.regionId}, index=${index}, projectedParagraphs=${paragraphs.length}).`,
+          `The target Word region ${operation.regionId} is not a paragraph.`,
         );
-      setParagraphStyle(document, paragraph, operation.style);
+      setParagraphStyle(document, region.paragraph, operation.style);
     } else if (operation.kind === "format-runs" || operation.kind === "format-paragraph") {
-      const index = resolveParagraphIndex(opened.projection, block, paragraphs.length);
-      const paragraph = paragraphs[index];
-      if (!paragraph)
+      if (!region.paragraph)
         throw new DocxLensError(
           "DOCX_UNSUPPORTED_EDIT",
-          `The target Word paragraph could not be resolved safely (format region=${operation.regionId}, index=${index}, projectedParagraphs=${paragraphs.length}).`,
+          `The target Word region ${operation.regionId} is not a paragraph.`,
         );
       if (operation.kind === "format-runs")
-        applyRunFormat(document, paragraph, operation.format);
-      else applyParagraphFormat(document, paragraph, operation.format);
+        applyRunFormat(document, region.paragraph, operation.format);
+      else applyParagraphFormat(document, region.paragraph, operation.format);
     } else if (operation.kind === "edit-table-cell") {
-      const index = Number(block.attrs?.tableIndex);
-      const table = tables[index];
-      if (!table)
+      if (!region.table)
         throw new DocxLensError(
           "DOCX_UNSUPPORTED_EDIT",
-          "The target Word table could not be resolved safely.",
+          `The target Word region ${operation.regionId} is not a table.`,
         );
-      table.cell(operation.row, operation.column).setText(operation.text);
+      const row = region.table.rows()[operation.row];
+      const cell = row?.cells()[operation.column];
+      if (!cell)
+        throw new DocxLensError(
+          "DOCX_UNSUPPORTED_EDIT",
+          "The target Word table cell no longer exists.",
+        );
+      cell.setText(operation.text);
+      document._markMainDirty();
     }
   }
   return document.save();
@@ -1184,6 +1354,7 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         `This Word package is incomplete or corrupt. Spectra kept it unchanged and did not attempt a conversion.${error instanceof Error ? ` (${error.message})` : ""}`,
       );
     }
+    ensureStableRegionIds(document);
     const { projection, fidelityMap } = await projectDocument(document, profile);
     const basePayloadHash = await sha256Payload(payload);
     return {
@@ -1208,7 +1379,7 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
   async materialize({ projection, carry }) {
     const before = new Map(carry.projection.blocks.map((block) => [block.id, block]));
     const operations: Exclude<DocxSemanticDelta, { kind: "ai-edit" }>[] = [];
-    for (const block of projection.blocks) {
+    for (const [blockIndex, block] of projection.blocks.entries()) {
       const previous = before.get(block.id);
       if (!previous) {
         if (block.type === "table")
@@ -1218,6 +1389,8 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
           );
         operations.push({
           kind: "insert-paragraph",
+          regionId: block.id,
+          afterRegionId: blockIndex > 0 ? projection.blocks[blockIndex - 1]!.id : null,
           text: block.text,
           ...(typeof block.attrs?.styleId === "string"
             ? { style: block.attrs.styleId }
@@ -1242,9 +1415,9 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         },
       };
       before.delete(block.id);
-      if (effectiveBlock.type === "table" && effectiveBlock.text !== previous.text) {
-        const oldRows = parseTableText(previous.text);
-        const newRows = parseTableText(effectiveBlock.text);
+      if (effectiveBlock.type === "table" && (effectiveBlock.text !== previous.text || JSON.stringify(effectiveBlock.rows) !== JSON.stringify(previous.rows))) {
+        const oldRows = previous.rows ?? parseTableText(previous.text);
+        const newRows = effectiveBlock.rows ?? parseTableText(effectiveBlock.text);
         if (
           oldRows.length !== newRows.length ||
           oldRows.some((row, index) => row.length !== newRows[index]?.length)
@@ -1306,10 +1479,16 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         });
     }
     if (before.size)
-      throw new DocxLensError(
-        "DOCX_UNSUPPORTED_EDIT",
-        "Deleting native Word regions is unavailable until the lens can prove the surrounding revision structure remains valid.",
+      operations.push(
+        ...[...before.keys()].map((regionId) => ({
+          kind: "delete-region" as const,
+          regionId,
+        })),
       );
+    const order = projection.blocks.map((block) => block.id);
+    const priorOrder = carry.projection.blocks.map((block) => block.id);
+    if (order.length !== priorOrder.length || order.some((id, index) => id !== priorOrder[index]))
+      operations.push({ kind: "reorder-regions", order });
     if (!operations.length) return carry.payload;
     return applyDelta(carry, { kind: "ai-edit", operations });
   },
@@ -1327,7 +1506,7 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
       prior.delete(block.id);
       if (!previous)
         changes.push({ regionId: block.id, kind: "insert", after: block });
-      else if (previous.text !== block.text)
+      else if (JSON.stringify(previous) !== JSON.stringify(block))
         changes.push({
           regionId: block.id,
           kind: "update",

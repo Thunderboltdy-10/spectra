@@ -8,7 +8,6 @@ import {
   docxLens,
 } from "../lenses/docx-lens";
 import {
-  assertChangedTablesSupported,
   contentProjection,
 } from "@/app/api/spectra/lenses/docx/route";
 
@@ -60,18 +59,56 @@ describe("DOCX preservation lens", () => {
     expect(reopened.projection.blocks.at(-1)?.text).toBe(added.text);
   });
 
-  it("refuses changed table blocks until the native table path is lossless", () => {
-    const base = {
-      blocks: [{ id: "table-1", type: "table" as const, text: "A | B" }],
-      outline: [],
-      nativeBinding: { semanticDigest: "base", format: "docx" },
-    };
-    const next = {
-      ...base,
-      blocks: [{ ...base.blocks[0], text: "A* | B" }],
-    };
-    expect(() => assertChangedTablesSupported(base, next, ["table-1"]))
-      .toThrowError(/cannot be safely rewritten/iu);
+  it("round-trips a changed table cell without flattening it into prose", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    const table = opened.projection.blocks.find((block) => block.type === "table");
+    expect(table?.rows?.[0]?.[0]).toContain("Multitasking");
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "edit-table-cell",
+      regionId: table!.id,
+      row: 0,
+      column: 0,
+      text: "Parallel work",
+    });
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.blocks.find((block) => block.id === table!.id)?.rows?.[0]?.[0])
+      .toBe("Parallel work");
+    expect(reopened.projection.blocks.some((block) => block.type !== "table" && block.text.includes("Parallel work"))).toBe(false);
+  });
+
+  it("keeps two tables paired when the first is wrapped in a content control", async () => {
+    const source = await fixture("complex-structure.docx");
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const files = unzipSync(source);
+    const documentName = Object.keys(files).find((name) => name.endsWith("word/document.xml"))!;
+    const xml = strFromU8(files[documentName]!);
+    const start = xml.indexOf("<w:tbl>");
+    const end = xml.indexOf("</w:tbl>", start) + "</w:tbl>".length;
+    const firstTable = xml.slice(start, end);
+    files[documentName] = strToU8(
+      xml.slice(0, start) +
+        "<w:sdt><w:sdtPr/><w:sdtContent>" + firstTable + "</w:sdtContent></w:sdt>" +
+        firstTable +
+        xml.slice(end),
+    );
+    const hostile = zipSync(files);
+    const opened = await docxLens.open(hostile);
+    const tables = opened.projection.blocks.filter((block) => block.type === "table");
+    expect(tables).toHaveLength(2);
+    const second = tables[1]!;
+    const edited = await docxLens.mutate(opened.preservedCarry, {
+      kind: "edit-table-cell",
+      regionId: second.id,
+      row: 0,
+      column: 0,
+      text: "Only the second table changed",
+    });
+    const reopened = await docxLens.open(edited);
+    const reopenedTables = reopened.projection.blocks.filter((block) => block.type === "table");
+    expect(reopenedTables[0]!.rows?.[0]?.[0]).toBe(tables[0]!.rows?.[0]?.[0]);
+    expect(reopenedTables[1]!.rows?.[0]?.[0]).toBe("Only the second table changed");
+    expect(reopenedTables.map((block) => block.id)).toEqual(tables.map((block) => block.id));
   });
 
   it("returns the original package for a semantic no-op", async () => {
@@ -136,6 +173,12 @@ describe("DOCX preservation lens", () => {
         kind: "replace-paragraph",
         regionId: protectedBlock!.id,
         text: "unsafe replacement",
+      }),
+    ).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
+    await expect(
+      docxLens.mutate(opened.preservedCarry, {
+        kind: "delete-region",
+        regionId: protectedBlock!.id,
       }),
     ).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
   });

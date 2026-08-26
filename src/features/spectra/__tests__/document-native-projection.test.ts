@@ -4,7 +4,12 @@ import {
   documentJsonFromContent,
 } from "../components/artifact-studio";
 import { withDocumentFormatting } from "../components/document-studio";
-import { documentContentToProseMirrorJson } from "../work/models/yjs/document-adapter";
+import { docxProjectionFromContent } from "../lenses/document-projection";
+import type { DocxProjection } from "../lenses/projection-contracts";
+import {
+  documentContentToProseMirrorJson,
+  documentYjsAdapter,
+} from "../work/models/yjs/document-adapter";
 
 describe("native document projection", () => {
   it("projects persisted Word heading styles back into TipTap headings", () => {
@@ -135,5 +140,66 @@ describe("native document projection", () => {
       type: "heading",
       attrs: { blockId: "docx:paragraph:one", level: 1 },
     });
+  });
+
+  it("derives deletions and reorders when collaborative content has no explicit intent", () => {
+    const base: DocxProjection = {
+      blocks: [
+        { id: "docx:paragraph:a", type: "paragraph", text: "A" },
+        { id: "docx:paragraph:b", type: "paragraph", text: "B" },
+        { id: "docx:paragraph:c", type: "paragraph", text: "C" },
+      ],
+      outline: [],
+      nativeBinding: {
+        version: 1,
+        format: "docx",
+        profile: "strict-native",
+        macroEnabled: false,
+        semanticDigest: "a".repeat(64),
+        nativePlaceholders: [],
+      },
+    };
+    const update = docxProjectionFromContent(
+      {
+        blocks: [base.blocks[2], base.blocks[0]],
+        outline: [],
+        nativeProjectionComplete: true,
+      },
+      base,
+    );
+
+    expect(update.projection.blocks.map((block) => block.id)).toEqual([
+      "docx:paragraph:c",
+      "docx:paragraph:a",
+    ]);
+    expect(update.operations).toContainEqual({
+      kind: "delete-region",
+      regionId: "docx:paragraph:b",
+    });
+    expect(update.operations).toContainEqual({
+      kind: "reorder-regions",
+      order: ["docx:paragraph:c", "docx:paragraph:a"],
+    });
+  });
+
+  it("does not retain an earlier native intent inside collaborative state", () => {
+    const document = documentYjsAdapter.createDocument({
+      blocks: [{ id: "docx:paragraph:a", type: "paragraph", text: "A" }],
+      nativeBinding: {
+        version: 1,
+        format: "docx",
+        profile: "strict-native",
+        macroEnabled: false,
+        semanticDigest: "a".repeat(64),
+        nativePlaceholders: [],
+      },
+      nativeIntent: {
+        kind: "replace-paragraph",
+        regionId: "docx:paragraph:a",
+        text: "stale",
+      },
+    });
+
+    expect(documentYjsAdapter.project(document)).not.toHaveProperty("nativeIntent");
   });
 });

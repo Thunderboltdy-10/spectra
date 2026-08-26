@@ -4,26 +4,11 @@ import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
 import type { PresentationObject } from "../presentation/model";
 import { sha256Payload } from "./docx-lens";
+import { pptxOperationsBetween } from "./office-content";
 import type { LensCapabilitySet, LensCompatibilityProfile, LensExternalDiff, LensFidelityEntry, LensFidelityMap, LensOpenResult, LensPreservedCarry, SpectraLens } from "./types";
+import { pptxProjectionSchema, type PptxProjection, type PptxSemanticDelta } from "./projection-contracts";
 
-export type PptxSlideProjection = { id: string; index: number; title: string; text: string[]; objects: PresentationObject[]; layoutPartName?: string; hasTransition: boolean; hasTiming: boolean; speakerNotes: string; notesPartName?: string };
-export type PptxProjection = { slides: PptxSlideProjection[]; nativeBinding: { version: 1; format: "pptx" | "pptm" | "potx" | "potm" | "ppsx" | "ppsm" | "ppam"; profile: LensCompatibilityProfile; macroEnabled: boolean; semanticDigest: string } };
-export type PptxSemanticDelta =
-  | { kind: "set-title"; slideId: string; text: string }
-  | { kind: "set-text"; slideId: string; paragraphIndex: number; text: string; shapeId?: string }
-  | { kind: "add-text-box"; slideId: string; text: string }
-  | { kind: "set-notes"; slideId: string; text: string }
-  | { kind: "set-alt-text"; slideId: string; shapeId: string; text: string }
-  | { kind: "set-geometry"; slideId: string; shapeId: string; x: number; y: number; width: number; height: number; rotation: number }
-  /** A brand-new slide. `slideId` is the caller's own id for it, so later
-   *  operations in the same delta can still name the slide before it has a
-   *  part; the layout is an existing layout of this file, never an invented one. */
-  | { kind: "add-slide"; slideId: string; layoutPartName?: string; title?: string; text?: string[] }
-  | { kind: "remove-slide"; slideId: string }
-  /** The final deck order, by slide id. Ids of slides added in the same delta
-   *  are allowed, because the order a person sees includes them. */
-  | { kind: "reorder-slides"; order: string[] }
-  | { kind: "ai-edit"; operations: Exclude<PptxSemanticDelta, { kind: "ai-edit" }>[] };
+export type { PptxProjection, PptxSemanticDelta, PptxSlideProjection } from "./projection-contracts";
 
 export class PptxLensError extends Error { constructor(public readonly code: string, message: string) { super(message); this.name = "PptxLensError"; } }
 
@@ -134,7 +119,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     entries.push({ regionId: `pptx:region:${feature}`, feature, class: cls, ...(cls === "PRESERVED" ? { readOnly: true } : {}), ...(reason && cls !== "NATIVE" ? { reason } : {}) });
   }
   const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify(slides.map(({ id, title, text, objects }) => ({ id, title, text, objects })))));
-  const projection: PptxProjection = { slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest } };
+  const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest } });
   return { projection, fidelityMap };
 }
 
@@ -359,49 +344,8 @@ export const pptxLens: SpectraLens<PptxProjection, PptxSemanticDelta> = {
   format: "pptx",
   async open(payload, profile = "strict-native"): Promise<LensOpenResult<PptxProjection>> { let deck: Presentation; try { deck = await Presentation.open(payload); } catch (error) { throw new PptxLensError("PPTX_CORRUPT", `This PowerPoint package could not be opened safely.${error instanceof Error ? ` (${error.message})` : ""}`); } const { projection, fidelityMap } = await projectPresentation(deck, profile); return { projection, fidelityMap, preservedCarry: { version: 1, format: projection.nativeBinding.format, profile, basePayloadHash: await sha256Payload(payload), payload, projection }, capabilities: this.capabilities(profile, fidelityMap) }; },
   mutate: applyDelta,
-  async materialize({ projection, carry }) { const previous = new Map(carry.projection.slides.map((slide) => [slide.id, slide])); const operations: Exclude<PptxSemanticDelta, { kind: "ai-edit" }>[] = [];
-    // Slides the person deleted go first, so the adds and the final order are
-    // computed against the deck that is actually left.
-    const kept = new Set(projection.slides.map((slide) => slide.id));
-    for (const old of carry.projection.slides) if (!kept.has(old.id)) operations.push({ kind: "remove-slide", slideId: old.id });
-    /** The layout a new slide should inherit: the nearest existing slide above
-     *  it, falling back to the deck's first layout. Spectra never writes a new
-     *  layout or master, so a growing deck leaves both preserved. */
-    const layoutForNewSlideAt = (index: number) => {
-      for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-        const candidate = previous.get(projection.slides[cursor]!.id);
-        if (candidate?.layoutPartName) return candidate.layoutPartName;
-      }
-      return carry.projection.slides.find((slide) => slide.layoutPartName)?.layoutPartName;
-    };
-    projection.slides.forEach((slide, slideIndex) => { const old = previous.get(slide.id);
-      if (!old) {
-        // A new slide carries its title and its text in one operation: the title
-        // goes into the layout's own title placeholder, and the rest become text
-        // boxes, so the slide a person gets back is the slide they built.
-        const lines = slide.objects.filter((object) => object.type === "text").map((object) => { const value = object.content as { text?: unknown } | undefined; return typeof value?.text === "string" ? value.text : ""; }).filter((line) => line.trim() && line.trim() !== slide.title.trim());
-        operations.push({ kind: "add-slide", slideId: slide.id, ...(layoutForNewSlideAt(slideIndex) ? { layoutPartName: layoutForNewSlideAt(slideIndex) } : {}), ...(slide.title ? { title: slide.title } : {}), ...(lines.length ? { text: lines } : {}) });
-        return;
-      }
-      if (slide.title !== old.title) operations.push({ kind: "set-title", slideId: slide.id, text: slide.title });
-    // Notes are written only when the file already has a notes page for this
-    // slide. Spectra does not invent one, so a deck without notes pages keeps
-    // its notes on the Spectra side instead of half-writing them.
-    if (slide.speakerNotes !== old.speakerNotes && old.notesPartName) operations.push({ kind: "set-notes", slideId: slide.id, text: slide.speakerNotes });
-    const oldObjects = new Map(old.objects.map((object) => [object.id, object])); slide.objects.forEach((object) => { const previousObject = oldObjects.get(object.id); const nextText = typeof (object.content as { text?: unknown })?.text === "string" ? String((object.content as { text: string }).text) : ""; if (!previousObject) { if (object.type === "text" && nextText) operations.push({ kind: "add-text-box", slideId: slide.id, text: nextText }); return; } const previousValue = previousObject.content as { text?: unknown } | undefined; const previousText = typeof previousValue?.text === "string" ? previousValue.text : ""; const nativeShapeId = typeof (object.content as { nativeShapeId?: unknown })?.nativeShapeId === "string" ? String((object.content as { nativeShapeId: string }).nativeShapeId) : undefined; if (nativeShapeId && nextText !== previousText && !object.locked) operations.push({ kind: "set-text", slideId: slide.id, paragraphIndex: 0, shapeId: nativeShapeId, text: nextText });
-      if (!nativeShapeId) return;
-      if ((object.altText ?? "") !== (previousObject.altText ?? "")) operations.push({ kind: "set-alt-text", slideId: slide.id, shapeId: nativeShapeId, text: object.altText ?? "" });
-      // Geometry is compared on the logical canvas with a half-unit tolerance,
-      // so reopening a deck and saving it does not rewrite every shape purely
-      // from EMU rounding.
-      const moved = ["x", "y", "width", "height", "rotation"].some((key) => Math.abs((object[key as "x"] ?? 0) - (previousObject[key as "x"] ?? 0)) > 0.5);
-      if (moved && !object.locked) operations.push({ kind: "set-geometry", slideId: slide.id, shapeId: nativeShapeId, x: object.x, y: object.y, width: object.width, height: object.height, rotation: object.rotation });
-    }); });
-    // Order is a presentation-level fact, so it is settled once, at the end,
-    // after the deck knows which slides exist. Only presentation.xml moves.
-    const orderNow = carry.projection.slides.filter((slide) => kept.has(slide.id)).map((slide) => slide.id);
-    const orderNext = projection.slides.map((slide) => slide.id);
-    if (orderNext.length !== orderNow.length || orderNext.some((id, index) => id !== orderNow[index])) operations.push({ kind: "reorder-slides", order: orderNext });
+  async materialize({ projection, carry }) {
+    const operations = pptxOperationsBetween(carry.projection, projection);
     return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }) : carry.payload; },
   async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> { const [before, after, comparison] = await Promise.all([this.open(payloadA), this.open(payloadB), comparePackages(payloadA, payloadB)]); const previous = new Map(before.projection.slides.map((slide) => [slide.id, slide])); const changes: LensExternalDiff["changes"] = []; for (const slide of after.projection.slides) { const old = previous.get(slide.id); previous.delete(slide.id); if (!old) changes.push({ regionId: slide.id, kind: "insert", after: slide }); else if (JSON.stringify(old) !== JSON.stringify(slide)) changes.push({ regionId: slide.id, kind: "update", before: old, after: slide }); } for (const slide of previous.values()) changes.push({ regionId: slide.id, kind: "delete", before: slide }); const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`); const modeled = new Set(after.projection.slides.map((slide) => slide.id.replace(/^pptx:slide:/, ""))); const preservedPartChanges = changedParts.filter((part) => !modeled.has(part)); return { changes, changedParts, preservedPartChanges }; },
   capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; const hasTransition = fidelityMap.entries.some((entry) => entry.feature === "transition"); const notesEntry = fidelityMap.entries.find((entry) => entry.feature === "speakerNotes"); const hasNotes = notesEntry?.class === "EQUIVALENT"; return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true },{ id: "edit-speaker-notes", available: hasNotes, ...(hasNotes ? {} : { reason: "This file has no notes page for its slides, and Spectra does not add one yet." }) }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: hasTransition, reason: hasTransition ? "Only exact PowerPoint transition equivalents may replace the preserved transition." : "No native transition is present." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "add_text_box", "write_speaker_notes", "set_alt_text", "move_object", "resize_object", "add_slide", "delete_slide", "reorder_slides"] }; },

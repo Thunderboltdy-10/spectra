@@ -144,6 +144,7 @@ import {
   type SpectraWorkspaceItem,
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { openSpectraPackage } from "../lenses/spectra-package";
 import { getWorkDefinition } from "../work/registry";
 import {
   readSharedWorkbenchSession,
@@ -3135,33 +3136,41 @@ export function SpectraShell({
    */
   async function importLibraryFile(file: File) {
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-    const blueprintKey: ArtifactTypeKey = ["ppt", "pptx"].includes(extension)
-      ? "presentation"
-      : ["xls", "xlsx", "csv", "tsv"].includes(extension)
-        ? "sheets"
-        : ["js", "jsx", "ts", "tsx", "py", "html", "css", "json"].includes(
-              extension,
-            )
-          ? "code"
-          : "document";
-    const fallback = createDefaultArtifactPayload(blueprintKey);
-    const title = file.name.replace(/\.[^.]+$/, "") || fallback.title;
     let importJobId: string | null = null;
     setBusyKey("library:import");
     try {
+      const originalBuffer = await file.arrayBuffer();
+      const portable =
+        extension === "spectra-pkg"
+          ? openSpectraPackage(new Uint8Array(originalBuffer))
+          : null;
+      const blueprintKey: ArtifactTypeKey = portable
+        ? portable.manifest.artifactType
+        : ["ppt", "pptx"].includes(extension)
+          ? "presentation"
+          : ["xls", "xlsx", "csv", "tsv"].includes(extension)
+            ? "sheets"
+            : ["js", "jsx", "ts", "tsx", "py", "html", "css", "json"].includes(
+                  extension,
+                )
+              ? "code"
+              : "document";
+      const fallback = createDefaultArtifactPayload(blueprintKey);
+      const importedContent = portable?.content ?? fallback.content;
+      const title = file.name.replace(/\.[^.]+$/, "") || fallback.title;
       const created = await postSpectra<{ artifactId: string }>({
         action: "createArtifact",
         blueprintKey,
         title,
         summary: `Imported from ${file.name}`,
-        content: fallback.content,
+        content: importedContent,
         tags: ["imported"],
         source: "manual",
         workspaceId: selectedWorkspaceId,
       });
       const digest = await crypto.subtle.digest(
         "SHA-256",
-        await file.arrayBuffer(),
+        originalBuffer,
       );
       const sha256 = [...new Uint8Array(digest)]
         .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -3183,14 +3192,16 @@ export function SpectraShell({
         status: "imported",
         fidelityReport: [
           {
-            scope: "original",
+            scope: portable ? "package" : "original",
             level: "exact",
             message:
-              "Original file preserved for the work editor import pipeline.",
+              portable
+                ? "Spectra restored the package content and preserved the uploaded package bytes exactly."
+                : "Original file preserved for the work editor import pipeline.",
           },
         ],
         unsupportedFeatures: [],
-        importedContent: fallback.content,
+        importedContent,
       });
       await postSpectra({
         action: "createArtifactImportVersion",

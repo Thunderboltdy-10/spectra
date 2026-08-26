@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { contentToPptx } from "@/app/api/spectra/lenses/office/route";
+import {
+  pptxProjectionUpdateFromContent,
+  xlsxProjectionUpdateFromContent,
+} from "../lenses/office-content";
 
 describe("Office lens route projection boundary", () => {
   it("keeps native presentation objects when content returns from Spectra", () => {
@@ -81,6 +85,117 @@ describe("Office lens route projection boundary", () => {
     // save never silently empties a notes part.
     const untouched = contentToPptx({ slides: [{ id: "slide-1" }] }, base);
     expect(untouched.slides[0]!.speakerNotes).toBe("Native notes");
+  });
+
+  it("keeps a new object on an existing slide instead of rebuilding from native objects", () => {
+    const base = {
+      slides: [{
+        id: "slide-1",
+        index: 0,
+        title: "Native title",
+        text: ["Native title"],
+        speakerNotes: "",
+        objects: [],
+        hasTransition: false,
+        hasTiming: false,
+      }],
+      nativeBinding: {
+        version: 1 as const,
+        format: "pptx" as const,
+        profile: "strict-native" as const,
+        macroEnabled: false,
+        semanticDigest: "0".repeat(64),
+      },
+    };
+    const result = contentToPptx({
+      slides: [{
+        id: "slide-1",
+        objects: [{
+          id: "spectra-added",
+          type: "text",
+          x: 210,
+          y: 120,
+          width: 400,
+          height: 90,
+          rotation: 0,
+          content: { text: "New object" },
+        }],
+      }],
+    }, base);
+    expect(result.slides[0]!.objects).toHaveLength(1);
+    expect(result.slides[0]!.objects[0]).toMatchObject({
+      id: "spectra-added",
+      x: 210,
+      content: { text: "New object" },
+    });
+  });
+
+  it("derives typed native operations at the route boundary", () => {
+    const xlsxBase = {
+      sheets: [{
+        id: "xlsx:sheet:1",
+        name: "Sheet1",
+        cells: [{ id: "xlsx:1:A1", ref: "A1", value: "Delete me" }],
+        merges: [] as string[],
+      }],
+      definedNames: [],
+      nativeBinding: {
+        version: 1 as const,
+        format: "xlsx" as const,
+        profile: "strict-native" as const,
+        macroEnabled: false,
+        semanticDigest: "0".repeat(64),
+        recognizedFormulaFunctions: [],
+      },
+    };
+    expect(
+      xlsxProjectionUpdateFromContent(
+        { sheets: [{ id: "xlsx:sheet:1", cells: {} }] },
+        xlsxBase,
+      ).operations,
+    ).toEqual([
+      { kind: "clear-cell", sheetId: "xlsx:sheet:1", ref: "A1" },
+    ]);
+
+    const pptxBase = {
+      slides: [{
+        id: "slide-1",
+        index: 0,
+        title: "One",
+        text: ["One"],
+        objects: [],
+        hasTransition: false,
+        hasTiming: false,
+        speakerNotes: "",
+      }],
+      nativeBinding: {
+        version: 1 as const,
+        format: "pptx" as const,
+        profile: "strict-native" as const,
+        macroEnabled: false,
+        semanticDigest: "0".repeat(64),
+      },
+    };
+    expect(
+      pptxProjectionUpdateFromContent(
+        {
+          slides: [{
+            id: "slide-1",
+            objects: [{
+              id: "new-text",
+              type: "text",
+              x: 100,
+              y: 100,
+              width: 300,
+              height: 80,
+              rotation: 0,
+              content: { text: "Added" },
+            }],
+          }],
+        },
+        pptxBase,
+      ).operations,
+    ).toEqual([{ kind: "add-text-box", slideId: "slide-1", text: "Added" }]);
   });
 
   /**

@@ -1,7 +1,8 @@
-import { Workbook, parseCellRef, type CellValue } from "@ariadng/office/xlsx";
+import { Workbook, parseCellRef } from "@ariadng/office/xlsx";
 import { comparePackages } from "@ariadng/office/preservation";
 import type { XmlElement } from "@ariadng/office/xml";
 import { sha256Payload } from "./docx-lens";
+import { xlsxOperationsBetween } from "./office-content";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -12,6 +13,12 @@ import type {
   LensPreservedCarry,
   SpectraLens,
 } from "./types";
+import {
+  xlsxProjectionSchema,
+  type XlsxProjection,
+  type XlsxSemanticDelta,
+  type XlsxSheetProjection,
+} from "./projection-contracts";
 
 const SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
@@ -19,39 +26,7 @@ export const XLSX_RECOGNIZED_FORMULAS = new Set([
   "ABS", "AVERAGE", "COUNT", "COUNTA", "IF", "MAX", "MIN", "ROUND", "SUM",
 ]);
 
-export type XlsxCellProjection = {
-  id: string;
-  ref: string;
-  value: CellValue;
-  formula?: string;
-  formulaSupport?: "recognized" | "cached-only";
-  style?: Record<string, unknown>;
-};
-
-export type XlsxSheetProjection = {
-  id: string;
-  name: string;
-  cells: XlsxCellProjection[];
-  merges: readonly string[];
-};
-
-export type XlsxProjection = {
-  sheets: XlsxSheetProjection[];
-  definedNames: Array<{ name: string; ref: string; sheet?: string }>;
-  nativeBinding: {
-    version: 1;
-    format: "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam";
-    profile: LensCompatibilityProfile;
-    macroEnabled: boolean;
-    semanticDigest: string;
-    recognizedFormulaFunctions: string[];
-  };
-};
-
-export type XlsxSemanticDelta =
-  | { kind: "set-cell"; sheetId: string; ref: string; value: CellValue }
-  | { kind: "set-formula"; sheetId: string; ref: string; formula: string }
-  | { kind: "ai-edit"; operations: Exclude<XlsxSemanticDelta, { kind: "ai-edit" }>[] };
+export type { XlsxCellProjection, XlsxProjection, XlsxSemanticDelta, XlsxSheetProjection } from "./projection-contracts";
 
 export class XlsxLensError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -151,7 +126,7 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
   const fidelityMap: LensFidelityMap = { version: 1, profile, entries };
   const definedNames = workbook.definedNames().map((item) => ({ name: item.name, ref: item.ref, ...(item.sheet ? { sheet: item.sheet } : {}) }));
   const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify({ sheets: sheets.map((s) => ({ name: s.name, cells: s.cells.map(({ ref, value, formula }) => ({ ref, value, formula })) })), definedNames })));
-  const projection: XlsxProjection = {
+  const projection = xlsxProjectionSchema.parse({
     sheets,
     definedNames,
     nativeBinding: {
@@ -162,7 +137,7 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
       semanticDigest,
       recognizedFormulaFunctions: [...XLSX_RECOGNIZED_FORMULAS].sort(),
     },
-  };
+  });
   return { projection, fidelityMap };
 }
 
@@ -180,6 +155,7 @@ async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: Xlsx
     const sheet = findSheet(workbook, operation.sheetId);
     parseCellRef(operation.ref);
     if (operation.kind === "set-formula") sheet.setFormula(operation.ref, operation.formula);
+    else if (operation.kind === "clear-cell") sheet.setCell(operation.ref, null);
     else {
       if (sheet.getFormula(operation.ref)) throw new XlsxLensError("XLSX_FORMULA_LITERALIZATION_BLOCKED", "A formula cell cannot be replaced by a literal through a value edit. Edit its formula text instead.");
       sheet.setCell(operation.ref, operation.value);
@@ -199,27 +175,7 @@ export const xlsxLens: SpectraLens<XlsxProjection, XlsxSemanticDelta> = {
   },
   mutate: applyDelta,
   async materialize({ projection, carry }) {
-    const beforeSheets = new Map(carry.projection.sheets.map((sheet) => [sheet.id, sheet]));
-    const operations: Exclude<XlsxSemanticDelta, { kind: "ai-edit" }>[] = [];
-    for (const sheet of projection.sheets) {
-      const previous = beforeSheets.get(sheet.id);
-      if (!previous) throw new XlsxLensError("XLSX_TOPOLOGY_UNSUPPORTED", "Adding worksheets to a mounted Excel file is not available in strict native mode yet.");
-      const oldCells = new Map(previous.cells.map((cell) => [cell.ref, cell]));
-      for (const cell of sheet.cells) {
-        const old = oldCells.get(cell.ref);
-        if (!old) {
-          if (cell.formula) operations.push({ kind: "set-formula", sheetId: sheet.id, ref: cell.ref, formula: cell.formula });
-          else operations.push({ kind: "set-cell", sheetId: sheet.id, ref: cell.ref, value: cell.value });
-          continue;
-        }
-        if (cell.formula !== old.formula) {
-          if (!cell.formula) throw new XlsxLensError("XLSX_FORMULA_LITERALIZATION_BLOCKED", `Formula ${sheet.name}!${cell.ref} cannot be silently rewritten as a literal.`);
-          operations.push({ kind: "set-formula", sheetId: sheet.id, ref: cell.ref, formula: cell.formula });
-        } else if (!cell.formula && JSON.stringify(cell.value) !== JSON.stringify(old.value)) {
-          operations.push({ kind: "set-cell", sheetId: sheet.id, ref: cell.ref, value: cell.value });
-        }
-      }
-    }
+    const operations = xlsxOperationsBetween(carry.projection, projection);
     return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }) : carry.payload;
   },
   async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> {

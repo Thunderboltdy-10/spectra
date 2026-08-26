@@ -11,6 +11,10 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import {
+  documentBlocksFromJson,
+  docxIntentFromDocumentBlocks,
+} from "../lenses/document-projection";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertCircle,
@@ -2381,101 +2385,12 @@ export function documentJsonFromContent(
   return { type: "doc", content: contentNodes };
 }
 
-export function blocksFromJson(json: JSONContent) {
-  const nodes = Array.isArray(json.content) ? json.content : [];
-  const seenIds = new Set<string>();
-  return nodes
-    .map((node, index) => {
-      let stableId =
-        typeof node.attrs?.blockId === "string" && node.attrs.blockId
-          ? node.attrs.blockId
-          : `block-${index + 1}`;
-      if (seenIds.has(stableId)) {
-        const base = stableId;
-        let n = 2;
-        while (seenIds.has(`${base}~${n}`)) n += 1;
-        stableId = `${base}~${n}`;
-      }
-      seenIds.add(stableId);
-      if (node.type === "equation")
-        return {
-          id: stableId,
-          type: "equation",
-          text: typeof node.attrs?.latex === "string" ? node.attrs.latex : "",
-          latex: typeof node.attrs?.latex === "string" ? node.attrs.latex : "",
-          attrs: {
-            display: node.attrs?.display ?? "block",
-            alignment: node.attrs?.alignment ?? "center",
-          },
-        };
-      if (node.type === "callout")
-        return {
-          id: stableId,
-          type: "callout",
-          text: contentTextFromJson(node),
-          attrs: { tone: node.attrs?.tone ?? "info" },
-        };
-      if (node.type === "table") {
-        const rows = (node.content ?? [])
-          .map((row) =>
-            (row.content ?? [])
-              .map((cell) => contentTextFromJson(cell).trim())
-              .join(" | "),
-          )
-          .filter(Boolean);
-        return {
-          id: stableId,
-          type: "table",
-          text: rows.join("\n"),
-          ...(node.attrs?.nativeReadOnly === true
-            ? { attrs: { nativeReadOnly: true } }
-            : {}),
-        };
-      }
-      const text =
-        node.type === "bulletList" || node.type === "orderedList"
-          ? (node.content ?? [])
-              .map((item) => contentTextFromJson(item))
-              .filter(Boolean)
-              .join("\n")
-          : contentTextFromJson(node);
-      const type =
-        node.type === "heading"
-          ? "heading"
-          : node.type === "blockquote"
-            ? "quote"
-            : node.type === "bulletList" || node.type === "orderedList"
-              ? "list"
-              : "paragraph";
-      const semanticAttrs =
-        node.type === "heading"
-          ? {
-              level: Number(node.attrs?.level) || 2,
-              styleId: `Heading${Number(node.attrs?.level) || 2}`,
-            }
-          : {};
-      return {
-        id: stableId,
-        type,
-        text,
-        ...(node.type === "heading" || node.attrs?.nativeReadOnly === true
-          ? {
-              attrs: {
-                ...semanticAttrs,
-                ...(node.attrs?.nativeReadOnly === true
-                  ? { nativeReadOnly: true }
-                  : {}),
-              },
-            }
-          : {}),
-      };
-    })
-    .filter((block) => block.text.length > 0);
-}
+export const blocksFromJson = documentBlocksFromJson;
 
 export function documentContentFromJson(json: JSONContent, previous: unknown) {
   const previousRecord = record(previous);
   const blocks = blocksFromJson(json);
+  const nativeIntent = docxIntentFromDocumentBlocks(previous, blocks);
   return {
     ...previousRecord,
     tiptap: json,
@@ -2490,6 +2405,9 @@ export function documentContentFromJson(json: JSONContent, previous: unknown) {
         title: block.text || `Section ${index + 1}`,
         level: 1,
       })),
+    ...(nativeIntent
+      ? { nativeIntent, nativeProjectionComplete: true as const }
+      : {}),
   };
 }
 

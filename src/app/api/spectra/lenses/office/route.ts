@@ -17,10 +17,22 @@ import {
   pptxLens,
   type PptxProjection,
 } from "@/features/spectra/lenses/pptx-lens";
+import type {
+  PptxOperation,
+  XlsxOperation,
+} from "@/features/spectra/lenses/projection-contracts";
 import {
   pptxArtifactContent,
+  pptxProjectionUpdateFromContent,
+  pptxProjectionFromContent,
   xlsxArtifactContent,
+  xlsxProjectionUpdateFromContent,
+  xlsxProjectionFromContent,
 } from "@/features/spectra/lenses/office-content";
+
+// Compatibility exports for existing callers. The implementation lives in the
+// canonical office-content module; routes only re-export the shared transform.
+export { pptxProjectionFromContent as contentToPptx, xlsxProjectionFromContent as contentToXlsx } from "@/features/spectra/lenses/office-content";
 
 export const runtime = "nodejs";
 
@@ -75,162 +87,6 @@ const _mediaTypes: Record<string, string> = {
 function id(value: string) {
   return value as Id<"spectraArtifacts">;
 }
-function contentToXlsx(content: unknown, base: XlsxProjection): XlsxProjection {
-  const raw = z
-    .object({
-      sheets: z.array(
-        z
-          .object({
-            id: z.string(),
-            cells: z.record(
-              z.string(),
-              z
-                .object({
-                  value: z.unknown().optional(),
-                  formula: z.string().optional(),
-                })
-                .passthrough(),
-            ),
-          })
-          .passthrough(),
-      ),
-    })
-    .passthrough()
-    .parse(content);
-  const byId = new Map(raw.sheets.map((sheet) => [sheet.id, sheet]));
-  return {
-    ...base,
-    sheets: base.sheets.map((sheet) => {
-      const next = byId.get(sheet.id);
-      if (!next) return sheet;
-      const cells = new Map(sheet.cells.map((cell) => [cell.ref, cell]));
-      for (const [ref, value] of Object.entries(next.cells)) {
-        const previous = cells.get(ref);
-        if (
-          previous?.formula &&
-          !value.formula &&
-          JSON.stringify(value.value) !== JSON.stringify(previous.value)
-        )
-          throw new Error(
-            `Formula ${sheet.name}!${ref} cannot be replaced by a literal through a value edit. Edit its formula text instead.`,
-          );
-        cells.set(ref, {
-          ...(previous ?? {
-            id: `xlsx:${sheet.id.replace(/^xlsx:sheet:/, "")}:${ref.toUpperCase()}`,
-            ref: ref.toUpperCase(),
-            value: null,
-          }),
-          value: value.value as never,
-          ...(value.formula
-            ? {
-                formula: value.formula.replace(/^=/, ""),
-                formulaSupport: previous?.formulaSupport,
-              }
-            : previous?.formula
-              ? {
-                  formula: previous.formula,
-                  formulaSupport: previous.formulaSupport,
-                }
-              : {}),
-        });
-      }
-      return { ...sheet, cells: [...cells.values()] };
-    }),
-  };
-}
-
-export function contentToPptx(content: unknown, base: PptxProjection): PptxProjection {
-  const raw = z
-    .object({
-      slides: z.array(
-        z
-          .object({
-            id: z.string(),
-            title: z.string().optional(),
-            speakerNotes: z.string().optional(),
-            objects: z
-              .array(
-                z
-                  .object({ id: z.string().optional(), type: z.string(), content: z.unknown() })
-                  .passthrough(),
-              )
-              .optional(),
-          })
-          .passthrough(),
-      ),
-    })
-    .passthrough()
-    .parse(content);
-  const baseById = new Map(base.slides.map((slide) => [slide.id, slide]));
-  const textOf = (next: { objects?: ReadonlyArray<{ type: string; content?: unknown }> }) =>
-    (next.objects ?? [])
-      .filter((object) => object.type === "text")
-      .map((object) => {
-        const value = object.content as { text?: unknown } | string;
-        return typeof value === "string"
-          ? value
-          : typeof value?.text === "string"
-            ? value.text
-            : "";
-      });
-
-  // A deck with no slides is not a request to empty the file — PowerPoint cannot
-  // hold one, so an empty list is a truncated payload. Keeping the base is the
-  // safe reading, and it is the one that cannot destroy someone's work.
-  if (!raw.slides.length) return base;
-
-  return {
-    ...base,
-    /**
-     * Slide identity and order come from the *incoming* content, not from the
-     * base projection. Mapping over `base.slides` pinned both, so adding,
-     * removing and reordering slides could be proven in the lens and the harness
-     * and still never reach a person: the write was correct and the boundary
-     * quietly discarded it. Known ids keep their native part and everything
-     * preserved on it; an unknown id is a new slide and says so, with no part
-     * and nothing preserved to claim.
-     */
-    slides: raw.slides.map((next, index) => {
-      const slide = baseById.get(next.id);
-      const text = textOf(next);
-      if (!slide) {
-        return {
-          id: next.id,
-          index,
-          title: next.title ?? "",
-          text,
-          objects: (next.objects ?? []).map((object) => object as PptxProjection["slides"][number]["objects"][number]),
-          // A slide Spectra has just made has no PowerPoint part behind it yet,
-          // so it carries no transition, no timing and no notes part. Copying
-          // those from a neighbour would be inventing preserved content.
-          hasTransition: false,
-          hasTiming: false,
-          speakerNotes: next.speakerNotes ?? "",
-        };
-      }
-      return {
-        ...slide,
-        index,
-        title: next.title ?? slide.title,
-        // Speaker notes are a promoted native region for a deck, so they have to
-        // survive the projection round trip: dropping them here would make the
-        // notes command look like it worked and change nothing in the file.
-        speakerNotes: next.speakerNotes ?? slide.speakerNotes,
-        text: text.length ? text : slide.text,
-        objects: slide.objects.map((object) => {
-          const incoming = (next.objects ?? []).find((candidate) => candidate.id === object.id);
-          if (!incoming) return object;
-          return {
-            ...object,
-            ...incoming,
-            content: incoming.content ?? object.content,
-          } as typeof object;
-        }),
-      };
-    }),
-  };
-}
-
 function contentFor(projection: OfficeProjection, isSheet: boolean) {
   return isSheet
     ? xlsxArtifactContent(projection as XlsxProjection)
@@ -242,8 +98,8 @@ export function projectionFor(
   isSheet: boolean,
 ) {
   return isSheet
-    ? contentToXlsx(content, base as XlsxProjection)
-    : contentToPptx(content, base as PptxProjection);
+    ? xlsxProjectionFromContent(content, base as XlsxProjection)
+    : pptxProjectionFromContent(content, base as PptxProjection);
 }
 
 /** Queue one verified XLSX/PPTX payload for the Bridge. AI and human edits
@@ -265,19 +121,22 @@ export async function materializeOfficeArtifact(
     ? await xlsxLens.open(cloudPayload)
     : await pptxLens.open(cloudPayload);
   const baseProjection = baseOpened.projection as OfficeProjection;
-  const projection = projectionFor(content, baseProjection, isSheet);
+  const update = isSheet
+    ? xlsxProjectionUpdateFromContent(content, baseProjection as XlsxProjection)
+    : pptxProjectionUpdateFromContent(content, baseProjection as PptxProjection);
+  const projection = update.projection as OfficeProjection;
   const regionIds = changedRegions(baseProjection, projection, isSheet);
-  const output = isSheet
-    ? await xlsxLens.materialize({
-        projection: projection as XlsxProjection,
-        carry: (baseOpened as Awaited<ReturnType<typeof xlsxLens.open>>)
-          .preservedCarry,
-      })
-    : await pptxLens.materialize({
-        projection: projection as PptxProjection,
-        carry: (baseOpened as Awaited<ReturnType<typeof pptxLens.open>>)
-          .preservedCarry,
-      });
+  const output = update.operations.length
+    ? isSheet
+      ? await xlsxLens.mutate(
+          (baseOpened as Awaited<ReturnType<typeof xlsxLens.open>>).preservedCarry,
+          { kind: "ai-edit", operations: update.operations as XlsxOperation[] },
+        )
+      : await pptxLens.mutate(
+          (baseOpened as Awaited<ReturnType<typeof pptxLens.open>>).preservedCarry,
+          { kind: "ai-edit", operations: update.operations as PptxOperation[] },
+        )
+    : cloudPayload;
   const hash = await sha256Payload(output);
   if (hash === cloudTruth.hash) return { state: "unchanged" as const, hash };
   const [next, comparison] = await Promise.all([

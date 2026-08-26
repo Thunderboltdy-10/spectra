@@ -2,6 +2,10 @@ import * as Y from "yjs";
 import { yXmlFragmentToProsemirrorJSON } from "y-prosemirror";
 import { enumerateArtifactRegions, validateArtifactContent } from "../../../artifacts/registry";
 import type { SemanticRegion } from "../../../artifacts/types";
+import {
+  documentBlocksFromJson,
+  type DocumentJsonNode,
+} from "../../../lenses/document-projection";
 import type {
   LegacyWorkSnapshot,
   WorkActorIdentity,
@@ -31,23 +35,12 @@ export type DocumentWorkContent = Record<string, unknown> & {
   tiptap?: Record<string, unknown>;
 };
 
-type ProseMirrorJson = {
-  type?: string;
-  text?: string;
-  attrs?: Record<string, unknown>;
-  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
-  content?: ProseMirrorJson[];
-};
+type ProseMirrorJson = DocumentJsonNode;
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
-}
-
-function textContent(node: ProseMirrorJson): string {
-  if (typeof node.text === "string") return node.text;
-  return (node.content ?? []).map(textContent).join(node.type === "listItem" ? "" : "\n");
 }
 
 function inlineText(value: string): ProseMirrorJson[] | undefined {
@@ -112,6 +105,29 @@ function blockToJson(block: Record<string, unknown>, index: number): ProseMirror
       attrs: { blockId: id, language: attrs.language ?? null },
       content: inlineText(value),
     };
+  if (block.type === "table") {
+    const rows = Array.isArray(block.rows)
+      ? block.rows.flatMap((row) =>
+          Array.isArray(row)
+            ? [row.map((cell) => String(cell ?? ""))]
+            : [],
+        )
+      : value.split(/\r?\n/).map((row) => row.split("|").map((cell) => cell.trim()));
+    return {
+      type: "table",
+      attrs: {
+        blockId: id,
+        ...(attrs.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
+      },
+      content: (rows.length ? rows : [[""]]).map((row, rowIndex) => ({
+        type: "tableRow",
+        content: row.map((cell) => ({
+          type: rowIndex === 0 ? "tableHeader" : "tableCell",
+          content: [{ type: "paragraph", content: inlineText(cell) }],
+        })),
+      })),
+    };
+  }
   return {
     type: "paragraph",
     attrs: { blockId: id },
@@ -200,71 +216,20 @@ function populateFragment(fragment: Y.XmlFragment, json: ProseMirrorJson) {
   appendJsonNode(fragment, json);
 }
 
-function blocksFromJson(json: ProseMirrorJson) {
-  const seen = new Set<string>();
-  return (json.content ?? []).map((node, index) => {
-    let id =
-      typeof node.attrs?.blockId === "string" && node.attrs.blockId
-        ? node.attrs.blockId
-        : `block-${index + 1}`;
-    if (seen.has(id)) {
-      let suffix = 2;
-      while (seen.has(`${id}~${suffix}`)) suffix += 1;
-      id = `${id}~${suffix}`;
-    }
-    seen.add(id);
-    const text = textContent(node).trimEnd();
-    if (node.type === "heading") {
-      const level = Number(node.attrs?.level) || 2;
-      return { id, type: "heading", text, attrs: { level, styleId: `Heading${level}` } };
-    }
-    if (node.type === "blockquote") return { id, type: "quote", text };
-    if (node.type === "bulletList" || node.type === "orderedList")
-      return { id, type: "list", text };
-    if (node.type === "callout")
-      return { id, type: "callout", text, attrs: { tone: node.attrs?.type ?? "info" } };
-    if (node.type === "equation")
-      return {
-        id,
-        type: "equation",
-        text: String(node.attrs?.latex ?? ""),
-        latex: String(node.attrs?.latex ?? ""),
-        attrs: {
-          display: node.attrs?.display ?? "block",
-          alignment: node.attrs?.alignment ?? "center",
-        },
-      };
-    if (node.type === "codeBlock")
-      return { id, type: "code", text, attrs: { language: node.attrs?.language ?? undefined } };
-    if (node.type === "spectraReference")
-      return {
-        id,
-        type: "paragraph",
-        text: String(node.attrs?.label ?? "Referenced work"),
-        reference: node.attrs,
-      };
-    if (node.type === "spectraCitation")
-      return {
-        id,
-        type: "paragraph",
-        text: String(node.attrs?.label ?? "Citation"),
-        citation: node.attrs,
-      };
-    return { id, type: "paragraph", text };
-  });
-}
-
 function documentProjection(doc: Y.Doc): DocumentWorkContent {
   assertWorkModelMetadata(doc, "document", WORK_YJS_SCHEMA_VERSION);
   const root = workRoot(doc);
   const extras = yToPlain(root.get("extras"));
   const fragment = doc.getXmlFragment(DOCUMENT_YJS_FRAGMENT);
   const tiptap = yXmlFragmentToProsemirrorJSON(fragment) as ProseMirrorJson;
-  const blocks = blocksFromJson(tiptap);
+  const blocks = documentBlocksFromJson(tiptap);
   return {
     ...record(extras),
     tiptap,
     blocks: blocks.length ? blocks : [{ id: "intro", type: "paragraph", text: "" }],
+    ...(record(extras).nativeBinding
+      ? { nativeProjectionComplete: true as const }
+      : {}),
     outline: blocks
       .filter((block) => block.type === "heading")
       .map((block) => ({
@@ -307,7 +272,13 @@ export class DocumentYjsAdapter implements WorkYjsAdapter<DocumentWorkContent> {
     doc.transact(() => {
       const fragment = doc.getXmlFragment(DOCUMENT_YJS_FRAGMENT);
       const root = workRoot(doc);
-      const { blocks: _blocks, tiptap: _tiptap, outline: _outline, ...extras } = model;
+      const {
+        blocks: _blocks,
+        tiptap: _tiptap,
+        outline: _outline,
+        nativeIntent: _nativeIntent,
+        ...extras
+      } = model;
       root.set("extras", plainToY(extras));
       const nextDocument = documentContentToProseMirrorJson(model);
       const currentDocument = yXmlFragmentToProsemirrorJSON(

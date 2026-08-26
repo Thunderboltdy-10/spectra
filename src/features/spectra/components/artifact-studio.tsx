@@ -63,6 +63,7 @@ import { ResourceSurface } from "../bridge/resource-surface";
 import { headerSyncMessage } from "../bridge/status";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useSyncPresentation } from "../bridge/use-sync-presentation";
+import { BRIDGE_SETTINGS_HREF } from "../bridge/client";
 import { formatByteCount } from "../../../../shared/human-format";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import {
@@ -5732,6 +5733,14 @@ function ArtifactStudioEditor({
               >
                 {artifactSyncMessage}
               </span>
+            ) : null}
+            {presentation.action?.kind === "reconnect" ? (
+              <a
+                href={BRIDGE_SETTINGS_HREF}
+                className="text-micro font-semibold text-[var(--text-primary)]"
+              >
+                {presentation.action.label}
+              </a>
             ) : null}
             {collaboratorCount > 0 ? (
               <CollaborationPresenceIndicator

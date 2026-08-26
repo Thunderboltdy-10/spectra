@@ -282,7 +282,12 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
     };
   }
   if (truth.key === "unavailable") {
-    return { ...truth, state: "offline", ready: false };
+    return {
+      ...truth,
+      state: "offline",
+      action: { label: "Reconnect", kind: "reconnect" },
+      ready: false,
+    };
   }
   if (truth.key === "offline") {
     return { ...truth, state: "offline", ready: false };

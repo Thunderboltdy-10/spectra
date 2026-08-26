@@ -25,6 +25,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_updater::UpdaterExt;
 
 struct BridgeRuntime {
     grants: Arc<GrantRegistry>,
@@ -66,12 +67,16 @@ impl LocalBridgeControl for SpectraLocalControl {
         // Pairing is initiated and completed from Spectra; the tray window stays hidden.
     }
 
-    async fn auto_pair(&self) -> Result<(), String> {
+    async fn auto_pair(&self, challenge: &str) -> Result<(), String> {
         let offer = self
             .state
-            .take_pairing_offer()
+            .take_pairing_offer(challenge)
             .map_err(|error| error.to_string())?;
         complete_pairing_offer(&offer, &self.state, &self.journal).await
+    }
+
+    async fn request_update(&self) -> Result<String, String> {
+        request_bridge_update(&self.app).await
     }
 
     fn mounts(&self) -> Vec<LocalMountStatus> {
@@ -1695,6 +1700,24 @@ async fn complete_pairing_offer(
         .set_config("browser_session_token", &session_token)
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+async fn request_bridge_update(app: &tauri::AppHandle) -> Result<String, String> {
+    let tray_sentence = "Look for Spectra Bridge near the clock and open it to install the update.";
+    let updater = match app.updater() {
+        Ok(updater) => updater,
+        Err(_) => return Ok(tray_sentence.into()),
+    };
+    match updater.check().await {
+        Ok(Some(update)) => {
+            update
+                .download_and_install(|_, _| {}, || {})
+                .await
+                .map_err(|_| tray_sentence.to_string())?;
+            Ok("Spectra Bridge is installing the update and will restart.".into())
+        }
+        Ok(None) | Err(_) => Ok(tray_sentence.into()),
+    }
 }
 
 fn should_repair_pairing(error: &str) -> bool {

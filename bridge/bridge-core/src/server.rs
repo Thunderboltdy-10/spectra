@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -21,8 +21,8 @@ pub struct ServerState {
     allowed_origins: RwLock<HashSet<String>>,
     session_token: RwLock<Vec<u8>>,
     bind_error: RwLock<Option<String>>,
-    pending_pairing: RwLock<Option<PairingOffer>>,
-    pairing_completion: RwLock<Option<(String, String)>>,
+    pending_pairing: RwLock<HashMap<String, PairingOffer>>,
+    pairing_completion: RwLock<HashMap<String, String>>,
     device_id: RwLock<Option<String>>,
     cloud_seen_at: AtomicU64,
     local_control: RwLock<Option<Arc<dyn LocalBridgeControl>>>,
@@ -31,7 +31,8 @@ pub struct ServerState {
 #[async_trait]
 pub trait LocalBridgeControl: Send + Sync {
     fn pairing_requested(&self);
-    async fn auto_pair(&self) -> Result<(), String>;
+    async fn auto_pair(&self, challenge: &str) -> Result<(), String>;
+    async fn request_update(&self) -> Result<String, String>;
     fn mounts(&self) -> Vec<LocalMountStatus>;
     async fn select_mount(&self) -> Result<(), String>;
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String>;
@@ -54,8 +55,8 @@ impl ServerState {
             allowed_origins: RwLock::new(origins),
             session_token: RwLock::new(vec![]),
             bind_error: RwLock::new(None),
-            pending_pairing: RwLock::new(None),
-            pairing_completion: RwLock::new(None),
+            pending_pairing: RwLock::new(HashMap::new()),
+            pairing_completion: RwLock::new(HashMap::new()),
             device_id: RwLock::new(None),
             cloud_seen_at: AtomicU64::new(0),
             local_control: RwLock::new(None),
@@ -78,6 +79,13 @@ impl ServerState {
         *self.paired.write().unwrap() = true;
         base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
     }
+    fn prune_expired_pairing(&self) {
+        let now = unix_ms();
+        self.pending_pairing
+            .write()
+            .unwrap()
+            .retain(|_, offer| offer.expires_at > now);
+    }
     pub fn accept_pairing_offer(&self, offer: PairingOffer) -> anyhow::Result<()> {
         anyhow::ensure!(
             offer.challenge.len() >= 32 && offer.challenge.len() <= 256,
@@ -96,48 +104,74 @@ impl ServerState {
                 .contains(&offer.browser_origin),
             "origin is not configured for Spectra"
         );
-        *self.pending_pairing.write().unwrap() = Some(offer);
+        self.prune_expired_pairing();
+        self.pending_pairing
+            .write()
+            .unwrap()
+            .insert(offer.challenge.clone(), offer);
         if let Some(control) = self.local_control.read().unwrap().as_ref() {
             control.pairing_requested();
         }
         Ok(())
     }
     pub fn confirm_pairing_code(&self, code: &str) -> anyhow::Result<PairingOffer> {
-        let offer = self
-            .pending_pairing
-            .write()
-            .unwrap()
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("no pairing is waiting"))?;
-        anyhow::ensure!(
-            offer.expires_at > unix_ms() && offer.short_code == code,
-            "pairing code does not match"
-        );
-        Ok(offer)
+        self.prune_expired_pairing();
+        let mut pending = self.pending_pairing.write().unwrap();
+        let challenge = pending
+            .iter()
+            .find(|(_, offer)| offer.short_code == code)
+            .map(|(challenge, _)| challenge.clone())
+            .ok_or_else(|| anyhow::anyhow!("pairing code does not match"))?;
+        Ok(pending
+            .remove(&challenge)
+            .expect("pairing offer was just found"))
     }
-    pub fn take_pairing_offer(&self) -> anyhow::Result<PairingOffer> {
+    pub fn take_pairing_offer(&self, challenge: &str) -> anyhow::Result<PairingOffer> {
+        self.prune_expired_pairing();
         let offer = self
             .pending_pairing
             .write()
             .unwrap()
-            .take()
+            .remove(challenge)
             .ok_or_else(|| anyhow::anyhow!("no pairing is waiting"))?;
         anyhow::ensure!(offer.expires_at > unix_ms(), "pairing offer expired");
         Ok(offer)
     }
     pub fn pending_pairing_code(&self) -> Option<String> {
+        self.prune_expired_pairing();
         self.pending_pairing
             .read()
             .unwrap()
-            .as_ref()
+            .values()
+            .max_by_key(|offer| offer.expires_at)
             .map(|offer| offer.short_code.clone())
+    }
+    pub fn pending_pairing_codes(&self) -> Vec<String> {
+        self.prune_expired_pairing();
+        let mut codes: Vec<String> = self
+            .pending_pairing
+            .read()
+            .unwrap()
+            .values()
+            .map(|offer| offer.short_code.clone())
+            .collect();
+        codes.sort();
+        codes
     }
     pub fn is_paired(&self) -> bool {
         *self.paired.read().unwrap()
     }
     pub fn complete_pairing(&self, challenge: String, origin: String) -> String {
-        let token = self.pair(origin);
-        *self.pairing_completion.write().unwrap() = Some((challenge, token.clone()));
+        let token = if self.is_paired() {
+            self.resume_session(&origin)
+                .unwrap_or_else(|| self.pair(origin))
+        } else {
+            self.pair(origin)
+        };
+        self.pairing_completion
+            .write()
+            .unwrap()
+            .insert(challenge, token.clone());
         token
     }
     pub fn restore_pairing(&self, origin: String, token: &str) -> anyhow::Result<()> {
@@ -198,14 +232,7 @@ impl ServerState {
         }
     }
     fn take_pairing_completion(&self, challenge: &str) -> Option<String> {
-        let mut completion = self.pairing_completion.write().unwrap();
-        if completion
-            .as_ref()
-            .is_some_and(|(expected, _)| expected.as_bytes().ct_eq(challenge.as_bytes()).into())
-        {
-            return completion.take().map(|(_, token)| token);
-        }
-        None
+        self.pairing_completion.write().unwrap().remove(challenge)
     }
 }
 
@@ -228,6 +255,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/pair", post(pair_offer))
         .route("/v1/pair/status", post(pair_status))
         .route("/v1/session/resume", post(resume))
+        .route("/v1/update", post(request_update))
         .merge(protected)
         .layer(
             CorsLayer::new()
@@ -313,11 +341,11 @@ async fn pair_offer(
     State(state): State<Arc<ServerState>>,
     Json(offer): Json<PairingOffer>,
 ) -> Response {
-    match state.accept_pairing_offer(offer) {
+    match state.accept_pairing_offer(offer.clone()) {
         Ok(()) => {
             let control = state.local_control.read().unwrap().clone();
             match control {
-                Some(control) => match control.auto_pair().await {
+                Some(control) => match control.auto_pair(&offer.challenge).await {
                     Ok(()) => StatusCode::NO_CONTENT.into_response(),
                     Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
                 },
@@ -329,6 +357,21 @@ async fn pair_offer(
             }
         }
         Err(error) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    }
+}
+
+async fn request_update(State(state): State<Arc<ServerState>>) -> Response {
+    let control = state.local_control.read().unwrap().clone();
+    match control {
+        Some(control) => match control.request_update().await {
+            Ok(message) => Json(serde_json::json!({ "message": message })).into_response(),
+            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Bridge controls are not ready",
+        )
+            .into_response(),
     }
 }
 
@@ -467,8 +510,62 @@ mod tests {
             expires_at: unix_ms() + 60_000,
         };
         state.accept_pairing_offer(offer.clone()).unwrap();
-        assert_eq!(state.take_pairing_offer().unwrap(), offer);
-        assert!(state.take_pairing_offer().is_err());
+        assert_eq!(state.take_pairing_offer(&offer.challenge).unwrap(), offer);
+        assert!(state.take_pairing_offer(&offer.challenge).is_err());
+    }
+    #[test]
+    fn six_pairing_offers_keep_every_code() {
+        let state = ServerState::unpaired();
+        for index in 0..6 {
+            state
+                .accept_pairing_offer(PairingOffer {
+                    challenge: format!("{:0>64}", index),
+                    short_code: format!("{index:06}"),
+                    browser_origin: "http://localhost:3000".into(),
+                    expires_at: unix_ms() + 60_000,
+                })
+                .unwrap();
+        }
+        assert_eq!(
+            state.pending_pairing_codes(),
+            vec!["000000", "000001", "000002", "000003", "000004", "000005"]
+        );
+        let first = state.take_pairing_offer(&"0".repeat(64)).unwrap();
+        assert_eq!(first.short_code, "000000");
+        assert_eq!(state.pending_pairing_codes().len(), 5);
+        assert!(
+            state
+                .pending_pairing_codes()
+                .contains(&"000005".to_string())
+        );
+    }
+    #[test]
+    fn complete_pairing_reuses_the_session_for_a_second_tab() {
+        let state = ServerState::unpaired();
+        let first = state.complete_pairing("a".repeat(64), "http://localhost:3000".into());
+        let second = state.complete_pairing("b".repeat(64), "http://localhost:3000".into());
+        assert_eq!(first, second);
+        assert_eq!(
+            state.take_pairing_completion(&"a".repeat(64)).as_deref(),
+            Some(first.as_str())
+        );
+        assert_eq!(
+            state.take_pairing_completion(&"b".repeat(64)).as_deref(),
+            Some(second.as_str())
+        );
+    }
+    #[test]
+    fn wrong_pairing_code_leaves_the_waiting_offer() {
+        let state = ServerState::unpaired();
+        let offer = PairingOffer {
+            challenge: "c".repeat(64),
+            short_code: "654321".into(),
+            browser_origin: "http://localhost:3000".into(),
+            expires_at: unix_ms() + 60_000,
+        };
+        state.accept_pairing_offer(offer.clone()).unwrap();
+        assert!(state.confirm_pairing_code("000000").is_err());
+        assert_eq!(state.pending_pairing_codes(), vec!["654321"]);
     }
     #[test]
     fn paired_session_can_resume_only_for_an_allowed_origin() {

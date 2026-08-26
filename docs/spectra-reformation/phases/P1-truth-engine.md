@@ -177,3 +177,14 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Taste: Untitled instead of a name prompt; Live stays off the header when copies agree; presenter `action` is not wired to Reconnect.
 - Relevant checks: focused Vitest 3 files / 27 tests; disclosure wording in `bridge-contract.test.ts`; new-file ESLint; secret scan. Two pre-existing I2 string-scan assertions in `bridge-contract.test.ts` remain red (restore key now derived; `device || linked`). `tsc --noEmit` retains the five recorded blockers plus `bridge-chaos.test.ts:172`; this unit adds none.
 - Status: IMPLEMENTED. No acceptance or verifier verdict claimed.
+
+## Implementer log — P1.I4 (2026-08-26)
+
+- Files and devices is three storage radios (This PC / Spectra / Both) plus a protected-original switch; Both is recommended in the UI. Consequence sentences replace policy enums (`mirror-from-disk`, `cloudContent`, `on-save-open`).
+- Item-level Spectra never claims the disk file was deleted: the file stays on disk when a local copy already exists (honors the P1.I1 field note). Unconfigured accounts still default to engine `spectra` so we do not silently start writing the PC.
+- Pairing offers are a map by challenge: six tabs keep six codes; a wrong code does not consume the offer; an already-paired second tab reuses the session token (WC-1).
+- Health parse is `.passthrough()` (WC-4). Reachability distinguishes not-running vs port-taken vs running. Pairing errors never surface `Failed to fetch`. Update Bridge POSTs `/v1/update` and falls back to the tray sentence.
+- Unavailable mounts speak unavailable-truth, never `0 of N`. Dead Open on device / fake image-preview / Bridge-can-stream copy are gone. Reconnect on the studio header and resource surface goes to Files and devices.
+- Taste: Open on device deleted (no honest OS-open path). Live signed-in pairing/toggle/Word journey is P1.V3, not this unit.
+- Relevant checks: focused Vitest `sync-toggles` + `sync-presentation` 12/12; `bridge-contract` 9 pass / 2 pre-existing I2 string-scans still red (restore key; `toPreset === "device"`) and not rewritten. Rust core `--lib` 40/40 (was 37); chaos 13/13 unchanged; `cargo check` bridge-app OK; new-file ESLint; secret scan. `tsc --noEmit` retains the five recorded blockers plus `bridge-chaos.test.ts:172`; this unit adds none.
+- Status: IMPLEMENTED. No acceptance or verifier verdict claimed.

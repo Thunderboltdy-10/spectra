@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bridgeConnectionState, protocolMajor } from "../bridge/client";
+import { bridgeConnectionState, parseBridgeHealth, protocolMajor } from "../bridge/client";
 import { replicaDisclosure, selectSyncTruth } from "../bridge/status";
 import { POLICY_PRESETS } from "../../../../convex/syncPolicy";
 import fs from "node:fs";
@@ -9,6 +9,15 @@ describe("N3 Bridge contract", () => {
   it("shows an update-required state on a protocol-major mismatch", () => {
     expect(protocolMajor("1.4")).toBe(1);
     expect(bridgeConnectionState({ version: "0.1", paired: true, protocolVersion: "2.0", port: 47615 })).toBe("update-required");
+    expect(
+      parseBridgeHealth({
+        version: "0.2",
+        paired: true,
+        protocolVersion: "1.0",
+        port: 47615,
+        newerField: "ignored",
+      })?.protocolVersion,
+    ).toBe("1.0");
   });
 
   it("does not call a locally paired Bridge connected until its authenticated status is available", () => {

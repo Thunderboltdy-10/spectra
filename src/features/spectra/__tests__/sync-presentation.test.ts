@@ -86,4 +86,15 @@ describe("sync presentation (P1.I3)", () => {
     expect(lines.join(" ")).not.toMatch(/\bCurrent\b/);
     expect(lines[0]).toContain("This device · Up to date");
   });
+
+  it("offers Reconnect when the local copy is unavailable", () => {
+    const presentation = presentSync({
+      replicas: [{ kind: "local", state: "unavailable" }],
+      openConflictCount: 0,
+      replicaPendingCount: 0,
+      online: true,
+    });
+    expect(presentation.action?.kind).toBe("reconnect");
+    expect(presentation.action?.label).toBe("Reconnect");
+  });
 });

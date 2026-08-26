@@ -55,6 +55,16 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
       "This computer is no longer connected to Spectra. Open Spectra Bridge on this PC to continue.",
   },
   {
+    test: /failed to fetch|networkerror|load failed|econnrefused/i,
+    message: () =>
+      "Spectra Bridge is not running on this PC. Open it, then try again.",
+  },
+  {
+    test: /port .+ unavailable|address already in use|os error 10048/i,
+    message: () =>
+      "Something else is using the Spectra Bridge connection on this PC. Close the other app, then try again.",
+  },
+  {
     test: /write-expired|write-failed/i,
     message: () => "The save did not finish. Try again.",
   },

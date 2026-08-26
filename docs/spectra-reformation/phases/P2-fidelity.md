@@ -2,9 +2,9 @@
 
 **Goal:** the full current editing surface on mounted Office files becomes provably safe (Pablo's "broad" decision): one schema per format, real 3-way merge, stable identity, ghosts made real or honestly refusing, sheets engine correct — with the composition seam under contract test for every capability. After P2, "edit a real DOCX in Spectra and in Word" is boring.
 
-**Prerequisites:** P1.I1, P1.I2 accepted. **Architecture:** ARCHITECTURE-FIDELITY (all), ARCHITECTURE-TRUTH §1. **Findings absorbed:** Parts III–VI wholesale (DOC-*, XLS-*, PPT-*, PKG-*), SYS-1/3/4, TEST-2/3.
+**Prerequisites:** P1.I1, P1.I2 accepted (met 2026-08-26; P1 complete). **Architecture:** ARCHITECTURE-FIDELITY (all), ARCHITECTURE-TRUTH §1. **Findings absorbed:** Parts III–VI wholesale (DOC-*, XLS-*, PPT-*, PKG-*), SYS-1/3/4, TEST-2/3.
 
-**Difficulty (PROCESS §4):** I1, I2, I3, V1 = Hard / GPT 5.6 Sol xhigh. I4, I5, V2 = Medium-thinking / Grok 4.6 High. Blocked until P1.I1+I2 ACCEPTED.
+**Difficulty (PROCESS §4):** I1, I2, I3, V1 = Hard / GPT 5.6 Sol xhigh. I4, I5, V2 = Medium-thinking / Grok 4.6 High. First unit: **P2.I1**. V1/V2 verifiers follow PROCESS §2 / R17: repair a holdable class in-session; hand off a paste-ready prompt only when the class is too complex to hold.
 
 ## P2.I1 — One schema per format (H)
 

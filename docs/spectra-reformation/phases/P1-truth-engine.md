@@ -4,9 +4,9 @@
 
 **Prerequisites:** P0.I1 and P0.I2 accepted. **Architecture:** ARCHITECTURE-TRUTH (all), CANON R1–R4, R14–R15.
 
-**Difficulty / routing (PROCESS §4):** I1, I2, V1, V2 = **Hard / GPT 5.6 Sol xhigh**. I3, I4, V3 = **Medium-thinking / Grok 4.6 High** (V3 may be Sol if Pablo wants the journey graded harder than I3/I4). **No Simple. No Luna on any P1 I or V.** Hard units are serial. Never two live-product verifiers at once. I1 and I2 were the one clean parallel pair (Convex vs Rust) and are **IMPLEMENTED** — not ACCEPTED until V1/V2 pass.
+**I1, I2, V1, V2 = Hard / GPT 5.6 Sol xhigh.** I3, I4, V3 = **Medium-thinking / Grok 4.6 High**. **No Simple. No Luna on any P1 I or V.** Hard units were serial. Never two live-product verifiers at once.
 
-**Remaining launch order:** V1 then V2, then I3 then I4 (same studio/header/dock — serial), then V3. P2 starts only after P1.I1 + P1.I2 **ACCEPTED** (verifier, not I-status).
+**Phase complete (Pablo 2026-08-26):** P1.I1–I4 **ACCEPTED**. P1.V1–V3 **VERIFIED** (V3 owner-accepted). Next remaining unit is **P2.I1**. W6 / DOC-5 / unfinished-control stays P2.I1. Later VUs follow PROCESS §2 / R17 (class-wide in-VU repair; handoff only when the class is too complex to hold).
 
 **Findings absorbed:** CS-1..CS-12 (whole cloud-sync part), BR-1..BR-9 (Bridge macro layer), WC-1..WC-5 (pairing/client), ST-1/ST-2 (status), PL-1 placement leaks touching replicas, DOC-3's stale-base window (the truth half; the merge half is P2).
 
@@ -56,7 +56,7 @@ Goal cards: first-run pairing by a novice; mount a real folder; toggle each stor
 
 ## Exit gate
 
-Property + chaos suites green in their owning verification units; journey PASS; budgets (quiet mount, idle product) met; no `pending`/`current` lie reproducible by the verifier; Pablo pass. P2 starts only after P1.I1 + P1.I2 ACCEPTED.
+Property + chaos suites green in their owning verification units; journey PASS (Pablo owner-accepted V3 2026-08-26); no `pending`/`current` lie remaining in P1 scope. W6 / DOC-5 is P2.I1. P2 is unblocked.
 
 ## Implementer log — P1.I1 (2026-08-25)
 
@@ -286,4 +286,11 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Out of scope: W6 / P2.I1 / PS 6 / PS 8. No `convex push`. Two pre-existing I2 string-scans not rewritten.
 - Checks: focused Vitest 42 pass / 2 I2 string-scans; Rust lock-queue and owner-file tests pass; Bridge rebuilt and launched.
 - Status: **IMPLEMENTED**. P1.V3 stays REJECTED pending independent walk. No acceptance claimed.
+
+## Owner close-out — P1.V3 / P1 complete (Pablo 2026-08-26)
+
+- Pablo owner-accepted P1.V3. Remaining W1/W3 class closed in the V3 remaining-lies session (hash-less lock reports; F6 drains despite reconcile races; leftover `~$` is not a live hold). Evidence: `.shots/reformation/P1.V3/w1w3fix/`.
+- P1.I1–I4 **ACCEPTED**. P1.V1–V3 **VERIFIED**. Next remaining: **P2.I1**. W6 / unfinished-control / DOC-5 stays P2.I1.
+- Process amendment (CANON R17): later verifiers repair holdable classes in-session, class-wide, and retest the remaining journey. They hand off a paste-ready prompt only when the class is too complex to hold (multiple independent seams), not merely because several files are involved.
+- Do not `convex push`. PS 6 / PS 8 untouched. Two pre-existing I2 string-scans not rewritten.
 

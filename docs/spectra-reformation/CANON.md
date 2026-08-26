@@ -11,7 +11,7 @@ Decisions **D1–D44** (`docs/spectra-nova/CANON.md`, incorporating HQ D1–D23)
 - **D26 (extended by R2).** Truthful states are now a mechanical property, not a discipline: no state may exist without a compensating exit.
 - **D42 (extended by R10).** Bounded reads now carry numeric budgets checked by the owning unit and at phase gates.
 
-## 1. New binding decisions (R1–R16)
+## 1. New binding decisions (R1–R17)
 
 ### Truth
 
@@ -28,11 +28,11 @@ Decisions **D1–D44** (`docs/spectra-nova/CANON.md`, incorporating HQ D1–D23)
 
 ### Process
 
-- **R8. The implementer never accepts its own work.** Acceptance requires a verification unit executed by a different agent in a different session with no shared context beyond the Reformation docs. STATE rows carry both signatures. Tests altered by an implementer to pass (constants bent, assertions weakened, gates deleted) are treated as data corruption of the evidence system.
+- **R8. The implementer never accepts its own work.** Acceptance requires a verification unit executed by a different agent in a different session with no shared context beyond the Reformation docs. STATE rows carry both signatures. The verifier may repair product code during that VU (R17); they still do not mark ACCEPTED. Tests altered by an implementer to pass (constants bent, assertions weakened, gates deleted) are treated as data corruption of the evidence system.
 - **R9. Per-unit evidence is canon.** A rule that is not exercised by the owning unit or a phase gate is advisory. Relevant tests, fidelity harnesses, seam contract tests, secret scans, token rules, and budgets are run and recorded with the unit that owns them. This program has no automated test lane; the entire repository sweep happens only after paired verification. Bridge compilation may be added later as a separate gate.
 - **R10. Budgets are gates.** Convex I/O per user action, first-paint request count and largest payload per surface, keystroke main-thread cost, and presence render cost carry numeric budgets (ARCHITECTURE-PLATFORM §4). Exceeding a budget is a defect now, not at scale.
 - **R11. Sequences are the unit of verification for sync and fidelity.** Edit → external save → reopen; offline → edit → reconnect; queue → crash → replay; concurrent edits both sides. Single-checkpoint evidence (one screenshot of one state) cannot verify any Tier-R claim.
-- **R12. Findings are triaged before they are fixed.** Every verifier finding is classified **local** (isolated defect) or **systemic** (evidence of a class) before anyone patches it. Systemic findings escalate to the phase brief owner and close only with the class. Making the symptom's screenshot pass is not a fix.
+- **R12. Findings are triaged before they are fixed.** Every verifier finding is classified **local** (isolated defect) or **systemic** (evidence of a class) before anyone patches it. Systemic findings escalate to the phase brief owner and close only with the class. The agent who patches — implementer or verifier — must close the class, not the symptom screenshot. Making the symptom's screenshot pass is not a fix.
 
 ### Experience
 
@@ -40,6 +40,10 @@ Decisions **D1–D44** (`docs/spectra-nova/CANON.md`, incorporating HQ D1–D23)
 - **R14. Sync is a toggle, not a configuration.** Users see simple switches ("Keep on this computer", "Keep in Spectra", "Both — recommended") with one-line consequences. The four-strategy engine remains underneath, mapped and truthful, but never exposed as jargon. Defaults must be safe enough that a user who never opens settings is never punished.
 - **R15. The Bridge is invisible when healthy and optional always.** A user with the Bridge running should never think about it: no churn, no storms, no mystery states. A user without it gets the full non-local product with honest "this file lives on your PC — connect this device to open it" messaging. The Bridge never requires reinstallation to recover; recovery is a product behavior, not a support procedure.
 - **R16. Show state, don't narrate it.** Prefer visual, in-place feedback (state on the thing itself: a chip on the file row, a fill on the save indicator, motion on the change) over stacked toasts, modal chains, and paragraphs. Text explains; it does not substitute for the surface telling the truth at a glance.
+
+### Process (amended 2026-08-26)
+
+- **R17. A verifier may repair product code during a VU, class-wide.** After triage (R12), the verifier inspects blast radius and applies the class everywhere it lives, then retests the remaining journey or contract. They do **not** apply the smallest local patch that greens the current card. They **do** stop and leave a paste-ready prompt for another agent when the finding is genuinely too complex to hold in this session — spanning multiple independent architectural seams they cannot close together, or a class they do not yet understand well enough to patch safely. Touching more than one file is not, by itself, a handoff. A later unit's owned class is a Field Note, not a start of that unit. Pablo 2026-08-26.
 
 ## 2. How Spectra must feel (unchanged, plus one line)
 

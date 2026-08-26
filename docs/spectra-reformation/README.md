@@ -17,7 +17,7 @@ If two documents disagree, the higher one wins. If a Reformation document seems 
 
 | File | What it is | Read when |
 |---|---|---|
-| `CANON.md` | Binding decisions: Nova D1–D44 inherited + Reformation R1–R16 | Every session, first |
+| `CANON.md` | Binding decisions: Nova D1–D44 inherited + Reformation R1–R17 | Every session, first |
 | `STATE.md` | The living ledger: unit statuses, verifier verdicts, field notes | Every session, second |
 | `PROCESS.md` | Roles, unit lifecycle, launch prompt template, difficulty routing, sub-agent policy | Every session, third |
 | `VERIFICATION.md` | The verification methodology: layers, journey protocol, contract tests, budgets | Every verifier session; implementers skim §1–§2 |
@@ -68,8 +68,8 @@ P8  The Release Gate                   chaos + multiplayer finale, release verdi
 1. Open `STATE.md` §0, find the lowest OPEN unit whose prerequisites are ACCEPTED.
 2. Check its **difficulty tag** (Simple / Medium-simple / Medium-thinking / Hard) and route it to the named model in PROCESS §4 (GPT 5.6 Luna Max, Grok 4.6 High, GPT 5.6 Sol xhigh). Remaining-unit ranking lives there.
 3. Paste the launch prompt template (PROCESS §5) filled in with the unit ID.
-4. When the implementer reports done, launch the paired **verification unit with a different agent** — never the same session, never the same context. Verifier close-out is PROCESS §5.1.
-5. Accept only when the verifier's verdict is recorded in STATE. Your own ten-minute pass remains the final control; it caught what every automated layer missed last time.
+4. When the implementer reports done, launch the paired **verification unit with a different agent** — never the same session, never the same context. The verifier starts as a person-shaped walk (VERIFICATION L3). On fail they repair a holdable class in-session and retest to PASS (PROCESS §2 / R17). If the class is too complex to hold, they stop and leave a paste-ready prompt. Close-out is PROCESS §5.1.
+5. Accept only when the verifier's verdict is recorded in STATE (PASS after retest, or a REJECTED handoff you route). Your own ten-minute pass remains the final control; it caught what every automated layer missed last time.
 6. Answer stop-and-ask items before relaunching. A pending question blocks the next unit. Relevant tests belong to their owning unit; the entire repository sweep waits until paired verification has run.
 
 Between units: commit. Never change branch. Keys rotation (STATE §5) is yours and blocks nothing except public exposure risk. Never two live-product verifiers at once; Hard units are serial.

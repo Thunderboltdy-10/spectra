@@ -47,6 +47,8 @@ Browser journeys use Chrome; keep one claimed tab for a sequence when same-tab c
 
 **Protocol:** fresh profile or clean state where the card demands it; the agent narrates intent before each action; captures a numbered screenshot **sequence** at every meaningful step (including intermediate/streaming states); records console/network anomalies; and files findings with severity + a one-line "what a real user would feel here". The rubric grades four axes: task success, state honesty (did labels ever disagree with reality?), recoverability (when stuck, was there a door?), and feel (jank, confusion, dead ends).
 
+After a finding, the verifier may enter the codebase (PROCESS §2 / R17). They start without implementation knowledge; they inspect code only once a card has failed. The edit is class-wide: understand the issue, the code, and every surface that shares the state, then retest the **whole remaining journey**. A screenshot-local patch is a defect (R12). If the class is too complex to hold in this VU — multiple independent architectural seams, not merely several files — stop and leave a paste-ready prompt for another agent.
+
 **Adversarial variants:** each phase gate includes at least one card executed adversarially — mid-task network kill, external Word edit during the flow, double-clicking everything, closing at the worst moment, a second tab, wrong-target AI prompts with similar filenames.
 
 ## L4 — Budgets (CANON R10)
@@ -59,7 +61,7 @@ Ten minutes per phase, unscripted, on the real product. Historically the only co
 
 ## Finding format (all layers)
 
-`[UNIT/PHASE] severity · surface · what happened · what a user would conclude · suspected class (LOCAL | SYSTEMIC: <class name>) · evidence path`. Findings are never closed by the person who triages them as LOCAL without a linked fix commit; SYSTEMIC findings open a class entry in the phase brief.
+`[UNIT/PHASE] severity · surface · what happened · what a user would conclude · suspected class (LOCAL | SYSTEMIC: <class name>) · evidence path`. Findings close with a linked fix commit after class-wide repair and retest, including when the verifier made the commit. SYSTEMIC findings still open a class entry in the phase brief. A finding handed off because it was too complex to hold stays open until the other agent's commit and a retest of the remaining journey.
 
 ## Anti-theater rules (learned the hard way)
 
@@ -67,4 +69,4 @@ Ten minutes per phase, unscripted, on the real product. Historically the only co
 2. Product constants are never bent to satisfy test expectations; expectations are never widened to accept regressions (PPT-4's codified regression is the canonical counterexample). Test diffs in an implementation unit get read by the verifier **first**.
 3. Digests, counts, and reports that are recorded must be *asserted*; write-only evidence is deleted.
 4. Evidence directories are created by the run that cites them; an empty cited directory fails the unit (GOV-1).
-5. Verifiers do not negotiate: findings are filed, not discussed away in-session.
+5. Verifiers do not negotiate: findings are filed, not discussed away in-session. They also do not apply a local screenshot patch of a SYSTEMIC finding. An ordinary multi-file class is fixed in the VU; a class too complex to hold is handed off with a paste-ready prompt.

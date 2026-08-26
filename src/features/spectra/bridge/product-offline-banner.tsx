@@ -3,8 +3,9 @@
 import { useProductOnline } from "./use-product-online";
 
 /**
- * One product-wide offline sentence (UX-3, R16). Lives in chrome, not inside
- * an open artifact, so Library and the composer see the same truth.
+ * One product-wide offline sentence (UX-3, R16). Lives in AppShell chrome so
+ * Settings, Library, and the composer share the same truth — not an artifact
+ * secret and not a workbench-only strip.
  */
 export function ProductOfflineBanner() {
   const online = useProductOnline();

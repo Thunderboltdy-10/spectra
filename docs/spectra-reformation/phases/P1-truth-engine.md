@@ -208,3 +208,11 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Taste: running-unpaired remembered folders say Connect this device, not Open Spectra Bridge.
 - Relevant checks: focused Vitest `sync-toggles` + `sync-presentation` 14/14. Two pre-existing I2 string-scans in `bridge-contract.test.ts` not rewritten. Changed-file ESLint clean. Did not `convex push`.
 - Status: IMPLEMENTED. No acceptance claimed. P1.V3 rerun remains independent after I3's banner and Convex actually serving current source.
+
+## Implementer rejection-fix log — P1.I3 / P1.V3 (2026-08-26)
+
+- Triage: **SYSTEMIC** — product-offline lived in the workbench (`spectra-shell`), so Settings/`AppShell` had no Offline sentence while Files and devices could still impersonate Bridge-down.
+- `ProductOfflineBanner` now mounts once in `AppShell` chrome; the workbench copy is deleted so Library and Settings share the same strip (UX-3). Stage padding moved off `main` so the banner is full-bleed in the content column.
+- I4 still owns Offline vs Not connected vs Not running on Files and devices. This unit does not retouch that mapping.
+- Relevant checks: focused Vitest 3 files / 29 tests including an AppShell-mount contract; new-file ESLint; secret scan. No `convex push`. Did not run P1.V3.
+- Status: IMPLEMENTED. No acceptance claimed. P1.V3 rerun remains independent.

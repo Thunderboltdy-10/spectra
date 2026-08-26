@@ -74,6 +74,7 @@ import { RouteSidePanelHost } from "@/features/spectra/components/route-side-pan
 import { ViewportContextPicker } from "@/features/spectra/components/viewport-context-picker";
 import { GlobalRouteWorkbench } from "@/features/spectra/components/global-route-workbench";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
 
 type AppShellProps = {
   children: ReactNode;
@@ -1099,7 +1100,6 @@ export function AppShell({
         className={cn(
           "relative min-h-dvh pb-24 md:flex md:h-dvh md:min-h-0 md:flex-col md:pb-0",
           noScroll && "h-dvh min-h-0 overflow-hidden",
-          !fullBleed && "px-5 py-6 sm:px-8",
         )}
       >
         {showTabRail ? (
@@ -1112,11 +1112,13 @@ export function AppShell({
         ) : (
           <div id="spectra-shell-tab-slot" className="hidden" />
         )}
+        <ProductOfflineBanner />
         <div
           style={{ minHeight: 0 }}
           className={cn(
             "spectra-global-stage flex min-h-0 flex-1 md:overflow-hidden",
             noScroll && "overflow-hidden",
+            !fullBleed && "px-5 py-6 sm:px-8",
             contentClassName,
           )}
         >

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import {
   isPresentationReady,
   presentSync,
@@ -85,6 +87,25 @@ describe("sync presentation (P1.I3)", () => {
     );
     expect(lines.join(" ")).not.toMatch(/\bCurrent\b/);
     expect(lines[0]).toContain("This device · Up to date");
+  });
+
+  it("mounts the product Offline banner on AppShell so Settings sees it", () => {
+    const root = process.cwd();
+    const appShell = fs.readFileSync(
+      path.join(root, "src/components/layout/app-shell.tsx"),
+      "utf8",
+    );
+    const workbench = fs.readFileSync(
+      path.join(root, "src/features/spectra/pages/spectra-shell.tsx"),
+      "utf8",
+    );
+    const settings = fs.readFileSync(
+      path.join(root, "src/app/settings/page.tsx"),
+      "utf8",
+    );
+    expect(appShell).toContain("<ProductOfflineBanner");
+    expect(workbench).not.toContain("ProductOfflineBanner");
+    expect(settings).toContain("<AppShell");
   });
 
   it("offers Reconnect when the local copy is unavailable", () => {

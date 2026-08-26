@@ -89,3 +89,17 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - `tsc --noEmit` retains exactly the five pre-existing errors recorded in STATE §1 and adds none from P1.I2.
 - The package-wide Rust command still cannot start the stale `granted_tree` fixture recorded in STATE §1; its assertion was not weakened or rewritten.
 - Status: IMPLEMENTED. No acceptance/verifier verdict claimed; the repository-wide sweep remains deferred until paired verification.
+
+## Verifier log — P1.V1 (2026-08-26)
+
+- Read the governing stack, ARCHITECTURE-TRUTH, VERIFICATION, and the phase finding families; inspected I1 tests before production code.
+- Existing I1 production-module/policy suite passed 3 files / 33 tests before the independent property harness was added.
+- Added `convex/replica-truth.property.test.ts`; it imports the real Convex schema/API modules and does not reproduce transition logic in a test-only model.
+- Exercised 24 deterministic seeds × 18 actions across enqueue, claim, complete, lock, external save, exact replay, crash, restart, network wait, and revoke.
+- Compensation/quiescence left zero pending requests, operations, replicas, or strategy transitions across all 24 traces.
+- **P1.V1-F1 HIGH · SYSTEMIC: replay-sensitive external-save state derivation.** First upload leaves cloud `current` against newer local bytes; exact replay changes local `ahead` to `current` while cloud keeps the old revision.
+- The failure appeared in 10/24 generated traces (59 observations while the invalid state persisted); exact minimal replay fails deterministically.
+- Root seam is `bridgeSync.commitPayloadUpload`: truth depends on whether the event looks new relative to already-mutated local state, rather than on the retained byte relation between replicas.
+- No product code or existing assertion was changed. Harness ESLint passes; TypeScript adds no error beyond the five pre-existing blockers in STATE §1.
+- Evidence: `.shots/reformation/P1.V1/2026-08-26-property-report.md`.
+- Verdict: **REJECTED**. Owner P1.I1; rerun P1.V1 before P1.V2.

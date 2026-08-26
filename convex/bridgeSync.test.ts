@@ -268,4 +268,46 @@ describe("Bridge incremental cloud seam", () => {
     const verified = await t.run(async (ctx) => ctx.db.get(replicaId));
     expect(verified?.errorCode).toBeUndefined();
   });
+
+  it("clears a writer lock when Word finishes without a new revision", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedBridge(t);
+    const discovered = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{
+        localResourceId: "lr_eeeeeeeeeeeeeeee",
+        relativePath: "Essay.docx",
+        size: 42,
+        contentHash: "a".repeat(64),
+        nativeFormat: "docx",
+      }],
+    });
+    const registration = discovered.registrations[0];
+    if (!("replicaId" in registration)) {
+      throw new Error(`Expected resource registration, got ${"reason" in registration ? registration.reason : "unknown"}`);
+    }
+    const replicaId = registration.replicaId;
+    await t.mutation(api.bridgeSync.reportChanges, {
+      credential,
+      mountId: fixture.mountId,
+      changes: [{
+        journalId: `op_${"6".repeat(32)}`,
+        resourceId: "lr_eeeeeeeeeeeeeeee",
+        op: "locked",
+      }],
+    });
+    await t.mutation(api.bridgeSync.reportChanges, {
+      credential,
+      mountId: fixture.mountId,
+      changes: [{
+        journalId: `op_${"7".repeat(32)}`,
+        resourceId: "lr_eeeeeeeeeeeeeeee",
+        op: "unlocked",
+      }],
+    });
+    const released = await t.run(async (ctx) => ctx.db.get(replicaId));
+    expect(released?.errorCode).toBeUndefined();
+    expect(released?.state).not.toBe("error");
+  });
 });

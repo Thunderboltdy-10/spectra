@@ -19,7 +19,8 @@ use spectra_bridge_core::sync::{
 };
 use spectra_bridge_core::watcher::{
     MountWatcher, StabilityTracker, WatcherConfig, file_held_by_office, is_office_lock_file,
-    office_lock_exists, office_lock_paths, relative_key, scan_mount, stable_file_snapshot,
+    office_lock_exists, office_lock_paths, office_lock_target, relative_key, scan_mount,
+    stable_file_snapshot,
 };
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -505,8 +506,10 @@ fn enqueue_stable_change(
     });
     journal.upsert_resource(&resource)?;
     if unchanged {
+        let _ = enqueue_unlocked_path(grant, journal, path);
         return Ok(false);
     }
+    let _ = journal.delete_config(&lock_hold_key(&grant.id, &resource.local_resource_id));
     let mount_id = journal
         .config(&format!("cloud_mount:{}", grant.id))?
         .ok_or_else(|| anyhow::anyhow!("cloud mount is not registered yet"))?;
@@ -630,10 +633,15 @@ fn enqueue_missing_path(
     Ok(queued)
 }
 
-fn enqueue_locked_path(
+fn lock_hold_key(grant_id: &str, resource_id: &str) -> String {
+    format!("lock_held:{grant_id}:{resource_id}")
+}
+
+fn enqueue_lock_report(
     grant: &Grant,
     journal: &Journal,
     path: &std::path::Path,
+    op: &str,
 ) -> anyhow::Result<usize> {
     let relative_path = relative_key(grant.device_root(), path);
     let mount_id = journal
@@ -644,34 +652,59 @@ fn enqueue_locked_path(
         if !resource.available {
             continue;
         }
+        let hold_key = lock_hold_key(&grant.id, &resource.local_resource_id);
+        if op == "locked" && journal.config(&hold_key)?.is_some() {
+            continue;
+        }
+        if op == "unlocked" && journal.config(&hold_key)?.is_none() {
+            continue;
+        }
         let before = resource
             .content_hash
             .as_deref()
             .or(resource.revision.as_deref());
-        let key = derived_change_key(
+        let mut key = derived_change_key(
             &grant.id,
             &resource.local_resource_id,
             None,
             &resource.path_key,
             before,
             None,
-            "locked",
+            op,
         );
-        let operation = journal.begin_intent(
+        let mut operation = journal.begin_intent(
             &key,
             "cloud.report-change",
             Some(&resource.local_resource_id),
             before,
             None,
         )?;
+        if operation.state == OpState::Verified && op == "locked" {
+            key = derived_change_key(
+                &grant.id,
+                &resource.local_resource_id,
+                None,
+                &resource.path_key,
+                before,
+                None,
+                &format!("locked:{}", uuid::Uuid::new_v4().simple()),
+            );
+            operation = journal.begin_intent(
+                &key,
+                "cloud.report-change",
+                Some(&resource.local_resource_id),
+                before,
+                None,
+            )?;
+        }
         if operation.state != OpState::Verified {
             let envelope = QueuedChangeEnvelope {
                 grant_id: grant.id.clone(),
                 mount_id: mount_id.clone(),
                 change: ReportedChange {
                     journal_id: operation.op_id.clone(),
-                    resource_id: resource.local_resource_id,
-                    op: "locked".into(),
+                    resource_id: resource.local_resource_id.clone(),
+                    op: op.into(),
                     relative_path: Some(resource.path_key),
                     previous_relative_path: None,
                     hash: None,
@@ -687,8 +720,29 @@ fn enqueue_locked_path(
             )?;
             queued += 1;
         }
+        if op == "locked" {
+            journal.set_config(&hold_key, "1")?;
+        } else {
+            let _ = journal.delete_config(&hold_key);
+        }
     }
     Ok(queued)
+}
+
+fn enqueue_locked_path(
+    grant: &Grant,
+    journal: &Journal,
+    path: &std::path::Path,
+) -> anyhow::Result<usize> {
+    enqueue_lock_report(grant, journal, path, "locked")
+}
+
+fn enqueue_unlocked_path(
+    grant: &Grant,
+    journal: &Journal,
+    path: &std::path::Path,
+) -> anyhow::Result<usize> {
+    enqueue_lock_report(grant, journal, path, "unlocked")
 }
 
 async fn upload_discovered_resource(
@@ -1302,9 +1356,12 @@ async fn finish_pending_payload_upload(
     if !target.exists() || is_office_lock_file(&target) {
         return Ok(false);
     }
-    if file_held_by_office(&target) {
+    if HostPlatform.is_locked(&target).unwrap_or(false) {
         let _ = enqueue_locked_path(&grant, journal, &target);
         return Ok(false);
+    }
+    if office_lock_exists(&target) {
+        let _ = enqueue_locked_path(&grant, journal, &target);
     }
     let mut snapshot = match stable_file_snapshot(&target) {
         Ok(Some(snapshot)) => snapshot,
@@ -1543,6 +1600,7 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
         let mut pending_files = HashSet::<std::path::PathBuf>::new();
         let mut pending_missing = HashMap::<std::path::PathBuf, std::time::Instant>::new();
         let mut last_reconciliation = std::time::Instant::now();
+        let mut last_hold_scan = std::time::Instant::now();
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             if !grants
@@ -1626,10 +1684,22 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
             let observed_at = std::time::Instant::now();
             for path in batch.existing_files {
                 pending_missing.remove(&path);
+                if is_office_lock_file(&path) {
+                    if let Some(target) = office_lock_target(&path) {
+                        pending_files.insert(target);
+                    }
+                    continue;
+                }
                 pending_files.insert(path);
             }
             for path in batch.missing_paths {
                 pending_files.remove(&path);
+                if is_office_lock_file(&path) {
+                    if let Some(target) = office_lock_target(&path) {
+                        pending_files.insert(target);
+                    }
+                    continue;
+                }
                 pending_missing.entry(path).or_insert(observed_at);
             }
             if !batch.failures.is_empty() {
@@ -1653,6 +1723,9 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                 }
                 if is_office_lock_file(&path) {
                     pending_files.remove(&path);
+                    if let Some(target) = office_lock_target(&path) {
+                        pending_files.insert(target);
+                    }
                     continue;
                 }
                 if file_held_by_office(&path) {
@@ -1668,6 +1741,7 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                     }
                     continue;
                 }
+                let _ = enqueue_unlocked_path(&grant, &journal, &path);
                 match stability.observe(&path, observed_at) {
                     Ok(Some(hash)) => {
                         let current_generation = match generation {
@@ -1740,6 +1814,24 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
             } else if generation.is_some() {
                 let _ =
                     set_mount_status(&journal, &grant.id, "active", "Changes queued safely", 0, 0);
+            }
+            if last_hold_scan.elapsed() >= std::time::Duration::from_secs(2) {
+                last_hold_scan = std::time::Instant::now();
+                if let Ok(resources) = journal.resources_for_grant(&grant.id) {
+                    for resource in resources.into_iter().take(500) {
+                        if !resource.available {
+                            continue;
+                        }
+                        let held_path = grant
+                            .device_root()
+                            .join(std::path::Path::new(&resource.path_key));
+                        if file_held_by_office(&held_path) {
+                            let _ = enqueue_locked_path(&grant, &journal, &held_path);
+                        } else {
+                            let _ = enqueue_unlocked_path(&grant, &journal, &held_path);
+                        }
+                    }
+                }
             }
             if last_reconciliation.elapsed() >= config.reconciliation_interval {
                 let _ = sync_grant(&grant, &journal).await;
@@ -2148,11 +2240,9 @@ fn main() {
                                             reconciliation_succeeded = false;
                                         }
                                     }
-                                    if !reconciliation_succeeded {
-                                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                                        continue;
+                                    if reconciliation_succeeded {
+                                        restored_grants_reconciled = true;
                                     }
-                                    restored_grants_reconciled = true;
                                 }
                                 match drain_cloud_queue(&sync_journal, &url, &credential).await {
                                     Ok(deliveries) => {

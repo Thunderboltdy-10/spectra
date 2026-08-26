@@ -928,7 +928,7 @@ export const claimPendingPayloadUpload = mutation({
       if (cloud?.payloadRef) {
         const payloadId = ctx.db.normalizeId("payloadObjects", cloud.payloadRef);
         const payload = payloadId ? await ctx.db.get(payloadId) : null;
-        if (payload?.state === "active") continue;
+        if (payload?.state === "active" && payload.hash === replica.contentHash) continue;
       }
       const mount = await ctx.db.get(replica.mountId);
       if (!mount || mount.deviceId !== device._id || mount.state !== "active") continue;
@@ -1357,7 +1357,7 @@ export const reportChanges = mutation({
     const changeSchema = z.object({
       journalId: z.string().regex(/^op_[a-f0-9]{32}$/),
       resourceId: z.string().regex(/^lr_[a-f0-9]+$/),
-      op: z.enum(["upsert", "unavailable", "locked"]),
+      op: z.enum(["upsert", "unavailable", "locked", "unlocked"]),
       relativePath: z.string().min(1).max(1024).optional(),
       previousRelativePath: z.string().min(1).max(1024).optional(),
       hash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -1392,6 +1392,22 @@ export const reportChanges = mutation({
           });
         }
         results.push({ journalId, state: replica ? "locked" : "ignored" });
+        continue;
+      }
+      if (change.op === "unlocked") {
+        const replicas = await ctx.db.query("workReplicas")
+          .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", change.resourceId))
+          .take(20);
+        const replica = replicas.find((candidate) => candidate.mountId === mount._id && candidate.state !== "unavailable");
+        if (replica && replica.errorCode === "office-locked") {
+          await ctx.db.patch(replica._id, {
+            errorCode: undefined,
+            errorMessage: undefined,
+            errorAt: undefined,
+            updatedAt: Date.now(),
+          });
+        }
+        results.push({ journalId, state: replica ? "unlocked" : "ignored" });
         continue;
       }
       if (change.op === "unavailable") {

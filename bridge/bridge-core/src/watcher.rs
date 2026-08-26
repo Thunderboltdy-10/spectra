@@ -329,11 +329,48 @@ pub fn is_office_lock_file(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with("~$"))
 }
 
-/// Office owns the file through its `~$` owner lock **or** an exclusive writer
-/// handle. Word Compatibility Mode often holds the document without a matching
-/// owner-file name; the share-lock is the truthful signal.
+/// Maps an Office `~$` owner file back to the open document in the same folder.
+/// Word names the lock by replacing the first two characters of the document
+/// name; Compatibility Mode still uses that owner file even when the share
+/// lock is the signal the watcher must act on.
+pub fn office_lock_target(lock_path: &Path) -> Option<PathBuf> {
+    let name = lock_path.file_name()?.to_str()?;
+    if !name.starts_with("~$") {
+        return None;
+    }
+    let suffix = &name[2..];
+    let dir = lock_path.parent()?;
+    let mut match_path = None;
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let candidate_name = entry.file_name();
+        let Some(candidate) = candidate_name.to_str() else {
+            continue;
+        };
+        if candidate.starts_with("~$") || !candidate.ends_with(suffix) {
+            continue;
+        }
+        if candidate.len() < suffix.len() + 2 {
+            continue;
+        }
+        if match_path.is_some() {
+            return None;
+        }
+        match_path = Some(entry.path());
+    }
+    match_path
+}
+
+/// Office owns the file through an exclusive writer handle. A leftover `~$`
+/// owner file after Word crashes is not a live hold: hashing and Keep in
+/// Spectra must proceed. Compatibility Mode is the other way around — the
+/// share-lock is present even when the owner-file name does not match.
 pub fn file_held_by_office(path: &Path) -> bool {
-    office_lock_exists(path) || HostPlatform.is_locked(path).unwrap_or(false)
+    match HostPlatform.is_locked(path) {
+        Ok(true) => true,
+        Ok(false) => false,
+        Err(_) => office_lock_exists(path),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -720,9 +757,23 @@ mod tests {
         std::fs::write(&path, b"bytes").unwrap();
         std::fs::write(dir.path().join("~$per.docx"), b"lock").unwrap();
         assert!(office_lock_exists(&path));
-        assert!(file_held_by_office(&path));
+        assert!(
+            !file_held_by_office(&path),
+            "a leftover owner file without a writer hold is not a live lock"
+        );
         assert!(is_office_lock_file(&dir.path().join("~$per.docx")));
         assert!(!is_office_lock_file(&path));
+        assert_eq!(
+            office_lock_target(&dir.path().join("~$per.docx")).as_deref(),
+            Some(path.as_path())
+        );
+        let essay = dir.path().join("Last-year essay.docx");
+        std::fs::write(&essay, b"bytes").unwrap();
+        std::fs::write(dir.path().join("~$st-year essay.docx"), b"lock").unwrap();
+        assert_eq!(
+            office_lock_target(&dir.path().join("~$st-year essay.docx")).as_deref(),
+            Some(essay.as_path())
+        );
     }
 
     #[test]

@@ -489,6 +489,37 @@ describe("replica truth machine", () => {
     expect(truth.local).toMatchObject({ state: "unavailable", unavailableReason: "unlinked-by-user" });
   });
 
+  it("claims a Keep in Spectra upload when the cloud payload hash does not match disk", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    await asUser.mutation(api.replicas.transitionStorageStrategy, {
+      workId: fixture.workId,
+      toPreset: "device",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(fixture.basePayloadId, { state: "released" });
+      await ctx.db.patch(fixture.cloudId, {
+        payloadRef: String(fixture.nextPayloadId),
+        contentHash: undefined,
+        state: "unavailable",
+        unavailableReason: "metadata-only",
+      });
+    });
+    const transition = await asUser.mutation(api.replicas.transitionStorageStrategy, {
+      workId: fixture.workId,
+      toPreset: "spectra",
+    });
+    expect(transition.state).toBe("pending");
+    const claimed = await t.mutation(api.bridgeSync.claimPendingPayloadUpload, {
+      credential: bridgeCredential,
+    });
+    expect(claimed.request).toMatchObject({
+      replicaId: fixture.localId,
+      relativePath: "Truth.docx",
+    });
+  });
+
   it("gives Library the full replica set so a This-PC file is not Unavailable", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

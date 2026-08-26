@@ -1,4 +1,4 @@
-use crate::journal::{Journal, QueueItem};
+use crate::journal::{Journal, QueueItem, ResourceRecord};
 use crate::platform::Platform;
 use crate::protocol::PairingOffer;
 use crate::watcher::office_lock_exists;
@@ -669,6 +669,34 @@ pub async fn resume_pairing(
     .await
 }
 
+/// A lock/unlock report has no content hash. Comparing it to the stored hash
+/// would mark every Word-open event as superseded and Convex would never hear
+/// that the file is held.
+pub fn queued_change_still_current(
+    change: &ReportedChange,
+    resource: Option<&ResourceRecord>,
+) -> bool {
+    let Some(resource) = resource else {
+        return false;
+    };
+    match change.op.as_str() {
+        "unavailable" => !resource.available,
+        "locked" | "unlocked" => {
+            resource.available
+                && change
+                    .relative_path
+                    .as_deref()
+                    .map(|path| path == resource.path_key)
+                    .unwrap_or(true)
+        }
+        _ => {
+            resource.available
+                && change.relative_path.as_deref() == Some(resource.path_key.as_str())
+                && change.hash.as_deref() == resource.content_hash.as_deref()
+        }
+    }
+}
+
 pub async fn drain_cloud_queue(
     journal: &Journal,
     deployment_url: &str,
@@ -687,16 +715,8 @@ pub async fn drain_cloud_queue(
         match serde_json::from_str::<QueuedChangeEnvelope>(&item.payload) {
             Ok(envelope) => {
                 let current = journal.resource_by_id(&envelope.change.resource_id)?;
-                let still_current = current.as_ref().is_some_and(|resource| {
-                    if envelope.change.op == "unavailable" {
-                        !resource.available
-                    } else {
-                        resource.available
-                            && envelope.change.relative_path.as_deref()
-                                == Some(resource.path_key.as_str())
-                            && envelope.change.hash.as_deref() == resource.content_hash.as_deref()
-                    }
-                });
+                let still_current =
+                    queued_change_still_current(&envelope.change, current.as_ref());
                 if !still_current {
                     journal.fail_queue(
                         &item,
@@ -814,6 +834,103 @@ mod tests {
         assert_eq!(
             journal.by_key("superseded").unwrap().unwrap().state,
             crate::journal::OpState::Failed
+        );
+    }
+
+    #[test]
+    fn locked_change_is_current_without_a_content_hash() {
+        let resource = crate::journal::ResourceRecord {
+            local_resource_id: "lr_word".into(),
+            grant_id: "grant_word".into(),
+            path_key: "Last-year essay.docx".into(),
+            volume: None,
+            file_index: None,
+            content_hash: Some("ab".repeat(32)),
+            revision: Some("ab".repeat(32)),
+            available: true,
+            unavailable_reason: None,
+            last_seen_generation: 1,
+        };
+        let locked = ReportedChange {
+            journal_id: "op_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            resource_id: "lr_word".into(),
+            op: "locked".into(),
+            relative_path: Some("Last-year essay.docx".into()),
+            previous_relative_path: None,
+            hash: None,
+            revision_before: resource.content_hash.clone(),
+            size: None,
+            native_format: None,
+        };
+        assert!(queued_change_still_current(&locked, Some(&resource)));
+        let upsert = ReportedChange {
+            hash: Some("cd".repeat(32)),
+            op: "upsert".into(),
+            ..locked.clone()
+        };
+        assert!(!queued_change_still_current(&upsert, Some(&resource)));
+    }
+
+    #[tokio::test]
+    async fn locked_queue_entry_is_not_dropped_as_superseded() {
+        let journal = Journal::in_memory().unwrap();
+        journal
+            .upsert_resource(&crate::journal::ResourceRecord {
+                local_resource_id: "lr_word".into(),
+                grant_id: "grant_word".into(),
+                path_key: "Last-year essay.docx".into(),
+                volume: None,
+                file_index: None,
+                content_hash: Some("ab".repeat(32)),
+                revision: Some("ab".repeat(32)),
+                available: true,
+                unavailable_reason: None,
+                last_seen_generation: 1,
+            })
+            .unwrap();
+        let operation = journal
+            .begin_intent(
+                "locked-hold",
+                "cloud.report-change",
+                Some("lr_word"),
+                Some(&"ab".repeat(32)),
+                None,
+            )
+            .unwrap();
+        let envelope = QueuedChangeEnvelope {
+            grant_id: "grant_word".into(),
+            mount_id: "mount_word".into(),
+            change: ReportedChange {
+                journal_id: operation.op_id.clone(),
+                resource_id: "lr_word".into(),
+                op: "locked".into(),
+                relative_path: Some("Last-year essay.docx".into()),
+                previous_relative_path: None,
+                hash: None,
+                revision_before: Some("ab".repeat(32)),
+                size: None,
+                native_format: None,
+            },
+        };
+        journal
+            .enqueue(
+                &operation.op_id,
+                "outbound-change",
+                &serde_json::to_string(&envelope).unwrap(),
+            )
+            .unwrap();
+
+        let delivered = drain_cloud_queue(&journal, "http://127.0.0.1:1", "unused")
+            .await
+            .unwrap();
+        assert!(delivered.is_empty());
+        assert_eq!(
+            journal.by_key("locked-hold").unwrap().unwrap().state,
+            crate::journal::OpState::Intent
+        );
+        assert_ne!(
+            journal.by_key("locked-hold").unwrap().unwrap().error_code.as_deref(),
+            Some("change-superseded")
         );
     }
 }

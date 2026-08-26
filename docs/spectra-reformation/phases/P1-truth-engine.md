@@ -278,3 +278,12 @@ Property + chaos suites green in their owning verification units; journey PASS; 
 - Checks: focused Vitest 51 pass / 2 pre-existing I2 string-scans not rewritten; property suite included; Rust core 40/40; bridge-app `cargo check` OK; changed-file ESLint; secret scan.
 - Status: **IMPLEMENTED**. P1.V3 remains REJECTED pending an independent walk. No acceptance claimed.
 
+## Implementer rejection-fix log — P1.I1/I2 / P1.V3-W1,W3 remaining (2026-08-26)
+
+- W3 SYSTEMIC: `drain_cloud_queue` treated a hash-less `locked` op as superseded, so Convex never received `office-locked`. Lock/unlock reports no longer require a content hash; `~$` events map to the open document; a leftover owner file without a writer share-lock is not a live hold.
+- W1 SYSTEMIC: the 5s poll skipped outbound and payload drains while `reconcileMissingResources` raced (`MOUNT_SCAN_NOT_CURRENT`). Drains now run. `claimPendingPayloadUpload` skips an existing cloud payload only when its hash matches disk.
+- Live retest on `P1V3Rem` with `Downloads\spectra-p1v3-rerun-fixture`: Word open/save → Waiting for Word; close → Up to date; Keep in Spectra → Location Spectra, disk file remains. W7/W8 held. W6 unfinished-control not patched.
+- Out of scope: W6 / P2.I1 / PS 6 / PS 8. No `convex push`. Two pre-existing I2 string-scans not rewritten.
+- Checks: focused Vitest 42 pass / 2 I2 string-scans; Rust lock-queue and owner-file tests pass; Bridge rebuilt and launched.
+- Status: **IMPLEMENTED**. P1.V3 stays REJECTED pending independent walk. No acceptance claimed.
+

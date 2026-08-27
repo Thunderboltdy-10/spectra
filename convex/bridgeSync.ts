@@ -845,6 +845,45 @@ export const commitPayloadUpload = mutation({
       // The upload verified newer local bytes only. The cloud payload remains
       // retained at the common base, so it is behind rather than current.
       await ctx.db.patch(cloud._id, { state: "behind", updatedAt: now });
+      const activeWrite = latestActiveWriteForReplica(
+        await ctx.db.query("bridgeWriteRequests")
+          .withIndex("by_work_created", (q) => q.eq("workId", replica.workId))
+          .order("desc")
+          .take(50),
+        replica._id,
+      );
+      if (
+        activeWrite &&
+        input.hash !== activeWrite.baseRevision &&
+        input.hash !== activeWrite.targetRevision
+      ) {
+        await ctx.db.patch(activeWrite._id, {
+          state: "failed",
+          errorCode: "external-save-during-write",
+          claimedAt: undefined,
+          updatedAt: now,
+        });
+        const pendingOperation = await ctx.db.query("syncOperations")
+          .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", activeWrite.idempotencyKey))
+          .unique();
+        if (pendingOperation)
+          await ctx.db.patch(pendingOperation._id, {
+            state: "failed",
+            errorCode: "external-save-during-write",
+            updatedAt: now,
+          });
+        const resolving = await ctx.db.query("syncConflicts")
+          .withIndex("by_work_state", (q) => q.eq("workId", replica.workId).eq("state", "resolving-spectra"))
+          .take(50);
+        await Promise.all(resolving
+          .filter((conflict) => conflict.resolutionRequestId === activeWrite._id)
+          .map((conflict) => ctx.db.patch(conflict._id, {
+            state: "open",
+            resolutionRequestId: undefined,
+            errorCode: "resolution-write-superseded",
+            updatedAt: now,
+          })));
+      }
     }
     // Complete a local -> Spectra F6 transition only after the uploaded
     // payload is attached to the cloud replica. Until this point the local

@@ -9,6 +9,10 @@ import {
 } from "react";
 import type { ArtifactLiveValue } from "../collaboration/artifact-yjs-model";
 import type { ReplicaTruth } from "../bridge/status";
+import {
+  nativeMaterializationStale,
+  nativeMaterializationVerified,
+} from "../bridge/native-materialization-exit";
 
 export type NativeMaterialization =
   | { state: "queueing" }
@@ -291,6 +295,7 @@ export function useArtifactNativeSync({
           hash?: string;
           message?: string;
           state?: string;
+          conflict?: NativeConflict;
         } | null;
         if (!response.ok)
           throw new Error(
@@ -299,6 +304,17 @@ export function useArtifactNativeSync({
           );
         if (result?.state === "unchanged") {
           setNativeMaterialization(undefined);
+          return;
+        }
+        if (result?.state === "conflicted") {
+          setNativeMaterialization(undefined);
+          setNativeConflict({
+            regionIds: result.conflict?.regionIds ?? [],
+            previews: result.conflict?.previews,
+            message:
+              result.conflict?.message ??
+              `${nativeOfficeApplication} and Spectra changed the same work region.`,
+          });
           return;
         }
         if (!result?.hash)
@@ -315,7 +331,7 @@ export function useArtifactNativeSync({
         );
       }
     },
-    [artifactId, nativeOfficeDocument, nativeWordDocument],
+    [artifactId, nativeOfficeApplication, nativeOfficeDocument, nativeWordDocument],
   );
 
   useEffect(() => {
@@ -556,17 +572,10 @@ export function useArtifactNativeSync({
 
   useEffect(() => {
     if (!nativeMaterialization || !nativeLocalReplica) return;
-    if (
-      nativeMaterialization.state === "pending" &&
-      nativeLocalReplica.state === "current" &&
-      nativeLocalReplica.contentHash === nativeMaterialization.hash
-    ) {
+    if (nativeMaterializationVerified(nativeMaterialization, nativeLocalReplica)) {
       setNativeMaterialization(undefined);
       setNativeAttribution("Saved locally");
-    } else if (
-      nativeLocalReplica.state === "error" ||
-      nativeLocalReplica.state === "diverged"
-    ) {
+    } else if (nativeMaterializationStale(nativeMaterialization, nativeLocalReplica)) {
       setNativeMaterialization(undefined);
     }
   }, [nativeLocalReplica, nativeMaterialization]);
@@ -608,8 +617,8 @@ export function useArtifactNativeSync({
     if (
       !nativeOfficeDocument ||
       !reconcilableLocalRevision ||
-      dirty ||
-      live.unsynchronizedChanges > 0 ||
+      (dirty && nativeLocalReplica?.state !== "ahead") ||
+      (live.unsynchronizedChanges > 0 && nativeLocalReplica?.state !== "ahead") ||
       nativeReconciliationRevisionRef.current === reconcilableLocalRevision
     )
       return;
@@ -628,6 +637,7 @@ export function useArtifactNativeSync({
     reconcilableLocalRevision,
     dirty,
     live.unsynchronizedChanges,
+    nativeLocalReplica?.state,
     reconcileNativeRevision,
     nativeOfficeApplication,
     nativeOfficeDocument,

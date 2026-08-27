@@ -150,8 +150,28 @@ async function materializeOfficeArtifactAttempt(
     const rebased = isSheet
       ? mergeOfficeProjection(ancestor.projection as XlsxProjection, ours as XlsxProjection, latest.projection as XlsxProjection, true)
       : mergeOfficeProjection(ancestor.projection as PptxProjection, ours as PptxProjection, latest.projection as PptxProjection, false);
-    if (rebased.conflicts.length)
-      throw new Error("The Office file changed in the same place while Spectra was saving. Review the conflict before trying again.");
+    if (rebased.conflicts.length) {
+      await convexMutation("replicas:recordExternalReconciliation", {
+        workId,
+        localReplicaId: local.truth.replicaId as Id<"workReplicas">,
+        localPayloadRef: local.truth.payloadRef,
+        localRevision: local.truth.revision,
+        content: contentFor(ours as OfficeProjection, isSheet),
+        fidelityMap: latest.fidelityMap,
+        regionIds: rebased.externalChanged,
+        partNames: [],
+        conflictRegionIds: rebased.conflicts.map((conflict) => String((conflict as { id?: unknown }).id ?? "office:region")),
+        previews: rebased.previews,
+      });
+      return {
+        state: "conflicted" as const,
+        conflict: {
+          regionIds: rebased.conflicts.map((conflict) => String((conflict as { id?: unknown }).id ?? "office:region")),
+          previews: rebased.previews,
+          message: `${isSheet ? "Excel" : "PowerPoint"} and Spectra changed the same region. Choose which version to keep.`,
+        },
+      };
+    }
     materializationTruth = local.truth;
     materializationPayload = local.payload;
     baseOpened = latest as typeof baseOpened;
@@ -449,7 +469,9 @@ export async function POST(request: Request) {
       });
       await convexMutation("replicas:resolveExternalConflict", { workId, resolution: "spectra" });
       return NextResponse.json({
-        state: (queued as { state: string }).state,
+        state: "applied",
+        projection: contentFor(next.projection as OfficeProjection, isSheet),
+        attribution: "Kept your Spectra version",
         requestId: (queued as { requestId: string }).requestId,
         status: "Waiting to save your Spectra version locally",
       });

@@ -108,8 +108,30 @@ async function materializeDocxArtifactAttempt(
     const ours = contentProjection(content, baseOpened.projection);
     const externalOpened = await docxLens.open(local.payload, "strict-native");
     const rebased = mergeDocxProjections(baseOpened.projection, ours, externalOpened.projection, undefined, true);
-    if (rebased.conflicts.length)
-      throw new Error("The Word file changed in the same place while Spectra was saving. Review the conflict before trying again.");
+    if (rebased.conflicts.length) {
+      const conflictRegionIds = conflictIds(rebased.conflicts);
+      const previews = conflictDetails(rebased.conflicts);
+      await convexMutation("replicas:recordExternalReconciliation", {
+        workId,
+        localReplicaId: local.truth.replicaId as Id<"workReplicas">,
+        localPayloadRef: local.truth.payloadRef,
+        localRevision: local.truth.revision,
+        content: ours,
+        fidelityMap: externalOpened.fidelityMap,
+        regionIds: rebased.externalChanged,
+        partNames: [],
+        conflictRegionIds,
+        previews,
+      });
+      return {
+        state: "conflicted" as const,
+        conflict: {
+          regionIds: conflictRegionIds,
+          previews,
+          message: "The Word file and Spectra changed the same regions. Choose which version to keep.",
+        },
+      };
+    }
     truth = local.truth;
     payload = local.payload;
     opened = externalOpened;
@@ -464,7 +486,9 @@ export async function POST(request: Request) {
         resolution: "spectra",
       });
       return NextResponse.json({
-        state: queued.state,
+        state: "applied",
+        projection: next.projection,
+        attribution: "Kept your Spectra version",
         requestId: queued.requestId,
         status: "Waiting to save your Spectra version locally",
       });

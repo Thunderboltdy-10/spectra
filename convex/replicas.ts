@@ -23,7 +23,10 @@ import {
   deriveStorageTransitionIdempotencyKey,
   deriveSyncIdempotencyKey,
 } from "../shared/replica-truth";
-import { retireSupersededExternalOperations } from "./syncOperationLifecycle";
+import {
+  isActionablePendingOperation,
+  retireSupersededExternalOperations,
+} from "./syncOperationLifecycle";
 
 const strategyPreset = v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked"));
 
@@ -276,22 +279,11 @@ export const forWork = query({
     const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const work = await ctx.db.get(workId); if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
-    const [openConflicts, resolvingConflicts] = await Promise.all([
-      ctx.db.query("syncConflicts").withIndex("by_work_state", (q) => q.eq("workId", workId).eq("state", "open")).take(20),
-      ctx.db.query("syncConflicts").withIndex("by_work_state", (q) => q.eq("workId", workId).eq("state", "resolving-spectra")).take(20),
-    ]);
-    const conflicts = [...openConflicts, ...resolvingConflicts];
+    const openConflicts = await ctx.db.query("syncConflicts").withIndex("by_work_state", (q) => q.eq("workId", workId).eq("state", "open")).take(20);
     const pending = await ctx.db.query("syncOperations").withIndex("by_work_created", (q) => q.eq("workId", workId)).order("desc").take(50);
     const replicaById = new Map(replicas.map((replica) => [String(replica._id), replica]));
-    const pendingCount = pending.filter((operation) => {
-      if (operation.state === "pending") return true;
-      if (operation.state !== "applied") return false;
-      if (operation.direction !== "external" || operation.actorKind !== "external-edit") return true;
-      if (!operation.replicaId) return false;
-      const replica = replicaById.get(String(operation.replicaId));
-      return Boolean(replica && replica.revision === operation.revisionAfter);
-    }).length;
-    return { replicas, conflicts, openConflictCount: conflicts.length, pendingCount, recentOperations: pending.slice(0, 20) };
+    const pendingCount = pending.filter((operation) => isActionablePendingOperation(operation, replicaById)).length;
+    return { replicas, conflicts: openConflicts, openConflictCount: openConflicts.length, pendingCount, recentOperations: pending.slice(0, 20) };
   },
 });
 
@@ -302,9 +294,8 @@ export const presentationsForAccount = query({
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) return [];
     const replicaStates = ["diverged", "error", "pending", "unavailable"] as const;
-    const [openConflicts, resolvingConflicts, ...replicaBatches] = await Promise.all([
+    const [openConflicts, ...replicaBatches] = await Promise.all([
       ctx.db.query("syncConflicts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "open")).take(100),
-      ctx.db.query("syncConflicts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "resolving-spectra")).take(100),
       ...replicaStates.map((state) =>
         ctx.db.query("workReplicas").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", state)).take(100),
       ),
@@ -327,7 +318,7 @@ export const presentationsForAccount = query({
       byWork.set(workId, created);
       return created;
     };
-    for (const conflict of [...openConflicts, ...resolvingConflicts]) {
+    for (const conflict of openConflicts) {
       ensure(String(conflict.workId)).openConflictCount += 1;
     }
     for (const replica of replicaBatches.flat()) {
@@ -626,9 +617,6 @@ export const queueMaterialization = mutation({
     const local = args.localReplicaId
       ? locals.find((candidate) => candidate._id === args.localReplicaId)
       : locals.filter((candidate) => candidate.state !== "unavailable").sort((left, right) => right.updatedAt - left.updatedAt)[0];
-    const cloud = await ctx.db.query("workReplicas")
-      .withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud"))
-      .unique();
     if (!local?.deviceId || !local.mountId || !local.localResourceId || !local.relativePath)
       throw new Error("LOCAL_REPLICA_UNAVAILABLE");
     const [mount, device] = await Promise.all([
@@ -653,6 +641,7 @@ export const queueMaterialization = mutation({
       .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey))
       .unique();
     if (existing) return { requestId: existing._id, state: existing.state };
+    const now = Date.now();
     const activeWrite = latestActiveWriteForReplica(
       await ctx.db.query("bridgeWriteRequests")
         .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
@@ -660,7 +649,15 @@ export const queueMaterialization = mutation({
         .take(50),
       local._id,
     );
-    if (activeWrite) throw new Error("MATERIALIZATION_BASE_STALE");
+    if (activeWrite) {
+      // The queued write is still valid against the bytes it was based on.
+      // If Word saved underneath it, those bytes moved: retire the stale
+      // write so Keep Spectra / rebase can queue against the live file.
+      if (local.revision === activeWrite.baseRevision) {
+        throw new Error("MATERIALIZATION_BASE_STALE");
+      }
+      await supersedeWriteRequest(ctx, activeWrite, "external-save-during-write", now);
+    }
     if (local.revision !== input.baseRevision) {
       throw new Error("MATERIALIZATION_BASE_STALE");
     }
@@ -708,7 +705,6 @@ export const queueMaterialization = mutation({
       });
       return { requestId: "protected-original" as const, state: "protected-pending" as const };
     }
-    const now = Date.now();
     const requestId = await ctx.db.insert("bridgeWriteRequests", {
       accountId: actor.accountId,
       workId: args.workId,
@@ -735,20 +731,18 @@ export const queueMaterialization = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    if (cloud) {
-      await ctx.db.patch(cloud._id, {
-        payloadRef: input.payloadRef,
-        baseRevision: cloud.revision,
-        revision: input.contentHash,
-        contentHash: input.contentHash,
-        fidelityMap: args.fidelityMap,
-        preservedCarryVersion: 1,
-        compatibilityProfile: "strict-native",
-        state: "ahead",
+    // Cloud bytes stay at the last verified revision until Bridge read-back
+    // proves the write. Stamping the target hash here made every overlapping
+    // Word save look like a blob conflict with no region previews.
+    await ctx.db.patch(local._id, { state: "pending", updatedAt: now });
+    if (args.projectionContent !== undefined && input.projectionContentHash) {
+      await ctx.db.patch(args.workId, {
+        content: args.projectionContent,
+        contentHash: input.projectionContentHash,
+        ...(input.projectionTextIndex !== undefined ? { textIndex: input.projectionTextIndex } : {}),
         updatedAt: now,
       });
     }
-    await ctx.db.patch(local._id, { state: "pending", updatedAt: now });
     await ctx.db.insert("syncOperations", {
       accountId: actor.accountId,
       workId: args.workId,
@@ -1384,6 +1378,37 @@ async function restoreTransitionPolicy(
   if (policy && before.hadItemPolicy && before.policy)
     await ctx.db.patch(policy._id, { ...before.policy, updatedAt: now });
   else if (policy) await ctx.db.delete(policy._id);
+}
+
+async function supersedeWriteRequest(
+  ctx: MutationCtx,
+  request: Doc<"bridgeWriteRequests">,
+  errorCode: string,
+  now: number,
+) {
+  await ctx.db.patch(request._id, {
+    state: "failed",
+    errorCode,
+    errorMessage: "A newer copy of the file arrived before this save finished.",
+    claimedAt: undefined,
+    updatedAt: now,
+  });
+  const operation = await ctx.db.query("syncOperations")
+    .withIndex("by_account_key", (q) => q.eq("accountId", request.accountId).eq("idempotencyKey", request.idempotencyKey))
+    .unique();
+  if (operation && (operation.state === "pending" || operation.state === "applied"))
+    await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
+  const resolving = await ctx.db.query("syncConflicts")
+    .withIndex("by_work_state", (q) => q.eq("workId", request.workId).eq("state", "resolving-spectra"))
+    .take(50);
+  await Promise.all(resolving
+    .filter((conflict) => conflict.resolutionRequestId === request._id)
+    .map((conflict) => ctx.db.patch(conflict._id, {
+      state: "open",
+      resolutionRequestId: undefined,
+      errorCode: "resolution-write-superseded",
+      updatedAt: now,
+    })));
 }
 
 async function failWriteRequest(

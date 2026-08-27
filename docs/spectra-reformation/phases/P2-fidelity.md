@@ -138,3 +138,15 @@ L1 harness green in the owning verification units for all formats; every write c
 - Focused Vitest: 7 files / 64 tests passed (native-office-draft, workbar-overflow, collaboration-change, artifact-workbar, artifact-reconciliation, preservation-guard, docx-lens). Scoped ESLint: 0 errors / pre-existing large-shell token warnings. Secret scan: no credentials in the patch; 2,088 tracked files. `git diff --check` passed.
 - I1 VERIFIED/PASS from the first V1 walk is not re-graded. I2 conflict resolution is not claimed. Next remaining: finish this V1 reexec (Keep Spectra hang, Excel/PPTX alternating).
 - Evidence: `.shots/reformation/P2.V1/reexec/15-essay-loophold.png`, `16-essay-conflict-bar.png`, `17-keep-spectra-stuck-sync.png`.
+
+## P2.V1 reexec remainder verifier log — 2026-08-27
+
+- Continuation after compaction. HEAD was `bf9b423`. Isolated fixture only; Pablo’s visible Word `workbook_DP2_phrase_simple_complexe.docx` (pid 10584) was identified via COM FullName and not driven. PrintWindow was not used as Word content proof.
+- TRIAGE · SYSTEMIC (busy-gate / hung CAS): `queueMaterialization` stamped cloud current before Bridge verified; `pendingCount` treated applied Spectra writes as Syncing; Library/`forWork` counted `resolving-spectra` as open; Keep Spectra returned `pending` with no projection; client `nativeMaterialization` pending never retired when Word saved different bytes, so reconcile never ran.
+- Held that class in Convex (`replicas.ts`, `bridgeSync.ts`, `syncOperationLifecycle.ts`), DOCX/office routes, and `artifact-native-sync.ts` / `native-materialization-exit.ts`. Tests: enqueue stays at base hash; applied Spectra write is not Syncing; Word save against an unverified write fails that write instead of blob-conflicting; stale pending exits when local is ahead.
+- Dead Convex watcher was not killed (already gone). Started `npx convex dev --typecheck=disable` against the existing deployment; no `convex push`.
+- Live: leftover Syncing cleared once Bridge was up (`19`/`20`). Spectra typed `KEEP-S-27` (0 console errors — typing loop did not regress). Headless Word `/w` COM FullName matched the fixture; Find-insert saved `WORD-OVERLAP-27` and `WORD-ONLY-27`. Zip still has LOOPHOLD-27; KEEP-S-27 never landed on disk.
+- Keep Spectra did not appear; studio returned to Syncing (`25`). Release Bridge (22 Aug) calls missing `discoverResource`; debug Bridge hit `MOUNT_SCAN_NOT_CURRENT`. Excel/PPTX/package SHA were not re-run; first-V1 package SHA still stands for I1.
+- Focused Vitest: replicas + replica-truth property 55; xlsx-pptx/three-way-merge/preservation-guard/native-office-draft/workbar/native-materialization-exit 55. Hidden desktop `P2V1Reexec2` closed; Convex left running.
+- I1 VERIFIED/PASS unchanged. I2 live resolution still not claimed. Next remaining: finish this V1 reexec with the debug Bridge.
+- Evidence: `.shots/reformation/P2.V1/reexec/18`–`26`.

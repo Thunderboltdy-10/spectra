@@ -6,6 +6,30 @@ type ReplicaRevision = {
   revision: string;
 };
 
+type PendingOperation = {
+  state: string;
+  direction?: string;
+  actorKind?: string;
+  replicaId?: Id<"workReplicas">;
+  revisionAfter?: string;
+};
+
+/** Presenter pending work is in-flight writes plus unreconciled external saves
+ * whose bytes are still the replica's current revision. Applied cloud writes
+ * already have a durable exit and must not keep every surface on Syncing. */
+export function isActionablePendingOperation(
+  operation: PendingOperation,
+  replicaById: ReadonlyMap<string, { revision: string }>,
+) {
+  if (operation.state === "pending") return true;
+  if (operation.state !== "applied") return false;
+  if (operation.direction !== "external" || operation.actorKind !== "external-edit")
+    return false;
+  if (!operation.replicaId) return false;
+  const replica = replicaById.get(String(operation.replicaId));
+  return Boolean(replica && replica.revision === operation.revisionAfter);
+}
+
 /**
  * An external upload is a whole-file snapshot. Once that replica advances,
  * older unreconciled snapshots cannot remain actionable: the newest bytes

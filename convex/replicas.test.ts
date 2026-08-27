@@ -179,9 +179,9 @@ describe("replica truth machine", () => {
     }));
     expect(truth.requests).toHaveLength(1);
     expect(truth.operations).toHaveLength(1);
-    expect(truth.cloud).toMatchObject({ state: "ahead", revision: nextHash });
+    expect(truth.cloud).toMatchObject({ state: "current", revision: baseHash, contentHash: baseHash });
     expect(truth.local).toMatchObject({ state: "pending", revision: baseHash });
-    expect([truth.cloud?.state, truth.local?.state]).not.toContain("current");
+    expect(truth.local?.state).not.toBe("current");
   });
 
   it("rejects a second materialization until the first write is verified", async () => {
@@ -402,6 +402,56 @@ describe("replica truth machine", () => {
       workId: fixture.workId,
     });
     expect(truth.pendingCount).toBe(0);
+  });
+
+  it("does not keep Syncing after an applied Spectra write", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaId: fixture.localId,
+        idempotencyKey: "applied-spectra-write",
+        direction: "cloud-to-local",
+        revisionBefore: baseHash,
+        revisionAfter: nextHash,
+        state: "applied",
+        actorKind: "user",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
+      workId: fixture.workId,
+    });
+    expect(truth.pendingCount).toBe(0);
+  });
+
+  it("does not treat a Keep Spectra write as an open conflict", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.insert("syncConflicts", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaIds: [fixture.localId, fixture.cloudId],
+        regionIds: ["body"],
+        partNames: ["word/document.xml"],
+        localRevision: nextHash,
+        spectraRevision: baseHash,
+        state: "resolving-spectra",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
+      workId: fixture.workId,
+    });
+    expect(truth.openConflictCount).toBe(0);
+    expect(truth.conflicts).toEqual([]);
   });
 
   it("expires an external revision that never reaches reconciliation", async () => {
@@ -1014,5 +1064,125 @@ describe("replica truth machine", () => {
       workId: fixture.workId,
     });
     expect(truth.conflicts[0]?.previews).toEqual(previews);
+  });
+
+  it("does not blob-conflict a Word save against an unverified Spectra write", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    });
+    const wordHash = "d".repeat(64);
+    const wordPayloadId = await t.run(async (ctx) => {
+      const storageId = await ctx.storage.store(new Blob(["word"]));
+      return ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId,
+        hash: wordHash,
+        storageId,
+        bytes: 4,
+        mediaType: "application/test",
+        refCount: 0,
+        state: "active",
+        createdAt: Date.now(),
+        verifiedAt: Date.now(),
+      });
+    });
+    await t.mutation(api.bridgeSync.commitPayloadUpload, {
+      credential: bridgeCredential,
+      replicaId: fixture.localId,
+      hash: wordHash,
+      bytes: 4,
+      mediaType: "application/test",
+      payloadRef: String(wordPayloadId),
+    });
+    const truth = await t.run(async (ctx) => ({
+      cloud: await ctx.db.get(fixture.cloudId),
+      local: await ctx.db.get(fixture.localId),
+      conflicts: await ctx.db.query("syncConflicts").collect(),
+      requests: await ctx.db.query("bridgeWriteRequests").collect(),
+    }));
+    expect(truth.cloud).toMatchObject({ revision: baseHash, contentHash: baseHash });
+    expect(truth.local).toMatchObject({ revision: wordHash, contentHash: wordHash });
+    expect(truth.conflicts).toEqual([]);
+    expect(truth.requests.some((request) => request.state === "failed" && request.errorCode === "external-save-during-write")).toBe(true);
+  });
+
+  it("supersedes an in-flight write when the disk revision moved", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const first = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    });
+    const wordHash = "d".repeat(64);
+    const keepHash = "e".repeat(64);
+    const payloads = await t.run(async (ctx) => {
+      const now = Date.now();
+      const wordStorage = await ctx.storage.store(new Blob(["word"]));
+      const keepStorage = await ctx.storage.store(new Blob(["keep"]));
+      const wordPayloadId = await ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId,
+        hash: wordHash,
+        storageId: wordStorage,
+        bytes: 4,
+        mediaType: "application/test",
+        refCount: 0,
+        state: "active",
+        createdAt: now,
+        verifiedAt: now,
+      });
+      const keepPayloadId = await ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId,
+        hash: keepHash,
+        storageId: keepStorage,
+        bytes: 4,
+        mediaType: "application/test",
+        refCount: 0,
+        state: "active",
+        createdAt: now,
+        verifiedAt: now,
+      });
+      await ctx.db.patch(fixture.localId, {
+        payloadRef: String(wordPayloadId),
+        revision: wordHash,
+        contentHash: wordHash,
+        updatedAt: now,
+      });
+      return { keepPayloadId };
+    });
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(payloads.keepPayloadId),
+      contentHash: keepHash,
+      baseRevision: wordHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+      projectionContent: { blocks: [{ id: "body", text: "LOOPHOLD-27" }] },
+      projectionContentHash: keepHash,
+    });
+    const truth = await t.run(async (ctx) => ({
+      first: await ctx.db.get(first.requestId),
+      next: await ctx.db.get(queued.requestId),
+      local: await ctx.db.get(fixture.localId),
+      work: await ctx.db.get(fixture.workId),
+    }));
+    expect(truth.first).toMatchObject({ state: "failed", errorCode: "external-save-during-write" });
+    expect(queued.state).toBe("pending");
+    expect(truth.local).toMatchObject({ state: "pending", revision: wordHash });
+    expect(truth.work?.content).toEqual({ blocks: [{ id: "body", text: "LOOPHOLD-27" }] });
   });
 });

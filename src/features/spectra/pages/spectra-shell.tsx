@@ -73,8 +73,8 @@ import { LiveThreadPanel } from "../components/live-thread-panel";
 import { WorkbenchDockShell } from "./workbench-dock-shell";
 import {
   createApplicationCommandDispatcher,
-  mergePreferences,
 } from "../commands/application-dispatcher";
+import { applyPreferencePatch } from "../settings/schema";
 import { useSpectraPreferences } from "../settings/preference-store";
 import {
   disengageFollowAi,
@@ -1602,7 +1602,7 @@ export function SpectraShell({
     const removeSettings = spectraBus.handle(
       "settings.change",
       ({ patch, section }) => {
-        replacePreferences(mergePreferences(preferences, patch));
+        replacePreferences(applyPreferencePatch(preferences, patch));
         router.push(
           section
             ? `/settings?section=${encodeURIComponent(section)}`

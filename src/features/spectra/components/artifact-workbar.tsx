@@ -24,6 +24,7 @@ import {
   executeCommand,
   resolveCommandLayout,
   shortcutMatchesEvent,
+  swapWorkbarCommandOrders,
   tabsFor,
   type CommandBinding,
   type CommandLayout,
@@ -605,14 +606,16 @@ export function ArtifactWorkbar({
                         onDragStart={() => setDragCommandId(action.id)}
                         onDrop={() => {
                           if (!dragCommandId || dragCommandId === action.id) return;
-                          const source = rowActions.find((entry) => entry.id === dragCommandId);
-                          if (!source) return;
-                          const sourceOrder = storedLayout?.commands?.[source.id]?.order ?? source.group ? 0 : 0;
-                          updateCommandLayout(dragCommandId, {
-                            order: storedLayout?.commands?.[action.id]?.order ?? 0,
+                          const source = commands.find(({ command }) => command.id === dragCommandId)?.command;
+                          const target = commands.find(({ command }) => command.id === action.id)?.command;
+                          if (!source || !target) return;
+                          saveLayout(swapWorkbarCommandOrders(storedLayout, {
+                            sourceId: dragCommandId,
+                            targetId: action.id,
+                            sourceOrder: source.defaultPlacement.order,
+                            targetOrder: target.defaultPlacement.order,
                             tab: activeTab,
-                          });
-                          updateCommandLayout(action.id, { order: sourceOrder });
+                          }));
                           setDragCommandId(null);
                         }}
                       />
@@ -630,12 +633,16 @@ export function ArtifactWorkbar({
               onDragStart={() => setDragCommandId(action.id)}
               onDrop={() => {
                 if (!dragCommandId || dragCommandId === action.id) return;
-                const sourceOrder = storedLayout?.commands?.[dragCommandId]?.order ?? 0;
-                updateCommandLayout(dragCommandId, {
-                  order: storedLayout?.commands?.[action.id]?.order ?? 0,
+                const source = commands.find(({ command }) => command.id === dragCommandId)?.command;
+                const target = commands.find(({ command }) => command.id === action.id)?.command;
+                if (!source || !target) return;
+                saveLayout(swapWorkbarCommandOrders(storedLayout, {
+                  sourceId: dragCommandId,
+                  targetId: action.id,
+                  sourceOrder: source.defaultPlacement.order,
+                  targetOrder: target.defaultPlacement.order,
                   tab: activeTab,
-                });
-                updateCommandLayout(action.id, { order: sourceOrder });
+                }));
                 setDragCommandId(null);
               }}
             />

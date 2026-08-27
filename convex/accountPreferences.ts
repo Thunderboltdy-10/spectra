@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import {
   PREFERENCE_SCHEMA_VERSION,
+  mergePreferenceValues,
   preferenceLayerValuesSchema,
   preferenceScopeSchema,
 } from "../src/features/spectra/settings/schema/preferences";
@@ -24,24 +25,6 @@ function unknownKeys(input: unknown, output: unknown, prefix = ""): string[] {
     if (!(key in kept)) return [path];
     return unknownKeys(value, kept[key], path);
   });
-}
-
-function mergeValues(current: unknown, patch: Record<string, unknown>) {
-  const base = current && typeof current === "object" && !Array.isArray(current)
-    ? current as Record<string, unknown>
-    : {};
-  return Object.fromEntries(
-    Object.entries({ ...base, ...patch }).map(([key, value]) => {
-      const previous = base[key];
-      return [
-        key,
-        previous && value && typeof previous === "object" && typeof value === "object" &&
-          !Array.isArray(previous) && !Array.isArray(value)
-          ? { ...previous as Record<string, unknown>, ...value as Record<string, unknown> }
-          : value,
-      ];
-    }),
-  );
 }
 
 export const layers = query({
@@ -88,7 +71,9 @@ export const writeLayer = mutation({
       .unique();
     const now = Date.now();
     if (existing) {
-      const merged = preferenceLayerValuesSchema.parse(mergeValues(existing.values, values));
+      const merged = preferenceLayerValuesSchema.parse(
+        mergePreferenceValues(existing.values, values),
+      );
       await ctx.db.patch(existing._id, { values: merged, schemaVersion: PREFERENCE_SCHEMA_VERSION, migrationNotes, updatedAt: now });
       return existing._id;
     }

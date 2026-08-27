@@ -18,6 +18,10 @@ export function capabilityById(id: string): CapabilityDefinition | undefined {
   return BY_ID.get(id);
 }
 
+export function knownCapabilityIds(): ReadonlySet<string> {
+  return new Set(BY_ID.keys());
+}
+
 export function capabilitiesFor(type: CapabilityOwner): readonly CapabilityDefinition[] {
   const prefix = `${type}.`;
   return ALL_CAPABILITIES.filter((definition) => definition.id.startsWith(prefix));

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup } from "@testing-library/react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SettingsApplication } from "@/features/spectra/settings/ui/settings-application";
+import { DEFAULT_SPECTRA_PREFERENCES } from "@/features/spectra/settings/schema";
 
 /*
  * The preference store reads auth state through Convex's provider context.
@@ -65,5 +65,32 @@ describe("Settings application accessibility contract", () => {
       version: 2,
       writing: { smartCompletion: false },
     });
+  });
+
+  it("hides deleted command ids and exposes rename and density for living ones", async () => {
+    window.localStorage.setItem(
+      "spectra:preferences:v2",
+      JSON.stringify({
+        ...DEFAULT_SPECTRA_PREFERENCES,
+        workbar: {
+          document: {
+            commands: {
+              "document.format.bold": { pinned: true, label: "Strong" },
+              "document.format.ghostFromNova": { pinned: true, label: "Dead control" },
+            },
+          },
+        },
+      }),
+    );
+    render(
+      <ThemeProvider>
+        <SettingsApplication initialSection="workbar" />
+      </ThemeProvider>,
+    );
+    expect(await screen.findByDisplayValue("Strong")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Name on the workbar for Bold" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Button size for Bold" })).toBeTruthy();
+    expect(screen.queryByDisplayValue("Dead control")).toBeNull();
+    expect(screen.queryByText("document.format.ghostFromNova")).toBeNull();
   });
 });

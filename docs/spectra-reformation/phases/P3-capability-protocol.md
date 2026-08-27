@@ -85,3 +85,16 @@ Ghost gate + conformance suites in their owning units; the "add one capability" 
 - Focused Vitest 9 files / 116 tests; `check:capabilities`; scoped ESLint 0 errors; secret scan 2116 files; `git diff --check` clean.
 - Live Playwright: Clerk sign-in (stale `.playwright-cli/auth.json`); no visual redesign claimed.
 - Later owners: P3.I4 preferences, P5.I1 overflow log loop, P6.I3 logger.
+
+## P3.I4 implementation log — 2026-08-28
+
+- Status: **IMPLEMENTED**; no acceptance claimed. P3.V1 already VERIFIED; this IU has no paired VU.
+- Root cause: four merge paths (resolve, dispatcher shallow, Convex one-level, client apply) plus writes inside setState and empty-subscription apply.
+- `mergePreferenceValues` + `applyPreferencePatch` are the only merge; Convex `mergeValues` and dispatcher `mergePreferences` deleted.
+- Nested workbar patches keep sibling pins; empty object resets a type or command; IR ids prune zombies on resolve/write.
+- Persist left the setState updater (StrictMode). Failed Convex writes revert and set `saveError`. Empty remote layers never clobber.
+- Taste: rename/density wired in Settings (workbar customize stays drag/pin/hide). Pin vs tab stay two operations.
+- Reorder uses real `defaultPlacement.order` in one `swapWorkbarCommandOrders` write (CMD-5).
+- Focused Vitest 7 files / 50 tests; `check:capabilities`; scoped ESLint 0 errors; secret scan 2118 files; `git diff --check` clean.
+- Live Playwright: signed-in Settings Workbars after `auth.json`; Document layout, no raw zombie ids. Evidence: `.shots/reformation/P3.I4/settings-workbar.png`.
+- Later owners: P5.I1 overflow log loop, P6.I3 logger.

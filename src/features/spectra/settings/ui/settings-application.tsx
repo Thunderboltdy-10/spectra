@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { IsolatedErrorBoundary } from "@/components/global-error-boundary";
+import { Input } from "@/components/ui/input";
 import { useTheme } from "@/components/theme-provider";
+import { knownCapabilityIds } from "../../capabilities/catalog";
 import { useSpectraPreferences } from "../preference-store";
 import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
@@ -122,12 +124,30 @@ const WORKBAR_TYPES = [
   "planner_task", "code", "whiteboard", "agent",
 ] as const;
 
+const KNOWN_COMMAND_IDS = knownCapabilityIds();
+
+function workbarCommandName(commandId: string) {
+  const leaf = commandId.split(".").at(-1) ?? commandId;
+  return leaf.replaceAll(/([a-z])([A-Z])/g, "$1 $2").replace(/^\w/, (letter) => letter.toUpperCase());
+}
+
 function WorkbarSettings({ p, update }: SectionProps<"workbar">) {
   const [type, setType] = useState<(typeof WORKBAR_TYPES)[number]>("document");
   const layout = p[type] ?? {};
-  const commandOverrides = Object.entries(layout.commands ?? {});
+  const commandOverrides = Object.entries(layout.commands ?? {}).filter(([commandId]) =>
+    KNOWN_COMMAND_IDS.has(commandId),
+  );
   const tabs = layout.tabOrder ?? [...COMMAND_TABS[type]];
-  const save = (next: typeof layout) => update({ ...p, [type]: next });
+  const save = (next: typeof layout) => update({ [type]: next });
+  const saveCommand = (commandId: string, override: NonNullable<typeof layout.commands>[string] | undefined) => {
+    const commands = { ...layout.commands };
+    if (!override || !Object.values(override).some((value) => value !== undefined)) {
+      commands[commandId] = {};
+    } else {
+      commands[commandId] = override;
+    }
+    save({ ...layout, commands });
+  };
   return (
     <SettingGroup title="Workbar layout" description="Layouts follow your account and update open editors without reloading them.">
       <SelectRow
@@ -140,19 +160,45 @@ function WorkbarSettings({ p, update }: SectionProps<"workbar">) {
       {tabs.map((tab, index) => (
         <SettingRow key={tab} label={`${tab} tab`} description="Tab order" control={<div className="flex items-center gap-1"><Button aria-label={`Move ${tab} earlier`} size="sm" variant="ghost" disabled={index === 0} onClick={() => { const next = [...tabs]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; save({ ...layout, tabOrder: next }); }}>←</Button><Button aria-label={`Move ${tab} later`} size="sm" variant="ghost" disabled={index === tabs.length - 1} onClick={() => { const next = [...tabs]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; save({ ...layout, tabOrder: next }); }}>→</Button></div>} />
       ))}
-      {commandOverrides.map(([commandId, override]) => (
-        <SettingRow
-          key={commandId}
-          label={override.label ?? commandId}
-          description={`${override.tab ?? "Default tab"} · ${override.density ?? "Default density"}`}
-          control={
-            <div className="flex items-center gap-1">
-              <Button size="sm" variant="ghost" onClick={() => save({ ...layout, commands: { ...layout.commands, [commandId]: { ...override, pinned: !override.pinned } } })}>{override.pinned ? "Unpin" : "Pin"}</Button>
-              <Button size="sm" variant="ghost" onClick={() => save({ ...layout, commands: { ...layout.commands, [commandId]: { ...override, hidden: !override.hidden } } })}>{override.hidden ? "Restore" : "Remove"}</Button>
+      {commandOverrides.map(([commandId, override]) => {
+        const shippedName = workbarCommandName(commandId);
+        return (
+          <div key={commandId} className="rounded-card px-3.5 py-3">
+            <div className="text-ui font-medium text-[var(--text-primary)]">{override.label ?? shippedName}</div>
+            <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+              <Input
+                aria-label={`Name on the workbar for ${shippedName}`}
+                className="h-8 min-w-[140px] max-w-[220px]"
+                maxLength={48}
+                value={override.label ?? ""}
+                placeholder={shippedName}
+                onChange={(event) => {
+                  const label = event.target.value.slice(0, 48);
+                  saveCommand(commandId, { ...override, label: label.length ? label : undefined });
+                }}
+              />
+              <SelectField
+                ariaLabel={`Button size for ${shippedName}`}
+                value={override.density ?? "default"}
+                onChange={(density) => {
+                  saveCommand(commandId, {
+                    ...override,
+                    density: density === "compact" || density === "medium" ? density : undefined,
+                  });
+                }}
+                options={[
+                  { value: "default", label: "Default size" },
+                  { value: "compact", label: "Compact" },
+                  { value: "medium", label: "Medium" },
+                ]}
+                triggerClassName="min-w-[144px]"
+              />
+              <Button size="sm" variant="ghost" onClick={() => saveCommand(commandId, { ...override, pinned: !override.pinned })}>{override.pinned ? "Unpin" : "Pin"}</Button>
+              <Button size="sm" variant="ghost" onClick={() => saveCommand(commandId, { ...override, hidden: !override.hidden })}>{override.hidden ? "Restore" : "Remove"}</Button>
             </div>
-          }
-        />
-      ))}
+          </div>
+        );
+      })}
       <SettingRow label="Restore the shipped layout" description="Clears renamed labels, moved commands, tab order, densities, and hidden controls for this work type." control={<Button size="sm" variant="secondary" onClick={() => save({})}>Reset workbar</Button>} />
     </SettingGroup>
   );
@@ -201,7 +247,7 @@ function PrivacySettings() {
 
 export function SettingsApplication({ initialSection = "ai" }: { initialSection?: string }) {
   const [active, setActive] = useState<SectionId>(isSection(initialSection) ? initialSection : "ai");
-  const { preferences, hydrated, update, reset } = useSpectraPreferences();
+  const { preferences, hydrated, saveError, update, reset } = useSpectraPreferences();
   useEffect(() => { if (isSection(initialSection)) setActive(initialSection); }, [initialSection]);
   const updateSection = <K extends PreferenceSection>(section: K) => (patch: Partial<SpectraPreferences[K]>) => update(section, patch);
   const body: Record<SectionId, ReactNode> = {
@@ -250,6 +296,11 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
                 </p>
               }
             >
+              {saveError ? (
+                <p className="pb-4 text-ui leading-5 text-[var(--text-primary)]" role="status">
+                  {saveError}
+                </p>
+              ) : null}
               {body[active]}
             </IsolatedErrorBoundary>
           </div>

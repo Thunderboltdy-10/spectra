@@ -257,11 +257,118 @@ export function migratePreferences(value: unknown): SpectraPreferences {
   });
 }
 
-function mergeSection<T extends object>(current: T, next: Partial<T> | undefined): T {
-  return next ? { ...current, ...next } : current;
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-export function resolvePreferences(layers: readonly ScopedPreferenceLayer[]): SpectraPreferences {
+function objectRecord(value: unknown): Record<string, unknown> {
+  return isPlainObject(value) ? value : {};
+}
+
+/**
+ * The one preference merge. Used by layer resolve, Convex writes, dispatcher
+ * patches, and optimistic client applies. Nested objects merge; arrays replace;
+ * an empty object in a patch replaces that key (workbar reset is `{ document: {} }`).
+ */
+export function mergePreferenceValues(current: unknown, patch: unknown): Record<string, unknown> {
+  const base = objectRecord(current);
+  const next = objectRecord(patch);
+  const result: Record<string, unknown> = { ...base };
+  for (const [key, patchValue] of Object.entries(next)) {
+    if (patchValue === undefined) continue;
+    const baseValue = base[key];
+    if (Array.isArray(patchValue)) {
+      result[key] = patchValue;
+      continue;
+    }
+    if (isPlainObject(patchValue)) {
+      if (Object.keys(patchValue).length === 0) {
+        result[key] = {};
+        continue;
+      }
+      if (isPlainObject(baseValue)) {
+        result[key] = mergePreferenceValues(baseValue, patchValue);
+        continue;
+      }
+    }
+    result[key] = patchValue;
+  }
+  return result;
+}
+
+export function pruneWorkbarCommandOverrides(
+  workbar: SpectraPreferences["workbar"] | undefined,
+  knownCommandIds?: ReadonlySet<string>,
+): SpectraPreferences["workbar"] {
+  const result: SpectraPreferences["workbar"] = {};
+  for (const [type, layout] of Object.entries(workbar ?? {})) {
+    if (!layout) continue;
+    const commands = layout.commands
+      ? Object.fromEntries(
+          Object.entries(layout.commands).filter(([id, override]) => {
+            if (knownCommandIds && !knownCommandIds.has(id)) return false;
+            return Boolean(override && Object.values(override).some((value) => value !== undefined));
+          }),
+        )
+      : undefined;
+    const nextLayout = { ...layout };
+    if (commands && Object.keys(commands).length > 0) {
+      nextLayout.commands = commands;
+    } else {
+      delete nextLayout.commands;
+    }
+    result[type] = nextLayout;
+  }
+  return result;
+}
+
+export type PreferenceMergeOptions = {
+  knownCommandIds?: ReadonlySet<string>;
+};
+
+function withPrunedWorkbar(
+  values: Record<string, unknown>,
+  knownCommandIds?: ReadonlySet<string>,
+): Record<string, unknown> {
+  if (!isPlainObject(values.workbar)) return values;
+  return {
+    ...values,
+    workbar: pruneWorkbarCommandOverrides(
+      values.workbar as SpectraPreferences["workbar"],
+      knownCommandIds,
+    ),
+  };
+}
+
+export function applyPreferencePatch(
+  current: SpectraPreferences,
+  patch: unknown,
+  options: PreferenceMergeOptions = {},
+): SpectraPreferences {
+  const raw = objectRecord(patch);
+  const sectionPatch = Object.fromEntries(
+    Object.entries(raw).filter(([key]) => key !== "version" && key in DEFAULT_SPECTRA_PREFERENCES),
+  );
+  const merged = withPrunedWorkbar(
+    mergePreferenceValues(current, sectionPatch),
+    options.knownCommandIds,
+  );
+  return spectraPreferencesSchema.parse({
+    ...merged,
+    version: PREFERENCE_SCHEMA_VERSION,
+  });
+}
+
+export function remotePreferenceLayersAreReady(
+  layers: readonly unknown[] | undefined,
+): layers is readonly unknown[] {
+  return Array.isArray(layers) && layers.length > 0;
+}
+
+export function resolvePreferences(
+  layers: readonly ScopedPreferenceLayer[],
+  options: PreferenceMergeOptions = {},
+): SpectraPreferences {
   const ordered = layers
     .map((layer, index) => ({ layer, index }))
     .sort((left, right) => {
@@ -271,21 +378,10 @@ export function resolvePreferences(layers: readonly ScopedPreferenceLayer[]): Sp
       return scopeOrder || left.index - right.index;
     });
   return ordered.reduce<SpectraPreferences>(
-    (current, { layer }) => ({
-      version: PREFERENCE_SCHEMA_VERSION,
-      general: mergeSection(current.general, layer.values.general),
-      ai: mergeSection(current.ai, layer.values.ai),
-      writing: mergeSection(current.writing, layer.values.writing),
-      collaboration: mergeSection(current.collaboration, layer.values.collaboration),
-      appearance: mergeSection(current.appearance, layer.values.appearance),
-      compute: mergeSection(current.compute, layer.values.compute),
-      notifications: mergeSection(current.notifications, layer.values.notifications),
-      privacy: mergeSection(current.privacy, layer.values.privacy),
-      integrations: mergeSection(current.integrations, layer.values.integrations),
-      accessibility: mergeSection(current.accessibility, layer.values.accessibility),
-      workbar: { ...current.workbar, ...layer.values.workbar },
-    }),
-    DEFAULT_SPECTRA_PREFERENCES,
+    (current, { layer }) => applyPreferencePatch(current, layer.values, options),
+    options.knownCommandIds
+      ? applyPreferencePatch(DEFAULT_SPECTRA_PREFERENCES, {}, options)
+      : DEFAULT_SPECTRA_PREFERENCES,
   );
 }
 
@@ -293,9 +389,7 @@ export function updatePreference<K extends PreferenceSection>(
   preferences: SpectraPreferences,
   section: K,
   patch: Partial<SpectraPreferences[K]>,
+  options: PreferenceMergeOptions = {},
 ): SpectraPreferences {
-  return spectraPreferencesSchema.parse({
-    ...preferences,
-    [section]: { ...preferences[section], ...patch },
-  });
+  return applyPreferencePatch(preferences, { [section]: patch }, options);
 }

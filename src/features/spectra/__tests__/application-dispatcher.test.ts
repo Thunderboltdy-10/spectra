@@ -48,6 +48,39 @@ describe("application command dispatcher", () => {
     }));
   });
 
+  it("merges a partial settings patch without wiping sibling workbar pins", async () => {
+    const replacePreferences = vi.fn();
+    const current = {
+      ...DEFAULT_SPECTRA_PREFERENCES,
+      workbar: {
+        document: { commands: { "document.format.bold": { pinned: true } } },
+        sheets: { commands: { "sheets.format.bold": { pinned: true } } },
+      },
+    };
+    const dispatch = createApplicationCommandDispatcher({
+      openArtifact: vi.fn(),
+      navigate: vi.fn(),
+      replacePreferences,
+      preferences: current,
+    });
+
+    await dispatch("app.settings.change", {
+      patch: { workbar: { document: { commands: { "document.format.italic": { hidden: true } } } } },
+    });
+
+    expect(replacePreferences).toHaveBeenCalledWith(expect.objectContaining({
+      workbar: {
+        document: {
+          commands: {
+            "document.format.bold": { pinned: true },
+            "document.format.italic": { hidden: true },
+          },
+        },
+        sheets: { commands: { "sheets.format.bold": { pinned: true } } },
+      },
+    }));
+  });
+
   it("fails loudly when a supported semantic mutation has no mounted host", async () => {
     const dispatch = createApplicationCommandDispatcher({
       openArtifact: vi.fn(),

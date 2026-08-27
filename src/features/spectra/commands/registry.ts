@@ -309,6 +309,33 @@ export function executeCommand<P extends CommandParam>(
   return true;
 }
 
+export function swapWorkbarCommandOrders(
+  layout: CommandLayout | undefined,
+  swap: {
+    sourceId: string;
+    targetId: string;
+    sourceOrder: number;
+    targetOrder: number;
+    tab: string;
+  },
+): CommandLayout {
+  return {
+    ...layout,
+    commands: {
+      ...layout?.commands,
+      [swap.sourceId]: {
+        ...layout?.commands?.[swap.sourceId],
+        order: swap.targetOrder,
+        tab: swap.tab,
+      },
+      [swap.targetId]: {
+        ...layout?.commands?.[swap.targetId],
+        order: swap.sourceOrder,
+      },
+    },
+  };
+}
+
 export function resolveCommandLayout<P>(command: Command<P>, layout?: CommandLayout) {
   const override = layout?.commands?.[command.id];
   const sourceTab = command.sourceTab ?? command.defaultPlacement.tab;

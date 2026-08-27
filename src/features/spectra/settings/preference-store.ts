@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConvex, useConvexAuth } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import { knownCapabilityIds } from "../capabilities/catalog";
 import {
   DEFAULT_SPECTRA_PREFERENCES,
   migratePreferences,
+  remotePreferenceLayersAreReady,
   resolvePreferences,
   updatePreference,
   type PreferenceSection,
@@ -14,6 +16,11 @@ import {
   type SpectraPreferences,
 } from "./schema";
 import { spectraBus } from "../events";
+
+export const PREFERENCE_SAVE_FAILURE =
+  "Settings could not be saved. Your last change was undone.";
+const KNOWN_COMMAND_IDS = knownCapabilityIds();
+const MERGE_OPTIONS = { knownCommandIds: KNOWN_COMMAND_IDS };
 
 export const SPECTRA_PREFERENCES_STORAGE_KEY = "spectra:preferences:v2";
 const LEGACY_KEYS = ["spectra:preferences:v1", "spectra-preferences"];
@@ -55,7 +62,7 @@ export function readDevicePreferences(
   const resolveDevice = (value: unknown) => {
     const migrated = migratePreferences(value);
     const { version: _version, ...values } = migrated;
-    return resolvePreferences([{ scope: "device", values }]);
+    return resolvePreferences([{ scope: "device", values }], MERGE_OPTIONS);
   };
   const current = storage.getItem(SPECTRA_PREFERENCES_STORAGE_KEY);
   if (current) {
@@ -116,6 +123,7 @@ export function useSpectraPreferences({
 }: { workspaceId?: string; workType?: string } = {}) {
   const [preferences, setPreferences] = useState(DEFAULT_SPECTRA_PREFERENCES);
   const [hydrated, setHydrated] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const convex = useConvex() as ReturnType<typeof useConvex> | undefined;
   /*
@@ -147,10 +155,25 @@ export function useSpectraPreferences({
   );
   const migrated = useRef(false);
   const initialCache = useRef<SpectraPreferences | null>(null);
+  const preferencesRef = useRef(preferences);
+  const confirmedRef = useRef(DEFAULT_SPECTRA_PREFERENCES);
+  const writeGeneration = useRef(0);
+  const inflightWrites = useRef(0);
+  preferencesRef.current = preferences;
+
+  const commitLocal = useCallback((next: SpectraPreferences) => {
+    preferencesRef.current = next;
+    setPreferences(next);
+    writeDevicePreferences(window.localStorage, next);
+    applyDocumentPreferences(next);
+    spectraBus.emit("settings.changed", { preferences: next });
+  }, []);
 
   useEffect(() => {
     const next = readDevicePreferences(window.localStorage);
     initialCache.current = next;
+    confirmedRef.current = next;
+    preferencesRef.current = next;
     setCurrentDeviceId(deviceId(window.localStorage));
     setPreferences(next);
     applyDocumentPreferences(next);
@@ -177,24 +200,23 @@ export function useSpectraPreferences({
   }, [convex, currentDeviceId, workspaceId, workType, signedIn]);
 
   const resolvedRemote = useMemo(() => {
-    if (!remoteLayers) return null;
+    if (!remotePreferenceLayersAreReady(remoteLayers)) return null;
     return resolvePreferences(
       remoteLayers.map((layer) => ({
         scope: layer.scope,
         values: layer.values as PreferenceLayerValues,
       })),
+      MERGE_OPTIONS,
     );
   }, [remoteLayers]);
 
   useEffect(() => {
     if (!resolvedRemote || !hydrated) return;
-    if (!remoteLayers?.length && !window.localStorage.getItem(MIGRATION_KEY))
-      return;
-    setPreferences(resolvedRemote);
-    writeDevicePreferences(window.localStorage, resolvedRemote);
-    applyDocumentPreferences(resolvedRemote);
-    spectraBus.emit("settings.changed", { preferences: resolvedRemote });
-  }, [hydrated, remoteLayers?.length, resolvedRemote]);
+    if (inflightWrites.current > 0) return;
+    confirmedRef.current = resolvedRemote;
+    commitLocal(resolvedRemote);
+    setSaveError(null);
+  }, [commitLocal, hydrated, resolvedRemote]);
 
   useEffect(() => {
     if (
@@ -230,42 +252,71 @@ export function useSpectraPreferences({
     );
   }, [convex, currentDeviceId, hydrated, remoteLayers, writeLayer]);
 
+  const revertFailedWrite = useCallback((generation: number) => {
+    if (generation !== writeGeneration.current) return;
+    commitLocal(confirmedRef.current);
+    setSaveError(PREFERENCE_SAVE_FAILURE);
+  }, [commitLocal]);
+
   const persistSection = useCallback(
-    <K extends PreferenceSection>(section: K, next: SpectraPreferences) => {
-      if (!currentDeviceId) return;
+    async <K extends PreferenceSection>(section: K, next: SpectraPreferences, generation: number) => {
+      if (!currentDeviceId || !signedIn) return;
       const scope = DEVICE_SECTIONS.has(section) ? "device" : "account";
       const scopeKey = scope === "device" ? currentDeviceId : "account";
-      void writeLayer({
-        scope,
-        scopeKey,
-        values: { [section]: next[section] },
-      });
+      inflightWrites.current += 1;
+      try {
+        await writeLayer({
+          scope,
+          scopeKey,
+          values: { [section]: next[section] as PreferenceLayerValues[K] },
+        });
+        if (generation === writeGeneration.current) {
+          confirmedRef.current = next;
+          setSaveError(null);
+        }
+      } catch {
+        revertFailedWrite(generation);
+      } finally {
+        inflightWrites.current = Math.max(0, inflightWrites.current - 1);
+      }
     },
-    [currentDeviceId, writeLayer],
+    [currentDeviceId, revertFailedWrite, signedIn, writeLayer],
   );
 
   const replace = useCallback(
     (next: SpectraPreferences) => {
-      setPreferences(next);
-      writeDevicePreferences(window.localStorage, next);
-      applyDocumentPreferences(next);
-      spectraBus.emit("settings.changed", { preferences: next });
-      if (currentDeviceId) {
-        void Promise.all([
-          writeLayer({
-            scope: "account",
-            scopeKey: "account",
-            values: layerFromPreferences(next, "account"),
-          }),
-          writeLayer({
-            scope: "device",
-            scopeKey: currentDeviceId,
-            values: layerFromPreferences(next, "device"),
-          }),
-        ]);
+      const pruned = updatePreference(next, "workbar", next.workbar, MERGE_OPTIONS);
+      const generation = ++writeGeneration.current;
+      commitLocal(pruned);
+      if (!currentDeviceId || !signedIn) {
+        confirmedRef.current = pruned;
+        return;
       }
+      inflightWrites.current += 1;
+      void Promise.all([
+        writeLayer({
+          scope: "account",
+          scopeKey: "account",
+          values: layerFromPreferences(pruned, "account"),
+        }),
+        writeLayer({
+          scope: "device",
+          scopeKey: currentDeviceId,
+          values: layerFromPreferences(pruned, "device"),
+        }),
+      ]).then(
+        () => {
+          if (generation === writeGeneration.current) {
+            confirmedRef.current = pruned;
+            setSaveError(null);
+          }
+        },
+        () => revertFailedWrite(generation),
+      ).finally(() => {
+        inflightWrites.current = Math.max(0, inflightWrites.current - 1);
+      });
     },
-    [currentDeviceId, writeLayer],
+    [commitLocal, currentDeviceId, revertFailedWrite, signedIn, writeLayer],
   );
 
   const update = useCallback(
@@ -273,21 +324,17 @@ export function useSpectraPreferences({
       section: K,
       patch: Partial<SpectraPreferences[K]>,
     ) => {
-      setPreferences((current) => {
-        const next = updatePreference(current, section, patch);
-        writeDevicePreferences(window.localStorage, next);
-        applyDocumentPreferences(next);
-        spectraBus.emit("settings.changed", { preferences: next });
-        persistSection(section, next);
-        return next;
-      });
+      const next = updatePreference(preferencesRef.current, section, patch, MERGE_OPTIONS);
+      const generation = ++writeGeneration.current;
+      commitLocal(next);
+      void persistSection(section, next, generation);
     },
-    [persistSection],
+    [commitLocal, persistSection],
   );
 
   const reset = useCallback(
     () => replace(DEFAULT_SPECTRA_PREFERENCES),
     [replace],
   );
-  return { preferences, hydrated, update, replace, reset };
+  return { preferences, hydrated, saveError, update, replace, reset };
 }

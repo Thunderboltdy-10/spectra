@@ -1,4 +1,5 @@
 import type { SpectraPreferences } from "../settings/schema";
+import { applyPreferencePatch } from "../settings/schema";
 import { spectraBus } from "../events";
 
 export type ApplicationCommandDispatcher = (
@@ -24,29 +25,6 @@ function objectRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-}
-
-export function mergePreferences(current: SpectraPreferences, patch: unknown): SpectraPreferences {
-  const values = objectRecord(patch);
-  const next = { ...current } as SpectraPreferences;
-  for (const key of Object.keys(current)) {
-    if (!(key in values)) continue;
-    const value = values[key];
-    if (key === "workbar" && value && typeof value === "object" && !Array.isArray(value)) {
-      next.workbar = {
-        ...current.workbar,
-        ...(value as SpectraPreferences["workbar"]),
-      };
-    } else if (value && typeof value === "object" && !Array.isArray(value)) {
-      (next as Record<string, unknown>)[key] = {
-        ...(current as Record<string, unknown>)[key] as Record<string, unknown>,
-        ...(value as Record<string, unknown>),
-      };
-    } else {
-      (next as Record<string, unknown>)[key] = value;
-    }
-  }
-  return next;
 }
 
 /**
@@ -132,7 +110,7 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
           ...(typeof params.section === "string" ? { section: params.section } : {}),
         });
         if (listeners > 0) return;
-        const next = mergePreferences(host.preferences, params.patch);
+        const next = applyPreferencePatch(host.preferences, params.patch);
         host.replacePreferences(next);
         host.navigate("settings", typeof params.section === "string" ? params.section : undefined);
         return;

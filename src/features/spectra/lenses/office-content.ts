@@ -1,5 +1,6 @@
 import type { PresentationContent } from "../presentation/model";
 import type { SheetCellFormat, SheetsContent } from "../sheets/model";
+import { dateToSerial } from "../sheets/excel-serial";
 import { z } from "zod";
 import {
   pptxProjectionSchema,
@@ -125,6 +126,7 @@ export function normalizedCellFormat(format: Record<string, unknown> | undefined
 }
 
 export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
+  const date1904 = projection.nativeBinding.date1904 === true;
   return {
     workbook: {
       calculationMode: "automatic",
@@ -133,6 +135,7 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
         projection.definedNames.map((item) => [item.name, item.ref]),
       ),
       calculationVersion: 1,
+      ...(date1904 ? { date1904: true } : {}),
     },
     sheets: projection.sheets.map((sheet) => ({
       id: sheet.id,
@@ -140,7 +143,9 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
       cells: Object.fromEntries(
         sheet.cells.map((cell) => {
           const value =
-            cell.value instanceof Date ? cell.value.toISOString() : cell.value;
+            cell.value instanceof Date
+              ? dateToSerial(cell.value, date1904)
+              : cell.value;
           return [
             cell.ref,
             {

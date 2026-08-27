@@ -5,6 +5,7 @@ import { Workbook } from "@ariadng/office/xlsx";
 import { Presentation } from "@ariadng/office/pptx";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
+import { dateToSerial } from "../sheets/excel-serial";
 import { xlsxLens } from "../lenses/xlsx-lens";
 import { pptxLens } from "../lenses/pptx-lens";
 import {
@@ -64,6 +65,23 @@ async function nativeTransitionFixture() {
 }
 
 describe("XLSX and PPTX fidelity lenses", () => {
+  it("projects date cells as Excel serials, not ISO strings", async () => {
+    const workbook = Workbook.create();
+    const sheet = workbook.sheet("Sheet1")!;
+    sheet.setCell("A1", new Date(Date.UTC(2024, 0, 15)));
+    const opened = await xlsxLens.open(await workbook.save());
+    const cell = opened.projection.sheets[0]!.cells.find(
+      (candidate) => candidate.ref === "A1",
+    )!;
+    expect(typeof cell.value).toBe("number");
+    expect(cell.value).toBeCloseTo(
+      dateToSerial(new Date(Date.UTC(2024, 0, 15))),
+      5,
+    );
+    const content = xlsxArtifactContent(opened.projection);
+    expect(typeof content.sheets[0]!.cells.A1?.value).toBe("number");
+    expect(content.sheets[0]!.cells.A1?.value).toBe(cell.value);
+  });
   it("keeps an unrecognized formula as formula text and cached value", async () => {
     const source = await workbookFixture();
     const opened = await xlsxLens.open(source);

@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   applyBorderPreset,
+  applyCachedStaleness,
+  applyCellFormat,
+  clearCells,
   compareScalars,
   duplicateRowIndices,
   fillRange,
   fillSeries,
   isPreservedFormula,
+  offsetCellToRow,
   offsetFormula,
+  parseCellInput,
   pasteBlock,
   replaceInCells,
   sortRows,
@@ -14,13 +19,20 @@ import {
   type ClipboardBlock,
 } from "../sheets/operations";
 import {
+  formatCalculatedCell,
   formatWithCode,
+  mutateWorkbookAxis,
   normalizeSheetsContent,
   parseRange,
+  rangeAddresses,
+  rangeArea,
+  RangeTooLargeError,
+  renameWorkbookSheet,
   sheetsCalculation,
   type SheetCell,
   type SheetsContent,
 } from "../sheets/model";
+import { dateToSerial } from "../sheets/excel-serial";
 
 /**
  * The workbook's operations, tested without a grid.
@@ -299,12 +311,22 @@ describe("find and replace", () => {
     A4: cached("=TEXTBEFORE(A1,\" control\")", 0),
   };
 
-  it("replaces values and evaluable formula text", () => {
+  it("replaces values and leaves quoted formula literals alone", () => {
     const result = replaceInCells(cells, ["A1", "A2", "A3"], "control", "trial");
-    // Case-insensitive by default, the way every spreadsheet's replace works.
     expect(result.cells.A1?.value).toBe("trial group");
     expect(result.cells.A2?.value).toBe("trial");
-    expect(result.cells.A3?.formula).toBe('=A1&" trial"');
+    expect(result.cells.A3?.formula).toBe('=A1&" control"');
+    expect(result.written).toBe(2);
+  });
+
+  it("still rewrites unquoted formula text", () => {
+    const result = replaceInCells(
+      { B1: live("=A1&control", 0) },
+      ["B1"],
+      "control",
+      "trial",
+    );
+    expect(result.cells.B1?.formula).toBe("=A1&trial");
   });
 
   it("matches case-insensitively without treating the query as a pattern", () => {
@@ -485,5 +507,172 @@ describe("calculation at workbook scale", () => {
       calculation.get(`${sheetId}:J1500`);
     const cachedMs = performance.now() - again;
     expect(cachedMs).toBeLessThan(Math.max(50, firstMs * 50));
+  });
+});
+
+function sheetOf(cells: Record<string, SheetCell>, extras: Record<string, unknown> = {}) {
+  return normalizeSheetsContent({
+    activeSheetId: "s1",
+    sheets: [{ id: "s1", name: "Sheet1", cells, ...extras }],
+  });
+}
+
+function evaluated(
+  cells: Record<string, SheetCell>,
+  address = "A1",
+  extras: Record<string, unknown> = {},
+) {
+  return sheetsCalculation(sheetOf(cells, extras)).get(`s1:${address}`);
+}
+
+describe("sheets engine correctness", () => {
+  it("uses Excel serials for DATE and arithmetic on dates", () => {
+    const start = dateToSerial(new Date(Date.UTC(2024, 0, 1)));
+    expect(evaluated({ A1: { formula: "=DATE(2024,1,1)" } })?.value).toBe(start);
+    expect(evaluated({ A1: { formula: "=DATE(2024,1,1)+1" } })?.value).toBe(
+      start + 1,
+    );
+    expect(evaluated({ A1: { formula: "=DAYS(DATE(2024,1,2),DATE(2024,1,1))" } })?.value).toBe(1);
+    expect(evaluated({ A1: { formula: "=YEAR(DATE(2024,1,15))" } })?.value).toBe(2024);
+    expect(
+      formatCalculatedCell(
+        { value: start, format: { numberFormat: "date" } },
+        { value: start },
+        "en-US",
+      ),
+    ).toMatch(/2024/);
+  });
+
+  it("treats ^ as left-associative, matching Excel", () => {
+    expect(evaluated({ A1: { formula: "=2^3^2" } })?.value).toBe(64);
+  });
+
+  it("evaluates whole-column references", () => {
+    expect(
+      evaluated(
+        {
+          A1: { value: 2 },
+          A2: { value: 3 },
+          A5: { value: 4 },
+          B1: { formula: "=SUM(A:A)" },
+        },
+        "B1",
+      )?.value,
+    ).toBe(9);
+  });
+
+  it("does not silently drop cells past 10,000 in a formula range", () => {
+    const cells: Record<string, SheetCell> = {
+      A1: { value: 10 },
+      A10001: { value: 7 },
+      B1: { formula: "=SUM(A1:A10002)" },
+    };
+    expect(evaluated(cells, "B1")?.value).toBe(17);
+  });
+
+  it("refuses to walk a huge range as a dense address list", () => {
+    const parsed = parseRange("A:A");
+    expect(parsed).not.toBeNull();
+    expect(rangeArea(parsed!)).toBeGreaterThan(200_000);
+    expect(() => rangeAddresses(parsed!)).toThrow(RangeTooLargeError);
+  });
+
+  it("shifts whole-column references with the one shifter", () => {
+    expect(offsetFormula("=SUM(A:A)", 0, 1)).toBe("=SUM(B:B)");
+    expect(offsetFormula('=SUM(A:A)&"B2"', 0, 1)).toBe('=SUM(B:B)&"B2"');
+  });
+
+  it("offsets a formula when a sort moves its row", () => {
+    expect(offsetCellToRow(live("=A2*2", 4), 1, 4).formula).toBe("=A5*2");
+  });
+
+  it("parses locale decimals and does not strip grouping as a second decimal", () => {
+    expect(parseCellInput("1,5", "de-DE").value).toBe(1.5);
+    expect(parseCellInput("1.234,56", "de-DE").value).toBe(1234.56);
+    expect(parseCellInput("1,234.56", "en-US").value).toBe(1234.56);
+    expect(parseCellInput("12%", "en-US")).toEqual({
+      value: 0.12,
+      format: { numberFormat: "percent" },
+    });
+    const iso = parseCellInput("2024-01-15", "en-US");
+    expect(iso.value).toBe(dateToSerial(new Date("2024-01-15")));
+    expect(iso.format?.numberFormat).toBe("date");
+  });
+
+  it("applies percent as a format, not a rewrite of the number", () => {
+    const result = applyCellFormat({ A1: { value: 50 } }, ["A1"], {
+      numberFormat: "percent",
+    });
+    expect(result.cells.A1?.value).toBe(50);
+    expect(result.cells.A1?.format?.numberFormat).toBe("percent");
+  });
+
+  it("refuses to destroy cached-only formula text on clear all and clear values", () => {
+    const cells = { A1: cached("=XLOOKUP(1,A:A,B:B)", 1), B1: { value: 2 } };
+    const all = clearCells(cells, ["A1", "B1"], "all");
+    expect(all.blocked).toEqual(["A1"]);
+    expect(all.cells.A1?.formula).toBe("=XLOOKUP(1,A:A,B:B)");
+    expect(all.cells.B1).toBeUndefined();
+    const values = clearCells(cells, ["A1"], "values");
+    expect(values.blocked).toEqual(["A1"]);
+    expect(values.cells.A1?.formula).toBe("=XLOOKUP(1,A:A,B:B)");
+  });
+
+  it("rewrites cross-sheet refs on insert and on rename", () => {
+    const workbook = normalizeSheetsContent({
+      activeSheetId: "s1",
+      sheets: [
+        { id: "s1", name: "Sheet1", cells: { A5: { value: 1 } } },
+        {
+          id: "s2",
+          name: "Sheet2",
+          cells: {
+            B1: { formula: "=Sheet1!A5" },
+            B2: { formula: "='Sheet1'!A1" },
+          },
+        },
+      ],
+      workbook: {
+        namedRanges: { Source: "Sheet1!$A$5" },
+      },
+    });
+    const inserted = mutateWorkbookAxis(workbook, "s1", "row", 0, 1);
+    expect(inserted.sheets[1]!.cells.B1?.formula).toBe("='Sheet1'!A6");
+    expect(inserted.workbook.namedRanges?.Source).toBe("'Sheet1'!$A$6");
+    const renamed = renameWorkbookSheet(inserted, "s1", "Input");
+    expect(renamed.sheets[1]!.cells.B1?.formula).toBe("=Input!A6");
+    expect(renamed.sheets[0]!.name).toBe("Input");
+    expect(renamed.workbook.namedRanges?.Source).toBe("Input!$A$6");
+  });
+
+  it("marks cached-only results stale when a precedent changes, without recalculating", () => {
+    const previous = sheetOf({
+      A1: { value: 1 },
+      B1: cached("=A1*10", 10),
+    });
+    const next = sheetOf({
+      A1: { value: 2 },
+      B1: cached("=A1*10", 10),
+    });
+    const marked = applyCachedStaleness(previous, next);
+    expect(marked.sheets[0]!.cells.B1?.value).toBe(10);
+    expect(marked.sheets[0]!.cells.B1?.cachedValueStale).toBe(true);
+    expect(sheetsCalculation(marked).get("s1:B1")?.value).toBe(10);
+  });
+
+  it("migrates ISO date strings to serials on normalize", () => {
+    const workbook = normalizeSheetsContent({
+      activeSheetId: "s1",
+      sheets: [
+        {
+          id: "s1",
+          name: "Sheet1",
+          cells: { A1: { value: "2024-01-15T00:00:00.000Z", format: { numberFormat: "date" } } },
+        },
+      ],
+    });
+    expect(workbook.sheets[0]!.cells.A1?.value).toBe(
+      dateToSerial(new Date("2024-01-15T00:00:00.000Z")),
+    );
   });
 });

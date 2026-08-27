@@ -49,14 +49,17 @@ import {
   columnName,
   coordinateToAddress,
   formatCalculatedCell,
+  mutateWorkbookAxis,
   normalizeRange,
   normalizeSheetsContent,
-  mutateSheetAxis,
   parseAddress,
   parseDelimited,
   parseRange,
   rangeAddresses,
+  rangeArea,
   rangeLabel,
+  RANGE_WALK_LIMIT,
+  renameWorkbookSheet,
   sheetsCalculation,
   type CellCoordinate,
   type SheetBorderEdge,
@@ -110,10 +113,16 @@ import {
 } from "../commands/office/sheets-commands";
 import {
   applyBorderPreset,
+  applyCachedStaleness,
+  applyCellFormat,
+  clearCells,
   duplicateRowIndices,
   fillRange,
   fillSeries,
   isPreservedFormula,
+  offsetCellToRow,
+  offsetFormula,
+  parseCellInput,
   pasteBlock,
   replaceInCells,
   sortRows,
@@ -274,47 +283,6 @@ function cellInput(cell?: SheetCell) {
   return cell?.value === null || cell?.value === undefined
     ? ""
     : String(cell.value);
-}
-
-function parseCellInput(value: string): SheetCell {
-  if (value.startsWith("=")) return { formula: value };
-  if (!value.trim()) return {};
-  if (/^(?:true|false)$/i.test(value.trim()))
-    return { value: value.trim().toLowerCase() === "true" };
-  const numeric = Number(value.replaceAll(",", ""));
-  return Number.isFinite(numeric) && value.trim() !== ""
-    ? { value: numeric }
-    : { value };
-}
-
-function translateFormula(
-  formula: string,
-  rowDelta: number,
-  columnDelta: number,
-) {
-  return formula.replace(
-    /(^|[^A-Za-z0-9_])(?:(('(?:[^']|'')+'|[A-Za-z_][A-Za-z0-9_.]*)!)?)(\$?)([A-Za-z]+)(\$?)([1-9][0-9]*)/g,
-    (
-      match,
-      prefix,
-      sheetPrefix,
-      _sheetName,
-      absoluteColumn,
-      column,
-      absoluteRow,
-      row,
-    ) => {
-      const coordinate = parseAddress(`${column}${row}`);
-      if (!coordinate) return match;
-      const nextColumn = absoluteColumn
-        ? coordinate.column
-        : coordinate.column + columnDelta;
-      const nextRow = absoluteRow ? coordinate.row : coordinate.row + rowDelta;
-      if (nextColumn < 0 || nextRow < 0)
-        return `${prefix}${sheetPrefix || ""}#REF!`;
-      return `${prefix}${sheetPrefix || ""}${absoluteColumn || ""}${columnName(nextColumn)}${absoluteRow || ""}${nextRow + 1}`;
-    },
-  );
 }
 
 function selected(range: CellRange, row: number, column: number) {
@@ -1464,12 +1432,28 @@ export function SheetsStudio({
       ),
     [workbook.nativeBinding, workbook.sheets],
   );
+  const staleCachedFormulaCount = useMemo(
+    () =>
+      workbook.sheets.reduce(
+        (count, sheet) =>
+          count +
+          Object.values(sheet.cells).filter(
+            (cell) =>
+              cell.nativeFormulaSupport === "cached-only" &&
+              cell.cachedValueStale,
+          ).length,
+        0,
+      ),
+    [workbook.sheets],
+  );
   const activeSheetRef = useRef(activeSheet);
   activeSheetRef.current = activeSheet;
   const calculatedRef = useRef(calculated);
   calculatedRef.current = calculated;
   const localeRef = useRef(workbook.workbook.locale);
   localeRef.current = workbook.workbook.locale;
+  const date1904Ref = useRef(workbook.workbook.date1904 === true);
+  date1904Ref.current = workbook.workbook.date1904 === true;
   const mergedCellMap = useMemo(() => {
     const map = new Map<
       string,
@@ -1632,7 +1616,12 @@ export function SheetsStudio({
     // Keyed on the selection state rather than on the normalized copy: the
     // normalized object is handed to helpers that take a mutable `CellRange`, and
     // a memo keyed on it is not a memo at all.
-    () => rangeAddresses(normalizeRange(range)),
+    () => {
+      const normalized = normalizeRange(range);
+      if (rangeArea(normalized) > RANGE_WALK_LIMIT)
+        return [coordinateToAddress(normalized.start)];
+      return rangeAddresses(normalized);
+    },
     [range],
   );
   /**
@@ -1788,18 +1777,20 @@ export function SheetsStudio({
       if (scope === "cells" ? locked : grantLocked) return;
       const current = workbookRef.current;
       if (sameContent(current, next)) return;
+      const committed =
+        scope === "cells" ? applyCachedStaleness(current, next) : next;
       if (remember) {
         undoRef.current = [...undoRef.current.slice(-79), current];
         redoRef.current = [];
         setCanUndo(true);
         setCanRedo(false);
       }
-      rememberEmitted(next);
-      workbookRef.current = next;
-      setWorkbook(next);
+      rememberEmitted(committed);
+      workbookRef.current = committed;
+      setWorkbook(committed);
       // Notify the parent after the local state transition has been scheduled,
       // never from inside a React state updater.
-      onChange(next);
+      onChange(committed);
     },
     [grantLocked, locked, onChange, rememberEmitted],
   );
@@ -1880,7 +1871,7 @@ export function SheetsStudio({
               ...sourceCell,
               ...(sourceCell.formula
                 ? {
-                    formula: translateFormula(
+                    formula: offsetFormula(
                       sourceCell.formula,
                       row - sourceCoordinate.row,
                       column - sourceCoordinate.column,
@@ -1924,7 +1915,11 @@ export function SheetsStudio({
       setEditingAddress(null);
       return;
     }
-    const parsed = parseCellInput(value);
+    const parsed = parseCellInput(
+      value,
+      workbook.workbook.locale,
+      workbook.workbook.date1904,
+    );
     const validation = activeSheet.cells[address]?.validation;
     if (validation && !parsed.formula) {
       const scalar = parsed.value ?? null;
@@ -1956,36 +1951,10 @@ export function SheetsStudio({
   }
 
   function formatSelection(patch: Partial<NonNullable<SheetCell["format"]>>) {
-    const convertPercent = patch.numberFormat === "percent";
-    updateActiveSheet((sheet) => ({
-      ...sheet,
-      cells: Object.fromEntries(
-        Object.entries({
-          ...sheet.cells,
-          ...Object.fromEntries(
-            selectedAddresses.map((address) => [
-              address,
-              sheet.cells[address] ?? {},
-            ]),
-          ),
-        }).map(([address, cell]) => {
-          if (!selectedAddresses.includes(address)) return [address, cell];
-          const next: SheetCell = {
-            ...cell,
-            format: { ...cell.format, ...patch },
-          };
-          if (
-            convertPercent &&
-            !next.formula &&
-            typeof next.value === "number" &&
-            Math.abs(next.value) > 1
-          ) {
-            next.value = next.value / 100;
-          }
-          return [address, next];
-        }),
-      ),
-    }));
+    applyCells(
+      applyCellFormat(activeSheet.cells, selectedAddresses, patch),
+      "Format",
+    );
   }
 
   function mergeSelection() {
@@ -2185,20 +2154,15 @@ export function SheetsStudio({
           });
           cells[address] = {
             ...cells[address],
-            ...parseCellInput(value),
+            ...parseCellInput(
+              value,
+              workbook.workbook.locale,
+              workbook.workbook.date1904,
+            ),
             provenance: { source: "clipboard", importedAt: Date.now() },
           };
         }),
       );
-      return { ...sheet, cells };
-    });
-  }
-
-  function clearSelection() {
-    if (locked) return;
-    updateActiveSheet((sheet) => {
-      const cells = { ...sheet.cells };
-      selectedAddresses.forEach((address) => delete cells[address]);
       return { ...sheet, cells };
     });
   }
@@ -2411,6 +2375,7 @@ export function SheetsStudio({
     const sheet = activeSheetRef.current;
     const calculatedCells = calculatedRef.current;
     const locale = localeRef.current;
+    const date1904 = date1904Ref.current;
     const sample =
       gridRef.current?.querySelector(".sheets-cell") ?? gridRef.current;
     const family = sample
@@ -2421,6 +2386,7 @@ export function SheetsStudio({
         cell,
         calculatedCells.get(`${sheet.id}:${address}`),
         locale,
+        date1904,
       );
     if (axis === "column") {
       let widest = 0;
@@ -2708,6 +2674,7 @@ export function SheetsStudio({
         ? selectedRange.start.row + 1
         : selectedRange.start.row;
     const rows = [] as Array<{
+      row: number;
       values: Record<number, SheetCell | undefined>;
       key: SheetScalar | "";
     }>;
@@ -2722,6 +2689,7 @@ export function SheetsStudio({
           activeSheet.cells[coordinateToAddress({ row, column })];
       const address = coordinateToAddress({ row, column: sortColumn });
       rows.push({
+        row,
         values,
         key:
           calculated.get(`${activeSheet.id}:${address}`)?.value ??
@@ -2742,11 +2710,12 @@ export function SheetsStudio({
       const cells = { ...sheet.cells };
       rows.forEach((entry, rowOffset) =>
         Object.entries(entry.values).forEach(([column, value]) => {
+          const newRow = dataStartRow + rowOffset;
           const address = coordinateToAddress({
-            row: dataStartRow + rowOffset,
+            row: newRow,
             column: Number(column),
           });
-          if (value) cells[address] = value;
+          if (value) cells[address] = offsetCellToRow(value, entry.row, newRow);
           else delete cells[address];
         }),
       );
@@ -2786,7 +2755,11 @@ export function SheetsStudio({
         values.slice(0, 16_384).forEach((value, column) => {
           const address = coordinateToAddress({ row, column });
           cells[address] = {
-            ...parseCellInput(value),
+            ...parseCellInput(
+              value,
+              workbook.workbook.locale,
+              workbook.workbook.date1904,
+            ),
             provenance: { source: file.name, importedAt: Date.now() },
           };
         }),
@@ -3127,6 +3100,7 @@ export function SheetsStudio({
                 cell,
                 calculated.get(`${activeSheet.id}:${address}`),
                 workbook.workbook.locale,
+                workbook.workbook.date1904,
               ),
             ),
           );
@@ -3316,6 +3290,7 @@ export function SheetsStudio({
             cell,
             calculated.get(`${activeSheet.id}:${address}`),
             workbook.workbook.locale,
+            workbook.workbook.date1904,
           )
             .toLowerCase()
             .includes(needle),
@@ -3333,6 +3308,7 @@ export function SheetsStudio({
     calculated,
     search,
     workbook.workbook.locale,
+    workbook.workbook.date1904,
   ]);
   const sheetIsEmpty =
     !Object.keys(activeSheet.cells).length && !activeSheet.charts.length;
@@ -3517,32 +3493,13 @@ export function SheetsStudio({
   }
 
   function clearSelectionScope(scope: "all" | "values" | "formats") {
-    if (scope === "all") {
-      clearSelection();
-      return;
-    }
-    const cells = { ...activeSheet.cells };
-    const blocked: string[] = [];
-    let written = 0;
-    for (const address of selectedAddresses) {
-      const cell = cells[address];
-      if (!cell) continue;
-      if (scope === "values") {
-        if (isPreservedFormula(cell)) {
-          blocked.push(address);
-          continue;
-        }
-        if (cell.format || cell.note || cell.validation)
-          cells[address] = { ...cell, value: undefined, formula: undefined };
-        else delete cells[address];
-      } else {
-        cells[address] = { ...cell, format: undefined };
-      }
-      written += 1;
-    }
     applyCells(
-      { cells, blocked, written },
-      scope === "values" ? "Clear contents" : "Clear formatting",
+      clearCells(activeSheet.cells, selectedAddresses, scope),
+      scope === "all"
+        ? "Clear"
+        : scope === "values"
+          ? "Clear contents"
+          : "Clear formatting",
     );
   }
 
@@ -3630,7 +3587,8 @@ export function SheetsStudio({
         ) {
           const address = coordinateToAddress({ row: first + offset, column });
           const cell = entry.values[column];
-          if (cell) cells[address] = cell;
+          if (cell)
+            cells[address] = offsetCellToRow(cell, entry.row, first + offset);
           else delete cells[address];
         }
       });
@@ -3662,12 +3620,10 @@ export function SheetsStudio({
       setImportNotice("No repeated rows in that selection.");
       return;
     }
-    updateActiveSheet((sheet) => {
-      let next = sheet;
-      for (const row of [...duplicates].sort((left, right) => right - left))
-        next = mutateSheetAxis(next, "row", row, -1);
-      return next;
-    });
+    let next = workbook;
+    for (const row of [...duplicates].sort((left, right) => right - left))
+      next = mutateWorkbookAxis(next, activeSheet.id, "row", row, -1);
+    commit(next);
     setImportNotice(
       `Removed ${duplicates.length === 1 ? "one repeated row" : `${duplicates.length} repeated rows`}.`,
     );
@@ -3952,20 +3908,44 @@ export function SheetsStudio({
     },
     structure: {
       insertRow: () =>
-        updateActiveSheet((sheet) =>
-          mutateSheetAxis(sheet, "row", normalizedSelection.start.row, 1),
+        commit(
+          mutateWorkbookAxis(
+            workbook,
+            activeSheet.id,
+            "row",
+            normalizedSelection.start.row,
+            1,
+          ),
         ),
       insertColumn: () =>
-        updateActiveSheet((sheet) =>
-          mutateSheetAxis(sheet, "column", normalizedSelection.start.column, 1),
+        commit(
+          mutateWorkbookAxis(
+            workbook,
+            activeSheet.id,
+            "column",
+            normalizedSelection.start.column,
+            1,
+          ),
         ),
       deleteRow: () =>
-        updateActiveSheet((sheet) =>
-          mutateSheetAxis(sheet, "row", normalizedSelection.start.row, -1),
+        commit(
+          mutateWorkbookAxis(
+            workbook,
+            activeSheet.id,
+            "row",
+            normalizedSelection.start.row,
+            -1,
+          ),
         ),
       deleteColumn: () =>
-        updateActiveSheet((sheet) =>
-          mutateSheetAxis(sheet, "column", normalizedSelection.start.column, -1),
+        commit(
+          mutateWorkbookAxis(
+            workbook,
+            activeSheet.id,
+            "column",
+            normalizedSelection.start.column,
+            -1,
+          ),
         ),
       columnWidth: Math.round(
         activeSheet.columnWidths?.[String(normalizedSelection.start.column)] ??
@@ -4096,7 +4076,9 @@ export function SheetsStudio({
       cachedOnlyCount: cachedOnlyFormulaCount,
       ...(cachedOnlyFormulaCount
         ? {
-            cachedOnlyNote: `${cachedOnlyFormulaCount} formulas here show the value Excel saved; Spectra keeps their text exactly as written.`,
+            cachedOnlyNote: staleCachedFormulaCount
+              ? `${cachedOnlyFormulaCount} formulas here show the value Excel saved; ${staleCachedFormulaCount === 1 ? "one of those results may be out of date" : `${staleCachedFormulaCount} of those results may be out of date`} until Excel recalculates.`
+              : `${cachedOnlyFormulaCount} formulas here show the value Excel saved; Spectra keeps their text exactly as written.`,
           }
         : {}),
       createNamedRange: () => {
@@ -4437,9 +4419,15 @@ export function SheetsStudio({
         {cachedOnlyFormulaCount ? (
           <span
             className="min-w-0 shrink truncate px-2.5 text-micro text-[var(--text-secondary)]"
-            title="These formulas are kept as native Excel text and show their cached values until Excel recalculates them."
+            title={
+              staleCachedFormulaCount
+                ? "These formulas are kept as native Excel text. Some cached results may be out of date until Excel recalculates them."
+                : "These formulas are kept as native Excel text and show their cached values until Excel recalculates them."
+            }
           >
-            {cachedOnlyFormulaCount} native formula{cachedOnlyFormulaCount === 1 ? "" : "s"} shown from Excel cache
+            {staleCachedFormulaCount
+              ? `${cachedOnlyFormulaCount} native formula${cachedOnlyFormulaCount === 1 ? "" : "s"} from Excel cache · ${staleCachedFormulaCount} may be out of date`
+              : `${cachedOnlyFormulaCount} native formula${cachedOnlyFormulaCount === 1 ? "" : "s"} shown from Excel cache`}
           </span>
         ) : null}
       </div>
@@ -4720,6 +4708,7 @@ export function SheetsStudio({
                       cell,
                       calculatedCell,
                       workbook.workbook.locale,
+                      workbook.workbook.date1904,
                     )
                       .toLowerCase()
                       .includes(search.toLowerCase()));
@@ -4747,6 +4736,9 @@ export function SheetsStudio({
                     aria-colindex={column + 1}
                     aria-selected={isSelected}
                     data-address={address}
+                    data-cache-stale={
+                      cell?.cachedValueStale ? "true" : undefined
+                    }
                     data-selected={isSelected || undefined}
                     data-active={isActive || undefined}
                     data-traced={
@@ -4874,6 +4866,7 @@ export function SheetsStudio({
                               cell,
                               calculatedCell,
                               workbook.workbook.locale,
+                              workbook.workbook.date1904,
                             )}
                       </span>
                     )}
@@ -4885,7 +4878,7 @@ export function SheetsStudio({
                         type="button"
                         className="sheets-table-filter"
                         disabled={locked}
-                        aria-label={`Filter ${formatCalculatedCell(cell, calculatedCell, workbook.workbook.locale) || columnName(column)}`}
+                        aria-label={`Filter ${formatCalculatedCell(cell, calculatedCell, workbook.workbook.locale, workbook.workbook.date1904) || columnName(column)}`}
                         aria-pressed={Boolean(tableFilter)}
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
@@ -5627,14 +5620,9 @@ export function SheetsStudio({
                         setImportNotice("A sheet needs a name.", "warning");
                         return;
                       }
-                      commit({
-                        ...workbook,
-                        sheets: workbook.sheets.map((candidate) =>
-                          candidate.id === activeSheet.id
-                            ? { ...candidate, name }
-                            : candidate,
-                        ),
-                      });
+                      commit(
+                        renameWorkbookSheet(workbook, activeSheet.id, name),
+                      );
                       setInspector(null);
                     }}
                   >
@@ -5894,7 +5882,7 @@ export function SheetsStudio({
                         ? ", which Excel evaluates. Spectra shows the value Excel saved and keeps the text exactly as written."
                         : activeCalculated?.error
                           ? `, and it currently reports ${activeCalculated.error}.`
-                          : `, and it currently works out to ${formatCalculatedCell(activeCell, activeCalculated, workbook.workbook.locale)}.`}
+                          : `, and it currently works out to ${formatCalculatedCell(activeCell, activeCalculated, workbook.workbook.locale, workbook.workbook.date1904)}.`}
                     </p>
                     {/* Naming the functions is the explanation. A person reading
                         an inherited sheet needs to know what each piece does, and

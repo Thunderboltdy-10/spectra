@@ -1,6 +1,4 @@
 import {
-  columnIndex,
-  columnName,
   coordinateToAddress,
   normalizeRange,
   parseAddress,
@@ -11,7 +9,16 @@ import {
   type SheetBorders,
   type SheetCell,
   type SheetScalar,
+  type SheetsContent,
 } from "./model";
+import {
+  collectFormulaReferences,
+  offsetFormula,
+  refTouchesAddress,
+} from "./formula-refs";
+import { dateToSerial, isIsoDateString } from "./excel-serial";
+
+export { offsetFormula } from "./formula-refs";
 
 /**
  * The workbook's semantic operations, as pure functions over a cell map.
@@ -43,65 +50,9 @@ export type CellsResult = {
   written: number;
 };
 
-const REFERENCE_HEAD = /[A-Za-z0-9_$.!]/;
-
 /** True when this cell's formula is Excel's, not one Spectra can evaluate. */
 export function isPreservedFormula(cell: SheetCell | undefined) {
   return Boolean(cell?.formula) && cell?.nativeFormulaSupport === "cached-only";
-}
-
-/**
- * Shifts the relative references in a formula by a row and column offset, the
- * way a spreadsheet does when you fill or paste. `$` pins an axis, quoted text
- * is left alone, and a reference pushed off the sheet becomes `#REF!` rather
- * than silently wrapping to the other side.
- */
-export function offsetFormula(
-  formula: string,
-  rowDelta: number,
-  columnDelta: number,
-): string {
-  if (!formula || (rowDelta === 0 && columnDelta === 0)) return formula;
-  let out = "";
-  let index = 0;
-  let quote: '"' | "'" | null = null;
-  while (index < formula.length) {
-    const char = formula[index]!;
-    if (quote) {
-      out += char;
-      if (char === quote) quote = null;
-      index += 1;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      out += char;
-      index += 1;
-      continue;
-    }
-    const previous = out.at(-1);
-    const rest = formula.slice(index);
-    const match = /^(\$?)([A-Z]{1,3})(\$?)([1-9][0-9]*)/.exec(rest);
-    if (!match || (previous && REFERENCE_HEAD.test(previous) && previous !== "!" && previous !== "$")) {
-      out += char;
-      index += 1;
-      continue;
-    }
-    const [whole, columnLock, letters, rowLock, digits] = match;
-    const after = formula[index + whole.length];
-    if (after && /[A-Za-z0-9_(]/.test(after)) {
-      out += char;
-      index += 1;
-      continue;
-    }
-    const column = columnLock ? columnIndex(letters!) : columnIndex(letters!) + columnDelta;
-    const row = rowLock ? Number(digits) - 1 : Number(digits) - 1 + rowDelta;
-    out += column < 0 || row < 0
-      ? "#REF!"
-      : `${columnLock}${columnName(column)}${rowLock}${row + 1}`;
-    index += whole.length;
-  }
-  return out;
 }
 
 /** The border edges a preset writes, and the edges it clears. */
@@ -141,6 +92,9 @@ export function applyBorderPreset(
   };
   const { outline, inside } = presetEdges(preset);
   let written = 0;
+  const rows = normalized.end.row - normalized.start.row + 1;
+  const columns = normalized.end.column - normalized.start.column + 1;
+  if (rows * columns > 200_000) return { cells, blocked: [], written: 0 };
   for (const address of rangeAddresses(normalized)) {
     const coordinate = parseAddress(address);
     if (!coordinate) continue;
@@ -482,22 +436,49 @@ export function replaceInCells(
     const haystack = options.matchCase ? text : text.toLowerCase();
     return options.wholeCell ? haystack === needle : haystack.includes(needle);
   };
-  const swap = (text: string) => {
+  const swap = (text: string, skipQuoted: boolean) => {
     if (options.wholeCell) return replacement;
-    if (options.matchCase) return text.split(query).join(replacement);
-    // Case-insensitive replace without a regex, so a query with `(` or `*` in it
-    // is treated as the literal text a person typed.
+    const apply = (chunk: string) => {
+      if (options.matchCase) return chunk.split(query).join(replacement);
+      let out = "";
+      let index = 0;
+      const lower = chunk.toLowerCase();
+      while (index < chunk.length) {
+        const found = lower.indexOf(needle, index);
+        if (found < 0) {
+          out += chunk.slice(index);
+          break;
+        }
+        out += chunk.slice(index, found) + replacement;
+        index = found + needle.length;
+      }
+      return out;
+    };
+    if (!skipQuoted) return apply(text);
     let out = "";
     let index = 0;
-    const lower = text.toLowerCase();
     while (index < text.length) {
-      const found = lower.indexOf(needle, index);
-      if (found < 0) {
-        out += text.slice(index);
-        break;
+      if (text[index] === '"') {
+        const start = index;
+        index += 1;
+        while (index < text.length) {
+          if (text[index] === '"' && text[index + 1] === '"') {
+            index += 2;
+            continue;
+          }
+          if (text[index] === '"') {
+            index += 1;
+            break;
+          }
+          index += 1;
+        }
+        out += text.slice(start, index);
+        continue;
       }
-      out += text.slice(index, found) + replacement;
-      index = found + needle.length;
+      const nextQuote = text.indexOf('"', index);
+      const end = nextQuote < 0 ? text.length : nextQuote;
+      out += apply(text.slice(index, end));
+      index = end;
     }
     return out;
   };
@@ -505,18 +486,192 @@ export function replaceInCells(
     const cell = next[address];
     if (!cell) continue;
     if (cell.formula) {
-      if (!hit(cell.formula)) continue;
       if (isPreservedFormula(cell)) {
-        blocked.push(address);
+        if (hit(cell.formula)) blocked.push(address);
         continue;
       }
-      next[address] = { ...cell, formula: swap(cell.formula) };
+      const nextFormula = swap(cell.formula, true);
+      if (nextFormula === cell.formula) continue;
+      next[address] = { ...cell, formula: nextFormula };
       written += 1;
       continue;
     }
     if (typeof cell.value !== "string" || !hit(cell.value)) continue;
-    next[address] = { ...cell, value: swap(cell.value) };
+    next[address] = { ...cell, value: swap(cell.value, false) };
     written += 1;
   }
   return { cells: next, blocked, written };
+}
+
+function localeNumberParts(locale: string) {
+  const parts = new Intl.NumberFormat(locale).formatToParts(12345.6);
+  return {
+    group: parts.find((part) => part.type === "group")?.value ?? ",",
+    decimal: parts.find((part) => part.type === "decimal")?.value ?? ".",
+  };
+}
+
+function parseLocaleNumber(text: string, locale: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const { group, decimal } = localeNumberParts(locale);
+  let body = trimmed;
+  if (group) body = body.split(group).join("");
+  if (decimal !== ".") body = body.replace(decimal, ".");
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(body)) return null;
+  const parsed = Number(body);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Turns typed cell text into a value or formula. Locale separators are honoured
+ * so German `1,5` is one-and-a-half, not fifteen; dates become Excel serials
+ * rather than ISO strings; a trailing `%` stores the fraction and a percent format.
+ */
+export function parseCellInput(
+  value: string,
+  locale = "en-US",
+  date1904 = false,
+): SheetCell {
+  if (value.startsWith("=")) return { formula: value };
+  const trimmed = value.trim();
+  if (!trimmed) return {};
+  if (/^(?:true|false)$/i.test(trimmed))
+    return { value: trimmed.toLowerCase() === "true" };
+  if (trimmed.endsWith("%")) {
+    const parsed = parseLocaleNumber(trimmed.slice(0, -1), locale);
+    if (parsed !== null)
+      return { value: parsed / 100, format: { numberFormat: "percent" } };
+  }
+  const numeric = parseLocaleNumber(trimmed, locale);
+  if (numeric !== null) return { value: numeric };
+  if (isIsoDateString(trimmed)) {
+    return {
+      value: dateToSerial(new Date(trimmed), date1904),
+      format: { numberFormat: "date" },
+    };
+  }
+  return { value };
+}
+
+/** Percent and other number formats are a view of the value, never a rewrite. */
+export function applyCellFormat(
+  cells: Record<string, SheetCell>,
+  addresses: readonly string[],
+  patch: Partial<NonNullable<SheetCell["format"]>>,
+): CellsResult {
+  const next = { ...cells };
+  let written = 0;
+  for (const address of addresses) {
+    const cell = next[address] ?? {};
+    next[address] = { ...cell, format: { ...cell.format, ...patch } };
+    written += 1;
+  }
+  return { cells: next, blocked: [], written };
+}
+
+/**
+ * Clear contents, formats, or both. Cached-only formula text is never destroyed
+ * by `all` or `values`; those cells are reported instead.
+ */
+export function clearCells(
+  cells: Record<string, SheetCell>,
+  addresses: readonly string[],
+  scope: "all" | "values" | "formats",
+): CellsResult {
+  const next = { ...cells };
+  const blocked: string[] = [];
+  let written = 0;
+  for (const address of addresses) {
+    const cell = next[address];
+    if (!cell) continue;
+    if (scope === "formats") {
+      next[address] = { ...cell, format: undefined };
+      written += 1;
+      continue;
+    }
+    if (isPreservedFormula(cell)) {
+      blocked.push(address);
+      continue;
+    }
+    if (scope === "values") {
+      if (cell.format || cell.note || cell.validation)
+        next[address] = { ...cell, value: undefined, formula: undefined };
+      else delete next[address];
+    } else {
+      delete next[address];
+    }
+    written += 1;
+  }
+  return { cells: next, blocked, written };
+}
+
+/** Moves a formula cell to a new row, shifting relative row references with it. */
+export function offsetCellToRow(cell: SheetCell, fromRow: number, toRow: number) {
+  if (!cell.formula || fromRow === toRow) return cell;
+  return { ...cell, formula: offsetFormula(cell.formula, toRow - fromRow, 0) };
+}
+
+function cellValueFormulaChanged(left?: SheetCell, right?: SheetCell) {
+  return (left?.value ?? null) !== (right?.value ?? null) ||
+    (left?.formula ?? "") !== (right?.formula ?? "");
+}
+
+/**
+ * Marks cached-only formulas whose precedents (or own formula text) changed.
+ * Never recalculates those cells — Excel owns that number.
+ */
+export function applyCachedStaleness(
+  previous: SheetsContent,
+  next: SheetsContent,
+): SheetsContent {
+  const previousById = new Map(previous.sheets.map((sheet) => [sheet.id, sheet]));
+  const changedBySheet = new Map<string, Set<string>>();
+  for (const sheet of next.sheets) {
+    const before = previousById.get(sheet.id);
+    const changed = new Set<string>();
+    const addresses = new Set([
+      ...Object.keys(before?.cells ?? {}),
+      ...Object.keys(sheet.cells),
+    ]);
+    for (const address of addresses) {
+      if (cellValueFormulaChanged(before?.cells[address], sheet.cells[address]))
+        changed.add(address);
+    }
+    changedBySheet.set(sheet.id, changed);
+  }
+  return {
+    ...next,
+    sheets: next.sheets.map((sheet) => {
+      let touched = false;
+      const cells: Record<string, SheetCell> = { ...sheet.cells };
+      for (const [address, cell] of Object.entries(cells)) {
+        if (cell.nativeFormulaSupport !== "cached-only" || !cell.formula) continue;
+        const ownChanged = changedBySheet.get(sheet.id)?.has(address);
+        const stale =
+          Boolean(ownChanged) ||
+          collectFormulaReferences(cell.formula).some((ref) => {
+            const target =
+              next.sheets.find((candidate) =>
+                ref.sheet
+                  ? candidate.name.toUpperCase() ===
+                    ref.sheet.replace(/^'|'$/g, "").toUpperCase()
+                  : candidate.id === sheet.id,
+              ) ?? sheet;
+            const changed = changedBySheet.get(target.id);
+            if (!changed?.size) return false;
+            for (const changedAddress of changed) {
+              if (changedAddress === address) continue;
+              if (refTouchesAddress(ref, changedAddress, sheet.name, target.name))
+                return true;
+            }
+            return false;
+          });
+        if (!stale || cell.cachedValueStale) continue;
+        cells[address] = { ...cell, cachedValueStale: true };
+        touched = true;
+      }
+      return touched ? { ...sheet, cells } : sheet;
+    }),
+  };
 }

@@ -1,4 +1,5 @@
 import { Workbook, parseCellRef, type CellStyleUpdate } from "@ariadng/office/xlsx";
+import { dateToSerial } from "../sheets/excel-serial";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement } from "@ariadng/office/xml";
 import { sha256Payload } from "./docx-lens";
@@ -220,6 +221,7 @@ async function clearCellStyle(workbook: Workbook, partName: string, ref: string)
 }
 
 async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityProfile) {
+  const date1904 = workbook._date1904();
   const entries: LensFidelityEntry[] = [];
   const sheets: XlsxSheetProjection[] = [];
   for (const sheet of workbook.sheets()) {
@@ -246,7 +248,10 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
       return {
         id,
         ref: ref.toUpperCase(),
-        value: info.value,
+        value:
+          info.value instanceof Date
+            ? dateToSerial(info.value, date1904)
+            : info.value,
         ...(formula ? { formula, formulaSupport: support } : {}),
         style: sheet.getCellStyle(ref) as unknown as Record<string, unknown>,
         format: normalizedCellFormat(sheet.getCellStyle(ref) as unknown as Record<string, unknown>),
@@ -339,6 +344,7 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
       macroEnabled: workbook.office.format.macroEnabled,
       semanticDigest,
       recognizedFormulaFunctions: [...XLSX_RECOGNIZED_FORMULAS].sort(),
+      ...(workbook._date1904() ? { date1904: true } : {}),
     },
   });
   return { projection, fidelityMap };

@@ -163,3 +163,15 @@ L1 harness green in the owning verification units for all formats; every write c
 - Package export→import→re-export was not re-run this pass; first-V1 SHA `5F2BD66F50AFEA0F3A31C8681427DF848E05AEE31093D9F4A008AA80276D5DEB` / 842 bytes still stands for I1.
 - Focused Vitest: replicas + sync-presentation + sheets-studio-render 48 passed. I1 VERIFIED/PASS unchanged. Headless desktop `P2V1Reexec3` closed after Bridge/Office launched there; Convex left running.
 - Evidence: `.shots/reformation/P2.V1/reexec/27`–`43` (did not overwrite `00`–`09` or `15`–`17`).
+
+## P2.I4 implementer log — 2026-08-27
+
+- TRIAGE: SYSTEMIC sheets-engine class (serials, `^`, whole-column, 10k truncate, three shifters, percent, locale, rename/structural, cache aging, find-replace quotes, clear.all). Held as one seam.
+- One quote-aware reference walker now serves fill, paste, sort, insert/delete, and rename. `translateFormula` and the naive structural regex are gone.
+- DATE/TODAY/NOW/YEAR/DAYS use Excel serials; `^` is left-associative (`2^3^2` = 64); `SUM(A:A)` tokenizes; ranges over 10k stream occupied cells instead of silently dropping them.
+- Locale entry honours decimal/group separators; typed ISO dates become serials; percent format no longer divides values > 1.
+- Insert/delete/rename rewrite cross-sheet formulas and named ranges. Cached-only formulas mark `cachedValueStale` when precedents change and are never recalculated. Find-replace skips quoted literals. `clear.all` and `clear.values` both refuse to destroy cached-only formula text.
+- Native date cells project as serials, not ISO strings. Sheet names that look like A1 refs are quoted on rewrite (`'Sheet1'!A6`), matching Excel.
+- Focused Vitest: 6 files / 84 tests passed. Scoped ESLint: 0 errors on owned engine files; studio retains pre-existing z-index/hex warnings. Secret scan passed across 2,092 tracked files; `git diff --check` passed.
+- Full repository sweep and live Excel grading were not run; P2.V1/V2 own coexistence. INDEX/MATCH/AVERAGE-empty/ROUND-ties stay XLS-5 extras. P2.I3 R7 refusals and P6.I3 logger untouched.
+- Status: IMPLEMENTED only; no verification or acceptance claimed.

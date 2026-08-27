@@ -1,3 +1,15 @@
+import {
+  dateToSerial,
+  EXCEL_MAX_COL,
+  EXCEL_MAX_ROW,
+  isIsoDateString,
+  serialToDate,
+} from "./excel-serial";
+import {
+  rewriteSheetNameInFormula,
+  rewriteStructuralReferences,
+} from "./formula-refs";
+
 export type SheetScalar = string | number | boolean | null;
 
 export type SheetValidation =
@@ -92,6 +104,12 @@ export type SheetCell = {
   value?: SheetScalar;
   formula?: string;
   nativeFormulaSupport?: "recognized" | "cached-only";
+  /**
+   * Excel's last saved result is older than the workbook Spectra can see.
+   * Cached-only formulas are never recalculated here; this flag is the
+   * honest marker that the displayed number may no longer match Excel.
+   */
+  cachedValueStale?: boolean;
   format?: SheetCellFormat;
   validation?: SheetValidation;
   note?: string;
@@ -211,6 +229,8 @@ export type SheetsContent = {
     timezone?: string;
     namedRanges?: Record<string, string>;
     calculationVersion?: number;
+    /** Excel 1904 date system. Absent means the 1900 system. */
+    date1904?: boolean;
   };
   sheets: WorkbookSheet[];
   activeSheetId: string;
@@ -221,6 +241,7 @@ export type SheetsContent = {
     macroEnabled: boolean;
     semanticDigest: string;
     recognizedFormulaFunctions: string[];
+    date1904?: boolean;
   };
 };
 
@@ -276,13 +297,55 @@ export function normalizeRange(range: CellRange): CellRange {
 }
 
 export function parseRange(value: string): CellRange | null {
-  const [startText, endText = startText] = value
-    .trim()
-    .toUpperCase()
-    .split(":", 2);
+  const text = value.trim().toUpperCase();
+  const colRange = /^\$?([A-Z]{1,3}):\$?([A-Z]{1,3})$/.exec(text);
+  if (colRange) {
+    const start = columnIndex(colRange[1]!);
+    const end = columnIndex(colRange[2]!);
+    if (start < 0 || end < 0) return null;
+    return normalizeRange({
+      start: { row: 0, column: start },
+      end: { row: EXCEL_MAX_ROW - 1, column: end },
+    });
+  }
+  const rowRange = /^\$?([1-9][0-9]*):\$?([1-9][0-9]*)$/.exec(text);
+  if (rowRange) {
+    const start = Number(rowRange[1]) - 1;
+    const end = Number(rowRange[2]) - 1;
+    if (start < 0 || end < 0 || start >= EXCEL_MAX_ROW || end >= EXCEL_MAX_ROW)
+      return null;
+    return normalizeRange({
+      start: { row: start, column: 0 },
+      end: { row: end, column: EXCEL_MAX_COL - 1 },
+    });
+  }
+  const [startText, endText = startText] = text.split(":", 2);
   const start = parseAddress(startText ?? "");
   const end = parseAddress(endText ?? "");
   return start && end ? normalizeRange({ start, end }) : null;
+}
+
+export function rangeArea(range: CellRange) {
+  const normalized = normalizeRange(range);
+  return (
+    (normalized.end.row - normalized.start.row + 1) *
+    (normalized.end.column - normalized.start.column + 1)
+  );
+}
+
+/** Walks denser than this throw rather than silently dropping cells. */
+export const RANGE_WALK_LIMIT = 200_000;
+const DENSE_FORMULA_RANGE = 10_000;
+
+export class RangeTooLargeError extends Error {
+  readonly area: number;
+  readonly limit: number;
+  constructor(area: number, limit: number) {
+    super(`Range of ${area} cells exceeds the ${limit}-cell walk limit.`);
+    this.name = "RangeTooLargeError";
+    this.area = area;
+    this.limit = limit;
+  }
 }
 
 export function rangeLabel(range: CellRange) {
@@ -292,8 +355,10 @@ export function rangeLabel(range: CellRange) {
   return start === end ? start : `${start}:${end}`;
 }
 
-export function rangeAddresses(range: CellRange, limit = 10_000) {
+export function rangeAddresses(range: CellRange, limit = RANGE_WALK_LIMIT) {
   const normalized = normalizeRange(range);
+  const area = rangeArea(normalized);
+  if (area > limit) throw new RangeTooLargeError(area, limit);
   const result: string[] = [];
   for (let row = normalized.start.row; row <= normalized.end.row; row += 1) {
     for (
@@ -301,11 +366,32 @@ export function rangeAddresses(range: CellRange, limit = 10_000) {
       column <= normalized.end.column;
       column += 1
     ) {
-      if (result.length >= limit) return result;
       result.push(coordinateToAddress({ row, column }));
     }
   }
   return result;
+}
+
+function occupiedAddressesInRange(sheet: WorkbookSheet, range: CellRange) {
+  const normalized = normalizeRange(range);
+  const addresses: string[] = [];
+  for (const address of Object.keys(sheet.cells)) {
+    const coordinate = parseAddress(address);
+    if (!coordinate) continue;
+    if (
+      coordinate.row >= normalized.start.row &&
+      coordinate.row <= normalized.end.row &&
+      coordinate.column >= normalized.start.column &&
+      coordinate.column <= normalized.end.column
+    )
+      addresses.push(address);
+  }
+  addresses.sort((left, right) => {
+    const a = parseAddress(left)!;
+    const b = parseAddress(right)!;
+    return a.row - b.row || a.column - b.column;
+  });
+  return addresses;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -396,13 +482,6 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
               }
             : record(rawCell);
         const value = cell.value;
-        const scalar =
-          typeof value === "string" ||
-          typeof value === "number" ||
-          typeof value === "boolean" ||
-          value === null
-            ? value
-            : undefined;
         const formula =
           typeof cell.formula === "string"
             ? cell.formula
@@ -410,6 +489,24 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                 String(cell.input).trim().startsWith("=")
               ? String(cell.input).trim()
               : undefined;
+        const date1904 = workbookSource.date1904 === true;
+        let scalar: SheetScalar | undefined =
+          typeof value === "string" ||
+          typeof value === "number" ||
+          typeof value === "boolean" ||
+          value === null
+            ? value
+            : undefined;
+        if (typeof scalar === "string" && isIsoDateString(scalar)) {
+          scalar = dateToSerial(new Date(scalar), date1904);
+        } else if (
+          typeof scalar === "number" &&
+          Math.abs(scalar) > 1e11 &&
+          (record(cell.format).numberFormat === "date" ||
+            record(cell.format).numberFormat === "time")
+        ) {
+          scalar = dateToSerial(new Date(scalar), date1904);
+        }
         if (scalar === undefined && formula === undefined) {
           // Keep format-only / note-only cells; drop truly empty shells.
           const hasExtras =
@@ -427,6 +524,9 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
               ...(cell.nativeFormulaSupport === "cached-only" ||
               cell.nativeFormulaSupport === "recognized"
                 ? { nativeFormulaSupport: cell.nativeFormulaSupport }
+                : {}),
+              ...(cell.cachedValueStale === true
+                ? { cachedValueStale: true }
                 : {}),
               ...(cell.format && typeof cell.format === "object"
                 ? { format: cell.format as SheetCell["format"] }
@@ -794,6 +894,7 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                 ? [entry.trim().slice(0, 120)]
                 : [],
             ),
+          ...(nativeBindingSource.date1904 === true ? { date1904: true } : {}),
         }
       : undefined;
   return {
@@ -814,6 +915,7 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
         typeof workbookSource.calculationVersion === "number"
           ? workbookSource.calculationVersion
           : 1,
+      ...(workbookSource.date1904 === true ? { date1904: true } : {}),
     },
     sheets,
     activeSheetId,
@@ -869,7 +971,7 @@ function tokenize(expression: string): Token[] {
       continue;
     }
     const cellReference = remaining.match(
-      /^(?:(?:'(?:[^']|'')+'|[A-Za-z_][A-Za-z0-9_.]*)!)?\$?[A-Za-z]+\$?[1-9][0-9]*/,
+      /^(?:(?:'(?:[^']|'')+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(?:\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}|\$?[1-9][0-9]*:\$?[1-9][0-9]*|\$?[A-Za-z]{1,3}\$?[1-9][0-9]*)/,
     );
     if (cellReference) {
       tokens.push({
@@ -1027,6 +1129,7 @@ class FormulaParser {
     private readonly resolveCell: (reference: string) => SheetScalar,
     private readonly resolveRange: (reference: string) => SheetScalar[],
     private readonly resolveName: (name: string) => FormulaValue,
+    private readonly date1904 = false,
   ) {}
 
   parse() {
@@ -1102,9 +1205,9 @@ class FormulaParser {
   }
   private power(): FormulaValue {
     let left = this.unary();
-    if (this.current()?.value === "^") {
+    while (this.current()?.value === "^") {
       this.consume();
-      left = Math.pow(numeric(left), numeric(this.power()));
+      left = Math.pow(numeric(left), numeric(this.unary()));
     }
     return left;
   }
@@ -1168,7 +1271,12 @@ class FormulaParser {
       this.argumentShapes = shapes;
       return this.call(upper, args);
     }
-    if (!addressPattern.test(upper.split("!").at(-1) ?? ""))
+    const local = upper.split("!").at(-1) ?? "";
+    if (local.includes(":")) {
+      this.rangeShape = referenceShape(upper);
+      return this.resolveRange(upper);
+    }
+    if (!addressPattern.test(local))
       return this.resolveName(upper);
     if (this.current()?.type === "colon") {
       this.consume();
@@ -1385,7 +1493,7 @@ class FormulaParser {
       const raw = scalar(args[0] ?? null);
       const code = String(scalar(args[1] ?? "") ?? "");
       if (typeof raw !== "number") return raw === null ? "" : String(raw);
-      return formatWithCode(raw, code);
+      return formatWithCode(raw, code, undefined, this.date1904);
     }
     if (name === "TRIM")
       return String(scalar(args[0] ?? "") ?? "")
@@ -1492,17 +1600,16 @@ class FormulaParser {
     if (name === "TAN") return Math.tan(numeric(args[0] ?? 0));
     if (name === "PI") return Math.PI;
     if (name === "DATE") {
-      const date = new Date(
-        Date.UTC(
-          Math.round(numeric(args[0] ?? 1900)),
-          Math.round(numeric(args[1] ?? 1)) - 1,
-          Math.round(numeric(args[2] ?? 1)),
-        ),
+      const year = Math.round(numeric(args[0] ?? 1900));
+      const month = Math.round(numeric(args[1] ?? 1));
+      const day = Math.round(numeric(args[2] ?? 1));
+      return dateToSerial(
+        new Date(Date.UTC(year, month - 1, day)),
+        this.date1904,
       );
-      return date.getTime();
     }
     if (name === "YEAR" || name === "MONTH" || name === "DAY") {
-      const date = new Date(numeric(args[0] ?? 0));
+      const date = serialToDate(numeric(args[0] ?? 0), this.date1904);
       if (Number.isNaN(date.getTime())) throw new Error("#VALUE!");
       if (name === "YEAR") return date.getUTCFullYear();
       if (name === "MONTH") return date.getUTCMonth() + 1;
@@ -1627,11 +1734,14 @@ class FormulaParser {
     }
     if (name === "TODAY") {
       const now = new Date();
-      return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      return dateToSerial(
+        new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())),
+        this.date1904,
+      );
     }
-    if (name === "NOW") return Date.now();
+    if (name === "NOW") return dateToSerial(new Date(), this.date1904);
     if (name === "WEEKDAY") {
-      const date = new Date(numeric(args[0] ?? 0));
+      const date = serialToDate(numeric(args[0] ?? 0), this.date1904);
       if (Number.isNaN(date.getTime())) throw new Error("#VALUE!");
       const type = Math.round(numeric(args[1] ?? 1));
       const day = date.getUTCDay();
@@ -1640,12 +1750,10 @@ class FormulaParser {
       return day + 1;
     }
     if (name === "DAYS") {
-      const later = numeric(args[0] ?? 0);
-      const earlier = numeric(args[1] ?? 0);
-      return Math.round((later - earlier) / 86_400_000);
+      return numeric(args[0] ?? 0) - numeric(args[1] ?? 0);
     }
     if (name === "HOUR" || name === "MINUTE" || name === "SECOND") {
-      const date = new Date(numeric(args[0] ?? 0));
+      const date = serialToDate(numeric(args[0] ?? 0), this.date1904);
       if (Number.isNaN(date.getTime())) throw new Error("#VALUE!");
       if (name === "HOUR") return date.getUTCHours();
       if (name === "MINUTE") return date.getUTCMinutes();
@@ -1706,6 +1814,7 @@ function calculationCore(content: SheetsContent) {
   const result = new Map<string, CalculatedCell>();
   const resolving = new Set<string>();
   const sheetById = new Map(content.sheets.map((sheet) => [sheet.id, sheet]));
+  const date1904 = content.workbook.date1904 === true;
   const calculate = (sheet: WorkbookSheet, address: string): CalculatedCell => {
     const key = `${sheet.id}:${address.toUpperCase()}`;
     const cached = result.get(key);
@@ -1757,7 +1866,11 @@ function calculationCore(content: SheetsContent) {
             throw new Error("#REF!");
           const range = parseRange(`${startParts.address}:${endParts.address}`);
           if (!range) throw new Error("#REF!");
-          return rangeAddresses(range).map((item) => {
+          const addresses =
+            rangeArea(range) <= DENSE_FORMULA_RANGE
+              ? rangeAddresses(range)
+              : occupiedAddressesInRange(startParts.sheet, range);
+          return addresses.map((item) => {
             const calculated = calculate(startParts.sheet!, item);
             if (calculated.error) throw new Error(calculated.error);
             return calculated.value;
@@ -1784,13 +1897,18 @@ function calculationCore(content: SheetsContent) {
             separator >= 0 ? named.slice(separator + 1) : named,
           );
           if (!targetSheet || !targetRange) throw new Error("#REF!");
-          const values = rangeAddresses(targetRange).map((address) => {
+          const values = (
+            rangeArea(targetRange) <= DENSE_FORMULA_RANGE
+              ? rangeAddresses(targetRange)
+              : occupiedAddressesInRange(targetSheet, targetRange)
+          ).map((address) => {
             const target = calculate(targetSheet, address);
             if (target.error) throw new Error(target.error);
             return target.value;
           });
           return values.length === 1 ? values[0]! : values;
         },
+        date1904,
       );
       const calculated = { value: parser.parse() };
       result.set(key, calculated);
@@ -1893,10 +2011,22 @@ function fractionText(value: number, limit = 99) {
  * the closest honest reading rather than being dropped, and the stored number is
  * never touched — a format is a view of a value, never a rewrite of it.
  */
-export function formatWithCode(value: number, code: string, locale?: string) {
+function dateFromSerial(value: number, date1904 = false) {
+  if (Math.abs(value) < 3_000_000) return serialToDate(value, date1904);
+  return new Date(value);
+}
+
+export function formatWithCode(
+  value: number,
+  code: string,
+  locale?: string,
+  date1904 = false,
+) {
   const codeDecimals = /\.(0+)/.exec(code)?.[1]?.length;
   if (/[dmy]/i.test(code.replace(/\[[^\]]*]/g, "")) && /[dy]/i.test(code))
-    return new Intl.DateTimeFormat(locale).format(new Date(value));
+    return new Intl.DateTimeFormat(locale).format(
+      dateFromSerial(value, date1904),
+    );
   if (code.includes("%"))
     return new Intl.NumberFormat(locale, {
       style: "percent",
@@ -1919,6 +2049,7 @@ export function formatCalculatedCell(
   cell: SheetCell | undefined,
   calculated: CalculatedCell | undefined,
   locale: string,
+  date1904 = false,
 ) {
   if (calculated?.error) return calculated.error;
   const value = calculated?.value ?? cell?.value ?? null;
@@ -1968,15 +2099,22 @@ export function formatCalculatedCell(
           maximumFractionDigits: Math.min(12, format.decimals ?? 2),
         }).format(value);
       case "date":
-        return new Intl.DateTimeFormat(locale).format(new Date(value));
+        return new Intl.DateTimeFormat(locale).format(
+          dateFromSerial(value, date1904),
+        );
       case "time":
         return new Intl.DateTimeFormat(locale, {
           hour: "2-digit",
           minute: "2-digit",
           ...(decimals > 0 ? { second: "2-digit" as const } : {}),
-        }).format(new Date(value));
+        }).format(dateFromSerial(value, date1904));
       case "custom":
-        return formatWithCode(value, format.customFormat ?? "", locale);
+        return formatWithCode(
+          value,
+          format.customFormat ?? "",
+          locale,
+          date1904,
+        );
       default:
         return new Intl.NumberFormat(locale, {
           useGrouping: grouping,
@@ -2022,36 +2160,6 @@ export function parseDelimited(
 export function delimitedValue(value: string) {
   if (!/[",\n\r]/.test(value)) return value;
   return `"${value.replaceAll('"', '""')}"`;
-}
-
-function rewriteStructuralReferences(
-  value: string,
-  axis: "row" | "column",
-  at: number,
-  delta: 1 | -1,
-) {
-  return value.replace(
-    /(\$?)([A-Z]+)(\$?)([1-9][0-9]*)/g,
-    (
-      token,
-      columnAbsolute: string,
-      columnText: string,
-      rowAbsolute: string,
-      rowText: string,
-    ) => {
-      const coordinate = {
-        row: Number(rowText) - 1,
-        column: columnIndex(columnText),
-      };
-      const current = axis === "row" ? coordinate.row : coordinate.column;
-      if (delta === -1 && current === at) return "#REF!";
-      if (current < at) return token;
-      if (axis === "row") coordinate.row += delta;
-      else coordinate.column += delta;
-      if (coordinate.row < 0 || coordinate.column < 0) return "#REF!";
-      return `${columnAbsolute}${columnName(coordinate.column)}${rowAbsolute}${coordinate.row + 1}`;
-    },
-  );
 }
 
 function shiftIdentityMap(
@@ -2172,7 +2280,10 @@ export function mutateSheetAxis(
       ...cell,
       ...(cell.formula
         ? {
-            formula: rewriteStructuralReferences(cell.formula, axis, at, delta),
+            formula: rewriteStructuralReferences(cell.formula, axis, at, delta, {
+              sheetName: sheet.name,
+              unqualified: true,
+            }),
           }
         : {}),
     };
@@ -2266,5 +2377,109 @@ export function mutateSheetAxis(
             `${sheet.id}:column`,
           )
         : sheet.columnIdentities,
+  };
+}
+
+function rewriteNamedRangeRef(
+  ref: string,
+  rewrite: (formula: string) => string,
+) {
+  const prefixed = ref.trimStart().startsWith("=") ? ref : `=${ref}`;
+  const next = rewrite(prefixed);
+  return ref.trimStart().startsWith("=") ? next : next.replace(/^=/, "");
+}
+
+/**
+ * Insert or delete a row/column on one sheet, then rewrite every formula and
+ * named range in the workbook that names that sheet. Unqualified refs on other
+ * sheets stay put — they belong to those sheets.
+ */
+export function mutateWorkbookAxis(
+  content: SheetsContent,
+  sheetId: string,
+  axis: "row" | "column",
+  at: number,
+  delta: 1 | -1,
+): SheetsContent {
+  const target = content.sheets.find((sheet) => sheet.id === sheetId);
+  if (!target) return content;
+  const sheetName = target.name;
+  return {
+    ...content,
+    sheets: content.sheets.map((sheet) => {
+      if (sheet.id === sheetId) return mutateSheetAxis(sheet, axis, at, delta);
+      const cells: Record<string, SheetCell> = {};
+      for (const [address, cell] of Object.entries(sheet.cells)) {
+        cells[address] = cell.formula
+          ? {
+              ...cell,
+              formula: rewriteStructuralReferences(
+                cell.formula,
+                axis,
+                at,
+                delta,
+                { sheetName, unqualified: false },
+              ),
+            }
+          : cell;
+      }
+      return { ...sheet, cells };
+    }),
+    workbook: {
+      ...content.workbook,
+      namedRanges: Object.fromEntries(
+        Object.entries(content.workbook.namedRanges ?? {}).map(([name, ref]) => [
+          name,
+          rewriteNamedRangeRef(ref, (formula) =>
+            rewriteStructuralReferences(formula, axis, at, delta, {
+              sheetName,
+              unqualified: false,
+            }),
+          ),
+        ]),
+      ),
+    },
+  };
+}
+
+/** Renames a sheet and rewrites every formula and named range that pointed at it. */
+export function renameWorkbookSheet(
+  content: SheetsContent,
+  sheetId: string,
+  newName: string,
+): SheetsContent {
+  const target = content.sheets.find((sheet) => sheet.id === sheetId);
+  if (!target || target.name === newName) return content;
+  const oldName = target.name;
+  return {
+    ...content,
+    sheets: content.sheets.map((sheet) => {
+      const renamed = sheet.id === sheetId ? { ...sheet, name: newName } : sheet;
+      const cells: Record<string, SheetCell> = {};
+      for (const [address, cell] of Object.entries(renamed.cells)) {
+        cells[address] = cell.formula
+          ? {
+              ...cell,
+              formula: rewriteSheetNameInFormula(
+                cell.formula,
+                oldName,
+                newName,
+              ),
+            }
+          : cell;
+      }
+      return { ...renamed, cells };
+    }),
+    workbook: {
+      ...content.workbook,
+      namedRanges: Object.fromEntries(
+        Object.entries(content.workbook.namedRanges ?? {}).map(([name, ref]) => [
+          name,
+          rewriteNamedRangeRef(ref, (formula) =>
+            rewriteSheetNameInFormula(formula, oldName, newName),
+          ),
+        ]),
+      ),
+    },
   };
 }

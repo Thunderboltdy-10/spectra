@@ -594,6 +594,7 @@ const cellSchema = z.object({
   value: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
   formula: z.string().max(8_000).optional(),
   nativeFormulaSupport: z.enum(["recognized", "cached-only"]).optional(),
+  cachedValueStale: z.boolean().optional(),
   format: z
     .object({
       bold: z.boolean().optional(),
@@ -627,6 +628,7 @@ export const sheetsContentSchema = z
       timezone: z.string().max(100).optional(),
       namedRanges: z.record(z.string(), z.string()).optional(),
       calculationVersion: z.number().int().positive().optional(),
+      date1904: z.boolean().optional(),
     }),
     sheets: z
       .array(
@@ -738,6 +740,7 @@ export const sheetsContentSchema = z
         recognizedFormulaFunctions: z
           .array(z.string().min(1).max(120))
           .max(500),
+        date1904: z.boolean().optional(),
       })
       .strict()
       .optional(),

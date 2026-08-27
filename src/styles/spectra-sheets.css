@@ -38,6 +38,12 @@
   background-color: color-mix(in oklab, var(--brand-primary) 5%, var(--bg-primary));
 }
 
+/* Cached Excel results whose precedents changed here. The number is still
+   Excel's last save — this mark is the honest aging, not a recalculation. */
+.sheets-cell[data-cache-stale="true"] {
+  box-shadow: inset 0 -2px 0 color-mix(in oklab, var(--warning, #b45309) 70%, transparent);
+}
+
 /* The active sheet's colour mark, beside the sheet selector in the workbar. */
 .sheets-tab-color {
   display: inline-block;

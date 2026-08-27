@@ -149,6 +149,7 @@ export const xlsxProjectionSchema = z
         ...nativeBindingBase,
         format: z.enum(["xlsx", "xlsm", "xltx", "xltm", "xlam"]),
         recognizedFormulaFunctions: z.array(z.string()),
+        date1904: z.boolean().optional(),
       })
       .strict(),
   })

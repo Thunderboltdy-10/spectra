@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { SelectField } from "@/components/ui/select";
 import { ArtifactWorkbar } from "./artifact-workbar";
+import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import {
   normalizePlanContent,
@@ -421,7 +422,7 @@ export function PlanStudio({
               }
             : undefined
         }
-        actions={[
+        actions={projectBindingsFromIr("planner_task", [
           {
             id: "find",
             label: "Find tasks",
@@ -469,7 +470,7 @@ export function PlanStudio({
             onSelect: () => exportPlan("json"),
             priority: "advanced",
           },
-        ]}
+        ])}
       />
       <div className="spectra-editor-body">
       {readOnly ? null : (

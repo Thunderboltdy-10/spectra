@@ -133,6 +133,7 @@ import {
   type CommandBinding,
   type WorkbarModeSpec,
 } from "./artifact-workbar";
+import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
 import { targetAttrs } from "../collaboration/target-attributes";
@@ -2537,7 +2538,7 @@ export function CodeStudio({
    * bar sheds under pressure — an icon tool drops its label, the primary verb
    * keeps its own, and nothing is deleted from the surface at any width.
    */
-  const workbarActions: CommandBinding[] = [
+  const workbarActions: CommandBinding[] = projectBindingsFromIr("code", [
     ...(sourcePaneVisible
       ? [
           {
@@ -2729,7 +2730,7 @@ export function CodeStudio({
           },
         ]
       : []),
-  ];
+  ]);
 
   return (
     <div className="code-studio min-h-0 w-full min-w-0">

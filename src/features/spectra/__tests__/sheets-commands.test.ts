@@ -294,7 +294,10 @@ describe("sheets command bindings", () => {
     const add = set.find((binding) => binding.id === "sheet.new");
     expect(add?.disabled).toBe(true);
     expect(add?.hint).toBe(reason);
-    expect(add?.strictNative).toEqual({ available: false, reason });
+    expect(add?.strictNative).toEqual({
+      available: false,
+      reason: "Spectra does not add, remove, hide, or reorder worksheets in a linked Excel file.",
+    });
   });
 
   it("only offers the pivot note when the workbook has pivot parts", () => {

@@ -63,6 +63,7 @@ import {
   type TextFormatAdapter,
   type ToggleFacet,
 } from "../shared";
+import { projectBindingsFromIr } from "../../capabilities";
 import type { CommandBinding, CommandControlOption } from "../types";
 
 /**
@@ -1540,7 +1541,7 @@ function referenceBindings(handlers: DocumentCommandHandlers): CommandBinding[] 
 export function documentCommandBindings(
   handlers: DocumentCommandHandlers,
 ): CommandBinding[] {
-  return [
+  return projectBindingsFromIr("document", [
     ...foundationBindings(handlers),
     ...paragraphBindings(handlers),
     ...insertBindings(handlers),
@@ -1569,7 +1570,7 @@ export function documentCommandBindings(
         "import.copy": { tab: "Layout", group: "Export" },
       },
     ),
-  ];
+  ]);
 }
 
 const noop = () => undefined;

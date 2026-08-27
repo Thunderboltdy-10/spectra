@@ -97,6 +97,7 @@ import {
   WorkbarItemSelector,
   type CommandBinding,
 } from "./artifact-workbar";
+import { projectBindingsFromIr } from "../capabilities";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -2785,7 +2786,7 @@ export function WhiteboardStudio({
         }
         context={undefined}
         className="mx-3 mt-2.5 shrink-0"
-        actions={[
+        actions={projectBindingsFromIr("whiteboard", [
           ...boardActions,
           ...barPalette.map(([id, Icon, label]) => ({
             id: `tool-${id}`,
@@ -2796,7 +2797,7 @@ export function WhiteboardStudio({
             disabled: !canEdit && id !== "select" && id !== "hand",
             onSelect: () => setTool(id),
           })),
-        ]}
+        ])}
         trailing={
           <span className="spectra-workbar-count" title="Zoom level">
             {Math.round(viewport.zoom * 100)}%

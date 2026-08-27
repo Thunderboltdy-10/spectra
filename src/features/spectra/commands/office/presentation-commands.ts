@@ -61,7 +61,7 @@ import {
   Type,
   Ungroup,
 } from "lucide-react";
-import { PRESENTATION_TEXT_FORMAT_NATIVE_REASON } from "../../capabilities";
+import { PRESENTATION_STRICT_REASONS, projectBindingsFromIr } from "../../capabilities";
 import type { CommandBinding, CommandControlOption, CommandParam, FidelityRegionKey } from "../types";
 import {
   commentsBinding,
@@ -80,6 +80,8 @@ import {
   type TextFormatAdapter,
   type ZoomAdapter,
 } from "../shared";
+
+export { PRESENTATION_STRICT_REASONS };
 
 /**
  * The Presentation command set.
@@ -268,67 +270,6 @@ export const PRESENTATION_CAPABILITY_DEFERRALS = [
       "Spectra never rewrites a deck's slide masters: they are preserved exactly as the file has them, so its branding survives a round trip. Use Design to change the theme, which restyles the slides without touching the master.",
   },
 ] as const;
-
-/* -------------------------------------------------------- honest disabling */
-
-/**
- * The sentences a person reads when a control cannot reach the linked file.
- * Written once, each names a concrete reason and promises no date. These bite
- * only in the `strict-native` profile: a deck born in Spectra keeps every one
- * of these controls.
- */
-export const PRESENTATION_STRICT_REASONS = {
-  addSlide:
-    "Adding a slide to the linked PowerPoint file needs a layout from its master. Spectra does not write new slides into the linked package yet.",
-  duplicateSlide:
-    "Duplicating into the linked PowerPoint file would have to clone its slide part and relationships, which Spectra does not write yet.",
-  layout:
-    "This file gets its layouts from its own slide masters. Spectra preserves them and cannot reassign a layout in the linked file.",
-  theme:
-    "The PowerPoint theme is preserved exactly as saved, so a Spectra theme cannot replace it while the original is linked.",
-  background:
-    "Slide background fills are not written into the linked PowerPoint file, so this stays unavailable while the original is linked.",
-  slideSize:
-    "The linked file keeps the slide size it was saved with. Changing it would rewrite every layout and master.",
-  transition:
-    "Only an exact PowerPoint equivalent may replace a transition in a linked file, and Spectra does not write transitions yet.",
-  animation:
-    "PowerPoint animation timing is preserved exactly. Spectra does not author timing entries in a linked file.",
-  textStyle: PRESENTATION_TEXT_FORMAT_NATIVE_REASON,
-  shapeStyle:
-    "Shape fills, lines and effects are preserved from the linked file rather than rewritten.",
-  newShape:
-    "Spectra cannot author this shape into the linked PowerPoint file yet. A text box is the one shape it writes natively.",
-  newChart:
-    "Charts in the linked file are preserved with their cached data and workbook. Spectra does not author a new chart part.",
-  newTable:
-    "Tables in the linked file are preserved as graphic frames. Spectra does not author a new table into them.",
-  newMedia:
-    "Adding media would need a new media part and relationship in the linked file, which Spectra does not write yet.",
-  embed:
-    "A linked Spectra work has no PowerPoint representation, so it is available only when this deck is not mirroring a native file.",
-  group:
-    "PowerPoint group shapes in this file are preserved. Spectra does not write its own groups into the linked package.",
-  order: "Shape stacking order is preserved from the linked file's own shape tree.",
-  deleteObject: "Removing a shape from the linked PowerPoint file is not written yet.",
-  crop: "Image cropping is held in Spectra and is not written into the linked picture.",
-  chartData:
-    "The linked chart keeps its own cached data. A live Spectra binding is a Spectra-side view of it.",
-  citations:
-    "Citations have no PowerPoint representation, so they stay in Spectra while the original file is linked.",
-  component:
-    "Reusable components are a Spectra library, so inserting one is unavailable while a native file is linked.",
-  sections:
-    "Sections are held in Spectra. The linked file keeps its own section list untouched.",
-  slideHidden:
-    "Hidden-slide state is preserved from PowerPoint. Spectra does not write that flag into a linked slide yet.",
-  slideNumbers:
-    "PowerPoint slide-number placeholders are preserved. Spectra does not add or remove them in a linked deck.",
-  objectState:
-    "Object lock and visibility flags are preserved from PowerPoint and are not written into a linked shape yet.",
-  autoAdvance:
-    "PowerPoint slide timing is preserved. Spectra does not write auto-advance timing into a linked deck yet.",
-} as const;
 
 const SHAPES: readonly FidelityRegionKey[] = ["shapes"];
 
@@ -658,7 +599,7 @@ export function presentationCommandBindings(
   const isImage = selection.objectType === "image" || selection.objectType === "video";
   const shaped = selection.objectType === "shape" || selection.objectType === "text";
 
-  return [
+  return projectBindingsFromIr("presentation", [
     /* ------------------------------------------------- General · History */
     ...historyBindings(handlers.history),
 
@@ -674,10 +615,6 @@ export function presentationCommandBindings(
       shortcut: "Mod+Enter",
       hint: "Adds a slide after this one",
       touches: ["slides"],
-      strictNative: {
-        available: false,
-        reason: PRESENTATION_STRICT_REASONS.addSlide,
-      },
       manifestOps: ["add_slide", "create_outline"],
       onSelect: () => handlers.slide.add(),
     },
@@ -2220,7 +2157,7 @@ export function presentationCommandBindings(
     ...exportBindings(handlers.exporter),
     printBinding(handlers.print, "deck"),
     importBinding(handlers.importer),
-  ];
+  ]);
 }
 
 /* -------------------------------------------------------------- the stub */

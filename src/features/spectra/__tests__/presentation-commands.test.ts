@@ -260,11 +260,11 @@ describe("presentation command set", () => {
     expect(command.availability(fullContext()).reason).toContain("no notes page");
   });
 
-  it("refuses adding a slide to a linked PowerPoint deck", () => {
+  it("enables adding a slide to a linked PowerPoint deck because the lens writes add-slide", () => {
     const add = commands().find((command) => command.id === "presentation.slide.add");
-    expect(add?.availability(fullContext("strict-native"))).toMatchObject({
-      state: "disabled",
-      reason: PRESENTATION_STRICT_REASONS.addSlide,
+    expect(add?.nativeDelta).toBe("add-slide");
+    expect(add?.availability(fullContext("strict-native"))).toEqual({
+      state: "enabled",
     });
   });
 

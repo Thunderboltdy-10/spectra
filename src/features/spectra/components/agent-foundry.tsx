@@ -96,6 +96,7 @@ import {
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { ArtifactWorkbar, type CommandBinding, WorkbarItemSelector } from "./artifact-workbar";
+import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
 
@@ -1864,7 +1865,9 @@ export function AgentFoundry({
      control (two modes and a verb, with the verb styled as the active tab) and
      then repeated both verbs as buttons in the body. */
   const barActions: CommandBinding[] =
-    view === "build"
+    projectBindingsFromIr(
+      "agent",
+      view === "build"
       ? [
           {
             id: "next",
@@ -1958,7 +1961,8 @@ export function AgentFoundry({
               hint: "Only you can use it, and it needs no passing check",
               onSelect: () => void publish("internal_test"),
             },
-          ];
+          ],
+    );
 
   const barPrimary =
     view === "build"

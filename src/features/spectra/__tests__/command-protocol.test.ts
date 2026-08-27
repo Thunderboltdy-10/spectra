@@ -269,24 +269,31 @@ describe("artifact command protocol", () => {
 describe("office capability audit", () => {
   it("names an operation the assistant can do and a person cannot", () => {
     const audit = officeCapabilityAudit("sheets", [
-      { id: "data.sort", label: "Sort", manifestOps: ["sort_filter"], onSelect: () => {} },
+      {
+        id: "sort.asc",
+        capabilityId: "sheets.sort.asc",
+        label: "Sort A to Z",
+        onSelect: () => {},
+      },
     ]);
-    const sort = audit.find((entry) => entry.operation === "sheets.sort.filter");
+    const sort = audit.find((entry) => entry.operation === "sheets.sort.asc");
     expect(sort).toMatchObject({
       status: "registered",
-      commandIds: ["sheets.data.sort"],
-      action: "sort.filter",
+      commandIds: ["sheets.sort.asc"],
     });
 
-    // Nothing registers create_named_range, and naming a range is neither a read
-    // nor something you can do by typing in a cell.
-    const named = audit.find((entry) => entry.operation === "sheets.create.named.range");
-    expect(named?.status).toBe("ai-only");
+    const chart = audit.find((entry) => entry.operation === "sheets.chart.insert");
+    expect(chart?.status).toBe("ai-only");
     const issues = officeCapabilityAuditIssues("sheets", [
-      { id: "data.sort", label: "Sort", manifestOps: ["sort_filter"], onSelect: () => {} },
+      {
+        id: "sort.asc",
+        capabilityId: "sheets.sort.asc",
+        label: "Sort A to Z",
+        onSelect: () => {},
+      },
     ]);
     expect(issues.some((issue) =>
-      issue.startsWith("sheets.create.named.range:") && issue.includes("a person cannot"),
+      issue.startsWith("sheets.chart.insert:") && issue.includes("a person cannot"),
     )).toBe(true);
   });
 
@@ -303,7 +310,7 @@ describe("office capability audit", () => {
     });
     // Creating a table is neither: nobody types a table into existence, so it
     // owes a real command.
-    expect(audit.find((entry) => entry.operation === "document.create.table")?.status)
+    expect(audit.find((entry) => entry.operation === "document.insert.table")?.status)
       .toBe("ai-only");
   });
 
@@ -311,15 +318,19 @@ describe("office capability audit", () => {
     // A registered command still wins: once Insert table exists, the operation is
     // registered rather than explained away.
     const audit = officeCapabilityAudit("document", [
-      { id: "insert.table", label: "Table", manifestOps: ["create_table"], onSelect: () => {} },
+      {
+        id: "insert.table",
+        capabilityId: "document.insert.table",
+        label: "Table",
+        onSelect: () => {},
+      },
     ]);
-    expect(audit.find((entry) => entry.operation === "document.create.table")).toMatchObject({
+    expect(audit.find((entry) => entry.operation === "document.insert.table")).toMatchObject({
       status: "registered",
       commandIds: ["document.insert.table"],
     });
-    // And an operation nobody can name a gesture for stays a reported bug.
     expect(officeCapabilityAuditIssues("document", []).some((issue) =>
-      issue.startsWith("document.add.citation:"),
+      issue.startsWith("document.insert.citation:"),
     )).toBe(true);
   });
 
@@ -339,12 +350,19 @@ describe("office capability audit", () => {
       .some((issue) => issue.includes("apply.master"))).toBe(false);
 
     // A deferral that outlived its fix, and one with nothing to tell anyone.
-    const stale = officeCapabilityAuditIssues("presentation", bindings, [
-      { operation: "apply_theme", reason: "Later." },
-      { operation: "build_bibliography", reason: "  " },
+    // apply_master is the leftover aggregate this suite still names; specialized
+    // verbs like apply_theme now live on their IR ids and cannot be deferred
+    // under the old name.
+    const stale = officeCapabilityAuditIssues("presentation", [
+      { id: "design.master", label: "Master", manifestOps: ["apply_master"], onSelect: () => {} },
+    ], [
+      { operation: "apply_master", reason: "Later." },
     ]);
     expect(stale.some((issue) => issue.includes("stale"))).toBe(true);
-    expect(stale.some((issue) => issue.includes("without a reason"))).toBe(true);
+    const unreasoned = officeCapabilityAuditIssues("presentation", bindings, [
+      { operation: "apply_master", reason: "  " },
+    ]);
+    expect(unreasoned.some((issue) => issue.includes("without a reason"))).toBe(true);
   });
 
   it("catches a command that claims an operation the registry never declared", () => {
@@ -356,21 +374,45 @@ describe("office capability audit", () => {
     )).toBe(true);
   });
 
-  it("accepts many commands for one operation, because an operation is a verb", () => {
-    // "Page break" and "Footnote" both insert a block. That is specialization,
-    // not two execute paths for one command — so the audit reports nothing.
+  it("accepts specialized IR ids instead of one aggregate verb", () => {
     const issues = officeCapabilityAuditIssues("document", [
-      { id: "insert.pageBreak", label: "Page break", manifestOps: ["insert_blocks"], onSelect: () => {} },
-      { id: "insert.footnote", label: "Footnote", manifestOps: ["insert_blocks"], onSelect: () => {} },
+      {
+        id: "insert.pageBreak",
+        capabilityId: "document.insert.pageBreak",
+        label: "Page break",
+        onSelect: () => {},
+      },
+      {
+        id: "insert.footnote",
+        capabilityId: "document.insert.footnote",
+        label: "Footnote",
+        onSelect: () => {},
+      },
     ]);
     expect(issues.some((issue) => issue.includes("insert.blocks"))).toBe(false);
 
-    const entry = officeCapabilityAudit("document", [
-      { id: "insert.pageBreak", label: "Page break", manifestOps: ["insert_blocks"], onSelect: () => {} },
-      { id: "insert.footnote", label: "Footnote", manifestOps: ["insert_blocks"], onSelect: () => {} },
-    ]).find((row) => row.operation === "document.insert.blocks");
-    expect(entry).toMatchObject({ status: "registered" });
-    expect(entry?.commandIds).toEqual(["document.insert.pageBreak", "document.insert.footnote"]);
+    const audit = officeCapabilityAudit("document", [
+      {
+        id: "insert.pageBreak",
+        capabilityId: "document.insert.pageBreak",
+        label: "Page break",
+        onSelect: () => {},
+      },
+      {
+        id: "insert.footnote",
+        capabilityId: "document.insert.footnote",
+        label: "Footnote",
+        onSelect: () => {},
+      },
+    ]);
+    expect(audit.find((row) => row.operation === "document.insert.pageBreak")).toMatchObject({
+      status: "registered",
+      commandIds: ["document.insert.pageBreak"],
+    });
+    expect(audit.find((row) => row.operation === "document.insert.footnote")).toMatchObject({
+      status: "registered",
+      commandIds: ["document.insert.footnote"],
+    });
   });
 
   it("summarises how much of a type the assistant and a person share", () => {

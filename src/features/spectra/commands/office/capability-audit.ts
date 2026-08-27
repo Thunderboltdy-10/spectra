@@ -1,5 +1,5 @@
 import { requireArtifactTypeManifest } from "../../artifacts/registry";
-import { formattingCapabilitiesFor } from "../../capabilities";
+import { officeCapabilitiesFor } from "../../capabilities";
 import { commandForBinding } from "../registry";
 import type { CapabilityAuditEntry } from "../app-registry";
 import type { CommandBinding } from "../types";
@@ -104,10 +104,10 @@ const INSPECTION_OPERATIONS: Record<string, readonly string[]> = {
  */
 const DIRECT_MANIPULATION_OPERATIONS: Record<string, Readonly<Record<string, string>>> = {
   document: {
-    rewrite_blocks: "Typing in the paragraph.",
+    "rewrite.paragraph": "Typing in the paragraph.",
+    "edit.tableCell": "Clicking the cell and typing.",
     split_block: "Pressing Enter.",
     merge_blocks: "Pressing Backspace at the start of a paragraph.",
-    edit_table_cell: "Clicking the cell and typing.",
   },
   sheets: {
     set_cells: "Selecting a cell and typing.",
@@ -116,6 +116,7 @@ const DIRECT_MANIPULATION_OPERATIONS: Record<string, Readonly<Record<string, str
     clear_range: "Selecting a range and pressing Delete.",
   },
   presentation: {
+    create_outline: "Adding slides and typing their titles.",
     rewrite_object: "Clicking into the text box and typing.",
     move_object: "Dragging the shape.",
     resize_object: "Dragging a selection handle.",
@@ -135,7 +136,7 @@ export function officeOperationsFor(type: WorkType): readonly string[] {
   if (type !== "document" && type !== "sheets" && type !== "presentation") {
     return manifestOperations;
   }
-  const definitions = formattingCapabilitiesFor(type);
+  const definitions = officeCapabilitiesFor(type);
   const replacedAggregates = new Set(
     definitions
       .map((definition) => definition.manifestOperation)
@@ -232,7 +233,8 @@ export function officeCapabilityAuditIssues(
   const manifestDeclared = new Set(requireArtifactTypeManifest(type).operations);
 
   if (type === "document" || type === "sheets" || type === "presentation") {
-    for (const definition of formattingCapabilitiesFor(type)) {
+    for (const definition of officeCapabilitiesFor(type)) {
+      if (!definition.ai.exposed) continue;
       if (!declared.has(definition.id)) {
         issues.push(`${definition.id}: capability is missing from the generated Office operation vocabulary.`);
       }

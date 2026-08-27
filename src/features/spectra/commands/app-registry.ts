@@ -17,6 +17,7 @@ import {
   UserRoundX,
 } from "lucide-react";
 import type { Command, CommandContext } from "./types";
+import { applicationCapability } from "../capabilities";
 
 const appContext = (ctx: CommandContext) => ctx.permissions.editable;
 const enabled = (ctx: CommandContext) =>
@@ -54,7 +55,7 @@ function appCommand(
   };
 }
 
-export const APP_COMMANDS: readonly Command<unknown>[] = [
+const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
   appCommand({
     id: "app.navigate",
     title: "Navigate Spectra",
@@ -382,6 +383,23 @@ export const APP_COMMANDS: readonly Command<unknown>[] = [
     choreography: { target: "settings-control", region: "providers" },
   }),
 ];
+
+export const APP_COMMANDS: readonly Command<unknown>[] =
+  APP_COMMAND_PRESENTATION.map((command) => {
+    const definition = applicationCapability(command.id);
+    return {
+      ...command,
+      capabilityId: definition.id,
+      description: definition.ai.description,
+      availability: definition.availability,
+      risk: definition.ai.riskClass,
+      choreography: definition.choreography ?? command.choreography,
+      aiAuthority: definition.ai.exposed ? ("allowed" as const) : ("prohibited" as const),
+      ...(!definition.ai.exposed
+        ? { prohibitionReason: definition.ai.description }
+        : {}),
+    };
+  });
 
 export function appCommandById(id: string) {
   return APP_COMMANDS.find((command) => command.id === id);

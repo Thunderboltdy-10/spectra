@@ -10,10 +10,7 @@ import {
   XLSX_LENS_DELTA_KINDS,
 } from "../lenses/projection-contracts";
 import type { WorkType } from "../work/registry";
-import {
-  OFFICE_FORMATTING_CAPABILITIES,
-  formattingCapabilitiesFor,
-} from "./office-formatting";
+import { ALL_CAPABILITIES, capabilityForLocalId, officeCapabilitiesFor } from "./catalog";
 import type { CapabilityDefinition, OfficeWorkType } from "./types";
 
 type CapabilityOwnedBindingField =
@@ -34,18 +31,26 @@ type CapabilityOwnedBindingField =
 export type CapabilityBindingPresentation = Omit<
   CommandBinding,
   CapabilityOwnedBindingField
->;
+> & { id?: string };
+
+function ownerFromId(id: string): string {
+  return id.split(".")[0] ?? id;
+}
+
+function localIdFromDefinition(definition: CapabilityDefinition, presentationId?: string) {
+  if (presentationId) return presentationId;
+  const prefix = `${ownerFromId(definition.id)}.`;
+  return definition.id.slice(prefix.length);
+}
 
 /** Project capability truth into the existing workbar binding contract. */
-export function commandBindingFromCapability<T extends OfficeWorkType>(
-  definition: CapabilityDefinition<T>,
+export function commandBindingFromCapability(
+  definition: CapabilityDefinition,
   presentation: CapabilityBindingPresentation,
 ): CommandBinding {
-  const prefix = `${definition.id.split(".")[0]}.`;
-  const localId = definition.id.slice(prefix.length);
   return {
     ...presentation,
-    id: localId,
+    id: localIdFromDefinition(definition, presentation.id),
     capabilityId: definition.id,
     params: definition.params as z.ZodType<CommandParam>,
     availability: definition.availability,
@@ -75,6 +80,68 @@ export function commandBindingFromCapability<T extends OfficeWorkType>(
   };
 }
 
+const OWNED_BINDING_FIELDS = [
+  "capabilityId",
+  "params",
+  "availability",
+  "touches",
+  "nativeDelta",
+  "manifestOps",
+  "risk",
+  "requires",
+  "strictNative",
+  "ai",
+  "choreography",
+] as const;
+
+function presentationOnly(
+  binding: CommandBinding,
+): CapabilityBindingPresentation & { id: string } {
+  const presentation: Record<string, unknown> = { ...binding };
+  for (const field of OWNED_BINDING_FIELDS) {
+    delete presentation[field];
+  }
+  return presentation as CapabilityBindingPresentation & { id: string };
+}
+
+function mergeManifestOps(
+  specialized: string | undefined,
+  original: readonly string[] | undefined,
+): string[] | undefined {
+  const merged: string[] = [];
+  if (specialized) merged.push(specialized);
+  for (const operation of original ?? []) {
+    if (!merged.includes(operation)) merged.push(operation);
+  }
+  return merged.length ? merged : undefined;
+}
+
+/**
+ * Overwrite IR-owned fields on authored workbar bindings. Presentation
+ * (label, icon, tab, control, shortcut, execute) stays as written.
+ */
+export function projectBindingsFromIr(
+  type: WorkType,
+  bindings: readonly CommandBinding[],
+): CommandBinding[] {
+  return bindings.map((binding) => {
+    if (binding.capabilityId) return binding;
+    const definition = capabilityForLocalId(type, binding.id);
+    if (!definition) {
+      throw new Error(`CAPABILITY_DEFINITION_MISSING: ${type}.${binding.id}`);
+    }
+    const projected = commandBindingFromCapability(
+      definition,
+      presentationOnly(binding),
+    );
+    const manifestOps = mergeManifestOps(
+      definition.manifestOperation,
+      binding.manifestOps,
+    );
+    return manifestOps ? { ...projected, manifestOps } : projected;
+  });
+}
+
 export type ProposedCapabilityOperation = {
   capabilityId: string;
   params: unknown;
@@ -87,7 +154,7 @@ export type ProposedCapabilityOperation = {
 export function proposeOperationSchemaFor(
   type: OfficeWorkType,
 ): z.ZodType<ProposedCapabilityOperation> {
-  const variants = formattingCapabilitiesFor(type)
+  const variants = officeCapabilitiesFor(type)
     .filter((definition) => definition.ai.exposed)
     .map((definition) =>
       z
@@ -120,16 +187,6 @@ const LENS_DELTA_KINDS: Record<OfficeWorkType, ReadonlySet<string>> = {
   presentation: new Set(PPTX_LENS_DELTA_KINDS),
 };
 
-/** Independent lens-side formatting surface that this unit must claim. */
-const REQUIRED_FORMATTING_LENS_DELTAS: Record<
-  OfficeWorkType,
-  readonly string[]
-> = {
-  document: ["apply-style", "format-runs", "format-paragraph"],
-  sheets: ["set-cell-format"],
-  presentation: [],
-};
-
 function strictNativeContext(type: OfficeWorkType): CommandContext {
   return {
     workType: type,
@@ -142,6 +199,12 @@ function strictNativeContext(type: OfficeWorkType): CommandContext {
       lists: "NATIVE",
       numberFormats: "NATIVE",
       shapes: "NATIVE",
+      slides: "NATIVE",
+      speakerNotes: "NATIVE",
+      cells: "NATIVE",
+      formulas: "NATIVE",
+      freezePanes: "NATIVE",
+      merges: "NATIVE",
     },
     selection: { ids: [] },
     permissions: { role: "edit", editable: true },
@@ -162,7 +225,7 @@ function definitionType(
  * it never scans source strings or trusts a parallel handwritten lens list.
  */
 export function capabilityGhostIssues(
-  definitions: readonly CapabilityDefinition[] = OFFICE_FORMATTING_CAPABILITIES,
+  definitions: readonly CapabilityDefinition[] = ALL_CAPABILITIES,
 ): string[] {
   const issues: string[] = [];
   const seen = new Set<string>();
@@ -173,13 +236,6 @@ export function capabilityGhostIssues(
   ]);
 
   for (const definition of definitions) {
-    const type = definitionType(definition);
-    if (!type) {
-      issues.push(
-        `${definition.id}: formatting capability is not an Office type.`,
-      );
-      continue;
-    }
     if (seen.has(definition.id)) {
       issues.push(
         `${definition.id}: capability id is registered more than once.`,
@@ -193,12 +249,10 @@ export function capabilityGhostIssues(
     if (definition.ai.exposed && !definition.ai.description.trim()) {
       issues.push(`${definition.id}: AI exposure has no description.`);
     }
-    if (!definition.native) {
-      issues.push(
-        `${definition.id}: formatting capability has no native mapping.`,
-      );
-      continue;
-    }
+
+    const type = definitionType(definition);
+    if (!type) continue;
+    if (!definition.native) continue;
 
     const availability = definition.availability(strictNativeContext(type));
     if (definition.native.delta) {
@@ -232,14 +286,10 @@ export function capabilityGhostIssues(
   }
 
   for (const type of ["document", "sheets", "presentation"] as const) {
-    for (const delta of REQUIRED_FORMATTING_LENS_DELTAS[type]) {
-      if (!LENS_DELTA_KINDS[type].has(delta)) {
+    for (const delta of LENS_DELTA_KINDS[type]) {
+      if (!claimed.get(type)!.has(delta)) {
         issues.push(
-          `${type}.${delta}: the formatting contract names a delta absent from the canonical lens schema.`,
-        );
-      } else if (!claimed.get(type)!.has(delta)) {
-        issues.push(
-          `${type}.${delta}: the lens implements this formatting delta but no capability claims it.`,
+          `${type}.${delta}: the lens implements this delta but no capability claims it.`,
         );
       }
     }
@@ -248,9 +298,12 @@ export function capabilityGhostIssues(
   return issues;
 }
 
-export function assertOfficeFormattingCapabilityGate() {
+export function assertCapabilityIrGate() {
   const issues = capabilityGhostIssues();
   if (issues.length) {
     throw new Error(`Capability IR ghost gate failed:\n${issues.join("\n")}`);
   }
 }
+
+/** @deprecated Use assertCapabilityIrGate. Kept so existing call sites compile during migration. */
+export const assertOfficeFormattingCapabilityGate = assertCapabilityIrGate;

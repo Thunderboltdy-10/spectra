@@ -61,10 +61,12 @@ function visualSignature(binding: CommandBinding) {
 describe("Office formatting capability IR", () => {
   it("projects every definition into the existing workbar exactly once", () => {
     for (const { type, bindings } of SETS) {
-      const projected = bindings.filter((binding) => binding.capabilityId);
-      expect(projected.map((binding) => binding.capabilityId)).toEqual(
-        formattingCapabilitiesFor(type).map((definition) => definition.id),
+      expect(bindings.every((binding) => binding.capabilityId)).toBe(true);
+      const formatting = formattingCapabilitiesFor(type).map((definition) => definition.id);
+      const projected = bindings.filter((binding) =>
+        formatting.includes(binding.capabilityId!),
       );
+      expect(projected.map((binding) => binding.capabilityId)).toEqual(formatting);
       expect(new Set(projected.map((binding) => binding.id)).size).toBe(
         projected.length,
       );
@@ -81,7 +83,8 @@ describe("Office formatting capability IR", () => {
     const vocabulary = officeOperationsFor("document");
     expect(vocabulary).toContain("document.format.bold");
     expect(vocabulary).not.toContain("document.format.blocks");
-    expect(vocabulary).toContain("document.insert.blocks");
+    expect(vocabulary).toContain("document.insert.pageBreak");
+    expect(vocabulary).not.toContain("document.insert.blocks");
 
     const entry = officeCapabilityAudit(
       "document",
@@ -97,7 +100,13 @@ describe("Office formatting capability IR", () => {
     const signatures = Object.fromEntries(
       SETS.map(({ type, bindings }) => [
         type,
-        bindings.filter((binding) => binding.capabilityId).map(visualSignature),
+        bindings
+          .filter((binding) =>
+            formattingCapabilitiesFor(type).some(
+              (definition) => definition.id === binding.capabilityId,
+            ),
+          )
+          .map(visualSignature),
       ]),
     );
     expect(signatures).toEqual({
@@ -207,7 +216,7 @@ describe("Office formatting capability IR", () => {
     expect(capabilityGhostIssues(withoutStyle)).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
-          "document.apply-style: the lens implements this formatting delta but no capability claims it",
+          "document.apply-style: the lens implements this delta but no capability claims it",
         ),
       ]),
     );
@@ -236,5 +245,36 @@ describe("Office formatting capability IR", () => {
       reason: PRESENTATION_TEXT_FORMAT_NATIVE_REASON,
     });
     expect(fromCommand).toEqual(fromDefinition);
+  });
+
+  it("refuses DOC-10 hyperlinks in strict-native even when the region reads native", () => {
+    const binding = SETS.find((entry) => entry.type === "document")!.bindings.find(
+      (candidate) => candidate.id === "insert.link",
+    )!;
+    const ctx = {
+      ...commandContext("document", () => true, "edit"),
+      compatibilityProfile: "strict-native" as const,
+      fidelity: { hyperlinks: "NATIVE" as const, body: "NATIVE" as const },
+    };
+    expect(commandForBinding("document", binding, 0).availability(ctx)).toMatchObject({
+      state: "disabled",
+      reason: expect.stringContaining("hyperlinks"),
+    });
+  });
+
+  it("claims remaining Office lens deltas from the IR", () => {
+    const document = SETS.find((entry) => entry.type === "document")!.bindings;
+    const sheets = SETS.find((entry) => entry.type === "sheets")!.bindings;
+    const presentation = SETS.find((entry) => entry.type === "presentation")!.bindings;
+    expect(document.find((binding) => binding.id === "insert.pageBreak")?.nativeDelta).toBe(
+      "insert-paragraph",
+    );
+    expect(sheets.find((binding) => binding.id === "freeze.rows")?.nativeDelta).toBe(
+      "set-freeze-panes",
+    );
+    expect(presentation.find((binding) => binding.id === "slide.add")?.nativeDelta).toBe(
+      "add-slide",
+    );
+    expect(presentation.find((binding) => binding.id === "slide.add")?.strictNative).toBeUndefined();
   });
 });

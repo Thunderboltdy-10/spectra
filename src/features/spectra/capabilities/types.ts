@@ -17,6 +17,7 @@ export type AuthorityRisk =
 export type HandlerRef = string;
 export type OperationRef = string;
 export type OfficeWorkType = "document" | "sheets" | "presentation";
+export type CapabilityOwner = WorkType | "app";
 
 export type OfficeLensDeltaKind<T extends OfficeWorkType> = T extends "document"
   ? DocxOperation["kind"]
@@ -29,14 +30,14 @@ export type ChoreographyPrimitive = {
   region?: string;
 };
 
-export type NativeCapability<T extends WorkType> = {
+export type NativeCapability<T extends OfficeWorkType = OfficeWorkType> = {
   /** Regions this operation can change in a linked native package. */
   touches: readonly FidelityRegionKey[];
   /**
    * The real lens operation that materializes the change. Its absence is an
    * explicit refusal in strict-native mode, never an optimistic capability.
    */
-  delta?: T extends OfficeWorkType ? OfficeLensDeltaKind<T> : string;
+  delta?: OfficeLensDeltaKind<T>;
   /** Required when `delta` is absent, and shown unchanged on every surface. */
   unavailableReason?: string;
 };
@@ -48,12 +49,15 @@ export type NativeCapability<T extends WorkType> = {
  * presentation projection; parameters, availability, native reach, authority
  * and execution identity are capability truth.
  */
-export type CapabilityDefinition<T extends WorkType = WorkType, P = unknown> = {
+export type CapabilityDefinition<
+  T extends CapabilityOwner = CapabilityOwner,
+  P = unknown,
+> = {
   id: `${T}.${string}`;
   params: z.ZodType<P>;
   scope: CapabilityScope;
   availability: (ctx: CommandContext) => CommandAvailability;
-  native?: NativeCapability<T>;
+  native?: T extends OfficeWorkType ? NativeCapability<T> : never;
   execute: {
     editor?: HandlerRef;
     server?: OperationRef;

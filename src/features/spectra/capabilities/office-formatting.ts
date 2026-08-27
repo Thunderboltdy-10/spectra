@@ -1,13 +1,14 @@
 import { z } from "zod";
-import { preservedRegionRefusal, regionBlockedBy } from "../commands/registry";
+import { preservedRegionRefusal } from "../commands/registry";
 import type {
   CapabilityDefinition,
   NativeCapability,
   OfficeWorkType,
 } from "./types";
+import { availabilityFor } from "./native";
+import { PRESENTATION_TEXT_FORMAT_NATIVE_REASON } from "./office-reasons";
 
-export const PRESENTATION_TEXT_FORMAT_NATIVE_REASON =
-  "Text inside a linked shape is edited natively, but its run properties stay as PowerPoint saved them.";
+export { PRESENTATION_TEXT_FORMAT_NATIVE_REASON };
 
 const FORMATTING_IDS = [
   "format.style",
@@ -142,30 +143,6 @@ function nativeFor<T extends OfficeWorkType>(
     touches: ["shapes"],
     unavailableReason: PRESENTATION_TEXT_FORMAT_NATIVE_REASON,
   } as NativeCapability<T>;
-}
-
-function availabilityFor(native: NativeCapability<OfficeWorkType>) {
-  return (ctx: Parameters<CapabilityDefinition["availability"]>[0]) => {
-    if (!ctx.can("edit")) return { state: "hidden" as const };
-    if (ctx.compatibilityProfile !== "strict-native") {
-      return { state: "enabled" as const };
-    }
-    if (!native.delta) {
-      return {
-        state: "disabled" as const,
-        reason:
-          native.unavailableReason ??
-          "This change cannot be written safely to the linked native file.",
-      };
-    }
-    const blocked = regionBlockedBy(ctx.fidelity, native.touches);
-    return blocked
-      ? {
-          state: "disabled" as const,
-          reason: preservedRegionRefusal(blocked.region),
-        }
-      : { state: "enabled" as const };
-  };
 }
 
 function definitionsFor<T extends OfficeWorkType>(

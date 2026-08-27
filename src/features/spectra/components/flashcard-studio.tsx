@@ -87,6 +87,7 @@ import {
   WorkbarItemSelector,
   type CommandBinding,
 } from "./artifact-workbar";
+import { projectBindingsFromIr } from "../capabilities";
 import {
   Select,
   SelectContent,
@@ -1988,7 +1989,7 @@ export function FlashcardStudio({
   // One declaration of what this type's controls mean. The bar decides which of
   // them survive the pane's width, so the deck can no longer grow a second row
   // under pressure the way the audited build did.
-  const deckActions: CommandBinding[] = [
+  const deckActions: CommandBinding[] = projectBindingsFromIr("flashcard_deck", [
     {
       id: "add-card",
       label: "Add card",
@@ -2077,7 +2078,7 @@ export function FlashcardStudio({
       priority: "advanced",
       onSelect: () => window.print(),
     },
-  ];
+  ]);
 
   /**
    * Keyboard flow for fast entry, matching `keyboardOperations.flashcard_deck`

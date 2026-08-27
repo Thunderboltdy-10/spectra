@@ -47,3 +47,16 @@ Ghost gate + conformance suites in their owning units; the "add one capability" 
 - Signed-in Playwright smoke: mounted Presentation Shape formatting controls held with 0 console errors; known overflow warnings remain P5.I1.
 - `tsc` and architecture checks contain only recorded repository blockers; no P3.I1-owned failure.
 - Later owners unchanged: P3.I2 remaining migration, P3.I3 dispatch/gate paths, P3.I4 preferences, P5.I1 overflow loop, P6.I3 logger wiring.
+
+## P3.I2 implementation log — 2026-08-27
+
+- Status: **IMPLEMENTED**; acceptance remains P3.V1/Pablo-owned.
+- Root cause: remaining Office, application, and studio commands still authored availability/native/manifest truth beside the IR.
+- Catalog now covers remaining Office ops, application `riskClass`, and quiz/flashcard/code/whiteboard/planner/agent workbars; stable ids unchanged (D34).
+- Projection overwrites IR-owned fields at assembly; extra original manifest verbs stay so inspections bundled on a control are not dropped.
+- Honesty: `presentation.slide.add` claims `add-slide` and is enabled in strict-native; hyperlink/footnote-class refusals fire even when the region reads NATIVE (DOC-10).
+- Recalc, named-range manager, and reading-order panel stay view-side (no native write claim, no false undo).
+- Ghost gate claims every imported lens delta kind. `gateOperation` NATIVE-no-delta still belongs to P3.I3.
+- Focused Vitest: 7 files / 136 tests; `check:capabilities`; secret scan 2108 files; `git diff --check`; scoped ESLint 0 errors.
+- Live Playwright not run (`localhost:3000` did not answer). No visual redesign.
+- Later owners unchanged: P3.I3 gate/keyboard/overflow, P3.I4 preferences, P5.I1 overflow loop, P6.I3 logger wiring.

@@ -1,6 +1,4 @@
-import { assertOfficeFormattingCapabilityGate } from "../src/features/spectra/capabilities/derivations";
+import { assertCapabilityIrGate } from "../src/features/spectra/capabilities/derivations";
 
-assertOfficeFormattingCapabilityGate();
-console.log(
-  "Capability IR ghost gate passed for the Office formatting family.",
-);
+assertCapabilityIrGate();
+console.log("Capability IR ghost gate passed.");

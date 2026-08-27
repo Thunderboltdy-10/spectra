@@ -81,6 +81,7 @@ import {
   type ValueFacet,
   type ZoomAdapter,
 } from "../shared";
+import { projectBindingsFromIr } from "../../capabilities";
 
 /**
  * The Sheets command set.
@@ -2302,5 +2303,5 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
   bindings.push({ ...importBinding(handlers.import), manifestOps: ["import_data"] });
   bindings.push(printBinding(handlers.print, "workbook"));
 
-  return bindings;
+  return projectBindingsFromIr("sheets", bindings);
 }

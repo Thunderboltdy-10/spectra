@@ -126,7 +126,6 @@ describe("document command set", () => {
   it("declares an AI operation for every document verb the manifest names", () => {
     const declared = new Set(bindings().flatMap((binding) => [...(binding.manifestOps ?? [])]));
     for (const op of [
-      "inspect_outline",
       "insert_blocks",
       "move_blocks",
       "format_blocks",
@@ -136,7 +135,6 @@ describe("document command set", () => {
       "add_citation",
       "add_embed",
       "apply_template",
-      "check_sources",
       "prepare_export",
     ]) {
       expect(declared.has(op)).toBe(true);

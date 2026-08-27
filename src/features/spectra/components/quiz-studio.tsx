@@ -87,6 +87,7 @@ import {
   WorkbarItemSelector,
   type CommandBinding,
 } from "./artifact-workbar";
+import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
 
@@ -1534,7 +1535,9 @@ export function QuizStudio({
    * capability each one needs. The bar decides what sheds and what promotes into
    * `⋯`; this type only says what its controls mean.
    */
-  const workbarActions: CommandBinding[] = canEditQuiz
+  const workbarActions: CommandBinding[] = projectBindingsFromIr(
+    "quiz",
+    canEditQuiz
     ? [
         activeQuizMode === "build"
           ? {
@@ -1640,7 +1643,8 @@ export function QuizStudio({
           active: view === "responses",
           onSelect: () => setView("responses"),
         },
-      ];
+      ],
+  );
 
   return (
     <div className="spectra-quiz-studio bg-transparent">

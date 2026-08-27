@@ -40,6 +40,7 @@ import {
   pptxChangedRegions,
   xlsxChangedRegions,
 } from "@/features/spectra/lenses/office-projection-merge";
+import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 
 // Compatibility exports for existing callers. The implementation lives in the
 // canonical office-content module; routes only re-export the shared transform.
@@ -415,8 +416,21 @@ export async function POST(request: Request) {
         { artifactId: workId },
       ),
     ]);
-    if (cloud.truth.hash === local.truth.hash)
+    if (cloud.truth.hash === local.truth.hash) {
+      if (input.resolution === "spectra" || input.resolution === "local") {
+        await convexMutation("replicas:resolveExternalConflict", {
+          workId,
+          resolution: input.resolution === "local" ? "local" : "spectra",
+        });
+        return NextResponse.json({
+          state: "current",
+          attribution: input.resolution === "local"
+            ? `Kept the ${isSheet ? "Excel" : "PowerPoint"} version`
+            : "Kept your Spectra version",
+        });
+      }
       return NextResponse.json({ state: "current" });
+    }
     const basePayload = await fetchStoredNativeBase(cloud.truth, cloud.payload);
     const [ancestorOpened, externalOpened, diff] = await Promise.all([
       isSheet ? xlsxLens.open(basePayload) : pptxLens.open(basePayload),
@@ -467,7 +481,16 @@ export async function POST(request: Request) {
         projectionContent: contentFor(next.projection as OfficeProjection, isSheet),
         projectionContentHash: (next.projection as OfficeProjection).nativeBinding.semanticDigest,
       });
-      await convexMutation("replicas:resolveExternalConflict", { workId, resolution: "spectra" });
+      if ((queued as { state: string }).state !== "pending") {
+        throw new Error(
+          "Spectra prepared your version but could not queue the file update. Nothing was overwritten. Try Keep Spectra again.",
+        );
+      }
+      await convexMutation("replicas:resolveExternalConflict", {
+        workId,
+        resolution: "spectra",
+        requestId: (queued as { requestId: string }).requestId,
+      });
       return NextResponse.json({
         state: "applied",
         projection: contentFor(next.projection as OfficeProjection, isSheet),
@@ -527,10 +550,10 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: "OFFICE_LENS_FAILED",
-        message:
-          error instanceof Error
-            ? error.message
-            : "The Office file could not be processed safely.",
+        message: humanizePublicFailure(
+          error,
+          isSheet ? "Excel" : "PowerPoint",
+        ),
       },
       { status: 400 },
     );

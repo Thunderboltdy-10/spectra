@@ -1185,4 +1185,168 @@ describe("replica truth machine", () => {
     expect(truth.local).toMatchObject({ state: "pending", revision: wordHash });
     expect(truth.work?.content).toEqual({ blocks: [{ id: "body", text: "LOOPHOLD-27" }] });
   });
+
+  async function seedKeepSpectraConflict(
+    t: ReturnType<typeof convexTest>,
+    fixture: Awaited<ReturnType<typeof seedWork>>,
+  ) {
+    const keepHash = "c".repeat(64);
+    const keepPayloadId = await t.run(async (ctx) => {
+      const now = Date.now();
+      const storageId = await ctx.storage.store(new Blob(["keep"]));
+      const payloadId = await ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId,
+        hash: keepHash,
+        storageId,
+        bytes: 4,
+        mediaType: "application/test",
+        refCount: 0,
+        state: "active",
+        createdAt: now,
+        verifiedAt: now,
+      });
+      await ctx.db.patch(fixture.localId, {
+        payloadRef: String(fixture.nextPayloadId),
+        revision: nextHash,
+        contentHash: nextHash,
+        state: "diverged",
+        updatedAt: now,
+      });
+      await ctx.db.patch(fixture.cloudId, { state: "diverged", updatedAt: now });
+      await ctx.db.insert("syncConflicts", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaIds: [fixture.localId, fixture.cloudId],
+        regionIds: ["body", "heading-quality", "heading-resiliency"],
+        partNames: ["word/document.xml"],
+        localRevision: nextHash,
+        spectraRevision: baseHash,
+        localPayloadRef: String(fixture.nextPayloadId),
+        spectraPayloadRef: String(fixture.basePayloadId),
+        state: "open",
+        createdAt: now,
+        updatedAt: now,
+      });
+      return payloadId;
+    });
+    return { keepHash, keepPayloadId };
+  }
+
+  it("binds Keep Spectra to the queued write even when open conflict regions are a unioned superset", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const seeded = await seedKeepSpectraConflict(t, fixture);
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(seeded.keepPayloadId),
+      contentHash: seeded.keepHash,
+      baseRevision: nextHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    });
+    const resolved = await asUser.mutation(api.replicas.resolveExternalConflict, {
+      workId: fixture.workId,
+      resolution: "spectra",
+      requestId: queued.requestId,
+    });
+    expect(resolved.requestId).toBe(queued.requestId);
+    const conflict = await t.run(async (ctx) =>
+      (await ctx.db.query("syncConflicts").collect())[0],
+    );
+    expect(conflict).toMatchObject({
+      state: "resolving-spectra",
+      resolutionRequestId: queued.requestId,
+    });
+  });
+
+  it("still binds Keep Spectra when the write overlaps any open conflict region", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const seeded = await seedKeepSpectraConflict(t, fixture);
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(seeded.keepPayloadId),
+      contentHash: seeded.keepHash,
+      baseRevision: nextHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    });
+    await expect(
+      asUser.mutation(api.replicas.resolveExternalConflict, {
+        workId: fixture.workId,
+        resolution: "spectra",
+      }),
+    ).resolves.toMatchObject({ requestId: queued.requestId });
+  });
+
+  it("refuses Keep Spectra when no pending write exists", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch(fixture.localId, {
+        payloadRef: String(fixture.nextPayloadId),
+        revision: nextHash,
+        contentHash: nextHash,
+        state: "diverged",
+        updatedAt: now,
+      });
+      await ctx.db.patch(fixture.cloudId, { state: "diverged", updatedAt: now });
+      await ctx.db.insert("syncConflicts", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaIds: [fixture.localId, fixture.cloudId],
+        regionIds: ["body"],
+        partNames: ["word/document.xml"],
+        localRevision: nextHash,
+        spectraRevision: baseHash,
+        localPayloadRef: String(fixture.nextPayloadId),
+        spectraPayloadRef: String(fixture.basePayloadId),
+        state: "open",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    await expect(
+      t.withIdentity(identity).mutation(api.replicas.resolveExternalConflict, {
+        workId: fixture.workId,
+        resolution: "spectra",
+      }),
+    ).rejects.toThrow(/CONFLICT_RESOLUTION_WRITE_REQUIRED/);
+  });
+
+  it("dismisses Keep Spectra conflicts when local and cloud bytes already agree", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.insert("syncConflicts", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaIds: [fixture.localId, fixture.cloudId],
+        regionIds: ["body", "heading-quality"],
+        partNames: ["word/document.xml"],
+        localRevision: baseHash,
+        spectraRevision: baseHash,
+        localPayloadRef: String(fixture.basePayloadId),
+        spectraPayloadRef: String(fixture.basePayloadId),
+        state: "open",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    const resolved = await t.withIdentity(identity).mutation(api.replicas.resolveExternalConflict, {
+      workId: fixture.workId,
+      resolution: "spectra",
+    });
+    expect(resolved.resolved).toBe(1);
+    const conflict = await t.run(async (ctx) =>
+      (await ctx.db.query("syncConflicts").collect())[0],
+    );
+    expect(conflict).toMatchObject({ state: "resolved-merged" });
+  });
 });

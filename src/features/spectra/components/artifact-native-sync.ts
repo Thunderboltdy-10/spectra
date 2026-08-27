@@ -142,7 +142,6 @@ export function useArtifactNativeSync({
       setBaseline(snapshot);
       setDirty(false);
       setNativeAttribution(attribution);
-      setNativeConflict(null);
       setNativeLensProjection(undefined);
       setNativeProjectionReady(false);
       window.requestAnimationFrame(() => {
@@ -505,7 +504,9 @@ export function useArtifactNativeSync({
       else if (resolution === "spectra") {
         setNativeConflict(null);
         setNativeAttribution(
-          result?.status ?? "Waiting to save your Spectra version locally",
+          result?.attribution ??
+            result?.status ??
+            "Waiting to save your Spectra version locally",
         );
       }
       setNativeWriteError(undefined);
@@ -590,7 +591,11 @@ export function useArtifactNativeSync({
     : undefined;
 
   useEffect(() => {
-    if (!persistedNativeConflict) return;
+    if (!nativeOfficeDocument || conflicts === undefined) return;
+    if (!persistedNativeConflict) {
+      setNativeConflict(null);
+      return;
+    }
     const regionCount = persistedNativeConflict.regionIds.length;
     const preservedPartCount = persistedNativeConflict.partNames.length;
     setNativeConflict(
@@ -611,7 +616,7 @@ export function useArtifactNativeSync({
                   : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
             },
     );
-  }, [nativeOfficeApplication, persistedNativeConflict]);
+  }, [conflicts, nativeOfficeApplication, nativeOfficeDocument, persistedNativeConflict]);
 
   useEffect(() => {
     if (

@@ -1130,7 +1130,9 @@ export const recordExternalReconciliation = mutation({
         ),
       ))
       .first();
-    if (!operation) throw new Error("EXTERNAL_OPERATION_NOT_FOUND");
+    if (!operation) {
+      if (!args.conflictRegionIds.length) return { state: "applied" as const };
+    }
     if (args.conflictRegionIds.length) {
       const existingConflict = await ctx.db
         .query("syncConflicts")
@@ -1244,6 +1246,7 @@ export const resolveExternalConflict = mutation({
     workId: v.id("spectraArtifacts"),
     resolution: v.union(v.literal("local"), v.literal("spectra"), v.literal("keep-both")),
     title: v.optional(v.string()),
+    requestId: v.optional(v.id("bridgeWriteRequests")),
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -1251,25 +1254,85 @@ export const resolveExternalConflict = mutation({
     const work = await ctx.db.get(args.workId);
     if (!work || work.ownerAccountId !== actor.accountId)
       throw new Error("WORK_NOT_FOUND");
-    if (args.resolution === "local")
-      throw new Error("CONFLICT_RECONCILIATION_REQUIRED");
     const conflicts = await ctx.db.query("syncConflicts")
       .withIndex("by_work_state", (q) => q.eq("workId", args.workId).eq("state", "open"))
       .take(20);
     const now = Date.now();
     if (!conflicts.length) return { resolved: 0, workId: null };
+    const replicaPair = async () => {
+      const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", args.workId)).take(50);
+      const local = replicas.find((replica) => replica.kind === "local" && replica.state !== "unavailable");
+      const cloud = replicas.find((replica) => replica.kind === "cloud");
+      return Boolean(local?.contentHash && cloud?.contentHash && local.contentHash === cloud.contentHash);
+    };
+    if (args.resolution === "local") {
+      if (await replicaPair()) {
+        const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", args.workId)).take(50);
+        const local = replicas.find((replica) => replica.kind === "local" && replica.state !== "unavailable");
+        const cloud = replicas.find((replica) => replica.kind === "cloud");
+        await Promise.all([
+          ...conflicts.map((conflict) => ctx.db.patch(conflict._id, {
+            state: "resolved-local",
+            resolvedAt: now,
+            updatedAt: now,
+          })),
+          local && local.state !== "current"
+            ? ctx.db.patch(local._id, { state: "current", updatedAt: now })
+            : Promise.resolve(),
+          cloud && cloud.state !== "current"
+            ? ctx.db.patch(cloud._id, { state: "current", updatedAt: now })
+            : Promise.resolve(),
+        ]);
+        return { resolved: conflicts.length, workId: null };
+      }
+      throw new Error("CONFLICT_RECONCILIATION_REQUIRED");
+    }
     if (args.resolution === "spectra") {
       const requests = await ctx.db.query("bridgeWriteRequests")
         .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
         .order("desc")
         .take(50);
-      const request = requests.find((candidate) =>
-        (candidate.state === "pending" || candidate.state === "claimed") &&
-        conflicts.every((conflict) =>
-          conflict.regionIds.length === 0 || conflict.regionIds.every((regionId) => candidate.regionIds.includes(regionId)),
-        ),
-      );
-      if (!request) throw new Error("CONFLICT_RESOLUTION_WRITE_REQUIRED");
+      const bound = args.requestId
+        ? requests.find((candidate) => candidate._id === args.requestId)
+        : undefined;
+      // Keep Spectra is one choice for the whole conflict bar. Bind the write
+      // the route just queued; do not require that write's region list to be a
+      // superset of every historically unioned open-conflict region id.
+      const request =
+        bound &&
+        bound.accountId === actor.accountId &&
+        (bound.state === "pending" || bound.state === "claimed")
+          ? bound
+          : requests.find((candidate) =>
+              (candidate.state === "pending" || candidate.state === "claimed") &&
+              conflicts.some((conflict) =>
+                conflict.regionIds.length === 0 ||
+                conflict.regionIds.some((regionId) => candidate.regionIds.includes(regionId)) ||
+                candidate.regionIds.some((regionId) => conflict.regionIds.includes(regionId)),
+              ),
+            );
+      if (!request) {
+        const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", args.workId)).take(50);
+        const local = replicas.find((replica) => replica.kind === "local" && replica.state !== "unavailable");
+        const cloud = replicas.find((replica) => replica.kind === "cloud");
+        if (local?.contentHash && cloud?.contentHash && local.contentHash === cloud.contentHash) {
+          await Promise.all([
+            ...conflicts.map((conflict) => ctx.db.patch(conflict._id, {
+              state: "resolved-merged",
+              resolvedAt: now,
+              updatedAt: now,
+            })),
+            local.state !== "current"
+              ? ctx.db.patch(local._id, { state: "current", updatedAt: now })
+              : Promise.resolve(),
+            cloud.state !== "current"
+              ? ctx.db.patch(cloud._id, { state: "current", updatedAt: now })
+              : Promise.resolve(),
+          ]);
+          return { resolved: conflicts.length, workId: null };
+        }
+        throw new Error("CONFLICT_RESOLUTION_WRITE_REQUIRED");
+      }
       await Promise.all(conflicts.map((conflict) => ctx.db.patch(conflict._id, {
         state: "resolving-spectra",
         resolutionRequestId: request._id,

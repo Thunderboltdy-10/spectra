@@ -117,6 +117,16 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
     message: () =>
       "Spectra can read this original file but will not change it until you choose otherwise.",
   },
+  {
+    test: /CONFLICT_RESOLUTION_WRITE_REQUIRED/i,
+    message: (app) =>
+      `Spectra could not attach Keep Spectra to a ${app} file update. Nothing was overwritten. Try again.`,
+  },
+  {
+    test: /MATERIALIZATION_BASE_STALE/i,
+    message: (app) =>
+      `The ${app} file changed again while Spectra was saving. Nothing was overwritten.`,
+  },
 ];
 
 const REPLICA_STATE_WORDS: Record<string, string> = {

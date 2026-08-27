@@ -21,6 +21,7 @@ import {
   type RecentNativeOperation,
 } from "@/features/spectra/lenses/native-reconciliation";
 import { mergeThreeWay, type MergeConflict } from "@/features/spectra/lenses/three-way-merge";
+import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 
 export const runtime = "nodejs";
 
@@ -293,7 +294,10 @@ function errorResponse(error: unknown) {
   return NextResponse.json(
     {
       error: error instanceof DocxLensError ? error.code : "DOCX_LENS_FAILED",
-      message: error instanceof Error ? error.message : "The Word file could not be processed safely.",
+      message:
+        error instanceof DocxLensError
+          ? error.message
+          : humanizePublicFailure(error, "Word"),
     },
     { status },
   );
@@ -413,8 +417,25 @@ export async function POST(request: Request) {
         { artifactId: workId },
       ),
     ]);
-    if (cloud.truth.hash === local.truth.hash)
+    if (cloud.truth.hash === local.truth.hash) {
+      if (input.resolution === "spectra" || input.resolution === "word") {
+        await convexMutation<
+          { workId: Id<"spectraArtifacts">; resolution: "spectra" | "local" },
+          unknown
+        >("replicas:resolveExternalConflict", {
+          workId,
+          resolution: input.resolution === "word" ? "local" : "spectra",
+        });
+        return NextResponse.json({
+          state: "current",
+          attribution:
+            input.resolution === "spectra"
+              ? "Kept your Spectra version"
+              : "Kept the Word version",
+        });
+      }
       return NextResponse.json({ state: "current" });
+    }
     const [baseOpened, externalOpened] = await Promise.all([
       storedDocxBase(cloud.truth, cloud.payload),
       docxLens.open(local.payload, "strict-native"),
@@ -478,12 +499,23 @@ export async function POST(request: Request) {
           .join("\n")
           .slice(0, 200_000),
       });
+      if (queued.state !== "pending") {
+        throw new DocxLensError(
+          "DOCX_KEEP_SPECTRA_WRITE_PENDING",
+          "Spectra prepared your version but could not queue the Word file update. Nothing was overwritten. Try Keep Spectra again.",
+        );
+      }
       await convexMutation<
-        { workId: Id<"spectraArtifacts">; resolution: "spectra" },
+        {
+          workId: Id<"spectraArtifacts">;
+          resolution: "spectra";
+          requestId: Id<"bridgeWriteRequests">;
+        },
         unknown
       >("replicas:resolveExternalConflict", {
         workId,
         resolution: "spectra",
+        requestId: queued.requestId as Id<"bridgeWriteRequests">,
       });
       return NextResponse.json({
         state: "applied",

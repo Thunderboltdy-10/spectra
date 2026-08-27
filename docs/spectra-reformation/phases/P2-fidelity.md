@@ -150,3 +150,16 @@ L1 harness green in the owning verification units for all formats; every write c
 - Focused Vitest: replicas + replica-truth property 55; xlsx-pptx/three-way-merge/preservation-guard/native-office-draft/workbar/native-materialization-exit 55. Hidden desktop `P2V1Reexec2` closed; Convex left running.
 - I1 VERIFIED/PASS unchanged. I2 live resolution still not claimed. Next remaining: finish this V1 reexec with the debug Bridge.
 - Evidence: `.shots/reformation/P2.V1/reexec/18`–`26`.
+
+## P2.V1 reexec close-out verifier log — 2026-08-27
+
+- Continuation of P2.V1 reexec on isolated `spectra-p2v1-reexec` only. Pablo’s OneDrive Physics, PS 6/PS 8, and visible Word `workbook_DP2_phrase_simple_complexe.docx` (pid 10584) were not driven. Debug `spectra-bridge.exe` on headless `P2V1Reexec3`; running `convex dev` watcher used (no `convex push`, Convex not killed).
+- TRIAGE · SYSTEMIC Keep Spectra write-binding/conflict-exit: resolve hunted a pending write whose regions were a superset of unioned historical conflict IDs (`CONFLICT_RESOLUTION_WRITE_REQUIRED`); hashes-agree 200 left Convex conflicts `open`; lens open cleared the bar while `syncConflicts` stayed open.
+- Held that class: bind `requestId`, overlap fallback, hashes-agree dismiss + replica current; routes no longer swallow resolve errors; opening a native file does not null the bar while Convex still has open conflicts.
+- Live Keep Spectra: bar cleared (`35`). Zip+headless Word `/w` COM FullName matched the fixture; LOOPHOLD-27 and WORD-ONLY-27 present; Complexity `Range.Bold=-1`. PrintWindow was not used as Word proof.
+- TRIAGE · SYSTEMIC Excel A1: formula-draft identity refreshes and Enter/blur committed lagged React state, so A1 keystrokes never landed. Commit now reads the live input; draft is not recopied while the formula bar is focused.
+- Excel alternating: Spectra A1 `P2V1R-A1` reached sharedStrings; Excel COM FullName matched, A1 readback held, bold B2 `P2V1R-B2` saved; chart/table/comment/sheet2 survived. Independent-cell Excel save raised a conflict bar; Keep Excel restored both markers in Spectra (`41`).
+- PPTX alternating: Spectra added `Spectra Text 95241` (“Add a clear idea”); PowerPoint COM FullName matched, 15 slides, 4 shapes, title `P2V1R-PPTX-P`. Native typing loop was not reopened.
+- Package export→import→re-export was not re-run this pass; first-V1 SHA `5F2BD66F50AFEA0F3A31C8681427DF848E05AEE31093D9F4A008AA80276D5DEB` / 842 bytes still stands for I1.
+- Focused Vitest: replicas + sync-presentation + sheets-studio-render 48 passed. I1 VERIFIED/PASS unchanged. Headless desktop `P2V1Reexec3` closed after Bridge/Office launched there; Convex left running.
+- Evidence: `.shots/reformation/P2.V1/reexec/27`–`43` (did not overwrite `00`–`09` or `15`–`17`).

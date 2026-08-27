@@ -1732,12 +1732,27 @@ export function SheetsStudio({
     [rowOffsets],
   );
 
+  const syncedFormulaAddressRef = useRef(activeAddress);
   useEffect(() => {
     const nextFormula = cellInput(activeCell);
     const nextName = selectionLabel;
-    setFormulaDraft((current) => (current === nextFormula ? current : nextFormula));
-    setNameDraft((current) => (current === nextName ? current : nextName));
-  }, [activeAddress, activeCell, selectionLabel]);
+    const addressChanged = syncedFormulaAddressRef.current !== activeAddress;
+    syncedFormulaAddressRef.current = activeAddress;
+    const formulaFocused = document.activeElement === formulaInputRef.current;
+    const nameFocused =
+      document.activeElement?.getAttribute("aria-label") === "Name box";
+    // Native/Yjs identity refreshes reconstruct `activeCell`. Re-copying the
+    // committed value while the formula bar is focused is how A1 keystrokes
+    // disappear before Enter can commit them.
+    if (addressChanged || (!formulaFocused && editingAddress === null)) {
+      setFormulaDraft((current) =>
+        current === nextFormula ? current : nextFormula,
+      );
+    }
+    if (!nameFocused) {
+      setNameDraft((current) => (current === nextName ? current : nextName));
+    }
+  }, [activeAddress, activeCell, editingAddress, selectionLabel]);
   useEffect(() => {
     const rowId =
       activeSheet.rowIdentities?.[String(range.end.row)] ??
@@ -4339,7 +4354,7 @@ export function SheetsStudio({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (!locked) commitInput(activeAddress, formulaDraft);
+            if (!locked) commitInput(activeAddress, formulaInputRef.current?.value ?? formulaDraft);
           }}
           className="contents"
         >
@@ -4396,12 +4411,12 @@ export function SheetsStudio({
             )}
             onChange={(event) => setFormulaDraft(event.target.value)}
             onBlur={() => {
-              if (!locked) commitInput(activeAddress, formulaDraft);
+              if (!locked) commitInput(activeAddress, formulaInputRef.current?.value ?? formulaDraft);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
-                if (!locked) commitInput(activeAddress, formulaDraft);
+                if (!locked) commitInput(activeAddress, event.currentTarget.value);
               }
               if (event.key === "Escape") {
                 setFormulaDraft(cellInput(activeCell));
@@ -4828,11 +4843,11 @@ export function SheetsStudio({
                         onChange={(event) =>
                           setEditingValue(event.target.value)
                         }
-                        onBlur={() => commitInput(address, editingValue)}
+                        onBlur={(event) => commitInput(address, event.currentTarget.value)}
                         onKeyDown={(event) => {
                           if (event.key === "Enter") {
                             event.preventDefault();
-                            commitInput(address, editingValue);
+                            commitInput(address, event.currentTarget.value);
                             moveSelection(1, 0);
                           }
                           if (event.key === "Escape") setEditingAddress(null);

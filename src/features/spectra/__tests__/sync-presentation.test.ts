@@ -192,6 +192,9 @@ describe("sync presentation (P1.I3)", () => {
       "[CONVEX Q(syncPolicy:effective)] [Request ID: 681785b0f916633b] Server Error Uncaught Error: AUTH_NOT_SIGNED_IN: Sign in to continue.",
     ];
     expect(humanizePublicFailure(convexAuth[0])).not.toMatch(/Request ID|AUTH_NOT_SIGNED_IN|syncPolicy:effective/i);
+    const keepSpectra = "[Request ID: 275e55f7015f4512] Server Error\nUncaught Error: CONFLICT_RESOLUTION_WRITE_REQUIRED\n    at handler (../convex/replicas.ts:1272:12)";
+    expect(humanizePublicFailure(keepSpectra, "Word")).toContain("Nothing was overwritten");
+    expect(humanizePublicFailure(keepSpectra, "Word")).not.toMatch(/Request ID|CONFLICT_RESOLUTION_WRITE_REQUIRED|replicas\.ts/i);
   });
 
   it("offers Reconnect when the local copy is unavailable", () => {

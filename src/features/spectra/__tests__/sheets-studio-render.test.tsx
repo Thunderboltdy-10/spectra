@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SheetsStudio } from "../components/sheets-studio";
 
@@ -129,6 +129,40 @@ describe("sheet protection", () => {
     mount(workbook());
     const formulaBar = screen.getByLabelText("Formula for A1");
     expect(formulaBar.getAttribute("aria-readonly")).toBe("false");
+  });
+});
+
+describe("formula bar", () => {
+  it("keeps an in-progress A1 edit when the workbook identity refreshes", () => {
+    const { rerender } = render(
+      <SheetsStudio
+        artifactId="workbook-1"
+        content={workbook()}
+        onChange={() => {}}
+      />,
+    );
+    const formulaBar = screen.getByLabelText("Formula for A1");
+    formulaBar.focus();
+    fireEvent.change(formulaBar, { target: { value: "P2V1R-A1" } });
+    expect((formulaBar as HTMLInputElement).value).toBe("P2V1R-A1");
+    rerender(
+      <SheetsStudio
+        artifactId="workbook-1"
+        content={workbook({
+          sheet: {
+            cells: {
+              A1: { value: "Input" },
+              A2: { value: 4 },
+              Z99: { value: "noise" },
+            },
+          },
+        })}
+        onChange={() => {}}
+      />,
+    );
+    expect((screen.getByLabelText("Formula for A1") as HTMLInputElement).value).toBe(
+      "P2V1R-A1",
+    );
   });
 });
 

@@ -205,14 +205,17 @@ export function commandForBinding(type: WorkType, binding: CommandBinding, order
       : sourceTab;
   return {
     id,
+    ...(binding.capabilityId ? { capabilityId: binding.capabilityId } : {}),
     domain: `artifact:${type}`,
     title: binding.label,
     icon: binding.icon ?? Circle,
     description: binding.hint ?? binding.label,
+    ...(binding.params ? { params: binding.params } : {}),
     execute: (_ctx, params) => binding.onSelect(params),
     availability: (ctx) => {
       if (binding.requires && !ctx.can(binding.requires)) return { state: "hidden" };
       if (binding.disabled) return { state: "disabled", reason: binding.hint ?? "Unavailable in the current selection" };
+      if (binding.availability) return binding.availability(ctx);
       if (
         ctx.compatibilityProfile === "strict-native" &&
         binding.strictNative?.available === false
@@ -250,12 +253,21 @@ export function commandForBinding(type: WorkType, binding: CommandBinding, order
     risk: binding.risk ?? (binding.priority === "advanced" ? "confirm" : "safe"),
     undo: binding.undo ?? "yjs",
     ...(binding.touches ? { touches: binding.touches } : {}),
+    ...(binding.nativeDelta ? { nativeDelta: binding.nativeDelta } : {}),
     ...(binding.manifestOps ? { manifestOps: binding.manifestOps } : {}),
     ...(binding.exportBoundary ? { exportBoundary: binding.exportBoundary } : {}),
-    choreography: {
+    choreography: binding.choreography ?? {
       target: binding.control ? "workbar-field" : "workbar-command",
       region: id,
     },
+    ...(binding.ai
+      ? {
+          aiAuthority: binding.ai.exposed ? "allowed" : "prohibited",
+          ...(!binding.ai.exposed
+            ? { prohibitionReason: binding.ai.description }
+            : {}),
+        }
+      : {}),
   };
 }
 

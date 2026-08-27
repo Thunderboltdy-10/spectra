@@ -3227,7 +3227,6 @@ export function PresentationStudio({
           };
         }),
       disabled: !selectedObject,
-      touches: ["shapes"],
       generalPins: [],
     },
     exporter: {

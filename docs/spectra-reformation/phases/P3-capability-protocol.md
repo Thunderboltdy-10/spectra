@@ -33,3 +33,17 @@ Generated parity tests (every definition reachable in UI; every AI-exposed defin
 ## Exit gate
 
 Ghost gate + conformance suites in their owning units; the "add one capability" walk-through (a real new small capability added as the acceptance demo, touching only definition + handler + delta) recorded as evidence; V1 PASS; Pablo pass.
+
+## P3.I1 implementation log — 2026-08-27
+
+- Status: **IMPLEMENTED**; acceptance remains P3.V1/Pablo-owned.
+- Root cause: Office formatting capability truth lived in UI bindings, aggregate manifest verbs, and lens schemas independently.
+- Added the typed `CapabilityDefinition` core and 37 Document/Sheets/Presentation formatting definitions.
+- Workbar bindings now derive params, availability, native reach/refusal, authority, choreography, and legacy manifest specialization from the IR; authored presentation stayed unchanged.
+- Generated typed per-type `propose_operation` Zod/JSON schemas for P4 consumption.
+- Build preflight now imports real lens schemas and fails missing, unclaimed, or fictional formatting deltas and missing native refusals.
+- `capability-audit.ts` now grades granular IR ids while retaining unmigrated manifest verbs for P3.I2.
+- Focused Vitest: 10 files / 159 tests; capability gate, secret scan, diff check, and scoped ESLint (0 errors) passed.
+- Signed-in Playwright smoke: mounted Presentation Shape formatting controls held with 0 console errors; known overflow warnings remain P5.I1.
+- `tsc` and architecture checks contain only recorded repository blockers; no P3.I1-owned failure.
+- Later owners unchanged: P3.I2 remaining migration, P3.I3 dispatch/gate paths, P3.I4 preferences, P5.I1 overflow loop, P6.I3 logger wiring.

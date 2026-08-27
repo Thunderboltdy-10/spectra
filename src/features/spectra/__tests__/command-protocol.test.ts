@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { formattingCapabilitiesFor } from "../capabilities";
 import {
   allTabsFor,
   commandContext,
@@ -160,14 +161,13 @@ describe("artifact command protocol", () => {
   it("registers formatting as commands with real controls, not editor chains", () => {
     const setFontSize = vi.fn();
     const toggleBold = vi.fn();
-    const bindings = textFormatBindings({
+    const bindings = textFormatBindings("document", {
       fontFamily: { value: undefined, set: vi.fn() },
       fontSize: { value: 11, set: setFontSize },
       bold: { active: true, toggle: toggleBold },
       italic: { toggle: vi.fn() },
       color: { value: "#101828", set: vi.fn() },
       alignment: { value: "left", set: vi.fn() },
-      touches: ["styles"],
     });
 
     const byId = new Map(
@@ -198,7 +198,9 @@ describe("artifact command protocol", () => {
     const bold = commandForBinding("document", byId.get("document.format.bold")!, 2);
     expect(bold.presentation.kind).toBe("toggle");
     expect(bold.shortcut).toBe("Mod+B");
-    executeCommand(bold, context);
+    executeCommand(bold, context, true);
+    expect(toggleBold).not.toHaveBeenCalled();
+    executeCommand(bold, context, false);
     expect(toggleBold).toHaveBeenCalledOnce();
   });
 
@@ -382,6 +384,9 @@ describe("office capability audit", () => {
       expect(summary.inspection + summary.direct + summary.aiOnly).toBe(summary.total);
       // And each type has real holes to close, which is the size of the job.
       expect(summary.aiOnly).toBeGreaterThan(0);
+      expect(summary.aiOnly).toBeGreaterThanOrEqual(
+        formattingCapabilitiesFor(type).length,
+      );
     }
   });
 

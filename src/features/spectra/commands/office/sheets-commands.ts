@@ -522,7 +522,6 @@ export function sheetsStubHandlers(): SheetsCommandHandlers {
       color: { set: noop },
       alignment: { value: "left", set: noop },
       clear: noop,
-      touches: ["styles", "numberFormats"],
     },
     openFormatPanel: noop,
     clipboard: {
@@ -929,7 +928,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
   // family; everything below is the spreadsheet's own vocabulary — number
   // formats, borders, wrap, rotation, merge — which no other type has.
   bindings.push(
-    ...textFormatBindings({
+    ...textFormatBindings("sheets", {
       ...handlers.textFormat,
       disabled: blocked || handlers.textFormat.disabled,
       generalPins: [],

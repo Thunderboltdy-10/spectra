@@ -159,6 +159,8 @@ export type CommandPresentation = {
 
 export type Command<P = unknown> = {
   id: string;
+  /** Stable capability IR identity, when this command is IR-derived. */
+  capabilityId?: string;
   domain: `artifact:${WorkType}` | `app:${string}`;
   title: string;
   icon: LucideIcon;
@@ -167,6 +169,8 @@ export type Command<P = unknown> = {
   execute: (ctx: CommandContext, params: P) => void | Promise<void>;
   /** Native regions this command may write. Drives strict-native gating. */
   touches?: readonly FidelityRegionKey[];
+  /** Canonical native lens delta used to materialize this capability. */
+  nativeDelta?: string;
   /** Manifest/AI operation names this command implements. */
   manifestOps?: readonly string[];
   /** Copy boundary — an export copy never claims to be a native sync write. */
@@ -198,6 +202,10 @@ export type Command<P = unknown> = {
 
 export type CommandBinding = {
   id: string;
+  /** Stable capability IR identity, projected into this workbar binding. */
+  capabilityId?: string;
+  /** Typed operation parameters generated from the capability definition. */
+  params?: z.ZodType<CommandParam>;
   label: string;
   icon?: LucideIcon;
   /**
@@ -206,10 +214,14 @@ export type CommandBinding = {
    * a menu and the AI dispatcher all land on this same function.
    */
   onSelect: (value?: CommandParam) => void;
+  /** Capability-owned availability, shared by UI and non-UI consumers. */
+  availability?: (ctx: CommandContext) => CommandAvailability;
   /** Renders the command as a real control instead of a button. */
   control?: CommandControl;
   /** Native regions written by this command — compared against the fidelity map. */
   touches?: readonly FidelityRegionKey[];
+  /** Canonical native lens delta used to materialize this capability. */
+  nativeDelta?: string;
   /** Manifest/AI operation names this binding implements. */
   manifestOps?: readonly string[];
   /** Authority class. Defaults from priority when unset. */
@@ -237,6 +249,13 @@ export type CommandBinding = {
   /** Native-format availability is declared per command. Unspecified means
    * the command is non-mutating or safely representable in every profile. */
   strictNative?: { available: boolean; reason?: string };
+  /** AI exposure and authority generated from the capability definition. */
+  ai?: {
+    exposed: boolean;
+    description: string;
+    riskClass: "safe" | "confirm" | "always-confirm" | "destructive";
+  };
+  choreography?: { target: string; region?: string };
 };
 
 export type CommandLayout = {

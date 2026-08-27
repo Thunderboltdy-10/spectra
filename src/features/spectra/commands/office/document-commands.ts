@@ -269,34 +269,15 @@ function foundationBindings(handlers: DocumentCommandHandlers): CommandBinding[]
     // linked file carries Word comments the adapter says so in the hint, which
     // is the honest statement — not a disabled button.
     { ...commentsBinding(handlers.comments), touches: undefined },
-    ...textFormatBindings(handlers.format),
+    ...textFormatBindings("document", handlers.format),
   ];
   return placed(bindings, {
-    // Every verb that writes character or paragraph formatting names
-    // `format_blocks`. The audit reads this to prove the assistant and the person
-    // share one vocabulary, and the fidelity harness indexes its evidence rows by
-    // command id — a formatting command that omits the operation is a native write
-    // with no proof behind it.
-    "format.style": { manifestOps: ["format_blocks"] },
-    "format.strike": { priority: "secondary", manifestOps: ["format_blocks"] },
+    "format.strike": { priority: "secondary" },
     "format.fontFamily": {
       priority: "secondary",
       keepLabel: true,
-      manifestOps: ["format_blocks"],
     },
-    "format.fontSize": { priority: "secondary", manifestOps: ["format_blocks"] },
-    "format.bold": { manifestOps: ["format_blocks"] },
-    "format.italic": { manifestOps: ["format_blocks"] },
-    "format.underline": { manifestOps: ["format_blocks"] },
-    "format.color": { manifestOps: ["format_blocks"] },
-    "format.highlight": { manifestOps: ["format_blocks"] },
-    "format.align": { manifestOps: ["format_blocks"] },
-    "format.lineSpacing": { manifestOps: ["format_blocks"] },
-    "format.indent.increase": { manifestOps: ["format_blocks"] },
-    "format.indent.decrease": { manifestOps: ["format_blocks"] },
-    "format.list.bullet": { manifestOps: ["format_blocks"] },
-    "format.list.numbered": { manifestOps: ["format_blocks"] },
-    "format.clear": { manifestOps: ["format_blocks"] },
+    "format.fontSize": { priority: "secondary" },
   });
 }
 
@@ -1623,7 +1604,6 @@ export function documentStubHandlers(): DocumentCommandHandlers {
       numberedList: { active: false, toggle: noop },
       indent: { increase: noop, decrease: noop, canDecrease: true },
       clear: noop,
-      touches: ["body"],
       generalPins: ["fontFamily", "fontSize", "bold", "italic"],
     },
     paragraph: {

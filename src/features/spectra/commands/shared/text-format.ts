@@ -17,8 +17,13 @@ import {
   Type,
   Underline,
 } from "lucide-react";
-import { z } from "zod";
-import type { CommandBinding, CommandControlOption, FidelityRegionKey } from "../types";
+import {
+  commandBindingFromCapability,
+  formattingCapability,
+  type FormattingCapabilityLocalId,
+  type OfficeWorkType,
+} from "../../capabilities";
+import type { CommandBinding, CommandControlOption, CommandParam } from "../types";
 
 /**
  * The shared text-formatting vocabulary.
@@ -31,26 +36,10 @@ import type { CommandBinding, CommandControlOption, FidelityRegionKey } from "..
  *
  * Here a type declares only the *adapter* — what it means to set a font on the
  * current selection — and receives real `CommandBinding`s with shared ids,
- * labels, icons, ordering, tabs and native-region declarations. The bar renders
+ * labels, icons, ordering and tabs. Capability metadata comes from the IR. The bar renders
  * a font picker, a size stepper and colour wells; the AI calls the identical
  * `execute` with a typed scalar.
  */
-
-/** The one patch shape the three types agree on (contract §3.2.1). */
-export const textFormatPatchSchema = z.object({
-  fontFamily: z.string().optional(),
-  fontSize: z.number().min(4).max(400).optional(),
-  bold: z.boolean().optional(),
-  italic: z.boolean().optional(),
-  underline: z.boolean().optional(),
-  strike: z.boolean().optional(),
-  color: z.string().nullable().optional(),
-  highlight: z.string().nullable().optional(),
-  alignment: z.enum(["left", "center", "right", "justify"]).optional(),
-  lineHeight: z.number().min(0.5).max(4).optional(),
-});
-
-export type TextFormatPatch = z.infer<typeof textFormatPatchSchema>;
 
 /**
  * Fonts a person actually reaches for, with honest fallbacks. Every entry is a
@@ -106,6 +95,12 @@ export type ToggleFacet = {
   toggle: () => void;
 };
 
+function applyToggle(facet: ToggleFacet, value?: CommandParam) {
+  const current = facet.active ?? false;
+  const desired = typeof value === "boolean" ? value : !current;
+  if (desired !== current) facet.toggle();
+}
+
 export type ValueFacet<T> = {
   value?: T;
   set: (value: T) => void;
@@ -133,8 +128,6 @@ export type TextFormatAdapter = {
   numberedList?: ToggleFacet;
   indent?: { increase: () => void; decrease: () => void; canDecrease?: boolean };
   clear?: () => void;
-  /** Native regions a formatting write touches for this type. */
-  touches?: readonly FidelityRegionKey[];
   /** Whether formatting is currently editable at all. */
   disabled?: boolean;
   /** Controls that belong in General as contract favourites. */
@@ -148,27 +141,22 @@ const DEFAULT_GENERAL_PINS = ["fontFamily", "fontSize", "bold", "italic"] as con
  * order in the Format tab, and it is deliberate: what you change most often is
  * leftmost, so the row reads the way a hand moves.
  */
-export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[] {
-  const touches = adapter.touches ?? ["styles"];
+export function textFormatBindings(type: OfficeWorkType, adapter: TextFormatAdapter): CommandBinding[] {
   const pins = new Set<string>(adapter.generalPins ?? DEFAULT_GENERAL_PINS);
   const disabled = adapter.disabled || undefined;
   const bindings: CommandBinding[] = [];
 
   if (adapter.style) {
     const style = adapter.style;
-    bindings.push({
-      id: "format.style",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.style"), {
       label: "Style",
       icon: Type,
       tab: "Format",
       group: "Styles",
       priority: "essential",
-      requires: "edit",
       general: pins.has("style"),
       disabled,
       hint: "Paragraph style",
-      touches: ["styles"],
-      manifestOps: ["format_blocks"],
       control: {
         kind: "select",
         options: style.options,
@@ -178,23 +166,20 @@ export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[]
       onSelect: (value) => {
         if (typeof value === "string") style.set(value);
       },
-    });
+    }));
   }
 
   if (adapter.fontFamily) {
     const font = adapter.fontFamily;
-    bindings.push({
-      id: "format.fontFamily",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.fontFamily"), {
       label: "Font",
       icon: Baseline,
       tab: "Format",
       group: "Font",
       priority: "essential",
-      requires: "edit",
       general: pins.has("fontFamily"),
       disabled,
       hint: "Font family for the selection",
-      touches,
       control: {
         kind: "select",
         options: SHARED_FONT_STACKS,
@@ -205,24 +190,21 @@ export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[]
       onSelect: (value) => {
         if (typeof value === "string") font.set(value);
       },
-    });
+    }));
   }
 
   if (adapter.fontSize) {
     const size = adapter.fontSize;
-    bindings.push({
-      id: "format.fontSize",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.fontSize"), {
       label: "Size",
       icon: Type,
       tab: "Format",
       group: "Font",
       priority: "essential",
-      requires: "edit",
       general: pins.has("fontSize"),
       keepLabel: true,
       disabled,
       hint: "Font size in points",
-      touches,
       control: {
         kind: "numeric",
         value: size.value,
@@ -235,10 +217,10 @@ export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[]
         const next = typeof value === "number" ? value : Number(value);
         if (Number.isFinite(next)) size.set(Math.min(400, Math.max(4, next)));
       },
-    });
+    }));
   }
 
-  const marks: Array<[string, string, typeof Bold, ToggleFacet | undefined, string, boolean]> = [
+  const marks: Array<[FormattingCapabilityLocalId, string, typeof Bold, ToggleFacet | undefined, string, boolean]> = [
     ["format.bold", "Bold", Bold, adapter.bold, "Mod+B", pins.has("bold")],
     ["format.italic", "Italic", Italic, adapter.italic, "Mod+I", pins.has("italic")],
     ["format.underline", "Underline", Underline, adapter.underline, "Mod+U", false],
@@ -246,36 +228,30 @@ export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[]
   ];
   for (const [id, label, icon, facet, shortcut, general] of marks) {
     if (!facet) continue;
-    bindings.push({
-      id,
+    bindings.push(commandBindingFromCapability(formattingCapability(type, id), {
       label,
       icon,
       tab: "Format",
       group: "Font",
       priority: "essential",
-      requires: "edit",
       general,
       disabled,
       shortcut,
       active: facet.active ?? false,
-      touches,
-      onSelect: () => facet.toggle(),
-    });
+      onSelect: (value) => applyToggle(facet, value),
+    }));
   }
 
   if (adapter.color) {
     const color = adapter.color;
-    bindings.push({
-      id: "format.color",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.color"), {
       label: "Text colour",
       icon: PaintBucket,
       tab: "Format",
       group: "Font",
       priority: "secondary",
-      requires: "edit",
       disabled,
       hint: "Colour of the selected text",
-      touches,
       control: {
         kind: "color",
         value: color.value ?? undefined,
@@ -283,22 +259,19 @@ export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[]
         clearLabel: "Automatic",
       },
       onSelect: (value) => color.set(typeof value === "string" ? value : null),
-    });
+    }));
   }
 
   if (adapter.highlight) {
     const highlight = adapter.highlight;
-    bindings.push({
-      id: "format.highlight",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.highlight"), {
       label: "Highlight",
       icon: Highlighter,
       tab: "Format",
       group: "Font",
       priority: "secondary",
-      requires: "edit",
       disabled,
       hint: "Highlight the selection",
-      touches,
       control: {
         kind: "color",
         value: highlight.value ?? undefined,
@@ -306,21 +279,18 @@ export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[]
         clearLabel: "No highlight",
       },
       onSelect: (value) => highlight.set(typeof value === "string" ? value : null),
-    });
+    }));
   }
 
   if (adapter.alignment) {
     const alignment = adapter.alignment;
-    bindings.push({
-      id: "format.align",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.align"), {
       label: "Alignment",
       icon: AlignLeft,
       tab: "Format",
       group: "Paragraph",
       priority: "essential",
-      requires: "edit",
       disabled,
-      touches,
       control: {
         kind: "segmented",
         value: alignment.value ?? "left",
@@ -334,21 +304,18 @@ export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[]
       onSelect: (value) => {
         if (typeof value === "string") alignment.set(value);
       },
-    });
+    }));
   }
 
   if (adapter.lineHeight) {
     const lineHeight = adapter.lineHeight;
-    bindings.push({
-      id: "format.lineSpacing",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.lineSpacing"), {
       label: "Line spacing",
       icon: AlignJustify,
       tab: "Format",
       group: "Paragraph",
       priority: "secondary",
-      requires: "edit",
       disabled,
-      touches,
       control: {
         kind: "menu",
         options: SHARED_LINE_HEIGHTS,
@@ -358,88 +325,73 @@ export function textFormatBindings(adapter: TextFormatAdapter): CommandBinding[]
         const next = Number(value);
         if (Number.isFinite(next)) lineHeight.set(next);
       },
-    });
+    }));
   }
 
   if (adapter.bulletList) {
     const list = adapter.bulletList;
-    bindings.push({
-      id: "format.list.bullet",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.list.bullet"), {
       label: "Bulleted list",
       icon: List,
       tab: "Format",
       group: "Lists",
       priority: "essential",
-      requires: "edit",
       disabled,
       active: list.active ?? false,
-      touches: ["lists"],
-      onSelect: () => list.toggle(),
-    });
+      onSelect: (value) => applyToggle(list, value),
+    }));
   }
 
   if (adapter.numberedList) {
     const list = adapter.numberedList;
-    bindings.push({
-      id: "format.list.numbered",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.list.numbered"), {
       label: "Numbered list",
       icon: ListOrdered,
       tab: "Format",
       group: "Lists",
       priority: "essential",
-      requires: "edit",
       disabled,
       active: list.active ?? false,
-      touches: ["lists"],
-      onSelect: () => list.toggle(),
-    });
+      onSelect: (value) => applyToggle(list, value),
+    }));
   }
 
   if (adapter.indent) {
     const indent = adapter.indent;
     bindings.push(
-      {
-        id: "format.indent.increase",
+      commandBindingFromCapability(formattingCapability(type, "format.indent.increase"), {
         label: "Increase indent",
         icon: Indent,
         tab: "Format",
         group: "Paragraph",
         priority: "secondary",
-        requires: "edit",
         disabled,
-        touches,
         onSelect: () => indent.increase(),
-      },
-      {
-        id: "format.indent.decrease",
+      }),
+      commandBindingFromCapability(formattingCapability(type, "format.indent.decrease"), {
         label: "Decrease indent",
         icon: Outdent,
         tab: "Format",
         group: "Paragraph",
         priority: "secondary",
-        requires: "edit",
         disabled: disabled || indent.canDecrease === false || undefined,
-        touches,
         onSelect: () => indent.decrease(),
-      },
+      }),
     );
   }
 
   if (adapter.clear) {
     const clear = adapter.clear;
-    bindings.push({
-      id: "format.clear",
+    bindings.push(commandBindingFromCapability(formattingCapability(type, "format.clear"), {
       label: "Clear formatting",
       icon: Eraser,
       tab: "Format",
       group: "Font",
       priority: "secondary",
-      requires: "edit",
       disabled,
       hint: "Return the selection to its style default",
-      touches,
       onSelect: () => clear(),
-    });
+    }));
   }
 
   return bindings;

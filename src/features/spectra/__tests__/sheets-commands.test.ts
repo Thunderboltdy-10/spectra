@@ -15,6 +15,7 @@ import {
   officeCapabilityAudit,
   officeCapabilityAuditIssues,
   officeCapabilityAuditSummary,
+  officeOperationsFor,
 } from "../commands/office/capability-audit";
 import {
   gateOperation,
@@ -132,7 +133,7 @@ describe("sheets command bindings", () => {
       SHEETS_CAPABILITY_DEFERRALS,
     );
     const summary = officeCapabilityAuditSummary(entries);
-    expect(summary.total).toBe(SHEETS_MANIFEST_OP_IDS.length);
+    expect(summary.total).toBe(officeOperationsFor("sheets").length);
     expect(summary.aiOnly).toBe(0);
     expect(summary.deferred).toBe(0);
     // Nothing is left unclassified: every operation is either a command or a

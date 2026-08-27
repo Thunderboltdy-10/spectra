@@ -1,4 +1,5 @@
 import { requireArtifactTypeManifest } from "../../artifacts/registry";
+import { formattingCapabilitiesFor } from "../../capabilities";
 import { commandForBinding } from "../registry";
 import type { CapabilityAuditEntry } from "../app-registry";
 import type { CommandBinding } from "../types";
@@ -130,7 +131,23 @@ const DIRECT_MANIPULATION_OPERATIONS: Record<string, Readonly<Record<string, str
 export type OfficeCapabilityDeferral = { operation: string; reason: string };
 
 export function officeOperationsFor(type: WorkType): readonly string[] {
-  return requireArtifactTypeManifest(type).operations;
+  const manifestOperations = requireArtifactTypeManifest(type).operations;
+  if (type !== "document" && type !== "sheets" && type !== "presentation") {
+    return manifestOperations;
+  }
+  const definitions = formattingCapabilitiesFor(type);
+  const replacedAggregates = new Set(
+    definitions
+      .map((definition) => definition.manifestOperation)
+      .filter((operation): operation is string => Boolean(operation))
+      .map((operation) => manifestOperationId(type, operation)),
+  );
+  return [
+    ...manifestOperations.filter((operation) => !replacedAggregates.has(operation)),
+    ...definitions
+      .filter((definition) => definition.ai.exposed)
+      .map((definition) => definition.id),
+  ];
 }
 
 /** `document.format.blocks` from `format_blocks`, matching the registry's form. */
@@ -148,6 +165,12 @@ export function officeCapabilityAudit(
   const byOperation = new Map<string, string[]>();
   for (const [index, binding] of bindings.entries()) {
     const command = commandForBinding(type, binding, index);
+    if (command.capabilityId) {
+      const list = byOperation.get(command.capabilityId) ?? [];
+      list.push(command.id);
+      byOperation.set(command.capabilityId, list);
+      continue;
+    }
     for (const op of command.manifestOps ?? []) {
       const id = manifestOperationId(type, op);
       const list = byOperation.get(id) ?? [];
@@ -206,6 +229,23 @@ export function officeCapabilityAuditIssues(
   const issues: string[] = [];
   const entries = officeCapabilityAudit(type, bindings, deferrals);
   const declared = new Set(officeOperationsFor(type));
+  const manifestDeclared = new Set(requireArtifactTypeManifest(type).operations);
+
+  if (type === "document" || type === "sheets" || type === "presentation") {
+    for (const definition of formattingCapabilitiesFor(type)) {
+      if (!declared.has(definition.id)) {
+        issues.push(`${definition.id}: capability is missing from the generated Office operation vocabulary.`);
+      }
+      if (definition.manifestOperation) {
+        const aggregate = manifestOperationId(type, definition.manifestOperation);
+        if (!manifestDeclared.has(aggregate)) {
+          issues.push(
+            `${definition.id}: specializes manifest operation "${aggregate}", which the artifact registry does not have.`,
+          );
+        }
+      }
+    }
+  }
 
   for (const entry of entries) {
     if (entry.status === "ai-only") {
@@ -237,9 +277,10 @@ export function officeCapabilityAuditIssues(
   // AI-reachable and is not.
   for (const [index, binding] of bindings.entries()) {
     const command = commandForBinding(type, binding, index);
+    if (command.capabilityId) continue;
     for (const op of command.manifestOps ?? []) {
       const operation = manifestOperationId(type, op);
-      if (!declared.has(operation)) {
+      if (!manifestDeclared.has(operation)) {
         issues.push(
           `${command.id}: declares manifest operation "${operation}", which the artifact registry does not have. The assistant cannot reach this command.`,
         );

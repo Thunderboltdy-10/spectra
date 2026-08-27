@@ -103,6 +103,9 @@ export const docxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("format-runs"), regionId: z.string(), format: docxRunFormatSchema }).strict(),
   z.object({ kind: z.literal("format-paragraph"), regionId: z.string(), format: docxParagraphFormatSchema }).strict(),
 ]);
+export const DOCX_LENS_DELTA_KINDS = docxOperationSchema.options.map(
+  (operation) => operation.shape.kind.value,
+);
 export const docxSemanticDeltaSchema = z.union([
   docxOperationSchema,
   z.object({ kind: z.literal("ai-edit"), operations: z.array(docxOperationSchema) }).strict(),
@@ -167,6 +170,9 @@ export const xlsxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("unmerge-cells"), sheetId: z.string(), range: z.string() }).strict(),
   z.object({ kind: z.literal("set-freeze-panes"), sheetId: z.string(), rows: z.number().int().nonnegative(), columns: z.number().int().nonnegative() }).strict(),
 ]);
+export const XLSX_LENS_DELTA_KINDS = xlsxOperationSchema.options.map(
+  (operation) => operation.shape.kind.value,
+);
 export const xlsxSemanticDeltaSchema = z.union([
   xlsxOperationSchema,
   z.object({ kind: z.literal("ai-edit"), operations: z.array(xlsxOperationSchema) }).strict(),
@@ -250,6 +256,9 @@ export const pptxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("remove-slide"), slideId: z.string() }).strict(),
   z.object({ kind: z.literal("reorder-slides"), order: z.array(z.string()) }).strict(),
 ]);
+export const PPTX_LENS_DELTA_KINDS = pptxOperationSchema.options.map(
+  (operation) => operation.shape.kind.value,
+);
 export const pptxSemanticDeltaSchema = z.union([
   pptxOperationSchema,
   z.object({ kind: z.literal("ai-edit"), operations: z.array(pptxOperationSchema) }).strict(),

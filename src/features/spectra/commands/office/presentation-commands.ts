@@ -61,6 +61,7 @@ import {
   Type,
   Ungroup,
 } from "lucide-react";
+import { PRESENTATION_TEXT_FORMAT_NATIVE_REASON } from "../../capabilities";
 import type { CommandBinding, CommandControlOption, CommandParam, FidelityRegionKey } from "../types";
 import {
   commentsBinding,
@@ -293,8 +294,7 @@ export const PRESENTATION_STRICT_REASONS = {
     "Only an exact PowerPoint equivalent may replace a transition in a linked file, and Spectra does not write transitions yet.",
   animation:
     "PowerPoint animation timing is preserved exactly. Spectra does not author timing entries in a linked file.",
-  textStyle:
-    "Text inside a linked shape is edited natively, but its run properties stay as PowerPoint saved them.",
+  textStyle: PRESENTATION_TEXT_FORMAT_NATIVE_REASON,
   shapeStyle:
     "Shape fills, lines and effects are preserved from the linked file rather than rewritten.",
   newShape:
@@ -557,17 +557,14 @@ function stringParam(value: CommandParam) {
  * The shared modules were written for a `Format` tab, which a deck does not
  * have: a deck formats the *selected shape*, so the family belongs on the
  * contextual Shape tab and appears the moment something is selected. Ids and
- * behaviour are untouched — only the placement, the region it declares, and the
- * sentence it shows when a linked file will not take the write.
+ * behaviour and capability truth are untouched — only placement changes.
  */
-function onShapeTab(bindings: CommandBinding[], strictReason: string): CommandBinding[] {
+function onShapeTab(bindings: CommandBinding[]): CommandBinding[] {
   return bindings.map((binding) => ({
     ...binding,
     tab: undefined,
     contextualTab: "Shape",
     general: false,
-    touches: SHAPES,
-    strictNative: { available: false, reason: strictReason },
   }));
 }
 
@@ -1738,10 +1735,7 @@ export function presentationCommandBindings(
     },
 
     /* ------------------------------------------------- Shape · Text */
-    ...onShapeTab(
-      textFormatBindings(handlers.textFormat),
-      PRESENTATION_STRICT_REASONS.textStyle,
-    ),
+    ...onShapeTab(textFormatBindings("presentation", handlers.textFormat)),
     {
       id: "format.textPreset",
       label: "Text style",
@@ -2329,7 +2323,6 @@ export function presentationStubHandlers(
       bulletList: { toggle: noop },
       numberedList: { toggle: noop },
       clear: noop,
-      touches: SHAPES,
       generalPins: [],
     },
     exporter: {

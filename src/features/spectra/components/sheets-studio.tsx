@@ -3804,7 +3804,6 @@ export function SheetsStudio({
           formatSelection({ align: value as NonNullable<SheetCellFormat["align"]> }),
       },
       clear: () => clearSelectionScope("formats"),
-      touches: ["styles", "numberFormats"],
     },
     openFormatPanel: () => toggleInspector("format"),
     formatPanelOpen: inspector === "format",

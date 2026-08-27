@@ -591,6 +591,8 @@ export const queueMaterialization = mutation({
     regionIds: v.array(v.string()),
     partNames: v.array(v.string()),
     localReplicaId: v.optional(v.id("workReplicas")),
+    // I2 persists the materialized projection beside the payload so Keep Spectra
+    // and conflict previews can restore after reload without a second lens open.
     baseContent: v.optional(v.any()),
     baseContentHash: v.optional(v.string()),
     baseTextIndex: v.optional(v.string()),

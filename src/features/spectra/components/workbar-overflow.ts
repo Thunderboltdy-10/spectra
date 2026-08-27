@@ -90,3 +90,51 @@ export function planWorkbarOverflow(
     overflowIds: visible.filter((id) => hidden.has(id)),
   };
 }
+
+/**
+ * First paint and command remounts report 0px. Applying that as "nothing fits"
+ * clears a real plan, the next frame restores it, and the workbar loops.
+ */
+export function shouldCommitWorkbarPlan(
+  widths: Iterable<{ full: number }>,
+): boolean {
+  for (const entry of widths) {
+    if (entry.full > 0) return true;
+  }
+  return false;
+}
+
+export function sameIdList(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+export function workbarPlanKey(plan: Pick<WorkbarOverflowPlan, "iconOnlyIds" | "overflowIds">) {
+  return `${plan.iconOnlyIds.join("\u001f")}\n${plan.overflowIds.join("\u001f")}`;
+}
+
+/**
+ * Overflow measurements and ResizeObserver can bounce A→B→A when the overflow
+ * control itself changes the row. Keep the committed plan instead of looping.
+ */
+export function shouldReplaceWorkbarPlan(
+  nextKey: string,
+  committedKey: string | null,
+  previousKey: string | null,
+) {
+  if (committedKey === nextKey) return false;
+  if (previousKey === nextKey) return false;
+  return true;
+}
+
+/**
+ * Hiding a command must not count as a host resize. The commands row is flex-1,
+ * so its clientWidth is stable; ResizeObserver still fires when inner content
+ * changes, and treating that as a new measurement walks unique overflow plans
+ * until React hits its update cap.
+ */
+export function shouldIgnoreWorkbarHostResize(
+  previousWidth: number | null,
+  nextWidth: number,
+) {
+  return previousWidth !== null && previousWidth === nextWidth;
+}

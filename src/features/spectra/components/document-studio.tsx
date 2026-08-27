@@ -603,6 +603,8 @@ export function DocumentStudio({
   const studioContract = useStudioContract();
   const strictNative = studioContract.compatibilityProfile === "strict-native";
   const nativeReadOnlyKey = nativeReadOnlyRegionIds.join("|");
+  const onLocalCollaborativeChangeRef = useRef(onLocalCollaborativeChange);
+  onLocalCollaborativeChangeRef.current = onLocalCollaborativeChange;
   const { preferences } = useSpectraPreferences();
   const [initialContent] = useState(() =>
     withEditorFormatting(documentJsonFromContent(content, title), record(content)),
@@ -661,6 +663,7 @@ export function DocumentStudio({
   >(null);
   const importRef = useRef<HTMLInputElement>(null);
   const editorReadyForUserChanges = useRef(false);
+  const lastDecorationKeyRef = useRef<string>("");
   const editorJsonKeyRef = useRef(JSON.stringify(initialContent));
   /** Filled once the command set exists; the slash menu reads it on each open. */
   const slashDispatchRef = useRef<SlashCommandDispatcher>({
@@ -833,6 +836,25 @@ export function DocumentStudio({
           class:
             "min-h-[620px] px-2 pb-24 pt-2 outline-none text-[var(--text-primary)]",
         },
+        handleDOMEvents: {
+          // `immediatelyRender: false` can leave `editor.isInitialized` false
+          // on the first effect. A once-listener that never attaches would
+          // skip onUpdate forever: the table cell would change on screen and
+          // in Yjs while native materialize never ran. Mark readiness on the
+          // same DOM events ProseMirror uses to create the user transaction.
+          pointerdown: () => {
+            editorReadyForUserChanges.current = true;
+            return false;
+          },
+          keydown: () => {
+            editorReadyForUserChanges.current = true;
+            return false;
+          },
+          beforeinput: () => {
+            editorReadyForUserChanges.current = true;
+            return false;
+          },
+        },
         handlePaste: (view, event) => {
           if (strictNative) return false;
           const target = parseSpectraWorkUrl(
@@ -859,7 +881,7 @@ export function DocumentStudio({
       onUpdate: ({ editor, transaction }) => {
         const nextJson = editor.getJSON();
         editorJsonKeyRef.current = JSON.stringify(nextJson);
-        refreshToolbar((value) => value + 1);
+        if (transaction.docChanged) refreshToolbar((value) => value + 1);
         // Extension normalization can emit an update during the editor's mount
         // frame even when the user changed nothing. Treat that frame as editor
         // hydration; genuine input begins immediately afterward.
@@ -870,7 +892,7 @@ export function DocumentStudio({
         // each keystroke back into a full projected document replacement.
         if (collaborationDocument) {
           if (isLocalCollaborativeDocumentChange(transaction))
-            onLocalCollaborativeChange?.();
+            onLocalCollaborativeChangeRef.current?.();
           return;
         }
         onChange(withDocumentFormatting(documentContentFromJson(nextJson, content), nextJson));
@@ -935,7 +957,6 @@ export function DocumentStudio({
     [
       collaborationDocument,
       nativeReadOnlyKey,
-      onLocalCollaborativeChange,
     ],
   );
 
@@ -983,17 +1004,17 @@ export function DocumentStudio({
       editorReadyForUserChanges.current = true;
     };
     const element = editor.view.dom;
-    element.addEventListener("pointerdown", markUserInput, { once: true });
-    element.addEventListener("keydown", markUserInput, { once: true });
-    element.addEventListener("beforeinput", markUserInput, { once: true });
-    element.addEventListener("paste", markUserInput, { once: true });
+    element.addEventListener("pointerdown", markUserInput);
+    element.addEventListener("keydown", markUserInput);
+    element.addEventListener("beforeinput", markUserInput);
+    element.addEventListener("paste", markUserInput);
     return () => {
       element.removeEventListener("pointerdown", markUserInput);
       element.removeEventListener("keydown", markUserInput);
       element.removeEventListener("beforeinput", markUserInput);
       element.removeEventListener("paste", markUserInput);
     };
-  }, [editor]);
+  }, [editor, editor?.isInitialized]);
 
   const incomingEditorJson = useMemo(
     () => withEditorFormatting(documentJsonFromContent(content, title), record(content)),
@@ -1066,8 +1087,13 @@ export function DocumentStudio({
     // corrupt IME composition, and turn a remote delta into a full replace.
     if (contentChanged && !collaborationDocument)
       editor.commands.setContent(incomingEditorJson, { emitUpdate: false });
+    const decorationKey = JSON.stringify(target);
+    if (lastDecorationKeyRef.current === decorationKey) return;
+    lastDecorationKeyRef.current = decorationKey;
     editor.view.dispatch(
-      editor.state.tr.setMeta(aiRegionDecorationKey, target),
+      editor.state.tr
+        .setMeta(aiRegionDecorationKey, target)
+        .setMeta("addToHistory", false),
     );
   }, [aiChangedPaths, collaborationDocument, editor, incomingEditorJson]);
 

@@ -8,10 +8,9 @@ import {
   docxLens,
   type DocxRunFormat,
 } from "../lenses/docx-lens";
-import {
-  contentProjection,
-} from "@/app/api/spectra/lenses/docx/route";
-import { mergeDocxProjections } from "@/app/api/spectra/lenses/docx/route";
+import { comparePackages } from "@ariadng/office/preservation";
+import { assertPreservationKept } from "../commands/office/preservation-guard";
+import { mergeDocxProjections, contentProjection } from "@/app/api/spectra/lenses/docx/route";
 
 const fixture = (name: string) =>
   readFile(join(process.cwd(), "fixtures", "office", "docx", name)).then(
@@ -101,6 +100,13 @@ describe("DOCX preservation lens", () => {
     expect(customXmlPart).toBeTruthy();
     expect((await document.office.xml(customXmlPart!.name)).root.find(null, "Name")?.text())
       .toBe("Ada Lovelace");
+    const comparison = await comparePackages(source, output);
+    expect(() =>
+      assertPreservationKept({
+        entries: opened.fidelityMap.entries,
+        parts: comparison.parts,
+      }),
+    ).not.toThrow();
   });
 
   it("writes tabs and soft line breaks as native run tokens", async () => {

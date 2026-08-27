@@ -618,6 +618,33 @@ async function customXmlTargets(document: Document, cell: NativeTableCell) {
   return targets;
 }
 
+async function boundCustomXmlPartNames(document: Document) {
+  const itemIds = new Set<string>();
+  for (const element of descendants(document.body())) {
+    if (element.namespaceUri() !== WML_NAMESPACE || element.localName !== "dataBinding")
+      continue;
+    const itemId = element.getAttributeNs(WML_NAMESPACE, "storeItemID")?.toLocaleLowerCase();
+    if (itemId) itemIds.add(itemId);
+  }
+  if (!itemIds.size) return [];
+  const names: string[] = [];
+  for (const part of document.office.package.parts()) {
+    if (!/^\/customxml\/item\d*\.xml$/i.test(part.name)) continue;
+    const propsRelationships = part.relationships().byType(CUSTOM_XML_PROPS_RELATIONSHIP);
+    for (const relationship of propsRelationships) {
+      const propsPart = document.office.package.relatedPart(part, relationship.id);
+      if (!propsPart) continue;
+      const props = await document.office.xml(propsPart.name);
+      const candidateId =
+        props.root.getAttributeNs(CUSTOM_XML_PROPS_NAMESPACE, "itemID") ??
+        props.root.getAttribute("itemID");
+      if (!candidateId || !itemIds.has(candidateId.toLocaleLowerCase())) continue;
+      names.push(part.name);
+    }
+  }
+  return names;
+}
+
 async function replaceTableCellText(
   document: Document,
   cell: NativeTableCell,
@@ -1414,6 +1441,14 @@ async function projectDocument(
   };
   partRule("bibliography", (name) => /^\/customXml\/item\d*\.xml$/i.test(name));
   partRule("customXml", (name) => name.toLowerCase().startsWith("/customxml/"));
+  for (const partName of await boundCustomXmlPartNames(document)) {
+    fidelityEntries.push({
+      regionId: `docx:feature:customXml:${partName}`,
+      feature: "customXml",
+      class: "NATIVE",
+      partName,
+    });
+  }
   partRule("ole", (name) => name.toLowerCase().includes("/embeddings/"));
   partRule("smartArt", (name) => name.toLowerCase().includes("/diagrams/"));
   partRule("footnotes", (name) => /\/word\/footnotes\.xml$/i.test(name));

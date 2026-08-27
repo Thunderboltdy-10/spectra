@@ -172,4 +172,55 @@ describe("native preservation guard", () => {
       }),
     ).toHaveLength(1);
   });
+
+  it("does not freeze a shared native part because a preserved feature also lives there", () => {
+    expect(
+      preservationViolations({
+        entries: [
+          { feature: "body", class: "NATIVE", partName: "/word/document.xml" },
+          { feature: "tables", class: "NATIVE", partName: "/word/document.xml" },
+          {
+            feature: "contentControl",
+            class: "PRESERVED",
+            partName: "/word/document.xml",
+            readOnly: true,
+          },
+        ],
+        parts: [{ name: "word/document.xml", verdict: "different" }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("still freezes a preserved-only Custom XML store", () => {
+    expect(
+      preservationViolations({
+        entries: [
+          {
+            feature: "customXml",
+            class: "PRESERVED",
+            partName: "/customXml/item.xml",
+            readOnly: true,
+          },
+        ],
+        parts: [{ name: "customXml/item.xml", verdict: "different" }],
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("lets a bound Custom XML store change when the lens also marks it native", () => {
+    expect(
+      preservationViolations({
+        entries: [
+          {
+            feature: "customXml",
+            class: "PRESERVED",
+            partName: "/customXml/item.xml",
+            readOnly: true,
+          },
+          { feature: "customXml", class: "NATIVE", partName: "/customXml/item.xml" },
+        ],
+        parts: [{ name: "customXml/item.xml", verdict: "different" }],
+      }),
+    ).toEqual([]);
+  });
 });

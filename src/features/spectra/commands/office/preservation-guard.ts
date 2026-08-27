@@ -72,19 +72,38 @@ export function preservationViolations(input: {
   entries: readonly PreservationEntry[];
   parts: readonly ComparedPart[];
 }): PreservationViolation[] {
+  const nativeParts = new Set<string>();
+  for (const entry of input.entries) {
+    if (
+      entry.class === "NATIVE" &&
+      entry.readOnly !== true &&
+      typeof entry.partName === "string" &&
+      entry.partName
+    ) {
+      nativeParts.add(normalize(entry.partName));
+    }
+  }
+
   const claimed = new Map<string, { feature: string; pathPattern?: string }>();
   for (const entry of input.entries) {
     const preserved = entry.class === "PRESERVED" || entry.readOnly === true;
     if (!preserved || typeof entry.partName !== "string" || !entry.partName) continue;
     const key = normalize(entry.partName);
+    const pathPattern =
+      typeof entry.pathPattern === "string" && entry.pathPattern
+        ? entry.pathPattern
+        : undefined;
+    // document.xml and bound Custom XML stores are native parts that also host
+    // preserved markup. Freezing the whole part would refuse every legal
+    // paragraph or cell write. A pathPattern still catches a rewrite of the
+    // preserved element itself.
+    if (nativeParts.has(key) && !pathPattern) continue;
     // First claim wins, so the message names one feature rather than a list. Any
     // of them is enough to explain why the part must not change.
     if (!claimed.has(key)) {
       claimed.set(key, {
         feature: typeof entry.feature === "string" ? entry.feature : "",
-        ...(typeof entry.pathPattern === "string" && entry.pathPattern
-          ? { pathPattern: entry.pathPattern }
-          : {}),
+        ...(pathPattern ? { pathPattern } : {}),
       });
     }
   }

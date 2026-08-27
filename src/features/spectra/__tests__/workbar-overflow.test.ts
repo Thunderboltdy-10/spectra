@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planWorkbarOverflow } from "../components/workbar-overflow";
+import { readFileSync } from "node:fs";
+import { planWorkbarOverflow, sameIdList, shouldCommitWorkbarPlan, shouldIgnoreWorkbarHostResize, shouldReplaceWorkbarPlan } from "../components/workbar-overflow";
 
 function item(
   id: string,
@@ -52,5 +53,41 @@ describe("planWorkbarOverflow", () => {
     );
     expect(plan.iconOnlyIds).toContain("theme");
     expect(plan.iconOnlyIds).not.toContain("add");
+  });
+
+  it("refuses to commit a plan while every measured command is still 0px", () => {
+    expect(shouldCommitWorkbarPlan([{ full: 0 }, { full: 0 }])).toBe(false);
+    expect(shouldCommitWorkbarPlan([{ full: 0 }, { full: 72 }])).toBe(true);
+  });
+
+  it("treats identical overflow id lists as the same plan", () => {
+    expect(sameIdList(["notes"], ["notes"])).toBe(true);
+    expect(sameIdList(["notes"], ["export"])).toBe(false);
+  });
+
+  it("refuses to replace a plan that is bouncing back to the previous one", () => {
+    expect(shouldReplaceWorkbarPlan("b", "a", null)).toBe(true);
+    expect(shouldReplaceWorkbarPlan("a", "a", null)).toBe(false);
+    expect(shouldReplaceWorkbarPlan("a", "b", "a")).toBe(false);
+  });
+
+  it("ignores a ResizeObserver tick that did not change host width", () => {
+    expect(shouldIgnoreWorkbarHostResize(null, 720)).toBe(false);
+    expect(shouldIgnoreWorkbarHostResize(720, 720)).toBe(true);
+    expect(shouldIgnoreWorkbarHostResize(720, 640)).toBe(false);
+  });
+
+  it("does not wipe oscillation guards when only disabled flags change", () => {
+    const source = readFileSync(
+      "src/features/spectra/components/artifact-workbar.tsx",
+      "utf8",
+    );
+    expect(source).toContain("overflowCommandIdsRef");
+    expect(source).toContain(
+      "if (overflowCommandIdsRef.current !== overflowCommandIds)",
+    );
+    expect(source).toContain("shouldIgnoreWorkbarHostResize");
+    expect(source).toContain("overflowHostWidthRef");
+    expect(source).toContain("fromResize");
   });
 });

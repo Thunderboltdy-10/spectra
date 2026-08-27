@@ -154,6 +154,7 @@ import {
   updatingHighlightFallbackPaths,
 } from "./ai-region-path";
 import { useArtifactNativeSync } from "./artifact-native-sync";
+import { nativeOfficeDraftPending, writeStudioDirty } from "./native-office-draft";
 import {
   UnsavedCloseDialog,
   decideClose,
@@ -3283,6 +3284,17 @@ function ArtifactStudioEditor({
   // explicitly so a freshly opened or AI-updated artifact never advertises
   // unsaved work that the student did not create.
   const userHasEditedRef = useRef(false);
+  const [localDraftEpoch, setLocalDraftEpoch] = useState(0);
+  const localDraftBumpRef = useRef(false);
+
+  const bumpLocalDraft = useCallback(() => {
+    if (localDraftBumpRef.current) return;
+    localDraftBumpRef.current = true;
+    window.requestAnimationFrame(() => {
+      localDraftBumpRef.current = false;
+      setLocalDraftEpoch((epoch) => epoch + 1);
+    });
+  }, []);
 
   useEffect(() => {
     detailsPinnedRef.current = false;
@@ -3449,7 +3461,10 @@ function ArtifactStudioEditor({
       incomingLiveTagDraft,
       live.liveValue.summary,
       live.liveValue.title,
-      content,
+      // Native Word/Excel/PowerPoint bodies are Yjs-bound. React `content`
+      // identity is not a remote write; putting it here retriggered incoming
+      // reconciliation (and setBaseline) on every keystroke.
+      nativeBodyBinding ? null : content,
       humanSummary,
       nativeBodyBinding,
       nativeProjectionReady,
@@ -3628,7 +3643,7 @@ function ArtifactStudioEditor({
             setTagDraft(acknowledged.tagDraft);
             setContent(acknowledged.content);
             setBaseline(acknowledged);
-            setDirty(false);
+            writeStudioDirty(dirtyRef, setDirty, false);
           } else {
             setBaseline(acknowledged);
           }
@@ -4774,21 +4789,22 @@ function ArtifactStudioEditor({
   useEffect(() => {
     const snapshotsDiffer =
       snapshotKey(currentSnapshot) !== snapshotKey(baseline);
-    const nextDirty = userHasEditedRef.current && snapshotsDiffer;
+    const nextDirty = nativeOfficeDraftPending({
+      nativeOfficeDocument,
+      userHasEdited: userHasEditedRef.current,
+      snapshotsDiffer,
+    });
     if (reconcilingRemoteRef.current) {
       if (!nextDirty) reconcilingRemoteRef.current = false;
-      if (dirtyRef.current) {
-        dirtyRef.current = false;
-        setDirty(false);
-      }
+      // A Yjs echo of a local Office edit hydrates React without writing the
+      // native file. Swallowing dirty here left Word/Excel/PowerPoint bytes
+      // unchanged while the editor already showed the draft.
+      writeStudioDirty(dirtyRef, setDirty, nextDirty);
       return;
     }
-    if (!snapshotsDiffer) userHasEditedRef.current = false;
-    if (dirtyRef.current !== nextDirty) {
-      dirtyRef.current = nextDirty;
-      setDirty(nextDirty);
-    }
-  }, [baseline, currentSnapshot]);
+    if (!snapshotsDiffer && !nextDirty) userHasEditedRef.current = false;
+    writeStudioDirty(dirtyRef, setDirty, nextDirty);
+  }, [baseline, currentSnapshot, nativeOfficeDocument]);
 
   useEffect(() => {
     const switchedArtifacts = activeArtifactIdRef.current !== artifact._id;
@@ -4837,6 +4853,13 @@ function ArtifactStudioEditor({
           aiMergeRef.current = null;
         } else if (isCollaborativeArtifact) {
           const local = currentSnapshotRef.current;
+          // Native Office bodies already live on the bound Yjs fragment. A
+          // Yjs echo is not a new human draft; rebasing React here re-dirtied
+          // after every save and nested updates past React's cap.
+          if (nativeOfficeDocument) {
+            setLiveConflict(null);
+            return;
+          }
           const rebased = rebaseCollaborativeSnapshot(
             baseline,
             local,
@@ -4852,8 +4875,7 @@ function ArtifactStudioEditor({
           // A successful remote-only merge remains an unsaved local draft. A
           // same-leaf collision is also preserved locally for explicit review.
           userHasEditedRef.current = true;
-          dirtyRef.current = true;
-          setDirty(true);
+          writeStudioDirty(dirtyRef, setDirty, true);
           window.requestAnimationFrame(() => {
             reconcilingRemoteRef.current = false;
           });
@@ -4864,10 +4886,7 @@ function ArtifactStudioEditor({
     activeArtifactIdRef.current = artifact._id;
     reconcilingRemoteRef.current = true;
     userHasEditedRef.current = false;
-    if (dirtyRef.current) {
-      dirtyRef.current = false;
-      setDirty(false);
-    }
+    writeStudioDirty(dirtyRef, setDirty, false);
     setRemoteConflict(null);
     setDismissedRemoteKey(null);
     setLiveConflict(null);
@@ -4888,10 +4907,10 @@ function ArtifactStudioEditor({
   }, [
     artifact._id,
     artifact.updatedAt,
-    baseline,
     dismissedRemoteKey,
     incomingSnapshot,
     isCollaborativeArtifact,
+    nativeOfficeDocument,
   ]);
 
   useEffect(
@@ -4988,7 +5007,7 @@ function ArtifactStudioEditor({
     busy,
     dirty,
     live.modelSnapshot.initialized,
-    live.modelSnapshot.value,
+    localDraftEpoch,
     liveConflict,
     readOnly,
     syncBusy,
@@ -5018,8 +5037,8 @@ function ArtifactStudioEditor({
     // can erase the user's first edit (most visibly: adding the first slide or
     // object appears to do nothing).
     reconcilingRemoteRef.current = false;
-    dirtyRef.current = true;
-    setDirty(true);
+    writeStudioDirty(dirtyRef, setDirty, true);
+    bumpLocalDraft();
     if (next.title !== undefined) {
       setActivePresence("metadata:title");
       setTitle(next.title);
@@ -5044,8 +5063,8 @@ function ArtifactStudioEditor({
     if (readOnly) return;
     userHasEditedRef.current = true;
     reconcilingRemoteRef.current = false;
-    dirtyRef.current = true;
-    setDirty(true);
+    writeStudioDirty(dirtyRef, setDirty, true);
+    bumpLocalDraft();
     if (
       (artifact.blueprintKey === "document" ||
         artifact.blueprintKey === "code") &&
@@ -5130,7 +5149,7 @@ function ArtifactStudioEditor({
     setTagDraft(authoritative.tagDraft);
     setContent(authoritative.content);
     setBaseline(authoritative);
-    setDirty(false);
+    writeStudioDirty(dirtyRef, setDirty, false);
     userHasEditedRef.current = false;
     setLiveConflict(null);
     window.requestAnimationFrame(() => {
@@ -5258,7 +5277,7 @@ function ArtifactStudioEditor({
     setTagDraft(remoteConflict.tagDraft);
     setContent(remoteConflict.content);
     setBaseline(remoteConflict);
-    setDirty(false);
+    writeStudioDirty(dirtyRef, setDirty, false);
     userHasEditedRef.current = false;
     setRemoteConflict(null);
     setDismissedRemoteKey(null);
@@ -5404,12 +5423,14 @@ function ArtifactStudioEditor({
 
   const markLocalCollaborativeDocumentChange = useCallback(() => {
     if (readOnly || artifact.blueprintKey !== "document") return;
+    // A native save and incoming Yjs hydration are not typing. Clearing the
+    // reconciling guard here re-dirtied the studio and nested React updates.
+    if (reconcilingRemoteRef.current) return;
     userHasEditedRef.current = true;
-    reconcilingRemoteRef.current = false;
-    dirtyRef.current = true;
-    setDirty(true);
+    writeStudioDirty(dirtyRef, setDirty, true);
+    bumpLocalDraft();
     setActivePresence("artifact:structure", { mode: "typing" });
-  }, [artifact.blueprintKey, readOnly, setActivePresence]);
+  }, [artifact.blueprintKey, bumpLocalDraft, readOnly, setActivePresence]);
 
   /**
    * The live fidelity map every command in the bar is gated by.
@@ -5557,6 +5578,7 @@ function ArtifactStudioEditor({
       data-blueprint={artifact.blueprintKey}
       data-native-office={nativeOfficeDocument ? "true" : "false"}
       data-native-format={inferredNativeFormat}
+      data-draft-pending={dirty ? "true" : "false"}
       data-ai-highlight-paths={highlightPaths.join("|") || undefined}
       data-ai-protocol={
         activeAiCollaborator?.interactionState

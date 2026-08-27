@@ -34,7 +34,7 @@ import {
   WorkbarControlMenuRow,
   isRenderedControl,
 } from "./workbar-controls";
-import { planWorkbarOverflow } from "./workbar-overflow";
+import { planWorkbarOverflow, sameIdList, shouldCommitWorkbarPlan, shouldIgnoreWorkbarHostResize, shouldReplaceWorkbarPlan, workbarPlanKey } from "./workbar-overflow";
 
 export type { CommandBinding } from "../commands";
 
@@ -215,6 +215,9 @@ export function ArtifactWorkbar({
   const measureRef = useRef<HTMLDivElement>(null);
   const tabsRailRef = useRef<HTMLDivElement>(null);
   const metaRef = useRef<HTMLDivElement>(null);
+  const overflowPlanKeyRef = useRef<string | null>(null);
+  const previousOverflowPlanKeyRef = useRef<string | null>(null);
+  const overflowHostWidthRef = useRef<number | null>(null);
   const [dragCommandId, setDragCommandId] = useState<string | null>(null);
   const previousSelectionContext = useRef<string | undefined>(undefined);
   const commandCtx = useMemo(
@@ -375,6 +378,11 @@ export function ArtifactWorkbar({
 
   const showPrimary = !primary?.requires || can(primary.requires);
   const rowActions = visibleActions;
+  const overflowCommandIds = visibleActions.map((action) => action.id).join("\u001f");
+  const overflowCommandIdsRef = useRef(overflowCommandIds);
+  const overflowSignature = visibleActions
+    .map((action) => `${action.id}:${action.disabled ? "1" : "0"}`)
+    .join("\u001f");
   const measuredOverflow = useMemo(
     () => new Set(overflowIds),
     [overflowIds],
@@ -394,12 +402,25 @@ export function ArtifactWorkbar({
     const host = commandsHostRef.current;
     const measure = measureRef.current;
     if (!host || !measure) return;
+    if (overflowCommandIdsRef.current !== overflowCommandIds) {
+      overflowPlanKeyRef.current = null;
+      previousOverflowPlanKeyRef.current = null;
+      overflowHostWidthRef.current = null;
+      overflowCommandIdsRef.current = overflowCommandIds;
+    }
 
-    const recompute = () => {
-      if (host.clientWidth < 40) return;
+    const recompute = (fromResize: boolean) => {
+      const hostWidth = host.clientWidth;
+      if (hostWidth < 40) return;
+      if (
+        fromResize &&
+        shouldIgnoreWorkbarHostResize(overflowHostWidthRef.current, hostWidth)
+      )
+        return;
+      overflowHostWidthRef.current = hostWidth;
       const reserved = [...host.querySelectorAll<HTMLElement>("[data-workbar-reserved]")]
         .reduce((total, node) => total + node.offsetWidth, 0);
-      const available = Math.max(0, host.clientWidth - reserved - 8);
+      const available = Math.max(0, hostWidth - reserved - 8);
       const nodes = [...measure.querySelectorAll<HTMLElement>("[data-measure-id]")];
       const widths = new Map<string, { full: number; icon: number }>();
       for (const node of nodes) {
@@ -412,12 +433,9 @@ export function ArtifactWorkbar({
         widths.set(id, current);
       }
       // jsdom and the first paint can report 0. Inventing 72px then collapses
-      // the row while half of it is still empty. Wait for a real layout.
-      if (![...widths.values()].some((entry) => entry.full > 0)) {
-        setIconOnlyIds((current) => (current.length ? [] : current));
-        setOverflowIds((current) => (current.length ? [] : current));
-        return;
-      }
+      // the row while half of it is still empty. Wait for a real layout — and
+      // do not wipe a previous plan, or table-context remounts loop the bar.
+      if (!shouldCommitWorkbarPlan(widths.values())) return;
       const plan = planWorkbarOverflow(
         rowActions.map((action) => ({
           id: action.id,
@@ -429,25 +447,30 @@ export function ArtifactWorkbar({
         available,
         36,
       );
+      const nextKey = workbarPlanKey(plan);
+      if (
+        !shouldReplaceWorkbarPlan(
+          nextKey,
+          overflowPlanKeyRef.current,
+          previousOverflowPlanKeyRef.current,
+        )
+      )
+        return;
+      previousOverflowPlanKeyRef.current = overflowPlanKeyRef.current;
+      overflowPlanKeyRef.current = nextKey;
       setIconOnlyIds((current) =>
-        current.length === plan.iconOnlyIds.length &&
-        current.every((id, index) => id === plan.iconOnlyIds[index])
-          ? current
-          : plan.iconOnlyIds,
+        sameIdList(current, plan.iconOnlyIds) ? current : plan.iconOnlyIds,
       );
       setOverflowIds((current) =>
-        current.length === plan.overflowIds.length &&
-        current.every((id, index) => id === plan.overflowIds[index])
-          ? current
-          : plan.overflowIds,
+        sameIdList(current, plan.overflowIds) ? current : plan.overflowIds,
       );
     };
 
-    recompute();
-    const observer = new ResizeObserver(recompute);
+    recompute(false);
+    const observer = new ResizeObserver(() => recompute(true));
     observer.observe(host);
     return () => observer.disconnect();
-  }, [rowActions, customizing, activeTab]);
+  }, [overflowSignature, overflowCommandIds, customizing, activeTab]);
 
   useLayoutEffect(() => {
     const tabs = tabsRailRef.current;
@@ -459,7 +482,14 @@ export function ArtifactWorkbar({
       const tabWidth = tabList?.scrollWidth ?? 0;
       // Measure the expanded cluster, not the current one. A collapsed
       // dropdown is narrower, which would immediately un-collapse and loop.
-      setMetaCollapsed(tabWidth + 108 + 24 > tabs.clientWidth);
+      const nextCollapsed = tabWidth + 108 + 24 > tabs.clientWidth;
+      setMetaCollapsed((current) => {
+        if (current === nextCollapsed) return current;
+        // Stay collapsed until there is slack, so selecting a table (extra
+        // commands, slightly tighter rail) cannot flip the header every frame.
+        if (current && tabWidth + 108 > tabs.clientWidth) return current;
+        return nextCollapsed;
+      });
     };
     recompute();
     const observer = new ResizeObserver(recompute);

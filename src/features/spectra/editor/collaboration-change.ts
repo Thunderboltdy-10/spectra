@@ -11,6 +11,9 @@ export function isLocalCollaborativeDocumentChange(
   transaction: Pick<Transaction, "docChanged" | "getMeta">,
 ) {
   if (!transaction.docChanged) return false;
+  // Plugin/decoration/hydration transactions must not look like typing.
+  // A native save's Yjs echo used to re-dirty the studio and nest updates.
+  if (transaction.getMeta("addToHistory") === false) return false;
   const syncMeta = transaction.getMeta(ySyncPluginKey) as
     | { isChangeOrigin?: boolean }
     | undefined;

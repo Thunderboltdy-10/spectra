@@ -28,4 +28,13 @@ describe("isLocalCollaborativeDocumentChange", () => {
       }),
     ).toBe(false);
   });
+
+  it("rejects history-less plugin transactions so save echoes cannot re-dirty", () => {
+    expect(
+      isLocalCollaborativeDocumentChange({
+        docChanged: true,
+        getMeta: (key) => (key === "addToHistory" ? false : undefined),
+      }),
+    ).toBe(false);
+  });
 });

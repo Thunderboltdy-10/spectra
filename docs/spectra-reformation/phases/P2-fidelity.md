@@ -122,3 +122,19 @@ L1 harness green in the owning verification units for all formats; every write c
 - FIELD NOTE: remaining deliberate R7 refusals are enumerated in STATE §1 and must gain a native writer plus L1 diff evidence before their gates move.
 - Later owners unchanged: P2.I2 verification owns merge/CAS/conflicts; P6.I3 owns missing logger wiring.
 - Status: IMPLEMENTED only; independent native Office verification remains required.
+
+## P2.V1 reexec verifier log — 2026-08-27
+
+- Re-executed after P2.I2/I3 landed. Isolated fixture `spectra-p2v1-reexec`; visible Word `workbook_DP2_phrase_simple_complexe.docx` and Physics PS 6/PS 8 were not driven.
+- TRIAGE · SYSTEMIC: typing a native Word body nested React past its update cap. Workbar ResizeObserver treated self-caused content changes as host resizes; native incoming snapshots keyed off React `content`; TipTap option identity retriggered onUpdate.
+- Held the class: ignore same-width host resizes; native incoming memo ignores body identity; collaborative onUpdate uses a ref; dirty ref/state stay paired; draft bumps coalesce.
+- After full reload, essay typing of `LOOPHOLD-27` left 0 console errors; marker reached `word/document.xml`; Word COM on desktop `P2V1Reexec` read LOOPHOLD and `P2V1R-ESSAY-SPECTRA`.
+- Spectra→Word formatting: heading `Complexity` is `<strong>` in Spectra and `Range.Bold=-1` in Word.
+- I3 bound Custom XML: Word COM on `Content controls.docx` (reexec path) reports Ada Lovelace. First-V1 Custom XML field note closed in the live Word instance.
+- Word→Spectra: italicizing the Allchin byline did not emit `<w:i` (styled paragraph). Closing Word then produced the conflict bar “Both copies changed. Nothing was overwritten.” with Keep Spectra / Keep Word and **no region previews**.
+- Keep Spectra did not complete: status stayed “A verified operation is still in progress / Syncing…”. Not patched as a screenshot fix.
+- PrintWindow of hidden Word hwnds is a lie (showed PS 6). Window titles and COM `FullName` are the identity source. One Word window was the p1v3-rerun essay copy; it was closed without save; the reexec essay was opened instead.
+- Excel opened without a loop; A1 type did not land. PowerPoint and package SHA were not re-run; first-V1 package evidence still stands for I1.
+- Focused Vitest: 7 files / 64 tests passed (native-office-draft, workbar-overflow, collaboration-change, artifact-workbar, artifact-reconciliation, preservation-guard, docx-lens). Scoped ESLint: 0 errors / pre-existing large-shell token warnings. Secret scan: no credentials in the patch; 2,088 tracked files. `git diff --check` passed.
+- I1 VERIFIED/PASS from the first V1 walk is not re-graded. I2 conflict resolution is not claimed. Next remaining: finish this V1 reexec (Keep Spectra hang, Excel/PPTX alternating).
+- Evidence: `.shots/reformation/P2.V1/reexec/15-essay-loophold.png`, `16-essay-conflict-bar.png`, `17-keep-spectra-stuck-sync.png`.

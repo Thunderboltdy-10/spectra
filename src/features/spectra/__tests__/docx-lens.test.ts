@@ -6,10 +6,12 @@ import type { XmlElement } from "@ariadng/office/xml";
 import {
   DocxLensError,
   docxLens,
+  type DocxRunFormat,
 } from "../lenses/docx-lens";
 import {
   contentProjection,
 } from "@/app/api/spectra/lenses/docx/route";
+import { mergeDocxProjections } from "@/app/api/spectra/lenses/docx/route";
 
 const fixture = (name: string) =>
   readFile(join(process.cwd(), "fixtures", "office", "docx", name)).then(
@@ -119,6 +121,112 @@ describe("DOCX preservation lens", () => {
       carry: opened.preservedCarry,
     });
     expect(Buffer.from(output).equals(Buffer.from(source))).toBe(true);
+  });
+
+  it("persists generated paraIds on the first real materialization", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    expect(opened.projection.nativeBinding.identityStable).toBe(false);
+    const projection = structuredClone(opened.projection);
+    const target = projection.blocks.find(
+      (block) => block.type !== "table" && block.attrs?.nativeReadOnly !== true,
+    )!;
+    target.text = `${target.text} with anchors`;
+    const output = await docxLens.materialize({ projection, carry: opened.preservedCarry });
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.nativeBinding.identityStable).toBe(true);
+    expect(reopened.projection.blocks.map((block) => block.id)).toEqual(
+      opened.projection.blocks.map((block) => block.id),
+    );
+  });
+
+  it("refuses duplicate persisted paraIds instead of guessing a Word region", async () => {
+    const source = await fixture("complex-structure.docx");
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const files = unzipSync(source);
+    const documentName = Object.keys(files).find((name) => name.endsWith("word/document.xml"))!;
+    const xml = strFromU8(files[documentName]!);
+    let count = 0;
+    const withNamespace = xml.replace(
+      /<w:document\b/,
+      '<w:document xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"',
+    );
+    files[documentName] = strToU8(withNamespace.replace(/<w:p(?=[ >])/g, (match) => {
+      count += 1;
+      return count <= 2 ? `${match} w14:paraId="ABCDEF12"` : match;
+    }));
+    await expect(docxLens.open(zipSync(files))).rejects.toMatchObject({
+      code: "DOCX_IDENTITY_AMBIGUOUS",
+    });
+  });
+
+  it("refuses a concurrent merge whose stored base never persisted native anchors", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    const ours = structuredClone(opened.projection);
+    const external = structuredClone(opened.projection);
+    const target = ours.blocks.find((block) => block.type !== "table" && block.text.trim())!;
+    ours.blocks.find((block) => block.id === target.id)!.text = "Spectra edit";
+    external.blocks.find((block) => block.id === target.id)!.text = "Word edit";
+    expect(() => mergeDocxProjections(opened.projection, ours, external, undefined, true))
+      .toThrow("did not yet have persisted native anchors");
+    expect(() => mergeDocxProjections(opened.projection, opened.projection, external, undefined, true))
+      .not.toThrow();
+  });
+
+  it("detects and merges a formatting-only external edit", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    const target = opened.projection.blocks.find(
+      (block) => block.type !== "table" && block.attrs?.nativeReadOnly !== true && Boolean(block.attrs?.format),
+    )!;
+    const previousFormat = target.attrs?.format as DocxRunFormat;
+    const formatted = await docxLens.mutate(opened.preservedCarry, {
+      kind: "format-runs",
+      regionId: target.id,
+      format: { ...previousFormat, bold: !previousFormat.bold },
+    });
+    const external = await docxLens.open(formatted);
+    const diff = await docxLens.diffExternal(source, formatted);
+    expect(diff.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ regionId: target.id, kind: "update" }),
+    ]));
+    const merged = mergeDocxProjections(
+      opened.projection,
+      opened.projection,
+      external.projection,
+    );
+    expect(merged.conflicts).toEqual([]);
+    const mergedFormat = merged.projection.blocks.find((block) => block.id === target.id)?.attrs?.format as DocxRunFormat;
+    const externalFormat = external.projection.blocks.find((block) => block.id === target.id)?.attrs?.format as DocxRunFormat;
+    expect(mergedFormat.bold).toBe(externalFormat.bold);
+  });
+
+  it("keeps a foreign Word insertion while resolving only Spectra's changed region", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    const target = opened.projection.blocks.find(
+      (block) => block.type !== "table" && block.text.trim().length > 0,
+    )!;
+    const ours = structuredClone(opened.projection);
+    ours.blocks.find((block) => block.id === target.id)!.text = "Spectra version";
+    const externalBytes = await docxLens.mutate(opened.preservedCarry, {
+      kind: "ai-edit",
+      operations: [
+        { kind: "replace-paragraph", regionId: target.id, text: "Word version" },
+        { kind: "insert-paragraph", regionId: "docx:paragraph:abcddcba", text: "Foreign insertion" },
+      ],
+    });
+    const external = await docxLens.open(externalBytes);
+    const resolved = mergeDocxProjections(opened.projection, ours, external.projection, "spectra");
+    expect(resolved.projection.blocks.find((block) => block.id === target.id)?.text).toBe("Spectra version");
+    expect(resolved.projection.blocks.some((block) => block.text === "Foreign insertion")).toBe(true);
+    const output = await docxLens.materialize({
+      projection: resolved.projection,
+      carry: external.preservedCarry,
+    });
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.blocks.some((block) => block.text === "Foreign insertion")).toBe(true);
   });
 
   it("changes an editable paragraph without losing tracked changes elsewhere", async () => {

@@ -184,6 +184,86 @@ describe("replica truth machine", () => {
     expect([truth.cloud?.state, truth.local?.state]).not.toContain("current");
   });
 
+  it("rejects a second materialization until the first write is verified", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    });
+    const thirdHash = "c".repeat(64);
+    const thirdPayloadId = await t.run(async (ctx) => {
+      const storageId = await ctx.storage.store(new Blob(["third"]));
+      return ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId,
+        hash: thirdHash,
+        storageId,
+        bytes: 5,
+        mediaType: "application/test",
+        refCount: 0,
+        state: "active",
+        createdAt: Date.now(),
+        verifiedAt: Date.now(),
+      });
+    });
+    await expect(
+      asUser.mutation(api.replicas.queueMaterialization, {
+        workId: fixture.workId,
+        payloadRef: String(thirdPayloadId),
+        contentHash: thirdHash,
+        baseRevision: nextHash,
+        fidelityMap: { entries: [] },
+        regionIds: ["body"],
+        partNames: ["word/document.xml"],
+      }),
+    ).rejects.toThrow("MATERIALIZATION_BASE_STALE");
+  });
+
+  it("advances the stored semantic base to the projection represented by verified bytes", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const projection = { blocks: [{ id: "body", text: "Saved projection" }] };
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+      projectionContent: projection,
+      projectionContentHash: nextHash,
+      projectionTextIndex: "Saved projection",
+    });
+    await t.mutation(api.bridgeSync.completeWrite, {
+      credential: bridgeCredential,
+      requestId: queued.requestId as Id<"bridgeWriteRequests">,
+      outcome: "verified",
+      actualRevision: nextHash,
+    });
+    const truth = await t.run(async (ctx) => ({
+      cloud: await ctx.db.get(fixture.cloudId),
+      local: await ctx.db.get(fixture.localId),
+    }));
+    expect(truth.cloud).toMatchObject({
+      projectionBaseRevision: nextHash,
+      projectionBaseContent: projection,
+      projectionBaseContentHash: nextHash,
+      projectionBaseTextIndex: "Saved projection",
+    });
+    expect(truth.local).toMatchObject({
+      projectionBaseRevision: nextHash,
+      projectionBaseContent: projection,
+    });
+  });
+
   it("keeps an external upload and its exact replay on the same replica truth", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
@@ -889,5 +969,50 @@ describe("replica truth machine", () => {
     expect(truth.cloud).toMatchObject({ state: "current", revision: nextHash, payloadRef: String(fixture.nextPayloadId) });
     expect(truth.local).toMatchObject({ state: "current", revision: nextHash });
     expect(truth.work?.contentHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("persists precise conflict previews for reload", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch(fixture.localId, {
+        payloadRef: String(fixture.nextPayloadId),
+        revision: nextHash,
+        contentHash: nextHash,
+        state: "ahead",
+        updatedAt: now,
+      });
+      await ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaId: fixture.localId,
+        idempotencyKey: "external-preview",
+        direction: "external",
+        revisionBefore: baseHash,
+        revisionAfter: nextHash,
+        state: "applied",
+        actorKind: "external-edit",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    const previews = [{ regionId: "body", spectra: "Spectra version", external: "Word version" }];
+    await t.withIdentity(identity).mutation(api.replicas.recordExternalReconciliation, {
+      workId: fixture.workId,
+      localReplicaId: fixture.localId,
+      localPayloadRef: String(fixture.nextPayloadId),
+      localRevision: nextHash,
+      content: { blocks: [{ id: "body", text: "Spectra version" }] },
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+      conflictRegionIds: ["body"],
+      previews,
+    });
+    const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
+      workId: fixture.workId,
+    });
+    expect(truth.conflicts[0]?.previews).toEqual(previews);
   });
 });

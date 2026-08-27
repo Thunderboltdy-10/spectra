@@ -64,6 +64,29 @@ export async function fetchVerifiedNativePayload(
   return { truth, payload };
 }
 
+export async function fetchVerifiedNativePayloadByHash(hash: string) {
+  const truth = await convexQuery<
+    { hash: string },
+    { url: string | null; bytes: number; mediaType: string; hash: string } | null
+  >("payloads:get", { hash });
+  if (!truth?.url) throw new Error("NATIVE_PAYLOAD_UNAVAILABLE");
+  const response = await fetch(truth.url, { cache: "no-store" });
+  if (!response.ok) throw new Error("NATIVE_PAYLOAD_FETCH_FAILED");
+  const payload = new Uint8Array(await response.arrayBuffer());
+  if (payload.byteLength !== truth.bytes || (await sha256Payload(payload)) !== truth.hash)
+    throw new Error("NATIVE_PAYLOAD_VERIFICATION_FAILED");
+  return { truth, payload };
+}
+
+export async function fetchStoredNativeBase(
+  truth: NativePayloadTruth,
+  fallback: Uint8Array,
+) {
+  const hash = truth.projectionBaseRevision;
+  if (!hash || hash === truth.hash) return fallback;
+  return (await fetchVerifiedNativePayloadByHash(hash)).payload;
+}
+
 export async function uploadNativePayload(
   workId: Id<"spectraArtifacts">,
   payload: Uint8Array,

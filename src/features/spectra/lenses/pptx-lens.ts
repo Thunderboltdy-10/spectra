@@ -26,21 +26,32 @@ function placeholderKey(root: XmlElement) {
   if (!placeholder) return undefined;
   return `${placeholder.getAttribute("type") ?? "body"}:${placeholder.getAttribute("idx") ?? "0"}`;
 }
-function shapeGeometry(root: XmlElement, fallback?: XmlElement) {
-  const xfrm = firstDescendant(root, DRAWINGML_NAMESPACE, "xfrm");
+function shapeGeometry(
+  root: XmlElement,
+  fallback?: XmlElement,
+  canvas = { width: 12192000, height: 6858000 },
+) {
+  // Graphic frames store their transform as p:xfrm, while regular shapes
+  // store a:xfrm under p:spPr. Read both namespaces before falling back to a
+  // layout placeholder.
+  const xfrm = firstDescendant(root, PML_NAMESPACE, "xfrm") ??
+    firstDescendant(root, DRAWINGML_NAMESPACE, "xfrm");
   const source = xfrm ? root : fallback;
-  const sourceXfrm = source ? firstDescendant(source, DRAWINGML_NAMESPACE, "xfrm") : undefined;
+  const sourceXfrm = source
+    ? firstDescendant(source, PML_NAMESPACE, "xfrm") ?? firstDescendant(source, DRAWINGML_NAMESPACE, "xfrm")
+    : undefined;
   const off = sourceXfrm ? firstDescendant(sourceXfrm, DRAWINGML_NAMESPACE, "off") : undefined;
   const ext = sourceXfrm ? firstDescendant(sourceXfrm, DRAWINGML_NAMESPACE, "ext") : undefined;
+  const canvasHeight = (canvas.height / canvas.width) * 1000;
   return {
-    x: Math.max(0, Math.min(1000, (emu(off?.getAttribute("x")) / 12192000) * 1000)),
-    y: Math.max(0, Math.min(562.5, (emu(off?.getAttribute("y")) / 6858000) * 562.5)),
-    width: Math.max(10, Math.min(1000, (emu(ext?.getAttribute("cx"), 914400) / 12192000) * 1000)),
-    height: Math.max(10, Math.min(562.5, (emu(ext?.getAttribute("cy"), 457200) / 6858000) * 562.5)),
+    x: Math.max(0, Math.min(1000, (emu(off?.getAttribute("x")) / canvas.width) * 1000)),
+    y: Math.max(0, Math.min(canvasHeight, (emu(off?.getAttribute("y")) / canvas.height) * canvasHeight)),
+    width: Math.max(10, Math.min(1000, (emu(ext?.getAttribute("cx"), 914400) / canvas.width) * 1000)),
+    height: Math.max(10, Math.min(canvasHeight, (emu(ext?.getAttribute("cy"), 457200) / canvas.height) * canvasHeight)),
     rotation: emu(sourceXfrm?.getAttribute("rot")) / 60000,
   };
 }
-function slideObjects(root: XmlElement, slideId: string, layoutRoot?: XmlElement): PresentationObject[] {
+function slideObjects(root: XmlElement, slideId: string, layoutRoot?: XmlElement, canvas?: { width: number; height: number }): PresentationObject[] {
   const layoutPlaceholders = new Map<string, XmlElement>();
   if (layoutRoot) descendants(layoutRoot).filter((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "sp").forEach((shape) => {
     const key = placeholderKey(shape);
@@ -55,12 +66,18 @@ function slideObjects(root: XmlElement, slideId: string, layoutRoot?: XmlElement
     // `descr` is PowerPoint's own alt text, so reading it here is what lets a
     // Spectra description round-trip instead of being invented alongside one.
     const descr = firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("descr")?.trim();
-    return [{ id: `${slideId}:shape:${nativeShapeId}`, type, ...shapeGeometry(shape, layoutPlaceholders.get(placeholderKey(shape) ?? "")), content: { text: shapeText(shape), nativeShapeId, nativeParagraphIndex: 0 }, ...(descr ? { altText: descr } : {}), locked: isTitle, readingOrder: index } satisfies PresentationObject];
+    return [{ id: `${slideId}:shape:${nativeShapeId}`, type, ...shapeGeometry(shape, layoutPlaceholders.get(placeholderKey(shape) ?? ""), canvas), content: { text: shapeText(shape), nativeShapeId, nativeParagraphIndex: 0 }, ...(descr ? { altText: descr } : {}), locked: isTitle, readingOrder: index } satisfies PresentationObject];
   });
 }
 
 async function projectPresentation(deck: Presentation, profile: LensCompatibilityProfile) {
   const entries: LensFidelityEntry[] = [];
+  const presentationXml = await deck.office.xml("/ppt/presentation.xml");
+  const slideSize = firstDescendant(presentationXml.root, PML_NAMESPACE, "sldSz");
+  const canvas = {
+    width: emu(slideSize?.getAttribute("cx"), 12192000),
+    height: emu(slideSize?.getAttribute("cy"), 6858000),
+  };
   const slides = await Promise.all(deck.slides().map(async (slide, index) => {
     const root = slide.root();
     const transition = semanticNode(root, "transition");
@@ -73,7 +90,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     const layoutRoot = slide.layoutPartName ? (await deck.office.xml(slide.layoutPartName)).root : undefined;
     const notesPartName = notesPartNameFor(deck, slide.partName);
     const speakerNotes = notesPartName ? notesText((await deck.office.xml(notesPartName)).root) : "";
-    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: slideObjects(root, id, layoutRoot), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), hasTiming: Boolean(timing), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
+    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: slideObjects(root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), hasTiming: Boolean(timing), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
   }));
   const partNames = deck.office.package.parts().map((part) => part.name);
   for (const [feature, pattern] of [["master", /\/slideMasters\//i], ["layout", /\/slideLayouts\//i], ["media", /\/media\//i], ["smartArt", /\/diagrams\//i], ["chart", /\/charts\//i], ["notes", /\/notesSlides\//i], ["unknown-extension", /unknown|future|extension/i]] as const) {
@@ -119,7 +136,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     entries.push({ regionId: `pptx:region:${feature}`, feature, class: cls, ...(cls === "PRESERVED" ? { readOnly: true } : {}), ...(reason && cls !== "NATIVE" ? { reason } : {}) });
   }
   const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify(slides.map(({ id, title, text, objects }) => ({ id, title, text, objects })))));
-  const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest } });
+  const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest, canvasWidthEmu: canvas.width, canvasHeightEmu: canvas.height } });
   return { projection, fidelityMap };
 }
 
@@ -205,7 +222,7 @@ function setAltText(shape: XmlElement, text: string) {
  * layout gets an explicit `a:xfrm` the first time it is moved, which is exactly
  * what PowerPoint itself writes in that case.
  */
-function setShapeGeometry(shape: XmlElement, geometry: { x: number; y: number; width: number; height: number; rotation: number }) {
+function setShapeGeometry(shape: XmlElement, geometry: { x: number; y: number; width: number; height: number; rotation: number }, canvas = { width: 12192000, height: 6858000 }) {
   const container = shape.localName === "graphicFrame"
     ? firstDescendant(shape, PML_NAMESPACE, "xfrm") ?? shape
     : firstDescendant(shape, PML_NAMESPACE, "spPr") ?? firstDescendant(shape, PML_NAMESPACE, "grpSpPr");
@@ -221,10 +238,11 @@ function setShapeGeometry(shape: XmlElement, geometry: { x: number; y: number; w
   if (!off) { off = new XmlElement("off", "a"); xfrm.insertBefore(off, xfrm.elements()[0] ?? null); }
   let ext = firstDescendant(xfrm, DRAWINGML_NAMESPACE, "ext");
   if (!ext) { ext = new XmlElement("ext", "a"); xfrm.appendChild(ext); }
-  off.setAttribute("x", String(Math.round((geometry.x / 1000) * 12192000)));
-  off.setAttribute("y", String(Math.round((geometry.y / 562.5) * 6858000)));
-  ext.setAttribute("cx", String(Math.max(1, Math.round((geometry.width / 1000) * 12192000))));
-  ext.setAttribute("cy", String(Math.max(1, Math.round((geometry.height / 562.5) * 6858000))));
+  const canvasHeight = (canvas.height / canvas.width) * 1000;
+  off.setAttribute("x", String(Math.round((geometry.x / 1000) * canvas.width)));
+  off.setAttribute("y", String(Math.round((geometry.y / canvasHeight) * canvas.height)));
+  ext.setAttribute("cx", String(Math.max(1, Math.round((geometry.width / 1000) * canvas.width))));
+  ext.setAttribute("cy", String(Math.max(1, Math.round((geometry.height / canvasHeight) * canvas.height))));
   const rotation = Math.round(geometry.rotation * 60000);
   if (rotation) xfrm.setAttribute("rot", String(rotation));
   else xfrm.removeAttribute("rot");
@@ -332,7 +350,10 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
     else if (operation.kind === "set-geometry") {
       const shape = shapeIn(slide.root(), operation.shapeId);
       if (!shape) throw new PptxLensError("PPTX_SHAPE_MISSING", "The shape being moved no longer exists on this slide.");
-      setShapeGeometry(shape, operation);
+        setShapeGeometry(shape, operation, {
+          width: carry.projection.nativeBinding.canvasWidthEmu ?? 12192000,
+          height: carry.projection.nativeBinding.canvasHeightEmu ?? 6858000,
+        });
       deck.office.markDirty(slide.partName);
     }
     else { addTextBox(slide.root(), operation.text); deck.office.markDirty(slide.partName); }

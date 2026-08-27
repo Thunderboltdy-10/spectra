@@ -13,12 +13,14 @@ import {
 import { docxProjectionFromContent } from "@/features/spectra/lenses/document-projection";
 import {
   fetchVerifiedNativePayload,
+  fetchStoredNativeBase,
   uploadNativePayload,
 } from "@/features/spectra/lenses/native-payload-server";
 import {
   hasUnreconciledExternalRevision,
   type RecentNativeOperation,
 } from "@/features/spectra/lenses/native-reconciliation";
+import { mergeThreeWay, type MergeConflict } from "@/features/spectra/lenses/three-way-merge";
 
 export const runtime = "nodejs";
 
@@ -68,7 +70,7 @@ export function changedRegions(before: DocxProjection, after: DocxProjection) {
   for (const block of after.blocks) {
     const old = prior.get(block.id);
     prior.delete(block.id);
-    if (!old || old.text !== block.text || JSON.stringify(old.attrs) !== JSON.stringify(block.attrs))
+    if (!old || JSON.stringify(old) !== JSON.stringify(block))
       changed.push(block.id);
   }
   changed.push(...prior.keys());
@@ -82,15 +84,38 @@ export async function materializeDocxArtifact(
   workId: Id<"spectraArtifacts">,
   content: unknown,
 ) {
-  const [{ truth, payload }, workTruth] = await Promise.all([
+  return materializeDocxArtifactAttempt(workId, content, 0);
+}
+
+async function materializeDocxArtifactAttempt(
+  workId: Id<"spectraArtifacts">,
+  content: unknown,
+  attempt: number,
+) {
+  const [cloud, workTruth] = await Promise.all([
     fetchVerifiedNativePayload(workId, "cloud"),
     convexQuery<{ workId: Id<"spectraArtifacts"> }, WorkTruth>(
       "replicas:forWork",
       { workId },
     ),
   ]);
-  const opened = await docxLens.open(payload, "strict-native");
-  const { projection, operations } = docxProjectionFromContent(content, opened.projection);
+  let { truth, payload } = cloud;
+  let opened = await docxLens.open(payload, "strict-native");
+  let update = docxProjectionFromContent(content, opened.projection);
+  if (attempt > 0) {
+    const local = await fetchVerifiedNativePayload(workId, "local-latest");
+    const baseOpened = await storedDocxBase(cloud.truth, cloud.payload);
+    const ours = contentProjection(content, baseOpened.projection);
+    const externalOpened = await docxLens.open(local.payload, "strict-native");
+    const rebased = mergeDocxProjections(baseOpened.projection, ours, externalOpened.projection, undefined, true);
+    if (rebased.conflicts.length)
+      throw new Error("The Word file changed in the same place while Spectra was saving. Review the conflict before trying again.");
+    truth = local.truth;
+    payload = local.payload;
+    opened = externalOpened;
+    update = docxProjectionFromContent(rebased.projection, opened.projection);
+  }
+  const { projection, operations } = update;
   const regionIds = changedRegions(opened.projection, projection);
   const output = operations.length
     ? await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations })
@@ -114,7 +139,9 @@ export async function materializeDocxArtifact(
         "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
     };
   }
-  const queued = await convexMutation<
+  let queued: { requestId: string; state: string };
+  try {
+    queued = await convexMutation<
     {
       workId: Id<"spectraArtifacts">;
       payloadRef: string;
@@ -127,26 +154,40 @@ export async function materializeDocxArtifact(
       baseContent?: unknown;
       baseContentHash?: string;
       baseTextIndex?: string;
+      projectionContent?: unknown;
+      projectionContentHash?: string;
+      projectionTextIndex?: string;
     },
     { requestId: string; state: string }
-  >("replicas:queueMaterialization", {
-    workId,
-    payloadRef: stored.payloadRef,
-    contentHash: hash,
-    baseRevision: truth.revision,
-    fidelityMap: next.fidelityMap,
-    regionIds,
-    partNames: comparison.parts
-      .filter((part) => part.verdict !== "identical")
-      .map((part) => `/${part.name}`),
-    localReplicaId: local._id as Id<"workReplicas">,
-    baseContent: opened.projection,
-    baseContentHash: opened.projection.nativeBinding.semanticDigest,
-    baseTextIndex: opened.projection.blocks
-      .map((block) => block.text)
-      .join("\n")
-      .slice(0, 200_000),
-  });
+    >("replicas:queueMaterialization", {
+      workId,
+      payloadRef: stored.payloadRef,
+      contentHash: hash,
+      baseRevision: truth.revision,
+      fidelityMap: next.fidelityMap,
+      regionIds,
+      partNames: comparison.parts
+        .filter((part) => part.verdict !== "identical")
+        .map((part) => `/${part.name}`),
+      localReplicaId: local._id as Id<"workReplicas">,
+      baseContent: opened.projection,
+      baseContentHash: opened.projection.nativeBinding.semanticDigest,
+      baseTextIndex: opened.projection.blocks
+        .map((block) => block.text)
+        .join("\n")
+        .slice(0, 200_000),
+      projectionContent: next.projection,
+      projectionContentHash: next.projection.nativeBinding.semanticDigest,
+      projectionTextIndex: next.projection.blocks
+        .map((block) => block.text)
+        .join("\n")
+        .slice(0, 200_000),
+    });
+  } catch (error) {
+    if (attempt === 0 && error instanceof Error && error.message.includes("MATERIALIZATION_BASE_STALE"))
+      return materializeDocxArtifactAttempt(workId, content, attempt + 1);
+    throw error;
+  }
   return {
     state: queued.state,
     requestId: queued.requestId,
@@ -155,36 +196,71 @@ export async function materializeDocxArtifact(
   };
 }
 
-function mergeExternalProjection(
+export function mergeDocxProjections(
+  base: DocxProjection,
   current: DocxProjection,
   external: DocxProjection,
-  externalRegionIds: Set<string>,
+  resolution?: "spectra" | "word",
+  requireStableIdentity = false,
 ) {
-  const externalById = new Map(external.blocks.map((block) => [block.id, block]));
-  const blocks = current.blocks.flatMap((block) => {
-    if (!externalRegionIds.has(block.id)) return [block];
-    const replacement = externalById.get(block.id);
-    externalById.delete(block.id);
-    return replacement ? [replacement] : [];
-  });
-  for (const block of external.blocks) {
-    if (externalRegionIds.has(block.id) && externalById.has(block.id)) {
-      blocks.push(block);
-      externalById.delete(block.id);
-    }
+  for (const projection of [base, current, external]) {
+    const ids = projection.blocks.map((block) => block.id);
+    if (ids.some((regionId) => !regionId) || new Set(ids).size !== ids.length)
+      throw new DocxLensError(
+        "DOCX_IDENTITY_AMBIGUOUS",
+        "This Word file contains duplicate or missing native region identities, so Spectra will not guess which content to change.",
+      );
   }
+  if (
+    requireStableIdentity &&
+    base.nativeBinding.identityStable !== true &&
+    changedRegions(base, current).length > 0 &&
+    changedRegions(base, external).length > 0
+  )
+    throw new DocxLensError(
+      "DOCX_IDENTITY_UNSTABLE",
+      "This Word file did not yet have persisted native anchors when both Word and Spectra changed it. Open the latest version and save again before merging.",
+    );
+  const merged = mergeThreeWay({
+    base: base.blocks,
+    ours: current.blocks,
+    theirs: external.blocks,
+    id: (block) => block.id,
+    orderId: "docx:order",
+    conflictResolution: resolution === "spectra" ? "ours" : resolution === "word" ? "theirs" : undefined,
+  });
   return {
-    ...current,
-    blocks,
-    outline: external.outline,
-    nativeBinding: {
-      ...external.nativeBinding,
-      externalTransaction: {
-        label: "Edited in Word",
-        occurredAt: Date.now(),
+    projection: {
+      ...current,
+      blocks: merged.value,
+      outline: merged.value.flatMap((block) => block.type === "heading" ? [{ id: block.id, title: block.text, level: Number(block.attrs?.styleId?.toString().match(/[1-3]$/)?.[0] ?? 2) }] : []),
+      nativeBinding: {
+        ...external.nativeBinding,
+        externalTransaction: { label: "Edited in Word", occurredAt: Date.now() },
       },
-    },
-  } as DocxProjection;
+    } as DocxProjection,
+    conflicts: merged.conflicts,
+    spectraChanged: merged.changedByOurs,
+    externalChanged: merged.changedByTheirs,
+  };
+}
+
+function conflictPreview(conflict: MergeConflict<DocxProjection["blocks"][number]>) {
+  const preview = (block: DocxProjection["blocks"][number] | undefined) =>
+    block ? block.text.slice(0, 160) || "Empty region" : "Deleted";
+  return { regionId: conflict.id, spectra: preview(conflict.ours), external: preview(conflict.theirs) };
+}
+
+async function storedDocxBase(cloudTruth: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>["truth"], fallback: Uint8Array) {
+  return docxLens.open(await fetchStoredNativeBase(cloudTruth, fallback), "strict-native");
+}
+
+function conflictIds(conflicts: readonly MergeConflict<unknown>[]) {
+  return conflicts.map((conflict) => conflict.id);
+}
+
+function conflictDetails(conflicts: readonly MergeConflict<DocxProjection["blocks"][number]>[]) {
+  return conflicts.map(conflictPreview);
 }
 
 function errorResponse(error: unknown) {
@@ -227,48 +303,50 @@ export async function POST(request: Request) {
           local.truth.hash !== truth.hash || externalRevision,
         );
         if (externalNeedsActivation) {
-          const [artifact, externalOpened, diff] = await Promise.all([
+          const [artifact, externalOpened] = await Promise.all([
             convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>(
               "spectraArtifacts:get",
               { artifactId: workId },
             ),
             docxLens.open(local.payload, "strict-native"),
-            docxLens.diffExternal(payload, local.payload),
           ]);
-          const current = contentProjection(artifact.content, opened.projection);
-          const spectraChanged = new Set(changedRegions(opened.projection, current));
-          const externalChanged = new Set(
-            local.truth.hash === truth.hash && externalRevision
-              ? changedRegions(opened.projection, current)
-              : diff.changes
-                  .filter((change) => change.kind !== "preserved-part-replaced")
-                  .map((change) => change.regionId),
-          );
-          const conflictRegionIds =
-            local.truth.hash === truth.hash && externalRevision
-              ? []
-              : [...externalChanged].filter((regionId) => spectraChanged.has(regionId));
+          const baseOpened = await storedDocxBase(local.truth, local.payload);
+          const current = contentProjection(artifact.content, baseOpened.projection);
+          const merged = mergeDocxProjections(baseOpened.projection, current, externalOpened.projection, undefined, true);
+          const conflictRegionIds = conflictIds(merged.conflicts);
           if (conflictRegionIds.length) {
+            const previews = conflictDetails(merged.conflicts as MergeConflict<DocxProjection["blocks"][number]>[]);
+            await convexMutation("replicas:recordExternalReconciliation", {
+              workId,
+              localReplicaId: local.truth.replicaId as Id<"workReplicas">,
+              localPayloadRef: local.truth.payloadRef,
+              localRevision: local.truth.revision,
+              content: contentProjection(artifact.content, baseOpened.projection),
+              fidelityMap: externalOpened.fidelityMap,
+              regionIds: merged.externalChanged,
+              partNames: [],
+              conflictRegionIds,
+              previews,
+            });
             return NextResponse.json(
-              { state: "conflicted", conflictRegionIds, message: "The Word file and Spectra changed the same regions. Review the conflict before opening." },
-              { status: 409 },
+              { state: "conflicted", conflict: { regionIds: conflictRegionIds, previews, message: "The Word file and Spectra changed the same regions. Choose which version to keep." } },
             );
           }
-          const merged = mergeExternalProjection(current, externalOpened.projection, externalChanged);
+          const diff = await docxLens.diffExternal(baseOpened.preservedCarry.payload, local.payload);
           await convexMutation("replicas:recordExternalReconciliation", {
             workId,
             localReplicaId: local.truth.replicaId as Id<"workReplicas">,
             localPayloadRef: local.truth.payloadRef,
             localRevision: local.truth.revision,
-            content: merged,
+            content: merged.projection,
             fidelityMap: externalOpened.fidelityMap,
-            regionIds: [...externalChanged],
+            regionIds: merged.externalChanged,
             partNames: diff.preservedPartChanges,
             conflictRegionIds: [],
           });
           truth = local.truth;
           payload = local.payload;
-          opened = { ...externalOpened, projection: merged };
+          opened = { ...externalOpened, projection: merged.projection };
         }
       } catch (error) {
         // A missing local payload is normal for cloud-only work. Other errors
@@ -315,17 +393,16 @@ export async function POST(request: Request) {
     ]);
     if (cloud.truth.hash === local.truth.hash)
       return NextResponse.json({ state: "current" });
-    const [baseOpened, externalOpened, diff] = await Promise.all([
-      docxLens.open(cloud.payload, "strict-native"),
+    const [baseOpened, externalOpened] = await Promise.all([
+      storedDocxBase(cloud.truth, cloud.payload),
       docxLens.open(local.payload, "strict-native"),
-      docxLens.diffExternal(cloud.payload, local.payload),
     ]);
     const current = contentProjection(artifact.content, baseOpened.projection);
-    const spectraChanged = new Set(changedRegions(baseOpened.projection, current));
-    const externalChanged = new Set(diff.changes
-      .filter((change) => change.kind !== "preserved-part-replaced")
-      .map((change) => change.regionId));
-    const conflictRegionIds = [...externalChanged].filter((regionId) => spectraChanged.has(regionId));
+    const diff = await docxLens.diffExternal(baseOpened.preservedCarry.payload, local.payload);
+    const mergedResult = mergeDocxProjections(baseOpened.projection, current, externalOpened.projection, undefined, true);
+    const spectraChanged = new Set(mergedResult.spectraChanged);
+    const externalChanged = new Set(mergedResult.externalChanged);
+    const conflictRegionIds = conflictIds(mergedResult.conflicts);
     const firstConflictBlock = current.blocks.find(
       (block) => block.id === conflictRegionIds[0],
     );
@@ -334,8 +411,9 @@ export async function POST(request: Request) {
       : "the same document region";
 
     if (input.resolution === "spectra") {
+      const resolved = mergeDocxProjections(baseOpened.projection, current, externalOpened.projection, "spectra", true);
       const output = await docxLens.materialize({
-        projection: current,
+        projection: resolved.projection,
         carry: externalOpened.preservedCarry,
       });
       const hash = await sha256Payload(output);
@@ -355,6 +433,9 @@ export async function POST(request: Request) {
           regionIds: string[];
           partNames: string[];
           localReplicaId?: Id<"workReplicas">;
+          projectionContent?: unknown;
+          projectionContentHash?: string;
+          projectionTextIndex?: string;
         },
         { requestId: string; state: string }
       >("replicas:queueMaterialization", {
@@ -368,6 +449,12 @@ export async function POST(request: Request) {
           .filter((part) => part.verdict !== "identical")
           .map((part) => `/${part.name}`),
         localReplicaId: local.truth.replicaId as Id<"workReplicas">,
+        projectionContent: next.projection,
+        projectionContentHash: next.projection.nativeBinding.semanticDigest,
+        projectionTextIndex: next.projection.blocks
+          .map((block) => block.text)
+          .join("\n")
+          .slice(0, 200_000),
       });
       await convexMutation<
         { workId: Id<"spectraArtifacts">; resolution: "spectra" },
@@ -382,7 +469,23 @@ export async function POST(request: Request) {
         status: "Waiting to save your Spectra version locally",
       });
     }
-    const merged = mergeExternalProjection(current, externalOpened.projection, externalChanged);
+    if (conflictRegionIds.length && input.resolution !== "word") {
+      const previews = conflictDetails(mergedResult.conflicts as MergeConflict<DocxProjection["blocks"][number]>[]);
+      await convexMutation("replicas:recordExternalReconciliation", {
+        workId,
+        localReplicaId: local.truth.replicaId as Id<"workReplicas">,
+        localPayloadRef: local.truth.payloadRef,
+        localRevision: local.truth.revision,
+        content: current,
+        fidelityMap: externalOpened.fidelityMap,
+        regionIds: mergedResult.externalChanged,
+        partNames: diff.preservedPartChanges,
+        conflictRegionIds,
+        previews,
+      });
+      return NextResponse.json({ state: "conflicted", conflict: { regionIds: conflictRegionIds, previews, message: "The Word file and Spectra changed the same regions. Choose which version to keep." } });
+    }
+    const merged = mergeDocxProjections(baseOpened.projection, current, externalOpened.projection, "word", true).projection;
     const recorded = await convexMutation<
       {
         workId: Id<"spectraArtifacts">;
@@ -416,6 +519,7 @@ export async function POST(request: Request) {
         : {
             conflict: {
               regionIds: conflictRegionIds,
+              previews: conflictDetails(mergedResult.conflicts as MergeConflict<DocxProjection["blocks"][number]>[]),
               message: `Word and Spectra both changed ${conflictLabel}. Choose which version to keep.`,
             },
           }),

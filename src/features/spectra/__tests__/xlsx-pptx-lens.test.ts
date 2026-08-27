@@ -196,6 +196,24 @@ describe("XLSX and PPTX fidelity lenses", () => {
     expect(reopened.projection.slides[0]!.objects.find((object) => object.id === target!.id)?.content).toMatchObject({ text: `${content.text} edited` });
   });
 
+  it("reads p:xfrm geometry on a real 4:3 canvas", async () => {
+    const source = new Uint8Array(
+      await readFile(
+        join(process.cwd(), "fixtures", "office", "pptx", "chart-notes-preservation.pptx"),
+      ),
+    );
+    const opened = await pptxLens.open(source);
+    expect(opened.projection.nativeBinding).toMatchObject({
+      canvasWidthEmu: 9_144_000,
+      canvasHeightEmu: 6_858_000,
+    });
+    const chart = opened.projection.slides.flatMap((slide) => slide.objects)
+      .find((object) => object.type === "chart");
+    expect(chart).toMatchObject({ x: 50, y: 175, width: 900 });
+    expect(chart!.height).toBeCloseTo(494.97, 1);
+    expect(pptxArtifactContent(opened.projection).settings?.aspectRatio).toBe("4:3");
+  });
+
   it("keeps the PPTX native contract valid through normalization and Yjs", async () => {
     const opened = await pptxLens.open(await nativeTransitionFixture());
     const content = pptxArtifactContent(opened.projection);

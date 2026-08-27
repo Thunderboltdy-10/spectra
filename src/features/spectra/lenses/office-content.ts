@@ -128,6 +128,14 @@ export function pptxArtifactContent(
   // advance, in words, instead of accepting text it cannot deliver.
   return {
     theme: { id: "native-pptx", name: "PowerPoint theme" },
+    settings: {
+      aspectRatio:
+        projection.nativeBinding.canvasWidthEmu && projection.nativeBinding.canvasHeightEmu &&
+        projection.nativeBinding.canvasWidthEmu / projection.nativeBinding.canvasHeightEmu < 1.55
+          ? "4:3"
+          : "16:9",
+      showSlideNumbers: true,
+    },
     slides: projection.slides.map((slide) => {
       const notesUnsupported = !slide.notesPartName;
       return {

@@ -11,6 +11,11 @@ const nativeBindingBase = {
   profile: compatibilityProfileSchema,
   macroEnabled: z.boolean(),
   semanticDigest: semanticDigestSchema,
+  // Presentations carry their real canvas dimensions in presentation.xml.
+  // Keeping them on the projection prevents a 4:3 deck from being silently
+  // normalised to the editor's 16:9 default during a native write.
+  canvasWidthEmu: z.number().positive().optional(),
+  canvasHeightEmu: z.number().positive().optional(),
 };
 
 const docxRunFormatSchema = z
@@ -66,6 +71,8 @@ export const docxProjectionSchema = z
       .object({
         ...nativeBindingBase,
         format: z.enum(["docx", "docm", "dotx", "dotm"]),
+        // Missing on legacy projections means native anchors were not proven.
+        identityStable: z.boolean().optional(),
         nativePlaceholders: z.array(
           z
             .object({

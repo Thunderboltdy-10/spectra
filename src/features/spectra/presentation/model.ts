@@ -552,6 +552,8 @@ export function normalizePresentationContent(
           profile: nativeProfile,
           macroEnabled: nativeBindingSource.macroEnabled,
           semanticDigest: nativeBindingSource.semanticDigest,
+          ...(typeof nativeBindingSource.canvasWidthEmu === "number" ? { canvasWidthEmu: nativeBindingSource.canvasWidthEmu } : {}),
+          ...(typeof nativeBindingSource.canvasHeightEmu === "number" ? { canvasHeightEmu: nativeBindingSource.canvasHeightEmu } : {}),
         }
       : undefined;
   return {

@@ -1649,6 +1649,11 @@ export default defineSchema({
     replicaIds: v.array(v.id("workReplicas")),
     regionIds: v.array(v.string()),
     partNames: v.array(v.string()),
+    previews: v.optional(v.array(v.object({
+      regionId: v.string(),
+      spectra: v.string(),
+      external: v.string(),
+    }))),
     localRevision: v.string(),
     spectraRevision: v.string(),
     localPayloadRef: v.optional(v.string()),

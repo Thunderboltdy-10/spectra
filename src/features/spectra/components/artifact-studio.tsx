@@ -5891,11 +5891,32 @@ function ArtifactStudioEditor({
       {nativeConflict ? (
         <div
           role="alert"
-          className="shrink-0 border-y border-[color-mix(in_oklab,#d88922_28%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2.5"
+          className="shrink-0 border-y border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_7%,var(--bg-primary))] px-5 py-2.5"
         >
-          <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]">
-            <AlertCircle className="h-4 w-4 shrink-0 text-[#d88922]" />
-            <span className="min-w-0 flex-1">{nativeConflict.message}</span>
+          <div className="flex flex-wrap items-start gap-2 text-[12px] text-[var(--text-secondary)]">
+            <AlertCircle className="h-4 w-4 shrink-0 text-[var(--warning)]" />
+            <div className="min-w-[240px] flex-1">
+              <p>{nativeConflict.message}</p>
+              {nativeConflict.previews?.length ? (
+                <div className="mt-1.5 grid gap-1 text-micro leading-4 text-[var(--text-tertiary)]">
+                  {nativeConflict.previews.slice(0, 3).map((preview) => (
+                    <div
+                      key={preview.regionId}
+                      className="grid gap-x-3 rounded-control border border-[color-mix(in_oklab,var(--warning)_18%,var(--border-default))] bg-[var(--bg-primary)] px-2 py-1 sm:grid-cols-2"
+                    >
+                      <span className="min-w-0 truncate">
+                        <span className="font-medium text-[var(--text-secondary)]">Spectra:</span>{" "}
+                        {preview.spectra}
+                      </span>
+                      <span className="min-w-0 truncate">
+                        <span className="font-medium text-[var(--text-secondary)]">{nativeOfficeApplication}:</span>{" "}
+                        {preview.external}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               className="rounded-[7px] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"

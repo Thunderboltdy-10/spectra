@@ -17,6 +17,11 @@ export type NativeMaterialization =
 export type NativeConflict = {
   regionIds: string[];
   message: string;
+  previews?: Array<{
+    regionId: string;
+    spectra: string;
+    external: string;
+  }>;
 };
 
 type NativeLive = {
@@ -89,6 +94,7 @@ export function useArtifactNativeSync({
   conflicts: readonly {
     regionIds: string[];
     partNames: string[];
+    previews?: NativeConflict["previews"];
   }[] | undefined;
   setContent: (content: unknown) => void;
   setBaseline: (snapshot: EditorSnapshot) => void;
@@ -167,9 +173,11 @@ export function useArtifactNativeSync({
     })
       .then(async (response) => {
         const result = (await response.json().catch(() => null)) as {
+          state?: string;
           content?: unknown;
           projection?: unknown;
           message?: string;
+          conflict?: NativeConflict;
         } | null;
         if (!response.ok)
           throw new Error(
@@ -178,6 +186,16 @@ export function useArtifactNativeSync({
           );
         if (!cancelled) {
           completed = true;
+          if (result?.state === "conflicted") {
+            setNativeConflict({
+              regionIds: result.conflict?.regionIds ?? [],
+              previews: result.conflict?.previews,
+              message:
+                result.conflict?.message ??
+                `${nativeOfficeApplication} and Spectra changed the same work region.`,
+            });
+            return;
+          }
           const projection = result?.content ?? result?.projection;
           if (projection !== undefined) {
             nativeProjectionOverrideRef.current = projection;
@@ -444,7 +462,11 @@ export function useArtifactNativeSync({
         attribution?: string;
         status?: string;
         message?: string;
-        conflict?: { regionIds?: string[]; message?: string };
+        conflict?: {
+          regionIds?: string[];
+          message?: string;
+          previews?: NativeConflict["previews"];
+        };
       } | null;
       if (!response.ok)
         throw new Error(
@@ -459,6 +481,7 @@ export function useArtifactNativeSync({
       else if (result?.state === "conflicted")
         setNativeConflict({
           regionIds: result.conflict?.regionIds ?? [],
+          previews: result.conflict?.previews,
           message:
             result.conflict?.message ??
             `${nativeOfficeApplication} and Spectra changed the same work region.`,
@@ -563,14 +586,21 @@ export function useArtifactNativeSync({
     const preservedPartCount = persistedNativeConflict.partNames.length;
     setNativeConflict(
       (current) =>
-        current ?? {
-          regionIds: persistedNativeConflict.regionIds,
-          message: regionCount
-            ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same work region" : `${regionCount} overlapping work regions`}. Choose which version to keep.`
-            : preservedPartCount
-              ? `${nativeOfficeApplication} and Spectra changed the same preserved native content. Choose which version to keep.`
-              : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
-        },
+        current
+          ? {
+              ...current,
+              regionIds: persistedNativeConflict.regionIds,
+              previews: persistedNativeConflict.previews ?? current.previews,
+            }
+          : {
+              regionIds: persistedNativeConflict.regionIds,
+              previews: persistedNativeConflict.previews,
+              message: regionCount
+                ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same work region" : `${regionCount} overlapping work regions`}. Choose which version to keep.`
+                : preservedPartCount
+                  ? `${nativeOfficeApplication} and Spectra changed the same preserved native content. Choose which version to keep.`
+                  : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
+            },
     );
   }, [nativeOfficeApplication, persistedNativeConflict]);
 

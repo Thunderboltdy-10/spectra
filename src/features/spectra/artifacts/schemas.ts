@@ -21,6 +21,8 @@ const officeNativeBindingBase = {
   profile: compatibilityProfileSchema,
   macroEnabled: z.boolean(),
   semanticDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  canvasWidthEmu: z.number().positive().optional(),
+  canvasHeightEmu: z.number().positive().optional(),
 };
 
 export {

@@ -39,7 +39,9 @@ export class DocxLensError extends Error {
       | "DOCX_CORRUPT"
       | "DOCX_REGION_READ_ONLY"
       | "DOCX_UNSUPPORTED_EDIT"
-      | "DOCX_TABLE_WRITE_UNSUPPORTED",
+      | "DOCX_TABLE_WRITE_UNSUPPORTED"
+      | "DOCX_IDENTITY_AMBIGUOUS"
+      | "DOCX_IDENTITY_UNSTABLE",
     message: string,
   ) {
     super(message);
@@ -244,23 +246,42 @@ function nativeRegions(document: Document): NativeRegion[] {
 
 function ensureStableRegionIds(document: Document) {
   const aliases = new Map<string, string>();
-  let changed = false;
+  const usedIds = new Set<string>();
+  let injected = false;
+  let identityStable = true;
   for (const region of nativeRegions(document)) {
-    const id = region.id.split(":").at(-1)?.toUpperCase();
     const anchor = region.paragraph?.element ?? (region.table ? tableAnchor(region.table) : undefined);
-    if (!anchor) continue;
-    const existing = anchor.getAttributeNs(W14_NAMESPACE, "paraId");
+    if (!anchor) {
+      identityStable = false;
+      continue;
+    }
+    const existing = anchor.getAttributeNs(W14_NAMESPACE, "paraId")?.toUpperCase();
     if (existing) {
+      if (!/^[0-9A-F]{8}$/.test(existing) || usedIds.has(existing))
+        throw new DocxLensError(
+          "DOCX_IDENTITY_AMBIGUOUS",
+          "This Word file contains duplicate or invalid native region identities, so Spectra will not guess which content to change.",
+        );
+      usedIds.add(existing);
       aliases.set(region.id, region.id.replace(/[^:]+$/, existing.toLowerCase()));
       continue;
     }
-    if (!id || !/^[0-9A-F]{8}$/.test(id)) continue;
+    identityStable = false;
+    injected = true;
+    let id = region.id.split(":").at(-1)?.toUpperCase();
+    if (!id || !/^[0-9A-F]{8}$/.test(id))
+      id = stableHex(`spectra-docx-region:${region.path}`);
+    let salt = 1;
+    while (usedIds.has(id)) {
+      id = stableHex(`spectra-docx-region:${region.path}:${salt}`);
+      salt += 1;
+    }
+    usedIds.add(id);
     anchor.setAttributeNs(W14_NAMESPACE, "paraId", id);
     aliases.set(region.id, region.id.replace(/[^:]+$/, id.toLowerCase()));
-    changed = true;
   }
-  if (changed) document._markMainDirty();
-  return aliases;
+  if (injected) document._markMainDirty();
+  return { aliases, injected, identityStable };
 }
 
 function uniqueRegionById(document: Document, regionId: string) {
@@ -958,6 +979,7 @@ const REGION_FIDELITY: ReadonlyArray<{
 async function projectDocument(
   document: Document,
   profile: LensCompatibilityProfile,
+  identityStable: boolean,
 ) {
   const fidelityEntries: LensFidelityEntry[] = [];
   const blocks: DocxProjectionBlock[] = [];
@@ -1202,6 +1224,7 @@ async function projectDocument(
       profile,
       macroEnabled: document.office.format.macroEnabled,
       semanticDigest,
+      identityStable,
       nativePlaceholders: placeholders,
     },
   });
@@ -1226,8 +1249,9 @@ async function applyDelta(
   delta: DocxSemanticDelta,
 ) {
   const document = await Document.open(carry.payload);
-  const aliases = ensureStableRegionIds(document);
-  const opened = await projectDocument(document, carry.profile);
+  const identity = ensureStableRegionIds(document);
+  const aliases = identity.aliases;
+  const opened = await projectDocument(document, carry.profile, identity.identityStable);
   const operations =
     delta.kind === "ai-edit" ? delta.operations : [delta];
   const born = new Map<string, string>();
@@ -1354,8 +1378,8 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         `This Word package is incomplete or corrupt. Spectra kept it unchanged and did not attempt a conversion.${error instanceof Error ? ` (${error.message})` : ""}`,
       );
     }
-    ensureStableRegionIds(document);
-    const { projection, fidelityMap } = await projectDocument(document, profile);
+    const identity = ensureStableRegionIds(document);
+    const { projection, fidelityMap } = await projectDocument(document, profile, identity.identityStable);
     const basePayloadHash = await sha256Payload(payload);
     return {
       projection,

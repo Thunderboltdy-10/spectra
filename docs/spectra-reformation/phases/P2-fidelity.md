@@ -83,3 +83,21 @@ L1 harness green in the owning verification units for all formats; every write c
 - FIELD NOTE · P6.I3: the logger calls nonexistent `errorEvents:log`; recorded as later dead wiring, not started here.
 - Evidence: `.shots/reformation/P2.V1/manifest.md` and numbered screenshots `00`–`09`.
 - Verdict: PASS after class-wide repair and full remaining P2.I1 journey retest; P2.I1 remains IMPLEMENTED pending Pablo acceptance.
+
+## P2.I2 implementer log — 2026-08-27
+
+- TRIAGE: SYSTEMIC merge/CAS/identity class across Office lenses, native routes, Convex replica truth, and the conflict bar; held as one architecture seam.
+- Added a generic keyed three-way merge with delete-vs-edit conflicts and deterministic weaving of independent insertions.
+- DOCX, XLSX, and PPTX now merge at stable native region/object/cell identities; formatting, structure, order, and defined-name changes are visible to diff and merge.
+- Removed the materialization in-flight bypass; stale claims fail CAS and the route performs one verified rebase retry before surfacing overlap.
+- Keep Spectra applies only Spectra-changed regions over the external carry; foreign insertions remain intact and conflict responses stay HTTP 200 with precise previews.
+- Persisted conflict previews in `syncConflicts`; Convex `forWork` restores them into the existing in-place conflict bar after reload.
+- DOCX now reports whether native paraIds were persisted, injects deterministic anchors on first real materialization, rejects duplicate/invalid identities, and refuses concurrent merge from an unanchored stored base while allowing one-sided external promotion.
+- Added regressions for formatting-only edits, foreign insertions, delete-vs-edit, preview persistence, stale-base retry, first-anchor persistence, duplicate anchors, and unanchored concurrent merge refusal.
+- Focused Vitest: 7 files / 89 tests passed (`docx-lens`, `document-native-projection`, `office-route-projection`, `xlsx-pptx-lens`, `spectra-package`, `three-way-merge`, `convex/replicas`).
+- Scoped ESLint: 0 errors. Secret scan passed across 2,085 tracked files. `git diff --check` passed.
+- `tsc --noEmit` retains only recorded repository blockers in bridge tests, replicas test, presentation commands, and agent library shell; no P2.I2 production error.
+- Architecture check retains the five documented global-event failures; no P2.I2-specific failure.
+- Live Office coexistence and screenshot grading remain P2.V1 verifier work; no acceptance claim made here.
+- Later owners unchanged: bound DOCX Custom XML backing data remains P2.I3; missing logger wiring remains P6.I3.
+- Status: IMPLEMENTED only; awaiting independent P2.I2 verification.

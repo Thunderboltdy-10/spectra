@@ -594,6 +594,9 @@ export const queueMaterialization = mutation({
     baseContent: v.optional(v.any()),
     baseContentHash: v.optional(v.string()),
     baseTextIndex: v.optional(v.string()),
+    projectionContent: v.optional(v.any()),
+    projectionContentHash: v.optional(v.string()),
+    projectionTextIndex: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -606,6 +609,8 @@ export const queueMaterialization = mutation({
       partNames: z.array(z.string().min(1).max(500)).max(200),
       baseContentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
       baseTextIndex: z.string().max(200_000).optional(),
+      projectionContentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+      projectionTextIndex: z.string().max(200_000).optional(),
     }).parse(args);
     const work = await ctx.db.get(args.workId);
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
@@ -624,13 +629,6 @@ export const queueMaterialization = mutation({
       .unique();
     if (!local?.deviceId || !local.mountId || !local.localResourceId || !local.relativePath)
       throw new Error("LOCAL_REPLICA_UNAVAILABLE");
-    const activeWrite = latestActiveWriteForReplica(
-      await ctx.db.query("bridgeWriteRequests")
-      .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
-      .order("desc")
-      .take(50),
-      local._id,
-    );
     const [mount, device] = await Promise.all([
       ctx.db.get(local.mountId),
       ctx.db.get(local.deviceId),
@@ -653,13 +651,15 @@ export const queueMaterialization = mutation({
       .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", idempotencyKey))
       .unique();
     if (existing) return { requestId: existing._id, state: existing.state };
-    if (activeWrite) {
-      if (
-        local.revision !== activeWrite.baseRevision ||
-        input.baseRevision !== activeWrite.targetRevision
-      )
-        throw new Error("MATERIALIZATION_BASE_STALE");
-    } else if (local.revision !== input.baseRevision) {
+    const activeWrite = latestActiveWriteForReplica(
+      await ctx.db.query("bridgeWriteRequests")
+        .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
+        .order("desc")
+        .take(50),
+      local._id,
+    );
+    if (activeWrite) throw new Error("MATERIALIZATION_BASE_STALE");
+    if (local.revision !== input.baseRevision) {
       throw new Error("MATERIALIZATION_BASE_STALE");
     }
     const effectiveBaseRevision = input.baseRevision;
@@ -722,9 +722,9 @@ export const queueMaterialization = mutation({
       idempotencyKey,
       regionIds: input.regionIds,
       partNames: input.partNames,
-      projectionBaseContent: work.content,
-      projectionBaseContentHash: work.contentHash,
-      projectionBaseTextIndex: work.textIndex,
+      projectionBaseContent: args.projectionContent ?? work.content,
+      projectionBaseContentHash: input.projectionContentHash ?? work.contentHash,
+      projectionBaseTextIndex: input.projectionTextIndex ?? work.textIndex,
       projectionBaseFidelityMap: args.fidelityMap,
       state: "pending",
       retryAt: now,
@@ -1081,6 +1081,11 @@ export const recordExternalReconciliation = mutation({
     regionIds: v.array(v.string()),
     partNames: v.array(v.string()),
     conflictRegionIds: v.array(v.string()),
+    previews: v.optional(v.array(v.object({
+      regionId: v.string(),
+      spectra: v.string(),
+      external: v.string(),
+    }))),
     resolution: v.optional(v.union(v.literal("local"), v.literal("merged"))),
   },
   handler: async (ctx, args) => {
@@ -1142,11 +1147,16 @@ export const recordExternalReconciliation = mutation({
         )
         .first();
       if (existingConflict) {
+        const previews = new Map(
+          (existingConflict.previews ?? []).map((preview) => [preview.regionId, preview]),
+        );
+        for (const preview of args.previews ?? []) previews.set(preview.regionId, preview);
         await ctx.db.patch(existingConflict._id, {
           regionIds: [...new Set([...existingConflict.regionIds, ...args.conflictRegionIds])],
           partNames: [...new Set([...existingConflict.partNames, ...args.partNames])],
           localPayloadRef: local.payloadRef,
           spectraPayloadRef: cloud.payloadRef,
+          ...(previews.size ? { previews: [...previews.values()] } : {}),
           updatedAt: now,
         });
         if (operation) await ctx.db.patch(operation._id, { state: "conflicted", updatedAt: now });
@@ -1160,6 +1170,7 @@ export const recordExternalReconciliation = mutation({
         replicaIds: [local._id, cloud._id],
         regionIds: args.conflictRegionIds,
         partNames: args.partNames,
+        previews: args.previews,
         localRevision: local.revision,
         spectraRevision: cloud.revision,
         localPayloadRef: local.payloadRef,

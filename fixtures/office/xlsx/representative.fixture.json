@@ -2,7 +2,7 @@
   "source": "Authored and saved by Microsoft Excel, with a real VBA project and an opaque custom XML part added afterwards",
   "contains": [
     "recognized SUM formula in D2",
-    "unrecognized _xlfn.XLOOKUP formula in C2 with Excel's cached value",
+    "unrecognized _xlfn.XLOOKUP formula in A1 with Excel's cached value",
     "xl/vbaProject.bin authored by Office",
     "xl/customXml/item1.xml"
   ],

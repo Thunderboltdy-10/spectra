@@ -1,0 +1,12 @@
+{
+  "id": "docx-table-then-external-format",
+  "finding": "DOC-1+DOC-2",
+  "format": "docx",
+  "source": "complex-structure.docx",
+  "steps": [
+    "edit a table cell through the production Yjs seam",
+    "materialize",
+    "apply a formatting-only native edit",
+    "diffExternal must see the format change"
+  ]
+}

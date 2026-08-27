@@ -1,0 +1,10 @@
+{
+  "source": "Microsoft Open XML SDK Strict-conformance pivot workbook. The selected engine rejects this package instead of rewriting it.",
+  "contains": [
+    "pivot"
+  ],
+  "expected": {
+    "file": "engine-rejected",
+    "pivotParts": "present in bytes, not opened for rewrite"
+  }
+}

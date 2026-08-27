@@ -4,6 +4,7 @@ import { enumerateArtifactRegions, validateArtifactContent } from "../../../arti
 import type { SemanticRegion } from "../../../artifacts/types";
 import {
   documentBlocksFromJson,
+  documentNodeText,
   type DocumentJsonNode,
 } from "../../../lenses/document-projection";
 import type {
@@ -162,6 +163,22 @@ export function documentContentToProseMirrorJson(
         const blockId = node.attrs?.blockId;
         const block = typeof blockId === "string" ? byId.get(blockId) : undefined;
         const attrs = record(block?.attrs);
+        if (attrs.nativeReadOnly === true)
+          return {
+            ...node,
+            attrs: { ...node.attrs, nativeReadOnly: true },
+          };
+        if (block?.type === "table") {
+          const rebuilt = blockToJson(block, 0);
+          return { ...rebuilt, attrs: { ...node.attrs, ...rebuilt.attrs } };
+        }
+        if (
+          typeof block?.text === "string" &&
+          block.text !== documentNodeText(node as DocumentJsonNode).trimEnd()
+        ) {
+          const rebuilt = blockToJson(block, 0);
+          return { ...rebuilt, attrs: { ...node.attrs, ...rebuilt.attrs } };
+        }
         const styleId = typeof attrs.styleId === "string" ? attrs.styleId : "";
         const headingLevel = Number(styleId.match(/^Heading([1-3])$/i)?.[1] ?? 0);
         if (headingLevel && (node.type === "paragraph" || node.type === "heading"))
@@ -173,11 +190,6 @@ export function documentContentToProseMirrorJson(
               level: headingLevel,
               ...(attrs.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
             },
-          };
-        if (attrs.nativeReadOnly === true)
-          return {
-            ...node,
-            attrs: { ...node.attrs, nativeReadOnly: true },
           };
         return node;
       }),

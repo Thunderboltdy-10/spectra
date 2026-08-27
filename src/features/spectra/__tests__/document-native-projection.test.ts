@@ -142,6 +142,61 @@ describe("native document projection", () => {
     });
   });
 
+  it("applies table-cell and paragraph mutations onto a stale TipTap tree", () => {
+    const json = documentContentToProseMirrorJson({
+      blocks: [
+        {
+          id: "docx:paragraph:one",
+          type: "paragraph",
+          text: "Spectra later",
+        },
+        {
+          id: "docx:table:1",
+          type: "table",
+          text: "Spectra cell | B",
+          rows: [["Spectra cell", "B"]],
+        },
+      ],
+      tiptap: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { blockId: "docx:paragraph:one" },
+            content: [{ type: "text", text: "Complexity" }],
+          },
+          {
+            type: "table",
+            attrs: { blockId: "docx:table:1" },
+            content: [
+              {
+                type: "tableRow",
+                content: [
+                  {
+                    type: "tableHeader",
+                    content: [{ type: "paragraph", content: [{ type: "text", text: "Old" }] }],
+                  },
+                  {
+                    type: "tableHeader",
+                    content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(json.content?.[0]).toMatchObject({
+      type: "paragraph",
+      content: [{ type: "text", text: "Spectra later" }],
+    });
+    expect(json.content?.[1]?.content?.[0]?.content?.[0]).toMatchObject({
+      type: "tableHeader",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Spectra cell" }] }],
+    });
+  });
+
   it("derives deletions and reorders when collaborative content has no explicit intent", () => {
     const base: DocxProjection = {
       blocks: [

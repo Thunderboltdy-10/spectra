@@ -1,7 +1,7 @@
 {
   "source": "Microsoft Open XML SDK test asset",
   "contains": [
-    "merged and nested tables",
+    "one body table",
     "footnotes",
     "endnotes",
     "footer",

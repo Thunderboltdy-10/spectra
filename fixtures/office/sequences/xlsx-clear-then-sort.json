@@ -1,0 +1,10 @@
+{
+  "id": "xlsx-clear-then-sort",
+  "finding": "XLS-2+XLS-3",
+  "format": "xlsx",
+  "steps": [
+    "delete a cell through Yjs so the route emits clear-cell",
+    "sort remaining formula rows with the studio shifter",
+    "materialize both through the production office merge"
+  ]
+}

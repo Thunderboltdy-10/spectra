@@ -175,3 +175,16 @@ L1 harness green in the owning verification units for all formats; every write c
 - Focused Vitest: 6 files / 84 tests passed. Scoped ESLint: 0 errors on owned engine files; studio retains pre-existing z-index/hex warnings. Secret scan passed across 2,092 tracked files; `git diff --check` passed.
 - Full repository sweep and live Excel grading were not run; P2.V1/V2 own coexistence. INDEX/MATCH/AVERAGE-empty/ROUND-ties stay XLS-5 extras. P2.I3 R7 refusals and P6.I3 logger untouched.
 - Status: IMPLEMENTED only; no verification or acceptance claimed.
+
+## P2.I5 implementer log — 2026-08-27
+
+- TRIAGE: SYSTEMIC corpus-honesty + production L1 composition class (sidecar claims vs bytes; lens → Yjs → route → materialize). Held as one harness seam.
+- Sidecar `contains` is now graded by `inspectOfficePackage` / `claimHolds`. Unmapped poetry fails. Lying claims on `complex-structure` (not merged/nested), `section-headers-footers` (no header/footer parts), and `representative.xlsm` (XLOOKUP is A1) were rewritten to the bytes.
+- School facts the committed packages lacked are generated overlays: SDT-wrapped tables, merged+nested tables, footer tables, locale formats, external links. `macro-enabled.docm` is a macroEnabled content type without a VBA part; the claim matches Content_Types, not a fictional `vbaProject.bin`.
+- L1 production helpers run the real adapters/routes: `runDocxProductionSeam`, `runXlsxProductionSeam`, `runPptxProductionSeam`. DOCX materialize uses `docxProjectionFromContent` (the route's `contentProjection` is projection-only).
+- Named CRITICAL tests: DOC-1 table round-trip vs pre-fix flatten mutant; DOC-2 format diff/merge; DOC-3 merge vs stale clobber; XLS-1 cell edit plus worksheet-as-PRESERVED mutant; XLS-2 sort uses studio 0-based coords and `offsetCellToRow`; XLS-3 clear-cell; PPT-1 empty content; PPT-2 new object. Sequence JSON lives under `fixtures/office/sequences/`.
+- Stale TipTap no longer wins over mutated `blocks`: paragraph text and table rows apply onto the existing tree (heading-type repair kept). That was why DOC-1/DOC-3 produced empty operations.
+- `npm run fidelity:seam` is the product L1 script. The old `scripts/fidelity-harness/*` engine layer was not deleted and still does not count as product evidence.
+- Focused Vitest: 4 files / 52 tests passed (`seam-contract` 13, `document-native-projection`, `xlsx-pptx-lens`, `office-route-projection`). Scoped ESLint: 0 errors. Secret scan passed across 2,094 tracked files. `git diff --check` passed.
+- Full repository sweep and live Office/school-folder grading were not run. Later owners unchanged: P2.I3 remaining R7 refusals; P6.I3 logger; P3 IR.
+- Status: IMPLEMENTED only; no verification or acceptance claimed. Paired journey is P2.V2.

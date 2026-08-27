@@ -1,0 +1,12 @@
+{
+  "id": "pptx-add-object-undo-rematerialize",
+  "finding": "PPT-2",
+  "format": "pptx",
+  "source": "transition-law.pptx",
+  "steps": [
+    "add a text object through the production Yjs seam",
+    "undo the addition",
+    "add it again and materialize",
+    "the new object must survive reopen"
+  ]
+}

@@ -484,12 +484,24 @@ describe("office capability audit", () => {
     expect(refusedOperations("document", bindings, "spectra-native", linked.fidelity)).toEqual([]);
   });
 
-  it("leaves an operation alone when no command claims the region it writes", () => {
-    // An operation nothing has declared regions for is not silently refused:
-    // guessing would block the assistant on a file it can legitimately edit.
-    expect(gateOperation({
+  it("refuses a known IR write from the definition even when no bindings are passed", () => {
+    const preservedCells = gateOperation({
       type: "sheets",
       operation: "set_cells",
+      bindings: [],
+      compatibilityProfile: "strict-native",
+      fidelity: { cells: "PRESERVED" },
+    });
+    expect(preservedCells.allowed).toBe(false);
+    expect(preservedCells.allowed === false && preservedCells.reason).toContain(
+      "cannot edit it yet",
+    );
+
+    // An operation the IR has never heard of is not silently refused: guessing
+    // would block the assistant on a file it can legitimately edit.
+    expect(gateOperation({
+      type: "sheets",
+      operation: "sheets.fiction.mutate",
       bindings: [],
       compatibilityProfile: "strict-native",
       fidelity: { cells: "PRESERVED" },

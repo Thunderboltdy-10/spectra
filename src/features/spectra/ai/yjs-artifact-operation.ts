@@ -56,6 +56,12 @@ import { workYjsOrigins } from "@/features/spectra/work/models/yjs/origins";
 import { CloudflareRealtimeProvider } from "@/features/spectra/realtime/providers";
 import { realtimeProviderForWorkType } from "@/features/spectra/realtime/providers/provider-factory";
 import type { CollaborationPresence } from "@/features/spectra/collaboration/types";
+import {
+  gateAiArtifactMutation,
+} from "@/features/spectra/commands/office/operation-gate";
+import { fidelityRegionMap } from "@/features/spectra/commands/office/fidelity-regions";
+import type { CompatibilityProfile } from "@/features/spectra/commands/types";
+import type { WorkType } from "@/features/spectra/work/registry";
 
 type ArtifactRecord = {
   _id: string;
@@ -65,6 +71,7 @@ type ArtifactRecord = {
   summary?: string;
   tags: string[];
   content: unknown;
+  compatibilityProfile?: CompatibilityProfile;
 };
 
 type ActorIdentity = {
@@ -413,6 +420,46 @@ export class AiArtifactRegionConflictError extends Error {
       `AI_ARTIFACT_REGION_QUEUED: ${claim.conflict?.regionId ?? "occupied region"}`,
     );
     this.name = "AiArtifactRegionConflictError";
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/**
+ * Native profile + fidelity the human workbar already uses. Replica fetch
+ * failure must not invent PRESERVED refusals, so the fallback is spectra-native
+ * with an empty region map — the same default a Spectra-owned file has.
+ */
+async function nativeGateContext(artifact: ArtifactRecord): Promise<{
+  compatibilityProfile: CompatibilityProfile;
+  fidelity: Record<string, "NATIVE" | "EQUIVALENT" | "PRESERVED" | "EXTENSION">;
+}> {
+  const profile = artifact.compatibilityProfile ?? "spectra-native";
+  try {
+    const truth = await convexQuery<
+      { workId: string },
+      { replicas?: Array<{ fidelityMap?: unknown }> }
+    >("replicas:forWork", { workId: artifact._id });
+    const entries =
+      truth.replicas?.flatMap((replica) => {
+        const map = recordValue(replica.fidelityMap);
+        return Array.isArray(map.entries)
+          ? map.entries.map((entry) => recordValue(entry))
+          : [];
+      }) ?? [];
+    return {
+      compatibilityProfile: profile,
+      fidelity: fidelityRegionMap(entries),
+    };
+  } catch {
+    return {
+      compatibilityProfile: profile,
+      fidelity: { artifact: "NATIVE" },
+    };
   }
 }
 
@@ -1493,6 +1540,7 @@ export async function applyAiArtifactMutation(params: {
   collaborationClientId?: string;
   checkpointBeforeAi?: boolean;
   replacePendingCreate?: boolean;
+  operations?: string[];
 }) {
   // The browser client id identifies the owner/viewer, not the AI body. Reusing
   // it for the worker makes every observer with that id discard the AI cursor
@@ -1510,6 +1558,18 @@ export async function applyAiArtifactMutation(params: {
     );
   const session = await createCollaborationSession(params.artifactId, clientId);
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
+  if (!params.replacePendingCreate) {
+    const native = await nativeGateContext(session.artifact);
+    const gate = gateAiArtifactMutation({
+      type: typeKey as WorkType,
+      operations: params.operations,
+      compatibilityProfile: native.compatibilityProfile,
+      fidelity: native.fidelity,
+    });
+    if (!gate.allowed) {
+      throw new Error(`AI_OPERATION_REFUSED: ${gate.reason}`);
+    }
+  }
   const document = new Y.Doc();
   let connectionError: Error | null = null;
   let connectionStatus = "initializing";

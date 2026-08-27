@@ -73,8 +73,9 @@ import { PRESENTATION_EXPORT_COPIES } from "../capabilities";
 import {
   commandContext,
   commandForBinding,
+  eventBelongsToFocusedStudio,
   executeCommand,
-} from "../commands/registry";
+} from "../commands";
 import type { CommandParam } from "../commands/types";
 import { auditDeck } from "../presentation/audit";
 import {
@@ -1457,6 +1458,9 @@ export function PresentationStudio({
   const importInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragState | undefined>(undefined);
   const textOriginRef = useRef<PresentationContent | undefined>(undefined);
+  const runCommandRef = useRef<(id: string, params?: CommandParam) => boolean>(
+    () => false,
+  );
   const activeSlide =
     deck.slides.find((slide) => slide.id === activeSlideId) ?? deck.slides[0]!;
   const activeSlideIndex = deck.slides.indexOf(activeSlide);
@@ -1588,6 +1592,7 @@ export function PresentationStudio({
   useEffect(() => {
     if (!presentedDeck) return;
     const keydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       // Blackout is a hold, not a mode: the next keypress returns the deck.
       if (presentBlackout) {
         event.preventDefault();
@@ -1671,6 +1676,8 @@ export function PresentationStudio({
   useEffect(() => {
     if (readOnly || surface !== "slides" || !selectedObjectId) return;
     const keydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (!eventBelongsToFocusedStudio(event, artifactId)) return;
       const target = event.target as HTMLElement | null;
       if (
         target?.matches("input, textarea, select") ||
@@ -1679,64 +1686,34 @@ export function PresentationStudio({
         return;
       if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
-        mutate((draft) => {
-          const slide = draft.slides[activeSlideIndex];
-          if (slide) {
-            const deletingGroup =
-              slide.objects.find((object) => object.id === selectedObjectId)
-                ?.type === "group";
-            slide.objects = slide.objects.filter(
-              (object) => object.id !== selectedObjectId,
-            );
-            if (deletingGroup)
-              slide.objects.forEach((object) => {
-                if (object.parentId === selectedObjectId)
-                  delete object.parentId;
-              });
-          }
-        });
-        setSelectedObjectId(undefined);
-        setLayerSelection([]);
-        onActiveRegionChange?.(activeSlide.id);
+        runCommandRef.current("arrange.delete");
         return;
       }
       const movement = event.shiftKey ? 10 : 1;
-      const delta =
-        event.key === "ArrowLeft"
-          ? { x: -movement, y: 0 }
-          : event.key === "ArrowRight"
-            ? { x: movement, y: 0 }
-            : event.key === "ArrowUp"
-              ? { x: 0, y: -movement }
-              : event.key === "ArrowDown"
-                ? { x: 0, y: movement }
-                : undefined;
-      if (!delta) return;
-      event.preventDefault();
-      mutate((draft) => {
-        const object = draft.slides[activeSlideIndex]?.objects.find(
-          (candidate) => candidate.id === selectedObjectId,
-        );
-        if (!object || object.locked) return;
-        const canvasHeight =
-          draft.settings?.aspectRatio === "4:3" ? 750 : 562.5;
-        object.x = Math.max(
-          0,
-          Math.min(1_000 - object.width, object.x + delta.x),
-        );
-        object.y = Math.max(
-          0,
-          Math.min(canvasHeight - object.height, object.y + delta.y),
-        );
-      });
+      const object = deck.slides[activeSlideIndex]?.objects.find(
+        (candidate) => candidate.id === selectedObjectId,
+      );
+      if (!object || object.locked) return;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        runCommandRef.current("arrange.geometry.x", object.x - movement);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        runCommandRef.current("arrange.geometry.x", object.x + movement);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        runCommandRef.current("arrange.geometry.y", object.y - movement);
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        runCommandRef.current("arrange.geometry.y", object.y + movement);
+      }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
   }, [
-    activeSlide.id,
     activeSlideIndex,
-    mutate,
-    onActiveRegionChange,
+    artifactId,
+    deck.slides,
     readOnly,
     selectedObjectId,
     surface,
@@ -1749,6 +1726,8 @@ export function PresentationStudio({
   useEffect(() => {
     if (readOnly || surface !== "slides") return;
     const keydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (!eventBelongsToFocusedStudio(event, artifactId)) return;
       if (!event.ctrlKey && !event.metaKey) return;
       const target = event.target as HTMLElement | null;
       if (
@@ -1759,16 +1738,15 @@ export function PresentationStudio({
       const key = event.key.toLowerCase();
       if (key === "z" && !event.shiftKey) {
         event.preventDefault();
-        undo();
+        runCommandRef.current("history.undo");
       } else if ((key === "z" && event.shiftKey) || key === "y") {
         event.preventDefault();
-        redo();
+        runCommandRef.current("history.redo");
       }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- undo and redo are declared below and read the latest stacks
-  }, [readOnly, surface, undoStack.length, redoStack.length]);
+  }, [artifactId, readOnly, surface]);
 
   function undo() {
     const previous = undoStack.at(-1);
@@ -3150,26 +3128,19 @@ export function PresentationStudio({
           }),
       },
       italic: {
-        active: selectedStyle("fontStyle", "normal") === "italic",
+        active: Boolean(selectedStyle("italic", false)),
         toggle: () =>
           updateSelected((object) => {
-            const italic = styleValue(object, "fontStyle", "normal") === "italic";
-            object.style = {
-              ...object.style,
-              fontStyle: italic ? "normal" : "italic",
-            };
+            const italic = Boolean(styleValue(object, "italic", false));
+            object.style = { ...object.style, italic: !italic };
           }),
       },
       underline: {
-        active: selectedStyle("textDecoration", "none") === "underline",
+        active: Boolean(selectedStyle("underline", false)),
         toggle: () =>
           updateSelected((object) => {
-            const underlined =
-              styleValue(object, "textDecoration", "none") === "underline";
-            object.style = {
-              ...object.style,
-              textDecoration: underlined ? "none" : "underline",
-            };
+            const underlined = Boolean(styleValue(object, "underline", false));
+            object.style = { ...object.style, underline: !underlined };
           }),
       },
       strike: {
@@ -3220,8 +3191,8 @@ export function PresentationStudio({
         updateSelected((object) => {
           object.style = {
             ...object.style,
-            fontStyle: undefined,
-            textDecoration: undefined,
+            italic: undefined,
+            underline: undefined,
             fontWeight: undefined,
             color: undefined,
             fontFamily: undefined,
@@ -3598,6 +3569,7 @@ export function PresentationStudio({
     if (!command) return false;
     return executeCommand(command, commandCtx, params);
   }
+  runCommandRef.current = runCommand;
   /** Why a surface is refusing, in the registry's own words. */
   function commandRefusal(id: string) {
     const availability = commandById(id)?.availability(commandCtx);

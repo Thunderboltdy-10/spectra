@@ -1833,6 +1833,7 @@ export function DocumentStudio({
         setReplaceOpen((open) => !open);
       },
       replaceOpen,
+      replaceAll: replaceAllMatches,
       matchCount: findMatches.length,
     },
     comments: {
@@ -2534,7 +2535,9 @@ export function DocumentStudio({
                   type="button"
                   data-find-replace=""
                   disabled={!findMatches.length || readOnly}
-                  onClick={replaceAllMatches}
+                  onClick={() =>
+                    runDocumentCommand("document.navigate.replace", true)
+                  }
                 >
                   Replace all
                 </button>

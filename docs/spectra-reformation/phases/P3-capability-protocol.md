@@ -72,3 +72,16 @@ Ghost gate + conformance suites in their owning units; the "add one capability" 
 - Split card: scratch `P3V1-A`/`P3V1-B` tiled. One Control+B bolded only A’s `P3V1-MARK`. Workbar still registers two `document` keydown listeners; presentation window handlers still ignore `defaultPrevented` — **P3.I3** (CMD-1). Selection formatting bar is RichTextFormatBar — **P3.I3** (CMD-4).
 - Taste: canvas-direct ops have no workbar button; export copies are one IR-owned list.
 - Later owners: P3.I3 gate/keyboard/overflow/CMD-1, P3.I4 preferences, P5.I1 overflow loop, P6.I3 logger. Evidence: `.shots/reformation/P3.V1/manifest.md`.
+
+## P3.I3 implementation log — 2026-08-28
+
+- Status: **IMPLEMENTED**; no acceptance claimed. P3.V1 already VERIFIED; live split re-grade is not this IU.
+- Root cause: AI gated from bindings (empty set allowed NATIVE-no-delta writes); keyboard/chrome had second execute paths.
+- `gateOperation` is IR-first; `applyAiArtifactMutation` calls `gateAiArtifactMutation` (create skipped). Same refusal sentence as the workbar (CMD-2 / C2).
+- One dispatch helper for studio input. Split view: only the focused `[data-spectra-studio]` handles keys; presentation respects `defaultPrevented`; Delete/arrows go through `arrange.*` (CMD-1, PPT-5).
+- Overflow ranks by priority only (CMD-3). Sheets lost the always-open Mod+F. Replace-all is `navigate.replace` with `true`. Field chrome uses `format.bold`, not `format-bold`. `openLibrary`/`openWorkspace` alias `app.navigate`.
+- Presentation italic/underline write the boolean keys the renderer already reads.
+- Taste: `app.settings.manageAccount` stays the settings.change path so patches are not dropped; kebab-case still opens Account.
+- Focused Vitest 9 files / 116 tests; `check:capabilities`; scoped ESLint 0 errors; secret scan 2116 files; `git diff --check` clean.
+- Live Playwright: Clerk sign-in (stale `.playwright-cli/auth.json`); no visual redesign claimed.
+- Later owners: P3.I4 preferences, P5.I1 overflow log loop, P6.I3 logger.

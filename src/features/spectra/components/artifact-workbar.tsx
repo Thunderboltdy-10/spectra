@@ -20,8 +20,10 @@ import {
   commandContext,
   commandForBinding,
   contextualTabsFor,
+  eventBelongsToFocusedStudio,
   executeCommand,
   resolveCommandLayout,
+  shortcutMatchesEvent,
   tabsFor,
   type CommandBinding,
   type CommandLayout,
@@ -257,32 +259,17 @@ export function ArtifactWorkbar({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      // A shortcut without a modifier belongs to whatever has focus. Firing
-      // "Bold" because someone typed the letter b in a cell, a title field or a
-      // paragraph would be the worst kind of surprise (D20).
-      const modified = event.metaKey || event.ctrlKey || event.altKey;
-      const match = commands.find(({ command }) => {
-        const shortcut = command.shortcut?.toLowerCase();
-        if (!shortcut) return false;
-        const needsModifier = shortcut.includes("mod+");
-        const needsShift = shortcut.includes("shift+");
-        const needsAlt = shortcut.includes("alt+");
-        if (!needsModifier && !needsAlt && !modified) return false;
-        const key = shortcut.split("+").at(-1);
-        // Shift is matched exactly, so Mod+Z and Mod+Shift+Z stay two
-        // different commands rather than a race between undo and redo.
-        return (!needsModifier || event.metaKey || event.ctrlKey) &&
-          event.shiftKey === needsShift &&
-          (!needsAlt || event.altKey) &&
-          event.key.toLowerCase() === key;
-      });
+      if (!eventBelongsToFocusedStudio(event, contract.artifactId)) return;
+      const match = commands.find(({ command }) =>
+        shortcutMatchesEvent(event, command.shortcut),
+      );
       if (!match) return;
       event.preventDefault();
       executeCommand(match.command, commandCtx);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [commandCtx, commands]);
+  }, [commandCtx, commands, contract.artifactId]);
 
   /**
    * One type's layout, patched by itself. `update` shallow-merges the patch into

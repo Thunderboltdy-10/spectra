@@ -58,6 +58,18 @@ export function mergePreferences(current: SpectraPreferences, patch: unknown): S
 export function createApplicationCommandDispatcher(host: ApplicationCommandHost): ApplicationCommandDispatcher {
   return async (commandId, rawParams) => {
     const params = objectRecord(rawParams);
+    // Unregistered aliases collapse onto IR ids. Callers may still pass the
+    // old names; the switch below only sees registered commands.
+    if (commandId === "app.work.openLibrary") {
+      commandId = "app.navigate";
+      params.destination = "library";
+    } else if (commandId === "app.work.openWorkspace") {
+      commandId = "app.navigate";
+      params.destination = "workspace";
+      if (typeof params.targetId !== "string" && typeof params.workspaceId === "string") {
+        params.targetId = params.workspaceId;
+      }
+    }
     switch (commandId) {
       case "app.navigate": {
         const destination = params.destination;
@@ -80,12 +92,6 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
       }
       case "app.calendar.open":
         host.navigate("calendar");
-        return;
-      case "app.work.openLibrary":
-        host.navigate("library");
-        return;
-      case "app.work.openWorkspace":
-        host.navigate("workspace", typeof params.workspaceId === "string" ? params.workspaceId : undefined);
         return;
       case "app.work.reveal-anchor": {
         const anchor = objectRecord(params.anchor);

@@ -27,19 +27,18 @@ describe("planWorkbarOverflow", () => {
     expect(plan.visibleIds).toEqual(["a", "b", "c"]);
   });
 
-  it("sheds disabled commands before essentials", () => {
+  it("keeps honest-disabled essentials visible while shedding advanced extras", () => {
     const plan = planWorkbarOverflow(
       [
-        item("bold", 72, { priority: "essential" }),
+        item("bold", 72, { priority: "essential", disabled: true }),
         item("italic", 72, { priority: "essential" }),
-        item("unused", 90, { disabled: true, priority: "secondary" }),
         item("notes", 96, { priority: "advanced" }),
       ],
-      180,
+      160,
     );
-    expect([...plan.iconOnlyIds, ...plan.overflowIds]).toContain("unused");
     expect(plan.visibleIds).toContain("bold");
     expect(plan.visibleIds).toContain("italic");
+    expect([...plan.iconOnlyIds, ...plan.overflowIds]).toContain("notes");
   });
 
   it("collapses advanced labels before essential labels", () => {

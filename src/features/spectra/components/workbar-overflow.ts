@@ -1,9 +1,9 @@
 /**
  * Real-time workbar overflow.
  *
- * Room is measured in pixels, not in a density guess. Disabled and low-value
- * commands leave the row first; essentials keep their labels until the bar
- * actually runs out of space. The assignment is recomputed on every resize.
+ * Room is measured in pixels, not in a density guess. Advanced extras leave
+ * first; honest-disabled controls stay visible so a refused native write does
+ * not vanish and leave an apparently fully-enabled bar (CMD-3).
  */
 
 export type WorkbarOverflowPriority = "essential" | "secondary" | "advanced";
@@ -27,7 +27,8 @@ export type WorkbarOverflowPlan = {
 const ICON_ONLY_FLOOR = 28;
 
 export function overflowRank(item: Pick<WorkbarOverflowItem, "disabled" | "priority">) {
-  if (item.disabled) return 0;
+  // Disabled is not low-value: it is the honest refusal. Shed by priority
+  // only, so a greyed-out Bold stays as visible as an enabled Bold.
   if (item.priority === "advanced") return 1;
   if (item.priority === "secondary") return 2;
   return 3;

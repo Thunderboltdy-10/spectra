@@ -135,6 +135,32 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   { type: "agent", localId: "private", description: "Release this agent to yourself.", requires: "edit" },
 ];
 
+/** Field format chrome (quiz / cards / planner) resolves these IR ids. They are not workbar actions. */
+const FIELD_FORMAT_LOCAL_IDS = [
+  "format.bold",
+  "format.italic",
+  "format.underline",
+  "format.strike",
+  "format.bulletList",
+  "format.orderedList",
+  "format.quote",
+  "format.code",
+  "insert.link",
+  "insert.equation",
+  "insert.blockEquation",
+] as const;
+
+const FIELD_FORMAT_TYPES = ["quiz", "flashcard_deck", "planner_task"] as const;
+
+const FIELD_FORMAT_SPECS: readonly StudioSpec[] = FIELD_FORMAT_TYPES.flatMap((type) =>
+  FIELD_FORMAT_LOCAL_IDS.map((localId) => ({
+    type,
+    localId,
+    description: `Apply ${localId.replaceAll(".", " ")} to the focused field.`,
+    requires: "edit" as const,
+  })),
+);
+
 export function stableCapabilityId(type: WorkType | "app", localId: string) {
   if (type === "app") {
     return localId.startsWith("app.") ? localId : `app.${localId}`;
@@ -145,7 +171,7 @@ export function stableCapabilityId(type: WorkType | "app", localId: string) {
 }
 
 export const STUDIO_CAPABILITIES: readonly CapabilityDefinition[] =
-  STUDIO_SPECS.map((spec) => {
+  [...STUDIO_SPECS, ...FIELD_FORMAT_SPECS].map((spec) => {
     const id = stableCapabilityId(spec.type, spec.localId);
     return {
       id: id as CapabilityDefinition["id"],

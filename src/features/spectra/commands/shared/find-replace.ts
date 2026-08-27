@@ -28,6 +28,8 @@ export type FindAdapter = {
   /** Present when the type can replace as well as find. */
   toggleReplace?: () => void;
   replaceOpen?: boolean;
+  /** Replace every current match. Same command as toggleReplace, with `true`. */
+  replaceAll?: () => void;
   /** Live match count for the honest hint. */
   matchCount?: number;
   matchNoun?: string;
@@ -61,7 +63,13 @@ export function findBindings(adapter: FindAdapter): CommandBinding[] {
       shortcut: "Mod+H",
       active: adapter.replaceOpen,
       hint: "Find and replace text",
-      onSelect: () => adapter.toggleReplace?.(),
+      onSelect: (params) => {
+        if (params === true) {
+          adapter.replaceAll?.();
+          return;
+        }
+        adapter.toggleReplace?.();
+      },
     });
   }
   return bindings;

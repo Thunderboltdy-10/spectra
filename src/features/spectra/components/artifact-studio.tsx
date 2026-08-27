@@ -185,7 +185,7 @@ import {
   type StudioInspectorPanel,
   type StudioTab,
 } from "./artifact-studio-shell";
-import { commandContext, commandForBinding, executeCommand } from "../commands";
+import { dispatchFormatChrome } from "../commands";
 import { fidelityRegionMap } from "../commands/office/fidelity-regions";
 import type { ApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import {
@@ -6040,6 +6040,7 @@ function ArtifactStudioEditor({
         aria-label="Work surface"
         ref={presenceSurfaceRef}
         className={`spectra-artifact-main ${mainClass}`}
+        data-spectra-studio={artifact._id}
         data-spectra-surface="artifact"
         data-ai-preview={visibleAiWorking || undefined}
         data-ai-effect-count={activeAiEffects.length || undefined}
@@ -7364,23 +7365,15 @@ export function ToolbarButton({
   const execute = () => {
     if (!onClick) return;
     if (!contract) return onClick();
-    const context = commandContext(contract.type, contract.can, contract.role);
-    executeCommand(
-      commandForBinding(
-        contract.type,
-        {
-          id: `format-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`,
-          label,
-          icon: Icon,
-          active,
-          disabled,
-          tab: "Format",
-          onSelect: onClick,
-        },
-        0,
-      ),
-      context,
-    );
+    dispatchFormatChrome({
+      type: contract.type,
+      label,
+      run: onClick,
+      can: contract.can,
+      role: contract.role,
+      compatibilityProfile: contract.compatibilityProfile,
+      fidelity: contract.fidelity,
+    });
   };
   return (
     <Tooltip label={label}>
@@ -7413,20 +7406,15 @@ export function ToolbarTextButton({
   const execute = () => {
     if (!onClick) return;
     if (!contract) return onClick();
-    executeCommand(
-      commandForBinding(
-        contract.type,
-        {
-          id: `format-${label.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}`,
-          label,
-          active,
-          tab: "Format",
-          onSelect: onClick,
-        },
-        0,
-      ),
-      commandContext(contract.type, contract.can, contract.role),
-    );
+    dispatchFormatChrome({
+      type: contract.type,
+      label,
+      run: onClick,
+      can: contract.can,
+      role: contract.role,
+      compatibilityProfile: contract.compatibilityProfile,
+      fidelity: contract.fidelity,
+    });
   };
   return (
     <Tooltip label={label}>

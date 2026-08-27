@@ -101,6 +101,7 @@ import {
   type CommandBinding,
 } from "./artifact-workbar";
 import { getWorkDefinition } from "../work/registry";
+import { commandContext, dispatchStudioCommand } from "../commands";
 import type { CommandParam } from "../commands/types";
 import { SHEETS_EXPORT_COPIES } from "../capabilities";
 import {
@@ -3442,10 +3443,29 @@ export function SheetsStudio({
    * the same way everywhere (C1/C2).
    */
   function runCommand(id: string, value?: CommandParam) {
-    const binding = actionsRef.current.find((candidate) => candidate.id === id);
-    if (!binding || binding.disabled) return false;
-    binding.onSelect(value);
-    return true;
+    if (!contract) {
+      const binding = actionsRef.current.find((candidate) => candidate.id === id);
+      if (!binding || binding.disabled) return false;
+      binding.onSelect(value);
+      return true;
+    }
+    return dispatchStudioCommand({
+      type: "sheets",
+      id,
+      bindings: actionsRef.current,
+      ctx: commandContext(
+        "sheets",
+        contract.can,
+        contract.role,
+        selectedChartId ? "Chart" : undefined,
+        {
+          compatibilityProfile: contract.compatibilityProfile,
+          fidelity: contract.fidelity,
+        },
+        contract.executeApplicationCommand,
+      ),
+      params: value,
+    });
   }
 
   function applyCells(result: CellsResult, verb: string) {
@@ -4233,12 +4253,6 @@ export function SheetsStudio({
       className="spectra-sheets-studio flex min-w-0 flex-col overflow-hidden"
       data-compact={mode === "split" || undefined}
       data-sheets-density={density}
-      onKeyDown={(event) => {
-        const command = event.metaKey || event.ctrlKey;
-        if (!command || event.key.toLowerCase() !== "f") return;
-        event.preventDefault();
-        setInspector("find");
-      }}
     >
       {/* One bar. Modes, the sheet selector, the selection readout and every
           action come from the shared contract, so this type no longer owns a

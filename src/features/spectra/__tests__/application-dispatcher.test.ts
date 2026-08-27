@@ -18,11 +18,15 @@ describe("application command dispatcher", () => {
     await dispatch("app.navigate", { destination: "artifact", targetId: "artifact-2" });
     await dispatch("app.work.open", { workId: "artifact-1", surface: "full" });
     await dispatch("app.calendar.open", {});
+    await dispatch("app.work.openLibrary", {});
+    await dispatch("app.work.openWorkspace", { workspaceId: "ws-1" });
 
     expect(openArtifact).toHaveBeenCalledWith("artifact-2", "panel");
     expect(openArtifact).toHaveBeenCalledWith("artifact-1", "full");
     expect(navigate).toHaveBeenCalledWith("settings", "workbar");
     expect(navigate).toHaveBeenCalledWith("calendar");
+    expect(navigate).toHaveBeenCalledWith("library", undefined);
+    expect(navigate).toHaveBeenCalledWith("workspace", "ws-1");
   });
 
   it("merges account settings patches without inventing a parallel store", async () => {

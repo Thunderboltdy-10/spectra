@@ -185,6 +185,7 @@ export function xlsxProjectionFromContent(
   content: unknown,
   base: XlsxProjection,
 ): XlsxProjection {
+  if (content == null) return base;
   const raw = xlsxEditorContentSchema.parse(content);
   const byId = new Map(raw.sheets.map((sheet) => [sheet.id, sheet]));
   const projection = xlsxProjectionSchema.parse({
@@ -339,6 +340,7 @@ export function pptxProjectionFromContent(
   content: unknown,
   base: PptxProjection,
 ): PptxProjection {
+  if (content == null) return base;
   const raw = pptxEditorContentSchema.parse(content);
   const baseById = new Map(base.slides.map((slide) => [slide.id, slide]));
   if (!raw.slides.length) return base;

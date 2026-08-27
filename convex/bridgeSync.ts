@@ -18,6 +18,7 @@ import {
   BRIDGE_WRITE_EXPIRES_MS,
   deriveSyncIdempotencyKey,
 } from "../shared/replica-truth";
+import { retireSupersededExternalOperations } from "./syncOperationLifecycle";
 
 async function digest(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -700,6 +701,11 @@ export const commitPayloadUpload = mutation({
       replica.revision === input.hash &&
       replica.contentHash === input.hash,
     );
+    await retireSupersededExternalOperations(ctx, {
+      workId: replica.workId,
+      replicaRevisions: [{ replicaId: replica._id, revision: input.hash }],
+      now,
+    });
     if (exactReplay) {
       await ctx.db.patch(device._id, { lastSeenAt: now });
       const replayResult = {

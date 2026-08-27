@@ -260,6 +260,10 @@ export function docxProjectionFromContent(
   value: unknown,
   base: DocxProjection,
 ) {
+  // A linked file can be opened before its semantic projection has ever been
+  // activated. Convex legitimately carries `null` in that state; the native
+  // projection we just read is the only safe starting point.
+  if (value == null) return { projection: base, operations: [] };
   const parsed = documentContentSchema.parse(value);
   const baseById = new Map(base.blocks.map((block) => [block.id, block]));
   const mergeBlock = (incoming: DocxProjection["blocks"][number]) => {

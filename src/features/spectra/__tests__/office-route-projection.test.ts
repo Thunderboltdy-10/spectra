@@ -4,8 +4,61 @@ import {
   pptxProjectionUpdateFromContent,
   xlsxProjectionUpdateFromContent,
 } from "../lenses/office-content";
+import { hasUnreconciledExternalRevision } from "../lenses/native-reconciliation";
 
 describe("Office lens route projection boundary", () => {
+  it("does not reconcile an external operation after it is verified", () => {
+    const operation = {
+      direction: "external",
+      actorKind: "external-edit",
+      revisionAfter: "revision-a",
+    };
+
+    expect(
+      hasUnreconciledExternalRevision(
+        [{ ...operation, state: "verified" }],
+        "revision-a",
+      ),
+    ).toBe(false);
+    expect(
+      hasUnreconciledExternalRevision(
+        [{ ...operation, state: "applied" }],
+        "revision-a",
+      ),
+    ).toBe(true);
+  });
+
+  it("uses the native projection before an Office artifact has semantic content", () => {
+    const binding = {
+      version: 1 as const,
+      profile: "strict-native" as const,
+      macroEnabled: false,
+      semanticDigest: "0".repeat(64),
+    };
+    const workbook = {
+      sheets: [{ id: "xlsx:sheet:1", name: "Sheet1", cells: [], merges: [] }],
+      definedNames: [],
+      nativeBinding: {
+        ...binding,
+        format: "xlsx" as const,
+        recognizedFormulaFunctions: [],
+      },
+    };
+    const deck = {
+      slides: [],
+      nativeBinding: { ...binding, format: "pptx" as const },
+    };
+
+    expect(xlsxProjectionUpdateFromContent(null, workbook)).toEqual({
+      projection: workbook,
+      operations: [],
+    });
+    expect(pptxProjectionUpdateFromContent(null, deck)).toEqual({
+      projection: deck,
+      operations: [],
+    });
+  });
+
   it("keeps native presentation objects when content returns from Spectra", () => {
     const base = {
       slides: [{

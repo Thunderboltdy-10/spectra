@@ -202,4 +202,24 @@ describe("native document projection", () => {
 
     expect(documentYjsAdapter.project(document)).not.toHaveProperty("nativeIntent");
   });
+
+  it("opens an unactivated native document from its freshly read projection", () => {
+    const base: DocxProjection = {
+      blocks: [{ id: "docx:paragraph:a", type: "paragraph", text: "Native" }],
+      outline: [],
+      nativeBinding: {
+        version: 1,
+        format: "docx",
+        profile: "strict-native",
+        macroEnabled: false,
+        semanticDigest: "a".repeat(64),
+        nativePlaceholders: [],
+      },
+    };
+
+    expect(docxProjectionFromContent(null, base)).toEqual({
+      projection: base,
+      operations: [],
+    });
+  });
 });

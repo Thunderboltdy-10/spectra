@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { strToU8, zipSync } from "fflate";
 import {
   createSpectraPackage,
   openSpectraPackage,
 } from "../lenses/spectra-package";
 import { validateArtifactContent } from "../artifacts/registry";
+import { LIBRARY_IMPORT_ACCEPT } from "../organization/library-import";
 
 const content = {
   settings: { shuffle: true, revealMode: "click" as const },
@@ -12,6 +13,8 @@ const content = {
 };
 
 describe("Spectra package", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("creates byte-identical archives for equivalent content and entry order", () => {
     const first = createSpectraPackage({
       artifactType: "flashcard_deck",
@@ -55,6 +58,30 @@ describe("Spectra package", () => {
       "history/": new Uint8Array(),
     });
     expect(openSpectraPackage(withDirectories).content).toEqual(content);
+  });
+
+  it("stays byte-identical when the wall clock changes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T08:00:00.000Z"));
+    const first = createSpectraPackage({
+      artifactType: "flashcard_deck",
+      schemaVersion: 3,
+      createdByVersion: "spectra-test",
+      content,
+    });
+    vi.setSystemTime(new Date("2026-08-27T20:00:00.000Z"));
+    const second = createSpectraPackage({
+      artifactType: "flashcard_deck",
+      schemaVersion: 3,
+      createdByVersion: "spectra-test",
+      content,
+    });
+
+    expect(Buffer.from(second).equals(Buffer.from(first))).toBe(true);
+  });
+
+  it("makes portable packages selectable from the Library importer", () => {
+    expect(LIBRARY_IMPORT_ACCEPT.split(",")).toContain(".spectra-pkg");
   });
 
   it("refuses traversal, unexpected entries, and invalid artifact content", () => {

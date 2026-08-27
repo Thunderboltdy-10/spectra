@@ -62,3 +62,24 @@ L1 harness green in the owning verification units for all formats; every write c
 - Full repository sweep and live Word/Excel/PowerPoint coexistence were not run; P2.V1 owns independent runtime verification.
 - Later owners unchanged: P2.I2 merge/CAS/broader identity; P2.I3 full native surface; P2.I4 sheets engine; P2.I5 corpus/harness.
 - Status: IMPLEMENTED only; no verification or acceptance claimed.
+
+## P2.V1 verifier log — 2026-08-27
+
+- Started as a clean verifier walk; real Word, Excel, PowerPoint, Browser, Bridge, and current Convex were used.
+- TRIAGE · SYSTEMIC: first DOCX activation failed because persisted semantic content was legitimately null; the same boundary existed in all Office formats.
+- Repaired DOCX/XLSX/PPTX to start from the freshly read native projection when semantic content is absent; added regression tests.
+- TRIAGE · SYSTEMIC: verified/stale external operations reactivated and old `applied` rows could keep presenters busy without a durable exit.
+- Centralized active external-revision selection; retired superseded rows on upload/activation/reconciliation; made `forWork` count only actionable work; added periodic expiry.
+- Deleted the now-dead DOCX table-refusal compatibility hook; no callers remained.
+- DOC-5 passed in the real SDT-wrapped table fixture: stable table targeting changed the named cell without shifting neighboring content.
+- FIELD NOTE · P2.I3: the bound cell's Custom XML value was not updated, so Word restored `Eric White`; no screenshot patch attempted.
+- Excel alternating loop retained Spectra A1 plus Excel bold B2 and preserved chart/table/WordArt/comment/sheets.
+- PowerPoint alternating loop retained the external title plus Spectra's new object; 15 slides and prior object identities held.
+- Package export→import restored both cards; re-export was byte-identical (842 bytes; SHA-256 `5F2BD66…D5DEB`).
+- P2.I2 owns simultaneous-open, materialize CAS/rebase races, and human conflict resolution; this VU did not claim them.
+- Focused Vitest: 7 files / 76 tests passed. Verifier-owned ESLint: zero warnings/errors.
+- Library shell: zero errors / 17 pre-existing design-token warnings. Secret scan and diff check passed.
+- `tsc --noEmit` retained only recorded blockers; no changed production file failed.
+- FIELD NOTE · P6.I3: the logger calls nonexistent `errorEvents:log`; recorded as later dead wiring, not started here.
+- Evidence: `.shots/reformation/P2.V1/manifest.md` and numbered screenshots `00`–`09`.
+- Verdict: PASS after class-wide repair and full remaining P2.I1 journey retest; P2.I1 remains IMPLEMENTED pending Pablo acceptance.

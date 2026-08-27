@@ -15,6 +15,10 @@ import {
   fetchVerifiedNativePayload,
   uploadNativePayload,
 } from "@/features/spectra/lenses/native-payload-server";
+import {
+  hasUnreconciledExternalRevision,
+  type RecentNativeOperation,
+} from "@/features/spectra/lenses/native-reconciliation";
 
 export const runtime = "nodejs";
 
@@ -40,12 +44,7 @@ type WorkTruth = {
     state: string;
     payloadRef?: string;
   }>;
-  recentOperations?: Array<{
-    direction?: string;
-    state?: string;
-    actorKind?: string;
-    revisionAfter?: string;
-  }>;
+  recentOperations?: RecentNativeOperation[];
 };
 
 type ArtifactTruth = {
@@ -74,16 +73,6 @@ export function changedRegions(before: DocxProjection, after: DocxProjection) {
   }
   changed.push(...prior.keys());
   return [...new Set(changed)];
-}
-
-/** Compatibility hook retained for older callers. Table writes are now
- * structured cell deltas and no longer need the former blanket refusal. */
-export function assertChangedTablesSupported(
-  _before: DocxProjection,
-  _after: DocxProjection,
-  _regionIds: readonly string[],
-) {
-  return true;
 }
 
 /** Queue one verified DOCX payload for the Bridge. Used by both the human
@@ -230,11 +219,9 @@ export async function POST(request: Request) {
           "replicas:forWork",
           { workId },
         );
-        const externalRevision = workTruth.recentOperations?.find(
-          (operation) =>
-            operation.direction === "external" &&
-            operation.actorKind === "external-edit" &&
-            operation.revisionAfter === local.truth.hash,
+        const externalRevision = hasUnreconciledExternalRevision(
+          workTruth.recentOperations,
+          local.truth.hash,
         );
         const externalNeedsActivation = Boolean(
           local.truth.hash !== truth.hash || externalRevision,

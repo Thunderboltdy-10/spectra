@@ -72,6 +72,7 @@ import type * as spectraRuntimeBuilds from "../spectraRuntimeBuilds.js";
 import type * as spectraShared from "../spectraShared.js";
 import type * as spectraThreads from "../spectraThreads.js";
 import type * as spectraWorkspaces from "../spectraWorkspaces.js";
+import type * as syncOperationLifecycle from "../syncOperationLifecycle.js";
 import type * as syncPolicy from "../syncPolicy.js";
 import type * as timetableReminders from "../timetableReminders.js";
 
@@ -146,6 +147,7 @@ declare const fullApi: ApiFromModules<{
   spectraShared: typeof spectraShared;
   spectraThreads: typeof spectraThreads;
   spectraWorkspaces: typeof spectraWorkspaces;
+  syncOperationLifecycle: typeof syncOperationLifecycle;
   syncPolicy: typeof syncPolicy;
   timetableReminders: typeof timetableReminders;
 }>;

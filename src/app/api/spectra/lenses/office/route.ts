@@ -10,6 +10,10 @@ import {
   uploadNativePayload,
 } from "@/features/spectra/lenses/native-payload-server";
 import {
+  hasUnreconciledExternalRevision,
+  type RecentNativeOperation,
+} from "@/features/spectra/lenses/native-reconciliation";
+import {
   xlsxLens,
   type XlsxProjection,
 } from "@/features/spectra/lenses/xlsx-lens";
@@ -57,12 +61,7 @@ type WorkTruth = {
     revision: string;
     state: string;
   }>;
-  recentOperations?: Array<{
-    direction?: string;
-    state?: string;
-    actorKind?: string;
-    revisionAfter?: string;
-  }>;
+  recentOperations?: RecentNativeOperation[];
 };
 type ArtifactTruth = { content: unknown };
 type OfficeProjection = XlsxProjection | PptxProjection;
@@ -303,11 +302,9 @@ export async function POST(request: Request) {
           "replicas:forWork",
           { workId },
         );
-        const externalRevision = workTruth.recentOperations?.find(
-          (operation) =>
-            operation.direction === "external" &&
-            operation.actorKind === "external-edit" &&
-            operation.revisionAfter === local.truth.hash,
+        const externalRevision = hasUnreconciledExternalRevision(
+          workTruth.recentOperations,
+          local.truth.hash,
         );
         const externalNeedsActivation = Boolean(
           local.truth.hash !== cloud.truth.hash || externalRevision,

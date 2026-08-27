@@ -75,6 +75,7 @@ import { OrganizerRail, type OrganizerLocation } from "./organizer-rail";
 import { OrganizerRow, ROW_HEIGHT, type RowCallbacks } from "./organizer-row";
 import { WorkBoard } from "./work-board";
 import { spectraBus } from "../events";
+import { LIBRARY_IMPORT_ACCEPT } from "./library-import";
 import {
   SurfaceGroupBy,
   SurfaceNewMenu,
@@ -801,7 +802,7 @@ export function LibraryOrganizer({
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"
-        accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json"
+        accept={LIBRARY_IMPORT_ACCEPT}
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) onImportFile?.(file);

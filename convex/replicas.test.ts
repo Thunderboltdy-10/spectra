@@ -287,7 +287,70 @@ describe("replica truth machine", () => {
     expect(truth.cloud).toMatchObject({ state: "behind", revision: baseHash, contentHash: baseHash });
     expect(truth.operations).toHaveLength(2);
     expect(new Set(truth.operations.map((operation) => operation.idempotencyKey)).size).toBe(2);
+    expect(truth.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        revisionAfter: nextHash,
+        state: "failed",
+        errorCode: "external-revision-superseded",
+      }),
+      expect.objectContaining({ revisionAfter: thirdHash, state: "applied" }),
+    ]));
     expect(truth.conflicts).toEqual([]);
+  });
+
+  it("does not present a superseded external revision as still syncing", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaId: fixture.localId,
+        idempotencyKey: "superseded-external",
+        direction: "external",
+        revisionBefore: "0".repeat(64),
+        revisionAfter: nextHash,
+        state: "applied",
+        actorKind: "external-edit",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+
+    const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
+      workId: fixture.workId,
+    });
+    expect(truth.pendingCount).toBe(0);
+  });
+
+  it("expires an external revision that never reaches reconciliation", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const operationId = await t.run(async (ctx) => {
+      const stalledAt = Date.now() - 31 * 60_000;
+      return ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaId: fixture.localId,
+        idempotencyKey: "stalled-external",
+        direction: "external",
+        revisionBefore: baseHash,
+        revisionAfter: baseHash,
+        state: "applied",
+        actorKind: "external-edit",
+        createdAt: stalledAt,
+        updatedAt: stalledAt,
+      });
+    });
+
+    const result = await t.mutation(internal.replicas.sweepReplicaTruth, {});
+    expect(result.expiredExternalOperations).toBe(1);
+    const operation = await t.run(async (ctx) => ctx.db.get(operationId));
+    expect(operation).toMatchObject({
+      state: "failed",
+      errorCode: "external-reconciliation-expired",
+    });
   });
 
   it("compensates an expired claimed write and its dependent rows", async () => {

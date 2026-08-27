@@ -23,6 +23,7 @@ import {
   deriveStorageTransitionIdempotencyKey,
   deriveSyncIdempotencyKey,
 } from "../shared/replica-truth";
+import { retireSupersededExternalOperations } from "./syncOperationLifecycle";
 
 const strategyPreset = v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked"));
 
@@ -281,7 +282,16 @@ export const forWork = query({
     ]);
     const conflicts = [...openConflicts, ...resolvingConflicts];
     const pending = await ctx.db.query("syncOperations").withIndex("by_work_created", (q) => q.eq("workId", workId)).order("desc").take(50);
-    return { replicas, conflicts, openConflictCount: conflicts.length, pendingCount: pending.filter((op) => op.state === "pending" || op.state === "applied").length, recentOperations: pending.slice(0, 20) };
+    const replicaById = new Map(replicas.map((replica) => [String(replica._id), replica]));
+    const pendingCount = pending.filter((operation) => {
+      if (operation.state === "pending") return true;
+      if (operation.state !== "applied") return false;
+      if (operation.direction !== "external" || operation.actorKind !== "external-edit") return true;
+      if (!operation.replicaId) return false;
+      const replica = replicaById.get(String(operation.replicaId));
+      return Boolean(replica && replica.revision === operation.revisionAfter);
+    }).length;
+    return { replicas, conflicts, openConflictCount: conflicts.length, pendingCount, recentOperations: pending.slice(0, 20) };
   },
 });
 
@@ -548,6 +558,14 @@ export const activateLens = mutation({
     const matchingLocals = await ctx.db.query("workReplicas")
       .withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local"))
       .take(50);
+    await retireSupersededExternalOperations(ctx, {
+      workId: args.workId,
+      replicaRevisions: matchingLocals.map((replica) => ({
+        replicaId: replica._id,
+        revision: replica.revision,
+      })),
+      now,
+    });
     await Promise.all(matchingLocals
       .filter((replica) => replica.contentHash === input.payloadHash && replica.payloadRef)
       .map((replica) => ctx.db.patch(replica._id, {
@@ -1092,6 +1110,11 @@ export const recordExternalReconciliation = mutation({
       throw new Error("EXTERNAL_PAYLOAD_UNVERIFIED");
     const now = Date.now();
     const projectionContentHash = await deriveProjectionSnapshotHash(args.content);
+    await retireSupersededExternalOperations(ctx, {
+      workId: args.workId,
+      replicaRevisions: [{ replicaId: local._id, revision: local.revision }],
+      now,
+    });
     const operation = await ctx.db.query("syncOperations")
       .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
       .order("desc")
@@ -1436,6 +1459,23 @@ export const sweepReplicaTruth = internalMutation({
       orphanedOperations += 1;
     }
 
+    const externalReconciliationCutoff = now - BRIDGE_WRITE_EXPIRES_MS;
+    const stalledExternalOperations = await ctx.db.query("syncOperations")
+      .withIndex("by_state_updated", (q) => q.eq("state", "applied").lt("updatedAt", externalReconciliationCutoff))
+      .filter((q) => q.and(
+        q.eq(q.field("direction"), "external"),
+        q.eq(q.field("actorKind"), "external-edit"),
+      ))
+      .take(100);
+    for (const operation of stalledExternalOperations) {
+      await ctx.db.patch(operation._id, {
+        state: "failed",
+        errorCode: "external-reconciliation-expired",
+        updatedAt: now,
+      });
+    }
+    const expiredExternalOperations = stalledExternalOperations.length;
+
     const transitions = await ctx.db.query("storageStrategyTransitions")
       .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", now))
       .take(100);
@@ -1549,7 +1589,7 @@ export const sweepReplicaTruth = internalMutation({
       await ctx.db.patch(payload._id, { refCount: 0, state: "released", releasedAt: now });
       releasedPayloads += 1;
     }
-    const repairs = { redriven, failedWrites, orphanedReplicas, orphanedOperations, failedTransitions, verifiedTransitions, reopenedConflicts, abandonedConflicts, releasedPayloads };
+    const repairs = { redriven, failedWrites, orphanedReplicas, orphanedOperations, expiredExternalOperations, failedTransitions, verifiedTransitions, reopenedConflicts, abandonedConflicts, releasedPayloads };
     if (Object.values(repairs).some((count) => count > 0))
       console.info("replica-truth-sweeper", repairs);
     return repairs;

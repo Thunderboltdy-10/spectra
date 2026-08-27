@@ -51,6 +51,7 @@ import {
   type CommandBinding,
   type CommandParam,
 } from "../commands";
+import { DOCUMENT_EXPORT_COPIES } from "../capabilities";
 import {
   DOCUMENT_STYLE_OPTIONS,
   documentCommandBindings,
@@ -2200,13 +2201,7 @@ export function DocumentStudio({
         "Field results stay as Word calculated them. Spectra never recalculates a field, so a stale page number is Word's to refresh.",
     },
     exportCopies: {
-      formats: [
-        { format: "docx", label: "Word" },
-        { format: "pdf", label: "PDF", lossy: true },
-        { format: "md", label: "Markdown", lossy: true },
-        { format: "html", label: "HTML", lossy: true },
-        { format: "txt", label: "text", lossy: true },
-      ],
+      formats: [...DOCUMENT_EXPORT_COPIES],
       run: async (format) => {
         setExportBusy(format);
         try {

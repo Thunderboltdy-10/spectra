@@ -63,7 +63,7 @@ import {
   type TextFormatAdapter,
   type ToggleFacet,
 } from "../shared";
-import { projectBindingsFromIr } from "../../capabilities";
+import { DOCUMENT_EXPORT_COPIES, projectBindingsFromIr } from "../../capabilities";
 import type { CommandBinding, CommandControlOption } from "../types";
 
 /**
@@ -1725,13 +1725,7 @@ export function documentStubHandlers(): DocumentCommandHandlers {
     },
     exportCopies: {
       noun: "document",
-      formats: [
-        { format: "docx", label: "Word", lossy: true },
-        { format: "pdf", label: "PDF", lossy: true },
-        { format: "md", label: "Markdown", lossy: true },
-        { format: "html", label: "HTML", lossy: true },
-        { format: "txt", label: "text", lossy: true },
-      ],
+      formats: [...DOCUMENT_EXPORT_COPIES],
       run: noop,
     },
     importCopy: { open: noop, noun: "document" },

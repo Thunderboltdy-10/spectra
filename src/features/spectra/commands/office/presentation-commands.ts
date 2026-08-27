@@ -61,7 +61,11 @@ import {
   Type,
   Ungroup,
 } from "lucide-react";
-import { PRESENTATION_STRICT_REASONS, projectBindingsFromIr } from "../../capabilities";
+import {
+  PRESENTATION_EXPORT_COPIES,
+  PRESENTATION_STRICT_REASONS,
+  projectBindingsFromIr,
+} from "../../capabilities";
 import type { CommandBinding, CommandControlOption, CommandParam, FidelityRegionKey } from "../types";
 import {
   commentsBinding,
@@ -2264,11 +2268,7 @@ export function presentationStubHandlers(
     },
     exporter: {
       noun: "deck",
-      formats: [
-        { format: "pptx", label: "PowerPoint", lossy: true },
-        { format: "pdf", label: "PDF", lossy: true },
-        { format: "png", label: "Slide image", lossy: true },
-      ],
+      formats: [...PRESENTATION_EXPORT_COPIES],
       run: noop,
     },
     importer: { open: noop, noun: "deck" },

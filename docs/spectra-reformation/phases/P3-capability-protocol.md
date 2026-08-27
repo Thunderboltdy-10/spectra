@@ -60,3 +60,15 @@ Ghost gate + conformance suites in their owning units; the "add one capability" 
 - Focused Vitest: 7 files / 136 tests; `check:capabilities`; secret scan 2108 files; `git diff --check`; scoped ESLint 0 errors.
 - Live Playwright not run (`localhost:3000` did not answer). No visual redesign.
 - Later owners unchanged: P3.I3 gate/keyboard/overflow, P3.I4 preferences, P5.I1 overflow loop, P6.I3 logger wiring.
+
+## P3.V1 verifier log — 2026-08-27
+
+- Status: **VERIFIED / PASS**. P3.I1 and P3.I2 stay IMPLEMENTED pending Pablo. No acceptance claimed.
+- Class repaired (R12/R17): `sharedFamily` no longer claims sheets Fit or presentation Replace; extras `zoomFit` / `replace` match what each studio mounts. Canvas-direct `document.rewrite.paragraph` / `document.edit.tableCell` stay IR-only.
+- Class repaired: live presentation listed `export.odp` the IR lacked (`CAPABILITY_DEFINITION_MISSING`). One list per type in `office-exports.ts` now feeds IR, stubs, and live studios. Ghost sheets `export.pdf` removed (live never had it).
+- Generated parity: `capability-conformance.test.ts` — unique ids, imported lens kinds, Office UI reach, AI schemas, D41 Font/Size/Bold/Italic, app commands, studio projection. Ghost gate passed. Focused Vitest 6 files / 96 tests. Authored-file ESLint 0 errors. Secret scan 2114 files. `git diff --check` clean.
+- Journey: after the export repair, workspace loaded; Photosynthesis / Rates (Shape) / Titration (Format) showed the same Font/Bold/Size controls. Overflow console spam unchanged — **P5.I1**.
+- Studio regression: quiz, flashcard, code, whiteboard, planner, agent workbars mounted with 0 CAPABILITY crashes. Library type filter used (board “Tides Quiz” opened a Live thread, not the studio).
+- Split card: scratch `P3V1-A`/`P3V1-B` tiled. One Control+B bolded only A’s `P3V1-MARK`. Workbar still registers two `document` keydown listeners; presentation window handlers still ignore `defaultPrevented` — **P3.I3** (CMD-1). Selection formatting bar is RichTextFormatBar — **P3.I3** (CMD-4).
+- Taste: canvas-direct ops have no workbar button; export copies are one IR-owned list.
+- Later owners: P3.I3 gate/keyboard/overflow/CMD-1, P3.I4 preferences, P5.I1 overflow loop, P6.I3 logger. Evidence: `.shots/reformation/P3.V1/manifest.md`.

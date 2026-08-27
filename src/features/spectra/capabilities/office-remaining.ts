@@ -4,6 +4,11 @@ import type { FidelityRegionKey } from "../commands/types";
 import type { WorkCapability } from "../work/registry";
 import { availabilityFor } from "./native";
 import {
+  DOCUMENT_EXPORT_COPIES,
+  PRESENTATION_EXPORT_COPIES,
+  SHEETS_EXPORT_COPIES,
+} from "./office-exports";
+import {
   DOCUMENT_NATIVE_REASONS,
   PRESENTATION_STRICT_REASONS,
   SHEETS_NATIVE_REASONS,
@@ -91,6 +96,10 @@ function sharedFamily<T extends OfficeWorkType>(
     exportFormats: readonly string[];
     exportManifest?: string;
     zoom: boolean;
+    /** Fit-to-window is a real control only where the studio mounts one. */
+    zoomFit?: boolean;
+    /** Replace is a real control only where the studio passes `toggleReplace`. */
+    replace?: boolean;
   },
 ): Spec<T>[] {
   return [
@@ -101,7 +110,15 @@ function sharedFamily<T extends OfficeWorkType>(
       "Find text in this work.",
       { requires: false, exposed: false },
     ],
-    ["navigate.replace", "Find and replace text in this work.", { exposed: false }],
+    ...(extras.replace
+      ? ([
+          [
+            "navigate.replace",
+            "Find and replace text in this work.",
+            { exposed: false },
+          ],
+        ] satisfies Spec<T>[])
+      : []),
     [
       "review.comments",
       "Show or hide Spectra comments on this work.",
@@ -116,11 +133,15 @@ function sharedFamily<T extends OfficeWorkType>(
             "Reset zoom to 100%.",
             { requires: false, exposed: false },
           ],
-          [
-            "view.zoom.fit",
-            "Fit the canvas to the window.",
-            { requires: false, exposed: false },
-          ],
+          ...(extras.zoomFit
+            ? ([
+                [
+                  "view.zoom.fit",
+                  "Fit the canvas to the window.",
+                  { requires: false, exposed: false },
+                ],
+              ] satisfies Spec<T>[])
+            : []),
         ] satisfies Spec<T>[])
       : []),
     [
@@ -154,9 +175,10 @@ function sharedFamily<T extends OfficeWorkType>(
 const DOCUMENT_SPECS: Spec<"document">[] = [
   ...sharedFamily("document", {
     importReason: DOCUMENT_NATIVE_REASONS.importCopy,
-    exportFormats: ["docx", "pdf", "md", "html", "txt"],
+    exportFormats: DOCUMENT_EXPORT_COPIES.map((copy) => copy.format),
     exportManifest: "prepare_export",
     zoom: false,
+    replace: true,
   }),
   [
     "navigate.outline",
@@ -678,8 +700,9 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
   ...sharedFamily("sheets", {
     importReason: SHEETS_NATIVE_REASONS.importCopy,
     importManifest: "import_data",
-    exportFormats: ["xlsx", "csv", "ods", "pdf"],
+    exportFormats: SHEETS_EXPORT_COPIES.map((copy) => copy.format),
     zoom: true,
+    replace: true,
   }),
   [
     "format",
@@ -1380,8 +1403,9 @@ const R = PRESENTATION_STRICT_REASONS;
 const PRESENTATION_SPECS: Spec<"presentation">[] = [
   ...sharedFamily("presentation", {
     importReason: R.importCopy,
-    exportFormats: ["pptx", "pdf", "png"],
+    exportFormats: PRESENTATION_EXPORT_COPIES.map((copy) => copy.format),
     zoom: true,
+    zoomFit: true,
   }),
   [
     "slide.add",

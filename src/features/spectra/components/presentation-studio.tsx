@@ -69,6 +69,7 @@ import {
   presentationCommandBindings,
   type PresentationHandlers,
 } from "../commands/office/presentation-commands";
+import { PRESENTATION_EXPORT_COPIES } from "../capabilities";
 import {
   commandContext,
   commandForBinding,
@@ -3232,12 +3233,7 @@ export function PresentationStudio({
     exporter: {
       noun: "deck",
       busyFormat: ioBusy ? "pptx" : null,
-      formats: [
-        { format: "pptx", label: "PowerPoint", lossy: true },
-        { format: "pdf", label: "PDF", lossy: true },
-        { format: "odp", label: "OpenDocument", lossy: true },
-        { format: "png", label: "Slide image", lossy: true },
-      ],
+      formats: [...PRESENTATION_EXPORT_COPIES],
       run: (format) =>
         void exportPresentation(format as "pptx" | "odp" | "pdf" | "png"),
     },

@@ -81,7 +81,7 @@ import {
   type ValueFacet,
   type ZoomAdapter,
 } from "../shared";
-import { projectBindingsFromIr } from "../../capabilities";
+import { SHEETS_EXPORT_COPIES, projectBindingsFromIr } from "../../capabilities";
 
 /**
  * The Sheets command set.
@@ -652,12 +652,7 @@ export function sheetsStubHandlers(): SheetsCommandHandlers {
     zoom: { zoom: 1, setZoom: noop, min: 0.5, max: 2 },
     export: {
       noun: "workbook",
-      formats: [
-        { format: "xlsx", label: "Excel", lossy: true },
-        { format: "csv", label: "CSV", lossy: true },
-        { format: "ods", label: "OpenDocument", lossy: true },
-        { format: "pdf", label: "PDF", lossy: true },
-      ],
+      formats: [...SHEETS_EXPORT_COPIES],
       run: noop,
     },
     import: { open: noop, noun: "workbook" },

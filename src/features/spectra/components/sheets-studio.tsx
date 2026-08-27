@@ -102,6 +102,7 @@ import {
 } from "./artifact-workbar";
 import { getWorkDefinition } from "../work/registry";
 import type { CommandParam } from "../commands/types";
+import { SHEETS_EXPORT_COPIES } from "../capabilities";
 import {
   SHEETS_BORDER_PRESETS,
   SHEETS_BORDER_STYLES,
@@ -4209,11 +4210,7 @@ export function SheetsStudio({
     },
     export: {
       noun: "workbook",
-      formats: [
-        { format: "xlsx", label: "Excel", lossy: true },
-        { format: "csv", label: "CSV", lossy: true },
-        { format: "ods", label: "OpenDocument", lossy: true },
-      ],
+      formats: [...SHEETS_EXPORT_COPIES],
       run: (format) => void exportWorkbook(format as "xlsx" | "csv" | "ods"),
     },
     import: {

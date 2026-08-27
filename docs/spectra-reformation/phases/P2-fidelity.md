@@ -188,3 +188,17 @@ L1 harness green in the owning verification units for all formats; every write c
 - Focused Vitest: 4 files / 52 tests passed (`seam-contract` 13, `document-native-projection`, `xlsx-pptx-lens`, `office-route-projection`). Scoped ESLint: 0 errors. Secret scan passed across 2,094 tracked files. `git diff --check` passed.
 - Full repository sweep and live Office/school-folder grading were not run. Later owners unchanged: P2.I3 remaining R7 refusals; P6.I3 logger; P3 IR.
 - Status: IMPLEMENTED only; no verification or acceptance claimed. Paired journey is P2.V2.
+
+## P2.V2 verifier log — 2026-08-27
+
+- Isolated school folder `Downloads\spectra-p2v2-schoolwork` (seven fixtures). Pablo’s OneDrive Physics, PS 6/PS 8, and visible Word pid 10584 were not driven. PrintWindow was not used as Office proof.
+- L1 `npm run fidelity:seam`: 1 file / 13 tests passed (I5 product seam). No product patch this VU; tests were not weakened.
+- Mount: debug Bridge on hidden desktop `P2V2`; Connect this device; folder Ready · 7 of 7. After every edit, History notes / Economics / TOK SHA-256 matched baseline (D25).
+- Essay: Spectra typed `P2V2-CONCLUSION-27` (0 console errors) into `word/document.xml`. Headless Word `/w` COM FullName matched the schoolwork path; Find-insert saved `P2V2-WORD-27`. Honest conflict bar; Keep Word showed both markers. Syncing after the Spectra write cleared into that conflict, not silent loss.
+- Chemistry: Spectra A1 `P2V2-A1` reached sharedStrings; chart/table parts remained. Excel COM FullName matched; A1 readback held; bold B2 `P2V2-B2`; 2 sheets / 1 chart. Keep Excel restored both markers. First A1 keystroke was rolled back by a lens-open race; the following commit persisted (not a screenshot patch).
+- Geography: Spectra subtitle `P2V2-PPTX-27` plus object `Spectra Text 95241` (`Add a clear idea`). PowerPoint COM FullName matched; 15 slides / 4 shapes; notes `P2V2-PPT-27`. Keep PowerPoint dismissed the bar; slide marker remained. Title `Typical Presentation` stayed read-only (P2.I3).
+- FIELD NOTE · P5.I1: Presentation workbar logged “essential actions are 20.6 button-widths wide on Shape” in a tight loop. Not patched here.
+- FIELD NOTE · P2.I3: remaining R7 refusals (title preset, transitions/animations, Shape) unchanged. Notes `P2V2-PPT-27` did not appear in the collapsed “Add notes” control.
+- Hidden desktop `P2V2` closed after Bridge kill. Convex/web left running; no `convex push`. Evidence: `.shots/reformation/P2.V2/manifest.md` `00`–`29`.
+- Status: VERIFIED / PASS. P2.I1–I5 remain IMPLEMENTED pending Pablo acceptance. Next remaining: P3.I1.
+

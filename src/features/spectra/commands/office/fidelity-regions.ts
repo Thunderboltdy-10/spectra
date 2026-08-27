@@ -102,10 +102,11 @@ function asFidelityClass(value: unknown): FidelityClass | undefined {
  * to forget a key.
  */
 const REGION_KEYS: ReadonlySet<string> = new Set<FidelityRegionKey>([
-  "body", "styles", "lists", "tables", "images", "equations", "headersFooters",
-  "footnotes", "fields", "trackedChanges", "sections", "comments", "macros",
+  "body", "styles", "lists", "tables", "tableStructure", "images", "equations", "headersFooters",
+  "footnotes", "hyperlinks", "fields", "trackedChanges", "sections", "comments", "macros",
   "customXml", "smartArt", "ole", "cells", "formulas", "numberFormats", "charts",
-  "pivotTables", "validation", "conditionalFormat", "namedRanges", "slides",
+  "merges", "freezePanes", "sheetStructure", "dimensions", "sheetViews", "sheetMetadata",
+  "calculationSettings", "sortFilter", "pivotTables", "validation", "conditionalFormat", "namedRanges", "slides",
   "masters", "layouts", "transitions", "animations", "media", "speakerNotes",
   "shapes",
 ]);

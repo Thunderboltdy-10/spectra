@@ -1,5 +1,5 @@
 import type { PresentationContent } from "../presentation/model";
-import type { SheetsContent } from "../sheets/model";
+import type { SheetCellFormat, SheetsContent } from "../sheets/model";
 import { z } from "zod";
 import {
   pptxProjectionSchema,
@@ -50,27 +50,77 @@ function decimalPlaces(value: unknown) {
  * and is reused by materialization; copying it into the Sheets model would
  * make the collaborative Yjs document fail its own schema validation.
  */
-function normalizedCellFormat(format: Record<string, unknown> | undefined) {
+function normalizedColor(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const hex = value.replace(/^#/, "");
+  return `#${hex.length === 8 ? hex.slice(2) : hex}`;
+}
+
+function normalizedFontFamily(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  if (/consolas|courier|mono/i.test(value)) return "mono" as const;
+  if (/cambria|times|georgia|serif/i.test(value)) return "serif" as const;
+  return "sans" as const;
+}
+
+export function normalizedCellFormat(format: Record<string, unknown> | undefined): SheetCellFormat | undefined {
   if (!format) return undefined;
   const font = record(format.font);
   const alignment = record(format.alignment);
+  const fill = record(format.fill);
+  const nativeBorders = record(format.border);
   const horizontal = alignment.horizontal;
+  const vertical = alignment.vertical;
   const decimals = decimalPlaces(format.numberFormat);
   const underline = font.underline;
+  const numberFormatRecord = record(format.numberFormat);
+  const nativeCode = typeof numberFormatRecord.code === "string" ? numberFormatRecord.code : undefined;
+  const borders = Object.fromEntries(
+    (["top", "right", "bottom", "left"] as const).flatMap((edge) => {
+      const native = record(nativeBorders[edge]);
+      if (typeof native.style !== "string") return [];
+      return [[edge, {
+        style: native.style,
+        ...(normalizedColor(native.color) ? { color: normalizedColor(native.color) } : {}),
+      }]];
+    }),
+  );
+  const rotation = typeof alignment.textRotation === "number"
+    ? alignment.textRotation > 90
+      ? 90 - alignment.textRotation
+      : alignment.textRotation
+    : undefined;
   return {
     ...(typeof font.bold === "boolean" ? { bold: font.bold } : {}),
     ...(typeof font.italic === "boolean" ? { italic: font.italic } : {}),
     ...(underline !== undefined
       ? { underline: underline !== false && underline !== "none" }
       : {}),
-    ...(horizontal === "left" || horizontal === "center" || horizontal === "right"
-      ? { align: horizontal as "left" | "center" | "right" }
+    ...(typeof font.strike === "boolean" ? { strike: font.strike } : {}),
+    ...(normalizedFontFamily(font.name) ? { fontFamily: normalizedFontFamily(font.name) } : {}),
+    ...(normalizedColor(font.color) ? { textColor: normalizedColor(font.color) } : {}),
+    ...(fill.pattern === "solid" && normalizedColor(fill.color)
+      ? { fillColor: normalizedColor(fill.color) }
       : {}),
+    ...(horizontal === "left" || horizontal === "center" || horizontal === "right"
+      || horizontal === "justify"
+      ? { align: horizontal as "left" | "center" | "right" | "justify" }
+      : {}),
+    ...(vertical === "top" || vertical === "bottom"
+      ? { verticalAlign: vertical }
+      : vertical === "center"
+        ? { verticalAlign: "middle" as const }
+        : {}),
+    ...(typeof alignment.wrapText === "boolean" ? { wrap: alignment.wrapText } : {}),
+    ...(rotation !== undefined ? { rotation } : {}),
+    ...(typeof alignment.indent === "number" ? { indent: alignment.indent } : {}),
     numberFormat: normalizedNumberFormat(format.numberFormat),
+    ...(nativeCode && nativeCode !== "General" ? { customFormat: nativeCode } : {}),
     ...(decimals !== undefined ? { decimals } : {}),
     ...(typeof font.size === "number" && font.size >= 6 && font.size <= 72
       ? { fontSize: font.size }
       : {}),
+    ...(Object.keys(borders).length ? { borders } : {}),
   };
 }
 
@@ -101,8 +151,8 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
                     nativeFormulaSupport: cell.formulaSupport,
                   }
                 : {}),
-              ...(cell.style
-                ? { format: normalizedCellFormat(cell.style) }
+              ...(cell.format ?? (cell.style ? normalizedCellFormat(cell.style) : undefined)
+                ? { format: cell.format ?? normalizedCellFormat(cell.style) }
                 : {}),
             },
           ];
@@ -111,6 +161,8 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
       tables: [],
       charts: [],
       mergedRanges: [...sheet.merges],
+      frozenRows: sheet.frozenRows,
+      frozenColumns: sheet.frozenColumns,
     })),
     activeSheetId: projection.sheets[0]?.id ?? "",
     nativeBinding: projection.nativeBinding,
@@ -120,12 +172,6 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
 export function pptxArtifactContent(
   projection: PptxProjection,
 ): PresentationContent {
-  // A deck can have notes pages for some slides and none for others, so the
-  // honesty flag is decided per slide rather than for the file. A slide with no
-  // notes part is the case that used to lie: the note went into Spectra's own
-  // state, the command reported success, and materialize had nowhere to write
-  // it. Saying `unsupported` here is what lets the notes command refuse in
-  // advance, in words, instead of accepting text it cannot deliver.
   return {
     theme: { id: "native-pptx", name: "PowerPoint theme" },
     settings: {
@@ -137,7 +183,6 @@ export function pptxArtifactContent(
       showSlideNumbers: true,
     },
     slides: projection.slides.map((slide) => {
-      const notesUnsupported = !slide.notesPartName;
       return {
         id: slide.id,
         title: slide.title,
@@ -148,16 +193,13 @@ export function pptxArtifactContent(
         // as empty.
         ...(slide.speakerNotes ? { speakerNotes: slide.speakerNotes } : {}),
         objects: slide.objects,
-        ...(slide.hasTransition || slide.hasTiming || notesUnsupported
+        ...(slide.hasTransition || slide.hasTiming
           ? {
               nativeCompatibility: {
                 ...(slide.hasTransition
                   ? { transition: "preserved" as const }
                   : {}),
                 ...(slide.hasTiming ? { animations: "preserved" as const } : {}),
-                ...(notesUnsupported
-                  ? { speakerNotes: "unsupported" as const }
-                  : {}),
               },
             }
           : {}),
@@ -179,9 +221,13 @@ const xlsxEditorContentSchema = z
               .object({
                 value: z.unknown().optional(),
                 formula: z.string().optional(),
+                format: z.record(z.string(), z.unknown()).optional(),
               })
               .passthrough(),
           ),
+          mergedRanges: z.array(z.string()).optional(),
+          frozenRows: z.number().int().nonnegative().optional(),
+          frozenColumns: z.number().int().nonnegative().optional(),
         })
         .passthrough(),
     ),
@@ -232,9 +278,20 @@ export function xlsxProjectionFromContent(
                   formulaSupport: previous.formulaSupport,
                 }
               : {}),
+          ...("format" in value
+            ? { format: value.format ?? {} }
+            : previous?.format
+              ? { format: previous.format }
+              : {}),
         };
       });
-      return { ...sheet, cells };
+      return {
+        ...sheet,
+        cells,
+        merges: next.mergedRanges ?? sheet.merges,
+        frozenRows: next.frozenRows ?? sheet.frozenRows,
+        frozenColumns: next.frozenColumns ?? sheet.frozenColumns,
+      };
     }),
   });
   return projection;
@@ -262,6 +319,13 @@ export function xlsxOperationsBetween(
             ? { kind: "set-formula", sheetId: sheet.id, ref: cell.ref, formula: cell.formula }
             : { kind: "set-cell", sheetId: sheet.id, ref: cell.ref, value: cell.value },
         );
+        if (cell.format)
+          operations.push({
+            kind: "set-cell-format",
+            sheetId: sheet.id,
+            ref: cell.ref,
+            format: { ...cell.format, __full: cell.format },
+          });
         continue;
       }
       if (cell.formula !== old.formula) {
@@ -286,9 +350,47 @@ export function xlsxOperationsBetween(
           value: cell.value,
         });
       }
+      if (JSON.stringify(cell.format ?? {}) !== JSON.stringify(old.format ?? {})) {
+        const oldFormat = old.format ?? {};
+        const nextFormat = cell.format ?? {};
+        const patch = Object.fromEntries(
+          [...new Set([...Object.keys(oldFormat), ...Object.keys(nextFormat)])]
+            .map((key) => [
+              key,
+              JSON.stringify(oldFormat[key]) === JSON.stringify(nextFormat[key])
+                ? undefined
+                : nextFormat[key] ?? null,
+            ])
+            .filter((entry) => entry[1] !== undefined),
+        );
+        operations.push({
+          kind: "set-cell-format",
+          sheetId: sheet.id,
+          ref: cell.ref,
+          format: Object.keys(nextFormat).length ? { ...patch, __full: nextFormat } : {},
+        });
+      }
     }
     for (const ref of oldCells.keys())
       operations.push({ kind: "clear-cell", sheetId: sheet.id, ref });
+    const oldMerges = new Set(previous.merges);
+    const newMerges = new Set(sheet.merges);
+    for (const range of oldMerges) {
+      if (!newMerges.has(range)) operations.push({ kind: "unmerge-cells", sheetId: sheet.id, range });
+    }
+    for (const range of newMerges) {
+      if (!oldMerges.has(range)) operations.push({ kind: "merge-cells", sheetId: sheet.id, range });
+    }
+    if (
+      sheet.frozenRows !== previous.frozenRows ||
+      sheet.frozenColumns !== previous.frozenColumns
+    )
+      operations.push({
+        kind: "set-freeze-panes",
+        sheetId: sheet.id,
+        rows: sheet.frozenRows ?? 0,
+        columns: sheet.frozenColumns ?? 0,
+      });
   }
   return operations;
 }
@@ -446,11 +548,13 @@ export function pptxOperationsBetween(
         ...(slide.title ? { title: slide.title } : {}),
         ...(text.length ? { text } : {}),
       });
+      if (slide.speakerNotes)
+        operations.push({ kind: "set-notes", slideId: slide.id, text: slide.speakerNotes });
       return;
     }
     if (slide.title !== old.title)
       operations.push({ kind: "set-title", slideId: slide.id, text: slide.title });
-    if (slide.speakerNotes !== old.speakerNotes && old.notesPartName)
+    if (slide.speakerNotes !== old.speakerNotes)
       operations.push({ kind: "set-notes", slideId: slide.id, text: slide.speakerNotes });
     const oldObjects = new Map(old.objects.map((object) => [object.id, object]));
     for (const object of slide.objects) {

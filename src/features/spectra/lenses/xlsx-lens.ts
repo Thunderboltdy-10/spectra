@@ -1,8 +1,8 @@
-import { Workbook, parseCellRef } from "@ariadng/office/xlsx";
+import { Workbook, parseCellRef, type CellStyleUpdate } from "@ariadng/office/xlsx";
 import { comparePackages } from "@ariadng/office/preservation";
-import type { XmlElement } from "@ariadng/office/xml";
+import { XmlElement } from "@ariadng/office/xml";
 import { sha256Payload } from "./docx-lens";
-import { xlsxOperationsBetween } from "./office-content";
+import { normalizedCellFormat, xlsxOperationsBetween } from "./office-content";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -59,11 +59,172 @@ function formulaSupport(formula: string) {
     : "cached-only" as const;
 }
 
+function worksheetFreeze(root: XmlElement) {
+  const pane = root.find(SML, "sheetViews")?.find(SML, "sheetView")?.find(SML, "pane");
+  const state = pane?.getAttribute("state");
+  if (state !== "frozen" && state !== "frozenSplit") return { rows: 0, columns: 0 };
+  return {
+    rows: Math.max(0, Number(pane?.getAttribute("ySplit") ?? 0) || 0),
+    columns: Math.max(0, Number(pane?.getAttribute("xSplit") ?? 0) || 0),
+  };
+}
+
+function columnName(index: number) {
+  let value = index;
+  let result = "";
+  while (value > 0) {
+    value -= 1;
+    result = String.fromCharCode(65 + (value % 26)) + result;
+    value = Math.floor(value / 26);
+  }
+  return result || "A";
+}
+
+const WORKSHEET_CHILD_ORDER = [
+  "sheetPr", "dimension", "sheetViews", "sheetFormatPr", "cols", "sheetData",
+  "sheetCalcPr", "sheetProtection", "protectedRanges", "scenarios", "autoFilter",
+  "sortState", "dataConsolidate", "customSheetViews", "mergeCells", "phoneticPr",
+  "conditionalFormatting", "dataValidations", "hyperlinks", "printOptions", "pageMargins",
+  "pageSetup", "headerFooter", "rowBreaks", "colBreaks", "customProperties", "cellWatches",
+  "ignoredErrors", "smartTags", "drawing", "legacyDrawing", "legacyDrawingHF", "picture",
+  "oleObjects", "controls", "webPublishItems", "tableParts", "extLst",
+];
+
+function insertWorksheetChild(root: XmlElement, child: XmlElement) {
+  const wanted = WORKSHEET_CHILD_ORDER.indexOf(child.localName);
+  const reference = root.elements().find((candidate) => {
+    const index = WORKSHEET_CHILD_ORDER.indexOf(candidate.localName);
+    return index >= 0 && index > wanted;
+  });
+  root.insertBefore(child, reference ?? null);
+}
+
+async function setWorksheetFreeze(workbook: Workbook, partName: string, rows: number, columns: number) {
+  const doc = await workbook.office.xml(partName);
+  let views = doc.root.find(SML, "sheetViews");
+  const prefix = doc.root.lookupPrefix(SML) ?? null;
+  if (!views) {
+    views = new XmlElement("sheetViews", prefix);
+    insertWorksheetChild(doc.root, views);
+  }
+  let view = views.find(SML, "sheetView");
+  if (!view) {
+    view = new XmlElement("sheetView", prefix);
+    view.setAttribute("workbookViewId", "0");
+    views.appendChild(view);
+  }
+  const existingPane = view.find(SML, "pane");
+  if (existingPane && ["frozen", "frozenSplit"].includes(existingPane.getAttribute("state") ?? ""))
+    view.removeChild(existingPane);
+  if (rows || columns) {
+    const pane = new XmlElement("pane", prefix);
+    if (columns) pane.setAttribute("xSplit", String(columns));
+    if (rows) pane.setAttribute("ySplit", String(rows));
+    pane.setAttribute("topLeftCell", `${columnName(columns + 1)}${rows + 1}`);
+    pane.setAttribute("activePane", rows && columns ? "bottomRight" : rows ? "bottomLeft" : "topRight");
+    pane.setAttribute("state", "frozen");
+    view.insertBefore(pane, view.elements()[0] ?? null);
+  }
+  workbook.office.markDirty(partName);
+}
+
+function numberFormatCode(format: Record<string, unknown>) {
+  const kind = format.numberFormat;
+  const decimals = Math.max(0, Math.min(12, Number(format.decimals ?? 0) || 0));
+  const zeroes = decimals ? `.${"0".repeat(decimals)}` : "";
+  const grouping = format.thousands === false ? "0" : "#,##0";
+  if (kind === "custom" && typeof format.customFormat === "string") return format.customFormat;
+  if (kind === "text") return "@";
+  if (kind === "percent") return `0${zeroes}%`;
+  if (kind === "fraction") return "# ?/?";
+  if (kind === "scientific") return `0${zeroes || ".00"}E+00`;
+  if (kind === "date") return "yyyy-mm-dd";
+  if (kind === "time") return decimals ? "h:mm:ss.000" : "h:mm:ss";
+  if (kind === "currency" || kind === "accounting") {
+    const currency = typeof format.currency === "string" ? format.currency : "USD";
+    return `[$${currency}] ${grouping}${zeroes}`;
+  }
+  if (kind === "number") return `${grouping}${zeroes}`;
+  return null;
+}
+
+function styleUpdate(format: Record<string, unknown>): CellStyleUpdate {
+  type MutableUpdate = { -readonly [Key in keyof CellStyleUpdate]?: CellStyleUpdate[Key] };
+  const update: MutableUpdate = {};
+  const full = format.__full && typeof format.__full === "object"
+    ? format.__full as Record<string, unknown>
+    : format;
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(format, key);
+  if (has("bold")) update.bold = format.bold === true;
+  if (has("italic")) update.italic = format.italic === true;
+  if (has("underline")) update.underline = format.underline === true;
+  if (has("strike")) update.strike = format.strike === true;
+  if (has("fontFamily")) {
+    const family = format.fontFamily;
+    update.fontName = family === "mono"
+      ? "Consolas"
+      : family === "serif"
+        ? "Cambria"
+        : family === "sans" || typeof family !== "string"
+          ? "Calibri"
+          : family;
+  }
+  if (has("fontSize")) update.fontSize = typeof format.fontSize === "number" ? format.fontSize : 11;
+  if (has("textColor")) update.color = typeof format.textColor === "string" ? format.textColor : null;
+  if (has("fillColor")) update.fill = typeof format.fillColor === "string" ? format.fillColor : null;
+  if (["numberFormat", "customFormat", "currency", "decimals", "thousands"].some(has))
+    update.numberFormat = numberFormatCode(full);
+  if (has("borders")) {
+    const borders = format.borders && typeof format.borders === "object"
+      ? format.borders as Record<string, unknown>
+      : undefined;
+    update.border = borders
+      ? Object.fromEntries(
+          (["top", "right", "bottom", "left"] as const).map((edge) => {
+            const value = borders[edge];
+            if (!value || typeof value !== "object") return [edge, null];
+            const record = value as Record<string, unknown>;
+            return [edge, {
+              style: record.style,
+              ...(typeof record.color === "string" ? { color: record.color } : {}),
+            }];
+          }),
+        ) as NonNullable<CellStyleUpdate["border"]>
+      : null;
+  }
+  if (has("align"))
+    update.align = format.align === "left" || format.align === "center" || format.align === "right" || format.align === "justify"
+      ? format.align
+      : "general";
+  if (has("verticalAlign"))
+    update.valign = format.verticalAlign === "middle"
+      ? "center"
+      : format.verticalAlign === "top" || format.verticalAlign === "bottom"
+        ? format.verticalAlign
+        : "bottom";
+  if (has("wrap")) update.wrapText = format.wrap === true;
+  if (has("indent")) update.indent = typeof format.indent === "number" ? format.indent : 0;
+  if (has("rotation")) {
+    const rotation = typeof format.rotation === "number" ? format.rotation : 0;
+    update.textRotation = rotation < 0 ? 90 - rotation : rotation;
+  }
+  return update;
+}
+
+async function clearCellStyle(workbook: Workbook, partName: string, ref: string) {
+  const doc = await workbook.office.xml(partName);
+  const cell = descendants(doc.root).find(
+    (element) => element.namespaceUri() === SML && element.localName === "c" && element.getAttribute("r")?.toUpperCase() === ref.toUpperCase(),
+  );
+  if (cell?.removeAttribute("s")) workbook.office.markDirty(partName);
+}
+
 async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityProfile) {
   const entries: LensFidelityEntry[] = [];
   const sheets: XlsxSheetProjection[] = [];
   for (const sheet of workbook.sheets()) {
     const doc = await workbook.office.xml(sheet.partName);
+    const freeze = worksheetFreeze(doc.root);
     const refs = descendants(doc.root)
       .filter((node) => node.namespaceUri() === SML && node.localName === "c")
       .map((node) => node.getAttribute("r"))
@@ -88,10 +249,43 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
         value: info.value,
         ...(formula ? { formula, formulaSupport: support } : {}),
         style: sheet.getCellStyle(ref) as unknown as Record<string, unknown>,
+        format: normalizedCellFormat(sheet.getCellStyle(ref) as unknown as Record<string, unknown>),
       };
     });
-    sheets.push({ id: `xlsx:sheet:${sheet.sheetId}`, name: sheet.name, cells, merges: sheet.merges() });
+    sheets.push({
+      id: `xlsx:sheet:${sheet.sheetId}`,
+      name: sheet.name,
+      cells,
+      merges: sheet.merges(),
+      frozenRows: freeze.rows,
+      frozenColumns: freeze.columns,
+    });
   }
+  const regionEntries: ReadonlyArray<[string, LensFidelityEntry["class"], string?]> = [
+    ["cells", "NATIVE"], ["formulas", "NATIVE"], ["styles", "NATIVE"],
+    ["numberFormats", "NATIVE"], ["merges", "NATIVE"], ["freezePanes", "NATIVE"],
+    ["charts", "PRESERVED", "Excel chart parts are preserved, but Spectra does not author or rewrite them."],
+    ["tables", "PRESERVED", "Excel table definitions are preserved until their structure has a native writer."],
+    ["validation", "PRESERVED", "Excel data validation is preserved until its rules have a native writer."],
+    ["conditionalFormat", "PRESERVED", "Excel conditional formatting is preserved until its rules have a native writer."],
+    ["namedRanges", "PRESERVED", "Workbook names are preserved until their scope and references have a complete native writer."],
+    ["pivotTables", "PRESERVED", "Pivot tables remain owned by Excel."],
+    ["comments", "PRESERVED", "Cell comments and notes remain owned by Excel."],
+    ["sheetStructure", "PRESERVED", "Worksheet lifecycle and row or column topology changes are unavailable for mounted workbooks."],
+    ["dimensions", "PRESERVED", "Row and column size or visibility changes are unavailable for mounted workbooks."],
+    ["sheetViews", "PRESERVED", "Gridline and heading view settings are preserved as Excel wrote them."],
+    ["sheetMetadata", "PRESERVED", "Worksheet tab and visibility metadata are preserved as Excel wrote them."],
+    ["calculationSettings", "PRESERVED", "Workbook calculation settings remain owned by Excel."],
+    ["sortFilter", "PRESERVED", "Excel filter state is preserved until its native references and criteria have a complete writer."],
+  ];
+  for (const [feature, fidelityClass, reason] of regionEntries)
+    entries.push({
+      regionId: `xlsx:region:${feature}`,
+      feature,
+      class: fidelityClass,
+      ...(fidelityClass === "PRESERVED" ? { readOnly: true } : {}),
+      ...(reason ? { reason } : {}),
+    });
   const partNames = workbook.office.package.parts().map((part) => part.name);
   const preserved: Array<[string, RegExp]> = [
     ["pivot", /\/pivot/i], ["chart", /\/charts\//i],
@@ -125,7 +319,16 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
   }
   const fidelityMap: LensFidelityMap = { version: 1, profile, entries };
   const definedNames = workbook.definedNames().map((item) => ({ name: item.name, ref: item.ref, ...(item.sheet ? { sheet: item.sheet } : {}) }));
-  const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify({ sheets: sheets.map((s) => ({ name: s.name, cells: s.cells.map(({ ref, value, formula }) => ({ ref, value, formula })) })), definedNames })));
+  const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify({
+    sheets: sheets.map((sheet) => ({
+      name: sheet.name,
+      cells: sheet.cells.map(({ ref, value, formula, format }) => ({ ref, value, formula, format })),
+      merges: sheet.merges,
+      frozenRows: sheet.frozenRows,
+      frozenColumns: sheet.frozenColumns,
+    })),
+    definedNames,
+  })));
   const projection = xlsxProjectionSchema.parse({
     sheets,
     definedNames,
@@ -153,9 +356,17 @@ async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: Xlsx
   const operations = delta.kind === "ai-edit" ? delta.operations : [delta];
   for (const operation of operations) {
     const sheet = findSheet(workbook, operation.sheetId);
-    parseCellRef(operation.ref);
+    if ("ref" in operation) parseCellRef(operation.ref);
     if (operation.kind === "set-formula") sheet.setFormula(operation.ref, operation.formula);
     else if (operation.kind === "clear-cell") sheet.setCell(operation.ref, null);
+    else if (operation.kind === "set-cell-format") {
+      if (Object.keys(operation.format).length) sheet.setCellStyle(operation.ref, styleUpdate(operation.format));
+      else await clearCellStyle(workbook, sheet.partName, operation.ref);
+    }
+    else if (operation.kind === "merge-cells") sheet.merge(operation.range);
+    else if (operation.kind === "unmerge-cells") sheet.unmerge(operation.range);
+    else if (operation.kind === "set-freeze-panes")
+      await setWorksheetFreeze(workbook, sheet.partName, operation.rows, operation.columns);
     else {
       if (sheet.getFormula(operation.ref)) throw new XlsxLensError("XLSX_FORMULA_LITERALIZATION_BLOCKED", "A formula cell cannot be replaced by a literal through a value edit. Edit its formula text instead.");
       sheet.setCell(operation.ref, operation.value);
@@ -188,8 +399,27 @@ export const xlsxLens: SpectraLens<XlsxProjection, XlsxSemanticDelta> = {
       else if (JSON.stringify(old) !== JSON.stringify(cell)) changes.push({ regionId: cell.id, kind: "update", before: old, after: cell });
     }
     for (const cell of previous.values()) changes.push({ regionId: cell.id, kind: "delete", before: cell });
+    const beforeSheets = new Map(before.projection.sheets.map((sheet) => [sheet.id, sheet]));
+    for (const sheet of after.projection.sheets) {
+      const old = beforeSheets.get(sheet.id);
+      if (!old) continue;
+      if (JSON.stringify(old.merges) !== JSON.stringify(sheet.merges))
+        changes.push({ regionId: `${sheet.id}:merges`, kind: "update", before: old.merges, after: sheet.merges });
+      if (old.frozenRows !== sheet.frozenRows || old.frozenColumns !== sheet.frozenColumns)
+        changes.push({
+          regionId: `${sheet.id}:freezePanes`,
+          kind: "update",
+          before: { rows: old.frozenRows, columns: old.frozenColumns },
+          after: { rows: sheet.frozenRows, columns: sheet.frozenColumns },
+        });
+    }
     const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`);
-    const modeled = new Set(after.projection.sheets.map((sheet) => workbookPart(sheet, after.projection)));
+    const modeled = new Set([
+      "/xl/workbook.xml",
+      "/xl/styles.xml",
+      "/xl/sharedStrings.xml",
+      ...after.projection.sheets.map((sheet) => workbookPart(sheet, after.projection)),
+    ]);
     const preservedPartChanges = changedParts.filter((part) => !modeled.has(part));
     return { changes, changedParts, preservedPartChanges };
   },

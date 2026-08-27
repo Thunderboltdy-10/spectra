@@ -744,6 +744,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
     hint: (handlers.view.frozenRows ?? 0) > 0
       ? `Rows 1–${handlers.view.frozenRows} stay in view`
       : "Keep the rows above the selection in view while scrolling",
+    touches: ["freezePanes"],
     onSelect: () => handlers.view.freezeRows(),
   });
 
@@ -789,7 +790,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Copies the selection, then clears it when you paste",
-      touches: ["cells"],
+      touches: ["merges"],
       manifestOps: ["clear_range"],
       onSelect: () => clipboard.cut(),
     },
@@ -914,7 +915,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled: disabled || clipboard.canFill === false || undefined,
       hint: "Continue a number, weekday or month pattern across the selection",
-      touches: ["cells"],
+      touches: ["merges"],
       control: { kind: "menu", options: SHEETS_FILL_SERIES },
       manifestOps: ["fill_range"],
       onSelect: (value) => {
@@ -1317,7 +1318,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Adds a row above the selection and shifts formula references",
-      touches: ["cells", "formulas"],
+      touches: ["sheetStructure"],
       manifestOps: ["insert_structure"],
       onSelect: () => structure.insertRow(),
     },
@@ -1331,7 +1332,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Adds a column left of the selection and shifts formula references",
-      touches: ["cells", "formulas"],
+      touches: ["sheetStructure"],
       manifestOps: ["insert_structure"],
       onSelect: () => structure.insertColumn(),
     },
@@ -1345,7 +1346,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Removes the selected rows; formulas that pointed at them shift up",
-      touches: ["cells", "formulas"],
+      touches: ["sheetStructure"],
       risk: "destructive",
       manifestOps: ["insert_structure"],
       onSelect: () => structure.deleteRow(),
@@ -1360,7 +1361,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Removes the selected columns; formulas that pointed at them shift left",
-      touches: ["cells", "formulas"],
+      touches: ["sheetStructure"],
       risk: "destructive",
       manifestOps: ["insert_structure"],
       onSelect: () => structure.deleteColumn(),
@@ -1375,7 +1376,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Width of the selected columns, in pixels",
-      touches: ["cells"],
+      touches: ["dimensions"],
       control: {
         kind: "numeric",
         value: structure.columnWidth,
@@ -1401,7 +1402,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Height of the selected rows, in pixels",
-      touches: ["cells"],
+      touches: ["dimensions"],
       control: {
         kind: "numeric",
         value: structure.rowHeight,
@@ -1427,7 +1428,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Widens the column to the longest value it holds",
-      touches: ["cells"],
+      touches: ["dimensions"],
       manifestOps: ["format_range"],
       onSelect: () => structure.autofitColumn(),
     },
@@ -1441,7 +1442,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Hides the selected rows; their values still count in formulas",
-      touches: ["cells"],
+      touches: ["dimensions"],
       manifestOps: ["format_range"],
       onSelect: () => structure.hideRow(),
     },
@@ -1455,7 +1456,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Hides the selected columns; their values still count in formulas",
-      touches: ["cells"],
+      touches: ["dimensions"],
       manifestOps: ["format_range"],
       onSelect: () => structure.hideColumn(),
     },
@@ -1471,7 +1472,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       hint: structure.hiddenCount
         ? `Brings back ${structure.hiddenCount} hidden rows and columns`
         : "Nothing on this sheet is hidden",
-      touches: ["cells"],
+      touches: ["dimensions"],
       manifestOps: ["format_range"],
       onSelect: () => structure.unhideAll(),
     },
@@ -1494,6 +1495,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       hint: (view.frozenColumns ?? 0) > 0
         ? `The first ${view.frozenColumns} columns stay in view`
         : "Keep the columns left of the selection in view while scrolling",
+      touches: ["freezePanes"],
       onSelect: () => view.freezeColumns(),
     },
     {
@@ -1509,6 +1511,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
         ((view.frozenRows ?? 0) === 0 && (view.frozenColumns ?? 0) === 0) ||
         undefined,
       hint: "Lets every row and column scroll again",
+      touches: ["freezePanes"],
       onSelect: () => view.clearFreeze(),
     },
   );
@@ -1632,7 +1635,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       disabled,
       active: data.filterActive,
       hint: "Turns the selection into a filterable range",
-      touches: ["cells"],
+      touches: ["sortFilter"],
       manifestOps: ["sort_filter"],
       onSelect: () => data.toggleFilter(),
     },
@@ -1648,7 +1651,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       hint: data.hasTable === false
         ? "Turn on Filter first"
         : "Choose which values stay visible in each column",
-      touches: ["cells"],
+      touches: ["sortFilter"],
       manifestOps: ["sort_filter"],
       onSelect: () => data.openFilter(),
     },
@@ -1882,6 +1885,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Whether formulas recalculate as you type or only when you ask",
+      touches: ["calculationSettings"],
       control: {
         kind: "select",
         options: SHEETS_CALC_MODES,
@@ -2089,7 +2093,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled: disabled || sheet.canAdd === false || undefined,
       hint: sheet.addBlockedReason ?? "Adds an empty sheet after this one",
-      touches: ["cells"],
+      touches: ["sheetStructure"],
       manifestOps: ["create_sheet"],
       ...(sheet.addBlockedReason
         ? { strictNative: { available: false, reason: sheet.addBlockedReason } }
@@ -2106,7 +2110,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Renames the active sheet; formulas that name it follow",
-      touches: ["cells"],
+      touches: ["sheetStructure"],
       manifestOps: ["rename_sheet"],
       onSelect: () => sheet.rename(),
     },
@@ -2120,7 +2124,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled: disabled || sheet.canAdd === false || undefined,
       hint: sheet.addBlockedReason ?? "Copies this sheet, its formats and its formulas",
-      touches: ["cells", "formulas"],
+      touches: ["sheetStructure"],
       ...(sheet.addBlockedReason
         ? { strictNative: { available: false, reason: sheet.addBlockedReason } }
         : {}),
@@ -2137,7 +2141,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled: disabled || sheet.canMoveLeft === false || undefined,
       hint: "Moves this sheet one place earlier in the tab strip",
-      touches: ["cells"],
+      touches: ["sheetStructure"],
       onSelect: () => sheet.moveLeft(),
     },
     {
@@ -2150,7 +2154,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled: disabled || sheet.canMoveRight === false || undefined,
       hint: "Moves this sheet one place later in the tab strip",
-      touches: ["cells"],
+      touches: ["sheetStructure"],
       onSelect: () => sheet.moveRight(),
     },
     {
@@ -2165,7 +2169,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       hint: sheet.canHide === false
         ? "A workbook needs one visible sheet"
         : "Hides the tab; formulas that read this sheet keep working",
-      touches: ["cells"],
+      touches: ["sheetStructure"],
       onSelect: () => sheet.hide(),
     },
     {
@@ -2180,7 +2184,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       hint: sheet.hiddenSheetCount
         ? `Brings back ${sheet.hiddenSheetCount} hidden sheets`
         : "No sheets are hidden",
-      touches: ["cells"],
+      touches: ["sheetStructure"],
       onSelect: () => sheet.showHidden(),
     },
     {
@@ -2195,7 +2199,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       hint: sheet.canRemove === false
         ? "A workbook needs at least one sheet"
         : "Deletes this sheet and everything on it",
-      touches: ["cells", "formulas"],
+      touches: ["sheetStructure"],
       risk: "destructive",
       onSelect: () => sheet.remove(),
     },
@@ -2213,6 +2217,7 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       requires: "edit",
       disabled,
       hint: "Marks this sheet with a colour beside its name",
+      touches: ["sheetMetadata"],
       control: { kind: "color", value: tabColor.value ?? undefined, clearLabel: "No colour" },
       onSelect: (value) => tabColor.set(asString(value) ?? null),
     });

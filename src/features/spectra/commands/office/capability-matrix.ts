@@ -83,9 +83,11 @@ export function capabilityMatrixRows(
  * proof, and a reversal story. View-only regions are excluded on purpose.
  */
 const NATIVE_WRITE_REGIONS = new Set<FidelityRegionKey>([
-  "body", "styles", "lists", "tables", "images", "equations",
-  "headersFooters", "footnotes", "fields", "sections",
-  "cells", "formulas", "numberFormats", "charts", "validation",
+  "body", "styles", "lists", "tables", "tableStructure", "images", "equations",
+  "headersFooters", "footnotes", "hyperlinks", "fields", "sections",
+  "cells", "formulas", "numberFormats", "merges", "freezePanes", "sheetStructure",
+  "dimensions", "sheetViews", "sheetMetadata", "calculationSettings", "sortFilter",
+  "charts", "validation",
   "conditionalFormat", "namedRanges",
   "slides", "layouts", "shapes", "speakerNotes", "media",
 ]);

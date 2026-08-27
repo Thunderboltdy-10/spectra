@@ -101,3 +101,24 @@ L1 harness green in the owning verification units for all formats; every write c
 - Live Office coexistence and screenshot grading remain P2.V1 verifier work; no acceptance claim made here.
 - Later owners unchanged: bound DOCX Custom XML backing data remains P2.I3; missing logger wiring remains P6.I3.
 - Status: IMPLEMENTED only; awaiting independent P2.I2 verification.
+
+## P2.I3 implementer log — 2026-08-27
+
+- TRIAGE: SYSTEMIC native-write honesty class across the three Office lenses and their mounted command gates; held as one architecture seam.
+- DOCX cell writes retain `w:tcPr` and safe paragraph interiors instead of rebuilding the whole cell.
+- Bound DOCX cells resolve store identity through Custom XML properties relationships and update the safe XPath leaf with `document.xml`; ambiguous or structured bindings refuse before mutation.
+- DOCX text writes emit native `w:tab`/`w:br` tokens; hyperlink and OMML ranges are preserved read-only; style aliases resolve against `styles.xml` or refuse instead of dangling.
+- DOCX list-structure and table-topology/formatting commands now refuse while existing safe text remains writable.
+- XLSX projects and writes semantic cell styles, fills, borders, alignment, wrapping, number formats, merges, and frozen panes; unchanged native style fields survive partial formatting edits.
+- XLSX style, merge, and freeze mutations appear in semantic and part diffs; modeled stylesheet/shared-string parts are not mislabeled as preserved drift.
+- XLSX charts and every other unwritten mounted family publish region refusals even when the current workbook has no such part.
+- PPTX creates a native notes page, notes master when absent, content-type entries, theme/slide/master relationships, and presentation references before writing notes.
+- PPTX notes creation and existing-page edits reopen through the same projection and appear as modeled diffs; unsupported slide/object sidecar flags now refuse in strict native mode.
+- Focused Vitest: 8 files / 131 tests passed; full repository sweep remains deferred until paired verification.
+- Scoped ESLint: zero warnings/errors. Secret scan passed across 2,088 tracked files. `git diff --check` passed.
+- `tsc --noEmit` retains recorded bridge/replica test, presentation-command test, and agent-library blockers; no P2.I3 production file fails.
+- Architecture check retains the five recorded unregistered global events; copy check retains the recorded missing `artifacts-shell.tsx` input.
+- No browser or live Office acceptance run was performed; this implementer log does not grade P2.V1/P2.V2.
+- FIELD NOTE: remaining deliberate R7 refusals are enumerated in STATE §1 and must gain a native writer plus L1 diff evidence before their gates move.
+- Later owners unchanged: P2.I2 verification owns merge/CAS/conflicts; P6.I3 owns missing logger wiring.
+- Status: IMPLEMENTED only; independent native Office verification remains required.

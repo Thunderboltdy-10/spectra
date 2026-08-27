@@ -320,6 +320,14 @@ export const PRESENTATION_STRICT_REASONS = {
     "Reusable components are a Spectra library, so inserting one is unavailable while a native file is linked.",
   sections:
     "Sections are held in Spectra. The linked file keeps its own section list untouched.",
+  slideHidden:
+    "Hidden-slide state is preserved from PowerPoint. Spectra does not write that flag into a linked slide yet.",
+  slideNumbers:
+    "PowerPoint slide-number placeholders are preserved. Spectra does not add or remove them in a linked deck.",
+  objectState:
+    "Object lock and visibility flags are preserved from PowerPoint and are not written into a linked shape yet.",
+  autoAdvance:
+    "PowerPoint slide timing is preserved. Spectra does not write auto-advance timing into a linked deck yet.",
 } as const;
 
 const SHAPES: readonly FidelityRegionKey[] = ["shapes"];
@@ -771,6 +779,7 @@ export function presentationCommandBindings(
       requires: "edit",
       active: state.slideHidden,
       hint: "A hidden slide stays in the deck and is skipped while presenting. Spectra holds the flag, so a linked PowerPoint file still shows every slide in PowerPoint.",
+      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.slideHidden },
       onSelect: () => handlers.slide.toggleHidden(),
     },
     {
@@ -1066,6 +1075,7 @@ export function presentationCommandBindings(
       requires: "edit",
       active: state.showSlideNumbers,
       hint: "Draws the slide number in the deck's own ink. Spectra holds this, so a linked file keeps its own number placeholders exactly as they are.",
+      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.slideNumbers },
       onSelect: () => handlers.design.toggleSlideNumbers(),
     },
     {
@@ -1460,6 +1470,8 @@ export function presentationCommandBindings(
       priority: "advanced",
       requires: "edit",
       hint: "Seconds before the deck moves on by itself. Zero waits for you.",
+      touches: ["transitions"],
+      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.autoAdvance },
       control: {
         kind: "numeric",
         value: state.autoAdvanceSeconds,
@@ -1913,6 +1925,7 @@ export function presentationCommandBindings(
       disabled: !single,
       active: selection.locked,
       hint: "A locked object cannot be dragged or resized on the stage",
+      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.objectState },
       onSelect: () => handlers.arrange.toggleLock(),
     },
     {
@@ -1926,6 +1939,7 @@ export function presentationCommandBindings(
       disabled: !single,
       active: selection.hidden,
       hint: "Keeps the object on the slide but out of the presented view",
+      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.objectState },
       onSelect: () => handlers.arrange.toggleHidden(),
     },
     {

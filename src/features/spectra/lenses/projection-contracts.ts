@@ -125,6 +125,7 @@ export const xlsxCellProjectionSchema = z
     formula: z.string().optional(),
     formulaSupport: z.enum(["recognized", "cached-only"]).optional(),
     style: z.record(z.string(), z.unknown()).optional(),
+    format: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 export const xlsxSheetProjectionSchema = z
@@ -133,6 +134,8 @@ export const xlsxSheetProjectionSchema = z
     name: z.string(),
     cells: z.array(xlsxCellProjectionSchema),
     merges: z.array(z.string()).readonly(),
+    frozenRows: z.number().int().nonnegative().optional(),
+    frozenColumns: z.number().int().nonnegative().optional(),
   })
   .strict();
 export const xlsxProjectionSchema = z
@@ -158,6 +161,10 @@ export const xlsxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-cell"), sheetId: z.string(), ref: z.string(), value: xlsxCellValueSchema }).strict(),
   z.object({ kind: z.literal("set-formula"), sheetId: z.string(), ref: z.string(), formula: z.string() }).strict(),
   z.object({ kind: z.literal("clear-cell"), sheetId: z.string(), ref: z.string() }).strict(),
+  z.object({ kind: z.literal("set-cell-format"), sheetId: z.string(), ref: z.string(), format: z.record(z.string(), z.unknown()) }).strict(),
+  z.object({ kind: z.literal("merge-cells"), sheetId: z.string(), range: z.string() }).strict(),
+  z.object({ kind: z.literal("unmerge-cells"), sheetId: z.string(), range: z.string() }).strict(),
+  z.object({ kind: z.literal("set-freeze-panes"), sheetId: z.string(), rows: z.number().int().nonnegative(), columns: z.number().int().nonnegative() }).strict(),
 ]);
 export const xlsxSemanticDeltaSchema = z.union([
   xlsxOperationSchema,

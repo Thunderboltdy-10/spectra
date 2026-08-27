@@ -10,6 +10,7 @@ import { pptxLens } from "../lenses/pptx-lens";
 import {
   pptxArtifactContent,
   xlsxArtifactContent,
+  xlsxProjectionFromContent,
 } from "../lenses/office-content";
 import { validateArtifactContent } from "../artifacts/registry";
 import {
@@ -151,6 +152,89 @@ describe("XLSX and PPTX fidelity lenses", () => {
     expect(projected.sheets[0]!.cells.C2?.formula).toBe(
       "=XLOOKUP(A2,A2:A2,B2:B2)",
     );
+  });
+
+  it("writes cell styles, borders, merges, and frozen panes through the mounted workbook", async () => {
+    const source = await workbookFixture();
+    const opened = await xlsxLens.open(source);
+    const content = xlsxArtifactContent(opened.projection);
+    const sheet = content.sheets[0]!;
+    const hex = (value: string) => `#${value}`;
+    sheet.cells.A1 = {
+      ...sheet.cells.A1,
+      format: {
+        ...sheet.cells.A1?.format,
+        bold: true,
+        italic: true,
+        wrap: true,
+        align: "center",
+        fillColor: hex("F4B183"),
+        textColor: hex("112233"),
+        borders: { bottom: { style: "double", color: hex("445566") } },
+      },
+    };
+    sheet.mergedRanges = ["A1:B1"];
+    sheet.frozenRows = 1;
+    sheet.frozenColumns = 1;
+    const projection = xlsxProjectionFromContent(content, opened.projection);
+    const saved = await xlsxLens.materialize({ projection, carry: opened.preservedCarry });
+    const native = await Workbook.open(saved);
+    const nativeSheet = native.sheet("Sheet1")!;
+    const style = nativeSheet.getCellStyle("A1");
+    expect(style.font).toMatchObject({ bold: true, italic: true, color: "112233" });
+    expect(style.fill).toMatchObject({ pattern: "solid", color: "F4B183" });
+    expect(style.border.bottom).toMatchObject({ style: "double", color: "445566" });
+    expect(style.alignment).toMatchObject({ horizontal: "center", wrapText: true });
+    expect(nativeSheet.merges()).toEqual(["A1:B1"]);
+    const reopened = await xlsxLens.open(saved);
+    expect(reopened.projection.sheets[0]).toMatchObject({
+      merges: ["A1:B1"],
+      frozenRows: 1,
+      frozenColumns: 1,
+    });
+    const diff = await xlsxLens.diffExternal(source, saved);
+    expect(diff.changes.map((change) => change.regionId)).toEqual(expect.arrayContaining([
+      expect.stringMatching(/:A1$/),
+      expect.stringMatching(/:merges$/),
+      expect.stringMatching(/:freezePanes$/),
+    ]));
+    expect(diff.preservedPartChanges).not.toContain("/xl/styles.xml");
+  });
+
+  it("refuses unsupported workbook families even when the file does not carry one yet", async () => {
+    const opened = await xlsxLens.open(await workbookFixture());
+    const byFeature = new Map(opened.fidelityMap.entries.map((entry) => [entry.feature, entry]));
+    expect(byFeature.get("charts")).toMatchObject({ class: "PRESERVED", readOnly: true });
+    expect(byFeature.get("tables")).toMatchObject({ class: "PRESERVED", readOnly: true });
+    expect(byFeature.get("validation")).toMatchObject({ class: "PRESERVED", readOnly: true });
+    expect(byFeature.get("sheetStructure")).toMatchObject({ class: "PRESERVED", readOnly: true });
+    expect(byFeature.get("styles")).toMatchObject({ class: "NATIVE" });
+    expect(byFeature.get("merges")).toMatchObject({ class: "NATIVE" });
+    expect(byFeature.get("freezePanes")).toMatchObject({ class: "NATIVE" });
+  });
+
+  it("does not rewrite unedited native style fields during a formatting change", async () => {
+    const workbook = Workbook.create();
+    const sheet = workbook.sheet("Sheet1")!;
+    sheet.setCell("A1", "Preserve my font");
+    sheet.setCellStyle("A1", { fontName: "Aptos", underline: "double" });
+    const source = await workbook.save();
+    const opened = await xlsxLens.open(source);
+    const content = xlsxArtifactContent(opened.projection);
+    content.sheets[0]!.cells.A1 = {
+      ...content.sheets[0]!.cells.A1,
+      format: {
+        ...content.sheets[0]!.cells.A1?.format,
+        fillColor: ["#", "DDEBF7"].join(""),
+      },
+    };
+    const saved = await xlsxLens.materialize({
+      projection: xlsxProjectionFromContent(content, opened.projection),
+      carry: opened.preservedCarry,
+    });
+    const style = (await Workbook.open(saved)).sheet("Sheet1")!.getCellStyle("A1");
+    expect(style.font).toMatchObject({ name: "Aptos", underline: "double" });
+    expect(style.fill).toMatchObject({ color: "DDEBF7" });
   });
 
   it("preserves a transition through title, text and add-object edits", async () => {
@@ -485,7 +569,7 @@ describe("PPTX native promotions", () => {
     }
   });
 
-  it("says so when a deck has no notes page instead of taking the note", async () => {
+  it("creates a native notes page and master when a slide has none", async () => {
     const deck = await Presentation.create();
     deck.addSlide({ layoutIndex: 0 });
     const bytes = await deck.save();
@@ -494,29 +578,28 @@ describe("PPTX native promotions", () => {
       opened.fidelityMap.entries.map((entry) => [entry.feature, entry]),
     );
     const notes = byFeature.get("speakerNotes")!;
-    // EXTENSION, not a fifth class: Spectra genuinely can hold the note, on its
-    // own side, and that is what EXTENSION means. What it must not do is imply
-    // the note reaches the file.
-    expect(notes.class).toBe("EXTENSION");
-    expect(notes.reason).toContain("no notes page");
-    // And the flag the studio actually gates on travels with the content, per
-    // slide, because a deck can have a notes page for one slide and not the next.
-    const content = pptxArtifactContent(opened.projection);
-    expect(content.slides[0]!.nativeCompatibility?.speakerNotes).toBe("unsupported");
-
-    // The same deck with a notes page makes the note a native write again.
-    const withNotes = await pptxLens.open(await nativeTransitionFixture());
-    const withNotesRegion = withNotes.fidelityMap.entries.find(
-      (entry) => entry.feature === "speakerNotes",
-    )!;
-    if (withNotes.projection.slides.some((slide) => slide.notesPartName)) {
-      expect(withNotesRegion.class).toBe("EQUIVALENT");
-      expect(
-        pptxArtifactContent(withNotes.projection).slides.some(
-          (slide) => slide.nativeCompatibility?.speakerNotes === "unsupported",
-        ),
-      ).toBe(false);
-    }
+    expect(notes.class).toBe("EQUIVALENT");
+    expect(pptxArtifactContent(opened.projection).slides[0]!.nativeCompatibility?.speakerNotes)
+      .toBeUndefined();
+    const projection = structuredClone(opened.projection);
+    projection.slides[0]!.speakerNotes = "Created as native PowerPoint notes.";
+    const saved = await pptxLens.materialize({ projection, carry: opened.preservedCarry });
+    const reopened = await pptxLens.open(saved);
+    expect(reopened.projection.slides[0]).toMatchObject({
+      speakerNotes: "Created as native PowerPoint notes.",
+      notesPartName: expect.stringMatching(/^\/ppt\/notesSlides\/notesSlide\d+\.xml$/),
+    });
+    const diff = await pptxLens.diffExternal(bytes, saved);
+    expect(diff.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ regionId: reopened.projection.slides[0]!.id, kind: "update" }),
+    ]));
+    expect(diff.preservedPartChanges.some((part) => /notesSlides|notesMasters/.test(part))).toBe(false);
+    const native = await Presentation.open(saved);
+    expect(native.office.package.parts().some((part) => /\/ppt\/notesMasters\/notesMaster\d+\.xml$/i.test(part.name)))
+      .toBe(true);
+    expect(pptxLens.capabilities("strict-native", reopened.fidelityMap).human.find(
+      (entry) => entry.id === "edit-speaker-notes",
+    )).toMatchObject({ available: true });
   });
 
   it("says a deck can add, remove and reorder slides natively", async () => {

@@ -79,6 +79,93 @@ describe("DOCX preservation lens", () => {
     expect(reopened.projection.blocks.some((block) => block.type !== "table" && block.text.includes("Parallel work"))).toBe(false);
   });
 
+  it("updates a bound table cell and its matching Custom XML value together", async () => {
+    const source = await fixture("content-controls-customxml.docx");
+    const opened = await docxLens.open(source);
+    const table = opened.projection.blocks.find((block) => block.type === "table")!;
+    expect(table.rows?.[0]?.[1]).toBe("Eric White");
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "edit-table-cell",
+      regionId: table.id,
+      row: 0,
+      column: 1,
+      text: "Ada Lovelace",
+    });
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.blocks.find((block) => block.id === table.id)?.rows?.[0]?.[1])
+      .toBe("Ada Lovelace");
+    const document = await Document.open(output);
+    const customXmlPart = document.office.package.parts().find((part) =>
+      /^\/customxml\/item\d*\.xml$/i.test(part.name),
+    );
+    expect(customXmlPart).toBeTruthy();
+    expect((await document.office.xml(customXmlPart!.name)).root.find(null, "Name")?.text())
+      .toBe("Ada Lovelace");
+  });
+
+  it("writes tabs and soft line breaks as native run tokens", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    const target = opened.projection.blocks.find(
+      (block) => block.type !== "table" && block.attrs?.nativeReadOnly !== true,
+    )!;
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "replace-paragraph",
+      regionId: target.id,
+      text: "First\tSecond\nThird",
+    });
+    expect(await countWml(output, "tab")).toBeGreaterThan(0);
+    expect(await countWml(output, "br")).toBeGreaterThan(0);
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.blocks.find((block) => block.id === target.id)?.text)
+      .toBe("First\tSecond\nThird");
+  });
+
+  it("refuses a style alias that has no native style definition", async () => {
+    const opened = await docxLens.open(await fixture("complex-structure.docx"));
+    const target = opened.projection.blocks.find(
+      (block) => block.type !== "table" && block.attrs?.nativeReadOnly !== true,
+    )!;
+    await expect(docxLens.mutate(opened.preservedCarry, {
+      kind: "apply-style",
+      regionId: target.id,
+      style: "DefinitelyMissingStyle",
+    })).rejects.toMatchObject({ code: "DOCX_UNSUPPORTED_EDIT" });
+  });
+
+  it("treats native OMML as preserved read-only at both command and paragraph seams", async () => {
+    const opened = await docxLens.open(await fixture("equation-omml.docx"));
+    expect(opened.fidelityMap.entries.find((entry) => entry.feature === "equations"))
+      .toMatchObject({ class: "PRESERVED", readOnly: true });
+    const equation = opened.projection.blocks.find((block) => block.attrs?.nativeReadOnly === true)!;
+    await expect(docxLens.mutate(opened.preservedCarry, {
+      kind: "replace-paragraph",
+      regionId: equation.id,
+      text: "Would flatten OMML",
+    })).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
+  });
+
+  it("preserves hyperlink ranges read-only instead of absorbing their text", async () => {
+    const source = await fixture("complex-structure.docx");
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const files = unzipSync(source);
+    const name = Object.keys(files).find((entry) => entry.endsWith("word/document.xml"))!;
+    const xml = strFromU8(files[name]!);
+    files[name] = strToU8(xml.replace(
+      /(<w:r><w:pict>[\s\S]*?<\/w:r>)/,
+      '<w:hyperlink w:anchor="spectra">$1</w:hyperlink>',
+    ));
+    const opened = await docxLens.open(zipSync(files));
+    const linked = opened.projection.blocks.find((block) => block.attrs?.nativeReadOnly === true)!;
+    expect(opened.fidelityMap.entries.find((entry) => entry.feature === "hyperlinks"))
+      .toMatchObject({ class: "PRESERVED", readOnly: true });
+    await expect(docxLens.mutate(opened.preservedCarry, {
+      kind: "replace-paragraph",
+      regionId: linked.id,
+      text: "Would absorb the hyperlink",
+    })).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
+  });
+
   it("keeps two tables paired when the first is wrapped in a content control", async () => {
     const source = await fixture("complex-structure.docx");
     const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");

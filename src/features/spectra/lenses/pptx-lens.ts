@@ -106,20 +106,12 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
   // Every class here is one of the four the contract defines. There is no
   // UNSUPPORTED row: a fifth name would be dropped by every reader on the way
   // to the bar, so the reason would never be shown and the control would look
-  // live. A deck with no notes page is EXTENSION — Spectra holds the note on its
-  // own side, honestly, and `nativeCompatibility.speakerNotes` is what tells the
-  // studio that writing it cannot reach the file.
-  const hasNotesPage = slides.some((slide) => slide.notesPartName);
+  // live. Speaker notes are EQUIVALENT for every conforming deck because an
+  // absent notes page is created with its native master and relationships.
   const regionClasses: Array<[string, LensFidelityEntry["class"], string?]> = [
     ["slides", "NATIVE"],
     ["shapes", "NATIVE"],
-    [
-      "speakerNotes",
-      hasNotesPage ? "EQUIVALENT" : "EXTENSION",
-      hasNotesPage
-        ? undefined
-        : "This file has no notes page, so Spectra keeps speaker notes on its own side rather than writing them into the deck.",
-    ],
+    ["speakerNotes", "EQUIVALENT", "Speaker notes are written into native PowerPoint notes pages, creating the page and master when needed."],
     ["transitions", slides.some((slide) => slide.hasTransition) ? "PRESERVED" : "NATIVE", "PowerPoint saved these transitions and Spectra preserves them exactly."],
     ["animations", slides.some((slide) => slide.hasTiming) ? "PRESERVED" : "NATIVE", "PowerPoint animation timing is preserved exactly rather than approximated."],
     ["masters", partNames.some((name) => /\/slideMasters\//i.test(name)) ? "PRESERVED" : "NATIVE", "Slide masters are preserved exactly as PowerPoint saved them."],
@@ -135,7 +127,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
   for (const [feature, cls, reason] of regionClasses) {
     entries.push({ regionId: `pptx:region:${feature}`, feature, class: cls, ...(cls === "PRESERVED" ? { readOnly: true } : {}), ...(reason && cls !== "NATIVE" ? { reason } : {}) });
   }
-  const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify(slides.map(({ id, title, text, objects }) => ({ id, title, text, objects })))));
+  const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify(slides.map(({ id, title, text, objects, speakerNotes }) => ({ id, title, text, objects, speakerNotes })))));
   const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest, canvasWidthEmu: canvas.width, canvasHeightEmu: canvas.height } });
   return { projection, fidelityMap };
 }
@@ -143,6 +135,12 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
 function slideFor(deck: Presentation, slideId: string) { const partName = slideId.replace(/^pptx:slide:/, ""); const slide = deck.slides().find((candidate) => candidate.partName === partName); if (!slide) throw new PptxLensError("PPTX_SLIDE_MISSING", "The target PowerPoint slide no longer exists."); return slide; }
 
 const NOTES_SLIDE_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide";
+const NOTES_MASTER_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster";
+const SLIDE_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide";
+const THEME_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme";
+const OFFICE_RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const NOTES_SLIDE_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml";
+const NOTES_MASTER_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml";
 
 /**
  * The notes page a slide points at, resolved through its own relationship
@@ -202,6 +200,136 @@ function setNotesText(root: XmlElement, text: string) {
     p.appendChild(r);
     txBody.appendChild(p);
   }
+}
+
+const MINIMAL_NOTES_SLIDE = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="2" name="Notes Placeholder 1"/><p:cNvSpPr txBox="1"/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>`;
+
+const MINIMAL_NOTES_MASTER = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:notesMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld name=""><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="2" name="Notes Placeholder 1"/><p:cNvSpPr txBox="1"/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp></p:spTree></p:cSld><p:clrMap accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" bg1="lt1" bg2="lt2" folHlink="folHlink" hlink="hlink" tx1="dk1" tx2="dk2"/><p:hf hdr="1" ftr="1" dt="1" sldNum="1"/><p:notesStyle><a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1200" kern="1200"/></a:lvl1pPr></p:notesStyle></p:notesMaster>`;
+
+function relativePartTarget(sourcePartName: string, targetPartName: string) {
+  const source = sourcePartName.replace(/^\//, "").split("/");
+  source.pop();
+  const target = targetPartName.replace(/^\//, "").split("/");
+  while (source.length && target.length && source[0] === target[0]) {
+    source.shift();
+    target.shift();
+  }
+  return `${"../".repeat(source.length)}${target.join("/")}`;
+}
+
+function relationshipsPartName(partName: string) {
+  const separator = partName.lastIndexOf("/");
+  return `${partName.slice(0, separator)}/_rels/${partName.slice(separator + 1)}.rels`;
+}
+
+function nextPartName(deck: Presentation, folder: string, stem: string) {
+  const used = new Set(deck.office.package.parts().map((part) => part.name.toLocaleLowerCase()));
+  let index = 1;
+  while (used.has(`${folder}/${stem}${index}.xml`.toLocaleLowerCase())) index += 1;
+  return `${folder}/${stem}${index}.xml`;
+}
+
+const PRESENTATION_CHILD_ORDER = [
+  "sldMasterIdLst", "notesMasterIdLst", "handoutMasterIdLst", "sldIdLst", "sldSz",
+  "notesSz", "smartTags", "embeddedFontLst", "custShowLst", "photoAlbum", "custDataLst",
+  "kinsoku", "defaultTextStyle", "modifyVerifier", "extLst",
+];
+
+function insertPresentationChild(root: XmlElement, child: XmlElement) {
+  const wanted = PRESENTATION_CHILD_ORDER.indexOf(child.localName);
+  const reference = root.elements().find((candidate) => {
+    const index = PRESENTATION_CHILD_ORDER.indexOf(candidate.localName);
+    return index >= 0 && index > wanted;
+  });
+  root.insertBefore(child, reference ?? null);
+}
+
+async function ensureNotesMaster(deck: Presentation) {
+  const pkg = deck.office.package;
+  const presentationPart = pkg.getPart("/ppt/presentation.xml");
+  if (!presentationPart)
+    throw new PptxLensError("PPTX_PRESENTATION_PART_MISSING", "This deck has no presentation part to own speaker notes.");
+  let relationship = presentationPart.relationships().byType(NOTES_MASTER_RELATIONSHIP)
+    .find((candidate) => candidate.targetMode === "Internal");
+  let masterPart = relationship ? pkg.relatedPart(presentationPart, relationship.id) : undefined;
+  masterPart ??= pkg.parts().find((part) => /\/ppt\/notesMasters\/notesMaster\d+\.xml$/i.test(part.name));
+  if (!masterPart) {
+    const name = nextPartName(deck, "/ppt/notesMasters", "notesMaster");
+    masterPart = pkg.addPart(name, NOTES_MASTER_CONTENT_TYPE, new TextEncoder().encode(MINIMAL_NOTES_MASTER));
+  }
+  if (!relationship || pkg.relatedPart(presentationPart, relationship.id)?.name !== masterPart.name) {
+    relationship = presentationPart.relationships().add({
+      type: NOTES_MASTER_RELATIONSHIP,
+      target: relativePartTarget(presentationPart.name, masterPart.name),
+    });
+  }
+  const presentation = await deck.office.xml(presentationPart.name);
+  let presentationChanged = false;
+  let list = firstDescendant(presentation.root, PML_NAMESPACE, "notesMasterIdLst");
+  if (!list) {
+    list = new XmlElement("notesMasterIdLst", presentation.root.lookupPrefix(PML_NAMESPACE) ?? null);
+    insertPresentationChild(presentation.root, list);
+    presentationChanged = true;
+  }
+  const existingIds = list.elements().filter((element) => element.namespaceUri() === PML_NAMESPACE && element.localName === "notesMasterId");
+  if (!existingIds.some((element) => element.getAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "id") === relationship.id)) {
+    if (existingIds.length)
+      throw new PptxLensError("PPTX_NOTES_MASTER_AMBIGUOUS", "This deck has an unresolved notes-master reference, so Spectra will not add a competing one.");
+    const id = new XmlElement("notesMasterId", presentation.root.lookupPrefix(PML_NAMESPACE) ?? null);
+    id.setAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "id", relationship.id);
+    list.appendChild(id);
+    presentationChanged = true;
+  }
+  if (!firstDescendant(presentation.root, PML_NAMESPACE, "notesSz")) {
+    const size = new XmlElement("notesSz", presentation.root.lookupPrefix(PML_NAMESPACE) ?? null);
+    size.setAttribute("cx", "6858000");
+    size.setAttribute("cy", "9144000");
+    insertPresentationChild(presentation.root, size);
+    presentationChanged = true;
+  }
+  if (presentationChanged) deck.office.markDirty(presentationPart.name);
+  if (!masterPart.relationships().byType(THEME_RELATIONSHIP).length) {
+    const theme = pkg.parts().find((part) => /\/ppt\/theme\/theme\d+\.xml$/i.test(part.name));
+    if (!theme)
+      throw new PptxLensError("PPTX_THEME_MISSING", "This deck has no theme for a native notes master.");
+    masterPart.relationships().add({
+      type: THEME_RELATIONSHIP,
+      target: relativePartTarget(masterPart.name, theme.name),
+    });
+  }
+  return masterPart;
+}
+
+async function ensureNotesPage(deck: Presentation, slidePartName: string) {
+  const existing = notesPartNameFor(deck, slidePartName);
+  if (existing) return existing;
+  const pkg = deck.office.package;
+  const slidePart = pkg.getPart(slidePartName);
+  if (!slidePart)
+    throw new PptxLensError("PPTX_SLIDE_MISSING", "The slide being annotated no longer exists.");
+  const masterPart = await ensureNotesMaster(deck);
+  const template = pkg.parts().find((part) => /\/ppt\/notesSlides\/notesSlide\d+\.xml$/i.test(part.name));
+  const notesName = nextPartName(deck, "/ppt/notesSlides", "notesSlide");
+  const notesPart = pkg.addPart(
+    notesName,
+    NOTES_SLIDE_CONTENT_TYPE,
+    template ? await template.read() : new TextEncoder().encode(MINIMAL_NOTES_SLIDE),
+  );
+  notesPart.relationships().add({
+    type: NOTES_MASTER_RELATIONSHIP,
+    target: relativePartTarget(notesPart.name, masterPart.name),
+  });
+  notesPart.relationships().add({
+    type: SLIDE_RELATIONSHIP,
+    target: relativePartTarget(notesPart.name, slidePart.name),
+  });
+  slidePart.relationships().add({
+    type: NOTES_SLIDE_RELATIONSHIP,
+    target: relativePartTarget(slidePart.name, notesPart.name),
+  });
+  return notesPart.name;
 }
 
 function shapeIn(root: XmlElement, id: string) {
@@ -336,8 +464,7 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       // Only the notes part is marked dirty, so the slide itself — with its
       // transition, its timing and everything Spectra does not model — is still
       // raw-copied at save.
-      const notesPartName = notesPartNameFor(deck, slide.partName);
-      if (!notesPartName) throw new PptxLensError("PPTX_NOTES_PART_MISSING", "This slide has no notes page in the file, and Spectra does not add one yet.");
+      const notesPartName = await ensureNotesPage(deck, slide.partName);
       setNotesText((await deck.office.xml(notesPartName)).root, operation.text);
       deck.office.markDirty(notesPartName);
     }
@@ -368,6 +495,6 @@ export const pptxLens: SpectraLens<PptxProjection, PptxSemanticDelta> = {
   async materialize({ projection, carry }) {
     const operations = pptxOperationsBetween(carry.projection, projection);
     return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }) : carry.payload; },
-  async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> { const [before, after, comparison] = await Promise.all([this.open(payloadA), this.open(payloadB), comparePackages(payloadA, payloadB)]); const previous = new Map(before.projection.slides.map((slide) => [slide.id, slide])); const changes: LensExternalDiff["changes"] = []; for (const slide of after.projection.slides) { const old = previous.get(slide.id); previous.delete(slide.id); if (!old) changes.push({ regionId: slide.id, kind: "insert", after: slide }); else if (JSON.stringify(old) !== JSON.stringify(slide)) changes.push({ regionId: slide.id, kind: "update", before: old, after: slide }); } for (const slide of previous.values()) changes.push({ regionId: slide.id, kind: "delete", before: slide }); const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`); const modeled = new Set(after.projection.slides.map((slide) => slide.id.replace(/^pptx:slide:/, ""))); const preservedPartChanges = changedParts.filter((part) => !modeled.has(part)); return { changes, changedParts, preservedPartChanges }; },
+  async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> { const [before, after, comparison] = await Promise.all([this.open(payloadA), this.open(payloadB), comparePackages(payloadA, payloadB)]); const previous = new Map(before.projection.slides.map((slide) => [slide.id, slide])); const changes: LensExternalDiff["changes"] = []; for (const slide of after.projection.slides) { const old = previous.get(slide.id); previous.delete(slide.id); if (!old) changes.push({ regionId: slide.id, kind: "insert", after: slide }); else if (JSON.stringify(old) !== JSON.stringify(slide)) changes.push({ regionId: slide.id, kind: "update", before: old, after: slide }); } for (const slide of previous.values()) changes.push({ regionId: slide.id, kind: "delete", before: slide }); const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`); const semanticParts = ["/ppt/presentation.xml", ...after.projection.slides.flatMap((slide) => [slide.id.replace(/^pptx:slide:/, ""), ...(slide.notesPartName ? [slide.notesPartName] : [])])]; const modeled = new Set([...semanticParts, ...semanticParts.map(relationshipsPartName)]); const preservedPartChanges = changedParts.filter((part) => !modeled.has(part) && !/^\/ppt\/notesMasters\//i.test(part)); return { changes, changedParts, preservedPartChanges }; },
   capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; const hasTransition = fidelityMap.entries.some((entry) => entry.feature === "transition"); const notesEntry = fidelityMap.entries.find((entry) => entry.feature === "speakerNotes"); const hasNotes = notesEntry?.class === "EQUIVALENT"; return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true },{ id: "edit-speaker-notes", available: hasNotes, ...(hasNotes ? {} : { reason: "This file has no notes page for its slides, and Spectra does not add one yet." }) }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: hasTransition, reason: hasTransition ? "Only exact PowerPoint transition equivalents may replace the preserved transition." : "No native transition is present." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "add_text_box", "write_speaker_notes", "set_alt_text", "move_object", "resize_object", "add_slide", "delete_slide", "reorder_slides"] }; },
 };

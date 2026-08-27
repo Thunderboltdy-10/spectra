@@ -22,6 +22,8 @@ import {
 
 const W14_NAMESPACE =
   "http://schemas.microsoft.com/office/word/2010/wordml";
+const OMML_NAMESPACE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/math";
 
 export type DocxNativePlaceholder = {
   id: string;
@@ -71,6 +73,12 @@ function hasWml(element: XmlElement, ...names: string[]) {
   );
 }
 
+function hasOmml(element: XmlElement) {
+  return [element, ...descendants(element)].some(
+    (candidate) => candidate.namespaceUri() === OMML_NAMESPACE,
+  );
+}
+
 function bytesLookEncrypted(payload: Uint8Array) {
   const compoundFileHeader = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
   return compoundFileHeader.every((byte, index) => payload[index] === byte);
@@ -107,8 +115,8 @@ function paragraphRegionId(paragraph: Paragraph, path: string) {
 }
 
 type NativeTableCell = {
+  element: XmlElement;
   text(): string;
-  setText(text: string): void;
   paragraphElements(): readonly XmlElement[];
 };
 type NativeTableRow = { cells(): readonly NativeTableCell[] };
@@ -137,28 +145,26 @@ function shallowWmlChildren(root: XmlElement, name: string) {
   return found;
 }
 
+function projectedWmlText(root: XmlElement) {
+  return [root, ...descendants(root)]
+    .filter((element) => element.namespaceUri() === WML_NAMESPACE)
+    .map((element) => {
+      if (element.localName === "t") return element.text();
+      if (element.localName === "tab") return "\t";
+      if (element.localName === "br" || element.localName === "cr") return "\n";
+      return "";
+    })
+    .join("");
+}
+
 function wrappedTable(element: XmlElement): NativeTable {
   const rows = () => shallowWmlChildren(element, "tr").map((row) => ({
     cells: () => shallowWmlChildren(row, "tc").map((cell) => ({
+      element: cell,
       paragraphElements: () => shallowWmlChildren(cell, "p"),
-      text: () => shallowWmlChildren(cell, "p")
-        .flatMap((paragraph) => shallowWmlChildren(paragraph, "r"))
-        .flatMap((run) => run.children.filter((child) => child.kind === "text").map((child) => child.text))
-        .join(""),
-      setText: (text: string) => {
-        const preserved = cell.children.filter(
-          (child) => child.kind === "element" && child.namespaceUri() === WML_NAMESPACE && child.localName === "tcPr",
-        );
-        for (const child of [...cell.children]) cell.removeChild(child);
-        for (const child of preserved) cell.appendChild(child);
-        const paragraph = new XmlElement("p", "w");
-        const run = new XmlElement("r", "w");
-        const value = new XmlElement("t", "w");
-        value.appendChild(new XmlText(text));
-        run.appendChild(value);
-        paragraph.appendChild(run);
-        cell.appendChild(paragraph);
-      },
+      text: () => shallowWmlChildren(cell, "p").map((paragraph) =>
+        projectedWmlText(paragraph),
+      ).join("\n"),
     })),
   }));
   return {
@@ -314,13 +320,15 @@ function insertedParagraphId(regionId: string | undefined) {
   return (native ?? stableHex(`spectra-docx-insert:${regionId ?? crypto.randomUUID()}`)).toUpperCase();
 }
 
-function insertParagraph(
+async function insertParagraph(
   document: Document,
   operation: Extract<DocxSemanticDelta, { kind: "insert-paragraph" }>,
 ) {
   const body = document.body();
   const paragraph = document.addParagraph(operation.text, {
-    ...(operation.style ? { style: safeStyleId(operation.style) } : {}),
+    ...(operation.style
+      ? { style: await resolveParagraphStyleId(document, operation.style) }
+      : {}),
   });
   const paraId = insertedParagraphId(operation.regionId);
   paragraph.element.setAttributeNs(W14_NAMESPACE, "paraId", paraId);
@@ -349,8 +357,49 @@ function safeStyleId(value: string) {
   return value;
 }
 
-function setParagraphStyle(document: Document, paragraph: Paragraph, style: string) {
-  const styleId = safeStyleId(style);
+async function resolveParagraphStyleId(document: Document, requested: string) {
+  const safeRequested = safeStyleId(requested);
+  const stylesPart = document.office.package.getPart("/word/styles.xml");
+  if (!stylesPart)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "This Word file has no native style catalogue, so Spectra will not write a dangling paragraph style reference.",
+    );
+  const styles = await document.office.xml(stylesPart.name);
+  const definitions = [styles.root, ...descendants(styles.root)]
+    .filter(
+      (element) =>
+        element.namespaceUri() === WML_NAMESPACE &&
+        element.localName === "style" &&
+        element.getAttributeNs(WML_NAMESPACE, "type") === "paragraph",
+    )
+    .flatMap((element) => {
+      const id = element.getAttributeNs(WML_NAMESPACE, "styleId");
+      if (!id) return [];
+      return [{
+        id,
+        name: element.find(WML_NAMESPACE, "name")?.getAttributeNs(WML_NAMESPACE, "val"),
+      }];
+    });
+  const exact = definitions.find((definition) => definition.id === safeRequested);
+  if (exact) return exact.id;
+  const headingAlias = safeRequested.match(/^Heading([1-3])$/i)?.[1];
+  if (headingAlias) {
+    const numeric = definitions.find((definition) => definition.id === headingAlias);
+    if (numeric) return numeric.id;
+  }
+  const byName = definitions.find(
+    (definition) => definition.name?.toLocaleLowerCase() === safeRequested.toLocaleLowerCase(),
+  );
+  if (byName) return byName.id;
+  throw new DocxLensError(
+    "DOCX_UNSUPPORTED_EDIT",
+    `The Word style ${safeRequested} does not exist in this file, so Spectra will not create a dangling style reference.`,
+  );
+}
+
+async function setParagraphStyle(document: Document, paragraph: Paragraph, style: string) {
+  const styleId = await resolveParagraphStyleId(document, style);
   let properties = paragraph.element.find(WML_NAMESPACE, "pPr");
   if (!properties) {
     properties = new XmlElement("pPr", "w");
@@ -395,11 +444,35 @@ function writableRun(run: Run) {
     );
 }
 
+function replaceRunText(document: Document, run: Run, text: string) {
+  const properties = run.element.find(WML_NAMESPACE, "rPr");
+  for (const child of [...run.element.children]) {
+    if (child !== properties) run.element.removeChild(child);
+  }
+  const chunks = text.split(/([\t\n])/);
+  for (const chunk of chunks) {
+    if (!chunk) continue;
+    if (chunk === "\t") {
+      run.element.appendChild(new XmlElement("tab", "w"));
+      continue;
+    }
+    if (chunk === "\n") {
+      run.element.appendChild(new XmlElement("br", "w"));
+      continue;
+    }
+    const value = new XmlElement("t", "w");
+    if (/^\s|\s$/.test(chunk)) value.setAttribute("xml:space", "preserve");
+    value.appendChild(new XmlText(chunk));
+    run.element.appendChild(value);
+  }
+  document._markMainDirty();
+}
+
 function replaceParagraphText(document: Document, paragraph: Paragraph, text: string) {
   const runs = paragraph.runs().filter(writableRun);
   if (runs.length) {
-    runs[0]!.setText(text);
-    for (const run of runs.slice(1)) run.setText("");
+    replaceRunText(document, runs[0]!, text);
+    for (const run of runs.slice(1)) replaceRunText(document, run, "");
     return;
   }
   const run = new XmlElement("r", "w");
@@ -410,6 +483,161 @@ function replaceParagraphText(document: Document, paragraph: Paragraph, text: st
   run.appendChild(textElement);
   paragraph.element.appendChild(run);
   document._markMainDirty();
+}
+
+const CUSTOM_XML_PROPS_RELATIONSHIP =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps";
+const CUSTOM_XML_PROPS_NAMESPACE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/customXml";
+
+function dataBindingsForCell(cell: XmlElement) {
+  const bindings = new Set<XmlElement>();
+  for (const element of descendants(cell)) {
+    if (element.namespaceUri() === WML_NAMESPACE && element.localName === "dataBinding")
+      bindings.add(element);
+  }
+  for (let ancestor = cell.parent; ancestor; ancestor = ancestor.parent) {
+    if (ancestor.namespaceUri() === WML_NAMESPACE && ancestor.localName === "sdt") {
+      for (const element of descendants(ancestor)) {
+        if (element.namespaceUri() === WML_NAMESPACE && element.localName === "dataBinding")
+          bindings.add(element);
+      }
+    }
+    if (ancestor.namespaceUri() === WML_NAMESPACE && ancestor.localName === "tbl") break;
+  }
+  return [...bindings];
+}
+
+function xpathNamespaces(prefixMappings: string | undefined) {
+  const namespaces = new Map<string, string>();
+  if (!prefixMappings?.trim()) return namespaces;
+  const expression = /xmlns:([A-Za-z_][\w.-]*)\s*=\s*(['"])(.*?)\2/g;
+  let consumed = "";
+  for (const match of prefixMappings.matchAll(expression)) {
+    namespaces.set(match[1]!, match[3]!);
+    consumed += match[0];
+  }
+  if (!namespaces.size || consumed.replace(/\s/g, "") !== prefixMappings.replace(/\s/g, ""))
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "This bound Word cell uses namespace mappings Spectra cannot resolve safely.",
+    );
+  return namespaces;
+}
+
+function resolveBoundElement(root: XmlElement, xpath: string, prefixMappings?: string) {
+  if (!xpath.startsWith("/") || /\/\/|@|\*|\(|\)|\||::/.test(xpath))
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "This bound Word cell uses an XPath Spectra cannot update safely.",
+    );
+  const namespaces = xpathNamespaces(prefixMappings);
+  const steps = xpath.slice(1).split("/").filter(Boolean).map((raw) => {
+    const match = raw.match(/^([A-Za-z_][\w.-]*)(?::([A-Za-z_][\w.-]*))?(?:\[(\d+)\])?$/);
+    if (!match)
+      throw new DocxLensError(
+        "DOCX_UNSUPPORTED_EDIT",
+        "This bound Word cell uses an XPath step Spectra cannot update safely.",
+      );
+    const prefix = match[2] ? match[1]! : null;
+    const localName = match[2] ?? match[1]!;
+    const namespace = prefix ? namespaces.get(prefix) : null;
+    if (prefix && namespace === undefined)
+      throw new DocxLensError(
+        "DOCX_UNSUPPORTED_EDIT",
+        `The bound Word cell uses the undeclared XPath prefix ${prefix}.`,
+      );
+    return { localName, namespace, index: Number(match[3] ?? 1) };
+  });
+  if (!steps.length)
+    throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "This bound Word cell has an empty XPath.");
+  const first = steps.shift()!;
+  let current: XmlElement | undefined =
+    root.localName === first.localName && root.namespaceUri() === first.namespace && first.index === 1
+      ? root
+      : undefined;
+  for (const step of steps) {
+    current = current?.elements().filter(
+      (element) => element.localName === step.localName && element.namespaceUri() === step.namespace,
+    )[step.index - 1];
+  }
+  if (!current)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "The bound Word cell no longer resolves to exactly one Custom XML element.",
+    );
+  if (current.elements().length)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "The bound Word cell targets structured Custom XML, so Spectra will not flatten it into text.",
+    );
+  return current;
+}
+
+async function customXmlTargets(document: Document, cell: NativeTableCell) {
+  const bindings = dataBindingsForCell(cell.element);
+  const targets: Array<{ partName: string; element: XmlElement }> = [];
+  for (const binding of bindings) {
+    const itemId = binding.getAttributeNs(WML_NAMESPACE, "storeItemID")?.toLocaleLowerCase();
+    const xpath = binding.getAttributeNs(WML_NAMESPACE, "xpath");
+    if (!itemId || !xpath)
+      throw new DocxLensError(
+        "DOCX_UNSUPPORTED_EDIT",
+        "This bound Word cell is missing its Custom XML identity or XPath.",
+      );
+    const matches: Array<{ partName: string; root: XmlElement }> = [];
+    for (const part of document.office.package.parts()) {
+      if (!/^\/customxml\/item\d*\.xml$/i.test(part.name)) continue;
+      const propsRelationships = part.relationships().byType(CUSTOM_XML_PROPS_RELATIONSHIP);
+      for (const relationship of propsRelationships) {
+        const propsPart = document.office.package.relatedPart(part, relationship.id);
+        if (!propsPart) continue;
+        const props = await document.office.xml(propsPart.name);
+        const candidateId =
+          props.root.getAttributeNs(CUSTOM_XML_PROPS_NAMESPACE, "itemID") ??
+          props.root.getAttribute("itemID");
+        if (candidateId?.toLocaleLowerCase() !== itemId) continue;
+        matches.push({ partName: part.name, root: (await document.office.xml(part.name)).root });
+      }
+    }
+    if (matches.length !== 1)
+      throw new DocxLensError(
+        "DOCX_UNSUPPORTED_EDIT",
+        "The bound Word cell does not map to one unique Custom XML data store.",
+      );
+    const match = matches[0]!;
+    targets.push({
+      partName: match.partName,
+      element: resolveBoundElement(
+        match.root,
+        xpath,
+        binding.getAttributeNs(WML_NAMESPACE, "prefixMappings"),
+      ),
+    });
+  }
+  return targets;
+}
+
+async function replaceTableCellText(
+  document: Document,
+  cell: NativeTableCell,
+  text: string,
+) {
+  const paragraphs = cell.paragraphElements().map((element) => Paragraph._wrap(document, element));
+  if (!paragraphs.length)
+    throw new DocxLensError(
+      "DOCX_TABLE_WRITE_UNSUPPORTED",
+      "This Word table cell has no writable paragraph container.",
+    );
+  const targets = await customXmlTargets(document, cell);
+  for (const target of targets) {
+    for (const child of [...target.element.children]) target.element.removeChild(child);
+    target.element.appendChild(new XmlText(text));
+    document.office.markDirty(target.partName);
+  }
+  replaceParagraphText(document, paragraphs[0]!, text);
+  for (const paragraph of paragraphs.slice(1)) paragraph.element.parent?.removeChild(paragraph.element);
+  if (paragraphs.length > 1) document._markMainDirty();
 }
 
 /**
@@ -921,10 +1149,22 @@ const REGION_FIDELITY: ReadonlyArray<{
   { region: "styles", class: "NATIVE" },
   { region: "tables", class: "NATIVE" },
   {
-    region: "lists",
-    class: "EQUIVALENT",
+    region: "tableStructure",
+    class: "PRESERVED",
     reason:
-      "List text and level are written to Word; the numbering definition itself stays as Word defined it.",
+      "Word table rows, columns, merges, and table formatting are preserved. Spectra only writes text into an existing safe cell.",
+  },
+  {
+    region: "hyperlinks",
+    class: "PRESERVED",
+    reason:
+      "Word hyperlink relationships and their exact text ranges are preserved. Spectra will not rewrite a linked range until that boundary is modeled natively.",
+  },
+  {
+    region: "lists",
+    class: "PRESERVED",
+    reason:
+      "Word list numbering definitions are preserved. Text in an existing list item remains editable, but changing list structure belongs in Word.",
   },
   {
     region: "images",
@@ -1000,7 +1240,7 @@ async function projectDocument(
       const regionId = paragraphRegionId(paragraph, path);
       const styleId = paragraph.styleId();
       const list = paragraph.list();
-      const readOnly = hasWml(
+      const readOnly = hasOmml(element) || hasWml(
         element,
         "ins",
         "del",
@@ -1014,6 +1254,7 @@ async function projectDocument(
         "fldChar",
         "instrText",
         "sdt",
+        "hyperlink",
       );
       // Some Word writers persist built-in Heading styles as the numeric
       // style IDs 1/2/3. Normalize those aliases to the semantic names used
@@ -1035,6 +1276,9 @@ async function projectDocument(
         attrs: {
           nativePath: path,
           ...(semanticStyleId ? { styleId: semanticStyleId } : {}),
+          ...(!readOnly && styleId && semanticStyleId !== styleId
+            ? { nativeStyleId: styleId }
+            : {}),
           ...(list ? { list } : {}),
           ...(readOnly ? { nativeReadOnly: true } : {}),
           // Formatting travels with the block so a writer sees the file's own
@@ -1054,7 +1298,7 @@ async function projectDocument(
           ? {
               readOnly: true,
               reason:
-                "This paragraph contains Word revision or field machinery and is preserved read-only.",
+                "This paragraph contains a Word revision, field, hyperlink range, content control, or OMML equation and is preserved read-only.",
             }
           : {}),
       });
@@ -1073,6 +1317,19 @@ async function projectDocument(
             candidate.namespaceUri() === WML_NAMESPACE &&
             candidate.localName === "tbl",
         );
+        const unsafeInterior = table.rows().some((row) => row.cells().some((cell) =>
+          hasOmml(cell.element) || hasWml(
+            cell.element,
+            "ins",
+            "del",
+            "moveFrom",
+            "moveTo",
+            "fldChar",
+            "instrText",
+            "hyperlink",
+          ),
+        ));
+        const readOnly = nested || unsafeInterior;
         const rows = table.rows().map((row) => row.cells().map((cell) => cell.text()));
         blocks.push({
           id: regionId,
@@ -1083,19 +1340,21 @@ async function projectDocument(
             nativePath: path,
             rowCount: table.rowCount(),
             columnCount: table.columnCount(),
-            ...(nested ? { nativeReadOnly: true } : {}),
+            ...(readOnly ? { nativeReadOnly: true } : {}),
           },
         });
         fidelityEntries.push({
           regionId,
-          feature: nested ? "nested-table" : "table",
-          class: nested ? "PRESERVED" : "NATIVE",
+          feature: nested ? "nested-table" : unsafeInterior ? "protected-table-interior" : "table",
+          class: readOnly ? "PRESERVED" : "NATIVE",
           partName: "/word/document.xml",
-          ...(nested
+          ...(readOnly
             ? {
                 readOnly: true,
                 reason:
-                  "Nested Word tables are preserved read-only until their cell topology can be rewritten safely.",
+                  nested
+                    ? "Nested Word tables are preserved read-only until their cell topology can be rewritten safely."
+                    : "This Word table contains a linked, field, revision, or equation range whose native boundary is preserved read-only.",
               }
             : {}),
         });
@@ -1260,7 +1519,7 @@ async function applyDelta(
 
   for (const operation of operations) {
     if (operation.kind === "insert-paragraph") {
-      const inserted = insertParagraph(document, {
+      const inserted = await insertParagraph(document, {
         ...operation,
         ...(operation.afterRegionId
           ? { afterRegionId: resolveRegionId(operation.afterRegionId) }
@@ -1330,7 +1589,7 @@ async function applyDelta(
           "DOCX_UNSUPPORTED_EDIT",
           `The target Word region ${operation.regionId} is not a paragraph.`,
         );
-      setParagraphStyle(document, region.paragraph, operation.style);
+      await setParagraphStyle(document, region.paragraph, operation.style);
     } else if (operation.kind === "format-runs" || operation.kind === "format-paragraph") {
       if (!region.paragraph)
         throw new DocxLensError(
@@ -1353,8 +1612,7 @@ async function applyDelta(
           "DOCX_UNSUPPORTED_EDIT",
           "The target Word table cell no longer exists.",
         );
-      cell.setText(operation.text);
-      document._markMainDirty();
+      await replaceTableCellText(document, cell, operation.text);
     }
   }
   return document.save();

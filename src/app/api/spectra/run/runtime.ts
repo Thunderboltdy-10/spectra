@@ -3713,6 +3713,25 @@ export async function handleSpectraRunRequest(request: NextRequest) {
           "Spectra could not undo this run.",
         { status: 409 },
       );
+    const executionId =
+      expectedExecutionId ?? state.run.executionId ?? `revert:${runId}`;
+    await Promise.all(
+      state.cards.map((card) =>
+        mutate("spectraRuns:patchResultCard", {
+          resultCardId: card._id,
+          executionId,
+          summary: "Restored the earlier copy of this work.",
+          actions: [
+            ...card.actions.filter((action) => action.key !== "revert"),
+            { key: "undone", label: "Undone" },
+          ].filter(
+            (action, index, all) =>
+              all.findIndex((candidate) => candidate.key === action.key) ===
+              index,
+          ),
+        }).catch(() => null),
+      ),
+    );
     return Response.json({
       restored: restored.length,
       blocked: plan.blocked,

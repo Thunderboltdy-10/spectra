@@ -3756,6 +3756,8 @@ export function SpectraShell({
               </div>
             </div>
           ) : null}
+          <div className="relative flex min-h-0 min-w-0 flex-1">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {workSetIsolated && tiledArtifacts.length > 0 ? (
             <ArtifactTileSurface
               isolated
@@ -4010,6 +4012,7 @@ export function SpectraShell({
               </>
             </section>
           )}
+          </div>
           <WorkbenchDockShell
             attachmentsHostRef={setAttachmentsHost}
             dock={{
@@ -4248,6 +4251,7 @@ export function SpectraShell({
               }
             />
           ) : null}
+          </div>
         </div>
       </div>
     </div>

@@ -49,6 +49,7 @@ export type LiveDockTabSource = {
   card?: {
     title?: string;
     summary?: string;
+    actions?: Array<{ key: string }>;
     provenance?: { attachmentNames?: string[]; artifactTitles?: string[] };
   } | null;
   checkpointSummary?: string;
@@ -172,10 +173,14 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
     state = "completed_limited";
   else state = "completed";
 
+  const undone = (source.card?.actions ?? []).some(
+    (action) => action.key === "undone",
+  );
   const cardSummary = distinct(source.card?.summary, title);
   const finalSummary = distinct(source.run.finalSummary, title);
-  const semanticStep =
-    state === "needs_input"
+  const semanticStep = undone
+    ? "Undone"
+    : state === "needs_input"
       ? "Ready for your input"
       : state === "completed" || state === "completed_limited"
         ? finalSummary ||
@@ -208,6 +213,7 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
       semanticStep
     ).slice(0, 800),
     hoverSummary: expandedSummary.slice(0, 800),
+    undone,
     recentSteps: (source.recentSteps ?? [])
       .flatMap((step) => {
         const clean = distinct(step, title);

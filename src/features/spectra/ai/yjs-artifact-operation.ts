@@ -1072,7 +1072,7 @@ async function synchronizeMutation(params: {
     // A detailed two-question quiz previously emitted hundreds of speculative
     // frames and spent over a minute awaiting preview-ledger writes before the
     // single real Yjs transaction was even attempted.
-    const maxChoreographyBeats = 48;
+    const maxChoreographyBeats = claimActorKind === "human" ? 0 : 48;
     let beats = rawBeats;
     if (rawBeats.length > maxChoreographyBeats) {
       const required = new Set<number>();
@@ -1341,7 +1341,7 @@ async function synchronizeMutation(params: {
         },
       });
       await new Promise<void>((resolve) =>
-        setTimeout(resolve, Math.max(48, beat.delayMs)),
+        setTimeout(resolve, Math.min(36, Math.max(0, beat.delayMs))),
       );
       if (
         (sequence === 0 ||
@@ -1463,7 +1463,9 @@ async function synchronizeMutation(params: {
           sequence: settleSequence,
         }),
       });
-      await new Promise<void>((resolve) => setTimeout(resolve, 420));
+      if (claimActorKind !== "human") {
+        await new Promise<void>((resolve) => setTimeout(resolve, 420));
+      }
     }
     return {
       changedRegionIds: plan.regions.map((region) => region.regionId),

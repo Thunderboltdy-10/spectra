@@ -125,18 +125,40 @@ describe("Live Dock V2", () => {
     expect(many.every((item) => item.preferredWidth === 0)).toBe(true);
     const dock = read("src/features/spectra/components/live-dock.tsx");
     expect(dock).toContain("spectra-live-dock-tab");
-    expect(dock).toContain("group-has-[.dock-tab-icon:hover]:hidden");
+    expect(dock).toContain("spectra-live-dock-hover");
+    expect(dock).toContain("ProgressTrace");
     expect(dock).toContain("OverflowMenu");
     expect(dock).toContain("Open conversation");
     expect(dock).toContain("dock-tab-identity min-w-0 flex-1");
     const css = read("src/styles/spectra-app.css");
     expect(css).not.toContain("flex: 1 0 calc((100% - 12px) / 3)");
     expect(css).toContain("min-width: 240px");
+    expect(css).toContain("flex: 1 1 240px");
+    expect(css).toContain(
+      '[data-studio-mode="tab"][data-blueprint="document"]',
+    );
+    expect(css).not.toContain("min-height: 52px !important");
     expect(css).toContain(".spectra-run-tab-strip::-webkit-scrollbar {");
     expect(css).toContain(".spectra-live-dock-progress::-webkit-scrollbar {");
     expect(css).not.toMatch(
       /\.spectra-run-tab-strip::-webkit-scrollbar,\s*\.spectra-live-dock-progress::-webkit-scrollbar/,
     );
+  });
+
+  it("marks a reverted run as undone", () => {
+    const model = deriveLiveDockTab(
+      source({
+        run: { status: "completed", phase: "completed" },
+        card: {
+          title: "Compare the evidence",
+          summary: "Restored the earlier copy of this work.",
+          actions: [{ key: "undone" }],
+        },
+      }),
+    );
+    expect(model.undone).toBe(true);
+    expect(model.semanticStep).toBe("Undone");
+    expect(model.state).toBe("completed");
   });
 
   it("keeps close and cancel semantics separate", () => {
@@ -160,6 +182,7 @@ describe("Live Dock V2", () => {
     );
     expect(surface).toContain("export function ThreadConversation");
     expect(surface).toContain("onSteer={runEngine.steer}");
+    expect(surface).toContain('from "./progress-trace"');
     const panel = read("src/features/spectra/components/live-thread-panel.tsx");
     expect(panel).toContain("ThreadConversation");
   });
@@ -178,7 +201,9 @@ describe("Live Dock V2", () => {
     expect(shell).toContain("width={liveThreadPanelWidth}");
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
     expect(runHook).toContain("options?.threadId === null");
-    expect(dock).toContain("group-focus-within:block");
+    expect(dock).toContain("dock-tab-identity min-w-0 flex-1 py-1 text-left");
+    expect(dock).toContain("onPointerEnter={() => openTabHover(tab.runId)}");
+    expect(dock).toContain("persistKey={tab.runId}");
     expect(dock).toContain("max-sm:fixed");
     expect(dock).toContain("data-mobile-sheet");
   });
@@ -200,16 +225,19 @@ describe("Live Dock V2", () => {
     expect(global).toContain('"/workspace"');
   });
 
-  it("keeps Follow and Stop immediate, with conversation Undo and Close in the shared overflow", () => {
+  it("keeps conversation and Stop immediate, with Follow Undo and Close in the shared overflow", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
     expect(dock).toContain("data-spectra-follow-control");
-    expect(dock).toContain("`Follow ${model.title}`");
-    expect(dock).toContain("<Crosshair");
+    expect(dock).toContain("Follow AI");
+    expect(dock).toContain("icon: Crosshair");
     expect(dock).toContain("followAiActor(tab.runId)");
+    expect(dock).toContain('aria-label={`Open conversation for ${model.title}`}');
     expect(dock).toContain('title="Stop"');
     expect(dock).toContain("OverflowMenu");
     expect(dock).toContain("Undo this run");
     expect(dock).toContain("Close tab");
+    expect(dock).toContain('side="top"');
+    expect(dock).toContain('layer="toast"');
     const panel = read("src/features/spectra/components/live-thread-panel.tsx");
     expect(panel).toContain("followAiActor(actor)");
     expect(panel).toContain("runIdForLiveThread(threadId)");

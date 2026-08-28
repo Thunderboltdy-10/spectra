@@ -131,11 +131,15 @@ export function OverflowMenu<T extends string>({
   value,
   onSelect,
   align = "end",
+  side = "bottom",
+  layer = "dropdown",
+  avoidCollisions = true,
   active = false,
   size = 40,
   icon: TriggerIcon = Ellipsis,
   triggerClassName,
   contentClassName,
+  followSafe = false,
 }: {
   /** Accessible name for the trigger, e.g. "More School sections". */
   label: string;
@@ -143,6 +147,10 @@ export function OverflowMenu<T extends string>({
   value?: T | "";
   onSelect: (key: T) => void;
   align?: "start" | "center" | "end";
+  side?: "top" | "bottom";
+  /** Stacking layer. Dock overflow must beat the composer dock. */
+  layer?: SpectraLayer;
+  avoidCollisions?: boolean;
   /** Renders the trigger in the active tone when the shown item is in here. */
   active?: boolean;
   /** Trigger edge length in px, so it can match the row it sits in. */
@@ -152,6 +160,9 @@ export function OverflowMenu<T extends string>({
   icon?: LucideIcon;
   triggerClassName?: string;
   contentClassName?: string;
+  /** Menu items count as Follow controls so choosing Follow AI does not
+      immediately cancel the mode. */
+  followSafe?: boolean;
 }) {
   if (!items.length) return null;
 
@@ -212,7 +223,14 @@ export function OverflowMenu<T extends string>({
           className="pointer-events-none size-4"
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className={contentClassName}>
+      <DropdownMenuContent
+        align={align}
+        side={side}
+        layer={layer}
+        avoidCollisions={avoidCollisions}
+        className={contentClassName}
+        data-spectra-follow-control={followSafe ? "" : undefined}
+      >
         {value === undefined ? (
           body
         ) : (

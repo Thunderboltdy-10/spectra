@@ -95,9 +95,13 @@ describe("P4.I3 honest execution and authority", () => {
       runtime.indexOf('if (action === "cancel")'),
     );
     expect(revert).toContain('claimActorKind: "human"');
+    expect(revert).toContain("spectraRuns:patchResultCard");
+    expect(revert).toContain('key: "undone"');
     const yjs = read("src/features/spectra/ai/yjs-artifact-operation.ts");
     expect(yjs).toContain('claimActorKind?: "ai" | "human"');
     expect(yjs).toContain("actorKind: claimActorKind");
+    expect(yjs).toContain('claimActorKind === "human" ? 0 : 48');
+    expect(yjs).toContain("Math.min(36, Math.max(0, beat.delayMs))");
     expect(yjs).toMatch(
       /claimActorKind === "ai"\s*\?\s*\{\s*runId: params\.runId,\s*operationId: params\.operationId\s*\}/,
     );

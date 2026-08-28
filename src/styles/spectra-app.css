@@ -1422,20 +1422,37 @@ body {
   }
 }
 
-.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-header {
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-header,
+.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header {
   flex-wrap: nowrap;
   gap: 8px;
-  padding-inline: 12px;
+  padding-inline: 20px !important;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-main,
+.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-main {
+  padding-inline: 20px !important;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-editor-workbar,
+.spectra-artifact-studio[data-studio-mode="tab"] .spectra-editor-workbar {
+  width: auto !important;
+  max-width: none;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
 }
 
 .spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-header-actions,
+.spectra-artifact-studio[data-studio-mode="tab"]
   .spectra-artifact-header-actions {
   width: auto;
   flex-shrink: 0;
   flex-wrap: nowrap;
 }
 
-.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-identity {
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-identity,
+.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-identity {
   padding-left: 0 !important;
   padding-right: 0 !important;
 }
@@ -1464,13 +1481,16 @@ body {
    pushed the summary to 22px as well — it then competed with the title for
    emphasis, wrapped to three lines in a split pane and was clipped by its
    one-line clamp. The summary keeps `--text-caption`. */
-.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-title {
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-title,
+.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-title {
   font-size: 22px !important;
   line-height: 1.25 !important;
   padding-block: 2px;
 }
 
 .spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-title:not(:focus),
+.spectra-artifact-studio[data-studio-mode="tab"]
   .spectra-artifact-title:not(:focus) {
   display: block;
   width: 100%;
@@ -11564,10 +11584,22 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .spectra-live-dock-tab {
-  flex: 0 0 auto;
+  flex: 1 1 240px;
   min-width: 240px;
-  width: 280px;
-  max-width: min(320px, 100%);
+  max-width: 100%;
+}
+
+.spectra-live-dock-hover {
+  pointer-events: auto;
+  z-index: var(--z-toast);
+}
+
+.spectra-live-dock-hover::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 100%;
+  height: 12px;
 }
 
 .spectra-live-stack {
@@ -15953,74 +15985,6 @@ body {
   padding: 10px 14px 8px !important;
 }
 
-/* Tab / fullscreen still needs the title and the description. The chrome tab
-   is a handle, not a substitute for the document's own identity. */
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header {
-  min-height: 52px !important;
-  padding: 4px 12px 6px !important;
-  overflow: visible;
-}
-
-.spectra-artifact-studio[data-studio-mode="tab"]
-  .spectra-artifact-identity-cluster {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  align-items: center;
-}
-
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-kind {
-  display: none;
-}
-
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-summary {
-  display: block;
-  max-height: 1.35em;
-}
-
-.spectra-artifact-studio[data-studio-mode="tab"]
-  .spectra-artifact-header-topline {
-  min-height: 32px;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.spectra-artifact-studio[data-studio-mode="tab"]
-  .spectra-artifact-header-actions {
-  flex-shrink: 0;
-  flex-wrap: nowrap;
-}
-
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-sync-status {
-  max-width: 9.5rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.spectra-artifact-studio[data-studio-mode="tab"]
-  .spectra-artifact-header-topline,
-.spectra-artifact-studio[data-studio-mode="tab"]
-  .spectra-artifact-header-topline
-  > .flex {
-  align-items: center;
-}
-
-.spectra-artifact-studio[data-studio-mode="tab"]
-  .spectra-artifact-header-topline
-  > .flex
-  > span {
-  height: 1.5rem;
-  width: 1.5rem;
-}
-
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-title {
-  font-size: 13px;
-  font-weight: 600;
-  min-height: 0;
-  line-height: 1.3;
-}
-
 .spectra-artifact-header-topline {
   min-height: 36px;
 }
@@ -16060,6 +16024,8 @@ body {
 }
 
 .spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-header-actions,
+.spectra-artifact-studio[data-studio-mode="tab"]
   .spectra-artifact-header-actions {
   width: auto;
   flex-wrap: nowrap;
@@ -16375,6 +16341,17 @@ body {
   min-height: 46px !important;
   border-radius: 11px !important;
   background: var(--bg-elevated) !important;
+}
+
+.spectra-command-surface textarea {
+  box-sizing: border-box;
+  min-height: 32px !important;
+  padding-block: 6px !important;
+  line-height: 20px !important;
+}
+
+.spectra-command-surface textarea::placeholder {
+  line-height: 20px;
 }
 
 .spectra-command-surface > div:last-child > div:first-child {
@@ -19320,11 +19297,36 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   display: none;
 }
 
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-editor-workbar {
-  width: 100% !important;
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-editor-workbar,
+.spectra-artifact-studio[data-studio-mode="tab"] .spectra-editor-workbar,
+.spectra-artifact-studio[data-studio-mode="split"][data-canvas-extent="infinite"]
+  .spectra-editor-workbar,
+.spectra-artifact-studio[data-studio-mode="tab"][data-canvas-extent="infinite"]
+  .spectra-editor-workbar {
+  width: auto !important;
   max-width: none;
+  margin-top: 8px !important;
   margin-left: 0 !important;
   margin-right: 0 !important;
+  border-radius: 12px !important;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-main,
+.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-main,
+.spectra-artifact-studio[data-studio-mode="split"][data-canvas-extent="infinite"]
+  .spectra-artifact-main,
+.spectra-artifact-studio[data-studio-mode="tab"][data-canvas-extent="infinite"]
+  .spectra-artifact-main,
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="document"]
+  .spectra-artifact-main,
+.spectra-artifact-studio[data-studio-mode="tab"][data-blueprint="document"]
+  .spectra-artifact-main {
+  padding-inline: 20px !important;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-header,
+.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header {
+  padding-inline: 20px !important;
 }
 
 /* Kept for the studios that still mount their own control cluster inside the

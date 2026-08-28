@@ -30,13 +30,16 @@ import {
 import { useNow } from "@/hooks/use-now";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
+import { LAYER_CLASS } from "@/components/ui/layers";
 import { PrismRunMark } from "@/components/spectra-prism-optic";
 import { SurfaceField, type FieldInfluence } from "../field/surface-field";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { confirmationDiffSummary } from "../ai/authority-execution";
 import type { ResultCardStreamView } from "../ai/stream-events";
+import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import type { CommandAttachment } from "./command-bar";
+import { ProgressTrace } from "./progress-trace";
 import {
   getSpectraRunTabs,
   invalidateSpectraRunTabsCache,
@@ -150,6 +153,45 @@ function streamCard(tab: SpectraRunTab): ResultCardStreamView | null {
     provenance: tab.card.provenance,
     updatedAt: tab.card.updatedAt,
   };
+}
+
+function asDockTraceSteps(
+  runId: string,
+  steps: Array<{ title: string; status: string }> | undefined,
+): SpectraLiveExchange["steps"] {
+  return (steps ?? []).map((step, index) => ({
+    id: `${runId}:dock-step:${index}`,
+    title: step.title,
+    status:
+      step.status === "error" || step.status === "running"
+        ? step.status
+        : "done",
+    createdAt: 0,
+  }));
+}
+
+function dockTraceSteps(
+  tab: SpectraRunTab,
+  optimistic:
+    | {
+        runId?: string;
+        steps?: Array<{ title: string; status: string }>;
+      }
+    | null
+    | undefined,
+  cached: SpectraLiveExchange["steps"] | undefined,
+): SpectraLiveExchange["steps"] {
+  if (optimistic?.runId === tab.runId && (optimistic.steps?.length ?? 0) > 0) {
+    return asDockTraceSteps(optimistic.runId, optimistic.steps);
+  }
+  if (cached && cached.length > 0) return cached;
+  return (tab.recentSteps ?? []).map((title, index) => ({
+    id: `${tab.runId}:dock-step:${index}`,
+    title,
+    summary: title,
+    status: "done" as const,
+    createdAt: 0,
+  }));
 }
 
 const stateCopy: Record<LiveDockTruthState, string> = {
@@ -389,40 +431,6 @@ function DockTabField({ state }: { state: LiveDockTruthState }) {
   return <SurfaceField influences={influences} scale="panel" grain="wave" />;
 }
 
-function DockHoverProgress({ steps }: { steps: string[] }) {
-  const scroller = useRef<HTMLUListElement>(null);
-  useEffect(() => {
-    const node = scroller.current;
-    if (!node) return;
-    node.scrollTop = node.scrollHeight;
-  }, [steps]);
-  if (!steps.length) return null;
-  return (
-    <div className="mt-3">
-      <p className="mb-1 text-micro font-bold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-        Progress
-      </p>
-      <ul
-        ref={scroller}
-        className="spectra-live-dock-progress max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px] leading-4 text-[var(--text-secondary)]"
-      >
-        {steps.map((step, stepIndex) => (
-          <li
-            key={`${stepIndex}:${step}`}
-            className={
-              stepIndex === steps.length - 1
-                ? "font-medium text-[var(--text-primary)]"
-                : "text-[var(--text-tertiary)]"
-            }
-          >
-            {step}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 export function LiveDock({
   workspaceId,
   optimistic,
@@ -462,6 +470,11 @@ export function LiveDock({
   const { preferences } = useSpectraPreferences();
   const motionLevel = useSpectraMotion();
   const follow = useFollowAi();
+  const [hoveredRunId, setHoveredRunId] = useState<string | null>(null);
+  const hoverCloseTimer = useRef<number | null>(null);
+  const traceCacheRef = useRef<Map<string, SpectraLiveExchange["steps"]>>(
+    new Map(),
+  );
   /* Titles that have already been established (and revealed) — a run title
      must only stream once, on first arrival (RUN-010). */
   const continuation = useSpectraContextStore((state) => state.continuation);
@@ -498,6 +511,35 @@ export function LiveDock({
     }, 5_000);
     return () => window.clearInterval(timer);
   }, [optimistic, optimistic?.runId, optimistic?.status, refresh, story]);
+
+  useEffect(() => {
+    if (!optimistic?.runId || !(optimistic.steps?.length ?? 0)) return;
+    traceCacheRef.current.set(
+      optimistic.runId,
+      asDockTraceSteps(optimistic.runId, optimistic.steps),
+    );
+  }, [optimistic?.runId, optimistic?.steps]);
+
+  const openTabHover = useCallback((runId: string) => {
+    if (hoverCloseTimer.current) {
+      window.clearTimeout(hoverCloseTimer.current);
+      hoverCloseTimer.current = null;
+    }
+    setHoveredRunId(runId);
+  }, []);
+  const closeTabHover = useCallback(() => {
+    if (hoverCloseTimer.current) window.clearTimeout(hoverCloseTimer.current);
+    hoverCloseTimer.current = window.setTimeout(() => {
+      setHoveredRunId(null);
+      hoverCloseTimer.current = null;
+    }, 180);
+  }, []);
+  useEffect(
+    () => () => {
+      if (hoverCloseTimer.current) window.clearTimeout(hoverCloseTimer.current);
+    },
+    [],
+  );
 
   const visible = useMemo(() => {
     /* Story mode shows exactly the runs the story declares, in the order it
@@ -738,7 +780,7 @@ export function LiveDock({
         >
         {showOptimistic ? (
           <article
-            className="flex h-11 min-w-[224px] basis-[260px] items-center gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 shadow-[inset_3px_0_var(--accent-cyan)]"
+            className="flex h-11 min-w-[240px] flex-1 items-center gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 shadow-[inset_3px_0_var(--accent-cyan)]"
             data-run-status="starting"
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
@@ -757,11 +799,11 @@ export function LiveDock({
           {visible.map((tab) => {
             const source = tabSource(tab);
             const model = deriveLiveDockTab(source);
-            const stateLabel = ["working", "completing", "completed"].includes(
-              model.state,
-            )
-              ? null
-              : stateCopy[model.state];
+            const stateLabel = model.undone
+              ? "Undone"
+              : ["working", "completing", "completed"].includes(model.state)
+                ? null
+                : stateCopy[model.state];
             const expanded = selectedInputRunId === tab.runId;
             const disclosureAnchor = `--live-dock-${tab.runId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
             const active = continuation?.id === tab.threadId;
@@ -770,12 +812,21 @@ export function LiveDock({
               (model.state === "paused" || model.state === "cancelled") &&
               tab.run.retryable;
             const canUndo = Boolean(
-              card?.actions.some((action) => action.key === "revert"),
+              card?.actions.some((action) => action.key === "revert") &&
+              !model.undone,
             );
             const isSteerable =
               model.state === "working" ||
               model.state === "waiting" ||
               model.state === "completing";
+            const followingThis =
+              follow.following && follow.followedActorId === tab.runId;
+            const hoverOpen = hoveredRunId === tab.runId;
+            const traceSteps = dockTraceSteps(
+              tab,
+              optimistic,
+              traceCacheRef.current.get(tab.runId),
+            );
             /* A title reveals exactly once: re-renders with the same title
                render it complete (RUN-010). */
             return (
@@ -827,6 +878,8 @@ export function LiveDock({
                     }}
                     className="dock-tab-identity min-w-0 flex-1 py-1 text-left"
                     title={model.title}
+                    onPointerEnter={() => openTabHover(tab.runId)}
+                    onPointerLeave={closeTabHover}
                   >
                     <span className="flex items-center gap-1.5">
                       <DockTitle
@@ -868,37 +921,12 @@ export function LiveDock({
                   </button>
                   <button
                     type="button"
-                    data-spectra-follow-control=""
-                    onClick={() => {
-                      if (
-                        follow.following &&
-                        follow.followedActorId === tab.runId
-                      ) {
-                        followAiActor(null);
-                        return;
-                      }
-                      followAiActor(tab.runId);
-                    }}
-                    className={`dock-tab-icon ml-auto flex h-8 w-7 shrink-0 items-center justify-center rounded-[6px] ${
-                      follow.following && follow.followedActorId === tab.runId
-                        ? "text-[var(--brand-primary)] hover:bg-[color-mix(in_oklab,var(--brand-primary)_8%,transparent)]"
-                        : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    }`}
-                    aria-label={
-                      follow.following && follow.followedActorId === tab.runId
-                        ? `Stop following ${model.title}`
-                        : `Follow ${model.title}`
-                    }
-                    aria-pressed={
-                      follow.following && follow.followedActorId === tab.runId
-                    }
-                    title={
-                      follow.following && follow.followedActorId === tab.runId
-                        ? "Stop spectating this run"
-                        : "Spectate this run"
-                    }
+                    onClick={() => openQuickChat(tab)}
+                    className="dock-tab-icon ml-auto flex h-8 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    aria-label={`Open conversation for ${model.title}`}
+                    title="Open conversation"
                   >
-                    <Crosshair className="h-3.5 w-3.5" />
+                    <SquareArrowOutUpRight className="h-3.5 w-3.5" />
                   </button>
                   {canRetry && onRetry ? (
                     <button
@@ -923,15 +951,20 @@ export function LiveDock({
                       <Square className="h-3.5 w-3.5" />
                     </button>
                   ) : null}
+                  <span data-spectra-follow-control="" className="contents">
                   <OverflowMenu
                     label={`More actions for ${model.title}`}
                     size={28}
+                    side="top"
+                    layer="toast"
+                    avoidCollisions={false}
+                    followSafe
                     triggerClassName="dock-tab-icon text-[var(--text-tertiary)]"
                     items={[
                       {
-                        key: "conversation",
-                        label: "Open conversation",
-                        icon: SquareArrowOutUpRight,
+                        key: "follow" as const,
+                        label: followingThis ? "Stop following" : "Follow AI",
+                        icon: Crosshair,
                       },
                       ...(canUndo && card
                         ? [
@@ -951,17 +984,20 @@ export function LiveDock({
                       },
                     ]}
                     onSelect={(key) => {
-                      if (key === "conversation") openQuickChat(tab);
-                      else if (key === "undo" && card)
+                      if (key === "follow") {
+                        if (followingThis) followAiActor(null);
+                        else followAiActor(tab.runId);
+                      } else if (key === "undo" && card)
                         void onAction?.(card, "revert");
                       else if (key === "close") void hideTab(tab);
                     }}
                   />
+                  </span>
                 </div>
 
-                {!expanded ? (
+                {!expanded && hoverOpen ? (
                   <div
-                    className="pointer-events-none fixed z-30 hidden w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)] group-hover:block group-focus-within:block group-has-[.dock-tab-icon:hover]:hidden"
+                    className={`spectra-live-dock-hover ${LAYER_CLASS.toast} fixed w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)]`}
                     style={
                       {
                         positionAnchor: disclosureAnchor,
@@ -970,16 +1006,24 @@ export function LiveDock({
                       } as CSSProperties
                     }
                     role="status"
+                    onPointerEnter={() => openTabHover(tab.runId)}
+                    onPointerLeave={closeTabHover}
                   >
                     <p className="text-[13px] font-semibold leading-5 text-[var(--text-primary)]">
                       {model.title}
                     </p>
-                    <p className="mt-1 line-clamp-3 text-xs leading-[1.55] text-[var(--text-secondary)]">
-                      {model.hoverSummary}
-                    </p>
-                    {isSteerable ? (
-                      <DockHoverProgress steps={model.recentSteps} />
-                    ) : null}
+                    <ProgressTrace
+                      steps={traceSteps}
+                      active={isSteerable}
+                      hasOutput={!isSteerable}
+                      summary={
+                        isSteerable
+                          ? undefined
+                          : model.finalSummary || model.hoverSummary
+                      }
+                      compact
+                      persistKey={tab.runId}
+                    />
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-micro text-[var(--text-tertiary)]">
                       {model.targetNames.length ? (
                         <span>{model.targetNames.slice(0, 2).join(" · ")}</span>

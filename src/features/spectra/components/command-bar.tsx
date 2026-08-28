@@ -483,8 +483,8 @@ export function CommandBar({
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+    textarea.style.height = "32px";
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 32), 128)}px`;
   }, [value]);
 
   useEffect(() => {
@@ -573,7 +573,7 @@ export function CommandBar({
           {context ? (
             <div className="flex shrink-0 self-center">{context}</div>
           ) : null}
-          <div className="relative min-w-0 flex-1">
+          <div className="relative flex min-h-8 min-w-0 flex-1 items-center">
             {autocomplete.suggestion ? (
               <div
                 aria-hidden="true"

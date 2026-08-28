@@ -87,6 +87,7 @@ function setup(
   plan: unknown,
   initialStatus: "queued" | "failed" = "queued",
   savedArtifactOverride?: Record<string, unknown>,
+  catalogArtifacts: Record<string, unknown>[] = [],
 ) {
   const card: { _id: string; runId: string; status: string; title: string; summary: string; variant: string; actions: Array<Record<string, unknown>>; updatedAt: number } = { _id: "card-real", runId: "run-real", status: initialStatus, title: initialStatus === "failed" ? "Run failed" : "Queued", summary: "", variant: initialStatus === "failed" ? "error" : "status", actions: [], updatedAt: 1 };
   const run: Record<string, unknown> & { status: string; sourceSurface: "workspace" | "chat"; workspaceId?: string; userPrompt: string; attemptCount: number } = { _id: "run-real", status: initialStatus, sourceSurface: "workspace", workspaceId: "workspace-real", threadId: "thread-real", executionId: "execution-1", userPrompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues.", attemptCount: 1 };
@@ -103,10 +104,11 @@ function setup(
     ...savedArtifactOverride,
   };
   const requireActor = vi.fn().mockResolvedValue({ clerkId: "actor" });
-  const convexQuery = vi.fn(async (name: string) => {
+  const convexQuery = vi.fn(async (name: string, args?: Record<string, unknown>) => {
     if (name.includes("spectraRuns:get")) return { run, cards: [card], operations };
     if (name.includes("spectraArtifacts:get")) return savedArtifact;
-    if (name.includes("spectraArtifacts:list")) return [];
+    if (name.includes("spectraArtifacts:listAgentRoutingDescriptors")) return [];
+    if (name.includes("spectraArtifacts:list")) return args?.blueprintKey === "agent" ? [] : catalogArtifacts;
     if (name.includes("spectraWorkspaces:list")) return [{ _id: "workspace-real", title: "Biology" }];
     if (name.includes("orgTree:listWorkspaceContents")) return { workspace: { _id: "workspace-real", title: "Biology" }, items: [] };
     if (name.includes("spectraThreads:get")) return { threadId: "thread-real", title: "New thread", messages: [], traces: [] };
@@ -1179,6 +1181,85 @@ describe("Spectra run route", () => {
 
     expect(error?.message).toBe("Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.");
     expect(error?.message).not.toMatch(/artifactId|workspaceId|threadId|schema|JSON|Convex/i);
+  });
+
+  it("routes the target-disambiguation tool into the durable required-input choices", async () => {
+    const otherArtifact = {
+      _id: "artifact-other",
+      blueprintKey: "document",
+      title: "Respiration Analysis",
+      summary: "A second respiration document.",
+      content: { blocks: [{ id: "other-block", type: "paragraph", text: "Analysis" }] },
+      placements: [{ workspaceId: "workspace-real", workspaceTitle: "Biology", nodeId: "node-other" }],
+      updatedAt: 2,
+    };
+    const { convexMutation, fetchMock } = setup(
+      {},
+      "queued",
+      {
+        blueprintKey: "document",
+        title: "Respiration Notes",
+        content: { blocks: [{ id: "open-block", type: "paragraph", text: "Notes" }] },
+      },
+      [otherArtifact],
+    );
+    fetchMock.mockImplementation(async (_url, init) => {
+      const payload = JSON.parse(String((init as RequestInit).body)) as {
+        tools?: Array<{ function?: { name?: string } }>;
+      };
+      expect(payload.tools?.map((tool) => tool.function?.name)).toContain("request_context_target");
+      return new Response(JSON.stringify({
+        model: "openai/gpt-5.6",
+        provider: "OpenAI",
+        choices: [{
+          finish_reason: "tool_calls",
+          message: {
+            content: "",
+            tool_calls: [{
+              id: "target-choice",
+              type: "function",
+              function: {
+                name: "request_context_target",
+                arguments: JSON.stringify({
+                  question: "Which respiration document should I change?",
+                  candidates: [
+                    { id: "artifact-real", title: "Wrong title", type: "quiz", summary: "Invented summary", workspaceTitle: "Wrong workspace" },
+                    { id: "artifact-other", title: "Wrong title", type: "quiz", summary: "Invented summary", workspaceTitle: "Wrong workspace" },
+                  ],
+                }),
+              },
+            }],
+          },
+        }],
+      }), { status: 200 });
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "run",
+        surface: "artifact",
+        workspaceId: "workspace-real",
+        artifactId: "artifact-real",
+        prompt: "Update the conclusion in my respiration work.",
+      }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string });
+    const assistantMessage = convexMutation.mock.calls
+      .filter(([name]) => String(name).includes("spectraThreads:appendMessage"))
+      .at(-1)?.[1] as { metadata?: { choices?: unknown } } | undefined;
+    expect(assistantMessage?.metadata?.choices).toEqual({
+      question: "Which respiration document should I change?",
+      options: [
+        { title: "Respiration Notes", description: "document · Biology · A focused deck." },
+        { title: "Respiration Analysis", description: "document · Biology · A second respiration document." },
+      ],
+    });
+    expect(convexMutation.mock.calls.some(([name, args]) =>
+      String(name).includes("spectraRuns:updateStatus") &&
+      (args as { decision?: string }).decision === "clarify",
+    )).toBe(true);
+    expect(events.some((event) => event.type === "final")).toBe(true);
   });
 
   it("canonicalizes operation and target id aliases without a model repair", async () => {

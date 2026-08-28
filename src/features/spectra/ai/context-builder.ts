@@ -8,6 +8,7 @@ export const CONTEXT_LIMITS = {
   packetCharacters: 28_000,
   artifactExcerptCharacters: 2_800,
   selectedArtifactCount: 16,
+  workspaceIndexCount: 48,
   workspaceArtifactCount: 8,
   catalogArtifactCount: 10,
   conversationMessages: 16,
@@ -79,7 +80,10 @@ function quizContentForAI(
   const questions = content.questions.map((value) => {
     if (!value || typeof value !== "object") return value;
     const question = value as Record<string, unknown>;
-    if (question.correctAnswer === undefined && question.correctAnswers === undefined)
+    if (
+      question.correctAnswer === undefined &&
+      question.correctAnswers === undefined
+    )
       withheld = true;
     // Defence in depth: if a key did arrive and the policy still withholds it,
     // it is removed here too rather than trusted to be filtered upstream.
@@ -105,9 +109,12 @@ function artifactContentForAI(artifact: ArtifactRecord) {
   return quizContentForAI(artifact, content);
 }
 
-function typedArtifactStructure(
+export function typedArtifactStructure(
   artifact: ArtifactRecord,
-  options?: { preferTrailingBlocks?: boolean; content?: Record<string, unknown> },
+  options?: {
+    preferTrailingBlocks?: boolean;
+    content?: Record<string, unknown>;
+  },
 ) {
   const content =
     options?.content ??
@@ -156,6 +163,107 @@ function typedArtifactStructure(
       priority: content.priority,
       subtasks: Array.isArray(content.subtasks)
         ? content.subtasks.slice(0, 20).map((item) => text(item, 300))
+        : [],
+    };
+  if (artifact.blueprintKey === "agent") {
+    const profile =
+      content.profile && typeof content.profile === "object"
+        ? (content.profile as Record<string, unknown>)
+        : {};
+    const instructions =
+      content.instructions && typeof content.instructions === "object"
+        ? (content.instructions as Record<string, unknown>)
+        : {};
+    const behavior =
+      content.behavior && typeof content.behavior === "object"
+        ? (content.behavior as Record<string, unknown>)
+        : {};
+    const routing =
+      content.routing && typeof content.routing === "object"
+        ? (content.routing as Record<string, unknown>)
+        : {};
+    return {
+      profile: {
+        purpose: text(profile.purpose, 800),
+        outcomes: Array.isArray(profile.outcomes)
+          ? profile.outcomes.slice(0, 12).map((item) => text(item, 240))
+          : [],
+        audienceIntent: text(profile.audienceIntent, 400),
+      },
+      instructions: text(instructions.text, 1_200),
+      skills: Array.isArray(content.skills)
+        ? content.skills.slice(0, 20).map((value) => {
+            const row = value as Record<string, unknown>;
+            return {
+              id: row.id,
+              name: text(row.name, 120),
+              enabled: row.enabled,
+              instructions: text(row.instructions, 400),
+            };
+          })
+        : [],
+      tools: Array.isArray(content.tools)
+        ? content.tools.slice(0, 30).map((value) => {
+            const row = value as Record<string, unknown>;
+            return {
+              id: row.id,
+              key: text(row.key, 120),
+              enabled: row.enabled,
+              approval: row.approval,
+            };
+          })
+        : [],
+      resources: Array.isArray(content.resources)
+        ? content.resources.slice(0, 20).map((value) => {
+            const row = value as Record<string, unknown>;
+            return {
+              id: row.id,
+              artifactId: row.artifactId,
+              label: text(row.label, 160),
+              mode: row.mode,
+            };
+          })
+        : [],
+      behavior: {
+        clarification: behavior.clarification,
+        tone: behavior.tone,
+        responseLength: behavior.responseLength,
+      },
+      routing: {
+        enabled: routing.enabled,
+        description: text(routing.description, 600),
+      },
+    };
+  }
+  if (artifact.blueprintKey === "timetable")
+    return {
+      timezone: text(content.timezone, 100),
+      layers: Array.isArray(content.layers)
+        ? content.layers.slice(0, 20).map((value) => {
+            const row = value as Record<string, unknown>;
+            return {
+              id: row.id,
+              name: text(row.name, 120),
+              kind: row.kind,
+              visible: row.visible,
+              locked: row.locked,
+            };
+          })
+        : [],
+      events: Array.isArray(content.events)
+        ? content.events.slice(0, 80).map((value) => {
+            const row = value as Record<string, unknown>;
+            return {
+              id: row.id,
+              layerId: row.layerId,
+              title: text(row.title, 240),
+              start: row.start,
+              end: row.end,
+              allDay: row.allDay,
+              status: row.status,
+              location: text(row.location, 160),
+            };
+          })
         : [],
     };
   if (artifact.blueprintKey === "document" && Array.isArray(content.blocks)) {
@@ -232,8 +340,98 @@ function typedArtifactStructure(
     });
     return { sheets };
   }
+  if (
+    artifact.blueprintKey === "presentation" &&
+    Array.isArray(content.slides)
+  ) {
+    const theme =
+      content.theme && typeof content.theme === "object"
+        ? (content.theme as Record<string, unknown>)
+        : {};
+    return {
+      theme: { id: theme.id, name: text(theme.name, 120) },
+      sections: Array.isArray(content.sections)
+        ? content.sections.slice(0, 40).map((value) => {
+            const row = value as Record<string, unknown>;
+            return { id: row.id, name: text(row.name, 120) };
+          })
+        : [],
+      slides: content.slides.slice(0, 60).map((value, index) => {
+        const row = value as Record<string, unknown>;
+        return {
+          index,
+          id: row.id,
+          title: text(row.title, 240),
+          layoutId: row.layoutId,
+          sectionId: row.sectionId,
+          speakerNotes: text(row.speakerNotes, 500),
+          objects: Array.isArray(row.objects)
+            ? row.objects.slice(0, 40).map((objectValue) => {
+                const object = objectValue as Record<string, unknown>;
+                return {
+                  id: object.id,
+                  type: object.type,
+                  content: text(compactText(object.content, 480), 480),
+                  altText: text(object.altText, 240),
+                  x: object.x,
+                  y: object.y,
+                  width: object.width,
+                  height: object.height,
+                  hidden: object.hidden,
+                };
+              })
+            : [],
+        };
+      }),
+    };
+  }
+  if (artifact.blueprintKey === "code" && Array.isArray(content.files))
+    return {
+      runtime: content.runtime,
+      entryFileId: content.entryFileId,
+      files: content.files.slice(0, 40).map((value) => {
+        const row = value as Record<string, unknown>;
+        const source = typeof row.source === "string" ? row.source : "";
+        return {
+          id: row.id,
+          path: text(row.path, 300),
+          language: text(row.language, 80),
+          lineCount: source ? source.split("\n").length : 0,
+          source: source.slice(0, 1_600),
+        };
+      }),
+      tests: Array.isArray(content.tests)
+        ? content.tests.slice(0, 20).map((value) => {
+            const row = value as Record<string, unknown>;
+            return {
+              id: row.id,
+              name: text(row.name, 160),
+              fileId: row.fileId,
+              enabled: row.enabled,
+            };
+          })
+        : [],
+      parameters: Array.isArray(content.parameters)
+        ? content.parameters.slice(0, 30).map((value) => {
+            const row = value as Record<string, unknown>;
+            return {
+              id: row.id,
+              key: row.key,
+              label: text(row.label, 160),
+              type: row.type,
+              value: row.value,
+            };
+          })
+        : [],
+    };
   if (artifact.blueprintKey === "whiteboard" && Array.isArray(content.nodes)) {
     return {
+      pages: Array.isArray(content.pages)
+        ? content.pages.slice(0, 20).map((value) => {
+            const row = value as Record<string, unknown>;
+            return { id: row.id, name: text(row.name, 120) };
+          })
+        : [],
       nodes: content.nodes.slice(0, 40).map((value, index) => {
         const row = value as Record<string, unknown>;
         const nodeContent =
@@ -243,7 +441,9 @@ function typedArtifactStructure(
             ? (row.content as Record<string, unknown>)
             : {};
         const style =
-          row.style && typeof row.style === "object" && !Array.isArray(row.style)
+          row.style &&
+          typeof row.style === "object" &&
+          !Array.isArray(row.style)
             ? (row.style as Record<string, unknown>)
             : {};
         return {
@@ -272,6 +472,17 @@ function typedArtifactStructure(
           color: text(style.color, 40),
         };
       }),
+      edges: Array.isArray(content.edges)
+        ? content.edges.slice(0, 80).map((value) => {
+            const row = value as Record<string, unknown>;
+            return {
+              id: row.id,
+              from: row.from,
+              to: row.to,
+              label: text(row.label, 200),
+            };
+          })
+        : [],
     };
   }
   return undefined;
@@ -376,6 +587,7 @@ export function buildBoundedContextPacket(input: {
   focusMode: EffectiveFocusMode;
   workspace?: WorkspaceRecord | null;
   artifacts: ArtifactRecord[];
+  workspaceIndexArtifacts?: ArtifactRecord[];
   focusedArtifact?: ArtifactRecord | null;
   selectedArtifactIds?: string[];
   conversation?: Array<{ role: unknown; content: unknown }>;
@@ -420,6 +632,7 @@ export function buildBoundedContextPacket(input: {
   inboxMap?: unknown[];
   contextReasons?: Record<string, "explicit" | "selected" | "visible" | "open">;
   continuationThreadId?: string;
+  threadAttachmentArtifactId?: string;
 }) {
   const broadPrompt =
     /\b(all|everything|search|find|across|compare|related|workspace|library|catalog|inbox|several|multiple|reorganize)\b/i.test(
@@ -490,6 +703,31 @@ export function buildBoundedContextPacket(input: {
   );
   const catalog = ranked.slice(0, CONTEXT_LIMITS.catalogArtifactCount);
   const includeCatalog = input.focusMode === "global" || broadPrompt;
+  const workspaceIndex = [
+    ...(input.workspaceIndexArtifacts ?? input.artifacts),
+  ]
+    .sort(
+      (left, right) =>
+        (typeof right.updatedAt === "number" ? right.updatedAt : 0) -
+        (typeof left.updatedAt === "number" ? left.updatedAt : 0),
+    )
+    .slice(0, CONTEXT_LIMITS.workspaceIndexCount)
+    .map((artifact) => ({
+      id: artifact._id,
+      title: artifact.title,
+      type: artifact.blueprintKey,
+      summary:
+        typeof artifact.summary === "string"
+          ? artifact.summary.slice(0, 260)
+          : undefined,
+      updatedAt: artifact.updatedAt,
+      placements: placements(artifact).slice(0, 3),
+      priors: {
+        visible: artifact._id === input.focusedArtifact?._id,
+        selected: selectedIds.has(String(artifact._id)),
+        threadAttachment: artifact._id === input.threadAttachmentArtifactId,
+      },
+    }));
   const selectedExcerptCap = Math.max(
     700,
     Math.min(
@@ -538,11 +776,9 @@ export function buildBoundedContextPacket(input: {
       selected: selectedSnapshots
         .filter((item) => item.relevance === "temporary selection")
         .map((item) => item.title),
-      workspaceMap: input.workspace
-        ? focusedMutation
-          ? "active workspace identity only"
-          : "bounded active workspace map"
-        : null,
+      workspaceMap: input.workspace ? "bounded active workspace map" : null,
+      workspaceIndex:
+        "bounded titles, types, summaries, recency, and target priors; content is hydrated only after resolution",
       libraryMap: input.libraryMap?.length
         ? "bounded nodes in the currently visible Library subtree"
         : null,
@@ -553,12 +789,22 @@ export function buildBoundedContextPacket(input: {
         "bounded workspaces, threads, and Inbox map with retrieval available",
     },
     currentView: input.currentView ?? "unknown",
-    semanticTargets: (input.semanticTargets ?? []).slice(0, 24).map((target) => ({
-      id: target.id,
-      label: target.label?.slice(0, 240),
-      summary: target.summary?.slice(0, 4_000),
-      anchor: target.anchor,
-    })),
+    workspaceIndex,
+    targetPriors: {
+      visibleArtifactId:
+        typeof input.focusedArtifact?._id === "string"
+          ? input.focusedArtifact._id
+          : null,
+      threadAttachmentArtifactId: input.threadAttachmentArtifactId ?? null,
+    },
+    semanticTargets: (input.semanticTargets ?? [])
+      .slice(0, 24)
+      .map((target) => ({
+        id: target.id,
+        label: target.label?.slice(0, 240),
+        summary: target.summary?.slice(0, 4_000),
+        anchor: target.anchor,
+      })),
     workspace: input.workspace
       ? {
           id: input.workspace._id,
@@ -589,36 +835,32 @@ export function buildBoundedContextPacket(input: {
             : (input.recentActivity ?? []).slice(0, 8),
         }
       : null,
-    workspaceMap: focusedMutation
-      ? []
-      : (input.workspaceMap ?? [])
-          .filter(
-            (item) =>
-              input.focusMode === "global" ||
-              input.focusMode === "workspace" ||
-              Boolean(
-                item &&
-                typeof item === "object" &&
-                (item as Record<string, unknown>).explicit,
-              ),
-          )
-          .slice(0, 18),
+    workspaceMap: (input.workspaceMap ?? [])
+      .filter(
+        (item) =>
+          input.focusMode === "global" ||
+          input.focusMode === "workspace" ||
+          Boolean(
+            item &&
+            typeof item === "object" &&
+            (item as Record<string, unknown>).explicit,
+          ),
+      )
+      .slice(0, 18),
     libraryMap: (input.libraryMap ?? []).slice(0, 120),
     currentLibraryLocation: input.currentLibraryLocation ?? null,
-    threadMap: focusedMutation
-      ? []
-      : (input.threadMap ?? [])
-          .filter(
-            (item) =>
-              input.focusMode === "global" ||
-              input.focusMode === "thread" ||
-              Boolean(
-                item &&
-                typeof item === "object" &&
-                (item as Record<string, unknown>).explicit,
-              ),
-          )
-          .slice(0, 14),
+    threadMap: (input.threadMap ?? [])
+      .filter(
+        (item) =>
+          input.focusMode === "global" ||
+          input.focusMode === "thread" ||
+          Boolean(
+            item &&
+            typeof item === "object" &&
+            (item as Record<string, unknown>).explicit,
+          ),
+      )
+      .slice(0, 14),
     inboxMap:
       input.focusMode === "global" ? (input.inboxMap ?? []).slice(0, 12) : [],
     focusedArtifact: focusedSnapshot,
@@ -688,6 +930,7 @@ export function buildBoundedContextPacket(input: {
     })),
     catalog: [],
     workspaceMap: packet.workspaceMap.slice(0, 16),
+    workspaceIndex: packet.workspaceIndex.slice(0, 40),
     libraryMap: packet.libraryMap.slice(0, 80),
     currentLibraryLocation: packet.currentLibraryLocation,
     threadMap: packet.threadMap.slice(0, 12),
@@ -726,6 +969,9 @@ export function buildBoundedContextPacket(input: {
       parentId: item.parentId,
       sourceId: item.sourceId,
       lastMessageAt: item.lastMessageAt,
+      updatedAt: item.updatedAt,
+      placements: item.placements,
+      priors: item.priors,
     };
   };
   let hardConversationCharacters = 0;
@@ -768,6 +1014,9 @@ export function buildBoundedContextPacket(input: {
       : null,
     conversation: hardConversation,
     workspaceMap: compactPacket.workspaceMap.slice(0, 8).map(compactMapItem),
+    workspaceIndex: compactPacket.workspaceIndex
+      .slice(0, 32)
+      .map(compactMapItem),
     libraryMap: compactPacket.libraryMap.slice(0, 48).map(compactMapItem),
     currentLibraryLocation: compactPacket.currentLibraryLocation,
     threadMap: compactPacket.threadMap.slice(0, 8).map(compactMapItem),
@@ -809,6 +1058,7 @@ export function buildBoundedContextPacket(input: {
       content: message.content.slice(0, 500),
     })),
     workspaceMap: [],
+    workspaceIndex: hardPacket.workspaceIndex.slice(0, 24),
     libraryMap: hardPacket.libraryMap.slice(0, 24),
     currentLibraryLocation: hardPacket.currentLibraryLocation,
     threadMap: [],

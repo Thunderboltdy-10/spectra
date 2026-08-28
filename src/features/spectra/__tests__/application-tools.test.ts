@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { spectraToolRegistry } from "../tools/registry";
+import {
+  APPLICATION_AGENT_TOOL_IDS,
+  spectraToolRegistry,
+} from "../tools/registry";
 import { decideAiAuthority } from "../ai/authority-policy";
 
 describe("application capability registry", () => {
@@ -50,5 +53,45 @@ describe("application capability registry", () => {
     expect(decideAiAuthority({ target: "bridge_pair" }).decision).toBe(
       "prohibited",
     );
+  });
+
+  it("exposes typed disambiguation tools to the agent", () => {
+    expect(APPLICATION_AGENT_TOOL_IDS).toEqual(
+      expect.arrayContaining(["ask_user_choice", "request_context_target"]),
+    );
+    expect(
+      spectraToolRegistry.parseInput("request_context_target", {
+        question: "Which Physics Essay should I change?",
+        candidates: [
+          {
+            id: "essay-a",
+            title: "Physics Essay",
+            type: "document",
+            workspaceTitle: "Mechanics",
+          },
+          {
+            id: "essay-b",
+            title: "Physics Essay",
+            type: "document",
+            workspaceTitle: "Waves",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      question: "Which Physics Essay should I change?",
+      candidates: [{ id: "essay-a" }, { id: "essay-b" }],
+    });
+    expect(() =>
+      spectraToolRegistry.parseInput("request_context_target", {
+        question: "Which one?",
+        candidates: [{ id: "only", title: "Only candidate" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      spectraToolRegistry.parseInput("ask_user_choice", {
+        question: "Which one?",
+        options: [{ title: "Only option" }],
+      }),
+    ).toThrow();
   });
 });

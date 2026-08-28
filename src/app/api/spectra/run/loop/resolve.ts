@@ -124,6 +124,338 @@ export function resolveNamedReference(
   return contained.length === 1 ? contained[0]!.id : value;
 }
 
+export type ArtifactTargetCandidate = {
+  id: string;
+  title: string;
+  blueprintKey?: string;
+  summary?: string;
+  updatedAt?: number;
+  placements: Array<{ workspaceId?: unknown; workspaceTitle?: unknown }>;
+  confidence: number;
+  reasons: string[];
+};
+
+export type ArtifactTargetResolution = {
+  role: string;
+  requestedReference: string | null;
+  blueprintKey?: string;
+  status: "resolved" | "ambiguous" | "missing";
+  confidence: number;
+  resolvedArtifactId?: string;
+  resolvedTitle?: string;
+  candidates: ArtifactTargetCandidate[];
+};
+
+export type ResolvedPlan = {
+  plan: SpectraPlan;
+  targetResolutions: ArtifactTargetResolution[];
+};
+
+type ArtifactCandidateSource = {
+  id: unknown;
+  title: unknown;
+  blueprintKey?: unknown;
+  type?: unknown;
+  summary?: unknown;
+  updatedAt?: unknown;
+  placements?: unknown;
+};
+
+const TARGET_TOKEN_STOP_WORDS = new Set([
+  "artifact",
+  "document",
+  "file",
+  "notes",
+  "note",
+  "deck",
+  "presentation",
+  "slides",
+  "sheet",
+  "workbook",
+  "quiz",
+  "task",
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "this",
+]);
+
+function referenceTokens(value: string) {
+  return normalizedReference(value)
+    .split(" ")
+    .filter(
+      (token) => token.length >= 3 && !TARGET_TOKEN_STOP_WORDS.has(token),
+    );
+}
+
+function targetCandidatesFromSources(sources: ArtifactCandidateSource[]) {
+  return sources.flatMap((source) => {
+    if (typeof source.id !== "string" || typeof source.title !== "string")
+      return [];
+    const placements = Array.isArray(source.placements)
+      ? source.placements.filter(
+          (placement): placement is Record<string, unknown> =>
+            Boolean(placement) && typeof placement === "object",
+        )
+      : [];
+    return [
+      {
+        id: source.id,
+        title: source.title,
+        blueprintKey:
+          typeof (source.blueprintKey ?? source.type) === "string"
+            ? String(source.blueprintKey ?? source.type)
+            : undefined,
+        summary:
+          typeof source.summary === "string" ? source.summary : undefined,
+        updatedAt:
+          typeof source.updatedAt === "number" ? source.updatedAt : undefined,
+        placements,
+      },
+    ];
+  });
+}
+
+function candidatesFromPacket(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  const workspaceIndex = Array.isArray(record.workspaceIndex)
+    ? (record.workspaceIndex as ArtifactCandidateSource[])
+    : [];
+  const artifacts = Array.isArray(record.artifacts)
+    ? (record.artifacts as ArtifactCandidateSource[])
+    : [];
+  return targetCandidatesFromSources([...workspaceIndex, ...artifacts]).filter(
+    (candidate, index, all) =>
+      all.findIndex((item) => item.id === candidate.id) === index,
+  );
+}
+
+function containsNormalizedPhrase(haystack: string, needle: string) {
+  if (!needle) return false;
+  return ` ${haystack} `.includes(` ${needle} `);
+}
+
+function promptHasDeicticTarget(prompt: string) {
+  return (
+    /\b(?:this|the open|the current|the visible|the selected)\s+(?:artifact|document|file|note|deck|presentation|slides?|sheet|workbook|quiz|task|whiteboard|code)\b/i.test(
+      prompt,
+    ) ||
+    /\b(?:rewrite|replace|edit|update|change|set|repair|fix|add|remove|rename)\s+(?:this|it|that)\b/i.test(
+      prompt,
+    )
+  );
+}
+
+export function promptExplicitlyTargetsFocusedArtifact(
+  prompt: string,
+  context: unknown,
+) {
+  if (!context || typeof context !== "object" || Array.isArray(context))
+    return false;
+  const record = context as Record<string, unknown>;
+  const focused =
+    record.focusedArtifact &&
+    typeof record.focusedArtifact === "object" &&
+    !Array.isArray(record.focusedArtifact)
+      ? (record.focusedArtifact as Record<string, unknown>)
+      : null;
+  if (typeof focused?.id !== "string" || typeof focused.title !== "string")
+    return false;
+  const candidates = candidatesFromPacket(record);
+  const promptKey = normalizedReference(prompt);
+  const namedOther = candidates.some(
+    (candidate) =>
+      candidate.id !== focused.id &&
+      normalizedReference(candidate.title).length >= 3 &&
+      containsNormalizedPhrase(promptKey, normalizedReference(candidate.title)),
+  );
+  if (namedOther) return false;
+  if (
+    normalizedReference(focused.title).length >= 3 &&
+    containsNormalizedPhrase(promptKey, normalizedReference(focused.title))
+  )
+    return true;
+  if (promptHasDeicticTarget(prompt)) return true;
+  // A region-specific command in Artifact Studio is an explicit reference to
+  // the visible structure only when no other titled artifact was named.
+  return (
+    /\b(?:rewrite|replace|edit|update|change|set|repair|fix|add|remove|rename|improve|write|draft|make|transform)\b/i.test(
+      prompt,
+    ) &&
+    /\b(?:title|summary|tag|hint|memory cue|answer|question|card|paragraph|heading|section|block|cell|row|column|sheet|slide|speaker notes?|object|node|subtask|deadline|due (?:date|time)|progress note|status|priority)\b/i.test(
+      prompt,
+    )
+  );
+}
+
+function selectedArtifactIds(
+  context: Awaited<ReturnType<typeof buildContext>>,
+) {
+  return new Set(context.selectedArtifactIds);
+}
+
+export function resolveArtifactTarget(input: {
+  prompt: string;
+  reference?: string | null;
+  blueprintKey?: string;
+  role: string;
+  candidates: Array<Omit<ArtifactTargetCandidate, "confidence" | "reasons">>;
+  focusedArtifactId?: string | null;
+  selectedArtifactIds?: Iterable<string>;
+  threadAttachmentArtifactId?: string | null;
+}): ArtifactTargetResolution {
+  const promptKey = normalizedReference(input.prompt);
+  const referenceKey = input.reference
+    ? normalizedReference(input.reference)
+    : "";
+  const selected = new Set(input.selectedArtifactIds ?? []);
+  const filtered = input.candidates.filter(
+    (candidate) =>
+      !input.blueprintKey || candidate.blueprintKey === input.blueprintKey,
+  );
+  const newest = Math.max(
+    0,
+    ...filtered.map((candidate) => candidate.updatedAt ?? 0),
+  );
+  const explicitFocus = promptExplicitlyTargetsFocusedArtifact(input.prompt, {
+    focusedArtifact: filtered.find(
+      (candidate) => candidate.id === input.focusedArtifactId,
+    ),
+    workspaceIndex: filtered,
+  });
+  const promptNamed = filtered.filter((candidate) => {
+    const titleKey = normalizedReference(candidate.title);
+    return (
+      titleKey.length >= 3 && containsNormalizedPhrase(promptKey, titleKey)
+    );
+  });
+  const scored = filtered
+    .map((candidate) => {
+      const reasons: string[] = [];
+      const titleKey = normalizedReference(candidate.title);
+      const titleTokens = referenceTokens(candidate.title);
+      const promptTokenSet = new Set(referenceTokens(input.prompt));
+      const matchedTitleTokens = titleTokens.filter((token) =>
+        promptTokenSet.has(token),
+      ).length;
+      const titleCoverage =
+        titleTokens.length > 0 ? matchedTitleTokens / titleTokens.length : 0;
+      const summaryTokens = referenceTokens(candidate.summary ?? "");
+      const summaryCoverage =
+        summaryTokens.length > 0
+          ? summaryTokens.filter((token) => promptTokenSet.has(token)).length /
+            Math.min(8, summaryTokens.length)
+          : 0;
+      let confidence = 0;
+      if (titleKey && containsNormalizedPhrase(promptKey, titleKey)) {
+        confidence += 0.94;
+        reasons.push("title named in request");
+      } else if (titleTokens.length >= 2 && titleCoverage === 1) {
+        confidence += 0.82;
+        reasons.push("all distinctive title words matched");
+      } else if (matchedTitleTokens >= 2) {
+        confidence += Math.min(0.68, 0.32 + titleCoverage * 0.42);
+        reasons.push("partial title match");
+      }
+      if (input.reference === candidate.id) {
+        confidence +=
+          (promptNamed.length > 0 &&
+            !promptNamed.some((named) => named.id === candidate.id)) ||
+          (candidate.id === input.focusedArtifactId && !explicitFocus)
+            ? 0.12
+            : 0.48;
+        reasons.push("planned owned id");
+      } else if (referenceKey && referenceKey === titleKey) {
+        confidence += 0.94;
+        reasons.push("planned title matched exactly");
+      }
+      if (explicitFocus && candidate.id === input.focusedArtifactId) {
+        confidence += 0.96;
+        reasons.push("request explicitly refers to visible work");
+      } else if (candidate.id === input.focusedArtifactId) {
+        confidence += 0.05;
+        reasons.push("visible work prior");
+      }
+      if (selected.has(candidate.id)) {
+        confidence += 0.3;
+        reasons.push("explicit selection prior");
+      }
+      if (candidate.id === input.threadAttachmentArtifactId) {
+        confidence +=
+          !input.focusedArtifactId && promptHasDeicticTarget(input.prompt)
+            ? 0.72
+            : 0.04;
+        reasons.push("thread attachment prior");
+      }
+      if (summaryCoverage > 0) {
+        confidence += Math.min(0.14, summaryCoverage * 0.14);
+        reasons.push("summary terms matched");
+      }
+      if (newest > 0 && candidate.updatedAt === newest) {
+        confidence += 0.025;
+        reasons.push("recent work prior");
+      }
+      return {
+        ...candidate,
+        confidence,
+        reasons,
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.confidence - left.confidence ||
+        (right.updatedAt ?? 0) - (left.updatedAt ?? 0) ||
+        left.title.localeCompare(right.title),
+    );
+  for (const candidate of scored)
+    candidate.confidence = Math.min(1, candidate.confidence);
+  const top = scored[0];
+  if (!top)
+    return {
+      role: input.role,
+      requestedReference: input.reference ?? null,
+      blueprintKey: input.blueprintKey,
+      status: "missing",
+      confidence: 0,
+      candidates: [],
+    };
+  const second = scored[1];
+  const duplicateNamedTitle =
+    promptNamed.length > 1 &&
+    promptNamed.some(
+      (candidate) =>
+        candidate.id !== top.id &&
+        normalizedReference(candidate.title) === normalizedReference(top.title),
+    );
+  const strongCompositeEvidence =
+    top.reasons.includes("title named in request") &&
+    top.reasons.includes("planned owned id");
+  const ambiguous =
+    duplicateNamedTitle ||
+    top.confidence < 0.76 ||
+    (!strongCompositeEvidence &&
+      Boolean(second) &&
+      second!.confidence >= 0.7 &&
+      top.confidence - second!.confidence < 0.1);
+  return {
+    role: input.role,
+    requestedReference: input.reference ?? null,
+    blueprintKey: input.blueprintKey,
+    status: ambiguous ? "ambiguous" : "resolved",
+    confidence: top.confidence,
+    ...(ambiguous
+      ? {}
+      : {
+          resolvedArtifactId: top.id,
+          resolvedTitle: top.title,
+        }),
+    candidates: scored.slice(0, 6),
+  };
+}
+
 export function resolvePlanReferences(
   plan: SpectraPlan,
   context: Awaited<ReturnType<typeof buildContext>>,
@@ -218,6 +550,324 @@ export function resolvePlanReferences(
     }
   }
   return parseSpectraPlan(next);
+}
+
+function ownedArtifactTargetCandidates(
+  context: Awaited<ReturnType<typeof buildContext>>,
+) {
+  return targetCandidatesFromSources(
+    [
+      ...context.artifacts,
+      ...(context.focusedArtifact ? [context.focusedArtifact] : []),
+    ].map((artifact) => ({
+      id: artifact.id,
+      title: artifact.title,
+      blueprintKey: artifact.blueprintKey,
+      summary: artifact.summary,
+      updatedAt: artifact.updatedAt,
+      placements: artifact.placements,
+    })),
+  ).filter(
+    (candidate, index, all) =>
+      all.findIndex((item) => item.id === candidate.id) === index,
+  );
+}
+
+function candidateChoiceTitle(
+  candidate: ArtifactTargetCandidate,
+  candidates: ArtifactTargetCandidate[],
+) {
+  const duplicateTitle = candidates.some(
+    (other) =>
+      other.id !== candidate.id &&
+      normalizedReference(other.title) === normalizedReference(candidate.title),
+  );
+  if (!duplicateTitle) return candidate.title.slice(0, 80);
+  const workspace = candidate.placements.find(
+    (placement) => typeof placement.workspaceTitle === "string",
+  )?.workspaceTitle;
+  const sameWorkspace = candidates.some(
+    (other) =>
+      other.id !== candidate.id &&
+      normalizedReference(other.title) ===
+        normalizedReference(candidate.title) &&
+      other.placements.some(
+        (placement) => placement.workspaceTitle === workspace,
+      ),
+  );
+  const summary = candidate.summary?.trim().slice(0, 44);
+  const sameSummary = Boolean(
+    summary &&
+    candidates.some(
+      (other) =>
+        other.id !== candidate.id &&
+        normalizedReference(other.title) ===
+          normalizedReference(candidate.title) &&
+        normalizedReference(other.summary ?? "") ===
+          normalizedReference(candidate.summary ?? ""),
+    ),
+  );
+  const qualifier =
+    typeof workspace === "string" && !sameWorkspace
+      ? workspace
+      : summary && !sameSummary
+        ? summary
+        : `copy ${candidates.indexOf(candidate) + 1}`;
+  return `${candidate.title} (${qualifier})`.slice(0, 80);
+}
+
+function clarificationForTarget(
+  plan: SpectraPlan,
+  resolution: ArtifactTargetResolution,
+) {
+  const topConfidence = resolution.candidates[0]?.confidence ?? 0;
+  const candidates = resolution.candidates
+    .filter(
+      (candidate) =>
+        candidate.confidence >= Math.max(0.6, topConfidence - 0.18),
+    )
+    .slice(0, 6);
+  const question = "Which Spectra work should I change?";
+  return parseSpectraPlan({
+    ...plan,
+    decision: "clarify",
+    intent: { ...plan.intent, targetArtifactId: null },
+    operations: [],
+    choices:
+      candidates.length >= 2
+        ? {
+            question,
+            options: candidates.map((candidate) => ({
+              title: candidateChoiceTitle(candidate, candidates),
+              description: [
+                candidate.blueprintKey?.replaceAll("_", " "),
+                candidate.summary?.trim().slice(0, 160),
+              ]
+                .filter(Boolean)
+                .join(": ")
+                .slice(0, 240),
+            })),
+          }
+        : null,
+    finalResponse:
+      candidates.length >= 2
+        ? `${question} I found ${candidates.map((candidate) => `“${candidateChoiceTitle(candidate, candidates)}”`).join(", ")}.`
+        : "I could not match that request to permissioned Spectra work. Name or select the work you want to change.",
+  });
+}
+
+export function resolvePlanArtifactTargets(
+  plan: SpectraPlan,
+  context: Awaited<ReturnType<typeof buildContext>>,
+  prompt: string,
+): ResolvedPlan {
+  let next = structuredClone(plan) as SpectraPlan;
+  const candidates = ownedArtifactTargetCandidates(context);
+  const focusedArtifactId =
+    typeof context.focusedArtifact?.id === "string"
+      ? context.focusedArtifact.id
+      : null;
+  const resolutions: ArtifactTargetResolution[] = [];
+  const resolveReference = (
+    reference: string | null | undefined,
+    blueprintKey: string | undefined,
+    role: string,
+    createdBeforeOperationIndex?: number,
+  ) => {
+    const createdMatch = /^@created:(\d+)$/.exec(reference ?? "");
+    if (createdMatch) {
+      const creationIndex = Number(createdMatch[1]);
+      const creation = next.operations[creationIndex];
+      const validCreation =
+        createdBeforeOperationIndex !== undefined &&
+        creationIndex < createdBeforeOperationIndex &&
+        creation?.type === "artifact.create";
+      const resolution: ArtifactTargetResolution = validCreation
+        ? {
+            role,
+            requestedReference: reference ?? null,
+            blueprintKey: creation.input.blueprintKey,
+            status: "resolved",
+            confidence: 1,
+            resolvedArtifactId: reference!,
+            resolvedTitle: creation.input.title,
+            candidates: [
+              {
+                id: reference!,
+                title: creation.input.title,
+                blueprintKey: creation.input.blueprintKey,
+                summary: creation.input.summary ?? undefined,
+                placements: [],
+                confidence: 1,
+                reasons: ["created earlier in this plan"],
+              },
+            ],
+          }
+        : {
+            role,
+            requestedReference: reference ?? null,
+            blueprintKey,
+            status: "missing",
+            confidence: 0,
+            candidates: [],
+          };
+      resolutions.push(resolution);
+      return resolution;
+    }
+    const resolution = resolveArtifactTarget({
+      prompt,
+      reference,
+      blueprintKey,
+      role,
+      candidates,
+      focusedArtifactId,
+      selectedArtifactIds: selectedArtifactIds(context),
+      threadAttachmentArtifactId: context.threadAttachmentArtifactId,
+    });
+    resolutions.push(resolution);
+    return resolution;
+  };
+  const operations = next.operations.map((operation, operationIndex) => {
+    if (operation.type === "artifact.update") {
+      const resolution = resolveReference(
+        operation.input.artifactId,
+        operation.input.blueprintKey,
+        `operation:${operationIndex}:artifact.update`,
+      );
+      return resolution.status === "resolved"
+        ? parseModelOperation({
+            ...operation,
+            input: {
+              ...operation.input,
+              artifactId: resolution.resolvedArtifactId,
+            },
+          })
+        : operation;
+    }
+    if (operation.type === "artifact.archive") {
+      const resolution = resolveReference(
+        operation.input.artifactId,
+        undefined,
+        `operation:${operationIndex}:artifact.archive`,
+      );
+      return resolution.status === "resolved"
+        ? parseModelOperation({
+            ...operation,
+            input: {
+              ...operation.input,
+              artifactId: resolution.resolvedArtifactId,
+            },
+          })
+        : operation;
+    }
+    if (operation.type === "workspaceItem.add") {
+      const resolution = resolveReference(
+        operation.input.artifactId,
+        undefined,
+        `operation:${operationIndex}:workspaceItem.add`,
+      );
+      return resolution.status === "resolved"
+        ? parseModelOperation({
+            ...operation,
+            input: {
+              ...operation.input,
+              artifactId: resolution.resolvedArtifactId,
+            },
+          })
+        : operation;
+    }
+    if (operation.type === "artifact.link") {
+      const source = resolveReference(
+        operation.input.sourceArtifactId,
+        undefined,
+        `operation:${operationIndex}:artifact.link.source`,
+        operationIndex,
+      );
+      const target = resolveReference(
+        operation.input.targetArtifactId,
+        undefined,
+        `operation:${operationIndex}:artifact.link.target`,
+        operationIndex,
+      );
+      return source.status === "resolved" && target.status === "resolved"
+        ? parseModelOperation({
+            ...operation,
+            input: {
+              ...operation.input,
+              sourceArtifactId: source.resolvedArtifactId,
+              targetArtifactId: target.resolvedArtifactId,
+            },
+          })
+        : operation;
+    }
+    return operation;
+  });
+  next = parseSpectraPlan({ ...next, operations });
+  const unresolved = resolutions.find(
+    (resolution) => resolution.status !== "resolved",
+  );
+  if (unresolved?.status === "ambiguous" && unresolved.candidates.length >= 2)
+    return {
+      plan: clarificationForTarget(next, unresolved),
+      targetResolutions: resolutions,
+    };
+  if (unresolved)
+    throw new Error(
+      "The requested artifactId target could not be resolved to a permissioned candidate.",
+    );
+  const primary = resolutions.find(
+    (resolution) => resolution.resolvedArtifactId,
+  );
+  if (primary?.resolvedArtifactId)
+    next = parseSpectraPlan({
+      ...next,
+      intent: {
+        ...next.intent,
+        targetArtifactId: primary.resolvedArtifactId,
+      },
+    });
+  return { plan: next, targetResolutions: resolutions };
+}
+
+export function narrateResolvedTargets(
+  plan: SpectraPlan,
+  resolutions: ArtifactTargetResolution[],
+) {
+  if (plan.decision !== "operate") return plan;
+  const titles = [
+    ...new Set(
+      resolutions.flatMap((resolution) =>
+        resolution.status === "resolved" && resolution.resolvedTitle
+          ? [resolution.resolvedTitle]
+          : [],
+      ),
+    ),
+  ];
+  if (titles.length === 0) return plan;
+  const quotedTitles = titles.map((title) => `“${title}”`).join(", ");
+  let finalResponse = plan.finalResponse.replace(
+    /\b(?:the\s+)?(?:focused|open|current)\s+(?:artifact|document|file|work)\b/gi,
+    titles[0]!,
+  );
+  if (
+    !titles.every((title) =>
+      normalizedReference(finalResponse).includes(normalizedReference(title)),
+    )
+  ) {
+    const operationKinds = new Set(
+      plan.operations.map((operation) => operation.type),
+    );
+    const action =
+      operationKinds.size === 1 && operationKinds.has("artifact.update")
+        ? "Updated"
+        : operationKinds.size === 1 && operationKinds.has("artifact.archive")
+          ? "Archived"
+          : operationKinds.size === 1 && operationKinds.has("artifact.link")
+            ? "Linked"
+            : "Changed";
+    finalResponse = `${finalResponse.replace(/\s+$/, "")} ${action} ${quotedTitles}.`;
+  }
+  return parseSpectraPlan({ ...plan, finalResponse });
 }
 
 export function reconcileExplicitRequestContract(
@@ -677,13 +1327,22 @@ export function reconcileExplicitDocumentRegions(
   prompt: string,
   context: Awaited<ReturnType<typeof buildContext>>,
 ) {
-  const operations = plan.operations.map((operation) =>
-    reconcileExplicitDocumentOperation(
+  const operations = plan.operations.map((operation) => {
+    const targetArtifact =
+      operation.type === "artifact.update"
+        ? (context.artifacts.find(
+            (artifact) => artifact.id === operation.input.artifactId,
+          ) ??
+          (context.focusedArtifact?.id === operation.input.artifactId
+            ? context.focusedArtifact
+            : null))
+        : null;
+    return reconcileExplicitDocumentOperation(
       operation,
       prompt,
-      context.focusedArtifact,
-    ),
-  );
+      targetArtifact,
+    );
+  });
   return operations.some(
     (operation, index) => operation !== plan.operations[index],
   )
@@ -695,7 +1354,7 @@ export function resolveAndValidatePlan(
   plan: SpectraPlan,
   context: Awaited<ReturnType<typeof buildContext>>,
   prompt: string,
-) {
+): ResolvedPlan {
   const requestedCreation = provisionalSingleCreation(prompt);
   const workspaceId =
     typeof context.currentWorkspace?.id === "string"
@@ -715,63 +1374,14 @@ export function resolveAndValidatePlan(
           }),
         )
       : plan;
-  const reconciled = reconcileExplicitDocumentRegions(
-    reconcileExplicitRequestContract(promoted, prompt),
-    prompt,
-    context,
-  );
+  const reconciled = reconcileExplicitRequestContract(promoted, prompt);
   let resolved = resolvePlanReferences(reconciled, context);
-  if (
-    (context.focusMode === "artifact" || context.focusMode === "thread") &&
-    context.focusedArtifact &&
-    typeof context.focusedArtifact.id === "string"
-  ) {
-    const focusedId = context.focusedArtifact.id;
-    const allowed = ownedReferences(context).artifactIds;
-    const operations = resolved.operations.map((operation) => {
-      if (
-        operation.type === "artifact.update" &&
-        !allowed.has(operation.input.artifactId) &&
-        operation.input.blueprintKey === context.focusedArtifact?.blueprintKey
-      ) {
-        return parseModelOperation({
-          ...operation,
-          input: { ...operation.input, artifactId: focusedId },
-        });
-      }
-      if (
-        operation.type === "artifact.archive" &&
-        !allowed.has(operation.input.artifactId)
-      ) {
-        return parseModelOperation({
-          ...operation,
-          input: { ...operation.input, artifactId: focusedId },
-        });
-      }
-      return operation;
-    });
-    const repairedTarget =
-      resolved.intent.targetArtifactId &&
-      !allowed.has(resolved.intent.targetArtifactId)
-        ? focusedId
-        : resolved.intent.targetArtifactId;
-    if (
-      repairedTarget !== resolved.intent.targetArtifactId ||
-      operations.some(
-        (operation, index) => operation !== resolved.operations[index],
-      )
-    ) {
-      console.warn("[spectra.plan.focused_reference_repaired]", {
-        focusedId,
-        focusMode: context.focusMode,
-      });
-      resolved = parseSpectraPlan({
-        ...resolved,
-        intent: { ...resolved.intent, targetArtifactId: repairedTarget },
-        operations,
-      });
-    }
-  }
+  const targetOutcome = resolvePlanArtifactTargets(resolved, context, prompt);
+  const targetResolutions = targetOutcome.targetResolutions;
+  resolved = targetOutcome.plan;
+  if (resolved.decision === "clarify")
+    return { plan: resolved, targetResolutions };
+  resolved = reconcileExplicitDocumentRegions(resolved, prompt, context);
   // A visible artifact is context, not an instruction to mutate it. When the
   // user explicitly asks for a fresh object, keep the conversation identity
   // anchored to that new object as well; otherwise the model can correctly
@@ -790,6 +1400,7 @@ export function resolveAndValidatePlan(
       });
     }
   }
+  resolved = narrateResolvedTargets(resolved, targetResolutions);
   assertRequestedArtifactMutation(resolved.operations, prompt);
   assertPresentationLayoutContract(resolved.operations, prompt);
   console.info(
@@ -814,7 +1425,10 @@ export function resolveAndValidatePlan(
     })}`,
   );
   try {
-    return validatePlanAgainstIntent(resolved, ownedReferences(context));
+    return {
+      plan: validatePlanAgainstIntent(resolved, ownedReferences(context)),
+      targetResolutions,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     console.error(
@@ -885,7 +1499,10 @@ export function resolveAndValidatePlan(
           blueprintKey: requested.blueprintKey,
           dropped: creates.length - 1,
         });
-        return validatePlanAgainstIntent(trimmed, ownedReferences(context));
+        return {
+          plan: validatePlanAgainstIntent(trimmed, ownedReferences(context)),
+          targetResolutions,
+        };
       }
     }
     // Vague single-create prompts often leave intent.requestedArtifactTypes
@@ -920,10 +1537,13 @@ export function resolveAndValidatePlan(
           console.warn("[spectra.plan.update_promoted_to_create]", {
             blueprintKey: requested.blueprintKey,
           });
-          return validatePlanAgainstIntent(
-            promotedCreate,
-            ownedReferences(context),
-          );
+          return {
+            plan: validatePlanAgainstIntent(
+              promotedCreate,
+              ownedReferences(context),
+            ),
+            targetResolutions,
+          };
         }
       }
       if (
@@ -948,7 +1568,10 @@ export function resolveAndValidatePlan(
         console.warn("[spectra.plan.intent_aligned_to_create]", {
           blueprintKey: requested.blueprintKey,
         });
-        return validatePlanAgainstIntent(aligned, ownedReferences(context));
+        return {
+          plan: validatePlanAgainstIntent(aligned, ownedReferences(context)),
+          targetResolutions,
+        };
       }
       if (creates.length === 1) {
         const blueprintKey = creates[0]!.input.blueprintKey;
@@ -975,42 +1598,12 @@ export function resolveAndValidatePlan(
         console.warn("[spectra.plan.intent_aligned_to_authored_create]", {
           blueprintKey,
         });
-        return validatePlanAgainstIntent(aligned, ownedReferences(context));
+        return {
+          plan: validatePlanAgainstIntent(aligned, ownedReferences(context)),
+          targetResolutions,
+        };
       }
     }
-    if (
-      !/\b(reference|target|destination|owned id|database ids?)\b/i.test(
-        message,
-      )
-    )
-      throw error;
-    const candidates = context.artifacts
-      .slice(0, 3)
-      .flatMap((artifact) =>
-        typeof artifact.title === "string" ? [artifact.title] : [],
-      );
-    // Clarification is appropriate only for genuine ambiguity. If retrieval found
-    // no viable owned target, treat the model operation as invalid so the run
-    // records one safe recoverable error instead of silently converting it into
-    // a successful-looking answer.
-    if (candidates.length < 2) throw error;
-    return parseSpectraPlan({
-      ...resolved,
-      decision: "clarify",
-      operations: [],
-      choices:
-        candidates.length >= 2
-          ? {
-              question: "Which Spectra object should I use?",
-              options: candidates.map((title) => ({
-                title,
-                description: "Use this owned object as the target.",
-              })),
-            }
-          : null,
-      finalResponse: candidates.length
-        ? `I found relevant work, but the requested change could apply to more than one object. Choose ${candidates.map((title) => `“${title}”`).join(", ")}, or name a different object.`
-        : "I can help with that, but I need the name of the Spectra object you want to change.",
-    });
+    throw error;
   }
 }

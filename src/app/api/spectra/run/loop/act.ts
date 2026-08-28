@@ -374,6 +374,7 @@ export async function executeApplicationCommand(
 export function operationEffectProgress(
   operation: ModelOperation,
   operationIndex: number,
+  resolvedTargetTitle?: string,
 ): NativeProgressUpdate | null {
   if (operation.type === "artifact.create")
     return {
@@ -430,7 +431,7 @@ export function operationEffectProgress(
   }
   return {
     title:
-      `${firstPath === "/title" ? "Renaming" : "Updating"} ${target}`.slice(
+      `${firstPath === "/title" ? "Renaming" : "Updating"} ${resolvedTargetTitle ?? target}`.slice(
         0,
         88,
       ),

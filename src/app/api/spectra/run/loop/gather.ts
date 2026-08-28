@@ -1,6 +1,9 @@
 import type { Body } from "./contract";
 import { act, mutate, query } from "./io";
-import { buildBoundedContextPacket } from "@/features/spectra/ai/context-builder";
+import {
+  artifactContextSnapshot,
+  buildBoundedContextPacket,
+} from "@/features/spectra/ai/context-builder";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { createHash } from "node:crypto";
@@ -23,6 +26,7 @@ export function summarizeArtifact(
     blueprintKey: artifact.blueprintKey,
     title: artifact.title,
     summary: artifact.summary,
+    updatedAt: artifact.updatedAt,
     placements: rows(artifact.placements).map((placement) => ({
       workspaceId: placement.workspaceId,
       workspaceTitle: placement.workspaceTitle,
@@ -45,6 +49,37 @@ export async function hydrateArtifactWithLiveContent(
   } catch {
     return artifact;
   }
+}
+
+export async function gatherResolvedArtifactContext(
+  actorClerkId: string,
+  artifactIds: string[],
+) {
+  const uniqueIds = [...new Set(artifactIds)].slice(0, 12);
+  const artifacts = await Promise.all(
+    uniqueIds.map(async (artifactId) => {
+      const stored = await query<unknown & object, unknown>(
+        "spectraArtifacts:get",
+        { actorClerkId, artifactId },
+      ).catch(() => null);
+      if (!stored || typeof stored !== "object") return null;
+      return hydrateArtifactWithLiveContent(stored as Record<string, unknown>);
+    }),
+  );
+  return artifacts.flatMap((artifact) =>
+    artifact
+      ? [
+          {
+            artifact,
+            snapshot: artifactContextSnapshot(artifact, {
+              includeExcerpt: true,
+              preferTrailingBlocks: true,
+              relevance: "resolved mutation target",
+            }),
+          },
+        ]
+      : [],
+  );
 }
 
 export async function buildContext(
@@ -100,20 +135,10 @@ export async function buildContext(
     /^(?:hi|hello|hey|thanks|thank you|good (?:morning|afternoon|evening))[!?.,\s]*$/i.test(
       prompt.trim(),
     );
-  const broadContextRequest =
-    /\b(all|everything|search|find|across|compare|related|workspace|library|catalog|inbox)\b/i.test(
-      prompt,
-    );
-  const shouldLoadArtifactCatalog =
-    (focusMode === "global" && !lightweightConversation) ||
-    focusMode === "workspace" ||
-    focusMode === "selection" ||
-    broadContextRequest;
-  const shouldLoadWorkspaceMap =
-    (focusMode === "global" && !lightweightConversation) ||
-    focusMode === "workspace" ||
-    focusMode === "selection" ||
-    explicitContextObjects.some((item) => item.type === "workspace");
+  // Target resolution always receives breadth. Artifact content remains
+  // shallow here and is hydrated only for the resolved targets below.
+  const shouldLoadArtifactCatalog = true;
+  const shouldLoadWorkspaceMap = true;
   const shouldLoadThreadMap =
     (focusMode === "global" && !lightweightConversation) ||
     focusMode === "thread" ||
@@ -152,7 +177,7 @@ export async function buildContext(
       ? query<unknown & object, unknown>("spectraArtifacts:list", {
           actorClerkId,
           placement: "all",
-          limit: 36,
+          limit: 48,
         })
       : Promise.resolve([]),
     shouldLoadArtifactCatalog
@@ -235,14 +260,15 @@ export async function buildContext(
     typeof continuedThreadRecord?.artifactId === "string"
       ? continuedThreadRecord.artifactId
       : undefined;
-  const effectiveArtifactId = body.artifactId ?? continuedArtifactId;
-  const effectiveFocusedArtifact =
-    focusedArtifact || !effectiveArtifactId
-      ? focusedArtifact
-      : await query<unknown & object, unknown>("spectraArtifacts:get", {
+  const effectiveArtifactId = body.artifactId;
+  const effectiveFocusedArtifact = focusedArtifact;
+  const threadAttachmentArtifact =
+    !body.artifactId && continuedArtifactId
+      ? await query<unknown & object, unknown>("spectraArtifacts:get", {
           actorClerkId,
-          artifactId: effectiveArtifactId,
-        }).catch(() => null);
+          artifactId: continuedArtifactId,
+        }).catch(() => null)
+      : null;
   const selectedRows = await Promise.all(
     selectedArtifactIds.map((artifactId) =>
       query<unknown & object, unknown>("spectraArtifacts:get", {
@@ -274,6 +300,9 @@ export async function buildContext(
     ...(hydratedFocusedArtifact && typeof hydratedFocusedArtifact === "object"
       ? [hydratedFocusedArtifact as Record<string, unknown>]
       : []),
+    ...(threadAttachmentArtifact && typeof threadAttachmentArtifact === "object"
+      ? [threadAttachmentArtifact as Record<string, unknown>]
+      : []),
     ...liveSelectedRows.flatMap((row) =>
       row && typeof row === "object" ? [row as Record<string, unknown>] : [],
     ),
@@ -302,6 +331,7 @@ export async function buildContext(
     ...new Set([
       ...ownedSelectedArtifactIds,
       ...(effectiveArtifactId ? [effectiveArtifactId] : []),
+      ...(continuedArtifactId ? [continuedArtifactId] : []),
     ]),
   ].slice(0, 12);
   const linkRows = await Promise.all(
@@ -603,6 +633,7 @@ export async function buildContext(
     focusMode,
     workspace: focusMode === "global" ? null : currentWorkspace,
     artifacts: ordinaryContextArtifacts,
+    workspaceIndexArtifacts: artifacts,
     // Keep the open studio artifact as focusedArtifact whenever the client
     // sent artifactId — even if focusMode still says workspace/global. Dropping
     // it under focusMode=workspace made QC invent creates (E-03 sheets).
@@ -667,6 +698,7 @@ export async function buildContext(
       .map((artifact) => summarizeArtifact(artifact)),
     contextReasons,
     continuationThreadId: body.threadId,
+    threadAttachmentArtifactId: continuedArtifactId,
   });
   return {
     workspaces,
@@ -708,6 +740,7 @@ export async function buildContext(
       typeof continuedThread?.retainedAgentId === "string"
         ? continuedThread.retainedAgentId
         : null,
+    threadAttachmentArtifactId: continuedArtifactId ?? null,
   };
 }
 

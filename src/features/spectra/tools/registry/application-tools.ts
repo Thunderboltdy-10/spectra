@@ -160,12 +160,42 @@ export function registerApplicationTools() {
     cancellable: true,
     resumable: true,
   };
-  for (const id of APPLICATION_INPUT_TOOL_IDS)
+  const choiceOptionSchema = z.object({
+    title: z.string().trim().min(1).max(80),
+    description: z.string().trim().max(240).nullable().optional(),
+  });
+  define({
+    ...inputDefaults,
+    id: "ask_user_choice",
+    title: "Ask user to choose",
+    description: "Pause safely and ask one bounded question when two or more valid choices would materially change the result.",
+    inputSchema: z.object({
+      question: z.string().trim().min(1).max(500),
+      options: z.array(choiceOptionSchema).min(2).max(6),
+    }),
+  });
+  define({
+    ...inputDefaults,
+    id: "request_context_target",
+    title: "Ask which work to use",
+    description: "Pause safely when multiple permissioned work items could be the mutation target; provide only evidence-backed candidates and never guess.",
+    inputSchema: z.object({
+      question: z.string().trim().min(1).max(500),
+      candidates: z.array(z.object({
+        id: z.string().min(1),
+        title: z.string().trim().min(1).max(80),
+        type: z.string().trim().max(80).nullable().optional(),
+        summary: z.string().trim().max(180).nullable().optional(),
+        workspaceTitle: z.string().trim().max(80).nullable().optional(),
+      })).min(2).max(6),
+    }),
+  });
+  for (const id of APPLICATION_INPUT_TOOL_IDS.filter((id) => id !== "ask_user_choice" && id !== "request_context_target"))
     define({ ...inputDefaults, id, title: id.split("_").map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" "), description: "Pause this recoverable run for the smallest necessary user input, then resume the same run.", inputSchema: jsonObject });
 }
 
 registerApplicationTools();
 
 export const APPLICATION_AGENT_TOOL_IDS = [
-  "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", "change_sharing", "trigger_managebac_sync", "change_managebac_mapping", "insert_reference", "pair_bridge", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "propose_operation", "submit_plan",
+  "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", "change_sharing", "trigger_managebac_sync", "change_managebac_mapping", "insert_reference", "pair_bridge", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "ask_user_choice", "request_context_target", "propose_operation", "submit_plan",
 ] as const;

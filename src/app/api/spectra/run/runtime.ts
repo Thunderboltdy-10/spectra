@@ -17,7 +17,12 @@ import type {
   RunState,
   Surface,
 } from "./loop/contract";
-import { buildContext, queueSilentMemoryMaintenance } from "./loop/gather";
+import {
+  buildContext,
+  gatherResolvedArtifactContext,
+  queueSilentMemoryMaintenance,
+  summarizeArtifact,
+} from "./loop/gather";
 import {
   addDerivedVisualAttachments,
   agentCanHandleLikelyMutation,
@@ -58,7 +63,12 @@ import {
   saveAssistantMessage,
   streamCard,
 } from "./loop/report";
-import { ownedReferences, resolveAndValidatePlan } from "./loop/resolve";
+import {
+  ownedReferences,
+  promptExplicitlyTargetsFocusedArtifact,
+  reconcileExplicitDocumentRegions,
+  resolveAndValidatePlan,
+} from "./loop/resolve";
 import {
   committedCreatesAreUsable,
   verifyCommittedOutcomes,
@@ -281,7 +291,7 @@ async function runAttempt(
       phase: "planning",
       resultTitle: "Spectra",
       resultSummary: params.artifactId
-        ? "Loading the focused artifact"
+        ? "Loading workspace context"
         : params.workspaceId
           ? "Loading the active workspace map"
           : "Resolving the requested objects",
@@ -453,34 +463,10 @@ async function runAttempt(
         if (target) queueArtifactEffect(target, progress);
       }
     };
-    const signalsFocusedEdit =
-      Boolean(params.artifactId) &&
+    const signalsMutationIntent =
       /\b(?:rename|edit|update|transform|rewrite|write|draft|add|remove|reorganize|change|set|replace|fix|correct)\b/i.test(
         params.prompt,
       );
-    if (params.artifactId && signalsFocusedEdit) {
-      publish({
-        type: "operation_preview",
-        runId: params.runId,
-        operationId: "focused-preview",
-        operationType: "artifact.update",
-        preview: {
-          action: "update",
-          title: "Preparing the focused artifact",
-          targetId: params.artifactId,
-        },
-      });
-      // Paint the canonical card as active immediately without persisting an
-      // empty artifact-wide preview. The validated operation later supplies
-      // exact paths and content, so only the real region begins to shimmer.
-      publish({
-        type: "artifact_patch",
-        runId: params.runId,
-        operationId: "focused-preview",
-        artifactId: params.artifactId,
-        patch: { progress: 0.08, changedPaths: [] },
-      });
-    }
     // A focused-artifact request is overwhelmingly an edit, even when the
     // user naturally says "write a hint" or "draft a better summary". Only
     // materialize a creation shell there when they explicitly ask for a new,
@@ -561,6 +547,12 @@ async function runAttempt(
       },
       params.prompt,
     );
+    const explicitlyTargetsFocusedArtifact =
+      promptExplicitlyTargetsFocusedArtifact(params.prompt, context.packet);
+    const signalsFocusedEdit =
+      Boolean(params.artifactId) &&
+      signalsMutationIntent &&
+      explicitlyTargetsFocusedArtifact;
     const ordinarySpectraRequested = requestsOrdinarySpectra(
       params.prompt,
       params.disableAgentRouting,
@@ -640,16 +632,18 @@ async function runAttempt(
       executionId: params.executionId,
       status: "running",
       phase: "retrieving",
-      resultTitle: context.focusedArtifact?.title
-        ? `Reviewing ${context.focusedArtifact.title}`
-        : context.currentWorkspace?.title
-          ? `Mapping ${context.currentWorkspace.title}`
-          : "Preparing the requested work",
-      resultSummary: context.focusedArtifact?.title
-        ? "Inspecting the permissioned live artifact state"
-        : context.currentWorkspace?.title
-          ? "Inspecting the permissioned workspace map"
-          : "Assembling only the permissioned context needed for this request",
+      resultTitle:
+        explicitlyTargetsFocusedArtifact && context.focusedArtifact?.title
+          ? `Reviewing ${context.focusedArtifact.title}`
+          : context.currentWorkspace?.title
+            ? `Mapping ${context.currentWorkspace.title}`
+            : "Preparing the requested work",
+      resultSummary:
+        explicitlyTargetsFocusedArtifact && context.focusedArtifact?.title
+          ? "Inspecting the permissioned live artifact state"
+          : context.currentWorkspace?.title
+            ? "Inspecting the permissioned workspace map"
+            : "Assembling only the permissioned context needed for this request",
       resultActions: [],
     });
     const persistedConversation =
@@ -678,7 +672,7 @@ async function runAttempt(
       },
     });
     const workspaceTitle = context.currentWorkspace?.title;
-    const provenance = {
+    let provenance = {
       artifactIds: context.selectedArtifactIds,
       artifactTitles: context.packet.selectedObjects.map((item) => item.title),
       threadId: params.threadId,
@@ -698,7 +692,11 @@ async function runAttempt(
         : {}),
     };
     const owned = ownedReferences(context);
-    if (params.artifactId && context.focusedArtifact?.title)
+    if (
+      explicitlyTargetsFocusedArtifact &&
+      params.artifactId &&
+      context.focusedArtifact?.title
+    )
       publish({
         type: "progress",
         runId: params.runId,
@@ -726,10 +724,15 @@ async function runAttempt(
       parallelCreations.length || (params.attachments?.length ?? 0) > 0
         ? null
         : (fastConversationalPlan(params.prompt) ??
-          fastFocusedPlannerPlan(params.prompt, context.focusedArtifact) ??
-          fastFocusedDeckHintPlan(params.prompt, context.focusedArtifact) ??
-          fastFocusedQuizSettingsPlan(params.prompt, context.focusedArtifact) ??
-          fastFocusedMetadataPlan(params.prompt, context.focusedArtifact));
+          (explicitlyTargetsFocusedArtifact
+            ? (fastFocusedPlannerPlan(params.prompt, context.focusedArtifact) ??
+              fastFocusedDeckHintPlan(params.prompt, context.focusedArtifact) ??
+              fastFocusedQuizSettingsPlan(
+                params.prompt,
+                context.focusedArtifact,
+              ) ??
+              fastFocusedMetadataPlan(params.prompt, context.focusedArtifact))
+            : null));
     if (focusedToolPlan) {
       publish({
         type: "status",
@@ -867,7 +870,8 @@ async function runAttempt(
             // A direct region edit needs the canonical block/field tree once;
             // including it here prevents a redundant read_artifact turn while
             // broad and ambiguous work keeps the compact on-demand strategy.
-            ...(promptDirectlyUsesFocusedContent(params.prompt) &&
+            ...(explicitlyTargetsFocusedArtifact &&
+            promptDirectlyUsesFocusedContent(params.prompt) &&
             context.focusedArtifact
               ? { focusedArtifact: context.focusedArtifact }
               : {}),
@@ -1019,16 +1023,6 @@ async function runAttempt(
                   if (frameIndex < frames.length - 1)
                     await new Promise((resolve) => setTimeout(resolve, 90));
                 }
-              } else if (
-                operation.type === "artifact.update" &&
-                owned.artifactIds.has(operation.input.artifactId)
-              ) {
-                bindArtifactEffect(index, operation.input.artifactId);
-                // Existing artifacts are performed by the live interaction
-                // fabric. Do not publish the final proposal from the model
-                // stream: that races ahead of cursor/menu/caret choreography
-                // and is repeated after contention resume. The performer
-                // stages cumulative native beats once it owns the region.
               } else if (operation.type === "workspace.create") {
                 const pending = await mutate<
                   unknown & object,
@@ -1191,18 +1185,139 @@ async function runAttempt(
     await partialWrite;
     const progressiveWritesReady = Promise.all(progressiveWrites);
     let plan: SpectraPlan;
+    let targetTitlesById = new Map<string, string>();
     try {
       loop.enter("resolve");
-      plan = resolveAndValidatePlan(modelResult.plan, context, params.prompt);
+      const resolved = resolveAndValidatePlan(
+        modelResult.plan,
+        context,
+        params.prompt,
+      );
+      plan = resolved.plan;
+      const resolvedTargetIds = resolved.targetResolutions.flatMap((target) =>
+        target.status === "resolved" &&
+        target.resolvedArtifactId &&
+        !target.resolvedArtifactId.startsWith("@created:")
+          ? [target.resolvedArtifactId]
+          : [],
+      );
+      loop.enter("gather");
+      const resolvedTargetContext = await gatherResolvedArtifactContext(
+        params.actorClerkId,
+        resolvedTargetIds,
+      );
+      const gatheredTargetIds = new Set(
+        resolvedTargetContext.flatMap(({ artifact }) =>
+          typeof artifact._id === "string" ? [artifact._id] : [],
+        ),
+      );
+      if (
+        resolvedTargetIds.some((artifactId) => !gatheredTargetIds.has(artifactId))
+      )
+        throw new Error(
+          "The resolved artifactId context could not be loaded safely before mutation.",
+        );
+      const resolvedSummaries = resolvedTargetContext.map(({ artifact }) =>
+        summarizeArtifact(artifact, true),
+      );
+      const resolvedById = new Map(
+        resolvedSummaries.flatMap((artifact) =>
+          typeof artifact.id === "string"
+            ? [[artifact.id, artifact] as const]
+            : [],
+        ),
+      );
+      const contextWithResolvedTargets = {
+        ...context,
+        artifacts: context.artifacts.map(
+          (artifact) => resolvedById.get(String(artifact.id)) ?? artifact,
+        ),
+        focusedArtifact:
+          context.focusedArtifact &&
+          typeof context.focusedArtifact.id === "string"
+            ? (resolvedById.get(context.focusedArtifact.id) ??
+              context.focusedArtifact)
+            : context.focusedArtifact,
+      };
+      if (resolvedTargetContext.length > 0) {
+        plan = validatePlanAgainstIntent(
+          reconcileExplicitDocumentRegions(
+            plan,
+            params.prompt,
+            contextWithResolvedTargets,
+          ),
+          ownedReferences(contextWithResolvedTargets),
+        );
+      }
+      targetTitlesById = new Map(
+        resolved.targetResolutions.flatMap((target) =>
+          target.status === "resolved" &&
+          target.resolvedArtifactId &&
+          target.resolvedTitle
+            ? [[target.resolvedArtifactId, target.resolvedTitle] as const]
+            : [],
+        ),
+      );
+      const resolvedTitles = [...new Set(targetTitlesById.values())];
+      provenance = {
+        ...provenance,
+        artifactIds: [
+          ...new Set([...provenance.artifactIds, ...resolvedTargetIds]),
+        ],
+        artifactTitles: [
+          ...new Set([...provenance.artifactTitles, ...resolvedTitles]),
+        ],
+      };
+      await mutate("spectraRuns:setContextSnapshot", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        contextSnapshot: {
+          workspaceId: params.workspaceId,
+          scopeNodeId: params.scopeNodeId,
+          artifactId: params.artifactId,
+          threadId: params.threadId,
+          focusMode: context.focusMode,
+          selectedObjectIds: context.selectedArtifactIds,
+          explicitContextObjects: params.explicitContextObjects,
+          currentView: params.currentView,
+          requestedAgentId: params.agentId,
+          disableAgentRouting: params.disableAgentRouting,
+          packetVersion: 2,
+          targetResolutions: resolved.targetResolutions.map((target) => ({
+            role: target.role,
+            requestedReference: target.requestedReference,
+            status: target.status,
+            confidence: target.confidence,
+            resolvedArtifactId: target.resolvedArtifactId,
+            resolvedTitle: target.resolvedTitle,
+            candidates: target.candidates.map((candidate) => ({
+              id: candidate.id,
+              title: candidate.title,
+              confidence: candidate.confidence,
+            })),
+          })),
+          capturedAt: Date.now(),
+        },
+      });
     } catch (resolveError) {
       // callModel already performs the single bounded repair against its
       // existing draft. Never restart the full model pass here.
       throw resolveError;
     }
-    // Adopt the behavior-preserving intake packet only after target resolution.
-    // Targeted post-resolution hydration replaces this compatibility handoff in I2.
-    loop.enter("gather");
+    // The shallow index is always present; only resolved targets were hydrated
+    // above, before any mutation is recorded or applied.
     assertSelectedAgentAllowsOperations(modelContextPacket, plan.operations);
+    const primaryResolvedTitle = targetTitlesById.values().next().value as
+      string | undefined;
+    if (primaryResolvedTitle)
+      publish({
+        type: "progress",
+        runId: params.runId,
+        title: `Reviewing ${primaryResolvedTitle}`,
+        detail: "Inspecting the resolved live target before applying changes",
+        activity: "inspect",
+      });
     if (plan.operations.length > 0)
       publish({
         type: "progress",
@@ -1334,7 +1449,13 @@ async function runAttempt(
       if (operation?.type === "artifact.update")
         bindArtifactEffect(index, operation.input.artifactId);
       if (operation && !latestArtifactProgressByIndex.has(index)) {
-        const fallbackProgress = operationEffectProgress(operation, index);
+        const fallbackProgress = operationEffectProgress(
+          operation,
+          index,
+          operation.type === "artifact.update"
+            ? targetTitlesById.get(operation.input.artifactId)
+            : undefined,
+        );
         if (fallbackProgress) publishNativeProgress(fallbackProgress);
       }
       if (
@@ -1354,7 +1475,19 @@ async function runAttempt(
         operationId,
         operationType: operation?.type ?? "unknown",
         preview: operation
-          ? { ...safeOperationPreview(operation), pendingArtifactId }
+          ? {
+              ...safeOperationPreview(
+                operation,
+                operation.type === "artifact.update" ||
+                  operation.type === "artifact.archive" ||
+                  operation.type === "workspaceItem.add"
+                  ? targetTitlesById.get(operation.input.artifactId)
+                  : operation.type === "artifact.link"
+                    ? targetTitlesById.get(operation.input.sourceArtifactId)
+                    : undefined,
+              ),
+              pendingArtifactId,
+            }
           : undefined,
       });
     }
@@ -1560,7 +1693,13 @@ async function runAttempt(
         publish({ type: "status", runId: params.runId, message: phase });
       const lastPhase = phases.at(-1);
       if (lastPhase) {
-        const effectProgress = operationEffectProgress(operation, index);
+        const effectProgress = operationEffectProgress(
+          operation,
+          index,
+          operation.type === "artifact.update"
+            ? targetTitlesById.get(operation.input.artifactId)
+            : undefined,
+        );
         await mutate("spectraRuns:patchResultCard", {
           actorClerkId: params.actorClerkId,
           resultCardId: params.resultCardId,
@@ -1644,7 +1783,13 @@ async function runAttempt(
             });
           },
           onRegionConflictResolved: async () => {
-            const progress = operationEffectProgress(operation, index);
+            const progress = operationEffectProgress(
+              operation,
+              index,
+              operation.type === "artifact.update"
+                ? targetTitlesById.get(operation.input.artifactId)
+                : undefined,
+            );
             publish({
               type: "status",
               runId: params.runId,
@@ -2352,6 +2497,38 @@ async function resumeOperationsAttempt(params: {
     .sort(
       (left, right) => (left._creationTime ?? 0) - (right._creationTime ?? 0),
     );
+  const resumedTargetContext = await gatherResolvedArtifactContext(
+    params.actorClerkId,
+    operations.flatMap((row) => {
+      try {
+        const operation = parseModelOperation({
+          type: row.type,
+          input: row.input,
+        });
+        if (
+          operation.type === "artifact.update" ||
+          operation.type === "artifact.archive" ||
+          operation.type === "workspaceItem.add"
+        )
+          return [operation.input.artifactId];
+        if (operation.type === "artifact.link")
+          return [
+            operation.input.sourceArtifactId,
+            operation.input.targetArtifactId,
+          ];
+      } catch {
+        return [];
+      }
+      return [];
+    }),
+  );
+  const resumedTargetTitles = new Map(
+    resumedTargetContext.flatMap(({ artifact }) =>
+      typeof artifact._id === "string" && typeof artifact.title === "string"
+        ? [[artifact._id, artifact.title] as const]
+        : [],
+    ),
+  );
   const createdArtifactIds = new Map<number, string>();
   for (let index = 0; index < operations.length; index += 1) {
     const row = operations[index]!;
@@ -2401,7 +2578,13 @@ async function resumeOperationsAttempt(params: {
         createdArtifactIds,
       );
       try {
-        const effectProgress = operationEffectProgress(operation, index);
+        const effectProgress = operationEffectProgress(
+          operation,
+          index,
+          operation.type === "artifact.update"
+            ? resumedTargetTitles.get(operation.input.artifactId)
+            : undefined,
+        );
         if (
           operation.type === "artifact.create" &&
           row.pendingArtifactId &&

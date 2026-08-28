@@ -53,3 +53,21 @@ Wrong-target suite zero-miss in its owning verification unit; honesty suite gree
 - Full `tsc --noEmit` retained only recorded repository blockers; no P4.I1 file failed.
 - Architecture check retained seven pre-existing global-event findings; no P4.I1 path was named.
 - Status: IMPLEMENTED. No acceptance claimed; P4.V1 remains independent.
+
+### P4.I2 implementation log (2026-08-28)
+
+- Deleted silent focused-artifact repair and the first-three-artifacts clarification fallback.
+- Every existing artifact mutation target now resolves through permissioned candidates, scored evidence, confidence, and an explicit target role.
+- Visible focus and thread attachment are priors only; named targets win, unresolved targets fail safely, and genuine ambiguity produces bounded canonical choices with no raw IDs.
+- `request_context_target` and `ask_user_choice` now have typed schemas, are agent-visible, and persist through the existing Live Dock required-input rail.
+- Every packet carries a bounded shallow workspace index; Agent titles remain discoverable without exposing Agent instructions.
+- Resolved existing targets are permission-re-read, live-Yjs hydrated, and structurally reconciled before any mutation is recorded or applied.
+- Added bounded serializers for all ten blueprints, including presentation slides, object geometry, and speaker notes.
+- Gated focused regex/model shortcuts on an explicit focus reference; named-other prompts receive only shallow focus context.
+- Progress, previews, provenance, and final narration use resolved titles; created-artifact link dependencies retain their authored titles.
+- Reused the established dense Dock choice rail after the required frontend-design/design-taste audit; no parallel UI surface was added.
+- Adversarial coverage includes 12 similar names, cross-type update/archive, duplicate titles, deictic focus, thread attachment, two-ended links, created dependencies, and correct-target document canonicalization.
+- Focused Vitest: 6 files / 64 tests. Scoped ESLint: 0 warnings. Capability ghost gate, secret scan (2,131 tracked files), and diff check passed.
+- `tsc --noEmit` retained only recorded repository blockers; no P4.I2 path failed. Architecture retained seven recorded global events; no P4.I2 path was named.
+- `check:copy` still stops on the deleted `artifacts-shell.tsx`; P6.I3 owns that stale checker path. The full repository sweep remains deferred until paired verification.
+- Status: IMPLEMENTED. No acceptance claimed; P4.V1 remains independent.

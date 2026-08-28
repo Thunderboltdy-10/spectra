@@ -1,4 +1,5 @@
 import { noteAiLocation, noteAiSurface } from "./follow-ai";
+import { performAppUiEvent } from "./app-choreography-host";
 
 export type SpectraAiUiEvent = {
   key: string;
@@ -6,9 +7,7 @@ export type SpectraAiUiEvent = {
   payload?: Record<string, unknown>;
 };
 
-/** Convert durable semantic UI events into the single Follow AI controller.
- * Non-followed actors update its remembered location without moving the user. */
-export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
+function rememberEvent(event: SpectraAiUiEvent): void {
   if (event.key === "organize_library") {
     const targetId = event.payload?.targetId;
     noteAiSurface({
@@ -52,7 +51,10 @@ export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
       ...(event.runId ? { actorId: event.runId } : {}),
       route: "settings",
       target: "memory",
-      note: typeof event.payload?.note === "string" ? event.payload.note : "Updated memory",
+      note:
+        typeof event.payload?.note === "string"
+          ? event.payload.note
+          : "Updated memory",
     });
     return;
   }
@@ -61,7 +63,10 @@ export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
       ...(event.runId ? { actorId: event.runId } : {}),
       route: "settings",
       target: "sharing",
-      note: typeof event.payload?.note === "string" ? event.payload.note : "Updated sharing",
+      note:
+        typeof event.payload?.note === "string"
+          ? event.payload.note
+          : "Updated sharing",
     });
     return;
   }
@@ -70,7 +75,10 @@ export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
       ...(event.runId ? { actorId: event.runId } : {}),
       route: "settings",
       target: "managebac",
-      note: typeof event.payload?.note === "string" ? event.payload.note : "Requested a ManageBac refresh",
+      note:
+        typeof event.payload?.note === "string"
+          ? event.payload.note
+          : "Requested a ManageBac refresh",
     });
     return;
   }
@@ -78,7 +86,11 @@ export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
   const destination = event.payload?.destination;
   const targetId = event.payload?.targetId;
   if (destination === "artifact" && typeof targetId === "string" && targetId) {
-    noteAiLocation({ ...(event.runId ? { actorId: event.runId } : {}), artifactId: targetId, note: "Opening the requested artifact" });
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId: targetId,
+      note: "Opening the requested artifact",
+    });
     return;
   }
   if (
@@ -94,4 +106,12 @@ export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
     ...(typeof targetId === "string" && targetId ? { target: targetId } : {}),
     note: `Opening ${destination}`,
   });
+}
+
+/** Convert durable semantic UI events into the single Follow AI controller
+ * and the app choreography coordinator. Non-followed actors update remembered
+ * location without moving the user. */
+export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
+  rememberEvent(event);
+  if (event.runId) performAppUiEvent(event);
 }

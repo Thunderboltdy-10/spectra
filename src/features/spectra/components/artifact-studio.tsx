@@ -88,6 +88,7 @@ import {
   noteFollowLocation,
   useFollow,
 } from "../collaboration/follow";
+import { stableAiActorId } from "../collaboration/ai-actor-id";
 import {
   clearAiLocation,
   disengageFollowAi,
@@ -102,7 +103,9 @@ import {
 import {
   resolveTargetElement,
   revealTarget,
+  scheduleRevealTarget,
 } from "../collaboration/interaction-geometry";
+import { getSpectraMotionSnapshot } from "../motion/motion-level";
 import {
   actorLabel,
   describeAct,
@@ -4311,6 +4314,9 @@ function ArtifactStudioEditor({
   useEffect(() => {
     if (!aiInteractionState?.target) return;
     noteAiLocation({
+      ...(stableAiActorId(aiInteractionState.actor)
+        ? { actorId: stableAiActorId(aiInteractionState.actor)! }
+        : {}),
       artifactId: artifact._id,
       path: aiInteractionState.target.path,
       note: describeState(aiInteractionState),
@@ -4335,11 +4341,11 @@ function ArtifactStudioEditor({
         detail: { artifactId: artifact._id, path: target.path },
       }),
     );
-    const timer = window.setTimeout(() => {
-      const surface = presenceSurfaceRef.current;
-      if (surface) revealTarget(surface, target);
-    }, 120);
-    return () => window.clearTimeout(timer);
+    return scheduleRevealTarget(
+      () => presenceSurfaceRef.current,
+      target,
+      { reducedMotion: getSpectraMotionSnapshot().reduced },
+    );
   }, [followAi.following, aiInteractionState, artifact._id]);
 
   /* ---------------------------------------------------------------- *
@@ -4382,11 +4388,11 @@ function ArtifactStudioEditor({
     });
     if (lastFollowRevealRef.current === followTarget.path) return;
     lastFollowRevealRef.current = followTarget.path;
-    const timer = window.setTimeout(() => {
-      const surface = presenceSurfaceRef.current;
-      if (surface) revealTarget(surface, followTarget);
-    }, 120);
-    return () => window.clearTimeout(timer);
+    return scheduleRevealTarget(
+      () => presenceSurfaceRef.current,
+      followTarget,
+      { reducedMotion: getSpectraMotionSnapshot().reduced },
+    );
   }, [followedClientId, followedInteractionState, artifact._id]);
 
   // Local input always wins: the first gesture ends spectating immediately

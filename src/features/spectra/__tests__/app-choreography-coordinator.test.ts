@@ -27,4 +27,35 @@ describe("application choreography coordinator", () => {
     expect(coordinator.cancel("ai-a")).toBe(1);
     expect(coordinator.snapshot()).toContainEqual(expect.objectContaining({ operationId: "b-1", status: "performing" }));
   });
+
+  it("expires a stale claim so the waiter can perform", () => {
+    let now = 0;
+    const coordinator = new AppChoreographyCoordinator({
+      now: () => now,
+      claimTtlMs: 1_000,
+    });
+    coordinator.enqueue({
+      actorId: "ai-a",
+      operationId: "a-1",
+      target: "library",
+      targetKey: "folder-a",
+      summary: "Rename",
+    });
+    coordinator.enqueue({
+      actorId: "ai-b",
+      operationId: "b-1",
+      target: "library",
+      targetKey: "folder-a",
+      summary: "Move",
+    });
+    expect(
+      coordinator.snapshot().find((entry) => entry.operationId === "b-1")
+        ?.status,
+    ).toBe("blocked");
+    now = 1_001;
+    expect(coordinator.expireClaims()).toBe(1);
+    expect(coordinator.snapshot()).toContainEqual(
+      expect.objectContaining({ operationId: "b-1", status: "performing" }),
+    );
+  });
 });

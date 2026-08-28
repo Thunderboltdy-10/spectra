@@ -23,7 +23,9 @@ import { useSyncExternalStore } from "react";
 
 import {
   disengageFollowAi,
+  followAiActor,
   isFollowingAi,
+  pickFollowAiActorId,
   setFollowingAi,
   subscribeFollowAi,
 } from "./follow-ai";
@@ -129,7 +131,9 @@ export function follow(next: FollowTarget): void {
   if (next.kind === "ai") {
     suppressAiSync = true;
     try {
-      setFollowingAi(true);
+      const actor = pickFollowAiActorId();
+      if (actor) followAiActor(actor);
+      else setFollowingAi(true);
     } finally {
       suppressAiSync = false;
     }

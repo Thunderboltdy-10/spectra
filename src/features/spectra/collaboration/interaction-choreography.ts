@@ -745,6 +745,45 @@ function spatialBeats(
 export function buildArtifactLivePreviewBeats(
   before: ArtifactLiveValue,
   after: ArtifactLiveValue,
+  choreography?: { target: string; region?: string },
+): AiStreamBeat[] {
+  return applyIrChoreography(
+    before,
+    buildArtifactLivePreviewBeatsFromDiff(before, after),
+    choreography,
+  );
+}
+
+function applyIrChoreography(
+  before: ArtifactLiveValue,
+  beats: AiStreamBeat[],
+  choreography?: { target: string; region?: string },
+): AiStreamBeat[] {
+  if (!choreography || beats.length === 0) return beats;
+  if (beats[0]?.interaction?.kind === "pointer") return beats;
+  const targetId = choreography.region ?? choreography.target;
+  return [
+    {
+      delayMs: 120,
+      value: structuredClone(before) as ArtifactLiveValue,
+      previewGesture: "selecting",
+      interaction: {
+        kind: "pointer",
+        targetId,
+        targetKind: choreography.target.startsWith("workbar")
+          ? "selector"
+          : "path",
+      },
+      ...(choreography.region ? { focusPath: `/${choreography.region}` } : {}),
+      menu: null,
+    },
+    ...beats,
+  ];
+}
+
+function buildArtifactLivePreviewBeatsFromDiff(
+  before: ArtifactLiveValue,
+  after: ArtifactLiveValue,
 ): AiStreamBeat[] {
   const structuralChange = firstCollectionChange(
     {
@@ -766,7 +805,7 @@ export function buildArtifactLivePreviewBeats(
     if (staged && JSON.stringify(staged) !== JSON.stringify(before)) {
       return [
         ...structuralBeats,
-        ...buildArtifactLivePreviewBeats(staged, after),
+        ...buildArtifactLivePreviewBeatsFromDiff(staged, after),
       ];
     }
   }

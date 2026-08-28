@@ -256,4 +256,45 @@ describe("buildArtifactLivePreviewBeats", () => {
         .every((beat) => beat.focusPath !== "/slides/1"),
     ).toBe(true);
   });
+
+  it("prepends an IR pointer beat when the capability names a target", () => {
+    const before = {
+      title: "Board",
+      tags: [],
+      content: {
+        nodes: [
+          {
+            id: "card-1",
+            type: "card",
+            x: 120,
+            y: 260,
+            width: 260,
+            height: 300,
+            content: { header: "Competitive", body: "Old body" },
+          },
+        ],
+      },
+    };
+    const after = {
+      ...before,
+      content: {
+        nodes: [
+          {
+            ...before.content.nodes[0],
+            x: 168,
+            y: 284,
+          },
+        ],
+      },
+    };
+    const beats = buildArtifactLivePreviewBeats(before, after, {
+      target: "canvas.card",
+      region: "card-1",
+    });
+    expect(beats[0]?.interaction?.kind).toBe("pointer");
+    expect(beats[0]?.interaction?.targetId).toBe("card-1");
+    expect(beats.some((beat) => beat.interaction?.kind === "dragging")).toBe(
+      true,
+    );
+  });
 });

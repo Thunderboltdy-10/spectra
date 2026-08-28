@@ -45,6 +45,7 @@ import {
 } from "./interaction-model";
 import { describeAct } from "./interaction-model";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { getSpectraMotionSnapshot } from "../motion/motion-level";
 
 export type AiOperationAction =
   "set" | "create" | "remove" | "reorder" | "group" | "switchView";
@@ -337,6 +338,15 @@ export class AiPerformer {
     if (this.disposed) return;
     if (performance.status === "blocked" || performance.status === "paused")
       return;
+
+    if (getSpectraMotionSnapshot().reduced) {
+      const last = performance.plan.frames.at(-1);
+      if (last?.value !== undefined) performance.provisional = last.value;
+      performance.frameIndex = performance.plan.frames.length;
+      if (last) this.emitFrame(performance, last);
+      this.finishChoreography(performance);
+      return;
+    }
 
     const frame = performance.plan.frames[performance.frameIndex];
     if (!frame) {

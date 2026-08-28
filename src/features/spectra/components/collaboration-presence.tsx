@@ -16,7 +16,16 @@ import {
   selectionIsActive,
 } from "../collaboration/presence-anchor";
 import type { CollaborationPresence } from "../collaboration/types";
-import { follow, resumeFollow, useFollow } from "../collaboration/follow";
+import {
+  follow,
+  resumeFollow,
+  useFollow,
+} from "../collaboration/follow";
+import {
+  followAiActor,
+  useFollowAi,
+} from "../collaboration/follow-ai";
+import { stableAiActorId } from "../collaboration/ai-actor-id";
 import {
   actorLabel,
   describeState,
@@ -24,6 +33,34 @@ import {
   stateIsVisible,
 } from "../collaboration/interaction-model";
 import type { ArtifactCommentRegion } from "./artifact-comments-panel";
+
+function aiActorIdForPerson(person: CollaborationPresence): string | null {
+  return stableAiActorId({
+    clientId: person.clientId,
+    runId: person.runId ?? person.interactionState?.actor?.runId,
+  });
+}
+
+function collapseCollaborators(
+  people: CollaborationPresence[],
+): CollaborationPresence[] {
+  const rows = new Map<string, CollaborationPresence>();
+  for (const person of people) {
+    const key =
+      person.actorKind === "ai"
+        ? `ai:${aiActorIdForPerson(person) ?? person.clientId}`
+        : `human:${person.clientId}`;
+    const previous = rows.get(key);
+    if (!previous) {
+      rows.set(key, person);
+      continue;
+    }
+    const previousAt = previous.interactionState?.at ?? 0;
+    const nextAt = person.interactionState?.at ?? 0;
+    if (nextAt >= previousAt) rows.set(key, person);
+  }
+  return [...rows.values()];
+}
 
 function initials(name?: string) {
   return (name || "?")
@@ -635,22 +672,25 @@ export function CollaborationPresenceIndicator({
 }) {
   const [open, setOpen] = useState(false);
   const followState = useFollow();
+  const followAi = useFollowAi();
   const collaborators = useMemo(
     () =>
-      presence.filter((person) => {
-        if (person.clientId === currentClientId) return false;
-        // Idle AI peers after a run must not linger as permanent avatars —
-        // only show them while they are actively streaming or pointing.
-        if (person.actorKind === "ai") {
-          if (person.interactionState)
-            return stateIsVisible(person.interactionState);
-          return (
-            person.previewPhase === "streaming" ||
-            (person.previewPatches?.length ?? 0) > 0
-          );
-        }
-        return true;
-      }),
+      collapseCollaborators(
+        presence.filter((person) => {
+          if (person.clientId === currentClientId) return false;
+          // Idle AI peers after a run must not linger as permanent avatars —
+          // only show them while they are actively streaming or pointing.
+          if (person.actorKind === "ai") {
+            if (person.interactionState)
+              return stateIsVisible(person.interactionState);
+            return (
+              person.previewPhase === "streaming" ||
+              (person.previewPatches?.length ?? 0) > 0
+            );
+          }
+          return true;
+        }),
+      ),
     [currentClientId, presence],
   );
   if (collaborators.length === 0) return null;
@@ -709,6 +749,7 @@ export function CollaborationPresenceIndicator({
       {followedTarget ? (
         <button
           type="button"
+          data-spectra-follow-control=""
           onClick={() => followState.disengage("explicit")}
           className="spectra-follow-chip flex h-9 items-center gap-1.5 rounded-full border pl-2 pr-2.5 text-micro font-semibold"
           style={{
@@ -820,10 +861,18 @@ export function CollaborationPresenceIndicator({
                     : `Line ${lineIndex + 1}`
                   : region;
               const followable = person.interactionState != null;
+              const aiActorId =
+                person.actorKind === "ai" ? aiActorIdForPerson(person) : null;
               const isFollowed =
-                followedTarget != null &&
-                (followedTarget as { clientId: string }).clientId ===
-                  person.clientId;
+                person.actorKind === "ai"
+                  ? Boolean(
+                      followAi.following &&
+                        aiActorId &&
+                        followAi.followedActorId === aiActorId,
+                    )
+                  : followedTarget != null &&
+                    (followedTarget as { clientId: string }).clientId ===
+                      person.clientId;
               return (
                 <li
                   key={person.clientId}
@@ -868,6 +917,7 @@ export function CollaborationPresenceIndicator({
                   {followable ? (
                     <button
                       type="button"
+                      data-spectra-follow-control=""
                       className={`spectra-follow-row-action mx-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border transition ${
                         isFollowed
                           ? "border-[color-mix(in_oklab,var(--brand-primary)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-primary))] text-[var(--brand-primary)]"
@@ -886,7 +936,10 @@ export function CollaborationPresenceIndicator({
                       }
                       onClick={() => {
                         if (isFollowed) {
-                          followState.disengage("explicit");
+                          if (person.actorKind === "ai") followAiActor(null);
+                          else followState.disengage("explicit");
+                        } else if (person.actorKind === "ai" && aiActorId) {
+                          followAiActor(aiActorId);
                         } else {
                           follow({
                             kind: "collaborator",
@@ -913,6 +966,7 @@ export function CollaborationPresenceIndicator({
       {disengagedFrom && disengagedFrom.kind !== "ai" ? (
         <button
           type="button"
+          data-spectra-follow-control=""
           onClick={() => {
             resumeFollow();
           }}

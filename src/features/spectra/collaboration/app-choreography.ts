@@ -94,6 +94,9 @@ export function resolveAppChoreographySurface(
   return arbitrateAppSurface(target, viewport);
 }
 
+export const APP_CHOREOGRAPHY_CLAIM_TTL_MS = 8_000;
+export const APP_CHOREOGRAPHY_SETTLE_MS = 280;
+
 export type AppChoreographyRequest = {
   actorId: string;
   operationId: string;
@@ -118,7 +121,19 @@ export type AppChoreographyEntry = AppChoreographyRequest & {
 export class AppChoreographyCoordinator {
   private readonly queues = new Map<string, AppChoreographyEntry[]>();
   private readonly active = new Map<string, AppChoreographyEntry>();
-  private readonly claims = new Map<string, string>();
+  private readonly claims = new Map<string, { actorId: string; expiresAt: number }>();
+  private readonly now: () => number;
+  private readonly claimTtlMs: number;
+
+  constructor(
+    options: {
+      now?: () => number;
+      claimTtlMs?: number;
+    } = {},
+  ) {
+    this.now = options.now ?? Date.now;
+    this.claimTtlMs = options.claimTtlMs ?? APP_CHOREOGRAPHY_CLAIM_TTL_MS;
+  }
 
   enqueue(request: AppChoreographyRequest): AppChoreographyEntry {
     const entry: AppChoreographyEntry = { ...request, status: "queued" };
@@ -169,7 +184,26 @@ export class AppChoreographyCoordinator {
     ].map((entry) => ({ ...entry }));
   }
 
+  /** Drop claims whose TTL elapsed so a crashed performer cannot deadlock a control. */
+  expireClaims(now = this.now()): number {
+    let released = 0;
+    for (const [key, claim] of [...this.claims.entries()]) {
+      if (claim.expiresAt > now) continue;
+      this.claims.delete(key);
+      released += 1;
+      const holder = this.active.get(claim.actorId);
+      if (holder && this.claimKey(holder) === key) {
+        holder.status = "cancelled";
+        holder.reason = "The control claim expired.";
+        this.active.delete(claim.actorId);
+      }
+    }
+    if (released) this.pumpAllBlocked();
+    return released;
+  }
+
   private pump(actorId: string): void {
+    this.expireClaims();
     if (this.active.has(actorId)) return;
     const queue = this.queues.get(actorId) ?? [];
     while (queue.length && queue[0]!.status !== "queued") queue.shift();
@@ -177,14 +211,19 @@ export class AppChoreographyCoordinator {
     if (!next) return;
     const key = this.claimKey(next);
     const owner = key ? this.claims.get(key) : undefined;
-    if (owner && owner !== actorId) {
+    if (owner && owner.actorId !== actorId) {
       next.status = "blocked";
-      next.reason = `Waiting for ${owner} to release ${key}`;
+      next.reason = `Waiting for ${owner.actorId} to release ${key}`;
       return;
     }
     queue.shift();
     next.status = "performing";
-    if (key) this.claims.set(key, actorId);
+    if (key) {
+      this.claims.set(key, {
+        actorId,
+        expiresAt: this.now() + this.claimTtlMs,
+      });
+    }
     this.active.set(actorId, next);
   }
 
@@ -203,8 +242,36 @@ export class AppChoreographyCoordinator {
 
   private releaseClaim(entry: AppChoreographyEntry): void {
     const key = this.claimKey(entry);
-    if (key && this.claims.get(key) === entry.actorId) this.claims.delete(key);
+    if (key && this.claims.get(key)?.actorId === entry.actorId) {
+      this.claims.delete(key);
+    }
   }
+}
+
+export function appSurfaceFromPathname(pathname: string): AppSurface {
+  if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/calendar")) return "calendar";
+  if (pathname.startsWith("/workspace") || pathname.startsWith("/library"))
+    return "library";
+  return "workspace";
+}
+
+export function appSurfaceFromChoreographyTarget(target: string): AppSurface {
+  if (target.includes("library")) return "library";
+  if (
+    target.includes("settings") ||
+    target.includes("sharing") ||
+    target === "settings-security"
+  )
+    return "settings";
+  if (target.includes("calendar")) return "calendar";
+  if (
+    target.includes("artifact") ||
+    target.includes("workbar") ||
+    target === "artifact-anchor"
+  )
+    return "artifact";
+  return "workspace";
 }
 
 export function appSurfaceForNavigation(destination: string): AppSurface | null {

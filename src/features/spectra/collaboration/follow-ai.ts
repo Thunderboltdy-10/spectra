@@ -64,8 +64,7 @@ let snapshot: FollowSnapshot = {
 };
 
 function emit(): void {
-  snapshot = { following, followedActorId, location, surfaceLocation };
-  for (const listener of listeners) listener();
+  emitVisible();
 }
 
 function dispatchOpen(artifactId: string): void {
@@ -91,6 +90,50 @@ function dispatchSurface(location: AiSurfaceLocation): void {
   window.dispatchEvent(new CustomEvent("spectra:ai-navigate", { detail: location }));
 }
 
+function visibleLocation(): AiLocation | null {
+  if (followedActorId) return locationsByActor.get(followedActorId) ?? null;
+  return location;
+}
+
+function visibleSurface(): AiSurfaceLocation | null {
+  if (followedActorId) return surfacesByActor.get(followedActorId) ?? null;
+  return surfaceLocation;
+}
+
+function emitVisible(): void {
+  snapshot = {
+    following,
+    followedActorId,
+    location: visibleLocation(),
+    surfaceLocation: visibleSurface(),
+  };
+  for (const listener of listeners) listener();
+}
+
+/** The most recently published attributed actor, if any. */
+export function pickFollowAiActorId(): string | null {
+  if (followedActorId) return followedActorId;
+  let best: { id: string; at: number } | null = null;
+  for (const [id, loc] of locationsByActor) {
+    if (!best || loc.updatedAt >= best.at) best = { id, at: loc.updatedAt };
+  }
+  for (const [id, loc] of surfacesByActor) {
+    if (!best || loc.updatedAt >= best.at) best = { id, at: loc.updatedAt };
+  }
+  return best?.id ?? location?.actorId ?? surfaceLocation?.actorId ?? null;
+}
+
+function shouldAnnounce(actorId?: string): boolean {
+  if (!following) return false;
+  if (followedActorId) return Boolean(actorId) && actorId === followedActorId;
+  return true;
+}
+
+function lockActorIfNeeded(actorId?: string): void {
+  if (!following || followedActorId || !actorId) return;
+  followedActorId = actorId;
+}
+
 export function isFollowingAi(): boolean {
   return following;
 }
@@ -103,8 +146,15 @@ export function setFollowingAi(next: boolean): void {
     lastDispatchedArtifactId = null;
     lastDispatchedSurfaceKey = null;
   } else {
-    const actorLocation = followedActorId ? locationsByActor.get(followedActorId) : location;
-    const actorSurface = followedActorId ? surfacesByActor.get(followedActorId) : surfaceLocation;
+    followedActorId = pickFollowAiActorId();
+    lastDispatchedArtifactId = null;
+    lastDispatchedSurfaceKey = null;
+    const actorLocation = followedActorId
+      ? (locationsByActor.get(followedActorId) ?? null)
+      : location;
+    const actorSurface = followedActorId
+      ? (surfacesByActor.get(followedActorId) ?? null)
+      : surfaceLocation;
     if (actorLocation?.artifactId) dispatchOpen(actorLocation.artifactId);
     if (actorSurface) dispatchSurface(actorSurface);
   }
@@ -137,11 +187,12 @@ export function getFollowedAiActorId(): string | null {
  * the dock; followed actors may navigate through this single controller. */
 export function noteAiSurface(update: Omit<AiSurfaceLocation, "updatedAt">): void {
   const next = { ...update, updatedAt: Date.now() };
-  const unchanged = surfaceLocation?.route === next.route && surfaceLocation?.target === next.target && surfaceLocation?.note === next.note;
+  const unchanged = surfaceLocation?.route === next.route && surfaceLocation?.target === next.target && surfaceLocation?.note === next.note && surfaceLocation?.actorId === next.actorId;
   if (unchanged) return;
   surfaceLocation = next;
   if (next.actorId) surfacesByActor.set(next.actorId, next);
-  if (following && (!followedActorId || next.actorId === followedActorId)) dispatchSurface(next);
+  lockActorIfNeeded(next.actorId);
+  if (shouldAnnounce(next.actorId)) dispatchSurface(next);
   emit();
 }
 
@@ -198,10 +249,11 @@ export function noteAiLocation(update: {
   // beat. Publishing the same semantic location must be a no-op; otherwise the
   // store re-renders ArtifactStudioEditor, which republishes the location, and
   // React correctly stops the resulting external-store feedback loop.
-  if (sameArtifact && samePath && sameNote) return;
+  if (sameArtifact && samePath && sameNote && location?.actorId === nextLocation.actorId) return;
   location = nextLocation;
   if (update.actorId) locationsByActor.set(update.actorId, nextLocation);
-  if (following && (!followedActorId || update.actorId === followedActorId) && !sameArtifact)
+  lockActorIfNeeded(update.actorId);
+  if (shouldAnnounce(update.actorId) && !sameArtifact)
     dispatchOpen(update.artifactId);
   emit();
 }

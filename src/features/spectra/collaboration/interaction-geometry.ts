@@ -772,13 +772,47 @@ export function resolvePlacement(
 export function revealTarget(
   root: HTMLElement,
   target: SemanticTarget,
+  options?: { reducedMotion?: boolean },
 ): boolean {
   const resolved = resolveTargetElement(root, target);
   if (!resolved) return false;
   resolved.element.scrollIntoView({
     block: "center",
     inline: "nearest",
-    behavior: "smooth",
+    behavior: options?.reducedMotion ? "auto" : "smooth",
   });
   return true;
+}
+
+/**
+ * Reveal that retries when the control is not mounted yet (view switch, slide
+ * change). A single 120ms one-shot used to drop the first beat silently.
+ */
+export function scheduleRevealTarget(
+  getRoot: () => HTMLElement | null,
+  target: SemanticTarget,
+  options?: {
+    reducedMotion?: boolean;
+    attempts?: number;
+    intervalMs?: number;
+  },
+): () => void {
+  const attempts = options?.attempts ?? 8;
+  const intervalMs = options?.intervalMs ?? 80;
+  let attempt = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let cancelled = false;
+  const tick = () => {
+    if (cancelled) return;
+    const root = getRoot();
+    if (root && revealTarget(root, target, options)) return;
+    attempt += 1;
+    if (attempt >= attempts) return;
+    timer = setTimeout(tick, intervalMs);
+  };
+  tick();
+  return () => {
+    cancelled = true;
+    if (timer !== null) clearTimeout(timer);
+  };
 }

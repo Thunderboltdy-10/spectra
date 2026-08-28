@@ -62,6 +62,10 @@ import {
 import { fidelityRegionMap } from "@/features/spectra/commands/office/fidelity-regions";
 import type { CompatibilityProfile } from "@/features/spectra/commands/types";
 import type { WorkType } from "@/features/spectra/work/registry";
+import {
+  capabilityById,
+  capabilityForLocalId,
+} from "@/features/spectra/capabilities/catalog";
 
 type ArtifactRecord = {
   _id: string;
@@ -468,6 +472,20 @@ function requireArtifactType(value: string): ArtifactTypeKey {
     throw new Error(`ARTIFACT_TYPE_UNSUPPORTED: ${value}`);
   }
   return value as ArtifactTypeKey;
+}
+
+function choreographyForOperations(
+  typeKey: ArtifactTypeKey,
+  operations?: string[],
+) {
+  if (!operations?.length) return undefined;
+  for (const operation of operations) {
+    const definition =
+      capabilityById(operation) ??
+      capabilityForLocalId(typeKey as WorkType, operation);
+    if (definition?.choreography) return definition.choreography;
+  }
+  return undefined;
 }
 
 function readLiveYjsDocument(document: Y.Doc, typeKey: ArtifactTypeKey) {
@@ -1817,6 +1835,7 @@ export async function applyAiArtifactMutation(params: {
     const streamBeats = buildArtifactLivePreviewBeats(
       refreshed,
       refreshedValue,
+      choreographyForOperations(typeKey, params.operations),
     );
     const result = await synchronizeMutation({
       document,
@@ -1852,6 +1871,7 @@ export async function applyAiArtifactMutation(params: {
             streamBeats: buildArtifactLivePreviewBeats(
               liveBase,
               normalizedDesired,
+              choreographyForOperations(typeKey, params.operations),
             ),
             baseSnapshot: snapshotArtifactRegions(typeKey, liveBase, [
               "artifact:structure",
@@ -1869,7 +1889,11 @@ export async function applyAiArtifactMutation(params: {
         return {
           plan: livePlan,
           streamBase: liveBase,
-          streamBeats: buildArtifactLivePreviewBeats(liveBase, liveDesired),
+          streamBeats: buildArtifactLivePreviewBeats(
+            liveBase,
+            liveDesired,
+            choreographyForOperations(typeKey, params.operations),
+          ),
           baseSnapshot: snapshotArtifactRegions(
             typeKey,
             liveBase,

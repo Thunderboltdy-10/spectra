@@ -79,6 +79,7 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
           event.preview?.pendingArtifactId ?? event.preview?.targetId;
         if (artifactId) {
           noteAiLocation({
+            actorId: runId,
             artifactId,
             ...(event.preview?.title ? { note: event.preview.title } : {}),
           });

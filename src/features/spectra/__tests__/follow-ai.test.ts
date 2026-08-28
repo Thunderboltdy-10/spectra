@@ -163,6 +163,38 @@ describe("follow AI", () => {
     expect(getAiLocation()).toBe(first);
   });
 
+  it("locks the most recent attributed actor when Follow is toggled on", () => {
+    const opened = openEvents();
+    noteAiLocation({ actorId: "run-a", artifactId: "art-a" });
+    noteAiLocation({ actorId: "run-b", artifactId: "art-b" });
+    setFollowingAi(true);
+    expect(getFollowedAiActorId()).toBe("run-b");
+    expect(opened).toEqual(["art-b"]);
+    noteAiLocation({ actorId: "run-a", artifactId: "art-a2" });
+    expect(opened).toEqual(["art-b"]);
+  });
+
+  it("does not navigate for unattributed events after an actor is locked", () => {
+    const opened = openEvents();
+    followAiActor("run-a");
+    noteAiLocation({ actorId: "run-a", artifactId: "art-a" });
+    expect(opened).toEqual(["art-a"]);
+    noteAiLocation({ artifactId: "art-other" });
+    expect(opened).toEqual(["art-a"]);
+  });
+
+  it("still follows a named actor through followAiActor after a later run appears", () => {
+    noteAiLocation({ actorId: "run-a", artifactId: "art-a" });
+    noteAiLocation({ actorId: "run-b", artifactId: "art-b" });
+    followAiActor("run-a");
+    expect(getFollowedAiActorId()).toBe("run-a");
+    const opened = openEvents();
+    noteAiLocation({ actorId: "run-b", artifactId: "art-b2" });
+    expect(opened).toEqual([]);
+    noteAiLocation({ actorId: "run-a", artifactId: "art-a2" });
+    expect(opened).toEqual(["art-a2"]);
+  });
+
   it("ignores a programmatic-open window that has expired", () => {
     vi.useFakeTimers();
     try {

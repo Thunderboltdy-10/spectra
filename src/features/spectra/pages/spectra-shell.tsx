@@ -78,6 +78,7 @@ import { applyPreferencePatch } from "../settings/schema";
 import { useSpectraPreferences } from "../settings/preference-store";
 import {
   disengageFollowAi,
+  getFollowedAiActorId,
   isFollowingAi,
   isProgrammaticOpen,
 } from "../collaboration/follow-ai";
@@ -2454,8 +2455,16 @@ export function SpectraShell({
     }
     function onAiNavigate(event: Event) {
       if (!isFollowingAi()) return;
-      const detail = (event as CustomEvent<{ route?: string; target?: string }>)
-        .detail;
+      const followed = getFollowedAiActorId();
+      const detail = (
+        event as CustomEvent<{
+          route?: string;
+          target?: string;
+          actorId?: string;
+        }>
+      ).detail;
+      if (followed && detail?.actorId && detail.actorId !== followed) return;
+      if (followed && !detail?.actorId) return;
       if (!detail?.route) return;
       if (detail.route === "library" || detail.route === "workspace") {
         if (detail.target) goToWorkspaceHub(detail.target);

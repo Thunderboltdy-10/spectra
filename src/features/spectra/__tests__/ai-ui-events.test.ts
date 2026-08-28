@@ -68,4 +68,24 @@ describe("AI UI events", () => {
       note: "Updated toolbar",
     });
   });
+
+  it("enqueues app choreography when a run id is present", async () => {
+    const { getAppChoreographyCoordinator, __resetAppChoreographyHost } =
+      await import("../collaboration/app-choreography-host");
+    __resetAppChoreographyHost();
+    setFollowingAi(true);
+    handleSpectraAiUiEvent({
+      key: "organize_library",
+      runId: "run-wired",
+      payload: { targetId: "folder-1", note: "Created Sources" },
+    });
+    expect(getAppChoreographyCoordinator().snapshot()).toContainEqual(
+      expect.objectContaining({
+        actorId: "run-wired",
+        target: "library",
+        status: "performing",
+      }),
+    );
+    __resetAppChoreographyHost();
+  });
 });

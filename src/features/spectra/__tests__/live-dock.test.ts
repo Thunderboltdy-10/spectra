@@ -189,6 +189,24 @@ describe("Live Dock V2", () => {
     expect(global).toContain('"/workspace"');
   });
 
+  it("keeps Follow as an always-visible dock-tab icon next to Stop", () => {
+    const dock = read("src/features/spectra/components/live-dock.tsx");
+    expect(dock).toContain("data-spectra-follow-control");
+    expect(dock).toContain("`Follow ${model.title}`");
+    expect(dock).toContain("<Crosshair");
+    expect(dock).toContain("followAiActor(tab.runId)");
+    const panel = read("src/features/spectra/components/live-thread-panel.tsx");
+    expect(panel).toContain("followAiActor(actor)");
+    expect(panel).toContain("runIdForLiveThread(threadId)");
+    const presence = read(
+      "src/features/spectra/components/collaboration-presence.tsx",
+    );
+    expect(presence).toContain("followAiActor(aiActorId)");
+    expect(presence).toContain("collapseCollaborators");
+    const shell = read("src/components/layout/app-shell.tsx");
+    expect(shell).toContain("<AppChoreographyMount");
+  });
+
   it("never shows machine tokens in dock failure copy", () => {
     for (const token of [
       "AI_ARTIFACT_CONNECTION_CLOSED",

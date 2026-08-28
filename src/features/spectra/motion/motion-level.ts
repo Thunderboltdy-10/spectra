@@ -95,6 +95,12 @@ function getSnapshot(): EffectiveMotion {
 
 const getServerSnapshot = () => FALLBACK;
 
+/** Effective motion for non-React collaborators (reveal, choreography holds). */
+export function getSpectraMotionSnapshot(): EffectiveMotion {
+  if (typeof window === "undefined") return FALLBACK;
+  return getSnapshot();
+}
+
 /** Effective motion level for the current document. */
 export function useSpectraMotion(): EffectiveMotion {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);

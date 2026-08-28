@@ -16,6 +16,7 @@ import {
   Square,
   Undo2,
   Unplug,
+  Crosshair,
   X,
 } from "lucide-react";
 import {
@@ -50,6 +51,10 @@ import {
 } from "../runs/live-dock";
 import { CrossfadeText, transitionFor, useSpectraMotion } from "../motion";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
+import {
+  followAiActor,
+  useFollowAi,
+} from "../collaboration/follow-ai";
 
 const activeStatuses = new Set([
   "queued",
@@ -63,6 +68,15 @@ let sharedRefresh: Promise<void> | null = null;
 let pollTimer: number | null = null;
 let pollConsumers = 0;
 const listeners = new Set<(tabs: SpectraRunTab[]) => void>();
+
+/** The dock already knows which run belongs to an open thread. Follow AI in
+ * the thread panel must lock that actor, not a leftover location from another
+ * run. */
+export function runIdForLiveThread(threadId: string): string | null {
+  const id = threadId.trim();
+  if (!id) return null;
+  return sharedTabs.find((tab) => tab.threadId === id)?.runId ?? null;
+}
 
 function syncPollingVisibility() {
   const shouldPoll =
@@ -446,6 +460,7 @@ export function LiveDock({
   const now = useNow(60_000);
   const { preferences } = useSpectraPreferences();
   const motionLevel = useSpectraMotion();
+  const follow = useFollowAi();
   /* Titles that have already been established (and revealed) — a run title
      must only stream once, on first arrival (RUN-010). */
   const continuation = useSpectraContextStore((state) => state.continuation);
@@ -809,7 +824,7 @@ export function LiveDock({
                         setExpandedInputRunId(tab.runId);
                       }
                     }}
-                    className="dock-tab-identity w-fit min-w-0 max-w-[calc(100%-9rem)] py-1 text-left"
+                    className="dock-tab-identity w-fit min-w-0 max-w-[calc(100%-11rem)] py-1 text-left"
                     title={model.title}
                   >
                     <span className="flex items-center gap-1.5">
@@ -852,8 +867,42 @@ export function LiveDock({
                   </button>
                   <button
                     type="button"
+                    data-spectra-follow-control=""
+                    onClick={() => {
+                      if (
+                        follow.following &&
+                        follow.followedActorId === tab.runId
+                      ) {
+                        followAiActor(null);
+                        return;
+                      }
+                      followAiActor(tab.runId);
+                    }}
+                    className={`dock-tab-icon ml-auto flex h-8 w-7 items-center justify-center rounded-[6px] ${
+                      follow.following && follow.followedActorId === tab.runId
+                        ? "text-[var(--brand-primary)] hover:bg-[color-mix(in_oklab,var(--brand-primary)_8%,transparent)]"
+                        : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    }`}
+                    aria-label={
+                      follow.following && follow.followedActorId === tab.runId
+                        ? `Stop following ${model.title}`
+                        : `Follow ${model.title}`
+                    }
+                    aria-pressed={
+                      follow.following && follow.followedActorId === tab.runId
+                    }
+                    title={
+                      follow.following && follow.followedActorId === tab.runId
+                        ? "Stop spectating this run"
+                        : "Spectate this run"
+                    }
+                  >
+                    <Crosshair className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => openQuickChat(tab)}
-                    className="dock-tab-icon ml-auto flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     aria-label={`Open ${model.title} conversation`}
                     title="Open conversation"
                   >

@@ -106,3 +106,19 @@ Wrong-target suite zero-miss in its owning verification unit; honesty suite gree
 - Secret scan 2,135 tracked files; `git diff --check` passed.
 - Playwright: `.shots/reformation/P4.I3/01-workspace-composer.png`, `02-settings-writing.png`, `03-live-dock-stop.png`, `04-live-dock-stop-running.png`.
 - Status: IMPLEMENTED. No acceptance claimed; P4.V1 owns the honesty suite. P4.I5 owns Follow-AI.
+
+### P4.I5 implementation log (2026-08-28)
+
+- Mounted `AppChoreographyCoordinator` + `AiPerformer` in `AppChoreographyMount`; `ui_event` enqueues when `runId` is present.
+- Follow AI is single-actor: `followAiActor` locks the run; `ai:runId:op:…` client ids parse to that run.
+- Toggling Follow on locks the most recent attributed actor; unattributed events after lock do not navigate.
+- Window-level pointer/key/wheel disengage; `[data-spectra-follow-control]` is ignored so the toggle does not cancel itself.
+- Claims expire at 8s; navigation settle-before-act is 280ms (0 when reduced motion).
+- Reveal retries until the control mounts; reduced motion uses instant scroll; AiPerformer jumps to the last frame.
+- IR choreography primitives prepend a pointer beat when the diff does not already approach the control.
+- Dock Follow is a Crosshair `dock-tab-icon`; thread Follow AI and presence AI chips call `followAiActor`; AI presence rows collapse by run.
+- Taste: the client performer does not republish awareness (server frames remain the visible body). Background runs never navigate unless followed.
+- Focused Vitest: 9 files / 87 tests. Scoped ESLint: 0 errors on new logic; existing dock token warnings unchanged.
+- Capability ghost gate passed. Secret scan 2,138 tracked files. `git diff --check` passed.
+- Playwright: `.shots/reformation/P4.I5/02-live-dock.png`, `04-thread-follow.png`, `08-dock-follow-pressed.png`, `09-thread-follow-locked.png`.
+- Status: IMPLEMENTED. No acceptance claimed; P4.V1 owns choreography journeys.

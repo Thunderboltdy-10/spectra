@@ -3,9 +3,10 @@
 import { Crosshair, MessageSquare, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
-import { useFollowAi } from "../collaboration/follow-ai";
+import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
 import { ThreadConversation } from "./conversation-surface";
 import { StudioSplitShell } from "./artifact-studio-shell";
+import { runIdForLiveThread } from "./live-dock";
 
 export function LiveThreadPanel({
   threadId,
@@ -62,7 +63,19 @@ export function LiveThreadPanel({
               stays lit rather than as another icon in the row. */}
           <button
             type="button"
-            onClick={() => follow.setFollowing(!follow.following)}
+            data-spectra-follow-control=""
+            onClick={() => {
+              if (follow.following) {
+                followAiActor(null);
+                return;
+              }
+              const actor =
+                liveExchange?.runId ??
+                runIdForLiveThread(threadId) ??
+                follow.location?.actorId;
+              if (actor) followAiActor(actor);
+              else follow.setFollowing(true);
+            }}
             className="spectra-follow-toggle shrink-0"
             data-following={follow.following ? "true" : undefined}
             aria-label={
@@ -126,7 +139,8 @@ export function LiveThreadPanel({
             </span>
             <button
               type="button"
-              onClick={() => follow.setFollowing(false)}
+              data-spectra-follow-control=""
+              onClick={() => followAiActor(null)}
               className="spectra-follow-strip-stop"
             >
               Stop

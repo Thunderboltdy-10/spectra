@@ -75,6 +75,7 @@ import { ViewportContextPicker } from "@/features/spectra/components/viewport-co
 import { GlobalRouteWorkbench } from "@/features/spectra/components/global-route-workbench";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
+import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
 
 type AppShellProps = {
   children: ReactNode;
@@ -1113,6 +1114,7 @@ export function AppShell({
           <div id="spectra-shell-tab-slot" className="hidden" />
         )}
         <ProductOfflineBanner />
+        <AppChoreographyMount />
         <div
           style={{ minHeight: 0 }}
           className={cn(

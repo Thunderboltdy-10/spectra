@@ -1,13 +1,15 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   hitTest,
   offSurfaceEdge,
   resolvePlacement,
   resolveSurfaceFrame,
   resolveTargetElement,
+  revealTarget,
+  scheduleRevealTarget,
   toSurfaceBox,
 } from "../collaboration/interaction-geometry";
 import { buildTarget } from "../collaboration/control-descriptors";
@@ -224,5 +226,54 @@ describe("hitTest", () => {
     const frame = surface(`<div data-rect="180,130,200,60" id="chrome"></div>`);
     document.elementFromPoint = () => document.getElementById("chrome");
     expect(hitTest(frame.element, 200, 140)).toBeNull();
+  });
+});
+
+describe("revealTarget", () => {
+  it("uses instant scroll when reduced motion is requested", () => {
+    const frame = surface(`
+      <div data-spectra-target="/slides/0/objects/0" data-rect="120,80,200,60" id="ctrl"></div>
+    `);
+    const seen: string[] = [];
+    HTMLElement.prototype.scrollIntoView = function (
+      this: HTMLElement,
+      arg?: boolean | ScrollIntoViewOptions,
+    ) {
+      seen.push(
+        typeof arg === "object" && arg ? String(arg.behavior) : "default",
+      );
+    };
+    expect(
+      revealTarget(frame.element, target("/slides/0/objects/0"), {
+        reducedMotion: true,
+      }),
+    ).toBe(true);
+    expect(seen).toEqual(["auto"]);
+    revealTarget(frame.element, target("/slides/0/objects/0"));
+    expect(seen).toEqual(["auto", "smooth"]);
+  });
+
+  it("retries until the control mounts", () => {
+    vi.useFakeTimers();
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const seen: string[] = [];
+      HTMLElement.prototype.scrollIntoView = function () {
+        seen.push("scroll");
+      };
+      const cancel = scheduleRevealTarget(
+        () => host,
+        target("/slides/0/objects/0"),
+        { attempts: 4, intervalMs: 80 },
+      );
+      expect(seen).toEqual([]);
+      host.innerHTML = `<div data-spectra-target="/slides/0/objects/0" data-rect="120,80,200,60"></div>`;
+      vi.advanceTimersByTime(80);
+      expect(seen).toEqual(["scroll"]);
+      cancel();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

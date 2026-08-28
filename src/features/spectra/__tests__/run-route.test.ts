@@ -722,6 +722,7 @@ describe("Spectra run route", () => {
   });
 
   it("creates one six-card deck and does not emit unrelated placement removal", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { convexMutation, fetchMock, getSavedArtifact } = setup(deckPlan());
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues." }) }));
@@ -756,6 +757,15 @@ describe("Spectra run route", () => {
     expect(new Headers(request.headers).get("X-OpenRouter-Title")).toBe("Spectra AI Operation Engine");
     const completedCall = convexMutation.mock.calls.find(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed");
     expect(completedCall?.[1]).toMatchObject({ providerUsed: "OpenAI", modelUsed: "openai/gpt-5.6" });
+    expect(info.mock.calls.filter(([label]) => label === "[spectra.agent-loop]").map(([, entry]) => entry)).toEqual([
+      { runId: "run-real", stage: "intake", status: "entered" },
+      { runId: "run-real", stage: "plan", status: "entered" },
+      { runId: "run-real", stage: "resolve", status: "entered" },
+      { runId: "run-real", stage: "gather", status: "entered" },
+      { runId: "run-real", stage: "act", status: "entered" },
+      { runId: "run-real", stage: "verify", status: "entered" },
+      { runId: "run-real", stage: "report", status: "entered" },
+    ]);
   });
 
   it("reads focused content on demand before submitting a mutation plan", async () => {
@@ -935,6 +945,7 @@ describe("Spectra run route", () => {
   });
 
   it("answers an explicit exact-reply command without invoking the heavy planner", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "unused", operations: [] };
     const { convexMutation, fetchMock } = setup(answerPlan);
     const route = await import("@/app/api/spectra/run/route");
@@ -943,6 +954,15 @@ describe("Spectra run route", () => {
     await response.text();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { finalSummary?: string }).finalSummary === "Ready.")).toBe(true);
+    expect(info.mock.calls.filter(([label]) => label === "[spectra.agent-loop]").map(([, entry]) => entry)).toEqual([
+      { runId: "run-real", stage: "intake", status: "entered" },
+      { runId: "run-real", stage: "plan", status: "entered" },
+      { runId: "run-real", stage: "resolve", status: "skipped", reason: "immediate answer has no mutation stages" },
+      { runId: "run-real", stage: "gather", status: "skipped", reason: "immediate answer has no mutation stages" },
+      { runId: "run-real", stage: "act", status: "skipped", reason: "immediate answer has no mutation stages" },
+      { runId: "run-real", stage: "verify", status: "skipped", reason: "immediate answer has no mutation stages" },
+      { runId: "run-real", stage: "report", status: "entered" },
+    ]);
   });
 
   it("answers a greeting without hydrating context or invoking the mutation planner", async () => {
@@ -1337,6 +1357,7 @@ describe("Spectra run route", () => {
   });
 
   it("applies an explicitly supplied focused deck hint without a model call or provisional shell", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { convexMutation, fetchMock, getSavedArtifact } = setup(deckPlan());
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
@@ -1356,6 +1377,15 @@ describe("Spectra run route", () => {
     const cards = (getSavedArtifact().content as { cards?: Array<{ hint?: string }> }).cards ?? [];
     expect(cards[2]?.hint).toBe("Krebs makes high-energy carriers and a little ATP.");
     expect(events.some((event) => event.type === "final")).toBe(true);
+    expect(info.mock.calls.filter(([label]) => label === "[spectra.agent-loop]").map(([, entry]) => entry)).toEqual([
+      { runId: "run-real", stage: "intake", status: "entered" },
+      { runId: "run-real", stage: "plan", status: "entered" },
+      { runId: "run-real", stage: "resolve", status: "entered" },
+      { runId: "run-real", stage: "gather", status: "entered" },
+      { runId: "run-real", stage: "act", status: "entered" },
+      { runId: "run-real", stage: "verify", status: "entered" },
+      { runId: "run-real", stage: "report", status: "entered" },
+    ]);
   });
 
   it("fixes only a focused planner due time without a model round trip", async () => {

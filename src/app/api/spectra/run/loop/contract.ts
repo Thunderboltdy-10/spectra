@@ -1,0 +1,181 @@
+import type { EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
+import type { SpectraPlan } from "@/features/spectra/operations/schema";
+
+export type Surface = "chat" | "workspace" | "artifacts" | "artifact";
+
+export type Body = {
+  action?:
+    | "run"
+    | "retry"
+    | "confirm"
+    | "cancel"
+    | "revise"
+    | "stop"
+    | "clear_agent"
+    | "scheduled_run"
+    | "scheduled_resume";
+  prompt?: string;
+  surface?: Surface;
+  workspaceId?: string;
+  scopeNodeId?: string;
+  artifactId?: string;
+  threadId?: string;
+  runId?: string;
+  executionId?: string;
+  revision?: string;
+  attachments?: AttachmentInput[];
+  focusMode?: EffectiveFocusMode;
+  selectedArtifactIds?: string[];
+  explicitContextObjects?: Array<{
+    type?: string;
+    id?: string;
+    label?: string;
+    workspaceId?: string;
+    semanticTargetId?: string;
+    semanticAnchor?: Record<string, unknown>;
+    contextSummary?: string;
+  }>;
+  currentView?: string;
+  submissionKey?: string;
+  agentId?: string;
+  disableAgentRouting?: boolean;
+  actorClerkId?: string;
+  resultCardId?: string;
+  conflictOperationId?: string;
+  collaborationClientId?: string;
+  payload?: Record<string, unknown>;
+};
+
+export type AttachmentInput = {
+  id?: string;
+  name?: string;
+  mimeType?: string;
+  size?: number;
+  handling?: "pdf" | "text" | "docx" | "xlsx" | "pptx" | "image";
+  data?: string;
+};
+
+export type PreparedAttachment = {
+  name: string;
+  mimeType: string;
+  size: number;
+  handling: "pdf" | "text" | "docx" | "xlsx" | "pptx" | "image";
+  data?: string;
+  extractedText?: string;
+  pageCount?: number;
+  visualPdfData?: string;
+};
+
+export type StoredOperation = {
+  _id: string;
+  _creationTime?: number;
+  executionId?: string;
+  type: string;
+  input: unknown;
+  status:
+    "proposed" | "executing" | "waiting" | "executed" | "failed" | "cancelled";
+  affected?: Array<{ type: string; id: string }>;
+  output?: unknown;
+  requiresConfirmation?: boolean;
+  pendingArtifactId?: string;
+  pendingWorkspaceId?: string;
+};
+
+export type ResultAction = {
+  key: string;
+  label: string;
+  targetType?: "artifact" | "thread" | "run" | "workspace";
+  targetId?: string;
+};
+
+export type Card = {
+  _id: string;
+  runId: string;
+  status:
+    | "queued"
+    | "running"
+    | "awaiting_confirmation"
+    | "awaiting_resolution"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  title: string;
+  summary?: string;
+  variant: "status" | "artifact" | "thread" | "operation" | "error";
+  actions: ResultAction[];
+  provenance?: unknown;
+  updatedAt: number;
+};
+
+export type RunState = {
+  status: Card["status"];
+  sourceSurface: "chat" | "workspace" | "artifact";
+  threadId?: string;
+  workspaceId?: string;
+  scopeNodeId?: string;
+  artifactId?: string;
+  userPrompt: string;
+  finalSummary?: string;
+  decision?: SpectraPlan["decision"];
+  planIntent?: unknown;
+  executionId?: string;
+  selectedAgentId?: string;
+  selectedAgentVersionId?: string;
+  agentRouting?: {
+    confidence: number;
+    reason: string;
+    source: "automatic" | "continued" | "explicit";
+    reversible: boolean;
+  };
+  contextSnapshot?: {
+    scopeNodeId?: string;
+    focusMode?: EffectiveFocusMode;
+    selectedObjectIds?: string[];
+    explicitContextObjects?: Body["explicitContextObjects"];
+    currentView?: string;
+    requestedAgentId?: string;
+    disableAgentRouting?: boolean;
+  };
+};
+
+export type RunDetail = {
+  run: RunState;
+  cards: Card[];
+  operations: StoredOperation[];
+};
+
+export type RetryReset = {
+  runId: string;
+  resultCardId?: string;
+  prompt: string;
+  workspaceId?: string;
+  scopeNodeId?: string;
+  artifactId?: string;
+  sourceSurface: RunState["sourceSurface"];
+  executionId: string;
+  previousExecutionId: string;
+  created: boolean;
+  contextSnapshot?: RunState["contextSnapshot"];
+};
+
+export type NativeProgressActivity =
+  | "plan"
+  | "retrieve"
+  | "inspect"
+  | "create"
+  | "edit"
+  | "verify"
+  | "approval"
+  | "other";
+
+export type NativeProgressUpdate = {
+  title: string;
+  detail?: string;
+  activity: NativeProgressActivity;
+  operationIndex?: number;
+  artifactType?: string;
+  regionHint?: string;
+};
+
+export type NativeProgressInput =
+  string | NativeProgressUpdate | Record<string, unknown>;

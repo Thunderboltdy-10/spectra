@@ -37,3 +37,19 @@ Wrong-target suite (multi-artifact, similar names, cross-type, thread-attached);
 ## Exit gate
 
 Wrong-target suite zero-miss in its owning verification unit; honesty suite green; rubric scores at or above the bar Pablo sets on V1's first grading round; choreography journeys PASS; Pablo pass (including his original two-artifact repro, which must now resolve correctly or ask).
+
+### P4.I1 implementation log (2026-08-28)
+
+- Kept the durable run substrate intact: leases, heartbeats, NDJSON, confirmations, retry/resume, cards, and scheduled callbacks remain in `runtime.ts`.
+- Reduced `run/route.ts` from 14,073 lines to an eight-line transport boundary.
+- Moved business logic into `loop/{intake,plan,resolve,gather,act,verify,report}.ts` with shared contracts and Convex I/O adapters.
+- Added the mounted `AgentLoopExecution` boundary in canonical intake → plan → resolve → gather → act → verify → report order.
+- Kept the current bounded context packet as intake input; the loop adopts it at gather, while P4.I2 owns breadth-first indexing plus post-resolution depth.
+- Early answer/refusal/confirmation paths record skipped stages explicitly; confirmation resumes start at act without replaying intake or planning.
+- Existing focused regex fast paths remain behavior-compatible but now traverse resolve, gather, act, verify, and report like model plans.
+- Added route-level golden transcripts for full mutation, immediate answer, and focused fast-path mutation, plus a structural extraction contract.
+- Focused Vitest: 7 files / 67 tests passed. Scoped ESLint: 0 warnings. Capability ghost gate passed.
+- Secret scan passed across 2,131 tracked files; `git diff --check` passed.
+- Full `tsc --noEmit` retained only recorded repository blockers; no P4.I1 file failed.
+- Architecture check retained seven pre-existing global-event findings; no P4.I1 path was named.
+- Status: IMPLEMENTED. No acceptance claimed; P4.V1 remains independent.

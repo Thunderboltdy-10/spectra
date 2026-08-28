@@ -83,6 +83,7 @@ import {
 } from "@/features/spectra/ai/model-config";
 import { AiArtifactRegionConflictError, applyAiArtifactMutation } from "@/features/spectra/ai/yjs-artifact-operation";
 import { confirmationDiffSummary } from "@/features/spectra/ai/authority-execution";
+import { interruptionRecovery } from "../../../../../shared/spectra-run-recovery";
 import { prepareAttachments as prepareRunAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
 import { promptLooksLikeFocusedStructuralEdit } from "@/features/spectra/operations/intent-alignment";
 import { isQuietRetryableApplyFailure } from "@/features/spectra/operations/plan-diagnostics";
@@ -2367,23 +2368,43 @@ async function runAttempt(
         streamedCreationPreview ||
         pendingArtifactCount > 0,
       );
+      const recovery = interruptionRecovery(
+        commitStarted ? ["executing"] : [],
+        Boolean(publicText.trim()),
+      );
       await mutate("spectraRuns:updateStatus", {
         actorClerkId: params.actorClerkId,
         runId: params.runId,
         executionId: params.executionId,
         status: "cancelled",
         resultTitle: "Stopped",
-        resultSummary: stoppedWithVisibleWork
-          ? "Stopped by you. Partial work from this run may already be visible — review it before retrying."
-          : "Stopped before the response began. You can retry when ready.",
-        resultActions: [
-          {
-            key: "retry",
-            label: "Retry",
-            targetType: "run",
-            targetId: params.runId,
-          },
-        ],
+        resultSummary: recovery.retryable
+          ? stoppedWithVisibleWork
+            ? "Stopped by you. The partial response remains available, and you can retry when ready."
+            : "Stopped before the response began. You can retry when ready."
+          : "Stopped by you. Some work may already be visible — review it before continuing.",
+        resultActions: recovery.retryable
+          ? [
+              {
+                key: "retry",
+                label: "Retry",
+                targetType: "run",
+                targetId: params.runId,
+              },
+            ]
+          : params.threadId
+            ? [
+                {
+                  key: "continue",
+                  label: "Continue in thread",
+                  targetType: "thread",
+                  targetId: params.threadId,
+                },
+              ]
+            : [],
+        recoveryState: recovery.recoveryState,
+        retryable: recovery.retryable,
+        preservedPartial: recovery.preservedPartial,
       }).catch(() => null);
       publish({
         type: "stopped",
@@ -2393,14 +2414,22 @@ async function runAttempt(
       await flushEvents();
       return;
     }
-    const preservedPartial = operationOutcomes.some(({ affected }) =>
+    const preservedOutcome = operationOutcomes.some(({ affected }) =>
       affected.some((item) => item.id),
     );
+    const recovery = interruptionRecovery(
+      commitStarted
+        ? [preservedOutcome ? "executed" : "executing"]
+        : [],
+      Boolean(publicText.trim()),
+    );
     advanceProtocolState(
-      preservedPartial ? "failed_terminal" : "paused",
-      preservedPartial
+      recovery.retryable ? "paused" : "failed_terminal",
+      recovery.retryable
+        ? "run_paused_after_recovery"
+        : preservedOutcome
         ? "unrecoverable_run_failure"
-        : "run_paused_after_recovery",
+        : "run_failed_after_commit_boundary",
     );
     const message = publicError(error);
     await mutate("spectraOperations:cancelPending", {
@@ -2425,31 +2454,44 @@ async function runAttempt(
       executionId: params.executionId,
       outcome: "failed",
     }).catch(() => null);
-    const resultSummary = preservedPartial
-      ? `${message} Review the affected objects before submitting a follow-up command.`
-      : message;
+    const resultSummary = recovery.retryable
+      ? message
+      : `${message} Review any affected work before submitting a follow-up command.`;
     await mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
       status: "failed",
       error: message,
-      resultTitle: preservedPartial ? "Completed with limits" : "Paused",
+      resultTitle: preservedOutcome
+        ? "Completed with limits"
+        : recovery.retryable
+          ? "Paused"
+          : "Needs review",
       resultSummary,
       resultVariant: "status",
-      resultActions: preservedPartial
-        ? []
-        : [
+      resultActions: recovery.retryable
+        ? [
             {
               key: "retry",
               label: "Retry",
               targetType: "run",
               targetId: params.runId,
             },
-          ],
-      recoveryState: preservedPartial ? "partial" : "interrupted",
-      retryable: !preservedPartial,
-      preservedPartial,
+          ]
+        : params.threadId
+          ? [
+              {
+                key: "continue",
+                label: "Continue in thread",
+                targetType: "thread",
+                targetId: params.threadId,
+              },
+            ]
+          : [],
+      recoveryState: recovery.recoveryState,
+      retryable: recovery.retryable,
+      preservedPartial: recovery.preservedPartial,
     }).catch(() => null);
     card = await latestCard(params.actorClerkId, params.runId).catch(
       () => card,

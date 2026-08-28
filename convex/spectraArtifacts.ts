@@ -1897,7 +1897,9 @@ export const finalizePendingLive = mutation({
       run.executionId !== args.executionId ||
       artifact.aiRunId !== args.runId ||
       artifact.aiExecutionId !== args.executionId ||
-      (artifact.aiState !== "creating" && artifact.aiState !== undefined)
+      (artifact.aiState !== "creating" &&
+        artifact.aiState !== "updating" &&
+        artifact.aiState !== undefined)
     )
       throw new Error(
         "This pending artifact is no longer editable by that run.",

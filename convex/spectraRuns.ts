@@ -1712,9 +1712,9 @@ export const stopRun = mutation({
     // `alive: false`; it then aborts at the next safe boundary and performs
     // the same pending/staged cleanup. Rejecting here can otherwise make a
     // stalled executing operation literally impossible to stop.
-    const hasAppliedWork = currentOperations.some(
-      (operation) =>
-        operation.status === "executed" || operation.status === "failed",
+    const recovery = interruptionRecovery(
+      currentOperations.map((operation) => operation.status),
+      false,
     );
     const now = Date.now();
     if (
@@ -1741,9 +1741,9 @@ export const stopRun = mutation({
     await ctx.db.patch(args.runId, {
       status: "cancelled",
       phase: "stopped",
-      recoveryState: hasAppliedWork ? "partial" : "interrupted",
-      retryable: !hasAppliedWork,
-      preservedPartial: hasAppliedWork,
+      recoveryState: recovery.recoveryState,
+      retryable: recovery.retryable,
+      preservedPartial: recovery.preservedPartial,
       completedAt: now,
       agentUsageSettledAt:
         run.selectedAgentId && run.selectedAgentVersionId
@@ -1763,7 +1763,7 @@ export const stopRun = mutation({
       payload: {
         type: "stopped",
         runId: args.runId,
-        partial: run.preservedPartial === true,
+        partial: recovery.preservedPartial,
       },
       createdAt: now,
     });
@@ -1776,18 +1776,28 @@ export const stopRun = mutation({
         ctx.db.patch(card._id, {
           status: "cancelled",
           title: "Stopped",
-          summary:
-            "Stopped by you. Any partial response remains available in the thread.",
-          actions: hasAppliedWork
-            ? []
-            : [
+          summary: recovery.retryable
+            ? "Stopped by you. Any partial response remains available in the thread."
+            : "Stopped by you. Some work may already be visible — review it before continuing.",
+          actions: recovery.retryable
+            ? [
                 {
                   key: "retry",
                   label: "Retry",
                   targetType: "run",
                   targetId: args.runId,
                 },
-              ],
+              ]
+            : run.threadId
+              ? [
+                  {
+                    key: "continue",
+                    label: "Continue in thread",
+                    targetType: "thread",
+                    targetId: run.threadId,
+                  },
+                ]
+              : [],
           updatedAt: now,
         }),
       ),
@@ -1902,7 +1912,10 @@ export const resetForRetry = mutation({
     requireCurrentExecution(run.executionId, args.executionId);
     if (run.status !== "failed" && run.status !== "cancelled")
       throw new Error("Only failed or cancelled runs can be retried");
-    if (run.retryable === false || run.recoveryState === "partial") {
+    if (
+      run.retryable === false ||
+      (run.recoveryState === "partial" && run.retryable !== true)
+    ) {
       throw new Error(
         "This run preserved partial work. Review the affected objects and continue in the thread instead of retrying.",
       );

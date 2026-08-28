@@ -1,3 +1,7 @@
+import type { SpectraOperationRecoveryStatus } from "../shared/spectra-run-recovery";
+
+export { interruptionRecovery } from "../shared/spectra-run-recovery";
+
 export type SpectraRunStatus =
   | "queued"
   | "running"
@@ -7,13 +11,7 @@ export type SpectraRunStatus =
   | "failed"
   | "cancelled";
 
-export type SpectraOperationStatus =
-  | "proposed"
-  | "executing"
-  | "waiting"
-  | "executed"
-  | "failed"
-  | "cancelled";
+export type SpectraOperationStatus = SpectraOperationRecoveryStatus;
 
 const ACTIVE_STATUSES = new Set<SpectraRunStatus>([
   "queued",
@@ -57,18 +55,4 @@ export function requireCurrentExecution(
   if (!currentExecutionId || currentExecutionId !== expectedExecutionId) {
     throw new Error("This run attempt is no longer active.");
   }
-}
-
-export function interruptionRecovery(
-  operationStatuses: readonly SpectraOperationStatus[],
-  hasPartialResponse: boolean,
-) {
-  const mayHaveCommitted = operationStatuses.some((status) =>
-    status === "executing" || status === "waiting" || status === "executed" || status === "failed"
-  );
-  return {
-    recoveryState: mayHaveCommitted || hasPartialResponse ? "partial" as const : "interrupted" as const,
-    retryable: !mayHaveCommitted,
-    preservedPartial: hasPartialResponse || mayHaveCommitted,
-  };
 }

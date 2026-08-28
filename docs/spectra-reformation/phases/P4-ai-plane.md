@@ -122,3 +122,26 @@ Wrong-target suite zero-miss in its owning verification unit; honesty suite gree
 - Capability ghost gate passed. Secret scan 2,138 tracked files. `git diff --check` passed.
 - Playwright: `.shots/reformation/P4.I5/02-live-dock.png`, `04-thread-follow.png`, `08-dock-follow-pressed.png`, `09-thread-follow-locked.png`.
 - Status: IMPLEMENTED. No acceptance claimed; P4.V1 owns choreography journeys.
+
+### P4.V1 verification log (2026-08-28)
+
+- Status: **REJECTED**. Independent verification does not claim acceptance.
+- Named-other targeting passed: Final changed, focused Draft stayed byte-for-byte at its marker, and the Dock named Final.
+- Standardized sheet artifact was valid and synchronized; production rubric score **88/100**, no blockers.
+- P4.V1-F1 triage: **SYSTEMIC** AI-create finalization and run-recovery lifecycle class.
+- Root cause: live staging changes owned pending creates to `updating`, while finalization accepted only `creating`; failure recovery missed the current executing commit boundary.
+- Fixed F1 class-wide in the live finalizer, runtime, Stop mutation, retry reset, and one shared recovery helper.
+- Before `17`–`18`: saved work falsely failed, exposed Retry, and Retry returned 409; after `24`–`26`: work remained, copy was honest, no unsafe Retry.
+- New production-function lifecycle tests failed 3/3 before the repair and passed 3/3 after it.
+- Focused Vitest: 3 files / 42 tests passed; scoped ESLint, capability gate, and secret scan passed.
+- Root `tsc --noEmit` is red on unchanged P4 authority/runtime contracts plus recorded cross-phase blockers; architecture retained seven recorded findings.
+- Convex development deploy remained blocked by recorded pre-existing type errors; its gate was not weakened.
+- Standardized 12-slide deck failed the shared rubric at **68→74→59** after bounded repair.
+- P4.V1-F2 triage: **SYSTEMIC** presentation generation/layout/critique quality class, independent of F1.
+- P4.V1-F3 triage: **SYSTEMIC** root type-gate drift; P4-owned unchanged errors stay in this unit and the gate was not weakened.
+- P4.V1-F4 triage: **SYSTEMIC** Dock density; always-visible actions displace run titles and later tabs at realistic density. It stays in P4.V1.
+- Follow-off passed during the deck run: opening the sheet kept the viewport there.
+- Screenshot follow-ups: narrow Library chrome → P6.I1; shared split-artifact inset → P6.I2. No screenshot-local CSS patch was made.
+- R17 stop: document grading and remaining ambiguity/honesty/authority/choreography cards are explicitly unrun.
+- Evidence: `.shots/reformation/P4.V1/manifest.md`, numbered screenshots `00`–`26`.
+- Next owner: **P4.V1 continuation**; repair F2 class-wide, then resume the remaining cards.

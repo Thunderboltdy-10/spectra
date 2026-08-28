@@ -120,11 +120,15 @@ function applyGeneratedTextStyle(
   align?: "left" | "center" | "right",
 ) {
   const tokens = deck.theme.tokens ?? {};
+  const color =
+    (role === "title" ? tokens.heading : tokens.body) ??
+    (role === "title" ? GENERATED_THEME.heading : GENERATED_THEME.body);
   object.style = {
     ...object.style,
-    color:
-      (role === "title" ? tokens.heading : tokens.body) ??
-      (role === "title" ? GENERATED_THEME.heading : GENERATED_THEME.body),
+    color,
+    // Contrast is ink against the slide, not an authored fill that can match
+    // the text. Generated decks own this pairing.
+    fill: tokens.background ?? GENERATED_THEME.background,
     fontWeight:
       role === "title"
         ? Math.max(650, numericStyle(object, "fontWeight", 700))
@@ -630,6 +634,9 @@ export function realizeGeneratedPresentation(value: unknown) {
     });
     parkExtraObjectsForSparseLayout(slide, layoutId);
     fitGeneratedSlide(deck, slide);
+    // Reading order is derived from objects that remain after parking and
+    // overflow. Authored IDs are not an identity for writes.
+    finalizeReadingOrder(slide);
   });
   return deck;
 }

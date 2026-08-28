@@ -44,3 +44,15 @@ Status remains **REJECTED** until an independent verifier re-grades. Sequence co
 13. `45`: Method Guide thread from the original paused document create (F1). Fresh live document/12-slide grading was not completed because artifact applies could not sync.
 
 Bridge interruption was not run (live OneDrive Physics). P6.I1/I2 were not patched. Focused Vitest 6 files / 73 tests; `tsc` no longer names `authority.ts` or `runtime.ts`.
+
+## Independent verifier re-grade (2026-08-28)
+
+Status remains **REJECTED**. Sequence continues `47`–`77`.
+
+14. `47`–`49`: F4 Dock density re-grade. Tabs 280px (min 240 / max 320); Follow + Stop/Retry immediate; overflow for conversation/Undo/Close.
+15. `50`–`62`: live 12-slide V3. Quality engine **85/100, 0 blockers** on saved artifact `q57b3tfqbv13yv4a5nzp5kg5598da7a8` (`v3-quality-report.json`). Dock still showed Recovery exhausted after undeployed F1 finalizer.
+16. `63`–`68`: Method Guide V4 false-failed on "do not cite" → source metadata. Rubric repaired; V5 `q576aaaszgq2a1g3115denn43n8dbar1` scored **100/100** (`v5-quality-report.json`). Same Convex finalize miss after save.
+17. `69`–`72`: live Undo. Marker landed on Draft; overflow offered Undo this run; toast **Could not undo this run** (`changeGroups:revertPlanForRun` missing on live Convex). Marker remains.
+18. `73`–`77`: archive confirm. Archive it / Keep it / Skip; Keep it left V5 `active`.
+
+Bridge skipped. P6.I1/I2 untouched. Focused Vitest 3 files / 39 tests this VU.

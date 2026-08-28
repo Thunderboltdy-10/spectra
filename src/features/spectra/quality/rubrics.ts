@@ -819,6 +819,18 @@ export function classifyDocumentEditIntent(prompt: string): DocumentEditIntent {
   return "create";
 }
 
+function documentPromptRequiresSources(prompt: string) {
+  if (
+    /\b(?:do not|don't|without|no)\b.{0,40}\b(?:cite|citation|citations|sources?|references?)\b/i.test(
+      prompt,
+    )
+  )
+    return false;
+  return /\b(cite|citation|research|bibliography|references?|source-backed|evidence-backed)\b/i.test(
+    prompt,
+  );
+}
+
 function evaluateDocument(content: unknown, prompt: string) {
   const document = record(normalizeArtifactContent("document", content));
   const blocks = Array.isArray(document.blocks)
@@ -907,7 +919,20 @@ function evaluateDocument(content: unknown, prompt: string) {
       );
     if (block.type === "heading") {
       const next = blocks[index + 1];
-      if (!next || next.type === "heading" || words(text(next.text)) < 4)
+      const headingLevel = Number(record(block.attrs).level ?? 1);
+      const nextHeadingLevel =
+        next?.type === "heading"
+          ? Number(record(next.attrs).level ?? 1)
+          : null;
+      const nextIsDeeperHeading =
+        nextHeadingLevel !== null && nextHeadingLevel > headingLevel;
+      const emptySameLevelSection =
+        next?.type === "heading" && !nextIsDeeperHeading;
+      const thinBody =
+        next != null &&
+        next.type !== "heading" &&
+        words(text(next.text)) < 4;
+      if (!next || emptySameLevelSection || thinBody)
         flowFindings.push(
           finding(
             "flow",
@@ -934,10 +959,7 @@ function evaluateDocument(content: unknown, prompt: string) {
     );
 
   const evidenceFindings: ArtifactQualityFinding[] = [];
-  const sourceDriven =
-    /\b(cite|citation|research|bibliography|references?|source-backed|evidence-backed)\b/i.test(
-      prompt,
-    );
+  const sourceDriven = documentPromptRequiresSources(prompt);
   const sources = Array.isArray(document.sources) ? document.sources : [];
   if (sourceDriven && sources.length === 0)
     evidenceFindings.push(

@@ -675,9 +675,21 @@ function normalizePlanIntentMode(value: unknown) {
   return { ...plan, intent: { ...intent, mode } };
 }
 
+function preprocessPlanOperations(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const plan = { ...(value as Record<string, unknown>) };
+  if (!Array.isArray(plan.operations)) return plan;
+  plan.operations = plan.operations.map((operation) =>
+    preprocessModelOperationContent(operation),
+  );
+  return plan;
+}
+
 export function parseSpectraPlan(value: unknown) {
   const plan = spectraPlanSchema.parse(
-    normalizePlanIntentMode(coerceCommonPlanSchemaSlips(value)),
+    normalizePlanIntentMode(
+      preprocessPlanOperations(coerceCommonPlanSchemaSlips(value)),
+    ),
   );
   return { ...plan, operations: plan.operations.map(parseModelOperation) };
 }

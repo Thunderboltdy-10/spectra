@@ -157,3 +157,16 @@ Wrong-target suite zero-miss in its owning verification unit; honesty suite gree
 - Taste: Stop/Retry stay immediate (UX-12); overflow reuses `OverflowMenu`.
 - Focused Vitest 6 files / 73 tests. Scoped ESLint 0 errors on new logic; existing dock token warnings unchanged. Capability gate, secret scan 2171 files, `git diff --check` passed.
 - Status: IMPLEMENTED repair. P4.V1 stays REJECTED pending an independent verifier. No acceptance claimed.
+
+### P4.V1 independent re-grade log (2026-08-28)
+
+- Status: **REJECTED**. Independent verification does not claim acceptance. P6.I1/I2 not started.
+- F3: `tsc --noEmit` names no P4-owned path; recorded cross-phase blockers remain; gate not weakened.
+- F4: live Dock tabs 240–320px; Follow and Stop/Retry immediate; overflow for conversation/Undo/Close. Looks like Spectra.
+- F2: live 12-slide V3 `q57b3tfqbv13yv4a5nzp5kg5598da7a8` scored **85/100, 0 blockers**. Class-wide: realize before plan parse, reading order after park, theme fill+ink, visible-only audit.
+- Document: Method Guide V5 scored **100/100**. "Do not cite" is not source-driven; H1 then H2 is outline, not empty content.
+- Archive: Keep it left V5 `active`. Bridge skipped (Physics mounted).
+- Live Undo: overflow offered Undo after Draft marker append; toast Could not undo this run — live Convex missing `changeGroups:revertPlanForRun`. Marker remains. Taste: Stop/Retry stay immediate.
+- Creates still hit the undeployed F1 finalizer after quality passed; artifacts stayed active. Convex typecheck was not disabled.
+- Focused Vitest 3 files / 39 tests. Evidence: `.shots/reformation/P4.V1/` `47`–`77`, `v3-quality-report.json`, `v5-quality-report.json`.
+- Next owner: **P4.V1 remainder** after live Convex serves revert + the new finalizer. Do not start P6.

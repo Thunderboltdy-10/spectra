@@ -159,11 +159,13 @@ export function auditDeck(deck: PresentationContent): DeckAuditReport {
       }
     }
 
-    // Reading order is the stacking order, so a slide with several objects and
-    // no explicit order is only worth flagging once the order could differ.
-    const declared = slide.accessibility?.readingOrder;
+    // Reading order is the stacking order of visible objects. Hidden or parked
+    // extras are not part of the spoken sequence.
+    const declared = slide.accessibility?.readingOrder ?? [];
     if (visible.length >= 3) {
-      const covered = declared?.length === slide.objects.length;
+      const covered =
+        declared.length === visible.length &&
+        visible.every((object) => declared.includes(object.id));
       if (!covered) {
         findings.push({
           kind: "readingOrder",

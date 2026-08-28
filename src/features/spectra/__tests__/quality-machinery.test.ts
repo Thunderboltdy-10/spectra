@@ -6,7 +6,8 @@ import {
 } from "../ai/model-config";
 import { PRESENTATION_LAYOUTS } from "../commands/office/presentation-commands";
 import { isRepairablePlanFailure } from "../operations/plan-diagnostics";
-import { creationToolContentJsonSchema } from "../operations/schema";
+import { creationToolContentJsonSchema, parseSpectraPlan } from "../operations/schema";
+import { auditDeck } from "../presentation/audit";
 import {
   PRESENTATION_LAYOUT_OPTIONS,
   realizeGeneratedPresentation,
@@ -376,10 +377,122 @@ describe("P4.I4 quality machinery", () => {
 
     expect(content.slides).toHaveLength(12);
     expect(new Set(content.slides.map((slide) => slide.layoutId)).size).toBeGreaterThanOrEqual(4);
+    for (const slide of content.slides) {
+      const objectIds = new Set(slide.objects.map((object) => object.id));
+      expect(slide.accessibility?.readingOrder?.length).toBeGreaterThan(0);
+      for (const objectId of slide.accessibility?.readingOrder ?? []) {
+        expect(objectIds.has(objectId)).toBe(true);
+      }
+    }
     expect(report.passed).toBe(true);
     expect(report.score).toBeGreaterThanOrEqual(
       ARTIFACT_QUALITY_RUBRICS.presentation.passScore,
     );
+  });
+
+  it("rewrites reading order after parking extras and accepts stale authored ids in a plan", () => {
+    const realized = realizeGeneratedPresentation({
+      theme: presentationDraft().theme,
+      settings: { aspectRatio: "16:9" },
+      slides: [
+        {
+          id: "slide-1",
+          title: "Experimental design",
+          layoutId: "statement",
+          objects: [
+            textObject("title-1", "Experimental design"),
+            textObject("body-1", "A fair test for pendulum period."),
+          ],
+          accessibility: { readingOrder: ["missing-object", "title-1", "body-1"] },
+        },
+      ],
+    });
+    const remaining = new Set(
+      realized.slides[0]?.objects.map((object) => object.id),
+    );
+    expect(realized.slides[0]?.objects).toHaveLength(1);
+    for (const objectId of realized.slides[0]?.accessibility?.readingOrder ?? []) {
+      expect(remaining.has(objectId)).toBe(true);
+    }
+
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: {
+        mode: "create",
+        requestedArtifactTypes: ["presentation"],
+        requestedVisibleArtifactCount: 1,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+      },
+      conversationTitle: "Experimental design deck",
+      conversationSummary: "A twelve-slide pendulum investigation.",
+      choices: null,
+      operations: [
+        {
+          type: "artifact.create",
+          input: {
+            blueprintKey: "presentation",
+            title: "P4V1 Experimental Design Deck",
+            summary: null,
+            content: {
+              theme: presentationDraft().theme,
+              settings: { aspectRatio: "16:9" },
+              slides: [
+                {
+                  id: "slide-1",
+                  title: "Experimental design",
+                  objects: [
+                    textObject("title-1", "Experimental design"),
+                    textObject("body-1", "A fair test for pendulum period."),
+                  ],
+                  accessibility: {
+                    readingOrder: ["from-another-slide", "title-1"],
+                  },
+                },
+              ],
+            },
+            tags: [],
+            workspaceId: null,
+            placement: "context",
+            pinned: false,
+            exclusivePin: false,
+          },
+        },
+      ],
+      finalResponse: "Created the deck.",
+    });
+    expect(plan.operations[0]?.type).toBe("artifact.create");
+  });
+
+  it("treats visible reading order and generated contrast as template-owned", () => {
+    const deck = realizeGeneratedPresentation({
+      theme: presentationDraft().theme,
+      settings: { aspectRatio: "16:9" },
+      slides: [
+        {
+          id: "slide-1",
+          title: "Three practical moves",
+          layoutId: "three-ideas",
+          objects: [
+            {
+              ...textObject("title-1", "Three practical moves"),
+              style: { color: "#e8eee9", fill: "#f4f7f5", fontSize: 36 },
+            },
+            shapeObject("idea-1", "Space"),
+            shapeObject("idea-2", "Retrieve"),
+            shapeObject("idea-3", "Correct"),
+            { ...textObject("parked", "Hidden extra"), hidden: true },
+          ],
+        },
+      ],
+    });
+    const slide = deck.slides[0];
+    const visible = slide?.objects.filter((object) => !object.hidden) ?? [];
+    expect(visible.length).toBeGreaterThanOrEqual(3);
+    expect(slide?.accessibility?.readingOrder).toHaveLength(visible.length);
+    const audit = auditDeck(deck);
+    expect(audit.findings.filter((entry) => entry.kind === "readingOrder")).toEqual([]);
+    expect(audit.findings.filter((entry) => entry.kind === "contrast")).toEqual([]);
   });
 
   it("requires formula-backed, chart-bound, stated analysis", () => {
@@ -428,6 +541,48 @@ describe("P4.I4 quality machinery", () => {
       prompt: "Create a structured report for teachers.",
     });
     expect(report.passed).toBe(true);
+
+    const methodGuide = {
+      blocks: [
+        {
+          id: "title",
+          type: "heading",
+          text: "Pendulum period method guide",
+          attrs: { level: 1 },
+        },
+        {
+          id: "aim",
+          type: "heading",
+          text: "Aim",
+          attrs: { level: 2 },
+        },
+        {
+          id: "aim-body",
+          type: "paragraph",
+          text: "Students change string length and measure period while keeping mass and amplitude fixed.",
+        },
+      ],
+    };
+    const withoutForcedCitations = evaluateArtifactQuality({
+      blueprintKey: "document",
+      content: methodGuide,
+      prompt:
+        "Create a structured document named Method Guide for teachers. Do not cite outside sources.",
+    });
+    expect(withoutForcedCitations.passed).toBe(true);
+    expect(
+      withoutForcedCitations.findings.some((finding) =>
+        /verified source metadata/i.test(finding.message),
+      ),
+    ).toBe(false);
+
+    expect(
+      evaluateArtifactQuality({
+        blueprintKey: "document",
+        content: structuredDocument(),
+        prompt: "Write a research briefing with citations for this lab.",
+      }).passed,
+    ).toBe(false);
   });
 
   it("derives a design-intent create schema instead of requiring raw geometry", () => {

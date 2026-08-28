@@ -119,6 +119,16 @@ describe("canonical Spectra client state", () => {
     ]);
   });
 
+  it("isolates a tiled set as soon as it is grouped", () => {
+    contextStore.getState().setTileObjects([
+      { type: "artifact", id: "a", label: "A", presentation: "tile" },
+      { type: "artifact", id: "b", label: "B", presentation: "tile" },
+    ]);
+    const next = contextStore.getState();
+    expect(next.tileArtifactIds).toEqual(["a", "b"]);
+    expect(next.tilesIsolated).toBe(true);
+  });
+
   it("closes tile presentation atomically without leaving layout state behind", () => {
     contextStore.getState().setTileObjects([
       { type: "artifact", id: "a", label: "A", presentation: "tile" },

@@ -313,7 +313,7 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
       activeOpenObjectKey: tiles.at(-1) ? spectraObjectKey(tiles.at(-1)!) : state.activeOpenObjectKey,
       tileArtifactIds: ids,
       tileSizes: Object.fromEntries(Object.entries(state.tileSizes).filter(([id]) => idSet.has(id))),
-      tilesIsolated: ids.length ? state.tilesIsolated : false,
+      tilesIsolated: ids.length > 0,
       revision: state.revision + 1,
     };
   }),

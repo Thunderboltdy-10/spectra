@@ -64,6 +64,7 @@ import {
   resolveKey,
   selectAll,
   selectRow,
+  selectedWorkSourceIds,
   sortRows,
   windowRange,
   type SortDirection,
@@ -113,6 +114,8 @@ export type LibraryOrganizerProps = {
   onOpenThread: (threadId: string, title: string) => void;
   onShareWork?: (artifactId: string) => void;
   onToggleContext?: (artifactId: string) => void;
+  /** Replaces the composer's selected work with this set (list range-select). */
+  onSelectWork?: (artifactIds: string[]) => void;
   contextIds?: ReadonlySet<string>;
   onImportFile?: (file: File) => void;
   /** Create a workspace exactly where this surface is currently standing. */
@@ -207,6 +210,7 @@ export function LibraryOrganizer({
   onOpenThread,
   onShareWork,
   onToggleContext,
+  onSelectWork,
   contextIds,
   onImportFile,
   onNewWorkspace,
@@ -655,6 +659,13 @@ export function LibraryOrganizer({
     [rows, selection.ids],
   );
 
+  const publishWorkSelection = useCallback(
+    (next: typeof selection) => {
+      onSelectWork?.(selectedWorkSourceIds(next, rows));
+    },
+    [onSelectWork, rows],
+  );
+
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (renamingId) return;
@@ -662,11 +673,24 @@ export function LibraryOrganizer({
       if (!action) return;
       event.preventDefault();
       if (action.type === "move")
-        setSelection((current) =>
-          selectRow(current, rows, action.nodeId, action.extend ? "range" : "replace"),
-        );
-      else if (action.type === "selectAll") setSelection(selectAll(rows));
-      else if (action.type === "clear") setSelection(EMPTY_SELECTION);
+        setSelection((current) => {
+          const next = selectRow(
+            current,
+            rows,
+            action.nodeId,
+            action.extend ? "range" : "replace",
+          );
+          publishWorkSelection(next);
+          return next;
+        });
+      else if (action.type === "selectAll") {
+        const next = selectAll(rows);
+        setSelection(next);
+        publishWorkSelection(next);
+      } else if (action.type === "clear") {
+        setSelection(EMPTY_SELECTION);
+        publishWorkSelection(EMPTY_SELECTION);
+      }
       else if (action.type === "rename") setRenamingId(action.nodeId);
       else if (action.type === "trash") trashNodes(action.nodeIds);
       else if (action.type === "leave") {
@@ -690,6 +714,7 @@ export function LibraryOrganizer({
       rows,
       selection,
       trashNodes,
+      publishWorkSelection,
     ],
   );
 
@@ -715,7 +740,11 @@ export function LibraryOrganizer({
           openNode(node);
           return;
         }
-        setSelection((current) => selectRow(current, rows, node.nodeId, clickIntent(event)));
+        setSelection((current) => {
+          const next = selectRow(current, rows, node.nodeId, clickIntent(event));
+          if (selectionMode) publishWorkSelection(next);
+          return next;
+        });
         if (renamingId && renamingId !== node.nodeId) setRenamingId(null);
       },
       onDoubleClick: (event, node) => {
@@ -761,7 +790,7 @@ export function LibraryOrganizer({
       },
       onCancelRename: () => setRenamingId(null),
     }),
-    [actions, beginDrag, consumeSuppressedClick, openNode, renamingId, rows, run, selection.ids, selectionMode],
+    [actions, beginDrag, consumeSuppressedClick, onToggleContext, openNode, publishWorkSelection, renamingId, rows, run, selection.ids, selectionMode],
   );
 
   const range = windowRange(scrollTop, viewportHeight, ROW_HEIGHT, rows.length);
@@ -975,6 +1004,29 @@ export function LibraryOrganizer({
                     }
                   : undefined
               }
+              onContextMenu={(event, node) => {
+                event.preventDefault();
+                setSelection((current) =>
+                  current.ids.has(node.nodeId)
+                    ? current
+                    : selectRow(current, rows, node.nodeId, "replace"),
+                );
+                setMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  nodeIds: selection.ids.has(node.nodeId)
+                    ? [...selection.ids]
+                    : [node.nodeId],
+                });
+              }}
+              onBeginDrag={(event, node) => {
+                const ids = selection.ids.has(node.nodeId)
+                  ? [...selection.ids]
+                  : [node.nodeId];
+                const label =
+                  ids.length === 1 ? node.name : `${ids.length} items`;
+                beginDrag(event, ids, label);
+              }}
               onCreate={({ blueprintKey, parentNodeId }) =>
                 void createWorkAt(blueprintKey, parentNodeId)
               }
@@ -1072,6 +1124,7 @@ export function LibraryOrganizer({
                       node.sourceId ? (contextIds?.has(node.sourceId) ?? false) : false
                     }
                     showLocation={flat}
+                    picking={selectionMode}
                     now={now}
                     callbacks={rowCallbacks}
                     syncLabel={

@@ -338,6 +338,7 @@ function responsiveContract(type: ArtifactTypeKey): WorkResponsiveContract {
     supportsTile: true,
     supportsCompact: true,
     toolbarPriorities: ["mode", "primary", "contextual", "overflow"],
+    canvasExtent: type === "presentation" ? "bounded" : "infinite",
   };
 }
 

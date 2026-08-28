@@ -76,6 +76,7 @@ function contract(density: StudioDensity = "comfortable"): StudioContract {
       supportsTile: true,
       supportsCompact: true,
       toolbarPriorities: [],
+      canvasExtent: "infinite",
     },
     density,
     compatibilityProfile: "spectra-native",

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState } from "react";
-import { ChevronRight, MoreHorizontal, Share2, Star } from "lucide-react";
+import { ChevronRight, Check, MoreHorizontal, Share2, Star } from "lucide-react";
 import { StatusBadge, type StatusTone } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { TreeNode } from "./tree-client";
@@ -38,6 +38,7 @@ export const OrganizerRow = memo(function OrganizerRow({
   showLocation,
   now,
   callbacks,
+  picking = false,
   syncLabel,
   syncTone = "attention",
 }: {
@@ -52,6 +53,7 @@ export const OrganizerRow = memo(function OrganizerRow({
   showLocation: boolean;
   now: number;
   callbacks: RowCallbacks;
+  picking?: boolean;
   syncLabel?: string;
   syncTone?: StatusTone;
 }) {
@@ -93,6 +95,20 @@ export const OrganizerRow = memo(function OrganizerRow({
           )}
         >
           <span className="absolute -left-0.5 -top-[3px] size-2 rounded-full bg-[var(--brand-primary)]" />
+        </span>
+      ) : null}
+
+      {picking ? (
+        <span
+          aria-hidden
+          className={cn(
+            "flex size-4 shrink-0 items-center justify-center rounded-[4px] border",
+            selected
+              ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]"
+              : "border-[var(--border-default)] text-transparent",
+          )}
+        >
+          <Check className="size-3" />
         </span>
       ) : null}
 

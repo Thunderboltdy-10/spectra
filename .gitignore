@@ -44,6 +44,7 @@ next-env.d.ts
 /ai-education-workspace-landing-page
 opencode*.json
 .playwright-cli/
+.playwright/
 .shots/
 
 # Local-only: pre-migration Convex snapshots and scratch working files.

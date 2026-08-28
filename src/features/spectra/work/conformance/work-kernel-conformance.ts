@@ -433,6 +433,10 @@ function checkResponsive(definition: WorkDefinition): WorkKernelCheck {
     if (!responsive.toolbarPriorities.includes(priority))
       problems.push(`toolbar has no "${priority}" priority`);
   if (!responsive.supportsCompact) problems.push("no compact rendering");
+  if (responsive.canvasExtent !== "infinite" && responsive.canvasExtent !== "bounded")
+    problems.push("canvas extent is missing");
+  if (definition.key === "presentation" && responsive.canvasExtent !== "bounded")
+    problems.push("presentation must keep a bounded canvas");
   return check(
     "responsive_contract",
     problems.length === 0,

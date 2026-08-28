@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type MouseEvent, type PointerEvent } from "react";
 import { FolderOpen, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ArtifactCard, workTypeMeta } from "../components/artifact-card";
@@ -139,6 +139,8 @@ export function WorkBoard({
   onOpenContainer,
   onToggleContext,
   onCreate,
+  onContextMenu,
+  onBeginDrag,
 }: {
   /** The folder or workspace the board covers; null is the whole account. */
   scopeNodeId: string | null;
@@ -159,6 +161,8 @@ export function WorkBoard({
     blueprintKey: BlueprintChoiceKey;
     parentNodeId: string | null;
   }) => void;
+  onContextMenu?: (event: MouseEvent, node: TreeNode) => void;
+  onBeginDrag?: (event: PointerEvent, node: TreeNode) => void;
 }) {
   const board = useBoardColumns(scopeNodeId, groupBy, typeFilter);
   const placementBoard = useBoardColumns(
@@ -226,6 +230,8 @@ export function WorkBoard({
             onOpenContainer={onOpenContainer}
             onToggleContext={onToggleContext}
             onCreate={onCreate}
+            onContextMenu={onContextMenu}
+            onBeginDrag={onBeginDrag}
             placementColumns={placementBoard.columns}
           />
         ))}
@@ -249,6 +255,8 @@ function BoardColumnView({
   onOpenContainer,
   onToggleContext,
   onCreate,
+  onContextMenu,
+  onBeginDrag,
   placementColumns,
 }: {
   column: BoardColumn;
@@ -268,6 +276,8 @@ function BoardColumnView({
     blueprintKey: BlueprintChoiceKey;
     parentNodeId: string | null;
   }) => void;
+  onContextMenu?: (event: MouseEvent, node: TreeNode) => void;
+  onBeginDrag?: (event: PointerEvent, node: TreeNode) => void;
   placementColumns: BoardColumn[];
 }) {
   const page = useBoardColumnCards(
@@ -387,6 +397,14 @@ function BoardColumnView({
                   workspaceId: card.workspace?.workspaceId,
                 })
               }
+              onContextMenu={
+                onContextMenu
+                  ? (event) => onContextMenu(event, card)
+                  : undefined
+              }
+              onBeginDrag={
+                onBeginDrag ? (event) => onBeginDrag(event, card) : undefined
+              }
             />
           ) : (
             <ArtifactCard
@@ -405,6 +423,14 @@ function BoardColumnView({
               }
               onToggleContext={
                 onToggleContext ? () => onToggleContext(card) : undefined
+              }
+              onContextMenu={
+                onContextMenu
+                  ? (event) => onContextMenu(event, card)
+                  : undefined
+              }
+              onBeginDrag={
+                onBeginDrag ? (event) => onBeginDrag(event, card) : undefined
               }
             />
           ),
@@ -519,13 +545,25 @@ function ColumnCreate({
  * that says how much is inside and opens it — not a work card pretending a
  * container is a document.
  */
-function PlaceCard({ node, onOpen }: { node: TreeNode; onOpen: () => void }) {
+function PlaceCard({
+  node,
+  onOpen,
+  onContextMenu,
+  onBeginDrag,
+}: {
+  node: TreeNode;
+  onOpen: () => void;
+  onContextMenu?: (event: MouseEvent) => void;
+  onBeginDrag?: (event: PointerEvent) => void;
+}) {
   const identity = nodeIdentity(node);
   const Icon = identity.icon;
   return (
     <button
       type="button"
       onClick={onOpen}
+      onContextMenu={onContextMenu}
+      onPointerDown={onBeginDrag}
       className="group flex w-full min-w-0 items-center gap-2.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-left transition-colors hover:border-[var(--border-strong)]"
     >
       <span

@@ -596,6 +596,11 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
   backdrop-filter: none !important;
 }
 
+.spectra-artifact-studio[data-canvas-extent="infinite"] .spectra-editor-workbar {
+  margin: 0 !important;
+  border-radius: 0 !important;
+}
+
 .spectra-editor-workbar::-webkit-scrollbar {
   height: 3px;
 }
@@ -703,6 +708,7 @@ html[data-spectra-sidebar-collapsed="true"]
 }
 
 .spectra-artifact-studio:is(
+    [data-blueprint="document"],
     [data-blueprint="sheets"],
     [data-blueprint="code"],
     [data-blueprint="presentation"],
@@ -716,6 +722,7 @@ html[data-spectra-sidebar-collapsed="true"]
 }
 
 .spectra-artifact-studio:is(
+    [data-blueprint="document"],
     [data-blueprint="sheets"],
     [data-blueprint="code"],
     [data-blueprint="presentation"],
@@ -723,12 +730,15 @@ html[data-spectra-sidebar-collapsed="true"]
     [data-blueprint="timetable"]
   )
   .spectra-editor-layout {
+  display: flex !important;
   min-height: 0;
   height: auto;
   flex: 1 1 auto;
+  flex-direction: column;
 }
 
 .spectra-artifact-studio:is(
+    [data-blueprint="document"],
     [data-blueprint="sheets"],
     [data-blueprint="code"],
     [data-blueprint="presentation"],
@@ -737,10 +747,15 @@ html[data-spectra-sidebar-collapsed="true"]
   )
   .spectra-editor-layout
   > section {
+  display: flex;
   min-height: 0;
+  min-width: 0;
   height: 100%;
+  flex: 1 1 auto;
+  flex-direction: column;
 }
 
+.spectra-document-studio,
 .spectra-sheets-studio,
 .code-studio,
 .presentation-studio,

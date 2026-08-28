@@ -124,6 +124,15 @@ describe("Workbench V2", () => {
       expect(definition.responsive.supportsTile).toBe(true);
       expect(definition.responsive.supportsCompact).toBe(true);
       expect(definition.responsive.toolbarPriorities.length).toBeGreaterThan(0);
+      expect(
+        definition.responsive.canvasExtent === "infinite" ||
+          definition.responsive.canvasExtent === "bounded",
+      ).toBe(true);
+      if (definition.key === "presentation") {
+        expect(definition.responsive.canvasExtent).toBe("bounded");
+      } else {
+        expect(definition.responsive.canvasExtent).toBe("infinite");
+      }
     }
   });
 });

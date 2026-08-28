@@ -98,3 +98,16 @@ Ghost gate + conformance suites in their owning units; the "add one capability" 
 - Focused Vitest 7 files / 50 tests; `check:capabilities`; scoped ESLint 0 errors; secret scan 2118 files; `git diff --check` clean.
 - Live Playwright: signed-in Settings Workbars after `auth.json`; Document layout, no raw zombie ids. Evidence: `.shots/reformation/P3.I4/settings-workbar.png`.
 - Later owners: P5.I1 overflow log loop, P6.I3 logger.
+
+## P3.V1 verifier log — 2026-08-28 (final reexec)
+
+- Status: **VERIFIED / PASS**. P3.I1–I4 stay IMPLEMENTED pending Pablo. No acceptance claimed.
+- I3/I4 closures re-graded live; first-V1 IR honesty (`office-exports.ts`, sharedFamily extras) still holds.
+- Generated parity: unique ids, imported lens kinds, Office UI reach, AI schemas, D41 Font/Size/Bold/Italic, app commands, studio projection. Ghost gate passed. Focused Vitest 13 files / 180 tests. Secret scan 2119 files. `git diff --check` clean.
+- Journey: workspace 0 `CAPABILITY_DEFINITION_MISSING`. Scratch `P3V1-B` document tools; Rates Shape and Titration Format showed the same Font/Size/Bold/Italic labels. Overflow console spam unchanged — **P5.I1**. `runTabs` 401 — **P6.I3**.
+- Studio regression: quiz, flashcard, code, whiteboard, planner, agent workbars mounted with 0 CAPABILITY crashes.
+- Split card: Board Select objects → `P3V1-A` + `P3V1-B` → Group as tiles. One Control+B unbolded A’s `P3V1-MARK`; B stayed empty. CMD-1 live-closed.
+- Pablo-directed after the reexec: grouping isolates and fills the workspace; list Select objects writes `selectionDraft`; board cards get the list menu and drag; infinite studios fill; presentation stays bounded; duplicate expand on Close removed.
+- I4 smoke: Settings Workbars 0 errors (`15-settings-workbars.png`). CMD-3: disabled PowerPoint Transition stayed visible.
+- Taste: RichTextFormatBar on quiz/flashcard fields is IR-routed (`dispatchFormatChrome`), not a hyphenated ghost — not CMD-4.
+- Later owners: P5.I1 overflow loop, P6.I3 logger. Evidence: `.shots/reformation/P3.V1/reexec/manifest.md`.

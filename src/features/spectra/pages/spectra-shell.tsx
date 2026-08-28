@@ -2713,7 +2713,7 @@ export function SpectraShell({
       }),
     );
     studio.closeStudio();
-    setWorkSetIsolated(false);
+    setWorkSetIsolated(true);
     setMultiSelectMode(false);
   }
 
@@ -3547,7 +3547,7 @@ export function SpectraShell({
           if (file) void importWorkspaceManifest(file);
         }}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <StudioTabRail
           hubTabs={
             workSetIsolated && activeHubTabId
@@ -3588,7 +3588,7 @@ export function SpectraShell({
           onGoForward={navigateShellForward}
           persistent
         />
-        <div className="spectra-workbench-frame relative flex min-h-0 flex-1">
+        <div className="spectra-workbench-frame relative flex min-h-0 min-w-0 flex-1 flex-col">
           <PendingCreateDialog
             open={pendingCreateType !== null}
             typeLabel={
@@ -3801,7 +3801,7 @@ export function SpectraShell({
               compact={false}
             />
           ) : (
-            <section className="flex min-w-0 flex-1">
+            <section className="relative flex min-h-0 min-w-0 flex-1">
               <>
                 <div className="relative flex min-w-0 flex-1 flex-col">
                   {shareInvitations.length > 0 ? (
@@ -3896,6 +3896,11 @@ export function SpectraShell({
                             (item) => item._id === artifactId,
                           );
                           if (found) toggleContextArtifact(found);
+                        }}
+                        onSelectWork={(ids) => {
+                          setMultiSelectMode(true);
+                          setSelectedContextIds(new Set(ids));
+                          setFocusModeOverride("selection");
                         }}
                       />
                     </main>

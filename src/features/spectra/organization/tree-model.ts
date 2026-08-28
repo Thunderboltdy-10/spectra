@@ -88,6 +88,20 @@ export function selectAll(rows: readonly TreeNode[]): RowSelection {
   };
 }
 
+/** Work/thread source ids in a row selection — what Group as tiles consumes. */
+export function selectedWorkSourceIds(
+  selection: RowSelection,
+  rows: readonly TreeNode[],
+): string[] {
+  return rows.flatMap((row) =>
+    selection.ids.has(row.nodeId) &&
+    row.sourceId &&
+    (row.kind === "work" || row.kind === "thread")
+      ? [row.sourceId]
+      : [],
+  );
+}
+
 /** Keep only ids that still exist, so a live delete cannot strand a selection. */
 export function pruneSelection(
   selection: RowSelection,

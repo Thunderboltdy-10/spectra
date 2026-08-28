@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { uniqueToken } from "@/lib/unique-token";
+import { cn } from "@/lib/utils";
 import type { JSONContent } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
 import { isLocalCollaborativeDocumentChange } from "../editor/collaboration-change";
@@ -835,7 +836,7 @@ export function DocumentStudio({
         attributes: {
           "data-work-id": artifactId,
           class:
-            "min-h-[620px] px-2 pb-24 pt-2 outline-none text-[var(--text-primary)]",
+            "min-h-full px-2 pb-24 pt-2 outline-none text-[var(--text-primary)]",
         },
         handleDOMEvents: {
           // `immediatelyRender: false` can leave `editor.isInitialized` false
@@ -2337,7 +2338,7 @@ export function DocumentStudio({
 
   return (
     <div
-      className="spectra-document-studio bg-[var(--bg-primary)]"
+      className="spectra-document-studio flex h-full min-h-0 flex-col bg-[var(--bg-primary)]"
       data-focus={focusMode || undefined}
       data-doc-mode={docMode}
       data-compact={mode === "split" || undefined}
@@ -2827,7 +2828,12 @@ export function DocumentStudio({
             ) : null}
             <EditorContent
               editor={editor}
-              className="tiptap-root spectra-document-canvas mx-auto max-w-[920px] [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-[23px] [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4"
+              className={cn(
+                "tiptap-root spectra-document-canvas [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-[23px] [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4",
+                pageLayout === "page"
+                  ? "mx-auto max-w-[920px]"
+                  : "h-full w-full",
+              )}
             />
             {pageLayout === "page" && pageSetup.footer ? (
               <p className="spectra-document-page-chrome" data-slot="footer">

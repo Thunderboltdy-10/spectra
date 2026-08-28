@@ -6,7 +6,6 @@ import {
   Maximize2,
   PanelRightClose,
   Plus,
-  Scaling,
   X,
 } from "lucide-react";
 import {
@@ -91,7 +90,6 @@ export function ArtifactTileSurface({
   const moveTileBefore = useSpectraContextStore(
     (state) => state.moveTileBefore,
   );
-  const cycleTileSize = useSpectraContextStore((state) => state.cycleTileSize);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const stageRef = useRef<HTMLElement | null>(null);
@@ -220,8 +218,8 @@ export function ArtifactTileSurface({
       ref={stageRef}
       className={
         isolated
-          ? "relative min-w-0 flex-1 overflow-hidden bg-[var(--bg-primary)]"
-          : "fixed inset-2 z-[70] flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[0_24px_70px_rgba(27,20,12,0.18)] md:absolute md:inset-y-3 md:left-auto md:right-3 md:w-[min(72vw,1120px)] xl:inset-y-0 xl:right-0 xl:w-[min(62vw,1120px)] xl:rounded-none xl:border-y-0 xl:border-r-0"
+          ? "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-primary)]"
+          : "absolute inset-0 z-[70] flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--bg-primary)]"
       }
       aria-label={isolated ? "Focused work set" : "Workbench split layout"}
       onDragOver={(event) => {
@@ -241,7 +239,7 @@ export function ArtifactTileSurface({
         }
       }}
     >
-      <div className="absolute right-3 top-3 z-50 flex items-center gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_8px_24px_rgba(27,20,12,0.12)]">
+      <div className="flex h-10 shrink-0 items-center justify-end gap-1 border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-2">
         {actionSlot}
         {onAddArtifact ? (
           <div className="relative">
@@ -322,7 +320,7 @@ export function ArtifactTileSurface({
         </button>
       </div>
       <div
-        className="flex min-h-0 flex-1 pt-12"
+        className="flex h-full min-h-0 min-w-0 flex-1"
         data-workbench-valid={
           renderedLayout
             ? validateWorkbenchTree(renderedLayout).length === 0
@@ -333,6 +331,8 @@ export function ArtifactTileSurface({
           <WorkbenchSplitTree
             node={renderedLayout}
             onChange={minimumFallback ? setFallbackLayout : setLayout}
+            showPaneFocus={false}
+            chrome="none"
             renderTab={(tab) => {
               const artifact = visibleArtifacts.find(
                 (item) => item._id === tab.id,
@@ -344,7 +344,7 @@ export function ArtifactTileSurface({
                   onDragEnd={() => setDraggingId(null)}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => moveBefore(event, artifact._id)}
-                  className={`relative flex h-full min-h-0 min-w-0 ${draggingId === artifact._id ? "opacity-60" : ""}`}
+                  className={`relative flex h-full min-h-0 min-w-0 flex-1 ${draggingId === artifact._id ? "opacity-60" : ""}`}
                 >
                   <span
                     className="absolute left-2 top-2 z-30 flex h-7 w-7 cursor-grab items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)]"
@@ -352,17 +352,9 @@ export function ArtifactTileSurface({
                   >
                     <GripVertical className="h-3.5 w-3.5" />
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => cycleTileSize(artifact._id)}
-                    className="absolute right-2 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-[7px] bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
-                    aria-label={`Resize ${artifact.title}`}
-                  >
-                    <Scaling className="h-3.5 w-3.5" />
-                  </button>
                   <ArtifactStudio
                     mode="tab"
-                    compact
+                    compact={false}
                     artifact={artifact}
                     artifacts={allArtifacts}
                     tabs={[]}

@@ -82,6 +82,8 @@ export type WorkResponsiveContract = {
   supportsTile: boolean;
   supportsCompact: boolean;
   toolbarPriorities: readonly string[];
+  /** Infinite canvases fill the studio; bounded ones keep an authored frame. */
+  canvasExtent: "infinite" | "bounded";
 };
 
 export type WorkAnchor = {

@@ -2733,7 +2733,7 @@ export function CodeStudio({
   ]);
 
   return (
-    <div className="code-studio min-h-0 w-full min-w-0">
+    <div className="code-studio flex h-full min-h-0 w-full min-w-0 flex-col">
       {/* The legacy `code-workbar` hook is deliberately not passed: it carried
           the transitional `overflow-x: auto` rail, and the shared bar must not
           scroll. */}

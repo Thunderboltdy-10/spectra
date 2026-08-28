@@ -4250,7 +4250,7 @@ export function SheetsStudio({
   return (
     <div
       ref={rootRef}
-      className="spectra-sheets-studio flex min-w-0 flex-col overflow-hidden"
+      className="spectra-sheets-studio flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       data-compact={mode === "split" || undefined}
       data-sheets-density={density}
     >

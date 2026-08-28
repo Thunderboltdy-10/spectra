@@ -17,10 +17,14 @@ export function WorkbenchSplitTree({
   node,
   onChange,
   renderTab,
+  showPaneFocus = true,
+  chrome = "pane",
 }: {
   node: WorkbenchNode;
   onChange: (node: WorkbenchNode) => void;
   renderTab: (tab: WorkbenchTab) => ReactNode;
+  showPaneFocus?: boolean;
+  chrome?: "pane" | "none";
 }) {
   const [focusedPaneId, setFocusedPaneId] = useState<string | null>(null);
 
@@ -34,7 +38,8 @@ export function WorkbenchSplitTree({
       if (focusedPaneId && focusedPaneId !== current.paneId) return null;
       const active = current.tabs.find((tab) => tab.id === current.activeTabId) ?? current.tabs[0]!;
       return (
-        <section className="relative flex min-h-[320px] min-w-0 flex-1 flex-col overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]" data-workbench-pane={current.paneId}>
+        <section className={`relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-primary)] ${chrome === "pane" ? "rounded-[9px] border border-[var(--border-default)]" : ""}`} data-workbench-pane={current.paneId}>
+          {chrome === "pane" ? (
           <header className="flex h-9 shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] pr-1">
             <div className="spectra-thin-scrollbar flex min-w-0 flex-1 overflow-x-auto">
               {current.tabs.map((tab) => (
@@ -72,10 +77,13 @@ export function WorkbenchSplitTree({
                 </button>
               ))}
             </div>
-            <button type="button" onClick={() => setFocusedPaneId((value) => value === current.paneId ? null : current.paneId)} className="flex h-7 w-7 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label={focusedPaneId ? "Restore split layout" : `Focus ${active.title}`}>
-              {focusedPaneId ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-            </button>
+            {showPaneFocus ? (
+              <button type="button" onClick={() => setFocusedPaneId((value) => value === current.paneId ? null : current.paneId)} className="flex h-7 w-7 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label={focusedPaneId ? "Restore split layout" : `Focus ${active.title}`}>
+                {focusedPaneId ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+              </button>
+            ) : null}
           </header>
+          ) : null}
           <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{renderTab(active)}</div>
         </section>
       );
@@ -106,7 +114,7 @@ export function WorkbenchSplitTree({
     };
     return (
       <div className={`flex min-h-0 min-w-0 flex-1 ${horizontal ? "flex-row" : "flex-col"}`} data-workbench-split={current.splitId}>
-        <div className="flex min-h-0 min-w-0" style={{ flexBasis: `${current.ratio * 100}%`, flexGrow: 0, flexShrink: 0 }}>{render(current.first)}</div>
+        <div className="flex h-full min-h-0 min-w-0" style={{ flexBasis: `${current.ratio * 100}%`, flexGrow: 0, flexShrink: 0 }}>{render(current.first)}</div>
         <button
           type="button"
           onPointerDown={beginResize}
@@ -119,10 +127,10 @@ export function WorkbenchSplitTree({
         >
           <span className={`absolute bg-[var(--border-default)] group-hover:bg-[var(--accent-cyan)] ${horizontal ? "inset-y-0 left-1/2 w-px" : "inset-x-0 top-1/2 h-px"}`} />
         </button>
-        <div className="flex min-h-0 min-w-0 flex-1">{render(current.second)}</div>
+        <div className="flex h-full min-h-0 min-w-0 flex-1">{render(current.second)}</div>
       </div>
     );
   }
 
-  return <div className="flex min-h-0 min-w-0 flex-1 p-2">{render(node)}</div>;
+  return <div className="flex h-full min-h-0 min-w-0 flex-1">{render(node)}</div>;
 }

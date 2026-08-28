@@ -3034,7 +3034,7 @@ export function ArtifactStudio({
 
   if (mode === "tab") {
     return (
-      <section className="min-w-0 flex-1 border-l border-[var(--border-default)]">
+      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col border-l border-[var(--border-default)]">
         {contextualBody}
       </section>
     );
@@ -5576,6 +5576,11 @@ function ArtifactStudioEditor({
         catchUpActive && highlightPaths.length > 0 ? "true" : undefined
       }
       data-blueprint={artifact.blueprintKey}
+      data-canvas-extent={
+        isArtifactTypeKey(artifact.blueprintKey)
+          ? getWorkDefinition(artifact.blueprintKey).responsive.canvasExtent
+          : "infinite"
+      }
       data-native-office={nativeOfficeDocument ? "true" : "false"}
       data-native-format={inferredNativeFormat}
       data-draft-pending={dirty ? "true" : "false"}
@@ -5754,7 +5759,7 @@ function ArtifactStudioEditor({
               onClick={() => setCommentsOpen(true)}
               icon={MessageSquare}
             />
-            {mode === "split" ? (
+            {mode === "split" && !compact ? (
               <IconButton
                 label="Open as tab"
                 onClick={onExpand}

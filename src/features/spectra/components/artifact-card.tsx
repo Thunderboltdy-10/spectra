@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import {
   Building2,
   Check,
@@ -81,6 +81,8 @@ export function ArtifactCard({
   selectionMode = false,
   contextSelected = false,
   onToggleContext,
+  onContextMenu,
+  onBeginDrag,
 }: {
   artifact: ArtifactCardView;
   selected?: boolean;
@@ -92,6 +94,8 @@ export function ArtifactCard({
   selectionMode?: boolean;
   contextSelected?: boolean;
   onToggleContext?: () => void;
+  onContextMenu?: (event: MouseEvent) => void;
+  onBeginDrag?: (event: PointerEvent) => void;
 }) {
   const meta = workTypeMeta[artifact.blueprintKey];
   const Icon = meta.icon;
@@ -202,6 +206,8 @@ export function ArtifactCard({
         }
         onSelect?.();
       }}
+      onContextMenu={onContextMenu}
+      onPointerDown={onBeginDrag}
       data-interactive={interactive ? "true" : undefined}
       data-ai-state={liveAiActivity ? "updating" : liveAiState}
       data-context-state={

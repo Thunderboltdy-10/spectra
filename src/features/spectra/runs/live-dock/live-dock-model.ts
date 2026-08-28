@@ -233,7 +233,7 @@ export function selectExpandedInputRun(
   return waiting[0]?.runId ?? null;
 }
 
-/** Tab geometry is CSS: min width is one-third of the tab strip. */
+/** Tab geometry is CSS: fixed readable width, then the strip scrolls. */
 export function allocateLiveDockWidths(
   sources: readonly LiveDockTabSource[],
   expandedRunId: string | null,

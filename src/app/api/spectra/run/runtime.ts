@@ -677,7 +677,11 @@ async function runAttempt(
     const workspaceTitle = context.currentWorkspace?.title;
     let provenance = {
       artifactIds: context.selectedArtifactIds,
-      artifactTitles: context.packet.selectedObjects.map((item) => item.title),
+      artifactTitles: context.packet.selectedObjects.flatMap((item) =>
+        typeof item.title === "string" && item.title.trim()
+          ? [item.title]
+          : [],
+      ),
       threadId: params.threadId,
       workspaceId: params.workspaceId,
       workspaceTitle,
@@ -3658,7 +3662,6 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         blocked: Array<{ artifactId: string; reason: string }>;
       }
     >("changeGroups:revertPlanForRun", {
-      actorClerkId: actor.clerkId,
       runId,
     });
     if (plan.restored.length === 0) {

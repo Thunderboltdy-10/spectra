@@ -1009,6 +1009,15 @@ function evaluateDocument(content: unknown, prompt: string) {
   ]);
 }
 
+export function artifactQualityRepairInstructions(report: ArtifactQualityReport) {
+  return report.findings
+    .map(
+      (finding) =>
+        `${finding.severity === "blocker" ? "Must fix" : "Fix"} ${finding.path ?? finding.criterionId}: ${finding.message}`,
+    )
+    .join("\n");
+}
+
 export function isQualityBlueprintKey(
   blueprintKey: ArtifactTypeKey,
 ): blueprintKey is QualityBlueprintKey {
@@ -1064,7 +1073,7 @@ export function artifactQualityPromptSection(
       : "";
   return `\n\nShared ${rubric.title} rubric. Spectra will re-read and score the authored content before accepting it, then score the saved artifact again during verify. The minimum self-critique score is ${rubric.passScore}/100, with no blocker findings.${intent}\n- ${rubric.criteria.map((entry) => `${entry.label} (${entry.weight}): ${entry.guidance}`).join("\n- ")}${
     blueprintKey === "presentation"
-      ? "\n- Author semantic slide objects and choose layoutId. Geometry is optional in the create tool because Spectra realizes the shared template after generation."
+      ? "\n- Author semantic slide objects and choose layoutId. Geometry is optional in the create tool because Spectra realizes the shared template after generation.\n- Honor the requested slide count exactly.\n- Use at least four layout types on decks of six or more slides, and never repeat the same layout three times in a row.\n- Keep display copy short: titles under eight words, body frames under forty words. Park supporting detail in speakerNotes.\n- Fill every layout role: title-content needs supporting text, two-column needs both columns, three-ideas needs three complete ideas, and visual layouts need an editable visual.\n- Put editable visuals, charts, or diagrams on at least one third of the deck."
       : ""
   }`;
 }

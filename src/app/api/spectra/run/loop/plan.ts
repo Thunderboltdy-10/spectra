@@ -72,6 +72,7 @@ import { nativeOpenRouterAttachmentContent } from "@/features/spectra/compute/fi
 import {
   QUALITY_CRITIQUE_MAX_PASSES,
   artifactQualityPromptSection,
+  artifactQualityRepairInstructions,
   assertArtifactQuality,
   isArtifactQualityError,
   isQualityBlueprintKey,
@@ -1778,9 +1779,12 @@ export function prepareOperationForQuality(
   operation: ModelOperation,
 ): ModelOperation {
   if (
-    operation.type !== "artifact.create" ||
+    (operation.type !== "artifact.create" &&
+      operation.type !== "artifact.update") ||
     !isQualityBlueprintKey(operation.input.blueprintKey)
   )
+    return operation;
+  if (operation.type === "artifact.update" && operation.input.content === null)
     return operation;
   return parseModelOperation({
     ...operation,
@@ -4949,6 +4953,15 @@ export async function callModel(
                       qualityCritiqueFailures < QUALITY_CRITIQUE_MAX_PASSES,
                     critiqueAttempt: qualityCritiqueFailures,
                     critiqueLimit: QUALITY_CRITIQUE_MAX_PASSES,
+                    score: error.report.score,
+                    passScore: error.report.passScore,
+                    findings: error.report.findings.map((finding) => ({
+                      criterionId: finding.criterionId,
+                      severity: finding.severity,
+                      message: finding.message,
+                      path: finding.path,
+                    })),
+                    repair: artifactQualityRepairInstructions(error.report),
                   }
                 : {}),
             };

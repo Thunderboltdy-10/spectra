@@ -92,7 +92,7 @@ describe("P4.I3 honest execution and authority", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
     expect(dock).toContain("aria-label={`Stop ${model.title}`}");
     expect(dock).toContain("aria-label={`Retry ${model.title}`}");
-    expect(dock).toContain('title="Undo this run"');
+    expect(dock).toContain("Undo this run");
     expect(dock).toContain("confirmationDiffSummary");
   });
 

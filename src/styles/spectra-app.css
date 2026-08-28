@@ -11534,14 +11534,29 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-run-tab-strip {
   position: relative;
   isolation: isolate;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(
+      in oklab,
+      var(--border-default) 88%,
+      var(--bg-primary)
+    )
+    transparent;
 }
 
-.spectra-run-tab-strip::-webkit-scrollbar,
 .spectra-live-dock-progress::-webkit-scrollbar {
   display: none;
   height: 0;
   width: 0;
+}
+
+.spectra-run-tab-strip::-webkit-scrollbar {
+  height: 4px;
+  background: transparent;
+}
+
+.spectra-run-tab-strip::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--border-default) 88%, var(--bg-primary));
 }
 
 .spectra-live-dock-progress {
@@ -11549,8 +11564,10 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .spectra-live-dock-tab {
-  flex: 1 0 calc((100% - 12px) / 3);
-  min-width: calc((100% - 12px) / 3);
+  flex: 0 0 auto;
+  min-width: 240px;
+  width: 280px;
+  max-width: min(320px, 100%);
 }
 
 .spectra-live-stack {

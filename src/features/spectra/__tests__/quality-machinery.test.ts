@@ -303,7 +303,7 @@ describe("P4.I4 quality machinery", () => {
   });
 
   it("rejects long repetitive text-only decks that merely scrape the score", () => {
-    const content = realizeGeneratedPresentation({
+    const content = {
       theme: presentationDraft().theme,
       settings: { aspectRatio: "16:9" },
       slides: Array.from({ length: 10 }, (_, index) => ({
@@ -318,7 +318,7 @@ describe("P4.I4 quality machinery", () => {
           ),
         ],
       })),
-    });
+    };
     const report = evaluateArtifactQuality({
       blueprintKey: "presentation",
       content,
@@ -333,6 +333,52 @@ describe("P4.I4 quality machinery", () => {
           severity: "blocker",
         }),
       ]),
+    );
+  });
+
+  it("realizes a 12-slide experimental-design brief into a presentable deck", () => {
+    const outline = [
+      ["Experimental design", "A fair test for pendulum period."],
+      ["Research question", "How does string length change the period of a pendulum?"],
+      ["Hypothesis", "Longer strings increase period because the restoring path is longer."],
+      ["Independent variable", "String length measured from pivot to bob centre."],
+      ["Dependent variable", "Period averaged from ten complete swings."],
+      ["Control variables", "Mass, amplitude, and release height stay fixed."],
+      ["Materials", "Stand, string, bob, metre rule, and stopwatch."],
+      ["Method", "Measure length, release at a small angle, and time ten oscillations."],
+      ["Data", "Record length, ten-swing time, and calculated period."],
+      ["Analysis", "Plot period against length and look for a clear trend."],
+      ["Uncertainty", "Repeat timings and quote the range on each period."],
+      ["Conclusion", "State whether the hypothesis holds and what to try next."],
+    ];
+    const content = realizeGeneratedPresentation({
+      theme: presentationDraft().theme,
+      settings: { aspectRatio: "16:9" },
+      slides: outline.map(([title, body], index) => ({
+        id: `slide-${index + 1}`,
+        title,
+        layoutId: "title-content",
+        objects: [
+          textObject(`title-${index + 1}`, title),
+          textObject(
+            `body-${index + 1}`,
+            `${body} Additional classroom detail that would overflow a narrow frame if the template did not fit display copy and park the rest in speaker notes.`,
+          ),
+        ],
+      })),
+    });
+    const report = evaluateArtifactQuality({
+      blueprintKey: "presentation",
+      content,
+      prompt:
+        "Create a 12-slide presentation on experimental design from this outline.",
+    });
+
+    expect(content.slides).toHaveLength(12);
+    expect(new Set(content.slides.map((slide) => slide.layoutId)).size).toBeGreaterThanOrEqual(4);
+    expect(report.passed).toBe(true);
+    expect(report.score).toBeGreaterThanOrEqual(
+      ARTIFACT_QUALITY_RUBRICS.presentation.passScore,
     );
   });
 

@@ -126,6 +126,17 @@ describe("Live Dock V2", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
     expect(dock).toContain("spectra-live-dock-tab");
     expect(dock).toContain("group-has-[.dock-tab-icon:hover]:hidden");
+    expect(dock).toContain("OverflowMenu");
+    expect(dock).toContain("Open conversation");
+    expect(dock).toContain("dock-tab-identity min-w-0 flex-1");
+    const css = read("src/styles/spectra-app.css");
+    expect(css).not.toContain("flex: 1 0 calc((100% - 12px) / 3)");
+    expect(css).toContain("min-width: 240px");
+    expect(css).toContain(".spectra-run-tab-strip::-webkit-scrollbar {");
+    expect(css).toContain(".spectra-live-dock-progress::-webkit-scrollbar {");
+    expect(css).not.toMatch(
+      /\.spectra-run-tab-strip::-webkit-scrollbar,\s*\.spectra-live-dock-progress::-webkit-scrollbar/,
+    );
   });
 
   it("keeps close and cancel semantics separate", () => {
@@ -189,12 +200,16 @@ describe("Live Dock V2", () => {
     expect(global).toContain('"/workspace"');
   });
 
-  it("keeps Follow as an always-visible dock-tab icon next to Stop", () => {
+  it("keeps Follow and Stop immediate, with conversation Undo and Close in the shared overflow", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
     expect(dock).toContain("data-spectra-follow-control");
     expect(dock).toContain("`Follow ${model.title}`");
     expect(dock).toContain("<Crosshair");
     expect(dock).toContain("followAiActor(tab.runId)");
+    expect(dock).toContain('title="Stop"');
+    expect(dock).toContain("OverflowMenu");
+    expect(dock).toContain("Undo this run");
+    expect(dock).toContain("Close tab");
     const panel = read("src/features/spectra/components/live-thread-panel.tsx");
     expect(panel).toContain("followAiActor(actor)");
     expect(panel).toContain("runIdForLiveThread(threadId)");

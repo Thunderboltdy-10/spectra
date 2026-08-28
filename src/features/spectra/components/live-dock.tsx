@@ -29,6 +29,7 @@ import {
 } from "react";
 import { useNow } from "@/hooks/use-now";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { PrismRunMark } from "@/components/spectra-prism-optic";
 import { SurfaceField, type FieldInfluence } from "../field/surface-field";
 import { useSpectraPreferences } from "../settings/preference-store";
@@ -824,7 +825,7 @@ export function LiveDock({
                         setExpandedInputRunId(tab.runId);
                       }
                     }}
-                    className="dock-tab-identity w-fit min-w-0 max-w-[calc(100%-11rem)] py-1 text-left"
+                    className="dock-tab-identity min-w-0 flex-1 py-1 text-left"
                     title={model.title}
                   >
                     <span className="flex items-center gap-1.5">
@@ -878,7 +879,7 @@ export function LiveDock({
                       }
                       followAiActor(tab.runId);
                     }}
-                    className={`dock-tab-icon ml-auto flex h-8 w-7 items-center justify-center rounded-[6px] ${
+                    className={`dock-tab-icon ml-auto flex h-8 w-7 shrink-0 items-center justify-center rounded-[6px] ${
                       follow.following && follow.followedActorId === tab.runId
                         ? "text-[var(--brand-primary)] hover:bg-[color-mix(in_oklab,var(--brand-primary)_8%,transparent)]"
                         : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
@@ -899,20 +900,11 @@ export function LiveDock({
                   >
                     <Crosshair className="h-3.5 w-3.5" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => openQuickChat(tab)}
-                    className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    aria-label={`Open ${model.title} conversation`}
-                    title="Open conversation"
-                  >
-                    <SquareArrowOutUpRight className="h-3.5 w-3.5" />
-                  </button>
                   {canRetry && onRetry ? (
                     <button
                       type="button"
                       onClick={() => onRetry(tab.runId)}
-                      className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      className="dock-tab-icon flex h-8 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                       aria-label={`Retry ${model.title}`}
                       title="Retry"
                     >
@@ -924,37 +916,47 @@ export function LiveDock({
                       type="button"
                       disabled={stopping.has(tab.runId)}
                       onClick={() => void stopTab(tab.runId)}
-                      className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                      className="dock-tab-icon flex h-8 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                       aria-label={`Stop ${model.title}`}
                       title="Stop"
                     >
                       <Square className="h-3.5 w-3.5" />
                     </button>
                   ) : null}
-                  {canUndo && card ? (
-                    <button
-                      type="button"
-                      onClick={() => void onAction?.(card, "revert")}
-                      className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                      aria-label="Undo this run"
-                      title="Undo this run"
-                    >
-                      <Undo2 className="h-3.5 w-3.5" />
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => void hideTab(tab)}
-                    className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    aria-label={`Close ${model.title}`}
-                    title={
-                      closePreservesRunningJob(source)
-                        ? "Close tab — the run keeps working"
-                        : "Close tab"
-                    }
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
+                  <OverflowMenu
+                    label={`More actions for ${model.title}`}
+                    size={28}
+                    triggerClassName="dock-tab-icon text-[var(--text-tertiary)]"
+                    items={[
+                      {
+                        key: "conversation",
+                        label: "Open conversation",
+                        icon: SquareArrowOutUpRight,
+                      },
+                      ...(canUndo && card
+                        ? [
+                            {
+                              key: "undo" as const,
+                              label: "Undo this run",
+                              icon: Undo2,
+                            },
+                          ]
+                        : []),
+                      {
+                        key: "close",
+                        label: closePreservesRunningJob(source)
+                          ? "Close tab. The run keeps working"
+                          : "Close tab",
+                        icon: X,
+                      },
+                    ]}
+                    onSelect={(key) => {
+                      if (key === "conversation") openQuickChat(tab);
+                      else if (key === "undo" && card)
+                        void onAction?.(card, "revert");
+                      else if (key === "close") void hideTab(tab);
+                    }}
+                  />
                 </div>
 
                 {!expanded ? (

@@ -12,7 +12,7 @@ function stringIds(value: unknown) {
 }
 
 export async function localFileCountForApplicationCommand(
-  actorClerkId: string,
+  _actorClerkId: string,
   command: string,
   args: Record<string, unknown>,
 ) {
@@ -23,7 +23,6 @@ export async function localFileCountForApplicationCommand(
       { workIds: string[] },
       { count: number }
     >("replicas:localEffectCount", {
-      actorClerkId,
       workIds: targetIds,
     }).catch(() => ({ count: 0 }));
     return localEffect.count;
@@ -33,7 +32,6 @@ export async function localFileCountForApplicationCommand(
       { nodeIds: string[] },
       { count: number }
     >("replicas:localEffectCountForNodes", {
-      actorClerkId,
       nodeIds: targetIds,
     }).catch(() => ({ count: 0 }));
     return localEffect.count;
@@ -69,11 +67,21 @@ export async function evaluateCommandAuthority(input: {
 
 export async function hydrateApplicationLocalFileCounts(
   actorClerkId: string,
-  operations: Array<{ type: string; input: { command?: string; args?: unknown } }>,
+  operations: ReadonlyArray<{ type: string; input: unknown }>,
 ) {
   for (const operation of operations) {
     if (operation.type !== "app.command") continue;
-    const command = operation.input.command;
+    if (
+      !operation.input ||
+      typeof operation.input !== "object" ||
+      Array.isArray(operation.input)
+    )
+      continue;
+    const input = operation.input as {
+      command?: string;
+      args?: unknown;
+    };
+    const command = input.command;
     if (
       command !== "organize_library" &&
       command !== "delete_library_items" &&
@@ -81,17 +89,17 @@ export async function hydrateApplicationLocalFileCounts(
     )
       continue;
     const args =
-      operation.input.args &&
-      typeof operation.input.args === "object" &&
-      !Array.isArray(operation.input.args)
-        ? (operation.input.args as Record<string, unknown>)
+      input.args &&
+      typeof input.args === "object" &&
+      !Array.isArray(input.args)
+        ? (input.args as Record<string, unknown>)
         : {};
     args.localFileCount = await localFileCountForApplicationCommand(
       actorClerkId,
       command,
       args,
     );
-    operation.input.args = args;
+    input.args = args;
   }
 }
 

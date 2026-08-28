@@ -145,3 +145,15 @@ Wrong-target suite zero-miss in its owning verification unit; honesty suite gree
 - R17 stop: document grading and remaining ambiguity/honesty/authority/choreography cards are explicitly unrun.
 - Evidence: `.shots/reformation/P4.V1/manifest.md`, numbered screenshots `00`–`26`.
 - Next owner: **P4.V1 continuation**; repair F2 class-wide, then resume the remaining cards.
+
+### P4.V1 continuation implementation log (2026-08-28)
+
+- F2: generated decks fit overflow, cycle ≥4 layouts, hydrate missing roles, and get structured critique; a 12-slide experimental-design fixture scores ≥80 on the shared rubric. Unrealized document-shaped decks still fail.
+- F3: Convex local-effect and revert queries use JWT identity; selected-object titles coerce to `string[]`. `tsc` no longer names `authority.ts` / `runtime.ts`. Gate not weakened.
+- F4: tabs 240–320px; Follow + Stop/Retry stay immediate; conversation / Undo / Close use shared `OverflowMenu`; strip scrolls with a thin Spectra scrollbar. Before `23`/`27`; after `29`–`31`.
+- Duplicate titles paused on a Needs-input choice rail (`38`). Follow on (`32`), window-click disengage (`33`), reduced-motion tab animation none (`34`).
+- Settings change confirmed then Rejected: Cancelled, no proposed changes applied (`41`–`42`). Stop was visible on the running append (`39`).
+- Artifact mutations hit `AI_ARTIFACT_CONNECTION_CLOSED` (gateway 1006). Browser-offline mid-run (`43`); ping recovered as Pong Reply after reload (`44`). Live Undo snapshot, archive confirm, Bridge kill, and a fresh 12-slide/document live grade remain for the verifier. Bridge was not killed. P6.I1/I2 untouched.
+- Taste: Stop/Retry stay immediate (UX-12); overflow reuses `OverflowMenu`.
+- Focused Vitest 6 files / 73 tests. Scoped ESLint 0 errors on new logic; existing dock token warnings unchanged. Capability gate, secret scan 2171 files, `git diff --check` passed.
+- Status: IMPLEMENTED repair. P4.V1 stays REJECTED pending an independent verifier. No acceptance claimed.

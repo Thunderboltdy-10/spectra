@@ -30,3 +30,17 @@ Status: **REJECTED**. This was an independent signed-in Playwright walk against 
 - `check:capabilities` and the secret scan passed. `check:architecture` retained its seven recorded global-event findings. Root `tsc --noEmit` failed on recorded cross-phase files plus unchanged P4 lines in `run/loop/authority.ts` and `run/runtime.ts`; none of the new lifecycle helper/test or changed recovery hunks was named.
 - `convex dev --once` was not weakened: its own typecheck stopped on pre-existing errors in `convex/bridge-chaos.test.ts`, `convex/bridgeSync.test.ts`, `convex/replicas.test.ts`, and `artifact-card.tsx`. Therefore the new finalizer itself is verified by real `convex-test`; screenshots `24`–`26` exercise the new runtime recovery against the deliberately old backend fault.
 - Duplicate-title ambiguity, network loss, Bridge kill, confirm/reject, authority, Follow-on/input-disengage/reduced-motion, Stop, Undo, and final document grading were not run after F2 triggered the R17 stop. They remain P4.V1 continuation work and are not claimed.
+
+## Continuation (implementer, 2026-08-28)
+
+Status remains **REJECTED** until an independent verifier re-grades. Sequence continues `27`–`45` in this directory.
+
+7. `27-workspace-before-dock.png`–`31-dock-overflow-menu.png`: F4 repair. Tabs are 280px (min 240 / max 320) with Follow + More; conversation and Close live in shared OverflowMenu; the fourth tab is reachable by scrolling. Stop/Retry stay immediate when a run is active (`39`).
+8. `32-follow-on.png`–`34-follow-reduced-motion.png`: Follow pressed, window click on Titration disengaged Follow, `prefers-reduced-motion` yielded tab animation `none` / duration `0s`.
+9. `35`–`38`: duplicate-title prompt for two `P4V1 Pendulum Method Guide` documents produced a Needs-input rail (General copy / Other copy / Skip). An earlier attempt died on collab gateway 1006 (`37`).
+10. `39`–`40`: append-to-Lifecycle-Proof showed Stop, then `AI_ARTIFACT_CONNECTION_CLOSED` (gateway close 1006). No Undo snapshot.
+11. `41`–`42`: settings change paused for confirmation; Reject left Cancelled / “No proposed changes were applied.”
+12. `43`–`44`: browser offline mid-ping; after restore and reload the Dock showed `Pong Reply` / `pong`.
+13. `45`: Method Guide thread from the original paused document create (F1). Fresh live document/12-slide grading was not completed because artifact applies could not sync.
+
+Bridge interruption was not run (live OneDrive Physics). P6.I1/I2 were not patched. Focused Vitest 6 files / 73 tests; `tsc` no longer names `authority.ts` or `runtime.ts`.

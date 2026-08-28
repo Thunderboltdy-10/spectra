@@ -257,7 +257,7 @@ export function ObjectLibrary({
 
   useEffect(() => {
     if (!sortOpen) return;
-    function close(event: PointerEvent) {
+    function close(event: globalThis.PointerEvent) {
       if (!sortRef.current?.contains(event.target as Node)) setSortOpen(false);
     }
     document.addEventListener("pointerdown", close);

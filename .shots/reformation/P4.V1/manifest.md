@@ -56,3 +56,15 @@ Status remains **REJECTED**. Sequence continues `47`–`77`.
 18. `73`–`77`: archive confirm. Archive it / Keep it / Skip; Keep it left V5 `active`.
 
 Bridge skipped. P6.I1/I2 untouched. Focused Vitest 3 files / 39 tests this VU.
+
+## Remainder verifier (2026-08-28)
+
+Status: **VERIFIED**. Sequence continues `78`–`95`.
+
+19. `78`–`79`: honest Convex deploy (`--typecheck=enable`). Live spec has `changeGroups:revertPlanForRun` and `spectraArtifacts:finalizePendingLive`.
+20. `80`–`85`: remainder marker `UNDO-MARK-P4V1-REMAINDER-92828` appended; overflow Undo; 409 because restore still claimed as AI with a synthetic operation id. Marker remained.
+21. `86`–`88`: stale Next still served the old apply path; Next relaunched onto the human-claim restore.
+22. `89`–`92`: Undo this run POST 200; toast **Restored the earlier copy of this work.** Remainder marker gone; `UNDO-MARK-P4V1-8841` kept.
+23. `93`–`95`: create `P4V1 Finalizer Probe` / `FINALIZER-PROBE-8821` finalized; Dock completed; no F1 “no longer editable” miss.
+
+Bridge skipped (Physics mounted). P6.I1/I2 untouched. Focused Vitest 4 files / 48 tests.

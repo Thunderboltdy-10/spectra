@@ -3,6 +3,16 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
+
+function requireWriteRequestId(
+  requestId: Id<"bridgeWriteRequests"> | "protected-original",
+): Id<"bridgeWriteRequests"> {
+  if (requestId === "protected-original") {
+    throw new Error("expected a Bridge write request, not a protected-original park");
+  }
+  return requestId;
+}
 
 const modules = import.meta.glob("./**/*.ts");
 const credential = "bridge-chaos-credential-000000000001";
@@ -169,7 +179,7 @@ describe("Bridge revocation chaos", () => {
       device: await ctx.db.get(fixture.deviceId),
       mount: await ctx.db.get(fixture.mountId),
       local: await ctx.db.get(fixture.localId),
-      request: await ctx.db.get(queued.requestId),
+      request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
       operations: await ctx.db.query("syncOperations").collect(),
     }));
     expect(truth.device?.state).toBe("revoked");

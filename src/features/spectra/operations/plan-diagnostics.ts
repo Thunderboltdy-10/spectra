@@ -105,12 +105,23 @@ export function formatPlanApplicationPublicError(error: unknown) {
   if (/AI_ARTIFACT_REGION_BUSY/i.test(message)) {
     return "That control is still being edited. Spectra left it untouched; finish the active edit and retry.";
   }
+  // Convex ArgumentValidationError "Path: .operationId" and REGION_CLAIM_* are
+  // apply machinery, not a missing selected object. Mapping those to targeting
+  // hid live Undo: restore sent a synthetic revert id into v.id("spectraOperations").
+  const isApplyMachinery =
+    /ArgumentValidationError|Validator:|Path:\s*\.|REGION_CLAIM_/i.test(
+      message,
+    );
   if (
+    !isApplyMachinery &&
     /\b(artifactId|workspaceId|threadId|plannerItemId|operationId|sourceId|targetId|object ID|database id|owned id)\b/i.test(
       message,
     )
   ) {
     return "Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.";
+  }
+  if (isApplyMachinery) {
+    return "Spectra could not apply that change. Your saved work is unchanged; retry when ready.";
   }
   if (
     /unrelated to the interpreted request|does not match the interpreted request|more visible artifacts/i.test(

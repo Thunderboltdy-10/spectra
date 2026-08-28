@@ -3686,6 +3686,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
             state.run.executionId ??
             `revert:${runId}`,
           checkpointBeforeAi: false,
+          claimActorKind: "human",
           resolveDesired: (current) => ({
             title: snapshot.title ?? current.title,
             summary:

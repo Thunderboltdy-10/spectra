@@ -425,7 +425,7 @@ function useOutsideClick<T extends HTMLElement>(
   const ref = useRef<T | null>(null);
   useEffect(() => {
     if (!open) return;
-    function onPointerDown(event: PointerEvent) {
+    function onPointerDown(event: globalThis.PointerEvent) {
       if (!ref.current?.contains(event.target as Node)) onClose();
     }
     document.addEventListener("pointerdown", onPointerDown);

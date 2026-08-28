@@ -22,7 +22,7 @@ export function FloatingMenu({
 
   useEffect(() => {
     if (!open) return;
-    function onPointerDown(event: PointerEvent) {
+    function onPointerDown(event: globalThis.PointerEvent) {
       if (!ref.current?.contains(event.target as Node)) onClose();
     }
     function onKeyDown(event: KeyboardEvent) {

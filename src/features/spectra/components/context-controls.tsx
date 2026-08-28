@@ -188,7 +188,7 @@ export function ContextFocusControl({
   }, [open]);
   useEffect(() => {
     if (!open) return;
-    const close = (event: PointerEvent) => {
+    const close = (event: globalThis.PointerEvent) => {
       if (
         !ref.current?.contains(event.target as Node) &&
         !dialogRef.current?.contains(event.target as Node)

@@ -15,6 +15,15 @@ const baseHash = "a".repeat(64);
 const nextHash = "b".repeat(64);
 const bridgeCredential = "bridge-test-credential-000000000001";
 
+function requireWriteRequestId(
+  requestId: Id<"bridgeWriteRequests"> | "protected-original",
+): Id<"bridgeWriteRequests"> {
+  if (requestId === "protected-original") {
+    throw new Error("expected a Bridge write request, not a protected-original park");
+  }
+  return requestId;
+}
+
 async function seedActor(t: ReturnType<typeof convexTest>) {
   return t.run(async (ctx) => {
     const now = Date.now();
@@ -244,7 +253,7 @@ describe("replica truth machine", () => {
     });
     await t.mutation(api.bridgeSync.completeWrite, {
       credential: bridgeCredential,
-      requestId: queued.requestId as Id<"bridgeWriteRequests">,
+      requestId: requireWriteRequestId(queued.requestId),
       outcome: "verified",
       actualRevision: nextHash,
     });
@@ -809,6 +818,7 @@ describe("replica truth machine", () => {
     ]);
     expect(truth.transition).toMatchObject({ state: "failed", errorCode: "readback-revision-mismatch" });
     expect(truth.cloud).toMatchObject({ state: "current", payloadRef: String(fixture.basePayloadId) });
+    if (!policy) throw new Error("expected an effective sync policy");
     expect(policy.preset).toBe("spectra");
   });
 
@@ -828,7 +838,7 @@ describe("replica truth machine", () => {
     const claimed = await t.mutation(api.bridgeSync.claimWrite, {
       credential: bridgeCredential,
     });
-    const requestId = queued.requestId as Id<"bridgeWriteRequests">;
+    const requestId = requireWriteRequestId(queued.requestId);
     expect(claimed.request?.requestId).toBe(requestId);
     await t.mutation(api.bridgeSync.completeWrite, {
       credential: bridgeCredential,
@@ -1175,8 +1185,8 @@ describe("replica truth machine", () => {
       projectionContentHash: keepHash,
     });
     const truth = await t.run(async (ctx) => ({
-      first: await ctx.db.get(first.requestId),
-      next: await ctx.db.get(queued.requestId),
+      first: await ctx.db.get(requireWriteRequestId(first.requestId)),
+      next: await ctx.db.get(requireWriteRequestId(queued.requestId)),
       local: await ctx.db.get(fixture.localId),
       work: await ctx.db.get(fixture.workId),
     }));
@@ -1249,7 +1259,7 @@ describe("replica truth machine", () => {
     const resolved = await asUser.mutation(api.replicas.resolveExternalConflict, {
       workId: fixture.workId,
       resolution: "spectra",
-      requestId: queued.requestId,
+      requestId: requireWriteRequestId(queued.requestId),
     });
     expect(resolved.requestId).toBe(queued.requestId);
     const conflict = await t.run(async (ctx) =>

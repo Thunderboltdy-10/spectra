@@ -687,6 +687,7 @@ async function acquirePlanClaims(params: {
   clientId: string;
   runId: string;
   operationId: string;
+  claimActorKind?: "ai" | "human";
   baseStateVectorHash: string;
   plan: ArtifactYjsMutationPlan;
   signal?: AbortSignal;
@@ -700,6 +701,7 @@ async function acquirePlanClaims(params: {
   proposedSnapshot?: ArtifactRegionSnapshot;
 }) {
   const claims: RegionClaim[] = [];
+  const claimActorKind = params.claimActorKind ?? "ai";
   for (const region of params.plan.regions) {
     let notified = false;
     for (;;) {
@@ -716,9 +718,9 @@ async function acquirePlanClaims(params: {
           regionId: string;
           overlapDomains: string[];
           baseStateVectorHash: string;
-          actorKind: "ai";
-          runId: string;
-          operationId: string;
+          actorKind: "ai" | "human";
+          runId?: string;
+          operationId?: string;
         },
         RegionClaim
       >("regionClaims:acquire", {
@@ -728,9 +730,14 @@ async function acquirePlanClaims(params: {
         regionId: region.regionId,
         overlapDomains: region.overlapDomains,
         baseStateVectorHash: params.baseStateVectorHash,
-        actorKind: "ai",
-        runId: params.runId,
-        operationId: params.operationId,
+        actorKind: claimActorKind,
+        // Human restore is user-initiated after the run finished. AI claims
+        // require a live run plus a real spectraOperations id; synthetic
+        // `revert:` ids fail validation and completed runs fail the running
+        // check. Omit both so acquire does not impersonate an active operation.
+        ...(claimActorKind === "ai"
+          ? { runId: params.runId, operationId: params.operationId }
+          : {}),
       });
       if (claim.status !== "queued") {
         if (notified) await params.onConflictResolved?.();
@@ -884,6 +891,7 @@ async function synchronizeMutation(params: {
   runId: string;
   executionId: string;
   operationId: string;
+  claimActorKind?: "ai" | "human";
   plan: ArtifactYjsMutationPlan;
   streamBase?: ArtifactLiveValue;
   streamValues?: readonly ArtifactLiveValue[];
@@ -939,14 +947,24 @@ async function synchronizeMutation(params: {
    * owner's presence colour instead of a separate "robot" palette.
    */
   const ownerName = params.session.actor.name.trim();
+  const claimActorKind = params.claimActorKind ?? "ai";
   const fabricActor: FabricActor = {
     clientId: params.session.clientId,
-    kind: "ai",
-    name: ownerName ? `${ownerName}'s AI` : "Spectra AI",
-    ownerAccountId: params.session.actor.accountId,
-    ...(ownerName ? { ownerName } : {}),
-    runId: params.runId,
-    operationId: params.operationId,
+    kind: claimActorKind,
+    name:
+      claimActorKind === "human"
+        ? ownerName || "You"
+        : ownerName
+          ? `${ownerName}'s AI`
+          : "Spectra AI",
+    ...(claimActorKind === "ai"
+      ? {
+          ownerAccountId: params.session.actor.accountId,
+          ...(ownerName ? { ownerName } : {}),
+          runId: params.runId,
+          operationId: params.operationId,
+        }
+      : { accountId: params.session.actor.accountId }),
   };
   const fabricTypeKey = requireArtifactType(
     params.session.artifact.blueprintKey,
@@ -965,13 +983,16 @@ async function synchronizeMutation(params: {
   // has not produced a Yjs transaction yet. Respect that exact semantic region
   // before acquiring durable claims, otherwise AI can commit underneath a
   // collaborator's local draft and later announce a result their blur erases.
-  await waitForHumanRegions({
-    provider: params.provider,
-    plan,
-    signal: params.signal,
-    onConflict: params.onConflict,
-    onConflictResolved: params.onConflictResolved,
-  });
+  // User-initiated restore must not queue behind the same viewer's caret.
+  if (claimActorKind !== "human") {
+    await waitForHumanRegions({
+      provider: params.provider,
+      plan,
+      signal: params.signal,
+      onConflict: params.onConflict,
+      onConflictResolved: params.onConflictResolved,
+    });
+  }
   const rebased = params.rebaseAfterHumanWait?.();
   if (rebased) {
     plan = rebased.plan;
@@ -988,6 +1009,7 @@ async function synchronizeMutation(params: {
     clientId: params.session.clientId,
     runId: params.runId,
     operationId: params.operationId,
+    claimActorKind,
     baseStateVectorHash: stateVectorHash(params.document),
     plan,
     signal: params.signal,
@@ -1547,6 +1569,8 @@ export async function applyAiArtifactMutation(params: {
   runId: string;
   operationId: string;
   executionId: string;
+  /** User-initiated snapshot restore (Undo this run). Not an active AI op. */
+  claimActorKind?: "ai" | "human";
   resolveDesired: (current: ArtifactLiveValue) => ArtifactLiveValue;
   signal?: AbortSignal;
   onConflict?: (conflict: {
@@ -1569,11 +1593,12 @@ export async function applyAiArtifactMutation(params: {
   const ownerClientHint = params.collaborationClientId?.trim()
     ? `:${params.collaborationClientId.trim().slice(0, 36)}`
     : "";
+  const claimActorKind = params.claimActorKind ?? "ai";
   const clientId =
-    `ai:${params.runId}:${params.operationId}${ownerClientHint}:${randomUUID()}`.slice(
-      0,
-      180,
-    );
+    (claimActorKind === "human"
+      ? `restore:${params.runId}:${randomUUID()}`
+      : `ai:${params.runId}:${params.operationId}${ownerClientHint}:${randomUUID()}`
+    ).slice(0, 180);
   const session = await createCollaborationSession(params.artifactId, clientId);
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
   if (!params.replacePendingCreate) {
@@ -1634,9 +1659,12 @@ export async function applyAiArtifactMutation(params: {
       authenticated: authenticated || provider.isAuthenticated,
       synced: provider.synced,
     });
-    const presenceName = session.actor.name.trim()
-      ? `${session.actor.name.trim()}'s AI`
-      : "Spectra AI";
+    const presenceName =
+      claimActorKind === "human"
+        ? session.actor.name.trim() || "You"
+        : session.actor.name.trim()
+          ? `${session.actor.name.trim()}'s AI`
+          : "Spectra AI";
     // Arrive as present-but-idle. No cursor coordinate is published: before the
     // first operation envelope there is no control to point at, and inventing a
     // position is exactly how a decorative cursor ends up parked mid-canvas.
@@ -1645,21 +1673,23 @@ export async function applyAiArtifactMutation(params: {
       accountId: session.actor.accountId,
       name: presenceName,
       displayName: presenceName,
-      actorKind: "ai",
-      runId: params.runId,
-      operationId: params.operationId,
+      actorKind: claimActorKind,
+      ...(claimActorKind === "ai"
+        ? { runId: params.runId, operationId: params.operationId }
+        : {}),
       interactionState: {
         v: 2 as const,
         actor: {
           clientId,
-          kind: "ai" as const,
+          kind: claimActorKind,
           name: presenceName,
           ownerAccountId: session.actor.accountId,
           ...(session.actor.name.trim()
             ? { ownerName: session.actor.name.trim() }
             : {}),
-          runId: params.runId,
-          operationId: params.operationId,
+          ...(claimActorKind === "ai"
+            ? { runId: params.runId, operationId: params.operationId }
+            : {}),
         },
         act: { kind: "idle" as const },
         lifecycle: "queued" as const,
@@ -1671,7 +1701,9 @@ export async function applyAiArtifactMutation(params: {
     // Awareness is a visible part of the operation, not disposable metadata.
     // Give the gateway one bounded paint window to fan out the AI collaborator
     // before a fast Yjs transaction can finish and tear down the provider.
-    await new Promise<void>((resolve) => setTimeout(resolve, 350));
+    if (claimActorKind === "ai") {
+      await new Promise<void>((resolve) => setTimeout(resolve, 350));
+    }
 
     let current = readLiveYjsDocument(document, typeKey);
     if (!current) {
@@ -1709,6 +1741,7 @@ export async function applyAiArtifactMutation(params: {
         runId: params.runId,
         executionId: params.executionId,
         operationId: params.operationId,
+        claimActorKind,
         plan: baselinePlan,
         getConnectionError: () => connectionError,
         signal: params.signal,
@@ -1844,6 +1877,7 @@ export async function applyAiArtifactMutation(params: {
       runId: params.runId,
       executionId: params.executionId,
       operationId: params.operationId,
+      claimActorKind,
       plan: refreshedPlan,
       streamBase: refreshed,
       streamBeats,

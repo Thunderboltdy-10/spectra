@@ -236,7 +236,7 @@ describe("Bridge incremental cloud seam", () => {
       }],
     });
     const registration = discovered.registrations[0];
-    if (!("replicaId" in registration)) {
+    if (!("replicaId" in registration) || !registration.replicaId) {
       throw new Error(`Expected resource registration, got ${"reason" in registration ? registration.reason : "unknown"}`);
     }
     const replicaId = registration.replicaId;
@@ -284,7 +284,7 @@ describe("Bridge incremental cloud seam", () => {
       }],
     });
     const registration = discovered.registrations[0];
-    if (!("replicaId" in registration)) {
+    if (!("replicaId" in registration) || !registration.replicaId) {
       throw new Error(`Expected resource registration, got ${"reason" in registration ? registration.reason : "unknown"}`);
     }
     const replicaId = registration.replicaId;

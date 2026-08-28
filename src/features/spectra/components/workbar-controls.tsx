@@ -76,7 +76,7 @@ function ControlPopover({
 
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
+    const onPointerDown = (event: globalThis.PointerEvent) => {
       const target = event.target as Node;
       if (anchor?.contains(target) || contentRef.current?.contains(target)) return;
       onClose();

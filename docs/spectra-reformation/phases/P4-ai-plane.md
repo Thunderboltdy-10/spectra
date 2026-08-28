@@ -170,3 +170,14 @@ Wrong-target suite zero-miss in its owning verification unit; honesty suite gree
 - Creates still hit the undeployed F1 finalizer after quality passed; artifacts stayed active. Convex typecheck was not disabled.
 - Focused Vitest 3 files / 39 tests. Evidence: `.shots/reformation/P4.V1/` `47`–`77`, `v3-quality-report.json`, `v5-quality-report.json`.
 - Next owner: **P4.V1 remainder** after live Convex serves revert + the new finalizer. Do not start P6.
+
+### P4.V1 remainder log (2026-08-28)
+
+- Status: **VERIFIED**. Independent remainder; no acceptance claimed. P6.I1/I2 not started.
+- Honest Convex deploy: `npx convex dev --once --typecheck=enable` after narrowing Bridge/replica test IDs and native `PointerEvent` (gate not disabled). Live spec has `revertPlanForRun` and `finalizePendingLive` (`78`–`79`).
+- Live Undo first retry still 409: restore called `applyAiArtifactMutation` as an AI claim with synthetic `revert:` operation ids. Convex `regionClaims.acquire` requires `v.id("spectraOperations")` and a running run. The humanizer mapped `Path: .operationId` to a targeting miss.
+- Class: user Undo is a restore, not a live AI operation. Revert now claims as `human` (no runId/operationId); humanizer no longer maps Convex/claim machinery to “open or selected object.”
+- Retest: append `UNDO-MARK-P4V1-REMAINDER-92828` on Draft; overflow Undo; POST 200 in 10.2s (`claims-acquired` → `claims-released`); toast **Restored the earlier copy**; remainder marker gone; `UNDO-MARK-P4V1-8841` kept (`89`–`92`).
+- F1: create `P4V1 Finalizer Probe` / `FINALIZER-PROBE-8821` finalized (`finalize-attempt` → `finalized`); no “no longer editable by that run” (`93`–`95`).
+- Bridge skipped (Physics mounted). Focused Vitest 4 files / 48 tests. Secret scan 2190 files; `git diff --check` passed.
+- Next: Pablo owner-accepts P4.V1. Do not start P6.

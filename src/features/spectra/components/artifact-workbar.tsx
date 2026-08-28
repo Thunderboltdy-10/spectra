@@ -1057,7 +1057,7 @@ export function WorkbarMenu({
 
   useEffect(() => {
     if (!resolvedOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
+    const onPointerDown = (event: globalThis.PointerEvent) => {
       const target = event.target as Node;
       if (
         triggerRef.current?.contains(target) ||

@@ -191,6 +191,21 @@ describe("plan diagnostics and schema slip recovery", () => {
     ).toContain("misread the request intent");
   });
 
+  it("does not map Convex validator or region-claim failures to a targeting miss", () => {
+    expect(
+      formatPlanApplicationPublicError(
+        new Error(
+          'ArgumentValidationError: Value does not match validator.\nPath: .operationId\nValidator: v.id("spectraOperations")',
+        ),
+      ),
+    ).toContain("could not apply that change");
+    expect(
+      formatPlanApplicationPublicError(
+        new Error("REGION_CLAIM_RUN_INVALID: The AI run is no longer active."),
+      ),
+    ).not.toContain("open or selected object");
+  });
+
   it("maps resolve/validate intent mismatches to actionable copy", () => {
     expect(
       formatPlanApplicationPublicError(

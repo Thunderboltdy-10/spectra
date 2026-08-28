@@ -466,7 +466,7 @@ export function CommandBar({
     }
     // Capture phase so outside closes even when a parent stops bubbling
     // (workspace composer sits under pointer-events-none shells).
-    function onPointerDown(event: PointerEvent) {
+    function onPointerDown(event: globalThis.PointerEvent) {
       if (!isInsideMenuUi(event.target)) setMenuOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {

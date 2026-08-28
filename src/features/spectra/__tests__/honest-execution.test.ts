@@ -88,6 +88,21 @@ describe("P4.I3 honest execution and authority", () => {
     ).not.toMatch(/NATIVE_MATERIALIZE_SKIPPED/);
   });
 
+  it("restores a finished run as a human claim, not a live AI operation", () => {
+    const runtime = read("src/app/api/spectra/run/runtime.ts");
+    const revert = runtime.slice(
+      runtime.indexOf('if (action === "revert")'),
+      runtime.indexOf('if (action === "cancel")'),
+    );
+    expect(revert).toContain('claimActorKind: "human"');
+    const yjs = read("src/features/spectra/ai/yjs-artifact-operation.ts");
+    expect(yjs).toContain('claimActorKind?: "ai" | "human"');
+    expect(yjs).toContain("actorKind: claimActorKind");
+    expect(yjs).toMatch(
+      /claimActorKind === "ai"\s*\?\s*\{\s*runId: params\.runId,\s*operationId: params\.operationId\s*\}/,
+    );
+  });
+
   it("keeps Stop and Retry as always-visible dock tab icons", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
     expect(dock).toContain("aria-label={`Stop ${model.title}`}");

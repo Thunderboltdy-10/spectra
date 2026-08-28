@@ -583,7 +583,7 @@ export function StudioSplitShell({
     };
   }, [contentReserve, minWidth, onWidthChange, width]);
   useEffect(() => {
-    function onMove(event: PointerEvent) {
+    function onMove(event: globalThis.PointerEvent) {
       if (!resizingRef.current || !onWidthChange) return;
       const panel = panelRef.current;
       if (!panel) return;

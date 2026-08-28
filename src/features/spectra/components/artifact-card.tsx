@@ -109,7 +109,7 @@ export function ArtifactCard({
   const actionsRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!actionsOpen) return;
-    const close = (event: PointerEvent) => {
+    const close = (event: globalThis.PointerEvent) => {
       if (!actionsRef.current?.contains(event.target as Node))
         setActionsOpen(false);
     };

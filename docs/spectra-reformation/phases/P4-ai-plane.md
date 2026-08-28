@@ -88,3 +88,21 @@ Wrong-target suite zero-miss in its owning verification unit; honesty suite gree
 - `tsc --noEmit` retained only recorded repository blockers; no P4.I4 path failed.
 - Signed-in Playwright smoke showed all nine shared layouts in the Presentation Design menu with zero console errors; evidence: `.shots/reformation/P4.I4/presentation-layout-menu.png`.
 - Status: IMPLEMENTED. No acceptance claimed; P4.V1 owns independent generated-output grading.
+
+### P4.I3 implementation log (2026-08-28)
+
+- Verify now re-reads local replica truth: error or failed cloud-to-local writes fail the run; pending queued writes stay honest.
+- Native materialize no longer skips when a local Office replica exists and the live document cannot be read.
+- One humanizer: `formatPlanApplicationPublicError` last-resort is `humanizePublicFailure`; SNAKE_CASE never names Word.
+- `notify` is consumed: dock progress/status sentence plus durable `ai.authority.*` audit; not a second Apply card.
+- Library rename/move/link with local replicas is `local_file` confirm with counts; `create_folder` stays tree notify.
+- Settings change applies in place; `settings.change` no longer `router.push`s. Explicit `navigate_spectra` still opens Settings.
+- Sync-policy journals `actorKind: "ai"`; model meters key by `runId:executionId` on any terminal status.
+- Run-level Undo restores change-group `baseSnapshot` for `artifact.update`; later human edits block with a sentence.
+- Live Dock: Stop/Retry are always-visible tab icons; Apply cards name targets; writing copy no longer implies a local model.
+- Taste: Undo only when a snapshot exists; 0-file sync policy still confirms with an honest zero-file sentence.
+- Focused Vitest: 9 files / 107 tests (`honest-execution` 8, plus live-dock/application-tools/plan-diagnostics/wave4/run-route).
+- Scoped ESLint: 0 errors on new logic; existing dock/shell token warnings unchanged. Capability ghost gate passed.
+- Secret scan 2,135 tracked files; `git diff --check` passed.
+- Playwright: `.shots/reformation/P4.I3/01-workspace-composer.png`, `02-settings-writing.png`, `03-live-dock-stop.png`, `04-live-dock-stop-running.png`.
+- Status: IMPLEMENTED. No acceptance claimed; P4.V1 owns the honesty suite. P4.I5 owns Follow-AI.

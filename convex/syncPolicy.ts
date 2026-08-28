@@ -20,6 +20,9 @@ const scopeKind = v.union(
   v.literal("folder"),
   v.literal("item"),
 );
+const recordedActorKind = v.optional(
+  v.union(v.literal("user"), v.literal("ai")),
+);
 const preset = v.union(
   v.literal("spectra"),
   v.literal("device"),
@@ -166,6 +169,7 @@ export const override = mutation({
     scopeId: v.string(),
     values: v.object(policyValues),
     idempotencyKey: v.string(),
+    actorKind: recordedActorKind,
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -215,7 +219,7 @@ export const override = mutation({
       action: "override",
       before: policySnapshot(existing),
       after: policySnapshot(next),
-      actorKind: "user",
+      actorKind: args.actorKind === "ai" ? "ai" : "user",
       idempotencyKey,
       createdAt: now,
     });
@@ -224,7 +228,11 @@ export const override = mutation({
 });
 
 export const overrideAccount = mutation({
-  args: { values: v.object(policyValues), idempotencyKey: v.string() },
+  args: {
+    values: v.object(policyValues),
+    idempotencyKey: v.string(),
+    actorKind: recordedActorKind,
+  },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
@@ -237,7 +245,7 @@ export const overrideAccount = mutation({
     const policyId = existing
       ? (await ctx.db.patch(existing._id, { ...next, updatedAt: now }), existing._id)
       : await ctx.db.insert("syncPolicies", { accountId: actor.accountId, scopeKind: "account", scopeId, ...next, createdAt: now, updatedAt: now });
-    const changeId = await ctx.db.insert("syncPolicyChanges", { accountId: actor.accountId, scopeKind: "account", scopeId, action: "override", before: policySnapshot(existing), after: policySnapshot(next), actorKind: "user", idempotencyKey: args.idempotencyKey, createdAt: now });
+    const changeId = await ctx.db.insert("syncPolicyChanges", { accountId: actor.accountId, scopeKind: "account", scopeId, action: "override", before: policySnapshot(existing), after: policySnapshot(next), actorKind: args.actorKind === "ai" ? "ai" : "user", idempotencyKey: args.idempotencyKey, createdAt: now });
     return { changed: true, policyId, changeId };
   },
 });
@@ -250,6 +258,7 @@ export const patchItems = mutation({
     itemIds: v.array(v.string()),
     patch: v.object(policyPatch),
     idempotencyKey: v.string(),
+    actorKind: recordedActorKind,
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -294,7 +303,7 @@ export const patchItems = mutation({
         action: "override",
         before: policySnapshot(existing),
         after: policySnapshot(next),
-        actorKind: "user",
+        actorKind: args.actorKind === "ai" ? "ai" : "user",
         idempotencyKey: key,
         createdAt: now,
       });
@@ -305,7 +314,12 @@ export const patchItems = mutation({
 });
 
 export const revert = mutation({
-  args: { scopeKind, scopeId: v.string(), idempotencyKey: v.string() },
+  args: {
+    scopeKind,
+    scopeId: v.string(),
+    idempotencyKey: v.string(),
+    actorKind: recordedActorKind,
+  },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
@@ -334,7 +348,7 @@ export const revert = mutation({
       scopeId,
       action: "revert",
       before: policySnapshot(existing),
-      actorKind: "user",
+      actorKind: args.actorKind === "ai" ? "ai" : "user",
       idempotencyKey,
       createdAt: now,
     });

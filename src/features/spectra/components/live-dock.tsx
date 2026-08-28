@@ -14,6 +14,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Square,
+  Undo2,
   Unplug,
   X,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import { PrismRunMark } from "@/components/spectra-prism-optic";
 import { SurfaceField, type FieldInfluence } from "../field/surface-field";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { confirmationDiffSummary } from "../ai/authority-execution";
 import type { ResultCardStreamView } from "../ai/stream-events";
 import type { CommandAttachment } from "./command-bar";
 import {
@@ -301,7 +303,7 @@ export type LiveDockProps = {
   onRetry?: (runId: string) => void;
   onAction?: (
     card: ResultCardStreamView,
-    action: "confirm" | "cancel",
+    action: "confirm" | "cancel" | "revert",
   ) => void | Promise<void>;
   onRevise?: (
     card: ResultCardStreamView,
@@ -627,6 +629,20 @@ export function LiveDock({
     await refresh(true);
   }
 
+  async function stopTab(runId: string) {
+    if (!onStop) return;
+    setStopping((current) => new Set(current).add(runId));
+    try {
+      await onStop(runId);
+    } finally {
+      setStopping((current) => {
+        const next = new Set(current);
+        next.delete(runId);
+        return next;
+      });
+    }
+  }
+
   async function respondToInput(
     tab: SpectraRunTab,
     response: string,
@@ -737,6 +753,9 @@ export function LiveDock({
             const canRetry =
               (model.state === "paused" || model.state === "cancelled") &&
               tab.run.retryable;
+            const canUndo = Boolean(
+              card?.actions.some((action) => action.key === "revert"),
+            );
             const isSteerable =
               model.state === "working" ||
               model.state === "waiting" ||
@@ -790,7 +809,7 @@ export function LiveDock({
                         setExpandedInputRunId(tab.runId);
                       }
                     }}
-                    className="dock-tab-identity w-fit min-w-0 max-w-[calc(100%-4.5rem)] py-1 text-left"
+                    className="dock-tab-identity w-fit min-w-0 max-w-[calc(100%-9rem)] py-1 text-left"
                     title={model.title}
                   >
                     <span className="flex items-center gap-1.5">
@@ -840,6 +859,40 @@ export function LiveDock({
                   >
                     <SquareArrowOutUpRight className="h-3.5 w-3.5" />
                   </button>
+                  {canRetry && onRetry ? (
+                    <button
+                      type="button"
+                      onClick={() => onRetry(tab.runId)}
+                      className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      aria-label={`Retry ${model.title}`}
+                      title="Retry"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                  {activeStatuses.has(tab.run.status) && onStop ? (
+                    <button
+                      type="button"
+                      disabled={stopping.has(tab.runId)}
+                      onClick={() => void stopTab(tab.runId)}
+                      className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                      aria-label={`Stop ${model.title}`}
+                      title="Stop"
+                    >
+                      <Square className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                  {canUndo && card ? (
+                    <button
+                      type="button"
+                      onClick={() => void onAction?.(card, "revert")}
+                      className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      aria-label="Undo this run"
+                      title="Undo this run"
+                    >
+                      <Undo2 className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => void hideTab(tab)}
@@ -926,24 +979,20 @@ export function LiveDock({
                           <RotateCcw className="h-3 w-3" /> Retry
                         </button>
                       ) : null}
+                      {canUndo && card ? (
+                        <button
+                          type="button"
+                          onClick={() => void onAction?.(card, "revert")}
+                          className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        >
+                          <Undo2 className="h-3 w-3" /> Undo this run
+                        </button>
+                      ) : null}
                       {activeStatuses.has(tab.run.status) && onStop ? (
                         <button
                           type="button"
                           disabled={stopping.has(tab.runId)}
-                          onClick={async () => {
-                            setStopping((current) =>
-                              new Set(current).add(tab.runId),
-                            );
-                            try {
-                              await onStop(tab.runId);
-                            } finally {
-                              setStopping((current) => {
-                                const next = new Set(current);
-                                next.delete(tab.runId);
-                                return next;
-                              });
-                            }
-                          }}
+                          onClick={() => void stopTab(tab.runId)}
                           className="ml-auto inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                         >
                           <Square className="h-3 w-3" /> Stop
@@ -1165,6 +1214,14 @@ export function LiveDock({
                         </label>
                       ) : card ? (
                         <>
+                          {model.targetNames.length ? (
+                            <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
+                              {confirmationDiffSummary({
+                                targetTitles: model.targetNames,
+                                reasons: [],
+                              })}
+                            </p>
+                          ) : null}
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <button
                               type="button"

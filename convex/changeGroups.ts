@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { requireArtifactCapability } from "./spectraShared";
+import { getAuthenticatedActor } from "./identityShared";
 import {
   loadVersionAfter,
   retainSnapshotObject,
@@ -687,5 +688,56 @@ export const commitRestore = mutation({
         }),
       );
     return committed;
+  },
+});
+
+export const revertPlanForRun = mutation({
+  args: { runId: v.id("spectraAiRuns") },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerAccountId !== actor.accountId)
+      throw new Error("AI run not found");
+    const groups = await ctx.db
+      .query("changeGroups")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .collect();
+    const restored: Array<{
+      artifactId: Id<"spectraArtifacts">;
+      snapshot: unknown;
+    }> = [];
+    const blocked: Array<{ artifactId: string; reason: string }> = [];
+    for (const group of groups) {
+      if (group.source !== "ai" || group.baseSnapshot === undefined) continue;
+      const versions = await ctx.db
+        .query("spectraArtifactVersions")
+        .withIndex("by_artifact_created", (q) =>
+          q.eq("artifactId", group.artifactId),
+        )
+        .order("desc")
+        .take(12);
+      const cutoff = group.committedAt ?? group.lastActivityAt;
+      const laterHuman = versions.some(
+        (version) =>
+          version.createdAt > cutoff &&
+          version.source !== "ai" &&
+          version.source !== "restore" &&
+          version.source !== "checkpoint",
+      );
+      if (laterHuman) {
+        blocked.push({
+          artifactId: String(group.artifactId),
+          reason:
+            "You edited this after Spectra finished. Undo from Version history if you want the earlier copy.",
+        });
+        continue;
+      }
+      restored.push({
+        artifactId: group.artifactId,
+        snapshot: group.baseSnapshot,
+      });
+    }
+    return { restored, blocked };
   },
 });

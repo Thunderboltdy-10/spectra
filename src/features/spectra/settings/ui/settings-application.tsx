@@ -93,7 +93,7 @@ function ConversationSettings({ p, update }: SectionProps<"ai">) {
 
 function WritingSettings({ p, update }: SectionProps<"writing">) {
   return (
-    <SettingGroup title="Local writing suggestions" description="Suggestions stay on this device and never insert text until you accept them.">
+    <SettingGroup title="Writing suggestions" description="Short phrase completions appear as you type. They never insert text until you accept them.">
       <ToggleRow label="Smart completion" checked={p.smartCompletion} onCheckedChange={(smartCompletion) => update({ smartCompletion })} />
       <ToggleRow label="Quick Chat suggestions" checked={p.quickChatSuggestions} onCheckedChange={(quickChatSuggestions) => update({ quickChatSuggestions })} />
       <ToggleRow label="Document suggestions" checked={p.longFormSuggestions} onCheckedChange={(longFormSuggestions) => update({ longFormSuggestions })} />

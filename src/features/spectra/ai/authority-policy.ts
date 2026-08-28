@@ -37,7 +37,10 @@ export type AiAuthorityResult = {
  */
 export function decideAiAuthority(input: AiAuthorityInput): AiAuthorityResult {
   const mode = input.mode ?? "standard";
-  const count = Math.max(1, Math.floor(input.fileCount ?? 1));
+  const count =
+    input.fileCount === undefined
+      ? 1
+      : Math.max(0, Math.floor(input.fileCount));
   const fileLabel = `${count} file${count === 1 ? "" : "s"}`;
   switch (input.target) {
     case "credential":
@@ -92,7 +95,10 @@ export function decideAiAuthority(input: AiAuthorityInput): AiAuthorityResult {
       return {
         decision: "confirm",
         reason: "A real local-file effect requires explicit approval.",
-        consequence: `This will affect ${fileLabel} on this PC.`,
+        consequence:
+          count === 0
+            ? "No files on this PC would change."
+            : `This will affect ${fileLabel} on this PC.`,
       };
     case "managebac_sync":
       return {

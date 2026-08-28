@@ -66,6 +66,45 @@ export function artifactContentLooksUsable(
   return false;
 }
 
+async function assertNativeReplicaHonest(artifactId: string) {
+  const truth = await query<
+    { workId: string },
+    {
+      replicas: Array<{
+        kind?: string;
+        state?: string;
+        nativeFormat?: string;
+      }>;
+      recentOperations?: Array<{
+        direction?: string;
+        state?: string;
+        errorCode?: string;
+      }>;
+    }
+  >("replicas:forWork", { workId: artifactId }).catch(() => null);
+  if (!truth) return;
+  const locals = (truth.replicas ?? []).filter(
+    (replica) =>
+      replica.kind === "local" &&
+      replica.state !== "unavailable" &&
+      replica.nativeFormat,
+  );
+  if (locals.length === 0) return;
+  if (locals.some((replica) => replica.state === "error"))
+    throw new Error(
+      "NATIVE_VERIFY_FAILED: Spectra saved the edit, but the Office file on this PC reported an error and was not updated.",
+    );
+  const failedWrite = (truth.recentOperations ?? []).find(
+    (operation) =>
+      operation.direction === "cloud-to-local" &&
+      operation.state === "failed",
+  );
+  if (failedWrite)
+    throw new Error(
+      "NATIVE_VERIFY_FAILED: Spectra saved the edit, but writing the Office file on this PC failed.",
+    );
+}
+
 export async function committedCreatesAreUsable(
   actorClerkId: string,
   outcomes: Array<{
@@ -170,11 +209,13 @@ export async function verifyCommittedOutcomes(
           ? new Error("The saved artifact content could not be verified.")
           : verified.error;
       }
-      if (operation.type === "artifact.create")
+      if (operation.type === "artifact.create") {
         assertArtifactQuality({
           blueprintKey,
           content: artifact.content,
         });
+        await assertNativeReplicaHonest(artifactId);
+      }
     }
     if (operation.type === "artifact.update") {
       if (
@@ -230,7 +271,10 @@ export async function verifyCommittedOutcomes(
         }
         return matched === changes.length;
       };
-      if (matchesPatch(artifact.content)) continue;
+      if (matchesPatch(artifact.content)) {
+        await assertNativeReplicaHonest(artifactId);
+        continue;
+      }
       // Convex projection can lag the acknowledged Yjs commit. Prefer the live
       // collaborative document, then briefly re-poll Convex before failing a
       // successful apply.
@@ -244,7 +288,10 @@ export async function verifyCommittedOutcomes(
         });
         return null;
       });
-      if (live && matchesPatch(live.content)) continue;
+      if (live && matchesPatch(live.content)) {
+        await assertNativeReplicaHonest(artifactId);
+        continue;
+      }
       if (live) {
         console.warn("[spectra.verify.live_mismatch]", {
           artifactId,
@@ -270,7 +317,10 @@ export async function verifyCommittedOutcomes(
           break;
         }
       }
-      if (matched) continue;
+      if (matched) {
+        await assertNativeReplicaHonest(artifactId);
+        continue;
+      }
       throw new Error(
         "The saved artifact did not contain the requested content change.",
       );

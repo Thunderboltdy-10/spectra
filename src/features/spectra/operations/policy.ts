@@ -4,6 +4,12 @@ import type {
   RequestIntent,
   SpectraOperationType,
 } from "./schema";
+import {
+  authorityPublicMessage,
+  authorityRequiresConfirmation,
+  evaluateApplicationAuthority,
+} from "@/features/spectra/ai/authority-execution";
+import { spectraToolRegistry } from "@/features/spectra/tools/registry";
 
 const DIRECT_OPERATION_TYPES = new Set<SpectraOperationType>([
   "artifact.create",
@@ -74,15 +80,49 @@ export function evaluatePlanPolicy(
   const appCommands = operations.filter((operation) => operation.type === "app.command");
   for (const operation of appCommands) {
     const command = operation.input.command;
-    if (command === "change_spectra_settings") reasons.push("Change Spectra settings");
-    else if (command === "change_sync_policy") {
-      const count = Math.max(0, Math.floor(Number(operation.input.args.localFileCount) || 0));
-      reasons.push(`Change sync policy; this will affect ${count} file${count === 1 ? "" : "s"} on this PC`);
+    const args =
+      operation.input.args &&
+      typeof operation.input.args === "object" &&
+      !Array.isArray(operation.input.args)
+        ? (operation.input.args as Record<string, unknown>)
+        : {};
+    const definition = spectraToolRegistry.get(command);
+    const authority = evaluateApplicationAuthority({
+      command,
+      args,
+      localFileCount: Number(args.localFileCount) || 0,
+      authorityTarget: definition?.authorityTarget,
+    });
+    if (!definition) {
+      reasons.push(`Approve ${command.replaceAll("_", " ")}`);
+      continue;
     }
-    else if (command === "delete_library_items") reasons.push("Delete Library items");
-    else if (command === "change_sharing") reasons.push("Change sharing or permissions");
-    else if (command === "change_managebac_mapping") reasons.push("Change ManageBac mapping");
-    else reasons.push(`Approve ${command.replaceAll("_", " ")}`);
+    if (!authorityRequiresConfirmation(authority.decision)) continue;
+    if (command === "change_spectra_settings")
+      reasons.push("Change Spectra settings");
+    else if (command === "change_sync_policy") {
+      const count = Math.max(
+        0,
+        Math.floor(Number(args.localFileCount) || 0),
+      );
+      reasons.push(
+        `Change sync policy; this will affect ${count} file${count === 1 ? "" : "s"} on this PC`,
+      );
+    } else if (command === "delete_library_items") {
+      const count = Math.max(
+        0,
+        Math.floor(Number(args.localFileCount) || 0),
+      );
+      reasons.push(
+        count > 0
+          ? `Delete Library items. This will affect ${count} file${count === 1 ? "" : "s"} on this PC.`
+          : "Delete Library items",
+      );
+    } else if (command === "change_sharing")
+      reasons.push("Change sharing or permissions");
+    else if (command === "change_managebac_mapping")
+      reasons.push("Change ManageBac mapping");
+    else reasons.push(authorityPublicMessage(authority));
   }
   if (operations.some((operation) => operation.type === "artifact.archive"))
     reasons.push("Archive the selected artifact");

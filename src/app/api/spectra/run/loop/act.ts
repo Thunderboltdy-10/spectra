@@ -5,7 +5,14 @@ import { mutate, query } from "./io";
 import { normalizeCreationSummary, operationLabel } from "./plan";
 import { materializeDocxArtifact } from "@/app/api/spectra/lenses/docx/route";
 import { materializeOfficeArtifact } from "@/app/api/spectra/lenses/office/route";
-import { decideAiAuthority } from "@/features/spectra/ai/authority-policy";
+import {
+  authorityPublicMessage,
+  authorityRequiresNotice,
+} from "@/features/spectra/ai/authority-execution";
+import {
+  evaluateCommandAuthority,
+  recordAuthorityDecision,
+} from "./authority";
 import { applyResolvedContentPatch } from "@/features/spectra/ai/document-content-patch";
 import { resolveLibraryDestinationId } from "@/features/spectra/ai/library-operation-context";
 import {
@@ -49,24 +56,37 @@ export async function executeApplicationCommand(
       `AUTHORITY_PROHIBITED:${definition.prohibitionReason ?? definition.title}`,
     );
   if (definition.authorityTarget) {
-    const targetIds = Array.isArray(parsed.targetIds)
-      ? parsed.targetIds.filter((id): id is string => typeof id === "string")
-      : [];
-    const localEffect =
-      command === "change_sync_policy" && targetIds.length
-        ? await query<unknown & object, { count: number }>(
-            "replicas:localEffectCount",
-            { actorClerkId, workIds: targetIds },
-          )
-        : null;
-    const authority = decideAiAuthority({
-      target: definition.authorityTarget,
-      fileCount: localEffect
-        ? localEffect.count
-        : targetIds.length || undefined,
+    const authority = await evaluateCommandAuthority({
+      actorClerkId,
+      command,
+      args: parsed,
+      authorityTarget: definition.authorityTarget,
+    });
+    await recordAuthorityDecision({
+      actorClerkId,
+      runId,
+      executionId,
+      command,
+      decision: authority.decision,
+      target: authority.target,
+      reason: authority.reason,
+      consequence: authority.consequence,
+      localFileCount:
+        typeof parsed.localFileCount === "number"
+          ? parsed.localFileCount
+          : undefined,
     });
     if (authority.decision === "prohibited")
       throw new Error(`AUTHORITY_PROHIBITED:${authority.reason}`);
+    if (authorityRequiresNotice(authority.decision) && authority.notice)
+      onUiEvent?.({
+        key: "authority_notice",
+        payload: {
+          note: authority.notice,
+          command,
+          message: authorityPublicMessage(authority),
+        },
+      });
   }
   // Application operations are the server-side semantic path shared by AI
   // and the human-facing Convex actions. Keep this dispatch small and typed;
@@ -252,6 +272,7 @@ export async function executeApplicationCommand(
     const changed = await mutate("syncPolicy:patchItems", {
       itemIds: targetIds,
       patch,
+      actorKind: "ai",
       idempotencyKey: `ai:${runId}:${JSON.stringify(patch).slice(0, 120)}`,
     });
     onUiEvent?.({
@@ -832,6 +853,25 @@ export async function executeOperation(
         artifactId: input.artifactId,
         timeoutMs: 5_000,
       }).catch(() => null);
+      const replicaTruth = await query<
+        { workId: string },
+        {
+          replicas: Array<{
+            kind?: string;
+            state?: string;
+            nativeFormat?: string;
+          }>;
+        }
+      >("replicas:forWork", { workId: input.artifactId }).catch(() => null);
+      const localNative = replicaTruth?.replicas.find(
+        (replica) =>
+          replica.kind === "local" &&
+          replica.state !== "unavailable" &&
+          replica.nativeFormat,
+      );
+      const nativeFormat = (
+        artifact.nativeFormat ?? localNative?.nativeFormat
+      )?.toLowerCase();
       if (live) {
         await mutate("spectraArtifacts:stageAiPatch", {
           actorClerkId,
@@ -848,24 +888,17 @@ export async function executeOperation(
             : {}),
           commit: true,
         }).catch(() => null);
+      } else if (localNative) {
+        throw new Error(
+          "NATIVE_MATERIALIZE_SKIPPED: Spectra could not read the live document after the edit, so the Office file on this PC was not updated.",
+        );
+      }
 
-        // AI edits use the same native lens/materialization pipeline as human
-        // edits. A committed Spectra projection without this queue step would
-        // look successful in the browser while leaving the mounted Office
-        // file stale, which is an unacceptable false-sync state.
-        // Converted Bridge artifacts may temporarily lag the format field on
-        // the logical work record. Replica truth is authoritative for native
-        // materialization, so do not silently skip a successful AI write just
-        // because the denormalized artifact field is absent.
-        const nativeFormat = (
-          artifact.nativeFormat ??
-          (
-            await query<
-              { workId: string },
-              { replicas: Array<{ nativeFormat?: string }> }
-            >("replicas:forWork", { workId: input.artifactId })
-          ).replicas.find((replica) => replica.nativeFormat)?.nativeFormat
-        )?.toLowerCase();
+      // AI edits use the same native lens/materialization pipeline as human
+      // edits. A committed Spectra projection without this queue step would
+      // look successful in the browser while leaving the mounted Office
+      // file stale, which is an unacceptable false-sync state.
+      if (live) {
         if (
           artifact.blueprintKey === "document" &&
           ["docx", "docm", "dotx", "dotm"].includes(nativeFormat ?? "")

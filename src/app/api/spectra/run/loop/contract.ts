@@ -11,6 +11,7 @@ export type Body = {
     | "cancel"
     | "revise"
     | "stop"
+    | "revert"
     | "clear_agent"
     | "scheduled_run"
     | "scheduled_resume";

@@ -21,6 +21,7 @@ import { releaseClaimsForRun } from "./regionClaims";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { recordAgentInvocation, settleAgentInvocation } from "./agents";
 import { recordMeterEvent } from "./metering";
+import { writeAuditEvent } from "./auditShared";
 
 function usageTokenCounts(usage: unknown) {
   const usageRecord =
@@ -65,7 +66,7 @@ async function recordRunModelMeters(
       quantity: inputTokens,
       sourceType: "spectra_run",
       sourceId: String(run._id),
-      idempotencyKey: `spectra-run:${run._id}:model_input_tokens`,
+      idempotencyKey: `spectra-run:${run._id}:${run.executionId}:model_input_tokens`,
       dimensions,
       occurredAt,
     });
@@ -78,7 +79,7 @@ async function recordRunModelMeters(
       quantity: outputTokens,
       sourceType: "spectra_run",
       sourceId: String(run._id),
-      idempotencyKey: `spectra-run:${run._id}:model_output_tokens`,
+      idempotencyKey: `spectra-run:${run._id}:${run.executionId}:model_output_tokens`,
       dimensions,
       occurredAt,
     });
@@ -554,6 +555,48 @@ export const beginRun = mutation({
   },
 });
 
+export const recordAuthorityDecision = mutation({
+  args: {
+    runId: v.optional(v.id("spectraAiRuns")),
+    executionId: v.optional(v.string()),
+    command: v.string(),
+    decision: v.string(),
+    target: v.string(),
+    reason: v.string(),
+    consequence: v.optional(v.string()),
+    localFileCount: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    if (args.runId) {
+      const run = await ctx.db.get(args.runId);
+      if (!run || run.ownerAccountId !== actor._id)
+        throw new Error("AI run not found");
+    }
+    const eventId = await writeAuditEvent(ctx, {
+      actorAccountId: actor._id,
+      schoolId: actor.schoolId,
+      action: `ai.authority.${args.decision.slice(0, 40)}`,
+      targetType: "ai_run",
+      targetId: args.runId ? String(args.runId) : args.command.slice(0, 80),
+      metadata: {
+        command: args.command.slice(0, 80),
+        decision: args.decision.slice(0, 40),
+        target: args.target.slice(0, 40),
+        reason: args.reason.slice(0, 240),
+        consequence: args.consequence?.slice(0, 240) ?? null,
+        localFileCount:
+          typeof args.localFileCount === "number"
+            ? Math.max(0, Math.floor(args.localFileCount))
+            : null,
+        executionId: args.executionId?.slice(0, 80) ?? null,
+      },
+      retentionClass: "operational",
+    });
+    return { eventId };
+  },
+});
+
 export const resolveBySubmissionKey = query({
   args: { submissionKey: v.string() },
   handler: async (ctx, args) => {
@@ -669,7 +712,7 @@ export const updateStatus = mutation({
         args.usage ?? run.usage,
         now,
       );
-    if (terminal && args.status === "completed")
+    if (terminal)
       await recordRunModelMeters(ctx, run, args.usage ?? run.usage, now);
     await ctx.db.patch(args.runId, {
       status: args.status,

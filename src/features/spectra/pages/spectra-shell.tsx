@@ -1601,13 +1601,8 @@ export function SpectraShell({
   useEffect(() => {
     const removeSettings = spectraBus.handle(
       "settings.change",
-      ({ patch, section }) => {
+      ({ patch }) => {
         replacePreferences(applyPreferencePatch(preferences, patch));
-        router.push(
-          section
-            ? `/settings?section=${encodeURIComponent(section)}`
-            : "/settings",
-        );
       },
     );
     const removeSync = spectraBus.handle(

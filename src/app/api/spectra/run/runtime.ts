@@ -38,6 +38,7 @@ import {
   selectedAgentOperationApprovalReasons,
 } from "./loop/intake";
 import { mutate, query } from "./loop/io";
+import { hydrateApplicationLocalFileCounts } from "./loop/authority";
 import { createAgentLoopExecution } from "./loop/orchestrator";
 import {
   assertRequestedArtifactContent,
@@ -80,7 +81,8 @@ import {
   getSpectraAttachmentStrategy,
   getSpectraModelId,
 } from "@/features/spectra/ai/model-config";
-import { AiArtifactRegionConflictError } from "@/features/spectra/ai/yjs-artifact-operation";
+import { AiArtifactRegionConflictError, applyAiArtifactMutation } from "@/features/spectra/ai/yjs-artifact-operation";
+import { confirmationDiffSummary } from "@/features/spectra/ai/authority-execution";
 import { prepareAttachments as prepareRunAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
 import { promptLooksLikeFocusedStructuralEdit } from "@/features/spectra/operations/intent-alignment";
 import { isQuietRetryableApplyFailure } from "@/features/spectra/operations/plan-diagnostics";
@@ -1347,6 +1349,10 @@ async function runAttempt(
               summary: plan.conversationSummary ?? undefined,
             }).catch(() => null)
         : Promise.resolve(null);
+    await hydrateApplicationLocalFileCounts(
+      params.actorClerkId,
+      plan.operations,
+    );
     const basePolicy = evaluatePlanPolicy(plan.operations, {
       intent: plan.intent,
     });
@@ -1607,7 +1613,10 @@ async function runAttempt(
         resultTitle: codeProposal
           ? "Review Code proposal"
           : "Confirmation required",
-        resultSummary: policy.reasons.join(" · "),
+        resultSummary: confirmationDiffSummary({
+          targetTitles: provenance.artifactTitles ?? [],
+          reasons: policy.reasons,
+        }) || policy.reasons.join(" · "),
         resultVariant: "operation",
         resultActions: actions,
         provenance,
@@ -1808,13 +1817,25 @@ async function runAttempt(
           onUiEvent: (event: {
             key: string;
             payload?: Record<string, unknown>;
-          }) =>
+          }) => {
             publish({
               type: "ui_event",
               runId: params.runId,
               key: event.key,
               payload: event.payload,
-            }),
+            });
+            const note = event.payload?.note;
+            if (
+              event.key === "authority_notice" &&
+              typeof note === "string" &&
+              note.trim()
+            )
+              publish({
+                type: "status",
+                runId: params.runId,
+                message: note,
+              });
+          },
         };
         let affected: Array<{ type: string; id: string }> = [];
         try {
@@ -2208,6 +2229,16 @@ async function runAttempt(
         targetType: "artifact" as const,
         targetId,
       })),
+      ...(plan.operations.some((operation) => operation.type === "artifact.update")
+        ? [
+            {
+              key: "revert" as const,
+              label: "Undo this run",
+              targetType: "run" as const,
+              targetId: params.runId,
+            },
+          ]
+        : []),
     ];
     const mergedProvenance = {
       ...provenance,
@@ -2677,7 +2708,27 @@ async function resumeOperationsAttempt(params: {
                 key: event.key,
                 payload: event.payload,
               },
-            }).then(() => undefined),
+            }).then(() => {
+              const note = event.payload?.note;
+              if (
+                event.key === "authority_notice" &&
+                typeof note === "string" &&
+                note.trim()
+              )
+                return mutate("spectraRuns:appendEvent", {
+                  actorClerkId: params.actorClerkId,
+                  runId: params.runId,
+                  executionId: params.executionId,
+                  type: "progress",
+                  payload: {
+                    type: "progress",
+                    runId: params.runId,
+                    title: note,
+                    detail: note,
+                  },
+                }).then(() => undefined);
+              return undefined;
+            }),
         };
         let affected: Array<{ type: string; id: string }> = [];
         try {
@@ -2881,16 +2932,28 @@ async function resumeOperationsAttempt(params: {
         resultTitle: "Done",
         resultSummary: finalSummary,
         resultVariant: artifact ? "artifact" : "status",
-        resultActions: artifact
-          ? [
-              {
-                key: "open",
-                label: "Open",
-                targetType: "artifact",
-                targetId: artifact.id,
-              },
-            ]
-          : [],
+        resultActions: [
+          ...(artifact
+            ? [
+                {
+                  key: "open" as const,
+                  label: "Open",
+                  targetType: "artifact" as const,
+                  targetId: artifact.id,
+                },
+              ]
+            : []),
+          ...(operations.some((row) => row.type === "artifact.update")
+            ? [
+                {
+                  key: "revert" as const,
+                  label: "Undo this run",
+                  targetType: "run" as const,
+                  targetId: params.runId,
+                },
+              ]
+            : []),
+        ],
       }),
       saveAssistantMessage({
         actorClerkId: params.actorClerkId,
@@ -3525,6 +3588,89 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         },
         emit,
       );
+    });
+  }
+
+  if (action === "revert") {
+    const state = await query<
+      { actorClerkId: string; runId: string },
+      RunDetail
+    >("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+    if (state.run.status !== "completed" && state.run.status !== "cancelled")
+      return new Response(
+        "Undo is available after Spectra finishes this run.",
+        { status: 409 },
+      );
+    const plan = await mutate<
+      { runId: string },
+      {
+        restored: Array<{
+          artifactId: string;
+          snapshot: {
+            title?: string;
+            summary?: string | null;
+            content?: unknown;
+            tags?: string[];
+          };
+        }>;
+        blocked: Array<{ artifactId: string; reason: string }>;
+      }
+    >("changeGroups:revertPlanForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+    });
+    if (plan.restored.length === 0) {
+      const blocked = plan.blocked[0]?.reason;
+      return new Response(
+        blocked ??
+          "This run did not keep a snapshot that can be undone. Archive created work from Library if you want to remove it.",
+        { status: 409 },
+      );
+    }
+    const restored: string[] = [];
+    const failed: string[] = [];
+    for (const item of plan.restored) {
+      const snapshot = item.snapshot ?? {};
+      try {
+        await applyAiArtifactMutation({
+          artifactId: item.artifactId,
+          runId,
+          operationId: `revert:${runId}:${item.artifactId}`,
+          executionId:
+            expectedExecutionId ??
+            state.run.executionId ??
+            `revert:${runId}`,
+          checkpointBeforeAi: false,
+          resolveDesired: (current) => ({
+            title: snapshot.title ?? current.title,
+            summary:
+              typeof snapshot.summary === "string"
+                ? snapshot.summary
+                : current.summary,
+            content: snapshot.content ?? current.content,
+            tags: snapshot.tags ?? current.tags,
+          }),
+        });
+        restored.push(item.artifactId);
+      } catch (error) {
+        failed.push(
+          error instanceof Error
+            ? publicError(error)
+            : "Spectra could not restore that earlier copy.",
+        );
+      }
+    }
+    if (restored.length === 0)
+      return new Response(
+        failed[0] ??
+          plan.blocked[0]?.reason ??
+          "Spectra could not undo this run.",
+        { status: 409 },
+      );
+    return Response.json({
+      restored: restored.length,
+      blocked: plan.blocked,
+      failed,
     });
   }
 

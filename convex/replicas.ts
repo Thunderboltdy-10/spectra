@@ -3,7 +3,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
-import { placeSourceNode } from "./orgTreeShared";
+import { placeSourceNode, subtreeNodes } from "./orgTreeShared";
 import { z } from "zod";
 import {
   activeReplicaWriteTarget,
@@ -360,6 +360,43 @@ export const localEffectCount = query({
         .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local"))
         .take(50);
       count += replicas.filter((replica) => replica.state !== "unavailable").length;
+    }
+    return { count };
+  },
+});
+
+/** Count available local replicas behind Library node ids, including work
+ * inside folders. Used to promote tree notify to local_file confirm. */
+export const localEffectCountForNodes = query({
+  args: { nodeIds: v.array(v.id("orgNodes")) },
+  handler: async (ctx, { nodeIds }) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const seen = new Set<string>();
+    let count = 0;
+    for (const nodeId of nodeIds.slice(0, 100)) {
+      const node = await ctx.db.get(nodeId);
+      if (!node || node.accountId !== actor.accountId) continue;
+      const related =
+        node.kind === "folder" || node.kind === "workspace"
+          ? await subtreeNodes(ctx, node)
+          : [node];
+      for (const item of related) {
+        if (item.kind !== "work" || !item.sourceId) continue;
+        const workId = ctx.db.normalizeId("spectraArtifacts", item.sourceId);
+        if (!workId || seen.has(String(workId))) continue;
+        seen.add(String(workId));
+        const work = await ctx.db.get(workId);
+        if (!work || work.ownerAccountId !== actor.accountId) continue;
+        const replicas = await ctx.db
+          .query("workReplicas")
+          .withIndex("by_work_kind", (q) =>
+            q.eq("workId", workId).eq("kind", "local"),
+          )
+          .take(50);
+        count += replicas.filter((replica) => replica.state !== "unavailable")
+          .length;
+      }
     }
     return { count };
   },

@@ -5,6 +5,16 @@
 
 const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> = [
   {
+    test: /AUTHORITY_PROHIBITED/i,
+    message: () =>
+      "That action is not something Spectra can do on your behalf.",
+  },
+  {
+    test: /NATIVE_MATERIALIZE_SKIPPED|NATIVE_VERIFY_FAILED/i,
+    message: (app) =>
+      `Spectra saved the edit. The ${app} file on this computer was not updated.`,
+  },
+  {
     test: /LOCAL_REPLICA_UNAVAILABLE|LOCAL_REPLICA_MISSING/i,
     message: (app) =>
       `Spectra saved your edit. The ${app} file on this computer was not updated because this file is not open as a local copy. Open it from Library while Spectra Bridge is connected, or keep working here.`,

@@ -14,6 +14,10 @@ import {
 } from "./intake";
 import type { ProvisionalCreation } from "./intake";
 import { act, mutate, query, safeJson } from "./io";
+import {
+  evaluateCommandAuthority,
+  recordAuthorityDecision,
+} from "./authority";
 import { publicError } from "./report";
 import {
   assertPresentationLayoutContract,
@@ -28,6 +32,10 @@ import {
   describeApplicationObservation,
 } from "@/features/spectra/ai/application-tool-observation";
 import { decideAiAuthority } from "@/features/spectra/ai/authority-policy";
+import {
+  authorityPublicMessage,
+  authorityRequiresConfirmation,
+} from "@/features/spectra/ai/authority-execution";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import { resolveLibraryDestinationId } from "@/features/spectra/ai/library-operation-context";
 import {
@@ -2831,6 +2839,7 @@ export async function executeAgentReadTool(
     };
   }
   const definition = spectraToolRegistry.get(call.name);
+  let pendingNotice: string | undefined;
   if (definition) {
     const parsed = definition.inputSchema.safeParse(parsedArguments);
     if (!parsed.success)
@@ -2855,23 +2864,23 @@ export async function executeAgentReadTool(
         retryable: false,
       };
     if (definition.authorityTarget) {
-      const targetIds = Array.isArray(parsedArguments.targetIds)
-        ? parsedArguments.targetIds.filter(
-            (value): value is string => typeof value === "string",
-          )
-        : [];
-      const localEffect =
-        call.name === "change_sync_policy" && targetIds.length
-          ? await query<unknown & object, { count: number }>(
-              "replicas:localEffectCount",
-              { actorClerkId, workIds: targetIds },
-            )
-          : null;
-      const authority = decideAiAuthority({
-        target: definition.authorityTarget,
-        fileCount: localEffect
-          ? localEffect.count
-          : targetIds.length || undefined,
+      const authority = await evaluateCommandAuthority({
+        actorClerkId,
+        command: call.name,
+        args: parsedArguments,
+        authorityTarget: definition.authorityTarget,
+      });
+      await recordAuthorityDecision({
+        actorClerkId,
+        command: call.name,
+        decision: authority.decision,
+        target: authority.target,
+        reason: authority.reason,
+        consequence: authority.consequence,
+        localFileCount:
+          typeof parsedArguments.localFileCount === "number"
+            ? parsedArguments.localFileCount
+            : undefined,
       });
       if (authority.decision === "prohibited")
         return {
@@ -2880,16 +2889,14 @@ export async function executeAgentReadTool(
           message: authority.reason,
           retryable: false,
         };
-      if (
-        authority.decision === "confirm" ||
-        authority.decision === "always-confirm"
-      )
+      if (authorityRequiresConfirmation(authority.decision))
         return {
           ok: false,
           code: "approval_required",
-          message: `${authority.reason}${authority.consequence ? ` ${authority.consequence}` : ""}`,
+          message: authorityPublicMessage(authority),
           retryable: true,
         };
+      pendingNotice = authority.notice;
     }
   }
   const run = async (executionSignal = scope?.signal) => {
@@ -3546,6 +3553,7 @@ export async function executeAgentReadTool(
         scopeKind: "item",
         scopeId: targetIds[0],
         values,
+        actorKind: "ai",
         idempotencyKey: `ai:${actorClerkId}:${targetIds[0]}:${JSON.stringify(values).slice(0, 120)}`,
       });
       return { ok: true, changed, targetIds };
@@ -3639,7 +3647,21 @@ export async function executeAgentReadTool(
         return run(executionContext.signal);
       },
     },
-  );
+  ).then((result) => {
+    if (
+      pendingNotice &&
+      result &&
+      typeof result === "object" &&
+      (result as { ok?: unknown }).ok
+    ) {
+      onUiEvent?.({
+        key: "authority_notice",
+        payload: { note: pendingNotice, command: call.name },
+      });
+      return { ...(result as Record<string, unknown>), notice: pendingNotice };
+    }
+    return result;
+  });
 }
 
 export function promptDirectlyUsesFocusedContent(prompt: string) {
@@ -5011,6 +5033,13 @@ export async function callModel(
           if (!committedApplicationSummaries.includes(summary))
             committedApplicationSummaries.push(summary);
         }
+        const notice =
+          toolResult &&
+          typeof toolResult === "object" &&
+          typeof (toolResult as { notice?: unknown }).notice === "string"
+            ? (toolResult as { notice: string }).notice
+            : null;
+        if (notice) onProgressUpdate?.(notice);
         if (
           call.name === "web_search" &&
           toolResult &&
@@ -5049,20 +5078,30 @@ export async function callModel(
           spectraToolRegistry.get(call.name)?.authorityTarget
         ) {
           const args = JSON.parse(call.arguments) as Record<string, unknown>;
-          if (call.name === "change_sync_policy") {
+          if (
+            call.name === "change_sync_policy" ||
+            call.name === "organize_library" ||
+            call.name === "delete_library_items"
+          ) {
             const targetIds = Array.isArray(args.targetIds)
               ? args.targetIds.filter(
                   (value): value is string =>
                     typeof value === "string" && value.length > 0,
                 )
               : [];
-            const localEffect = targetIds.length
-              ? await query<unknown & object, { count: number }>(
-                  "replicas:localEffectCount",
-                  { actorClerkId, workIds: targetIds },
-                )
-              : { count: 0 };
-            args.localFileCount = localEffect.count;
+            if (targetIds.length) {
+              const localEffect =
+                call.name === "change_sync_policy"
+                  ? await query<unknown & object, { count: number }>(
+                      "replicas:localEffectCount",
+                      { actorClerkId, workIds: targetIds },
+                    )
+                  : await query<unknown & object, { count: number }>(
+                      "replicas:localEffectCountForNodes",
+                      { actorClerkId, nodeIds: targetIds },
+                    );
+              args.localFileCount = localEffect.count;
+            }
           }
           const operation = parseModelOperation({
             type: "app.command",

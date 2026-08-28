@@ -1,4 +1,5 @@
 import { ZodError } from "zod";
+import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 import { alignIntentWithCreates } from "./intent-alignment";
 
 /**
@@ -135,7 +136,7 @@ export function formatPlanApplicationPublicError(error: unknown) {
   ) {
     return "Spectra lost its model connection before the run could finish. Your saved context is intact; retry when the connection is stable.";
   }
-  return message.length > 240 ? `${message.slice(0, 237)}…` : message;
+  return humanizePublicFailure(message);
 }
 
 /** Harmless envelope slips models emit that Zod would otherwise reject. */

@@ -1232,6 +1232,30 @@ export function useSpectraRun({
         }
         return;
       }
+      if (actionKey === "revert") {
+        try {
+          const response = await fetch("/api/spectra/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "revert", runId: card.runId }),
+          });
+          if (!response.ok)
+            throw new Error(
+              (await response.text().catch(() => "")) ||
+                "Could not undo this run.",
+            );
+          toast.success("Restored the earlier copy of this work.");
+          window.dispatchEvent(new Event("spectra:threads-changed"));
+          await onDataChanged?.();
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "Could not undo this run.",
+          );
+        }
+        return;
+      }
       if (actionKey === "retry") {
         toast.dismiss();
         setActiveRequestCount((count) => count + 1);
@@ -1260,7 +1284,7 @@ export function useSpectraRun({
           );
       }
     },
-    [consume, onOpenArtifact, run],
+    [consume, onDataChanged, onOpenArtifact, run],
   );
 
   const revise = useCallback(

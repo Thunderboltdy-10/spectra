@@ -1037,6 +1037,48 @@ export function creationToolContentJsonSchema(
     base.description =
       "Workbook content with at least one sheet containing real cell values.";
   }
+  if (blueprintKey === "presentation") {
+    const slides = properties.slides as Record<string, unknown> | undefined;
+    const slideItems =
+      slides?.items &&
+      typeof slides.items === "object" &&
+      !Array.isArray(slides.items)
+        ? (slides.items as Record<string, unknown>)
+        : null;
+    const slideProperties =
+      slideItems?.properties &&
+      typeof slideItems.properties === "object" &&
+      !Array.isArray(slideItems.properties)
+        ? (slideItems.properties as Record<string, unknown>)
+        : null;
+    const objects = slideProperties?.objects as
+      Record<string, unknown> | undefined;
+    const objectItems =
+      objects?.items &&
+      typeof objects.items === "object" &&
+      !Array.isArray(objects.items)
+        ? (objects.items as Record<string, unknown>)
+        : null;
+    if (Array.isArray(objectItems?.required))
+      objectItems.required = objectItems.required.filter(
+        (key) =>
+          typeof key !== "string" ||
+          !["x", "y", "width", "height", "rotation", "readingOrder"].includes(
+            key,
+          ),
+      );
+    if (slideProperties?.layoutId)
+      slideProperties.layoutId = {
+        ...(slideProperties.layoutId as object),
+        description:
+          "Required design intent for generated slides. Use one supported Spectra layout id; Spectra realizes its geometry after generation.",
+      };
+    if (objectItems)
+      objectItems.description =
+        "A semantic slide object. Supply type, content, style, and accessibility data; generated create calls may omit raw geometry because the chosen layoutId realizes it.";
+    base.description =
+      "Presentation content authored as semantic slide objects plus layout intents. Spectra realizes shared template geometry before storage.";
+  }
   return base;
 }
 

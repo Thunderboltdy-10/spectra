@@ -1,5 +1,5 @@
 export const SPECTRA_DEFAULT_MODEL_ID = "openai/gpt-5.6";
-export const SPECTRA_DEFAULT_FALLBACK_MODEL_ID = "openai/gpt-5.6";
+export const SPECTRA_DEFAULT_FALLBACK_MODEL_ID = "openai/gpt-5.6-luna";
 export const SPECTRA_DEFAULT_REASONING_PROFILE = "high" as const;
 export const SPECTRA_DEFAULT_VISION_MODEL_ID = "xiaomi/mimo-v2.5";
 export const SPECTRA_PRIMARY_PROVIDER = "OpenAI" as const;
@@ -30,10 +30,26 @@ export function getSpectraModelId() {
 }
 
 export function getSpectraFallbackModelId() {
-  return modelIdFromEnvironment(
+  const primaryModelId = getSpectraModelId();
+  const configuredFallbackModelId = modelIdFromEnvironment(
     "SPECTRA_FALLBACK_MODEL_ID",
     SPECTRA_DEFAULT_FALLBACK_MODEL_ID,
   );
+  return resolveSpectraFallbackModelId(
+    primaryModelId,
+    configuredFallbackModelId,
+  );
+}
+
+export function resolveSpectraFallbackModelId(
+  primaryModelId: string,
+  configuredFallbackModelId: string,
+) {
+  if (configuredFallbackModelId !== primaryModelId)
+    return configuredFallbackModelId;
+  return primaryModelId === SPECTRA_DEFAULT_MODEL_ID
+    ? SPECTRA_DEFAULT_FALLBACK_MODEL_ID
+    : SPECTRA_DEFAULT_MODEL_ID;
 }
 
 export function getSpectraReasoningProfile() {

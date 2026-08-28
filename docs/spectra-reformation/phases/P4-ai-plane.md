@@ -71,3 +71,20 @@ Wrong-target suite zero-miss in its owning verification unit; honesty suite gree
 - `tsc --noEmit` retained only recorded repository blockers; no P4.I2 path failed. Architecture retained seven recorded global events; no P4.I2 path was named.
 - `check:copy` still stops on the deleted `artifacts-shell.tsx`; P6.I3 owns that stale checker path. The full repository sweep remains deferred until paired verification.
 - Status: IMPLEMENTED. No acceptance claimed; P4.V1 remains independent.
+
+### P4.I4 implementation log (2026-08-28)
+
+- Extracted one presentation layout vocabulary and realization engine shared by Studio, commands, target resolution, generated creates, and quality checks.
+- Generated presentations now author semantic objects plus `layoutId`; raw geometry is optional in the create transport and the shared template realizes bounds, hierarchy, text fitting, and reading order.
+- Deck grading uses one shared rubric for narrative structure, template completeness, density/overflow, pacing/variation, contrast, accessibility, and source coverage.
+- Incomplete layout roles and long repetitive text-only decks are blockers, so document-shaped decks cannot pass by accumulating unrelated points.
+- Sheets grading requires formula-backed outputs, automatic recalculation, error-free references, honest populated chart ranges, labeled units, conclusions, and readable sizing.
+- Document grading classifies create/append/rewrite/restructure intent, preserves stable structure, rejects placeholders, checks heading flow, and requires verified citations only for explicit research/source requests.
+- The run loop injects the rubric before authoring, realizes generated decks before validation, rejects failed critiques through the repair path, and caps quality critique failures at two per run.
+- Verify re-reads saved creates through the same rubric; the fallback model resolver also refuses to reuse the active primary route.
+- Focused Vitest: 9 files / 122 tests passed, including eight P4.I4 quality tests.
+- Scoped ESLint: 0 errors; nine existing presentation-studio design warnings. Capability ghost gate, secret scan (2,132 tracked files), and diff check passed.
+- Architecture retained seven recorded global-event findings; no P4.I4 path was named.
+- `tsc --noEmit` retained only recorded repository blockers; no P4.I4 path failed.
+- Signed-in Playwright smoke showed all nine shared layouts in the Presentation Design menu with zero console errors; evidence: `.shots/reformation/P4.I4/presentation-layout-menu.png`.
+- Status: IMPLEMENTED. No acceptance claimed; P4.V1 owns independent generated-output grading.

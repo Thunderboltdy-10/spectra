@@ -66,6 +66,7 @@ import {
   PRESENTATION_STRICT_REASONS,
   projectBindingsFromIr,
 } from "../../capabilities";
+import { PRESENTATION_LAYOUT_OPTIONS } from "../../presentation/layouts";
 import type { CommandBinding, CommandControlOption, CommandParam, FidelityRegionKey } from "../types";
 import {
   commentsBinding,
@@ -128,17 +129,8 @@ export const PRESENTATION_OBJECT_ANIMATIONS: readonly CommandControlOption[] = [
   { value: "wipe", label: "Wipe" },
 ];
 
-export const PRESENTATION_LAYOUTS: readonly CommandControlOption[] = [
-  { value: "title-content", label: "Title and content" },
-  { value: "title-only", label: "Title only" },
-  { value: "two-column", label: "Two columns" },
-  { value: "title-visual-text", label: "Title, visual and text" },
-  { value: "visual-story", label: "Visual story" },
-  { value: "three-ideas", label: "Three ideas" },
-  { value: "statement", label: "Statement" },
-  { value: "full-bleed", label: "Full bleed" },
-  { value: "blank", label: "Blank" },
-];
+export const PRESENTATION_LAYOUTS: readonly CommandControlOption[] =
+  PRESENTATION_LAYOUT_OPTIONS;
 
 export const PRESENTATION_TEXT_PRESETS: readonly CommandControlOption[] = [
   { value: "title", label: "Title" },

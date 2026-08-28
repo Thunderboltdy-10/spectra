@@ -15,6 +15,7 @@ import {
 } from "@/features/spectra/operations/hollow-content";
 import { SPECTRA_BLUEPRINT_KEYS } from "@/features/spectra/operations/schema";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
+import { assertArtifactQuality } from "@/features/spectra/quality/rubrics";
 
 export function readContentPointer(content: unknown, path: string) {
   const sheetsPath = canonicalizeSheetsPatchChange({
@@ -169,6 +170,11 @@ export async function verifyCommittedOutcomes(
           ? new Error("The saved artifact content could not be verified.")
           : verified.error;
       }
+      if (operation.type === "artifact.create")
+        assertArtifactQuality({
+          blueprintKey,
+          content: artifact.content,
+        });
     }
     if (operation.type === "artifact.update") {
       if (

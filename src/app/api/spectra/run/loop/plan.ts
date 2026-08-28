@@ -62,6 +62,14 @@ import { loadArtifactSkill } from "@/features/spectra/artifacts/blueprint-catalo
 import type { ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import { nativeOpenRouterAttachmentContent } from "@/features/spectra/compute/files/model-attachment-bundle";
 import {
+  QUALITY_CRITIQUE_MAX_PASSES,
+  artifactQualityPromptSection,
+  assertArtifactQuality,
+  isArtifactQualityError,
+  isQualityBlueprintKey,
+  prepareArtifactContentForQuality,
+} from "@/features/spectra/quality/rubrics";
+import {
   artifactPopulationScore,
   assertCreateContentNotHollow,
   deriveCreateArtifactSummary,
@@ -1734,13 +1742,48 @@ export function assertRequestedArtifactContent(
           `The generated quiz is incomplete: ${issues.slice(0, 8).join(" ")}`,
         );
     }
-    if (operation.type === "artifact.create")
+    if (operation.type === "artifact.create") {
       assertCreateContentNotHollow(
         operation.input.blueprintKey,
         operation.input.content,
         "create",
       );
+      assertArtifactQuality({
+        blueprintKey: operation.input.blueprintKey,
+        content: operation.input.content,
+        prompt,
+      });
+    } else if (
+      operation.input.content !== null &&
+      isQualityBlueprintKey(operation.input.blueprintKey)
+    ) {
+      assertArtifactQuality({
+        blueprintKey: operation.input.blueprintKey,
+        content: operation.input.content,
+        prompt,
+      });
+    }
   }
+}
+
+export function prepareOperationForQuality(
+  operation: ModelOperation,
+): ModelOperation {
+  if (
+    operation.type !== "artifact.create" ||
+    !isQualityBlueprintKey(operation.input.blueprintKey)
+  )
+    return operation;
+  return parseModelOperation({
+    ...operation,
+    input: {
+      ...operation.input,
+      content: prepareArtifactContentForQuality(
+        operation.input.blueprintKey,
+        operation.input.content,
+      ),
+    },
+  });
 }
 
 export function explicitPlannerDueTime(prompt: string) {
@@ -4163,6 +4206,8 @@ export async function callModel(
   const acceptedAgentOperations: ModelOperation[] = [];
   const acceptedAgentWorkSummaries: string[] = [];
   const committedApplicationSummaries: string[] = [];
+  let qualityCritiqueFailures = 0;
+  let lastQualityFailure: unknown;
   const parseAndCheckPlan = (text: string) => {
     let candidateText = text;
     if (acceptedAgentOperations.length) {
@@ -4220,7 +4265,9 @@ export async function callModel(
         ? sanitizeArtifactUserFacingContent(parsed.choices, contextRecord)
         : null,
       operations: parsed.operations.map((operation) =>
-        sanitizeModelOperationUserFacingContent(operation, contextRecord),
+        prepareOperationForQuality(
+          sanitizeModelOperationUserFacingContent(operation, contextRecord),
+        ),
       ),
       finalResponse: cleanText(parsed.finalResponse) ?? "",
     });
@@ -4273,7 +4320,9 @@ export async function callModel(
     const normalizedContent =
       blueprintKey === "planner_task"
         ? reconcileExplicitPlannerRequirements(safeContent, prompt)
-        : normalizeArtifactContent(blueprintKey, safeContent);
+        : isQualityBlueprintKey(blueprintKey)
+          ? prepareArtifactContentForQuality(blueprintKey, safeContent)
+          : normalizeArtifactContent(blueprintKey, safeContent);
     const plan = parseSpectraPlan({
       decision: "operate",
       intent: {
@@ -4474,17 +4523,27 @@ export async function callModel(
         }
       : undefined;
   })();
-  const buildAgentSystemContent = async (encouragementNudge = "") =>
-    (forcedSingleCreation
-      ? await artifactWorkerSystemPrompt(forcedSingleCreation.blueprintKey)
-      : forcedCoordination
-        ? coordinationWorkerSystemPrompt()
-        : agentSystemPrompt(surface, singleCreationBlueprint)) +
-    (!forcedSingleCreation && !forcedCoordination && directFocusedAction
-      ? await focusedArtifactSkillSystemSection(focusedBlueprintKey)
-      : "") +
-    selectedAgentSystemSection(contextRecord) +
-    encouragementNudge;
+  const buildAgentSystemContent = async (encouragementNudge = "") => {
+    const qualityBlueprint =
+      forcedSingleCreation?.blueprintKey ??
+      singleCreationBlueprint ??
+      (directFocusedAction ? focusedBlueprintKey : undefined);
+    return (
+      (forcedSingleCreation
+        ? await artifactWorkerSystemPrompt(forcedSingleCreation.blueprintKey)
+        : forcedCoordination
+          ? coordinationWorkerSystemPrompt()
+          : agentSystemPrompt(surface, singleCreationBlueprint)) +
+      (!forcedSingleCreation && !forcedCoordination && directFocusedAction
+        ? await focusedArtifactSkillSystemSection(focusedBlueprintKey)
+        : "") +
+      (qualityBlueprint
+        ? artifactQualityPromptSection(qualityBlueprint, prompt)
+        : "") +
+      selectedAgentSystemSection(contextRecord) +
+      encouragementNudge
+    );
+  };
   const consumeAgentResult = (
     agentResult: Awaited<ReturnType<typeof runSpectraAgentLoop>>,
   ) => {
@@ -4781,6 +4840,11 @@ export async function callModel(
         ),
       executeTool: async (call) => {
         if (call.name === "propose_operation") {
+          if (
+            qualityCritiqueFailures >= QUALITY_CRITIQUE_MAX_PASSES &&
+            lastQualityFailure
+          )
+            throw lastQualityFailure;
           let args: Record<string, unknown>;
           try {
             args = JSON.parse(call.arguments) as Record<string, unknown>;
@@ -4795,20 +4859,22 @@ export async function callModel(
             }
           }
           try {
-            const operation = sanitizeModelOperationUserFacingContent(
-              reconcileExplicitDocumentOperation(
-                parseModelOperation(
-                  coerceProposedOperation(
-                    args.operation,
-                    defaultPlacement,
-                    contextRecord,
-                    prompt,
+            const operation = prepareOperationForQuality(
+              sanitizeModelOperationUserFacingContent(
+                reconcileExplicitDocumentOperation(
+                  parseModelOperation(
+                    coerceProposedOperation(
+                      args.operation,
+                      defaultPlacement,
+                      contextRecord,
+                      prompt,
+                    ),
                   ),
+                  prompt,
+                  contextRecord.focusedArtifact,
                 ),
-                prompt,
-                contextRecord.focusedArtifact,
+                contextRecord,
               ),
-              contextRecord,
             );
             assertSelectedAgentAllowsOperations(contextRecord, [operation]);
             assertRequestedArtifactContent([operation], prompt);
@@ -4845,10 +4911,24 @@ export async function callModel(
                 : "The typed mutation passed structural validation and its visible preview is staged. Continue with remaining work or submit the final plan.",
             };
           } catch (error) {
+            if (isArtifactQualityError(error)) {
+              qualityCritiqueFailures += 1;
+              lastQualityFailure = error;
+            }
             return {
               ok: false,
-              code: "invalid_operation",
+              code: isArtifactQualityError(error)
+                ? "quality_critique_failed"
+                : "invalid_operation",
               message: publicError(error),
+              ...(isArtifactQualityError(error)
+                ? {
+                    retryable:
+                      qualityCritiqueFailures < QUALITY_CRITIQUE_MAX_PASSES,
+                    critiqueAttempt: qualityCritiqueFailures,
+                    critiqueLimit: QUALITY_CRITIQUE_MAX_PASSES,
+                  }
+                : {}),
             };
           }
         }

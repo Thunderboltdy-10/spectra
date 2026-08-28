@@ -61,6 +61,11 @@ import {
   type PresentationSlide,
 } from "../presentation/model";
 import {
+  applyPresentationLayout,
+  PRESENTATION_LAYOUT_OPTIONS,
+  type PresentationLayoutId,
+} from "../presentation/layouts";
+import {
   applyBibliographySlides,
   BIBLIOGRAPHY_SLIDE_MARKER,
   collectDeckCitations,
@@ -160,17 +165,7 @@ const ASPECT_RATIO_OPTIONS = [
   { value: "16:9", label: "16:9 widescreen" },
   { value: "4:3", label: "4:3 standard" },
 ] as const;
-const LAYOUT_OPTIONS = [
-  { value: "title-content", label: "Title and content" },
-  { value: "title-only", label: "Title only" },
-  { value: "two-column", label: "Two columns" },
-  { value: "title-visual-text", label: "Title, visual and text" },
-  { value: "visual-story", label: "Visual story" },
-  { value: "three-ideas", label: "Three ideas" },
-  { value: "statement", label: "Statement" },
-  { value: "full-bleed", label: "Full bleed" },
-  { value: "blank", label: "Blank" },
-] as const;
+const LAYOUT_OPTIONS = PRESENTATION_LAYOUT_OPTIONS;
 const TEXT_PRESET_OPTIONS = [
   { value: "title", label: "Title" },
   { value: "subtitle", label: "Subtitle" },
@@ -2006,182 +2001,12 @@ export function PresentationStudio({
   }
   function applySlideLayout(layoutId: string) {
     mutate((draft) => {
-      const slide = draft.slides[activeSlideIndex]!;
-      slide.layoutId = layoutId;
-      if (layoutId === "blank" || !slide.objects.length) return;
-      const canvasHeight = draft.settings?.aspectRatio === "4:3" ? 750 : 562.5;
-      const nextObject = (type: PresentationObjectType) => {
-        const object = createPresentationObject(type, slide.objects.length + 1);
-        slide.objects.push(object);
-        return object;
-      };
-      let visible = slide.objects.filter((object) => !object.hidden);
-      let title = visible.find((object) => object.type === "text");
-      if (!title) {
-        title = nextObject("text");
-        visible = [...visible, title];
-      }
-      const remaining = () =>
-        visible.filter((object) => object.id !== title?.id);
-      if (layoutId === "title-only" && title) {
-        Object.assign(title, {
-          x: 90,
-          y: canvasHeight * 0.33,
-          width: 820,
-          height: canvasHeight * 0.22,
-        });
-        return;
-      }
-      if (layoutId === "statement" && title) {
-        Object.assign(title, {
-          x: 110,
-          y: canvasHeight * 0.25,
-          width: 780,
-          height: canvasHeight * 0.5,
-          style: {
-            ...title.style,
-            fontSize: 58,
-            fontWeight: 720,
-            align: "center",
-          },
-        });
-        return;
-      }
-      if (layoutId === "full-bleed") {
-        const hero =
-          visible.find((object) =>
-            ["image", "video", "shape"].includes(object.type),
-          ) ?? visible[0];
-        if (hero)
-          Object.assign(hero, {
-            x: 0,
-            y: 0,
-            width: 1_000,
-            height: canvasHeight,
-          });
-        if (title && title.id !== hero?.id)
-          Object.assign(title, {
-            x: 70,
-            y: canvasHeight * 0.68,
-            width: 860,
-            height: canvasHeight * 0.18,
-          });
-        return;
-      }
-      if (layoutId === "title-visual-text" || layoutId === "visual-story") {
-        let visual = remaining().find((object) =>
-          ["image", "video", "chart", "shape", "embed"].includes(object.type),
-        );
-        if (!visual) {
-          visual = nextObject("shape");
-          visual.content = {
-            shape: "rounded-rectangle",
-            text: "Add a visual",
-          };
-          visible = [...visible, visual];
-        }
-        const bodies = remaining().filter(
-          (object) => object.type === "text" && object.id !== visual?.id,
-        );
-        if (!bodies.length) {
-          let body = nextObject("text");
-          body = withPresentationObjectText(body, "Add the supporting idea");
-          slide.objects[slide.objects.length - 1] = body;
-          visible = [...visible, body];
-          bodies.push(body);
-        }
-        if (layoutId === "title-visual-text") {
-          Object.assign(title, { x: 70, y: 45, width: 860, height: 90 });
-          Object.assign(visual, {
-            x: 70,
-            y: 165,
-            width: 500,
-            height: canvasHeight - 215,
-          });
-          const bodyGap = 16;
-          const bodyHeight =
-            (canvasHeight - 215 - bodyGap * (bodies.length - 1)) /
-            bodies.length;
-          bodies.forEach((body, index) =>
-            Object.assign(body, {
-              x: 610,
-              y: 165 + index * (bodyHeight + bodyGap),
-              width: 320,
-              height: bodyHeight,
-            }),
-          );
-        } else {
-          Object.assign(visual, {
-            x: 0,
-            y: 0,
-            width: 570,
-            height: canvasHeight,
-          });
-          Object.assign(title, {
-            x: 620,
-            y: 100,
-            width: 320,
-            height: 145,
-          });
-          const bodyGap = 14;
-          const bodyHeight =
-            (canvasHeight - 320 - bodyGap * (bodies.length - 1)) /
-            bodies.length;
-          bodies.forEach((body, index) =>
-            Object.assign(body, {
-              x: 620,
-              y: 270 + index * (bodyHeight + bodyGap),
-              width: 310,
-              height: bodyHeight,
-            }),
-          );
-        }
-        return;
-      }
-      if (layoutId === "three-ideas") {
-        Object.assign(title, { x: 70, y: 45, width: 860, height: 90 });
-        const cards = remaining().filter((object) => object.type !== "group");
-        while (cards.length < 3) {
-          const card = nextObject("shape");
-          card.content = {
-            shape: "rounded-rectangle",
-            text: `Key idea ${cards.length + 1}`,
-          };
-          cards.push(card);
-        }
-        cards.slice(0, 3).forEach((card, index) =>
-          Object.assign(card, {
-            x: 70 + index * 300,
-            y: 175,
-            width: 260,
-            height: canvasHeight - 235,
-          }),
-        );
-        return;
-      }
-      if (title) Object.assign(title, { x: 70, y: 52, width: 860, height: 92 });
-      remaining().forEach((object, index) => {
-        if (layoutId === "two-column") {
-          const column = index % 2;
-          const row = Math.floor(index / 2);
-          Object.assign(object, {
-            x: column ? 525 : 70,
-            y: Math.min(canvasHeight - 40, 175 + row * 170),
-            width: 405,
-            height: Math.max(40, Math.min(145, canvasHeight - 190 - row * 170)),
-          });
-        } else {
-          Object.assign(object, {
-            x: 90,
-            y: Math.min(canvasHeight - 40, 175 + index * 155),
-            width: 820,
-            height: Math.max(
-              40,
-              Math.min(130, canvasHeight - 190 - index * 155),
-            ),
-          });
-        }
-      });
+      applyPresentationLayout(
+        draft,
+        activeSlideIndex,
+        layoutId as PresentationLayoutId,
+        { createMissing: true, mode: "preserve" },
+      );
     });
   }
   function applyTheme(theme: (typeof THEMES)[number]) {

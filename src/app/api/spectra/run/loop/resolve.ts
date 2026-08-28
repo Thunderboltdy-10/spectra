@@ -1,6 +1,7 @@
 import { buildContext } from "./gather";
 import { provisionalSingleCreation } from "./intake";
 import { remapDocumentSectionRewriteChanges } from "@/features/spectra/ai/document-content-patch";
+import { PRESENTATION_LAYOUT_IDS } from "@/features/spectra/presentation/layouts";
 import {
   promoteMatchingUpdateToCreate,
   promptLooksLikeFocusedStructuralEdit,
@@ -1200,18 +1201,6 @@ export function assertRequestedArtifactMutation(
       "The proposed artifact update did not contain the requested content change.",
     );
 }
-
-export const PRESENTATION_LAYOUT_IDS = [
-  "title-content",
-  "title-only",
-  "two-column",
-  "title-visual-text",
-  "visual-story",
-  "three-ideas",
-  "statement",
-  "full-bleed",
-  "blank",
-] as const;
 
 export function requestedPresentationLayout(prompt: string) {
   const normalized = prompt.toLowerCase().replace(/[–—]/g, "-");

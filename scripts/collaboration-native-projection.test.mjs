@@ -13,6 +13,7 @@ import {
   isNativeArtifactDocument,
   initializeNativeArtifactDocument,
   nativeArtifactProjection,
+  nativeChangedRegionIds,
 } from "./collaboration-native-projection.mjs";
 
 function defaultContent(typeKey) {
@@ -133,5 +134,24 @@ describe("native collaboration gateway projection", () => {
         .map((region) => region.regionId)
         .filter((regionId) => !regionId.startsWith("metadata:")),
     );
+  });
+
+  it("names changed native entities without treating identical projections as empty", () => {
+    const before = {
+      title: "Essay",
+      tags: [],
+      typeKey: "document",
+      content: { blocks: [{ id: "intro", type: "paragraph", text: "a" }] },
+    };
+    const after = {
+      title: "Essay",
+      tags: [],
+      typeKey: "document",
+      content: { blocks: [{ id: "intro", type: "paragraph", text: "b" }] },
+    };
+    expect(nativeChangedRegionIds(before, after)).toEqual(["intro"]);
+    expect(nativeChangedRegionIds(after, after)).toEqual([
+      "$spectra:native-projection",
+    ]);
   });
 });

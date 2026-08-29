@@ -1,6 +1,6 @@
 "use client";
 
-import { HocuspocusProvider } from "@hocuspocus/provider";
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import * as Y from "yjs";
 import type {
   ArtifactCollaborationTransport,
@@ -11,6 +11,7 @@ import type {
 import { readInteractionState } from "./interaction-model";
 import { resolveDocumentRelativeSelection } from "../work/models/yjs/relative-position";
 import { ScopedCollaborationSnapshots } from "./scoped-snapshots";
+import { COLLAB_RECONNECT } from "./reconnect-backoff";
 
 function authenticationActuallyRevoked(reason?: string) {
   const value = (reason ?? "").toUpperCase();
@@ -390,7 +391,16 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       // has been destroyed; doing so creates an invisible reconnect/token loop.
       if (this.destroyed) return;
       this.provider = new HocuspocusProvider({
-        url: initial.url,
+        websocketProvider: new HocuspocusProviderWebsocket({
+          url: initial.url,
+          delay: COLLAB_RECONNECT.delay,
+          factor: COLLAB_RECONNECT.factor,
+          minDelay: COLLAB_RECONNECT.minDelay,
+          maxDelay: COLLAB_RECONNECT.maxDelay,
+          jitter: COLLAB_RECONNECT.jitter,
+          maxAttempts: COLLAB_RECONNECT.maxAttempts,
+          initialDelay: COLLAB_RECONNECT.initialDelay,
+        }),
         name: initial.documentName,
         document: this.document,
         flushDelay: 180,

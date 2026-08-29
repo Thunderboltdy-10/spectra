@@ -1,10 +1,13 @@
 import { spawn } from "node:child_process";
+import { reconnectDelayMs } from "./collaboration-reconnect.mjs";
 
 const port = Number(process.env.SPECTRA_COLLAB_PORT || 1234);
 const healthUrl = `http://127.0.0.1:${port}/_spectra/health`;
 const pollIntervalMs = 2_000;
 let child = null;
 let stopping = false;
+let restartAttempt = 0;
+let restartTimer = null;
 
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -19,7 +22,7 @@ async function probeGateway() {
     if (!response.ok) return { state: "foreign", detail: `HTTP ${response.status}` };
     try {
       const payload = JSON.parse(body);
-      if (payload?.service === "spectra-collaboration-gateway" && payload?.status === "ready") {
+      if (payload?.service === "spectra-collaboration-gateway" && (payload?.status === "ready" || payload?.status === "degraded")) {
         return { state: "spectra", detail: `protocol ${payload.protocolVersion ?? "unknown"}` };
       }
     } catch {
@@ -37,6 +40,10 @@ async function probeGateway() {
 }
 
 function launchGateway() {
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
   const next = spawn(process.execPath, ["scripts/collaboration-gateway.mjs"], {
     cwd: process.cwd(),
     env: process.env,
@@ -47,8 +54,18 @@ function launchGateway() {
   next.once("exit", (code, signal) => {
     if (child === next) child = null;
     if (stopping) return;
+    restartAttempt += 1;
     const reason = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
-    process.stderr.write(`Spectra collaboration gateway stopped with ${reason}; supervising process will recover it.\n`);
+    const retryMs = reconnectDelayMs(restartAttempt - 1);
+    process.stderr.write(
+      `Spectra collaboration gateway stopped with ${reason}; supervising process will recover it in ${retryMs}ms.\n`,
+    );
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      if (stopping || child) return;
+      launchGateway();
+    }, retryMs);
+    restartTimer.unref?.();
   });
   process.stdout.write(`Starting Spectra collaboration gateway on ${port}\n`);
 }
@@ -66,10 +83,18 @@ async function supervise() {
 
   while (!stopping) {
     await wait(pollIntervalMs);
-    if (stopping || child) continue;
+    if (stopping) continue;
+    if (child) {
+      restartAttempt = 0;
+      continue;
+    }
+    if (restartTimer) continue;
     const health = await probeGateway();
-    if (health.state === "absent") launchGateway();
-    else if (health.state === "foreign") throw new Error(`Port ${port} changed ownership to another service (${health.detail}).`);
+    if (health.state === "absent") {
+      launchGateway();
+    } else if (health.state === "foreign") {
+      throw new Error(`Port ${port} changed ownership to another service (${health.detail}).`);
+    }
   }
 }
 

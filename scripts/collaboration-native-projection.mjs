@@ -482,6 +482,49 @@ export function isNativeArtifactDocument(document) {
   return document.getMap(WORK_META_MAP).get("initialized") === true;
 }
 
+function collectEntitySignatures(value, signatures = new Map()) {
+  if (Array.isArray(value)) {
+    for (const entry of value) collectEntitySignatures(entry, signatures);
+    return signatures;
+  }
+  if (!value || typeof value !== "object") return signatures;
+  const node = value;
+  if (typeof node.id === "string" && node.id.trim())
+    signatures.set(node.id, JSON.stringify(node));
+  for (const entry of Object.values(node))
+    collectEntitySignatures(entry, signatures);
+  return signatures;
+}
+
+export function nativeChangedRegionIds(beforeProjection, afterProjection) {
+  if (!afterProjection) return [NATIVE_PROJECTION_REGION];
+  if (!beforeProjection || beforeProjection.typeKey !== afterProjection.typeKey)
+    return ["artifact:structure"];
+  const changed = [];
+  if (beforeProjection.title !== afterProjection.title)
+    changed.push("metadata:title");
+  if ((beforeProjection.summary ?? "") !== (afterProjection.summary ?? ""))
+    changed.push("metadata:summary");
+  if (JSON.stringify(beforeProjection.tags) !== JSON.stringify(afterProjection.tags))
+    changed.push("metadata:tags");
+  const beforeContent = JSON.stringify(beforeProjection.content);
+  const afterContent = JSON.stringify(afterProjection.content);
+  if (beforeContent === afterContent)
+    return changed.length > 0 ? changed : [NATIVE_PROJECTION_REGION];
+  const beforeIds = collectEntitySignatures(beforeProjection.content);
+  const afterIds = collectEntitySignatures(afterProjection.content);
+  const beforeKeys = [...beforeIds.keys()].sort();
+  const afterKeys = [...afterIds.keys()].sort();
+  if (
+    beforeKeys.length !== afterKeys.length ||
+    beforeKeys.some((key, index) => key !== afterKeys[index])
+  )
+    return ["artifact:structure", ...changed];
+  for (const [id, signature] of afterIds)
+    if (beforeIds.get(id) !== signature) changed.push(id);
+  return changed.length > 0 ? [...new Set(changed)] : [NATIVE_PROJECTION_REGION];
+}
+
 export function nativeArtifactProjection(document, schemaVersion) {
   const meta = document.getMap(WORK_META_MAP);
   if (meta.get("initialized") !== true) return null;

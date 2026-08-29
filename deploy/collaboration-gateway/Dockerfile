@@ -1,0 +1,24 @@
+# Build from the repository root so package.json is in the Docker context:
+#   docker build -f deploy/collaboration-gateway/Dockerfile .
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+ENV SPECTRA_COLLAB_PORT=1234
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json ./
+COPY scripts/collaboration-gateway.mjs \
+     scripts/collaboration-native-projection.mjs \
+     scripts/collaboration-checkpoint.mjs \
+     scripts/collaboration-health.mjs \
+     scripts/collaboration-reconnect.mjs \
+     scripts/collaboration-room-state.mjs \
+     ./scripts/
+EXPOSE 1234
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.SPECTRA_COLLAB_PORT||1234)+'/_spectra/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "scripts/collaboration-gateway.mjs"]

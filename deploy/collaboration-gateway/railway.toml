@@ -1,0 +1,10 @@
+[build]
+  builder = "DOCKERFILE"
+  dockerfilePath = "deploy/collaboration-gateway/Dockerfile"
+
+[deploy]
+  restartPolicyType = "ON_FAILURE"
+  restartPolicyMaxRetries = 10
+  healthcheckPath = "/_spectra/health"
+  healthcheckTimeout = 3
+  numReplicas = 1

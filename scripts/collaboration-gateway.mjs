@@ -10,8 +10,15 @@ import {
   initializeNativeArtifactDocument,
   isNativeArtifactDocument,
   nativeArtifactProjection,
+  nativeChangedRegionIds,
   NATIVE_PROJECTION_REGION,
 } from "./collaboration-native-projection.mjs";
+import { createCheckpointScheduler } from "./collaboration-checkpoint.mjs";
+import { gatewayHealthPayload } from "./collaboration-health.mjs";
+import {
+  applyStoredRoomUpdates,
+  shouldCompactRoom,
+} from "./collaboration-room-state.mjs";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
 const tokenSecret = process.env.SPECTRA_COLLAB_TOKEN_SECRET;
@@ -32,11 +39,14 @@ const CODE_LINES_MARKER = "$spectraCodeLines";
 const GATEWAY_PROTOCOL_VERSION = 1;
 const PERSISTENCE_DEBOUNCE_MS = 180;
 const PERSISTENCE_RETRY_MAX_MS = 5_000;
+const GATEWAY_STARTED_AT = Date.now();
 const activeConnections = new Set();
 const documentMessageTails = new WeakMap();
 const pendingMessageReleases = new Map();
 const acceptedDocumentMessages = new Map();
 const documentPersistenceQueues = new WeakMap();
+const documentCheckpointSchedulers = new WeakMap();
+const checkpointSchedulers = new Set();
 let policySweepRunning = false;
 let lastPersistenceFailure = null;
 
@@ -85,6 +95,22 @@ function messageQueue(socketId) {
   if (!acceptedDocumentMessages.has(socketId))
     acceptedDocumentMessages.set(socketId, queue);
   return queue;
+}
+
+function checkpointScheduler(document) {
+  const existing = documentCheckpointSchedulers.get(document);
+  if (existing) return existing;
+  const created = createCheckpointScheduler({
+    persist: (payload) =>
+      bridge("checkpoint", payload).catch((error) => {
+        process.stderr.write(
+          `[checkpoint] ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }),
+  });
+  documentCheckpointSchedulers.set(document, created);
+  checkpointSchedulers.add(created);
+  return created;
 }
 
 function persistenceQueue(document) {
@@ -201,8 +227,11 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
       const first = group[0];
       const last = group[group.length - 1];
       const nativeAfter = isNativeArtifactDocument(scratch);
+      const afterProjection = nativeAfter
+        ? nativeArtifactProjection(scratch, first.context.schemaVersion)
+        : null;
       const regionIds = nativeAfter
-        ? [NATIVE_PROJECTION_REGION]
+        ? nativeChangedRegionIds(first.nativeProjectionBefore, afterProjection)
         : [...new Set(group.flatMap((entry) => entry.regionIds))];
       if (!regionIds.length) {
         for (const entry of group)
@@ -222,7 +251,10 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
       const updateHash = createHash("sha256")
         .update(mergedUpdate)
         .digest("base64url");
-      await appendWithRetry(
+      const immediateProjection =
+        first.context.actorKind === "ai" ||
+        group.some((entry) => entry.nativeInitialization);
+      const appendResult = await appendWithRetry(
         {
           artifactId: first.context.artifactId,
           partitionKey: first.context.partitionKey,
@@ -238,13 +270,29 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
           nativeInitialization: group.some(
             (entry) => entry.nativeInitialization,
           ),
-          projectionJson,
-          projectionHash: projectionJson
-            ? createHash("sha256").update(projectionJson).digest("base64url")
-            : null,
+          projectionJson: immediateProjection ? projectionJson : null,
+          projectionHash:
+            immediateProjection && projectionJson
+              ? createHash("sha256").update(projectionJson).digest("base64url")
+              : null,
         },
         group,
       );
+      if (projectionJson) {
+        checkpointScheduler(document).note({
+          artifactId: first.context.artifactId,
+          partitionKey: first.context.partitionKey,
+          accountId: first.context.accountId,
+          clientId: first.context.clientId,
+          policyVersion: first.context.policyVersion,
+          stateVectorHash: last.stateVectorHash,
+          projectionJson,
+          projectionHash: createHash("sha256")
+            .update(projectionJson)
+            .digest("base64url"),
+          throughSequence: appendResult?.sequence ?? null,
+        });
+      }
     }
   } finally {
     scratch.destroy();
@@ -643,17 +691,19 @@ const server = new Server({
   maxPendingDocuments: 4,
 
   async onRequest({ request, response }) {
-    if (request.url !== "/_spectra/health") return;
+    if (!request.url?.startsWith("/_spectra/health")) return;
     response.writeHead(200, {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
     });
     response.end(
       JSON.stringify({
-        service: "spectra-collaboration-gateway",
-        protocolVersion: GATEWAY_PROTOCOL_VERSION,
-        status: "ready",
-        persistence: lastPersistenceFailure,
+        ...gatewayHealthPayload({
+          protocolVersion: GATEWAY_PROTOCOL_VERSION,
+          connections: activeConnections.size,
+          lastPersistenceFailure,
+          startedAt: GATEWAY_STARTED_AT,
+        }),
       }),
     );
     // Hocuspocus uses an empty rejection to signal that a request hook has
@@ -725,6 +775,9 @@ const server = new Server({
       const nativeBefore = isNativeArtifactDocument(document);
       if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
       const baseStateVectorHash = documentStateVectorHash(document);
+      const nativeProjectionBefore = nativeBefore
+        ? nativeArtifactProjection(document, context.schemaVersion)
+        : null;
       const probe = new Y.Doc();
       try {
         Y.applyUpdate(probe, Y.encodeStateAsUpdate(document));
@@ -754,6 +807,7 @@ const server = new Server({
         documentUpdate,
         before,
         nativeBefore,
+        nativeProjectionBefore,
         baseStateVectorHash,
         messageId: `${context.clientId}:${updateHash}`,
       });
@@ -898,19 +952,13 @@ const server = new Server({
       artifactId: context.artifactId,
       partitionKey: context.partitionKey,
     });
-    const updates = [];
-    if (stored?.snapshot?.update)
-      updates.push(
-        new Uint8Array(Buffer.from(stored.snapshot.update, "base64")),
-      );
-    for (const entry of stored?.updates ?? [])
-      updates.push(new Uint8Array(Buffer.from(entry.update, "base64")));
-    if (updates.length > 0) {
-      const storedDocument = new Y.Doc();
-      Y.applyUpdate(storedDocument, Y.mergeUpdates(updates));
-      if (isNativeArtifactDocument(storedDocument))
-        return Y.encodeStateAsUpdate(storedDocument);
+    const storedDocument = applyStoredRoomUpdates(Y, stored);
+    if (isNativeArtifactDocument(storedDocument)) {
+      const encoded = Y.encodeStateAsUpdate(storedDocument);
+      storedDocument.destroy();
+      return encoded;
     }
+    storedDocument.destroy();
     const document = new Y.Doc();
     if (stored?.initialProjection) {
       if (!initializeNativeArtifactDocument(document, stored.initialProjection))
@@ -957,6 +1005,14 @@ const server = new Server({
       !stored?.roomId ||
       throughSequence <= currentSnapshotSequence ||
       throughSequence <= 0
+    )
+      return;
+    if (
+      !shouldCompactRoom({
+        uncompactedBytes: stored.uncompactedBytes ?? 0,
+        updateCount: stored.updates?.length ?? 0,
+        lastSnapshotAt: stored.lastSnapshotAt ?? null,
+      })
     )
       return;
     const update = Y.encodeStateAsUpdate(document);
@@ -1039,6 +1095,11 @@ process.stdout.write(
 
 async function shutdown() {
   clearInterval(policySweep);
+  await Promise.all(
+    [...checkpointSchedulers].map((scheduler) => scheduler.flush()),
+  );
+  for (const scheduler of checkpointSchedulers) scheduler.dispose();
+  checkpointSchedulers.clear();
   await server.destroy();
   process.exit(0);
 }

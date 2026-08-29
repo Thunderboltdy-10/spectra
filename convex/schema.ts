@@ -2502,6 +2502,8 @@ export default defineSchema({
     snapshotSequence: v.number(),
     uncompactedBytes: v.number(),
     lastSnapshotAt: v.optional(v.number()),
+    lastProjectionSequence: v.optional(v.number()),
+    lastProjectionAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

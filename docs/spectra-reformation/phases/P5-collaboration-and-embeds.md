@@ -43,3 +43,14 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - Focused Vitest: 5 files / 39 tests. Scoped ESLint: 0 errors on new logic; existing studio token warnings unchanged.
 - Secret scan 2191 files; `git diff --check` passed. L4 live 30-client budgets remain P5.V1.
 - Status: IMPLEMENTED. No acceptance claimed.
+
+### P5.I2 implementation log (2026-08-29)
+
+- Hosting: Fly.io (chosen) vs Railway vs Hetzner. Fly: sticky single machine, native WS + HTTP health, `auto_stop` off, Madrid. Railway: easy git deploy, idle-sleep risk unless paid. Hetzner: cheapest always-on, you run compose/TLS/restarts. Config: `deploy/collaboration-gateway/` (Dockerfile, fly.toml, railway.toml, compose.yml). No live deploy — Pablo owns secrets and the host flip.
+- Human append stores the Yjs update and state-vector hash only; `artifact.content` / `textIndex` / Library title move on idle 2s / max 15s checkpoint (durable-ack kept). AI writes and native initialization still project on append.
+- Gateway `/_spectra/health` reports `ready` or `degraded` with connections/uptime. Dev supervisor backoff on child exit; client `HocuspocusProviderWebsocket` uses the same 400ms×2 band, cap 12s, jitter.
+- Restart reload: `onLoadDocument` applies Convex snapshot + later updates. Compaction when uncompacted ≥256KB, ≥200 updates, first snapshot, or 60s idle; `verifySnapshot` deletes compacted updates and superseded snapshots.
+- Focused Vitest: 3 files / 25 tests (`collaboration-checkpoint`, `collaboration-gateway`, `collaboration-native-projection`). Scoped ESLint: 0 errors. Secret scan 2195 files; `git diff --check` passed.
+- CS-9 payload GC (`beginPayloadUpload` refCount) is not this unit. L4 30-client / multi-writer stays P5.V1. Embeds stay P5.I3.
+- Status: IMPLEMENTED. No acceptance claimed.
+

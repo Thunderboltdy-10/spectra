@@ -315,12 +315,11 @@ export const verifySnapshot = internalMutation({
         .filter(
           (candidate) =>
             candidate._id !== snapshot._id &&
-            candidate.status === "verified" &&
+            (candidate.status === "verified" ||
+              candidate.status === "superseded") &&
             candidate.throughSequence <= snapshot.throughSequence,
         )
-        .map((candidate) =>
-          ctx.db.patch(candidate._id, { status: "superseded" }),
-        ),
+        .map((candidate) => ctx.db.delete(candidate._id)),
     );
     const compacted = await ctx.db
       .query("collaborationUpdates")

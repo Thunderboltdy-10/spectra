@@ -22,6 +22,23 @@ type GatewayProjection = {
   content: unknown;
 };
 
+function artifactProjectionPatch(
+  projection: GatewayProjection,
+  projectionHash: string,
+) {
+  return {
+    title: projection.title,
+    summary: projection.summary,
+    tags: projection.tags,
+    content: projection.content,
+    schemaVersion: projection.schemaVersion,
+    validity: "valid" as const,
+    validityIssues: [] as [],
+    contentHash: projectionHash,
+    textIndex: `${projection.title}\n${projection.summary ?? ""}\n${projection.tags.join(" ")}\n${JSON.stringify(projection.content).slice(0, 80_000)}`,
+  };
+}
+
 function parseGatewayProjection(
   projectionJson: string | undefined,
   projectionHash: string | undefined,
@@ -241,6 +258,8 @@ export const load = internalQuery({
       hasMore:
         updates.length === limit &&
         updates[updates.length - 1]!.sequence < room.nextSequence - 1,
+      uncompactedBytes: room.uncompactedBytes,
+      lastSnapshotAt: room.lastSnapshotAt ?? null,
       initialProjection:
         args.afterSequence === 0
           ? {
@@ -361,15 +380,7 @@ export const bootstrapNative = internalMutation({
         updatedAt: now,
       }),
       ctx.db.patch(artifact._id, {
-        title: projection.title,
-        summary: projection.summary,
-        tags: projection.tags,
-        content: projection.content,
-        schemaVersion: projection.schemaVersion,
-        validity: "valid",
-        validityIssues: [],
-        contentHash: args.projectionHash,
-        textIndex: `${projection.title}\n${projection.summary ?? ""}\n${projection.tags.join(" ")}\n${JSON.stringify(projection.content).slice(0, 80_000)}`,
+        ...artifactProjectionPatch(projection, args.projectionHash),
         syncState: "synchronized",
         liveStateVectorHash: args.stateVectorHash,
         lastSynchronizedAt: now,
@@ -471,7 +482,7 @@ export const append = internalMutation({
         q.eq("roomId", room._id).eq("idempotencyKey", idempotencyKey),
       )
       .unique();
-    if (duplicate) return { sequence: duplicate.sequence, duplicate: true };
+    if (duplicate) return { sequence: duplicate.sequence, duplicate: true, projected: false };
     const projection = parseGatewayProjection(
       args.projectionJson,
       args.projectionHash,
@@ -505,7 +516,7 @@ export const append = internalMutation({
     const nativeProjection = declaredRegionIds.includes(
       NATIVE_PROJECTION_REGION,
     );
-    if (nativeProjection && (declaredRegionIds.length !== 1 || !projection))
+    if (nativeProjection && declaredRegionIds.length !== 1)
       throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
     const nativeTypeKey = isArtifactTypeKey(artifact.blueprintKey)
       ? artifact.blueprintKey
@@ -513,24 +524,26 @@ export const append = internalMutation({
     if (nativeProjection && !nativeTypeKey)
       throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
     const regionIds = nativeProjection
-      ? [
-          ...new Set([
-            ...(args.nativeInitialization ? ["artifact:structure"] : []),
-            ...changedArtifactRegionIds(
-              nativeTypeKey!,
-              artifact.content,
-              projection!.content,
-            ),
-            ...(artifact.title !== projection!.title ? ["metadata:title"] : []),
-            ...((artifact.summary ?? "") !== (projection!.summary ?? "")
-              ? ["metadata:summary"]
-              : []),
-            ...(JSON.stringify(artifact.tags) !==
-            JSON.stringify(projection!.tags)
-              ? ["metadata:tags"]
-              : []),
-          ]),
-        ]
+      ? projection
+        ? [
+            ...new Set([
+              ...(args.nativeInitialization ? ["artifact:structure"] : []),
+              ...changedArtifactRegionIds(
+                nativeTypeKey!,
+                artifact.content,
+                projection.content,
+              ),
+              ...(artifact.title !== projection.title ? ["metadata:title"] : []),
+              ...((artifact.summary ?? "") !== (projection.summary ?? "")
+                ? ["metadata:summary"]
+                : []),
+              ...(JSON.stringify(artifact.tags) !==
+              JSON.stringify(projection.tags)
+                ? ["metadata:tags"]
+                : []),
+            ]),
+          ]
+        : []
       : declaredRegionIds;
     if (nativeProjection && regionIds.length === 0) {
       // A reconnect can legitimately add Yjs-only convergence metadata while
@@ -700,8 +713,12 @@ export const append = internalMutation({
           ...new Set([...changeGroup.operationIds, ...aiOperationIds]),
         ],
         finalStateVectorHash: args.stateVectorHash,
-        finalSnapshot,
-        finalIntegrityHash: args.projectionHash ?? args.stateVectorHash,
+        ...(projection
+          ? {
+              finalSnapshot,
+              finalIntegrityHash: args.projectionHash ?? args.stateVectorHash,
+            }
+          : {}),
         lastActivityAt: now,
       });
     }
@@ -726,17 +743,7 @@ export const append = internalMutation({
       updatedAt: now,
     });
     const projectionPatch = projection
-      ? {
-          title: projection.title,
-          summary: projection.summary,
-          tags: projection.tags,
-          content: projection.content,
-          schemaVersion: projection.schemaVersion,
-          validity: "valid" as const,
-          validityIssues: [],
-          contentHash: args.projectionHash,
-          textIndex: `${projection.title}\n${projection.summary ?? ""}\n${projection.tags.join(" ")}\n${JSON.stringify(projection.content).slice(0, 80_000)}`,
-        }
+      ? artifactProjectionPatch(projection, args.projectionHash!)
       : {};
     await ctx.db.patch(artifact._id, {
       ...projectionPatch,
@@ -784,6 +791,135 @@ export const append = internalMutation({
           { groupId: changeGroup._id, expectedLastActivityAt: now },
         );
     }
-    return { sequence, duplicate: false, regionIds };
+    return { sequence, duplicate: false, regionIds, projected: Boolean(projection) };
+  },
+});
+
+export const checkpoint = internalMutation({
+  args: {
+    accountId: v.id("accounts"),
+    artifactId: v.id("spectraArtifacts"),
+    partitionKey: v.string(),
+    clientId: v.string(),
+    policyVersion: v.number(),
+    stateVectorHash: v.string(),
+    projectionJson: v.string(),
+    projectionHash: v.string(),
+    throughSequence: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const [actor, artifact, room] = await Promise.all([
+      getActorForAccountId(ctx, args.accountId),
+      ctx.db.get(args.artifactId),
+      ctx.db
+        .query("collaborationRooms")
+        .withIndex("by_artifact_partition", (q) =>
+          q
+            .eq("artifactId", args.artifactId)
+            .eq("partitionKey", args.partitionKey),
+        )
+        .unique(),
+    ]);
+    if (
+      !actor ||
+      !artifact ||
+      !room ||
+      room.status === "closed" ||
+      (artifact.status !== "active" && artifact.status !== "draft") ||
+      artifact.schoolId !== actor.schoolId
+    )
+      throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
+    const resourceType =
+      artifact.blueprintKey === "agent"
+        ? ("agent" as const)
+        : ("artifact" as const);
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      resourceType,
+      artifact._id,
+    );
+    const policy = await ctx.db
+      .query("resourcePolicies")
+      .withIndex("by_resource", (q) =>
+        q.eq("resourceType", resourceType).eq("resourceId", artifact._id),
+      )
+      .unique();
+    const currentPolicyVersion = policy?.version ?? 0;
+    const canModify =
+      artifact.ownerAccountId === actor.accountId ||
+      decision.capabilities.includes("modify");
+    if (
+      !decision.allowed ||
+      !canModify ||
+      currentPolicyVersion !== args.policyVersion ||
+      room.policyVersion !== currentPolicyVersion
+    )
+      throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
+    const projection = parseGatewayProjection(
+      args.projectionJson,
+      args.projectionHash,
+      artifact,
+    );
+    if (!projection) throw new Error("COLLABORATION_PROJECTION_INVALID");
+    if (artifact.contentHash === args.projectionHash)
+      return {
+        sequence: room.lastProjectionSequence ?? room.nextSequence - 1,
+        duplicate: true,
+      };
+    if (
+      artifact.liveStateVectorHash &&
+      artifact.liveStateVectorHash !== args.stateVectorHash
+    )
+      return {
+        sequence: room.lastProjectionSequence ?? room.nextSequence - 1,
+        stale: true,
+      };
+    const throughSequence = Math.max(
+      0,
+      Math.min(
+        args.throughSequence ?? room.nextSequence - 1,
+        room.nextSequence - 1,
+      ),
+    );
+    const now = Date.now();
+    if (!args.clientId.trim()) throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
+    const finalSnapshot = {
+      title: projection.title,
+      summary: projection.summary,
+      content: projection.content,
+      tags: projection.tags,
+    };
+    await ctx.db.patch(artifact._id, {
+      ...artifactProjectionPatch(projection, args.projectionHash),
+      syncState: "synchronized",
+      liveStateVectorHash: args.stateVectorHash,
+      lastSynchronizedAt: now,
+      updatedAt: now,
+    });
+    await ctx.db.patch(room._id, {
+      lastProjectionSequence: throughSequence,
+      lastProjectionAt: now,
+      updatedAt: now,
+    });
+    await syncSourceNodes(ctx, "work", artifact._id, projection.title);
+    const openGroups = await ctx.db
+      .query("changeGroups")
+      .withIndex("by_artifact_status_activity", (q) =>
+        q.eq("artifactId", artifact._id).eq("status", "open"),
+      )
+      .collect();
+    await Promise.all(
+      openGroups
+        .filter((group) => group.source === "human")
+        .map((group) =>
+          ctx.db.patch(group._id, {
+            finalStateVectorHash: args.stateVectorHash,
+            finalSnapshot,
+            finalIntegrityHash: args.projectionHash,
+          }),
+        ),
+    );
+    return { sequence: throughSequence, duplicate: false };
   },
 });

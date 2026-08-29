@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.shots
+.playwright
+.playwright-cli
+bridge/target
+coverage
+*.md
+.env*
+!.env.example
+ai-education-workspace-landing-page

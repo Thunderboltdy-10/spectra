@@ -27,3 +27,19 @@ The composition matrix, adversarially: two humans + one AI editing one artifact;
 ## Exit gate
 
 Load + composition suites recorded; L4 budgets met at densities; embed journeys PASS; no truth divergence reproducible between Yjs, Convex projection, and bytes under the matrix; Pablo pass with a second human.
+
+### P5.I1 implementation log (2026-08-29)
+
+- Three snapshot identities on the transport: sync (connection/durability), presence (cursors), preview (target path / speculation, not cursor x/y).
+- `useArtifactCollaboration` subscribes to sync only; studio body uses `usePresencePreview`; cursor/indicator/InteractionLayer are leaves on `usePresence`.
+- Presence preview listeners fire only when the signature changes; empty `[]` reuses `EMPTY_PRESENCE` so sync ticks do not wake the cursor layer.
+- InteractionLayer observers bind to frame identity, not point JSON.
+- Presentation `producePresentationContent` keeps untouched slide/object identity; pointermove mutates a local `gestureDeck` and commits on pointerup.
+- Document collab `onUpdate` no longer `getJSON`/stringify; `refreshToolbar` is gone. TipTap still re-renders DocumentStudio on transactions (workbar not extracted).
+- Sheets commit uses structural `sameContent` plus a bounded identity hash; no whole-workbook stringify on that path.
+- Persistence `patch()` is equality-gated; eviction uses `listMeta()`; IDB v2 `work-meta` store.
+- Workbar overflow warn is once per `label:tab`, not every render. Shape essentials were not demoted.
+- Taste: preview includes every peer's path/act so Follow-human stays in the studio without cursor frames; drag defers parent `onChange` until pointerup.
+- Focused Vitest: 5 files / 39 tests. Scoped ESLint: 0 errors on new logic; existing studio token warnings unchanged.
+- Secret scan 2191 files; `git diff --check` passed. L4 live 30-client budgets remain P5.V1.
+- Status: IMPLEMENTED. No acceptance claimed.

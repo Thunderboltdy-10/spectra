@@ -149,6 +149,22 @@ export type CollaborationTransportSnapshot = {
   error?: string;
 };
 
+export type CollaborationSyncSnapshot = {
+  state: CollaborationSyncState;
+  level: "read" | "modify" | null;
+  accountId?: string;
+  displayName?: string;
+  unsynchronizedChanges: number;
+  error?: string;
+};
+
+export type PresencePreviewSnapshot = {
+  signature: string;
+  aiCollaborator: CollaborationPresence | null;
+  patches: Array<{ path: string; value: unknown }>;
+  people: CollaborationPresence[];
+};
+
 export type CollaborationActorIdentity = {
   accountId: string;
   clientId: string;
@@ -206,6 +222,12 @@ export type ArtifactCollaborationTransport = {
   readonly clientId: string;
   getSnapshot(): CollaborationTransportSnapshot;
   subscribe(listener: () => void): () => void;
+  getSyncSnapshot(): CollaborationSyncSnapshot;
+  subscribeSync(listener: () => void): () => void;
+  getPresenceSnapshot(): CollaborationPresence[];
+  subscribePresence(listener: () => void): () => void;
+  getPresencePreviewSnapshot(): PresencePreviewSnapshot;
+  subscribePresencePreview(listener: () => void): () => void;
   connect(): Promise<void>;
   retry(): Promise<void>;
   disconnect(): void;

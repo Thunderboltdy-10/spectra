@@ -41,6 +41,30 @@ export class LegacyArtifactTransportAdapter
     return this.legacy.subscribe(listener);
   }
 
+  getSyncSnapshot() {
+    return this.legacy.getSyncSnapshot();
+  }
+
+  subscribeSync(listener: () => void) {
+    return this.legacy.subscribeSync(listener);
+  }
+
+  getPresenceSnapshot() {
+    return this.legacy.getPresenceSnapshot();
+  }
+
+  subscribePresence(listener: () => void) {
+    return this.legacy.subscribePresence(listener);
+  }
+
+  getPresencePreviewSnapshot() {
+    return this.legacy.getPresencePreviewSnapshot();
+  }
+
+  subscribePresencePreview(listener: () => void) {
+    return this.legacy.subscribePresencePreview(listener);
+  }
+
   connect() {
     return this.legacy.connect();
   }

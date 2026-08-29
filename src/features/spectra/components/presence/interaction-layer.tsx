@@ -152,7 +152,7 @@ function placementRequest(state: InteractionState) {
 
 /** Semantic identity of a frame: position changes without a signature change
  * mean the surface moved (scroll/reflow), not that the actor travelled. */
-function frameSignature(state: InteractionState): string {
+function frameIdentity(state: InteractionState): string {
   return [
     state.actor.clientId,
     state.act.kind,
@@ -164,6 +164,12 @@ function frameSignature(state: InteractionState): string {
       ? `${state.target.scope.kind}:${state.target.scope.id}`
       : "",
     state.menu?.highlighted ?? "",
+  ].join("~");
+}
+
+function frameSignature(state: InteractionState): string {
+  return [
+    frameIdentity(state),
     "point" in state.act ? JSON.stringify(state.act.point) : "",
     "span" in state.act ? JSON.stringify(state.act.span) : "",
   ].join("~");
@@ -221,10 +227,13 @@ export const InteractionLayer = memo(function InteractionLayer({
     effectsMutedRef.current = simplified || dense;
   }, [simplified, dense]);
 
-  const signature = useMemo(
-    () => actors.map(frameSignature).join("|"),
+  const identity = useMemo(
+    () => actors.map(frameIdentity).join("|"),
     [actors],
   );
+  const actorsRef = useRef(actors);
+  actorsRef.current = actors;
+  const scheduleMeasureRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     const anchor = anchorRef.current;
@@ -249,7 +258,7 @@ export const InteractionLayer = memo(function InteractionLayer({
       let keepAnimating = false;
       let nextStaleDelay = Number.POSITIVE_INFINITY;
 
-      for (const state of actors) {
+      for (const state of actorsRef.current) {
         const key = state.actor.clientId;
         seen.add(key);
         let runtime = runtimes.get(key);
@@ -428,6 +437,7 @@ export const InteractionLayer = memo(function InteractionLayer({
       }
       frame = requestAnimationFrame(measure);
     };
+    scheduleMeasureRef.current = scheduleMeasure;
 
     const resize = new ResizeObserver(scheduleMeasure);
     resize.observe(surface);
@@ -444,7 +454,11 @@ export const InteractionLayer = memo(function InteractionLayer({
       window.removeEventListener("resize", scheduleMeasure);
       document.removeEventListener("visibilitychange", scheduleMeasure);
     };
-  }, [actors, signature]);
+  }, [identity]);
+
+  useEffect(() => {
+    scheduleMeasureRef.current();
+  }, [actors]);
 
   if (!visuals.length) {
     return (

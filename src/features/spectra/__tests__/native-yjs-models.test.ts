@@ -570,6 +570,9 @@ describe("native fine-grained Yjs models", () => {
       list() {
         return this.base.list();
       }
+      listMeta() {
+        return this.base.listMeta();
+      }
     }
     const store = new DelayedStore();
     const document = codeYjsAdapter.createDocument(

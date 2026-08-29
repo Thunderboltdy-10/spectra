@@ -275,8 +275,61 @@ type Viewport = {
   scrollTop: number;
 };
 
+function cellSame(left?: SheetCell, right?: SheetCell) {
+  if (left === right) return true;
+  if (!left || !right) return !left && !right;
+  return (
+    left.value === right.value &&
+    left.formula === right.formula &&
+    left.format === right.format &&
+    left.nativeFormulaSupport === right.nativeFormulaSupport
+  );
+}
+
 function sameContent(left: SheetsContent, right: SheetsContent) {
-  return JSON.stringify(left) === JSON.stringify(right);
+  if (left === right) return true;
+  if (left.activeSheetId !== right.activeSheetId) return false;
+  if (left.sheets.length !== right.sheets.length) return false;
+  return left.sheets.every((sheet, index) => {
+    const other = right.sheets[index];
+    if (!other) return false;
+    if (sheet === other) return true;
+    if (sheet.id !== other.id || sheet.name !== other.name) return false;
+    const leftKeys = Object.keys(sheet.cells);
+    const rightKeys = Object.keys(other.cells);
+    if (leftKeys.length !== rightKeys.length) return false;
+    return leftKeys.every(
+      (address) =>
+        Object.prototype.hasOwnProperty.call(other.cells, address) &&
+        cellSame(sheet.cells[address], other.cells[address]),
+    );
+  });
+}
+
+function workbookIdentityKey(content: SheetsContent) {
+  let hash = 2166136261;
+  const mix = (value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+  };
+  mix(content.activeSheetId);
+  mix(String(content.sheets.length));
+  for (const sheet of content.sheets) {
+    mix(sheet.id);
+    mix(sheet.name);
+    const addresses = Object.keys(sheet.cells);
+    mix(String(addresses.length));
+    for (const address of addresses) {
+      const cell = sheet.cells[address];
+      mix(address);
+      mix(String(cell?.value ?? ""));
+      mix(cell?.formula ?? "");
+      mix(cell?.format ? JSON.stringify(cell.format) : "");
+    }
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function cellInput(cell?: SheetCell) {
@@ -1326,7 +1379,7 @@ export function SheetsStudio({
   const recentEmittedKeysRef = useRef(new Set<string>());
 
   const rememberEmitted = useCallback((next: SheetsContent) => {
-    const key = JSON.stringify(next);
+    const key = workbookIdentityKey(next);
     lastEmittedKeyRef.current = key;
     const recent = recentEmittedKeysRef.current;
     recent.add(key);
@@ -1362,15 +1415,12 @@ export function SheetsStudio({
   }, [grantLocked]);
 
   useEffect(() => {
-    const incomingKey = JSON.stringify(incoming);
-    if (incomingKey === JSON.stringify(workbook)) {
+    if (incoming === workbookRef.current) return;
+    const incomingKey = workbookIdentityKey(incoming);
+    if (sameContent(incoming, workbook)) {
       recentEmittedKeysRef.current.delete(incomingKey);
       return;
     }
-    // React can deliver several local `onChange` echoes after a newer edit has
-    // already rendered. Treat every recently emitted workbook as an
-    // acknowledgement, not just the latest one; otherwise an older echo rolls
-    // the grid back and rapid data entry appears to retain only the final cell.
     if (
       incomingKey === lastEmittedKeyRef.current ||
       recentEmittedKeysRef.current.delete(incomingKey)

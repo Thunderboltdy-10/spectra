@@ -37,7 +37,7 @@ import {
   WorkbarControlMenuRow,
   isRenderedControl,
 } from "./workbar-controls";
-import { planWorkbarOverflow, sameIdList, shouldCommitWorkbarPlan, shouldIgnoreWorkbarHostResize, shouldReplaceWorkbarPlan, workbarPlanKey } from "./workbar-overflow";
+import { planWorkbarOverflow, sameIdList, shouldCommitWorkbarPlan, shouldIgnoreWorkbarHostResize, shouldReplaceWorkbarPlan, shouldWarnEssentialOverBudget, workbarPlanKey } from "./workbar-overflow";
 
 export type { CommandBinding } from "../commands";
 
@@ -357,7 +357,11 @@ export function ArtifactWorkbar({
 
   if (
     process.env.NODE_ENV !== "production" &&
-    actionsWeight(essential) > BAR_BUDGET.comfortable
+    shouldWarnEssentialOverBudget(
+      `${label}:${activeTab}`,
+      actionsWeight(essential),
+      BAR_BUDGET.comfortable,
+    )
   ) {
     console.warn(
       `[spectra] ${label}: essential actions are ${actionsWeight(essential).toFixed(1)} button-widths wide on "${activeTab}", past the ${BAR_BUDGET.comfortable} the bar can show at full width. Demote the tail to "secondary" so the shedding order stays a decision rather than an accident.`,

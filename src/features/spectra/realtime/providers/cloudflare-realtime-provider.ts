@@ -12,6 +12,7 @@ import type {
 import { SPECTRA_PROTOCOL_VERSIONS } from "../../migrations/protocol";
 import { isEmptyYjsUpdate } from "../../work/models/yjs/shared";
 import { resolveDocumentRelativeSelection } from "../../work/models/yjs/relative-position";
+import { ScopedCollaborationSnapshots } from "../../collaboration/scoped-snapshots";
 
 type ProviderOptions = {
   workId: string;
@@ -54,13 +55,9 @@ export class CloudflareRealtimeProvider
   readonly clientId: string;
   private readonly remoteOrigin = Symbol("cloudflare-remote");
   private socket: WebSocket | null = null;
-  private listeners = new Set<() => void>();
-  private snapshot: CollaborationTransportSnapshot = {
+  private readonly snapshots = new ScopedCollaborationSnapshots({
     state: "closed",
-    level: null,
-    unsynchronizedChanges: 0,
-    presence: [],
-  };
+  });
   private awarenessSequence = 0;
   private pendingUpdates: Uint8Array[] = [];
   private pendingLeases = new Map<
@@ -92,21 +89,23 @@ export class CloudflareRealtimeProvider
     this.document.on("update", (update: Uint8Array, origin: unknown) => {
       if (origin === this.remoteOrigin) return;
       this.pendingUpdates.push(update);
-      this.snapshot = {
-        ...this.snapshot,
-        unsynchronizedChanges: this.pendingUpdates.length,
-      };
+      this.patch({ unsynchronizedChanges: this.pendingUpdates.length });
       this.send({ type: "sync_update", update, origin: String(origin ?? "user") });
-      this.publish();
     });
   }
 
-  getSnapshot = () => this.snapshot;
+  private get snapshot() {
+    return this.snapshots.getSnapshot();
+  }
 
-  subscribe = (listener: () => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
+  getSnapshot = this.snapshots.getSnapshot;
+  getSyncSnapshot = this.snapshots.getSyncSnapshot;
+  getPresenceSnapshot = this.snapshots.getPresenceSnapshot;
+  getPresencePreviewSnapshot = this.snapshots.getPresencePreviewSnapshot;
+  subscribe = this.snapshots.subscribe;
+  subscribeSync = this.snapshots.subscribeSync;
+  subscribePresence = this.snapshots.subscribePresence;
+  subscribePresencePreview = this.snapshots.subscribePresencePreview;
 
   async connect() {
     if (this.socket && this.socket.readyState <= 1) return;
@@ -169,7 +168,7 @@ export class CloudflareRealtimeProvider
   destroy() {
     this.disconnect();
     this.rejectPendingCoordination("COLLABORATION_CLOSED");
-    this.listeners.clear();
+    this.snapshots.clear();
     this.leaseReleaseListeners.clear();
     this.claimReleaseListeners.clear();
     this.document.destroy();
@@ -486,11 +485,6 @@ export class CloudflareRealtimeProvider
   }
 
   private patch(patch: Partial<CollaborationTransportSnapshot>) {
-    this.snapshot = { ...this.snapshot, ...patch };
-    this.publish();
-  }
-
-  private publish() {
-    for (const listener of this.listeners) listener();
+    this.snapshots.apply({ ...this.snapshot, ...patch });
   }
 }

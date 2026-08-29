@@ -139,3 +139,17 @@ export function shouldIgnoreWorkbarHostResize(
 ) {
   return previousWidth !== null && previousWidth === nextWidth;
 }
+
+const warnedEssentialBudgets = new Set<string>();
+
+/** Dev contract: essential actions that cannot fit the bar should warn once per tab, not every render. */
+export function shouldWarnEssentialOverBudget(
+  key: string,
+  essentialWeight: number,
+  budget: number,
+) {
+  if (essentialWeight <= budget) return false;
+  if (warnedEssentialBudgets.has(key)) return false;
+  warnedEssentialBudgets.add(key);
+  return true;
+}

@@ -10,6 +10,7 @@ import type {
 } from "./types";
 import { readInteractionState } from "./interaction-model";
 import { resolveDocumentRelativeSelection } from "../work/models/yjs/relative-position";
+import { ScopedCollaborationSnapshots } from "./scoped-snapshots";
 
 function authenticationActuallyRevoked(reason?: string) {
   const value = (reason ?? "").toUpperCase();
@@ -219,7 +220,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   readonly document = new Y.Doc();
   readonly clientId: string;
   private provider: HocuspocusProvider | null = null;
-  private listeners = new Set<() => void>();
+  private readonly snapshots = new ScopedCollaborationSnapshots();
   private state: CollaborationSyncState = "connecting";
   private level: "read" | "modify" | null = null;
   private accountId?: string;
@@ -236,12 +237,6 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private intentionallyDisconnected = false;
   private authorizationTimer?: number;
   private authorizationRefreshRunning = false;
-  private snapshot: CollaborationTransportSnapshot = {
-    state: "connecting",
-    level: null,
-    unsynchronizedChanges: 0,
-    presence: [],
-  };
 
   constructor(
     private readonly artifactId: string,
@@ -251,16 +246,15 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     this.clientId = clientIdentity(artifactId);
   }
 
-  getSnapshot = (): CollaborationTransportSnapshot => this.snapshot;
-
-  subscribe = (listener: () => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
-
-  private emit() {
-    for (const listener of this.listeners) listener();
-  }
+  getSnapshot = (): CollaborationTransportSnapshot =>
+    this.snapshots.getSnapshot();
+  getSyncSnapshot = this.snapshots.getSyncSnapshot;
+  getPresenceSnapshot = this.snapshots.getPresenceSnapshot;
+  getPresencePreviewSnapshot = this.snapshots.getPresencePreviewSnapshot;
+  subscribe = this.snapshots.subscribe;
+  subscribeSync = this.snapshots.subscribeSync;
+  subscribePresence = this.snapshots.subscribePresence;
+  subscribePresencePreview = this.snapshots.subscribePresencePreview;
 
   private update(next: Partial<CollaborationTransportSnapshot>) {
     if (next.state) this.state = next.state;
@@ -271,16 +265,15 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       this.unsynchronizedChanges = next.unsynchronizedChanges;
     if (next.presence) this.presence = next.presence;
     if (next.error !== undefined) this.error = next.error;
-    this.snapshot = {
+    this.snapshots.apply({
       state: this.state,
       level: this.level,
       ...(this.accountId ? { accountId: this.accountId } : {}),
       ...(this.displayName ? { displayName: this.displayName } : {}),
       unsynchronizedChanges: this.unsynchronizedChanges,
-      presence: this.presence,
+      ...(next.presence ? { presence: this.presence } : {}),
       ...(this.error ? { error: this.error } : {}),
-    };
-    this.emit();
+    });
   }
 
   private updateSynchronizationState(error?: string) {
@@ -702,7 +695,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     this.provider = null;
     this.document.destroy();
     this.update({ state: "closed", presence: [] });
-    this.listeners.clear();
+    this.snapshots.clear();
   }
 
   async retry() {

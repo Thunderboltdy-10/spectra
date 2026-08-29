@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { planWorkbarOverflow, sameIdList, shouldCommitWorkbarPlan, shouldIgnoreWorkbarHostResize, shouldReplaceWorkbarPlan } from "../components/workbar-overflow";
+import { planWorkbarOverflow, sameIdList, shouldCommitWorkbarPlan, shouldIgnoreWorkbarHostResize, shouldReplaceWorkbarPlan, shouldWarnEssentialOverBudget } from "../components/workbar-overflow";
 
 function item(
   id: string,
@@ -74,6 +74,13 @@ describe("planWorkbarOverflow", () => {
     expect(shouldIgnoreWorkbarHostResize(null, 720)).toBe(false);
     expect(shouldIgnoreWorkbarHostResize(720, 720)).toBe(true);
     expect(shouldIgnoreWorkbarHostResize(720, 640)).toBe(false);
+  });
+
+  it("warns once per overflowing tab instead of on every render", () => {
+    const key = `presentation:Shape:${Math.random()}`;
+    expect(shouldWarnEssentialOverBudget(key, 20.6, 11)).toBe(true);
+    expect(shouldWarnEssentialOverBudget(key, 20.6, 11)).toBe(false);
+    expect(shouldWarnEssentialOverBudget(key, 8, 11)).toBe(false);
   });
 
   it("does not wipe oscillation guards when only disabled flags change", () => {

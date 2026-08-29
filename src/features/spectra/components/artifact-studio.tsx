@@ -120,6 +120,7 @@ import { useJoinLateArrival } from "../collaboration/presentation-lane";
 import { targetAttrs } from "../collaboration/target-attributes";
 import type { CollaborationPresence } from "../collaboration/types";
 import { useArtifactLiveModel } from "../collaboration/use-artifact-live-model";
+import { usePresencePreview } from "../collaboration/scoped-hooks";
 import { useInteractionPresence } from "../collaboration/use-interaction-presence";
 import { contextSourceRegistry } from "../context";
 import {
@@ -198,12 +199,12 @@ import {
 } from "./artifact-studio-value-utils";
 export { tagsFromDraft } from "./artifact-studio-value-utils";
 import {
-  CollaborationCursorLayer,
-  CollaborationPresenceIndicator,
-} from "./collaboration-presence";
+  StudioInteractionLayer,
+  StudioLegacyCursorLayer,
+  StudioPresenceIndicator,
+} from "./studio-presence-layer";
 import { ContextSourceBoundary } from "./context-source-boundary";
 import { ThreadConversation } from "./conversation-surface";
-import { InteractionLayer } from "./presence/interaction-layer";
 import { SandboxedArtifactRuntime } from "./sandboxed-artifact-runtime";
 import {
   artifactPlacements,
@@ -3748,34 +3749,9 @@ function ArtifactStudioEditor({
       ),
     [activeAiEffects, artifact.aiState],
   );
-  const activeAiCollaborator = useMemo(() => {
-    const aiCollaborators = live.presence.filter(
-      (person) =>
-        person.actorKind === "ai" ||
-        person.interactionState?.actor.kind === "ai",
-    );
-    // Protocol v2 is authoritative: one actor frame owns presence, native
-    // choreography, provisional content, contention and lifecycle. The v1
-    // preview fields remain only as a bounded compatibility fallback.
-    return (
-      aiCollaborators.find(
-        (person) =>
-          person.interactionState && stateIsVisible(person.interactionState),
-      ) ??
-      aiCollaborators.find((person) => person.previewPhase === "streaming") ??
-      aiCollaborators.find(
-        (person) => (person.previewPatches?.length ?? 0) > 0,
-      ) ??
-      null
-    );
-  }, [live.presence]);
-  const activeAiPreviewPatches = useMemo(
-    () =>
-      activeAiCollaborator?.interactionState?.speculation?.patches?.length
-        ? activeAiCollaborator.interactionState.speculation.patches
-        : (activeAiCollaborator?.previewPatches ?? []),
-    [activeAiCollaborator],
-  );
+  const presencePreviewState = usePresencePreview(live.transport);
+  const activeAiCollaborator = presencePreviewState.aiCollaborator;
+  const activeAiPreviewPatches = presencePreviewState.patches;
   const activeAiPresence =
     activeAiCollaborator && activeAiPreviewPatches.length > 0
       ? activeAiCollaborator
@@ -4212,12 +4188,7 @@ function ArtifactStudioEditor({
   // Never manufacture a second AI body from durable status. If awareness has
   // not arrived yet, the run may say "preparing", but no cursor is invented.
   // The real actor's canonical frame is the only source of visible action.
-  const displayPresence = live.presence;
-  /** Peers that have not adopted the semantic protocol yet. */
-  const legacyPresence = useMemo(
-    () => displayPresence.filter((person) => !person.interactionState),
-    [displayPresence],
-  );
+  const displayPresence = presencePreviewState.people;
   // Existing-artifact edits may only become provisional through the live
   // actor's awareness frames. The Convex preview is a recovery ledger, not a
   // rendering source: using it during cursor/focus/menu beats lets a later
@@ -5302,9 +5273,6 @@ function ArtifactStudioEditor({
   const liveConflictLabel = liveConflict?.regionId
     ? liveDescriptor(liveConflict.regionId)?.label
     : undefined;
-  const collaboratorCount = displayPresence.filter(
-    (person) => person.clientId !== live.transport?.clientId,
-  ).length;
   const currentAccountId = live.accountId;
   const commentRegions = useMemo<ArtifactCommentRegion[]>(() => {
     const semantic = live.modelSnapshot.regionIds.map((regionId) => {
@@ -5624,9 +5592,8 @@ function ArtifactStudioEditor({
       {/* Legacy coarse cursors are only for peers on the pre-v2 protocol.
           Anyone publishing a semantic frame is rendered by InteractionLayer,
           which is what keeps a peer from appearing twice. */}
-      <CollaborationCursorLayer
-        presence={legacyPresence}
-        currentClientId={live.transport?.clientId}
+      <StudioLegacyCursorLayer
+        transport={live.transport}
         currentAccountId={live.accountId}
         currentDisplayName={live.displayName}
       />
@@ -5693,73 +5660,70 @@ function ArtifactStudioEditor({
                 {presentation.action.label}
               </a>
             ) : null}
-            {collaboratorCount > 0 ? (
-              <CollaborationPresenceIndicator
-                presence={displayPresence}
-                currentClientId={live.transport?.clientId}
-                currentAccountId={live.accountId}
-                currentDisplayName={live.displayName}
-                regions={commentRegions}
-                onFocusPresence={(person) => {
-                  const studio = studioSurfaceRef.current;
-                  if (!studio) return;
-                  const blockId =
-                    person.cursor?.anchor?.kind === "block"
-                      ? person.cursor.anchor.id
-                      : person.selection?.ranges[0]?.blockId;
-                  const lineIndex =
-                    person.cursor?.anchor?.lineIndex ??
-                    person.selection?.ranges[0]?.lineIndex;
-                  const regionId = person.activeRegionId;
-                  const target =
-                    (blockId
-                      ? studio.querySelector<HTMLElement>(
-                          `[data-block-id="${
-                            typeof CSS !== "undefined" && CSS.escape
-                              ? CSS.escape(blockId)
-                              : blockId.replace(/["\\]/g, "\\$&")
-                          }"]`,
-                        )
-                      : null) ??
-                    (regionId
-                      ? studio.querySelector<HTMLElement>(
-                          `[data-region-id="${
-                            typeof CSS !== "undefined" && CSS.escape
-                              ? CSS.escape(regionId)
-                              : regionId.replace(/["\\]/g, "\\$&")
-                          }"], [data-ai-path="${
-                            typeof CSS !== "undefined" && CSS.escape
-                              ? CSS.escape(regionId)
-                              : regionId.replace(/["\\]/g, "\\$&")
-                          }"]`,
-                        )
-                      : null) ??
-                    studio.querySelector<HTMLElement>(
-                      '[data-ai-region="true"]',
-                    );
-                  if (!target) return;
-                  let focus: HTMLElement = target;
-                  if (
-                    typeof lineIndex === "number" &&
-                    lineIndex >= 0 &&
-                    (target.matches("ul,ol") ||
-                      target.querySelector(":scope > li"))
-                  ) {
-                    const items =
-                      target.querySelectorAll<HTMLElement>(":scope > li");
-                    focus =
-                      items[
-                        Math.min(lineIndex, Math.max(0, items.length - 1))
-                      ] ?? target;
-                  }
-                  focus.scrollIntoView({
-                    block: "nearest",
-                    inline: "nearest",
-                    behavior: "smooth",
-                  });
-                }}
-              />
-            ) : null}
+            <StudioPresenceIndicator
+              transport={live.transport}
+              currentAccountId={live.accountId}
+              currentDisplayName={live.displayName}
+              regions={commentRegions}
+              onFocusPresence={(person) => {
+                const studio = studioSurfaceRef.current;
+                if (!studio) return;
+                const blockId =
+                  person.cursor?.anchor?.kind === "block"
+                    ? person.cursor.anchor.id
+                    : person.selection?.ranges[0]?.blockId;
+                const lineIndex =
+                  person.cursor?.anchor?.lineIndex ??
+                  person.selection?.ranges[0]?.lineIndex;
+                const regionId = person.activeRegionId;
+                const target =
+                  (blockId
+                    ? studio.querySelector<HTMLElement>(
+                        `[data-block-id="${
+                          typeof CSS !== "undefined" && CSS.escape
+                            ? CSS.escape(blockId)
+                            : blockId.replace(/["\\]/g, "\\$&")
+                        }"]`,
+                      )
+                    : null) ??
+                  (regionId
+                    ? studio.querySelector<HTMLElement>(
+                        `[data-region-id="${
+                          typeof CSS !== "undefined" && CSS.escape
+                            ? CSS.escape(regionId)
+                            : regionId.replace(/["\\]/g, "\\$&")
+                        }"], [data-ai-path="${
+                          typeof CSS !== "undefined" && CSS.escape
+                            ? CSS.escape(regionId)
+                            : regionId.replace(/["\\]/g, "\\$&")
+                        }"]`,
+                      )
+                    : null) ??
+                  studio.querySelector<HTMLElement>(
+                    '[data-ai-region="true"]',
+                  );
+                if (!target) return;
+                let focus: HTMLElement = target;
+                if (
+                  typeof lineIndex === "number" &&
+                  lineIndex >= 0 &&
+                  (target.matches("ul,ol") ||
+                    target.querySelector(":scope > li"))
+                ) {
+                  const items =
+                    target.querySelectorAll<HTMLElement>(":scope > li");
+                  focus =
+                    items[
+                      Math.min(lineIndex, Math.max(0, items.length - 1))
+                    ] ?? target;
+                }
+                focus.scrollIntoView({
+                  block: "nearest",
+                  inline: "nearest",
+                  behavior: "smooth",
+                });
+              }}
+            />
             <IconButton
               label="Comments"
               onClick={() => setCommentsOpen(true)}
@@ -6067,10 +6031,7 @@ function ArtifactStudioEditor({
         {/* The presence layer is a sticky zero-height node, so it pins to the
             scroll viewport instead of scrolling away with the content. It must
             stay the first child of the scroll container. */}
-        <InteractionLayer
-          states={remoteInteractionStates}
-          localClientId={live.transport?.clientId}
-        />
+        <StudioInteractionLayer transport={live.transport} />
         <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
             <StudioContractProvider value={studioContract}>

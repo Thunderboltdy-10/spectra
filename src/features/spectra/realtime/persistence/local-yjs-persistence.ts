@@ -6,6 +6,7 @@ import * as Y from "yjs";
 // canonical room can duplicate document blocks and structured collections.
 export const LOCAL_YJS_DATABASE = "spectra-yjs-room-v1";
 export const LOCAL_YJS_STORE = "work-updates";
+export const LOCAL_YJS_META_STORE = "work-meta";
 export const LOCAL_PERSISTENCE_ORIGIN = Symbol("spectra-local-persistence");
 
 export type LocalYjsRecord = {
@@ -18,11 +19,19 @@ export type LocalYjsRecord = {
   modelVersion: number;
 };
 
+export type LocalYjsMeta = {
+  key: string;
+  bytes: number;
+  lastOpenedAt: number;
+  pendingRemoteSync: boolean;
+};
+
 export interface LocalYjsStore {
   get(key: string): Promise<LocalYjsRecord | null>;
   put(record: LocalYjsRecord): Promise<void>;
   delete(key: string): Promise<void>;
   list(): Promise<LocalYjsRecord[]>;
+  listMeta(): Promise<LocalYjsMeta[]>;
 }
 
 export type LocalDurabilitySnapshot = {
@@ -53,11 +62,13 @@ export class IndexedDbYjsStore implements LocalYjsStore {
   private open() {
     if (this.database) return this.database;
     this.database = new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(LOCAL_YJS_DATABASE, 1);
+      const request = indexedDB.open(LOCAL_YJS_DATABASE, 2);
       request.onupgradeneeded = () => {
         const database = request.result;
         if (!database.objectStoreNames.contains(LOCAL_YJS_STORE))
           database.createObjectStore(LOCAL_YJS_STORE, { keyPath: "key" });
+        if (!database.objectStoreNames.contains(LOCAL_YJS_META_STORE))
+          database.createObjectStore(LOCAL_YJS_META_STORE, { keyPath: "key" });
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error ?? new Error("INDEXEDDB_OPEN_FAILED"));
@@ -76,14 +87,32 @@ export class IndexedDbYjsStore implements LocalYjsStore {
 
   async put(record: LocalYjsRecord) {
     const database = await this.open();
-    const transaction = database.transaction(LOCAL_YJS_STORE, "readwrite");
+    const transaction = database.transaction(
+      [LOCAL_YJS_STORE, LOCAL_YJS_META_STORE],
+      "readwrite",
+    );
     await requestResult(transaction.objectStore(LOCAL_YJS_STORE).put(record));
+    await requestResult(
+      transaction.objectStore(LOCAL_YJS_META_STORE).put({
+        key: record.key,
+        bytes: record.bytes,
+        lastOpenedAt: record.lastOpenedAt,
+        pendingRemoteSync: record.pendingRemoteSync,
+      } satisfies LocalYjsMeta),
+    );
   }
 
   async delete(key: string) {
     const database = await this.open();
-    const transaction = database.transaction(LOCAL_YJS_STORE, "readwrite");
+    const transaction = database.transaction(
+      [LOCAL_YJS_STORE, LOCAL_YJS_META_STORE],
+      "readwrite",
+    );
     await requestResult(transaction.objectStore(LOCAL_YJS_STORE).delete(key));
+    if (database.objectStoreNames.contains(LOCAL_YJS_META_STORE))
+      await requestResult(
+        transaction.objectStore(LOCAL_YJS_META_STORE).delete(key),
+      );
   }
 
   async list() {
@@ -92,6 +121,31 @@ export class IndexedDbYjsStore implements LocalYjsStore {
     return requestResult(
       transaction.objectStore(LOCAL_YJS_STORE).getAll() as IDBRequest<LocalYjsRecord[]>,
     );
+  }
+
+  async listMeta() {
+    const database = await this.open();
+    if (!database.objectStoreNames.contains(LOCAL_YJS_META_STORE)) {
+      const records = await this.list();
+      return records.map((record) => ({
+        key: record.key,
+        bytes: record.bytes,
+        lastOpenedAt: record.lastOpenedAt,
+        pendingRemoteSync: record.pendingRemoteSync,
+      }));
+    }
+    const transaction = database.transaction(LOCAL_YJS_META_STORE, "readonly");
+    const meta = await requestResult(
+      transaction.objectStore(LOCAL_YJS_META_STORE).getAll() as IDBRequest<LocalYjsMeta[]>,
+    );
+    if (meta.length) return meta;
+    const records = await this.list();
+    return records.map((record) => ({
+      key: record.key,
+      bytes: record.bytes,
+      lastOpenedAt: record.lastOpenedAt,
+      pendingRemoteSync: record.pendingRemoteSync,
+    }));
   }
 }
 
@@ -113,6 +167,15 @@ export class MemoryYjsStore implements LocalYjsStore {
 
   async list() {
     return [...this.records.values()].map((record) => ({ ...record, update: record.update.slice() }));
+  }
+
+  async listMeta() {
+    return [...this.records.values()].map((record) => ({
+      key: record.key,
+      bytes: record.bytes,
+      lastOpenedAt: record.lastOpenedAt,
+      pendingRemoteSync: record.pendingRemoteSync,
+    }));
   }
 }
 
@@ -139,6 +202,7 @@ export class BoundedYjsLocalPersistence {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private initialized = false;
+  private dirty = false;
   private snapshot: LocalDurabilitySnapshot;
   private readonly onUpdate: (update: Uint8Array, origin: unknown) => void;
 
@@ -156,7 +220,12 @@ export class BoundedYjsLocalPersistence {
       : UNSUPPORTED;
     this.onUpdate = (_update, origin) => {
       if (!this.initialized || origin === LOCAL_PERSISTENCE_ORIGIN) return;
-      this.patch({ state: "persisting", pendingRemoteSync: true });
+      if (
+        this.snapshot.state !== "persisting" ||
+        !this.snapshot.pendingRemoteSync
+      )
+        this.patch({ state: "persisting", pendingRemoteSync: true });
+      this.dirty = true;
       this.schedulePersist();
     };
   }
@@ -204,6 +273,7 @@ export class BoundedYjsLocalPersistence {
   markRemoteDurable() {
     if (!this.store || !this.initialized || !this.snapshot.pendingRemoteSync) return;
     this.patch({ state: "ready", pendingRemoteSync: false });
+    this.dirty = true;
     this.schedulePersist();
   }
 
@@ -213,6 +283,7 @@ export class BoundedYjsLocalPersistence {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    if (!this.dirty) return;
     const update = Y.encodeStateAsUpdate(this.options.document);
     if (update.byteLength > this.perWorkBytes) {
       this.patch({
@@ -239,6 +310,7 @@ export class BoundedYjsLocalPersistence {
         bytes: update.byteLength,
         error: undefined,
       });
+      this.dirty = false;
     } catch (error) {
       this.patch({
         state: "error",
@@ -273,7 +345,7 @@ export class BoundedYjsLocalPersistence {
 
   private async evictFor(nextBytes: number) {
     if (!this.store) return;
-    const records = (await this.store.list())
+    const records = (await this.store.listMeta())
       .filter((record) => record.key !== this.options.key)
       .sort((left, right) => left.lastOpenedAt - right.lastOpenedAt);
     let total = records.reduce((sum, record) => sum + record.bytes, 0) + nextBytes;
@@ -290,7 +362,16 @@ export class BoundedYjsLocalPersistence {
   }
 
   private patch(patch: Partial<LocalDurabilitySnapshot>) {
-    this.snapshot = { ...this.snapshot, ...patch };
+    const next = { ...this.snapshot, ...patch };
+    if (
+      next.state === this.snapshot.state &&
+      next.bytes === this.snapshot.bytes &&
+      next.pendingRemoteSync === this.snapshot.pendingRemoteSync &&
+      next.restored === this.snapshot.restored &&
+      next.error === this.snapshot.error
+    )
+      return;
+    this.snapshot = next;
     this.emit();
   }
 

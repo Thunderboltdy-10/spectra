@@ -89,6 +89,90 @@ export type PresentationContent = {
   };
 };
 
+function objectGeometryEqual(left: PresentationObject, right: PresentationObject) {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height &&
+    left.rotation === right.rotation &&
+    left.content === right.content &&
+    left.style === right.style &&
+    left.altText === right.altText &&
+    left.locked === right.locked &&
+    left.hidden === right.hidden &&
+    left.readingOrder === right.readingOrder &&
+    left.parentId === right.parentId &&
+    left.componentId === right.componentId &&
+    left.sourceBinding === right.sourceBinding &&
+    left.animation === right.animation &&
+    left.type === right.type &&
+    left.id === right.id
+  );
+}
+
+/**
+ * Copy-on-write deck mutation. Unchanged slides and objects keep their
+ * previous identities so a pointermove does not deep-clone the whole deck.
+ */
+export function producePresentationContent(
+  deck: PresentationContent,
+  recipe: (draft: PresentationContent) => void,
+): PresentationContent {
+  const draft: PresentationContent = {
+    ...deck,
+    theme: { ...deck.theme },
+    slides: deck.slides.map((slide) => ({
+      ...slide,
+      objects: slide.objects.map((object) => ({ ...object })),
+    })),
+    ...(deck.sections ? { sections: deck.sections.map((section) => ({ ...section })) } : {}),
+    ...(deck.components
+      ? { components: deck.components.map((component) => ({ ...component })) }
+      : {}),
+    ...(deck.settings ? { settings: { ...deck.settings } } : {}),
+  };
+  recipe(draft);
+  draft.slides = draft.slides.map((slide, index) => {
+    const previous = deck.slides[index];
+    if (!previous || previous.id !== slide.id) return slide;
+    const objects = slide.objects.map((object, objectIndex) => {
+      const previousObject = previous.objects[objectIndex];
+      if (previousObject && objectGeometryEqual(previousObject, object))
+        return previousObject;
+      return object;
+    });
+    const nextSlide = { ...slide, objects };
+    if (
+      previous.title === nextSlide.title &&
+      previous.speakerNotes === nextSlide.speakerNotes &&
+      previous.layoutId === nextSlide.layoutId &&
+      previous.masterId === nextSlide.masterId &&
+      previous.sectionId === nextSlide.sectionId &&
+      previous.hidden === nextSlide.hidden &&
+      previous.background === nextSlide.background &&
+      previous.transition === nextSlide.transition &&
+      previous.citations === nextSlide.citations &&
+      previous.accessibility === nextSlide.accessibility &&
+      previous.nativeCompatibility === nextSlide.nativeCompatibility &&
+      previous.objects.length === objects.length &&
+      previous.objects.every((object, objectIndex) => object === objects[objectIndex])
+    )
+      return previous;
+    return nextSlide;
+  });
+  if (
+    draft.slides.length === deck.slides.length &&
+    draft.slides.every((slide, index) => slide === deck.slides[index]) &&
+    draft.theme.id === deck.theme.id &&
+    draft.settings === deck.settings &&
+    draft.sections === deck.sections &&
+    draft.components === deck.components
+  )
+    return deck;
+  return draft;
+}
+
 const objectTypes = new Set<PresentationObjectType>([
   "text",
   "shape",

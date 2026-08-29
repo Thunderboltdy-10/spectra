@@ -54,6 +54,7 @@ import {
   createPresentationSlide,
   normalizePresentationContent,
   presentationObjectText,
+  producePresentationContent,
   withPresentationObjectText,
   type PresentationContent,
   type PresentationObject,
@@ -1355,7 +1356,16 @@ export function PresentationStudio({
   syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
-  const deck = useMemo(() => normalizePresentationContent(content), [content]);
+  const committedDeck = useMemo(
+    () => normalizePresentationContent(content),
+    [content],
+  );
+  const [gestureDeck, setGestureDeck] = useState<PresentationContent | null>(
+    null,
+  );
+  const gestureDeckRef = useRef<PresentationContent | null>(null);
+  gestureDeckRef.current = gestureDeck;
+  const deck = gestureDeck ?? committedDeck;
   const contract = useStudioContract();
   // Two locks, and either one is enough: the prop is the studio's own (history
   // view, a deck that has not synchronized), the contract is the role's. Every
@@ -1453,6 +1463,10 @@ export function PresentationStudio({
   const importInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragState | undefined>(undefined);
   const textOriginRef = useRef<PresentationContent | undefined>(undefined);
+  useEffect(() => {
+    if (dragRef.current || textOriginRef.current) return;
+    setGestureDeck(null);
+  }, [content]);
   const runCommandRef = useRef<(id: string, params?: CommandParam) => boolean>(
     () => false,
   );
@@ -1656,17 +1670,26 @@ export function PresentationStudio({
         setUndoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
         setRedoStack([]);
       }
+      setGestureDeck(null);
       onChange(next);
     },
     [deck, onChange, readOnly],
   );
   const mutate = useCallback(
     (recipe: (draft: PresentationContent) => void, record = true) => {
-      const next = cloneDeck(deck);
-      recipe(next);
+      const next = producePresentationContent(deck, recipe);
+      if (next === deck) return;
       emit(next, record);
     },
     [deck, emit],
+  );
+  const mutateLocal = useCallback(
+    (recipe: (draft: PresentationContent) => void) => {
+      setGestureDeck((current) =>
+        producePresentationContent(current ?? committedDeck, recipe),
+      );
+    },
+    [committedDeck],
   );
   useEffect(() => {
     if (readOnly || surface !== "slides" || !selectedObjectId) return;
@@ -2273,7 +2296,7 @@ export function PresentationStudio({
     } else {
       setGuides({});
     }
-    mutate((draft) => {
+    mutateLocal((draft) => {
       const object = draft.slides[activeSlideIndex]!.objects.find(
         (candidate) => candidate.id === drag.objectId,
       );
@@ -2301,7 +2324,7 @@ export function PresentationStudio({
           });
         }
       }
-    }, false);
+    });
   }
   function finishDrag(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
@@ -2310,15 +2333,19 @@ export function PresentationStudio({
     setGuides({});
     setUndoStack((stack) => [...stack.slice(-79), drag.snapshot]);
     setRedoStack([]);
+    if (gestureDeckRef.current) {
+      onChange(gestureDeckRef.current);
+      setGestureDeck(null);
+    }
   }
   function updateText(objectId: string, value: string) {
-    mutate((draft) => {
+    mutateLocal((draft) => {
       const object = draft.slides[activeSlideIndex]!.objects.find(
         (candidate) => candidate.id === objectId,
       );
       if (object)
         Object.assign(object, withPresentationObjectText(object, value));
-    }, false);
+    });
   }
   function beginText(objectId: string) {
     textOriginRef.current ??= cloneDeck(deck);
@@ -2330,6 +2357,10 @@ export function PresentationStudio({
     setUndoStack((stack) => [...stack.slice(-79), textOriginRef.current!]);
     setRedoStack([]);
     textOriginRef.current = undefined;
+    if (gestureDeckRef.current) {
+      onChange(gestureDeckRef.current);
+      setGestureDeck(null);
+    }
   }
   async function addMedia(file: File) {
     if (readOnly || !file.size) return;

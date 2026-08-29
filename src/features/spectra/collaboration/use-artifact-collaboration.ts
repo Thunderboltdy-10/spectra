@@ -9,7 +9,7 @@ import {
 } from "react";
 import type {
   ArtifactCollaborationTransport,
-  CollaborationTransportSnapshot,
+  CollaborationSyncSnapshot,
 } from "./types";
 import { createArtifactCollaborationTransport } from "../realtime/providers/provider-factory";
 import type { RealtimeProviderKind } from "../realtime/providers/provider-factory";
@@ -18,13 +18,12 @@ import {
   type LocalDurabilitySnapshot,
 } from "../realtime/persistence";
 import { leaseReleaseSubscriptions } from "../realtime/policies";
+import {
+  EMPTY_PRESENCE,
+  EMPTY_SYNC_SNAPSHOT,
+} from "./scoped-snapshots";
 
-const CLOSED_SNAPSHOT: CollaborationTransportSnapshot = {
-  state: "closed" as const,
-  level: null,
-  unsynchronizedChanges: 0,
-  presence: [],
-};
+const CLOSED_SNAPSHOT: CollaborationSyncSnapshot = EMPTY_SYNC_SNAPSHOT;
 
 const subscribeClosed = () => () => undefined;
 const getClosedSnapshot = () => CLOSED_SNAPSHOT;
@@ -111,8 +110,8 @@ export function useArtifactCollaboration(
     schemaVersion,
   ]);
   const snapshot = useSyncExternalStore(
-    transport?.subscribe ?? subscribeClosed,
-    transport?.getSnapshot ?? getClosedSnapshot,
+    transport?.subscribeSync ?? subscribeClosed,
+    transport?.getSyncSnapshot ?? getClosedSnapshot,
     getClosedSnapshot,
   );
   const localDurability = useSyncExternalStore(
@@ -184,6 +183,7 @@ export function useArtifactCollaboration(
   return {
     transport,
     ...snapshot,
+    presence: EMPTY_PRESENCE,
     localDurability,
     recoverAuthoritative,
     // Only hard-lock when access is known read-only or revoked. Connecting,

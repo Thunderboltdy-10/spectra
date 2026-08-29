@@ -611,7 +611,6 @@ export function DocumentStudio({
   const [initialContent] = useState(() =>
     withEditorFormatting(documentJsonFromContent(content, title), record(content)),
   );
-  const [, refreshToolbar] = useState(0);
   const [importing, setImporting] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
@@ -881,26 +880,22 @@ export function DocumentStudio({
         },
       },
       onUpdate: ({ editor, transaction }) => {
-        const nextJson = editor.getJSON();
-        editorJsonKeyRef.current = JSON.stringify(nextJson);
-        if (transaction.docChanged) refreshToolbar((value) => value + 1);
-        // Extension normalization can emit an update during the editor's mount
-        // frame even when the user changed nothing. Treat that frame as editor
-        // hydration; genuine input begins immediately afterward.
-        if (!editorReadyForUserChanges.current || readOnly)
-          return;
-        // Native collaboration already committed this transaction directly to
-        // the bound XmlFragment. Mirroring it through React/onChange would turn
-        // each keystroke back into a full projected document replacement.
+        if (!editorReadyForUserChanges.current || readOnly) return;
         if (collaborationDocument) {
           if (isLocalCollaborativeDocumentChange(transaction))
             onLocalCollaborativeChangeRef.current?.();
           return;
         }
-        onChange(withDocumentFormatting(documentContentFromJson(nextJson, content), nextJson));
+        const nextJson = editor.getJSON();
+        editorJsonKeyRef.current = JSON.stringify(nextJson);
+        onChange(
+          withDocumentFormatting(
+            documentContentFromJson(nextJson, content),
+            nextJson,
+          ),
+        );
       },
       onSelectionUpdate: ({ editor }) => {
-        refreshToolbar((value) => value + 1);
         const { from, to, empty } = editor.state.selection;
         const ranges: Array<{
           blockId: string;
@@ -1103,10 +1098,8 @@ export function DocumentStudio({
   const wordCount = editorText.trim()
     ? editorText.trim().split(/\s+/).length
     : 0;
-  // Outline, find and the source navigator all read the live ProseMirror
-  // document rather than a JSON copy, so their positions are the editor's own
-  // and stay correct through collaborative edits (§11A).
   const outlineEntries = (() => {
+    if (!outlineOpen && !sourcesOpen) return [] as DocumentOutlineEntry[];
     const entries: DocumentOutlineEntry[] = [];
     const wordsAfter: number[] = [];
     editor?.state.doc.descendants((node, position) => {
@@ -1140,7 +1133,7 @@ export function DocumentStudio({
   const findMatches = (() => {
     const matches: DocumentMatch[] = [];
     const query = findDraft.trim();
-    if (!editor || !query) return matches;
+    if (!findOpen || !editor || !query) return matches;
     const pattern = documentFindPattern(query, findOptions);
     if (!pattern) return matches;
     editor.state.doc.descendants((node, position) => {
@@ -1170,6 +1163,7 @@ export function DocumentStudio({
   })();
   const documentCitationUses = (() => {
     const uses: DocumentCitationUse[] = [];
+    if (!sourcesOpen) return uses;
     editor?.state.doc.descendants((node, position) => {
       if (node.type.name !== "spectraCitation") return;
       const sourceId = node.attrs.sourceId;

@@ -170,13 +170,25 @@ export class DocumentYjsAdapter implements WorkYjsAdapter<DocumentWorkContent> {
     return documentProjection(doc);
   }
 
-  deriveSemanticRegions(doc: Y.Doc): readonly SemanticRegion[] {
-    return enumerateArtifactRegions("document", this.project(doc));
+  deriveSemanticRegions(
+    doc: Y.Doc,
+    projection?: DocumentWorkContent,
+  ): readonly SemanticRegion[] {
+    return enumerateArtifactRegions(
+      "document",
+      projection ?? this.project(doc),
+    );
   }
 
-  validate(doc: Y.Doc): WorkValidationResult {
+  validate(
+    doc: Y.Doc,
+    projection?: DocumentWorkContent,
+  ): WorkValidationResult {
     try {
-      const result = validateArtifactContent("document", this.project(doc));
+      const result = validateArtifactContent(
+        "document",
+        projection ?? this.project(doc),
+      );
       return result.success
         ? { valid: true }
         : {
@@ -199,7 +211,7 @@ export class DocumentYjsAdapter implements WorkYjsAdapter<DocumentWorkContent> {
     const rollback = snapshot.rollbackUpdate ?? rollbackUpdate(snapshot);
     const document = this.createDocument(snapshot.content);
     const projected = this.project(document);
-    const validation = this.validate(document);
+    const validation = this.validate(document, projected);
     if (!validation.valid)
       throw new Error(
         `DOCUMENT_YJS_MIGRATION_INVALID: ${validation.issues.join("; ")}`,

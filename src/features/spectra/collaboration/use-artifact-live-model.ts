@@ -48,13 +48,28 @@ export function useArtifactLiveModel(
     realtimeProviderForWorkType(typeKey),
     typeKey,
   );
-  const model = useMemo(
-    () =>
-      supported && collaboration.transport
-        ? new NativeArtifactYjsModel(typeKey, collaboration.transport)
-        : null,
-    [collaboration.transport, supported, typeKey],
-  );
+  const [ownedModel, setOwnedModel] =
+    useState<NativeArtifactYjsModel | null>(null);
+  useEffect(() => {
+    if (!supported || !collaboration.transport) {
+      setOwnedModel(null);
+      return;
+    }
+    // NativeArtifactYjsModel owns a Y.Doc listener and UndoManager. Construct
+    // it in the effect lifecycle so Strict Mode's setup/cleanup probe destroys
+    // the first instance before creating the live one; render-time useMemo
+    // construction leaked the discarded instance and could leave the retained
+    // instance destroyed.
+    const next = new NativeArtifactYjsModel(typeKey, collaboration.transport);
+    setOwnedModel(next);
+    return () => next.destroy();
+  }, [collaboration.transport, supported, typeKey]);
+  const model =
+    supported &&
+    ownedModel?.transport === collaboration.transport &&
+    ownedModel.typeKey === typeKey
+      ? ownedModel
+      : null;
   const controller = useMemo(
     () =>
       collaboration.transport
@@ -69,8 +84,6 @@ export function useArtifactLiveModel(
   );
   const [initializationError, setInitializationError] = useState<string>();
   const reconciledRevisionRef = useRef<string | null>(null);
-
-  useEffect(() => () => model?.destroy(), [model]);
 
   useEffect(() => {
     if (

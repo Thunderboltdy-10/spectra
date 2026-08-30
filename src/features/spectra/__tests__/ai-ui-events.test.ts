@@ -7,14 +7,15 @@ import {
   getAiSurfaceLocation,
   setFollowingAi,
 } from "../collaboration/follow-ai";
+import { spectraBus } from "../events";
 
 describe("AI UI events", () => {
   beforeEach(() => __resetFollowAi());
 
   it("remembers semantic navigation without moving a non-followed viewport", () => {
     const navigated: string[] = [];
-    window.addEventListener("spectra:ai-navigate", (event) => {
-      navigated.push((event as CustomEvent<{ route: string }>).detail.route);
+    spectraBus.handle("navigation.show", ({ route }) => {
+      navigated.push(route);
     });
 
     handleSpectraAiUiEvent({
@@ -34,8 +35,8 @@ describe("AI UI events", () => {
 
   it("opens an artifact only after Follow AI is enabled", () => {
     const opened: string[] = [];
-    window.addEventListener("spectra:open-artifact", (event) => {
-      opened.push((event as CustomEvent<{ artifactId: string }>).detail.artifactId);
+    spectraBus.handle("work.open", ({ workId }) => {
+      opened.push(workId);
     });
 
     handleSpectraAiUiEvent({

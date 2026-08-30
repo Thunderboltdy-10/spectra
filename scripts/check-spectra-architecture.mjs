@@ -28,8 +28,17 @@ for (const path of await walk(sourceRoot)) {
   const source = await readFile(path, "utf8");
   const repoPath = relative(root, path).replaceAll("\\", "/");
   for (const match of source.matchAll(/(?:CustomEvent|Event)\(\s*["']([^"']+)["']/g)) {
-    if (!baselineEvents.has(match[1]))
-      violations.push(`${repoPath}: unregistered global event ${match[1]}`);
+    if (!match[1].startsWith("spectra:")) continue;
+    violations.push(
+      `${repoPath}: semantic global event ${match[1]} must use spectraBus`,
+    );
+  }
+  for (const match of source.matchAll(
+    /window\.(?:add|remove)EventListener\(\s*["'](spectra:[^"']+)["']/g,
+  )) {
+    violations.push(
+      `${repoPath}: semantic global listener ${match[1]} must use spectraBus`,
+    );
   }
 }
 
@@ -50,6 +59,6 @@ if (violations.length) {
   process.exitCode = 1;
 } else {
   process.stdout.write(
-    `Architecture guard passed (${baselineEvents.size} legacy event names frozen; embedded run-route tools did not grow).\n`,
+    `Architecture guard passed (semantic window events removed; ${baselineEvents.size} historical names remain inventoried; embedded run-route tools did not grow).\n`,
   );
 }

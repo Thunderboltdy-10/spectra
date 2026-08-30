@@ -1,9 +1,13 @@
 "use client";
 
 import { Check, ChevronDown, Minus, Plus } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useState, type ReactElement, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type { CommandBinding, CommandControl, CommandControlOption, CommandParam } from "../commands";
 
 /**
@@ -27,91 +31,36 @@ function optionLabel(options: readonly CommandControlOption[], value?: string) {
   return options.find((option) => option.value === value)?.label;
 }
 
-/** Shared popover shell: fixed, portaled, flips above when there is no room. */
+/** Shared popover shell: portaled, collision-aware, and on the named layer. */
 function ControlPopover({
   open,
-  onClose,
-  anchor,
+  onOpenChange,
+  trigger,
   children,
   ariaLabel,
   width,
 }: {
   open: boolean;
-  onClose: () => void;
-  anchor: HTMLElement | null;
+  onOpenChange: (open: boolean) => void;
+  trigger: ReactElement;
   children: ReactNode;
   ariaLabel: string;
   width?: number;
 }) {
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const [position, setPosition] = useState<{ top: number; left: number; maxHeight: number }>({
-    top: 0,
-    left: 0,
-    maxHeight: 360,
-  });
-
-  useLayoutEffect(() => {
-    if (!open || !anchor) return;
-    const place = () => {
-      const rect = anchor.getBoundingClientRect();
-      const below = window.innerHeight - rect.bottom - 10;
-      const above = rect.top - 10;
-      const opensBelow = below >= Math.min(200, above);
-      const maxHeight = Math.max(140, Math.min(360, opensBelow ? below : above));
-      const measured = width ?? Math.max(rect.width, 176);
-      setPosition({
-        top: opensBelow ? rect.bottom + 5 : Math.max(8, rect.top - maxHeight - 5),
-        left: Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - measured - 8)),
-        maxHeight,
-      });
-    };
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-    };
-  }, [anchor, open, width]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: globalThis.PointerEvent) => {
-      const target = event.target as Node;
-      if (anchor?.contains(target) || contentRef.current?.contains(target)) return;
-      onClose();
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      onClose();
-      anchor?.focus();
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [anchor, onClose, open]);
-
-  if (!open || typeof document === "undefined") return null;
-  return createPortal(
-    <div
-      ref={contentRef}
-      role="listbox"
-      aria-label={ariaLabel}
-      className="spectra-workbar-control-popover"
-      style={{
-        top: position.top,
-        left: position.left,
-        maxHeight: position.maxHeight,
-        ...(width ? { width } : {}),
-      }}
-    >
-      {children}
-    </div>,
-    document.body,
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent
+        role="listbox"
+        aria-label={ariaLabel}
+        align="start"
+        layer="dropdown"
+        className="spectra-workbar-control-popover"
+        style={width ? { width } : undefined}
+      >
+        {children}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -160,15 +109,18 @@ function SelectControl({
   emit: Emit;
 }) {
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const current = optionLabel(control.options, control.value);
   const shown = control.kind === "menu"
     ? action.label
     : current ?? ("placeholder" in control ? control.placeholder : undefined) ?? action.label;
   return (
-    <>
-      <button
-        ref={triggerRef}
+    <ControlPopover
+      open={open}
+      onOpenChange={setOpen}
+      ariaLabel={action.label}
+      width={control.kind === "select" ? 224 : 196}
+      trigger={
+        <button
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -183,13 +135,8 @@ function SelectControl({
         <span className="min-w-0 flex-1 truncate text-left">{shown}</span>
         <ChevronDown className="size-3 shrink-0 text-[var(--text-tertiary)]" />
       </button>
-      <ControlPopover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchor={triggerRef.current}
-        ariaLabel={action.label}
-        width={control.kind === "select" ? 224 : 196}
-      >
+      }
+    >
         {control.options.map((option) => (
           <ControlOptionRow
             key={option.value}
@@ -201,8 +148,7 @@ function SelectControl({
             }}
           />
         ))}
-      </ControlPopover>
-    </>
+    </ControlPopover>
   );
 }
 
@@ -219,7 +165,6 @@ function NumericControl({
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const step = control.step ?? 1;
   const min = control.min ?? 0;
   const max = control.max ?? 999;
@@ -295,9 +240,13 @@ function NumericControl({
         <Plus className="size-3" />
       </button>
       {control.presets?.length ? (
-        <>
-          <button
-            ref={triggerRef}
+        <ControlPopover
+          open={open}
+          onOpenChange={setOpen}
+          ariaLabel={`${action.label} presets`}
+          width={104}
+          trigger={
+            <button
             type="button"
             aria-haspopup="listbox"
             aria-expanded={open}
@@ -309,13 +258,8 @@ function NumericControl({
           >
             <ChevronDown className="size-3" />
           </button>
-          <ControlPopover
-            open={open}
-            onClose={() => setOpen(false)}
-            anchor={triggerRef.current}
-            ariaLabel={`${action.label} presets`}
-            width={104}
-          >
+          }
+        >
             {control.presets.map((preset) => (
               <ControlOptionRow
                 key={preset}
@@ -327,8 +271,7 @@ function NumericControl({
                 }}
               />
             ))}
-          </ControlPopover>
-        </>
+        </ControlPopover>
       ) : null}
     </div>
   );
@@ -392,12 +335,15 @@ function ColorControl({
   emit: Emit;
 }) {
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const Icon = action.icon;
   return (
-    <>
-      <button
-        ref={triggerRef}
+    <ControlPopover
+      open={open}
+      onOpenChange={setOpen}
+      ariaLabel={action.label}
+      width={168}
+      trigger={
+        <button
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -415,16 +361,10 @@ function ColorControl({
           style={control.value ? { background: control.value } : undefined}
         />
       </button>
-      <ControlPopover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchor={triggerRef.current}
-        ariaLabel={action.label}
-        width={168}
-      >
+      }
+    >
         <ColorSwatchGrid control={control} emit={emit} onDone={() => setOpen(false)} />
-      </ControlPopover>
-    </>
+    </ControlPopover>
   );
 }
 

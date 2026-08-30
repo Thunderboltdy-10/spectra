@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   Atom,
@@ -69,13 +69,18 @@ import {
   type AdministrationIdentity,
 } from "@/features/spectra/administration/api";
 import { formatRelativeTime } from "@/features/spectra/components/spectra-view-model";
-import { KeyboardShortcutsRegistrar } from "@/components/keyboard-shortcuts";
+import {
+  KeyboardShortcutsHelp,
+  KeyboardShortcutsRegistrar,
+  ShortcutsButton,
+} from "@/components/keyboard-shortcuts";
 import { RouteSidePanelHost } from "@/features/spectra/components/route-side-panel-host";
 import { ViewportContextPicker } from "@/features/spectra/components/viewport-context-picker";
 import { GlobalRouteWorkbench } from "@/features/spectra/components/global-route-workbench";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
+import { spectraBus } from "@/features/spectra/events";
 
 type AppShellProps = {
   children: ReactNode;
@@ -132,6 +137,7 @@ function workspaceHref(workspaceId: string) {
 
 function ShellNavigation() {
   const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { openUserProfile } = useClerk();
   const selectedWorkspaceId = pathname.startsWith("/workspace/")
@@ -194,14 +200,29 @@ function ShellNavigation() {
       if (next)
         document.documentElement.dataset.spectraSidebarCollapsed = "true";
       else delete document.documentElement.dataset.spectraSidebarCollapsed;
-      window.dispatchEvent(
-        new CustomEvent("spectra:sidebar-layout", {
-          detail: { collapsed: next },
-        }),
-      );
+      spectraBus.emit("shell.sidebarLayout", { collapsed: next });
       return next;
     });
   }, []);
+
+  const focusSidebarSearch = useCallback(() => {
+    setSidebarCollapsed(false);
+    window.localStorage.setItem("spectra:sidebar-collapsed", "false");
+    delete document.documentElement.dataset.spectraSidebarCollapsed;
+    spectraBus.emit("shell.sidebarLayout", { collapsed: false });
+    window.requestAnimationFrame(() => {
+      const search = document.querySelector<HTMLInputElement>(
+        "[data-spectra-sidebar-search]",
+      );
+      search?.focus();
+      search?.select();
+    });
+  }, []);
+
+  useEffect(
+    () => spectraBus.on("shell.focusSidebarSearch", focusSidebarSearch),
+    [focusSidebarSearch],
+  );
 
   const coreDestinations = useMemo(() => {
     const destinations: Array<{
@@ -235,10 +256,10 @@ function ShellNavigation() {
   useEffect(() => {
     void refreshWorkspaces();
     const refresh = () => void refreshWorkspaces(true);
-    window.addEventListener("spectra:workspaces-changed", refresh);
+    const removeChanged = spectraBus.on("workspaces.changed", refresh);
     window.addEventListener("focus", refresh);
     return () => {
-      window.removeEventListener("spectra:workspaces-changed", refresh);
+      removeChanged();
       window.removeEventListener("focus", refresh);
     };
   }, [refreshWorkspaces]);
@@ -254,10 +275,10 @@ function ShellNavigation() {
         .catch(() => undefined);
     };
     refresh();
-    window.addEventListener("spectra:threads-changed", refresh);
+    const removeChanged = spectraBus.on("threads.changed", refresh);
     return () => {
       active = false;
-      window.removeEventListener("spectra:threads-changed", refresh);
+      removeChanged();
     };
   }, []);
 
@@ -289,9 +310,7 @@ function ShellNavigation() {
                   : "You have read-only access.",
               action: {
                 label: "Review",
-                onClick: () => {
-                  window.location.href = "/library?collection=invitations";
-                },
+                onClick: () => router.push("/library?collection=invitations"),
               },
             },
           );
@@ -304,7 +323,7 @@ function ShellNavigation() {
     } finally {
       setNotificationsLoading(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     void refreshNotifications();
@@ -317,15 +336,12 @@ function ShellNavigation() {
       if (document.visibilityState === "visible") void refreshNotifications();
     };
     window.addEventListener("focus", refreshVisible);
-    window.addEventListener("spectra:notifications-changed", refreshVisible);
+    const removeChanged = spectraBus.on("notifications.changed", refreshVisible);
     document.addEventListener("visibilitychange", refreshVisible);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshVisible);
-      window.removeEventListener(
-        "spectra:notifications-changed",
-        refreshVisible,
-      );
+      removeChanged();
       document.removeEventListener("visibilitychange", refreshVisible);
     };
   }, [refreshNotifications]);
@@ -444,7 +460,11 @@ function ShellNavigation() {
   }, [pathname, selectedWorkspaceId, coreDestinations]);
 
   const navRef = useRef<HTMLElement>(null);
-  const [railMarker, setRailMarker] = useState({ top: 6, height: 22, visible: false });
+  const [railMarker, setRailMarker] = useState({
+    top: 6,
+    height: 22,
+    visible: false,
+  });
 
   const placeRailMarker = useCallback((element: HTMLElement | null) => {
     const nav = navRef.current;
@@ -463,7 +483,9 @@ function ShellNavigation() {
   }, []);
 
   const snapRailMarkerToActive = useCallback(() => {
-    const active = navRef.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    const active = navRef.current?.querySelector<HTMLElement>(
+      '[aria-current="page"]',
+    );
     placeRailMarker(active ?? null);
   }, [placeRailMarker]);
 
@@ -485,7 +507,9 @@ function ShellNavigation() {
           <button
             type="button"
             onClick={toggleSidebar}
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={
+              sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+            }
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             className="grid size-8 shrink-0 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
@@ -522,6 +546,7 @@ function ShellNavigation() {
         >
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
           <input
+            data-spectra-sidebar-search=""
             value={sidebarSearch}
             onChange={(event) => setSidebarSearch(event.target.value)}
             placeholder="Search"
@@ -558,9 +583,7 @@ function ShellNavigation() {
                     pathname.startsWith("/workspace")
                   ) {
                     event.preventDefault();
-                    window.dispatchEvent(
-                      new Event("spectra:navigate-workspace-home"),
-                    );
+                    void spectraBus.command("navigation.home", {});
                   }
                 }}
                 onMouseEnter={(event) => placeRailMarker(event.currentTarget)}
@@ -667,9 +690,7 @@ function ShellNavigation() {
             <button
               type="button"
               aria-label="Share current page"
-              onClick={() =>
-                window.dispatchEvent(new CustomEvent("spectra:page-share"))
-              }
+              onClick={() => void spectraBus.command("surface.share", {})}
               className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
             >
               <Share2 size={15} />
@@ -693,11 +714,12 @@ function ShellNavigation() {
             <button
               type="button"
               aria-label="Settings"
-              onClick={() => window.location.assign("/settings")}
+              onClick={() => router.push("/settings")}
               className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
             >
               <Settings2 size={15} />
             </button>
+            <ShortcutsButton compact />
           </div>
           {administrationIdentity ? (
             <button
@@ -1029,6 +1051,7 @@ export function AppShell({
   contentClassName,
 }: AppShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [shellSidebarCollapsed, setShellSidebarCollapsed] = useState(false);
   const showTabRail =
     pathname === "/workspace" ||
@@ -1047,13 +1070,9 @@ export function AppShell({
     setShellSidebarCollapsed(
       window.localStorage.getItem("spectra:sidebar-collapsed") === "true",
     );
-    const update = (event: Event) => {
-      const collapsed = (event as CustomEvent<{ collapsed?: boolean }>).detail
-        ?.collapsed;
-      if (typeof collapsed === "boolean") setShellSidebarCollapsed(collapsed);
-    };
-    window.addEventListener("spectra:sidebar-layout", update);
-    return () => window.removeEventListener("spectra:sidebar-layout", update);
+    return spectraBus.on("shell.sidebarLayout", ({ collapsed }) => {
+      setShellSidebarCollapsed(collapsed);
+    });
   }, []);
 
   return (
@@ -1069,14 +1088,11 @@ export function AppShell({
       )}
     >
       <KeyboardShortcutsRegistrar
-        onEscape={() => {
-          window.dispatchEvent(new CustomEvent("spectra:escape"));
-        }}
         onNewChat={() => {
-          window.location.assign("/chat");
+          router.push("/chat");
         }}
         onOpenSettings={() => {
-          window.location.assign("/settings");
+          router.push("/settings");
         }}
         onFocusComposer={() => {
           const composer = document.querySelector<HTMLElement>(
@@ -1084,7 +1100,9 @@ export function AppShell({
           );
           composer?.focus();
         }}
+        onFocusSearch={() => spectraBus.emit("shell.focusSidebarSearch", {})}
       />
+      <KeyboardShortcutsHelp />
       <ShellNavigation />
       <main
         style={{

@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
 import type { NextRequest } from "next/server";
-import { convexMutation } from "@/lib/convex-server";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -110,23 +109,10 @@ export class StructuredLogger {
       }
     }
 
-    // Fire-and-forget DB persist for error/warn events
-    if (level === "error" || level === "warn") {
-      const persistResult = convexMutation("errorEvents:log", {
-        level,
-        message: `${message}${error ? `: ${error.message}` : ""}`,
-        source: this._context.path ?? undefined,
-        stack: error?.stack?.slice(0, 4000),
-        metadata: metadata ? JSON.stringify(metadata).slice(0, 2000) : undefined,
-        actorClerkId: typeof this._context.userId === "string" ? this._context.userId : undefined,
-        chatId: typeof this._context.chatId === "string" ? (this._context.chatId as string) : undefined,
-      });
-      if (persistResult && typeof (persistResult as { catch?: unknown }).catch === "function") {
-        void (persistResult as Promise<unknown>).catch(() => {
-          // Never let error reporting break the main flow
-        });
-      }
-    }
+    // Structured stdout/stderr is the production logging sink. The former
+    // fire-and-forget Convex write targeted a deleted `errorEvents` function,
+    // so every warning could create a second missing-function warning. Keep
+    // logging single-path until an owned, retention-bounded sink is designed.
   }
   
   debug(message: string, metadata?: Record<string, unknown>) {

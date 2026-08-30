@@ -12,6 +12,7 @@ import {
 } from "./authorityShared";
 import type { Doc, Id } from "./_generated/dataModel";
 import { incrementOperationalCounter } from "./operationalCounters";
+import { normalizeWorkspaceView } from "../shared/workspace-view";
 import {
   createFolderNode,
   createLinkNode,
@@ -29,8 +30,6 @@ import {
 
 const vDefaultView = v.union(
   v.literal("cards"),
-  v.literal("canvas"),
-  v.literal("timeline"),
   v.literal("library"),
 );
 
@@ -65,23 +64,31 @@ function liveWorkspace<
       icon?: string;
       color?: string;
     };
+    defaultView: "cards" | "canvas" | "timeline" | "library";
   },
 >(workspace: T) {
+  const currentWorkspace = {
+    ...workspace,
+    // Canvas and Timeline were abolished by D30. Historical rows remain
+    // readable until the explicit data migration runs, but no current API may
+    // project or write those values.
+    defaultView: normalizeWorkspaceView(workspace.defaultView),
+  };
   if (
-    workspace.aiState === "edited" &&
-    workspace.aiStateExpiresAt &&
-    workspace.aiStateExpiresAt <= Date.now()
+    currentWorkspace.aiState === "edited" &&
+    currentWorkspace.aiStateExpiresAt &&
+    currentWorkspace.aiStateExpiresAt <= Date.now()
   )
-    return { ...workspace, aiState: undefined };
-  return workspace.aiState === "updating" && workspace.aiPreview
+    return { ...currentWorkspace, aiState: undefined };
+  return currentWorkspace.aiState === "updating" && currentWorkspace.aiPreview
     ? {
-        ...workspace,
-        title: workspace.aiPreview.title ?? workspace.title,
-        description: workspace.aiPreview.description ?? workspace.description,
-        icon: workspace.aiPreview.icon ?? workspace.icon,
-        color: workspace.aiPreview.color ?? workspace.color,
+        ...currentWorkspace,
+        title: currentWorkspace.aiPreview.title ?? currentWorkspace.title,
+        description: currentWorkspace.aiPreview.description ?? currentWorkspace.description,
+        icon: currentWorkspace.aiPreview.icon ?? currentWorkspace.icon,
+        color: currentWorkspace.aiPreview.color ?? currentWorkspace.color,
       }
-    : workspace;
+    : currentWorkspace;
 }
 
 export const list = query({
@@ -253,7 +260,7 @@ export const update = mutation({
       description?: string;
       icon?: string;
       color?: string;
-      defaultView?: "cards" | "canvas" | "timeline" | "library";
+      defaultView?: "cards" | "library";
       updatedAt: number;
       lastActivityAt: number;
       aiState?: "edited";
@@ -868,12 +875,7 @@ export const importPortableManifest = mutation({
     const safePlacements = placementsValue as unknown[];
 
     const title = boundedText(safeWorkspace.title, 160) ?? "Imported workspace";
-    const defaultView =
-      safeWorkspace.defaultView === "cards" ||
-      safeWorkspace.defaultView === "canvas" ||
-      safeWorkspace.defaultView === "timeline"
-        ? safeWorkspace.defaultView
-        : "library";
+    const defaultView = normalizeWorkspaceView(safeWorkspace.defaultView);
     const workspaceId = await ctx.db.insert("spectraWorkspaces", {
       ownerAccountId: actor._id,
       schoolId: actor.schoolId,

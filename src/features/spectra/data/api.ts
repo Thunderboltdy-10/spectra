@@ -4,6 +4,7 @@ import type { ArtifactCardView } from "../components/artifact-card";
 import type { PublishedCodeBuildProjection } from "../code/published-build";
 import type { QuizExperience } from "../quiz/experience";
 import type { TimetablePersonalState } from "../timetable/model";
+import { spectraBus } from "../events";
 
 export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference" | "resource";
 
@@ -278,7 +279,7 @@ export type SpectraWorkspace = {
   icon?: string;
   color?: string;
   status: "active" | "archived";
-  defaultView: "cards" | "canvas" | "timeline" | "library";
+  defaultView: "cards" | "library";
   aiState?: "creating" | "updating" | "edited" | "failed";
   aiRunId?: string;
   aiStateExpiresAt?: number;
@@ -319,7 +320,7 @@ export type SpectraWorkspacePortableManifest = {
     description?: string;
     icon?: string;
     color?: string;
-    defaultView: "cards" | "canvas" | "timeline" | "library";
+    defaultView: "cards" | "library";
   };
   placements: Array<{
     artifactId: string;
@@ -2265,7 +2266,7 @@ export async function postSpectra<T>(body: JsonRecord) {
       "deleteWorkspace",
     ].includes(body.action)
   ) {
-    window.dispatchEvent(new Event("spectra:workspaces-changed"));
+    spectraBus.emit("workspaces.changed", {});
   }
   return value;
 }

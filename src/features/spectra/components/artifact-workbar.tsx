@@ -11,15 +11,20 @@ import {
   MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
-import { createPortal } from "react-dom";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SelectField } from "@/components/ui/select";
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { WorkCapability } from "../work/registry";
 import {
   commandContext,
   commandForBinding,
-  contextualTabsFor,
   eventBelongsToFocusedStudio,
   executeCommand,
   resolveCommandLayout,
@@ -134,27 +139,6 @@ function actionCost(action: CommandBinding) {
 
 function actionsWeight(actions: readonly CommandBinding[]) {
   return actions.reduce((total, action) => total + actionCost(action), 0);
-}
-
-/**
- * Fills the row in the order given, then hands back what did not fit. Order in,
- * order out: a person's pinned arrangement is never silently rearranged to make
- * something else fit.
- */
-function fitToBudget(actions: readonly CommandBinding[], budget: number) {
-  const bar: CommandBinding[] = [];
-  const shed: CommandBinding[] = [];
-  let spent = 0;
-  for (const action of actions) {
-    const cost = actionCost(action);
-    if (spent + cost <= budget) {
-      bar.push(action);
-      spent += cost;
-    } else {
-      shed.push(action);
-    }
-  }
-  return { bar, shed };
 }
 
 function actionTitle(action: CommandBinding) {
@@ -348,9 +332,6 @@ export function ArtifactWorkbar({
   const essential = visibleActions.filter(
     (action) => (action.priority ?? "secondary") === "essential",
   );
-  const secondary = visibleActions.filter(
-    (action) => (action.priority ?? "secondary") === "secondary",
-  );
   const advanced = visibleActions.filter(
     (action) => action.priority === "advanced",
   );
@@ -383,12 +364,22 @@ export function ArtifactWorkbar({
     () => new Set(iconOnlyIds),
     [iconOnlyIds],
   );
+  const alwaysOverflow = useMemo(
+    () => new Set(advanced.map((action) => action.id)),
+    [advanced],
+  );
   const barActions = customizing
     ? rowActions
-    : rowActions.filter((action) => !measuredOverflow.has(action.id));
+    : rowActions.filter(
+        (action) =>
+          !alwaysOverflow.has(action.id) && !measuredOverflow.has(action.id),
+      );
   const menuActions = customizing
     ? []
-    : rowActions.filter((action) => measuredOverflow.has(action.id));
+    : rowActions.filter(
+        (action) =>
+          alwaysOverflow.has(action.id) || measuredOverflow.has(action.id),
+      );
 
   useLayoutEffect(() => {
     const host = commandsHostRef.current;
@@ -433,6 +424,11 @@ export function ArtifactWorkbar({
           id: action.id,
           fullWidth: Math.max(widths.get(action.id)?.full || 0, 32),
           iconWidth: Math.max(widths.get(action.id)?.icon || 0, 32),
+          canCollapseToIcon:
+            Boolean(action.icon) &&
+            !action.keepLabel &&
+            action.density !== "medium" &&
+            !isRenderedControl(action),
           disabled: action.disabled,
           priority: action.priority,
         })),
@@ -462,7 +458,7 @@ export function ArtifactWorkbar({
     const observer = new ResizeObserver(() => recompute(true));
     observer.observe(host);
     return () => observer.disconnect();
-  }, [overflowSignature, overflowCommandIds, customizing, activeTab]);
+  }, [overflowSignature, overflowCommandIds, customizing, activeTab, rowActions]);
 
   useLayoutEffect(() => {
     const tabs = tabsRailRef.current;
@@ -766,29 +762,24 @@ export function ArtifactWorkbar({
           align="end"
           triggerClassName="spectra-workbar-menu-trigger"
         >
-          <button type="button" role="menuitem" className={workbarMenuItemClass()} onClick={() => setCustomizing((value) => !value)}>
+          <WorkbarMenuAction onSelect={() => setCustomizing((value) => !value)}>
             <Settings2 className="size-3.5" />
             <span>{customizing ? "Finish customizing" : "Customize workbar"}</span>
-          </button>
-          <button type="button" role="menuitem" className={workbarMenuItemClass()} onClick={() => saveLayout({ ...storedLayout, expanded: !storedLayout?.expanded })}>
+          </WorkbarMenuAction>
+          <WorkbarMenuAction onSelect={() => saveLayout({ ...storedLayout, expanded: !storedLayout?.expanded })}>
             {storedLayout?.expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
             <span>{storedLayout?.expanded ? "Collapse workbar" : "Expand workbar"}</span>
-          </button>
-          
-          
-          <button
-            type="button"
-            role="menuitem"
-            className={workbarMenuItemClass()}
+          </WorkbarMenuAction>
+          <WorkbarMenuAction
             disabled={!customizedCount && !storedLayout?.tabOrder && !storedLayout?.expanded}
             title={customizedCount
               ? `Return ${customizedCount} changed ${customizedCount === 1 ? "command" : "commands"} to the default layout`
               : "This workbar is already at its default"}
-            onClick={() => saveLayout({})}
+            onSelect={() => saveLayout({})}
           >
             <RotateCcw className="size-3.5" />
             <span>Reset this workbar{customizedCount ? ` (${customizedCount})` : ""}</span>
-          </button>
+          </WorkbarMenuAction>
         </WorkbarMenu>
     );
   }
@@ -844,14 +835,21 @@ function WorkbarActionButton({
   iconOnly?: boolean;
 }) {
   const Icon = action.icon;
-  return (
+  const visuallyIconOnly = Boolean(
+    Icon && (iconOnly || action.density === "compact"),
+  );
+  const button = (
     <button
       type="button"
       aria-label={action.label}
       title={actionTitle(action)}
       aria-pressed={action.active}
       data-active={action.active || undefined}
-      data-workbar-density={action.density ?? undefined}
+      data-workbar-density={
+        action.density === "compact" && !Icon
+          ? "medium"
+          : action.density ?? undefined
+      }
       data-workbar-keep-label={action.keepLabel || undefined}
       data-workbar-icon-only={iconOnly || undefined}
       disabled={action.disabled}
@@ -859,28 +857,28 @@ function WorkbarActionButton({
       className="spectra-artifact-workbar-action"
     >
       {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
-      {iconOnly ? null : <span>{action.label}</span>}
+      {iconOnly && Icon ? null : <span>{action.label}</span>}
     </button>
   );
+  return visuallyIconOnly ? (
+    <Tooltip label={actionTitle(action)}>{button}</Tooltip>
+  ) : button;
 }
 
 function WorkbarMenuItem({ action }: { action: CommandBinding }) {
   const Icon = action.icon;
   return (
-    <button
-      type="button"
-      role="menuitem"
-      className={workbarMenuItemClass()}
+    <WorkbarMenuAction
       disabled={action.disabled}
       title={actionTitle(action)}
       data-active={action.active || undefined}
-      onClick={() => action.onSelect()}
+      onSelect={() => action.onSelect()}
     >
       <span className="grid size-4 shrink-0 place-items-center text-[var(--text-secondary)]">
         {Icon ? <Icon className="size-3.5" /> : null}
       </span>
       <span className="min-w-0 flex-1 truncate text-left">{action.label}</span>
-    </button>
+    </WorkbarMenuAction>
   );
 }
 
@@ -1018,105 +1016,61 @@ export function WorkbarMenu({
   triggerClassName?: string;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
   const resolvedOpen = open ?? internalOpen;
-  const [position, setPosition] = useState<{
-    top: number;
-    left?: number;
-    right?: number;
-    maxHeight: number;
-  }>({ top: 0, left: 0, maxHeight: 420 });
-  const setOpen = useCallback((next: boolean) => {
+  const setOpen = (next: boolean) => {
     if (open === undefined) setInternalOpen(next);
     onOpenChange?.(next);
-  }, [onOpenChange, open]);
-
-  useLayoutEffect(() => {
-    if (!resolvedOpen) return;
-    const place = () => {
-      const trigger = triggerRef.current;
-      if (!trigger) return;
-      const rect = trigger.getBoundingClientRect();
-      const below = window.innerHeight - rect.bottom - 8;
-      const above = rect.top - 8;
-      const opensBelow = below >= Math.min(220, above);
-      const maxHeight = Math.max(120, Math.min(420, opensBelow ? below : above));
-      setPosition({
-        top: opensBelow ? rect.bottom + 6 : Math.max(8, rect.top - maxHeight - 6),
-        ...(align === "end"
-          ? { right: Math.max(8, window.innerWidth - rect.right) }
-          : { left: Math.max(8, rect.left) }),
-        maxHeight,
-      });
-    };
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-    };
-  }, [align, resolvedOpen]);
-
-  useEffect(() => {
-    if (!resolvedOpen) return;
-    const onPointerDown = (event: globalThis.PointerEvent) => {
-      const target = event.target as Node;
-      if (
-        triggerRef.current?.contains(target) ||
-        contentRef.current?.contains(target)
-      ) return;
-      setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      triggerRef.current?.focus();
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [resolvedOpen, setOpen]);
+  };
 
   return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={resolvedOpen}
-        aria-label={ariaLabel ?? (typeof label === "string" ? label : "More")}
-        className={cn("spectra-workbar-menu-trigger", triggerClassName)}
-        onClick={() => setOpen(!resolvedOpen)}
+    <DropdownMenu modal={false} open={resolvedOpen} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={ariaLabel ?? (typeof label === "string" ? label : "More")}
+          className={cn("spectra-workbar-menu-trigger", triggerClassName)}
+        >
+          {label}
+          {typeof label === "string" ? (
+            <ChevronDown className="size-3 shrink-0 text-[var(--text-secondary)]" />
+          ) : null}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align={align}
+        layer="dropdown"
+        className="spectra-workbar-menu"
       >
-        {label}
-        {typeof label === "string" ? (
-          <ChevronDown className="size-3 shrink-0 text-[var(--text-secondary)]" />
-        ) : null}
-      </button>
-      {resolvedOpen && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              ref={contentRef}
-              role="menu"
-              className="spectra-workbar-menu fixed z-[340] min-w-[210px] overflow-y-auto rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)]"
-              style={{
-                top: position.top,
-                left: position.left,
-                right: position.right,
-                maxHeight: position.maxHeight,
-              }}
-            >
-              {children}
-            </div>,
-            document.body,
-          )
-        : null}
-    </>
+        {children}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** A keyboard-aware action row for callers that contribute to WorkbarMore. */
+export function WorkbarMenuAction({
+  children,
+  disabled,
+  title,
+  onSelect,
+  ...data
+}: {
+  children: ReactNode;
+  disabled?: boolean;
+  title?: string;
+  onSelect: () => void;
+  "data-active"?: boolean;
+}) {
+  return (
+    <DropdownMenuItem
+      className={workbarMenuItemClass()}
+      disabled={disabled}
+      title={title}
+      onSelect={onSelect}
+      {...data}
+    >
+      {children}
+    </DropdownMenuItem>
   );
 }
 

@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   CalendarDays,
   Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -30,6 +29,7 @@ import {
   type DragEvent,
 } from "react";
 import { useNow } from "@/hooks/use-now";
+import { spectraBus } from "../events";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -63,6 +63,8 @@ import {
 } from "../timetable/io";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { projectBindingsFromIr } from "../capabilities/derivations";
+import { ArtifactWorkbar, type CommandBinding } from "./artifact-workbar";
 
 const HOUR_HEIGHT = 68;
 const DAY_MS = 86_400_000;
@@ -132,7 +134,7 @@ function formatDateRange(days: Date[], view: TimetableView) {
   }
   const first = days[0]!;
   const last = days.at(-1)!;
-  return `${first.toLocaleDateString("en-US", { day: "numeric", month: "short" })} – ${last.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`;
+  return `${first.toLocaleDateString("en-US", { day: "numeric", month: "short" })} - ${last.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`;
 }
 
 function eventMinutes(event: TimetableEvent) {
@@ -1189,6 +1191,101 @@ path={eventPath(event.id)}
     );
   }
 
+  const workbarActions: CommandBinding[] = projectBindingsFromIr("timetable", [
+    {
+      id: "today",
+      label: "Today",
+      icon: CalendarDays,
+      general: true,
+      priority: "essential",
+      keepLabel: true,
+      onSelect: () => {
+        userMovedAnchorRef.current = true;
+        emit((draft) => {
+          draft.view!.anchorDate = dateKey(new Date());
+        });
+      },
+    },
+    {
+      id: "previous",
+      label: "Previous range",
+      icon: ChevronLeft,
+      general: true,
+      priority: "essential",
+      onSelect: () => moveAnchor(-1),
+    },
+    {
+      id: "next",
+      label: "Next range",
+      icon: ChevronRight,
+      general: true,
+      priority: "essential",
+      onSelect: () => moveAnchor(1),
+    },
+    {
+      id: "view",
+      label: "Calendar view",
+      icon: CalendarDays,
+      general: true,
+      priority: "essential",
+      control: {
+        kind: "select",
+        value: view.kind,
+        options: [
+          { value: "week", label: "Week" },
+          { value: "day", label: "Day" },
+          { value: "month", label: "Month" },
+          { value: "agenda", label: "Agenda" },
+        ],
+      },
+      onSelect: (value) => {
+        if (typeof value === "string") updateView(value as TimetableView);
+      },
+    },
+    {
+      id: "calendars",
+      label: "Calendars",
+      icon: List,
+      general: true,
+      active: layersOpen,
+      onSelect: () => setLayersOpen((open) => !open),
+    },
+    {
+      id: "add",
+      label: "Add time",
+      icon: Plus,
+      general: true,
+      priority: "essential",
+      keepLabel: true,
+      disabled: !personalReady,
+      hint: personalReady ? undefined : "Your private calendar is still loading",
+      onSelect: () => setAddOpen((open) => !open),
+    },
+    {
+      id: "import",
+      label: importBusy ? "Importing calendar" : "Import calendar",
+      icon: FileUp,
+      tab: "Schedule",
+      priority: "advanced",
+      disabled: readOnly || Boolean(importBusy),
+      hint: "Import an ICS or CSV file with duplicate protection",
+      onSelect: () => fileInputRef.current?.click(),
+    },
+    {
+      id: "export-ics",
+      label: "Export visible calendar",
+      icon: Download,
+      tab: "Schedule",
+      priority: "advanced",
+      onSelect: () =>
+        downloadText(
+          "spectra-timetable.ics",
+          "text/calendar;charset=utf-8",
+          exportTimetableIcs(baseVisibleEvents, "Spectra timetable"),
+        ),
+    },
+  ]);
+
   return (
     <section className="timetable-studio">
       <input
@@ -1201,69 +1298,12 @@ path={eventPath(event.id)}
           if (file) void importFile(file);
         }}
       />
-      <header className="spectra-editor-workbar timetable-toolbar">
-        <div className="timetable-date-navigation">
-          <button
-            type="button"
-            onClick={() => {
-              userMovedAnchorRef.current = true;
-              emit((draft) => {
-                draft.view!.anchorDate = dateKey(new Date());
-              });
-            }}
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            aria-label="Previous range"
-            onClick={() => moveAnchor(-1)}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Next range"
-            onClick={() => moveAnchor(1)}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-          <strong>{formatDateRange(days, view.kind)}</strong>
-        </div>
-        <div className="timetable-toolbar-actions">
-          <label>
-            <span className="sr-only">Calendar view</span>
-            <select
-              value={view.kind}
-              onChange={(event) =>
-                updateView(event.target.value as TimetableView)
-              }
-            >
-              <option value="week">Week</option>
-              <option value="day">Day</option>
-              <option value="month">Month</option>
-              <option value="agenda">Agenda</option>
-            </select>
-            <ChevronDown className="h-3.5 w-3.5" />
-          </label>
-          <button
-            type="button"
-            className="timetable-calendars-trigger"
-            data-active={layersOpen || undefined}
-            onClick={() => setLayersOpen(!layersOpen)}
-          >
-            All calendars <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            className="timetable-add-trigger"
-            disabled={!personalReady}
-            onClick={() => setAddOpen(!addOpen)}
-          >
-            <Plus className="h-4 w-4" /> Add
-          </button>
-        </div>
-      </header>
+      <ArtifactWorkbar
+        label="Calendar"
+        modes={[]}
+        context={formatDateRange(days, view.kind)}
+        actions={workbarActions}
+      />
       {!personalReady || personalSaveState !== "idle" || personalError ? (
         <div
           className="timetable-personal-sync"
@@ -1491,11 +1531,10 @@ path={eventPath(event.id)}
                     key={artifact._id}
                     type="button"
                     onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent("spectra:open-artifact", {
-                          detail: { artifactId: artifact._id },
-                        }),
-                      )
+                      void spectraBus.command("work.open", {
+                        workId: artifact._id,
+                        surface: "panel",
+                      })
                     }
                   >
                     <Link2 className="h-4 w-4" />
@@ -1564,27 +1603,6 @@ path={eventPath(event.id)}
               {Math.floor(studyMinutes / 60)}h {Math.round(studyMinutes % 60)}m
               scheduled
             </small>
-          </section>
-          <section className="timetable-export-actions">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={readOnly || Boolean(importBusy)}
-            >
-              <FileUp className="h-4 w-4" /> Import ICS or CSV
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                downloadText(
-                  "spectra-timetable.ics",
-                  "text/calendar;charset=utf-8",
-                  exportTimetableIcs(baseVisibleEvents, "Spectra timetable"),
-                )
-              }
-            >
-              <Download className="h-4 w-4" /> Export visible calendar
-            </button>
           </section>
         </aside>
       </div>

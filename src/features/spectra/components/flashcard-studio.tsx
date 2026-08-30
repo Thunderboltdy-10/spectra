@@ -57,24 +57,27 @@ import {
 import { parseDelimited } from "../sheets/model";
 import type { WorkCapability } from "../work/registry";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { spectraBus } from "../events";
 import {
   ArtifactRichTextEditor,
-  DeckCard,
-  DeckStudyItem,
   Field,
+  deckCards,
+  iconButtonClass,
+  inputClass,
+  plannerDescriptionHtml,
+  plannerDescriptionText,
+} from "./artifact-studio";
+import {
   arrayOfRecords,
   clozeAnswer,
   clozeParts,
   clozePrompt,
-  deckCards,
   deckStudyKey,
-  iconButtonClass,
   id,
-  inputClass,
-  plannerDescriptionHtml,
-  plannerDescriptionText,
   record,
-} from "./artifact-studio";
+  type DeckCard,
+  type DeckStudyItem,
+} from "./artifact-content-model";
 import {
   artifactBlobSha256,
   downloadDocumentBlob,
@@ -257,11 +260,8 @@ export function FlashcardStudio({
   const [deckMediaError, setDeckMediaError] = useState<string>();
 
   useEffect(() => {
-    const reveal = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{ artifactId?: string; path?: string }>
-      ).detail;
-      if (detail?.artifactId !== artifactId || !detail.path) return;
+    const reveal = (detail: { workId: string; path?: string }) => {
+      if (detail.workId !== artifactId || !detail.path) return;
       const match = detail.path.match(/^\/cards\/(\d+)(?:\/|$)/);
       if (!match) return;
       const index = Number(match[1]);
@@ -274,8 +274,7 @@ export function FlashcardStudio({
       )
         setAdvancedOpen(true);
     };
-    window.addEventListener("spectra:reveal-target", reveal);
-    return () => window.removeEventListener("spectra:reveal-target", reveal);
+    return spectraBus.handle("work.reveal", reveal);
   }, [artifactId, cards]);
   const [maskDraft, setMaskDraft] = useState<{
     x: number;
@@ -616,14 +615,10 @@ export function FlashcardStudio({
   });
 
   useEffect(() => {
-    function beginFromInspector(event: Event) {
-      const requestedId = (event as CustomEvent<{ artifactId?: string }>).detail
-        ?.artifactId;
-      if (requestedId === artifactId) beginStudySessionRef.current();
+    function beginFromInspector({ workId }: { workId: string }) {
+      if (workId === artifactId) beginStudySessionRef.current();
     }
-    window.addEventListener("spectra:study-deck", beginFromInspector);
-    return () =>
-      window.removeEventListener("spectra:study-deck", beginFromInspector);
+    return spectraBus.handle("deck.study", beginFromInspector);
   }, [artifactId]);
 
   useEffect(() => {
@@ -2130,7 +2125,7 @@ export function FlashcardStudio({
   return (
     <div
       ref={studioRef}
-      className="spectra-flashcard-studio ml-2.5 flex min-h-0 min-w-0 flex-col overflow-hidden" 
+      className="spectra-flashcard-studio flex min-h-0 min-w-0 flex-col overflow-hidden"
       data-studio-view={activeView}
       data-rail-collapsed={railCollapsed || undefined}
       onKeyDown={onStudioKeyDown}

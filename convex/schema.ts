@@ -1278,6 +1278,9 @@ export default defineSchema({
     status: v.union(v.literal("active"), v.literal("archived")),
     defaultView: v.union(
       v.literal("cards"),
+      // Legacy storage-only values. D30 forbids new writes and every read is
+      // normalized by spectraWorkspaces.liveWorkspace. Remove these literals
+      // only after the separately executed data migration has rewritten rows.
       v.literal("canvas"),
       v.literal("timeline"),
       v.literal("library"),
@@ -3415,6 +3418,10 @@ export default defineSchema({
     .index("by_account_thread", ["ownerAccountId", "threadId"])
     .index("by_thread", ["threadId"]),
 
+  // Legacy read-only tombstone retained because dropping a live Convex table
+  // is destructive. There are no product readers or writers; administration
+  // export/purge keeps the rows recoverable until an explicit migration owns
+  // their disposition.
   spectraFocusSpaces: defineTable({
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     title: v.string(),

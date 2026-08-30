@@ -41,7 +41,7 @@ describe("planWorkbarOverflow", () => {
     expect([...plan.iconOnlyIds, ...plan.overflowIds]).toContain("notes");
   });
 
-  it("collapses advanced labels before essential labels", () => {
+  it("keeps advanced actions in labelled overflow before collapsing essentials", () => {
     const plan = planWorkbarOverflow(
       [
         item("add", 90, { priority: "essential" }),
@@ -50,8 +50,9 @@ describe("planWorkbarOverflow", () => {
       ],
       220,
     );
-    expect(plan.iconOnlyIds).toContain("theme");
+    expect(plan.overflowIds).toContain("theme");
     expect(plan.iconOnlyIds).not.toContain("add");
+    expect(plan.overflowIds).not.toContain("add");
   });
 
   it("refuses to commit a plan while every measured command is still 0px", () => {

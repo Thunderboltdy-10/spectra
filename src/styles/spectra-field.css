@@ -581,24 +581,24 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
    sideways instead of shedding into `⋯`. */
 .spectra-editor-workbar {
   position: relative !important;
-  z-index: 12 !important;
+  z-index: var(--z-chrome) !important;
   top: auto !important;
   /* Layout is owned by the workbar system in spectra-app.css, which stacks a tab
      rail over a command rail. This file only restores the surface treatment the
      old field styles had trampled — declaring `display` here as well silently
      flattened the two rails back into one row. */
-  margin: 8px 12px 0 !important;
+  margin: 8px var(--spectra-studio-inline-inset) 0 !important;
   flex-shrink: 0;
   border: 1px solid var(--border-default) !important;
-  border-radius: 12px !important;
+  border-radius: var(--card-radius) !important;
   background: var(--bg-elevated) !important;
   box-shadow: 0 8px 24px rgba(31, 44, 37, 0.045) !important;
   backdrop-filter: none !important;
 }
 
 .spectra-artifact-studio[data-canvas-extent="infinite"] .spectra-editor-workbar {
-  margin: 0 !important;
-  border-radius: 0 !important;
+  margin: 8px var(--spectra-studio-inline-inset) 0 !important;
+  border-radius: var(--card-radius) !important;
 }
 
 .spectra-editor-workbar::-webkit-scrollbar {

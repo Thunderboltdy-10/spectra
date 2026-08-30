@@ -19,8 +19,10 @@ export type ResultCardStatus = (typeof RESULT_CARD_STATUSES)[number];
 export const SURFACES = ["chat", "workspace", "artifact"] as const;
 export type SpectraSurface = (typeof SURFACES)[number];
 
-export const WORKSPACE_VIEWS = ["cards", "canvas", "timeline", "library"] as const;
-export type WorkspaceView = (typeof WORKSPACE_VIEWS)[number];
+export {
+  CURRENT_WORKSPACE_VIEWS as WORKSPACE_VIEWS,
+  type WorkspaceView,
+} from "../../../../shared/workspace-view";
 
 export const ACTOR_TYPES = ["user", "ai", "system"] as const;
 export type ActorType = (typeof ACTOR_TYPES)[number];

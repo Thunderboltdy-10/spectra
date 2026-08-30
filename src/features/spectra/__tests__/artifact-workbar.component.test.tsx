@@ -193,7 +193,10 @@ describe("artifact workbar", () => {
     renderWorkbar(documentDefaults());
 
     const bar = screen.getByRole("toolbar", { name: "Document workbar" });
-    fireEvent.click(within(bar).getByRole("button", { name: /More/i }));
+    fireEvent.pointerDown(within(bar).getByRole("button", { name: /More/i }), {
+      button: 0,
+      ctrlKey: false,
+    });
     // The menu is portaled, so it lives outside the toolbar element. That is what
     // keeps the bar 42px tall, and it is also what makes "in the bar" and "in the
     // menu" two answerable questions.
@@ -205,6 +208,7 @@ describe("artifact workbar", () => {
       return (
         within(scope).queryAllByRole("button", { name: exact }).length > 0 ||
         within(scope).queryAllByRole("menuitem", { name: exact }).length > 0 ||
+        within(scope).queryAllByRole("listbox", { name: exact }).length > 0 ||
         within(scope).queryAllByRole("spinbutton", { name: exact }).length > 0 ||
         within(scope).queryAllByRole("combobox", { name: exact }).length > 0
       );

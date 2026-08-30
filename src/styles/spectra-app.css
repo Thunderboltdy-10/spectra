@@ -1426,20 +1426,19 @@ body {
 .spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header {
   flex-wrap: nowrap;
   gap: 8px;
-  padding-inline: 20px !important;
+  padding-inline: var(--spectra-studio-inline-inset) !important;
 }
 
 .spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-main,
 .spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-main {
-  padding-inline: 20px !important;
+  padding-inline: var(--spectra-studio-inline-inset) !important;
 }
 
 .spectra-artifact-studio[data-studio-mode="split"] .spectra-editor-workbar,
 .spectra-artifact-studio[data-studio-mode="tab"] .spectra-editor-workbar {
   width: auto !important;
   max-width: none;
-  margin-left: 0 !important;
-  margin-right: 0 !important;
+  margin-inline: var(--spectra-studio-inline-inset) !important;
 }
 
 .spectra-artifact-studio[data-studio-mode="split"]
@@ -15980,9 +15979,21 @@ body {
    One height for every type. Nine distinct header heights (74 to 133px) came
    from per-type overrides each nudging padding or type size; the identity is
    shell furniture, so it is settled here and nowhere else. */
+.spectra-artifact-studio {
+  --spectra-studio-inline-inset: 20px;
+}
+
+.spectra-artifact-studio[data-studio-density="compact"] {
+  --spectra-studio-inline-inset: 15px;
+}
+
+.spectra-artifact-studio[data-studio-density="tight"] {
+  --spectra-studio-inline-inset: 12px;
+}
+
 .spectra-artifact-header {
   min-height: 72px !important;
-  padding: 10px 14px 8px !important;
+  padding: 10px var(--spectra-studio-inline-inset) 8px !important;
 }
 
 .spectra-artifact-header-topline {
@@ -16042,7 +16053,7 @@ body {
      `.spectra-editor-body`, so the 42px bar never covers the canvas. */
   overflow: hidden !important;
   overscroll-behavior: contain;
-  padding: 0 0 20px 15px !important;
+  padding: 0 var(--spectra-studio-inline-inset) 20px !important;
 }
 
 .spectra-artifact-studio[data-canvas-extent="infinite"] .spectra-artifact-main {
@@ -16053,7 +16064,7 @@ body {
 }
 
 .spectra-artifact-studio[data-canvas-extent="infinite"] .spectra-editor-workbar {
-  margin: 0 !important;
+  margin: 8px var(--spectra-studio-inline-inset) 0 !important;
 }
 
 .spectra-artifact-studio[data-canvas-extent="infinite"]
@@ -19221,7 +19232,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   min-width: 0;
   flex-shrink: 0;
   position: relative;
-  z-index: 18;
+  z-index: var(--z-chrome);
   /* Fixed, not minimum: a wrapping bar that pushes the canvas down was the
      baseline's most common editor defect. */
   height: 72px;
@@ -19229,7 +19240,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   box-sizing: border-box;
   gap: 4px;
   border: 1px solid var(--border-default);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   background: var(--bg-elevated);
   padding: 5px 8px 6px;
   box-shadow: 0 8px 24px -22px rgba(31, 44, 37, 0.22);
@@ -19306,9 +19317,8 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   width: auto !important;
   max-width: none;
   margin-top: 8px !important;
-  margin-left: 0 !important;
-  margin-right: 0 !important;
-  border-radius: 12px !important;
+  margin-inline: var(--spectra-studio-inline-inset) !important;
+  border-radius: var(--card-radius) !important;
 }
 
 .spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-main,
@@ -19321,12 +19331,12 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   .spectra-artifact-main,
 .spectra-artifact-studio[data-studio-mode="tab"][data-blueprint="document"]
   .spectra-artifact-main {
-  padding-inline: 20px !important;
+  padding-inline: var(--spectra-studio-inline-inset) !important;
 }
 
 .spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-header,
 .spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-header {
-  padding-inline: 20px !important;
+  padding-inline: var(--spectra-studio-inline-inset) !important;
 }
 
 /* Kept for the studios that still mount their own control cluster inside the
@@ -19397,7 +19407,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   flex: 0 0 auto;
   padding: 0 8px;
   border: 0;
-  border-radius: 5px 5px 0 0;
+  border-radius: var(--chip-radius) var(--chip-radius) 0 0;
   background: transparent;
   color: var(--text-tertiary);
   font-size: var(--text-micro);
@@ -19430,7 +19440,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   bottom: -1px;
   left: 6px;
   height: 2px;
-  border-radius: 2px 2px 0 0;
+  border-radius: var(--chip-radius) var(--chip-radius) 0 0;
   background: var(--brand-primary);
 }
 
@@ -19896,7 +19906,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  border-radius: 7px;
+  border-radius: var(--control-radius);
   padding: 0 9px;
   color: var(--text-secondary);
   font-size: var(--text-micro);
@@ -19913,7 +19923,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  border-radius: 7px;
+  border-radius: var(--control-radius);
   padding: 0 6px;
   color: var(--text-secondary);
   font-size: var(--text-micro);
@@ -19928,7 +19938,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  border-radius: 7px;
+  border-radius: var(--control-radius);
   padding: 0 11px;
   font-size: var(--text-micro);
   font-weight: 600;
@@ -20070,7 +20080,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   align-items: center;
   gap: 5px;
   border: 1px solid var(--border-subtle);
-  border-radius: 7px;
+  border-radius: var(--control-radius);
   background: var(--bg-primary);
   padding: 0 7px;
   color: var(--text-primary);
@@ -20128,7 +20138,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   height: 24px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 5px;
+  border-radius: var(--chip-radius);
   color: var(--text-secondary);
 }
 
@@ -20181,7 +20191,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   height: 24px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 5px;
+  border-radius: var(--chip-radius);
   padding: 0 4px;
   color: var(--text-secondary);
   font-size: var(--text-micro);
@@ -20203,14 +20213,11 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 }
 
 .spectra-workbar-control-popover {
-  position: fixed;
-  z-index: 341;
   display: grid;
   min-width: 104px;
   gap: 1px;
-  overflow-y: auto;
   border: 1px solid var(--border-default);
-  border-radius: var(--card-radius, 12px);
+  border-radius: var(--card-radius);
   background: var(--bg-elevated);
   padding: 5px;
   box-shadow: var(--shadow-lg);
@@ -20221,7 +20228,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   min-height: 28px;
   align-items: center;
   gap: 6px;
-  border-radius: 6px;
+  border-radius: var(--chip-radius);
   padding: 0 6px;
   color: var(--text-primary);
   font-size: var(--text-micro);
@@ -20267,7 +20274,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 .spectra-workbar-color-swatch {
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--chip-radius);
   box-shadow: inset 0 0 0 1px rgb(45 31 17 / 0.16);
 }
 
@@ -20282,7 +20289,7 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 .spectra-workbar-color-clear {
   grid-column: 1 / -1;
   height: 26px;
-  border-radius: 6px;
+  border-radius: var(--chip-radius);
   color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 600;
@@ -20398,7 +20405,11 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 .spectra-workbar-native-select:focus-visible {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
-  border-radius: 6px;
+  border-radius: var(--chip-radius);
+}
+
+.spectra-workbar-menu {
+  min-width: 13rem;
 }
 
 @container artifact-workbar (max-width: 780px) {

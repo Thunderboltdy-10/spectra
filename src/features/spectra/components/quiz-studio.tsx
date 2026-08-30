@@ -65,21 +65,24 @@ import {
 } from "../quiz/interchange";
 
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { spectraBus } from "../events";
 import {
   ArtifactRichTextEditor,
   Field,
-  QuizQuestion,
-  QuizSettings,
   iconButtonClass,
-  id,
   inputClass,
   plannerDescriptionText,
   quizQuestions,
-  quizSettingsFromContent,
-  record,
   smallActionClass,
   textareaClass,
 } from "./artifact-studio";
+import {
+  id,
+  quizSettingsFromContent,
+  record,
+  type QuizQuestion,
+  type QuizSettings,
+} from "./artifact-content-model";
 import { artifactBlobSha256 } from "./artifact-studio-file-utils";
 import { formatShortDate } from "./spectra-view-model";
 import {
@@ -554,11 +557,8 @@ export function QuizStudio({
   }, [studio.surface]);
 
   useEffect(() => {
-    const reveal = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{ artifactId?: string; path?: string }>
-      ).detail;
-      if (detail?.artifactId !== artifactId || !detail.path) return;
+    const reveal = (detail: { workId: string; path?: string }) => {
+      if (detail.workId !== artifactId || !detail.path) return;
       const match = detail.path.match(/^\/questions\/(\d+)(?:\/|$)/);
       if (match) {
         const question = questions[Number(match[1])];
@@ -574,8 +574,7 @@ export function QuizStudio({
       }
       if (detail.path.startsWith("/settings")) setView("settings");
     };
-    window.addEventListener("spectra:reveal-target", reveal);
-    return () => window.removeEventListener("spectra:reveal-target", reveal);
+    return spectraBus.handle("work.reveal", reveal);
   }, [artifactId, questions]);
   const quizImportRef = useRef<HTMLInputElement>(null);
   const quizWasReadOnly = useRef(!canEditQuiz);
@@ -616,14 +615,10 @@ export function QuizStudio({
   }, [canEditQuiz, practiceAttempt, view]);
 
   useEffect(() => {
-    const openPreview = (event: Event) => {
-      const detail = (event as CustomEvent<{ artifactId?: string }>).detail;
-      if (!detail?.artifactId || detail.artifactId === artifactId)
-        setView("preview");
+    const openPreview = ({ workId }: { workId: string }) => {
+      if (workId === artifactId) setView("preview");
     };
-    window.addEventListener("spectra:preview-quiz", openPreview);
-    return () =>
-      window.removeEventListener("spectra:preview-quiz", openPreview);
+    return spectraBus.handle("quiz.preview", openPreview);
   }, [artifactId]);
 
   useEffect(() => {

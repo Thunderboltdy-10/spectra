@@ -10,7 +10,10 @@ import {
   sha256Payload,
   type DocxProjection,
 } from "@/features/spectra/lenses/docx-lens";
-import { docxProjectionFromContent } from "@/features/spectra/lenses/document-projection";
+import {
+  bindDocxProjectionSource,
+  docxProjectionFromContent,
+} from "@/features/spectra/lenses/document-projection";
 import {
   fetchVerifiedNativePayload,
   fetchStoredNativeBase,
@@ -149,6 +152,11 @@ async function materializeDocxArtifactAttempt(
     docxLens.open(output, "strict-native"),
     comparePackages(payload, output),
   ]);
+  const nextProjection = bindDocxProjectionSource(
+    next.projection,
+    String(workId),
+    hash,
+  );
   assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
   const stored = await uploadNativePayload(workId, output, hash, truth.nativeFormat);
   const local = workTruth.replicas.find(
@@ -199,9 +207,9 @@ async function materializeDocxArtifactAttempt(
         .map((block) => block.text)
         .join("\n")
         .slice(0, 200_000),
-      projectionContent: next.projection,
-      projectionContentHash: next.projection.nativeBinding.semanticDigest,
-      projectionTextIndex: next.projection.blocks
+      projectionContent: nextProjection,
+      projectionContentHash: nextProjection.nativeBinding.semanticDigest,
+      projectionTextIndex: nextProjection.blocks
         .map((block) => block.text)
         .join("\n")
         .slice(0, 200_000),
@@ -364,7 +372,11 @@ export async function POST(request: Request) {
             localReplicaId: local.truth.replicaId as Id<"workReplicas">,
             localPayloadRef: local.truth.payloadRef,
             localRevision: local.truth.revision,
-            content: merged.projection,
+            content: bindDocxProjectionSource(
+              merged.projection,
+              String(workId),
+              local.truth.hash,
+            ),
             fidelityMap: externalOpened.fidelityMap,
             regionIds: merged.externalChanged,
             partNames: diff.preservedPartChanges,
@@ -379,6 +391,11 @@ export async function POST(request: Request) {
         // must remain visible instead of silently reverting to stale content.
         if (!(error instanceof Error) || !["LOCAL_REPLICA_UNAVAILABLE", "NATIVE_PAYLOAD_UNAVAILABLE"].includes(error.message)) throw error;
       }
+      const activatedProjection = bindDocxProjectionSource(
+        opened.projection,
+        String(workId),
+        truth.hash,
+      );
       await convexMutation<
         {
           workId: Id<"spectraArtifacts">;
@@ -392,14 +409,14 @@ export async function POST(request: Request) {
       >("replicas:activateLens", {
         workId,
         payloadHash: truth.hash,
-        content: opened.projection,
+        content: activatedProjection,
         fidelityMap: opened.fidelityMap,
-        semanticDigest: opened.projection.nativeBinding.semanticDigest,
-        nativeFormat: opened.projection.nativeBinding.format,
+        semanticDigest: activatedProjection.nativeBinding.semanticDigest,
+        nativeFormat: activatedProjection.nativeBinding.format,
       });
       return NextResponse.json({
         state: "opened",
-        projection: opened.projection,
+        projection: activatedProjection,
         fidelityMap: opened.fidelityMap,
         capabilities: opened.capabilities,
       });
@@ -464,6 +481,11 @@ export async function POST(request: Request) {
         docxLens.open(output, "strict-native"),
         comparePackages(local.payload, output),
       ]);
+      const nextProjection = bindDocxProjectionSource(
+        next.projection,
+        String(workId),
+        hash,
+      );
       assertPreservationKept({ entries: externalOpened.fidelityMap.entries, parts: comparison.parts });
       const stored = await uploadNativePayload(workId, output, hash, local.truth.nativeFormat);
       const queued = await convexMutation<
@@ -492,9 +514,9 @@ export async function POST(request: Request) {
           .filter((part) => part.verdict !== "identical")
           .map((part) => `/${part.name}`),
         localReplicaId: local.truth.replicaId as Id<"workReplicas">,
-        projectionContent: next.projection,
-        projectionContentHash: next.projection.nativeBinding.semanticDigest,
-        projectionTextIndex: next.projection.blocks
+        projectionContent: nextProjection,
+        projectionContentHash: nextProjection.nativeBinding.semanticDigest,
+        projectionTextIndex: nextProjection.blocks
           .map((block) => block.text)
           .join("\n")
           .slice(0, 200_000),
@@ -519,7 +541,7 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({
         state: "applied",
-        projection: next.projection,
+        projection: nextProjection,
         attribution: "Kept your Spectra version",
         requestId: queued.requestId,
         status: "Waiting to save your Spectra version locally",
@@ -541,7 +563,17 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ state: "conflicted", conflict: { regionIds: conflictRegionIds, previews, message: "The Word file and Spectra changed the same regions. Choose which version to keep." } });
     }
-    const merged = mergeDocxProjections(baseOpened.projection, current, externalOpened.projection, "word", true).projection;
+    const merged = bindDocxProjectionSource(
+      mergeDocxProjections(
+        baseOpened.projection,
+        current,
+        externalOpened.projection,
+        "word",
+        true,
+      ).projection,
+      String(workId),
+      local.truth.hash,
+    );
     const recorded = await convexMutation<
       {
         workId: Id<"spectraArtifacts">;

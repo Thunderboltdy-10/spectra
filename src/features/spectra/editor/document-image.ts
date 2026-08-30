@@ -1,4 +1,5 @@
 import { Image } from "@tiptap/extension-image";
+import { Node, mergeAttributes } from "@tiptap/core";
 
 /**
  * The document image.
@@ -42,5 +43,56 @@ export const DocumentImage = Image.extend({
             : {},
       },
     };
+  },
+});
+
+/**
+ * A retained DOCX drawing inside otherwise ordered paragraph content.
+ *
+ * This is intentionally a separate node from authorable `image`: it is
+ * inline, atomic, and has no mutation UI. The `src` is a small authenticated
+ * route to the retained package part, never a base64 copy stored in the
+ * collaborative document.
+ */
+export const NativeDocxImage = Node.create({
+  name: "nativeDocxImage",
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: false,
+  draggable: false,
+  addAttributes() {
+    return {
+      src: { default: "" },
+      partName: { default: "" },
+      mediaType: { default: "" },
+      alt: { default: "Word image" },
+      widthEmu: { default: null },
+      heightEmu: { default: null },
+      placement: { default: "inline" },
+      nativeReadOnly: { default: true },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "img[data-native-docx-image]" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    const widthEmu = Number(HTMLAttributes.widthEmu);
+    const widthPixels =
+      Number.isFinite(widthEmu) && widthEmu > 0
+        ? Math.max(1, Math.round(widthEmu / 9525))
+        : null;
+    return [
+      "img",
+      mergeAttributes(HTMLAttributes, {
+        "data-native-docx-image": "true",
+        "data-native-read-only": "true",
+        contenteditable: "false",
+        draggable: "false",
+        ...(widthPixels
+          ? { style: `width:min(100%, ${widthPixels}px);height:auto` }
+          : { style: "max-width:100%;height:auto" }),
+      }),
+    ];
   },
 });

@@ -24,7 +24,7 @@ function EquationView({ node, editor, getPos, selected, updateAttributes }: Node
   const display = node.attrs.display === "inline" ? "inline" : "block";
   const alignment = ["left", "center", "right"].includes(node.attrs.alignment) ? node.attrs.alignment : "center";
   const html = useMemo(() => renderEquation(latex, display === "block"), [display, latex]);
-  const focused = Boolean(selected) && isFocusedNode({ editor, getPos });
+  const focused = node.attrs.nativeReadOnly !== true && Boolean(selected) && isFocusedNode({ editor, getPos });
   return <NodeViewWrapper as={display === "inline" ? "span" : "div"} className={`spectra-equation spectra-equation-${display} is-${alignment} ${focused ? "is-selected" : ""}`} data-equation="true">
     <span className="spectra-equation-preview" dangerouslySetInnerHTML={{ __html: html }} />
     {focused ? <textarea value={latex} onChange={(event) => updateAttributes({ latex: event.target.value })} rows={Math.max(2, latex.split("\n").length)} className="spectra-equation-source" aria-label="LaTeX equation source" placeholder="e.g. E = mc^2" /> : null}
@@ -48,7 +48,7 @@ function EquationView({ node, editor, getPos, selected, updateAttributes }: Node
 function InlineEquationView({ node, editor, getPos, selected, updateAttributes }: NodeViewProps) {
   const latex = typeof node.attrs.latex === "string" ? node.attrs.latex : "";
   const html = useMemo(() => renderEquation(latex, false), [latex]);
-  const focused = Boolean(selected) && isFocusedNode({ editor, getPos });
+  const focused = node.attrs.nativeReadOnly !== true && Boolean(selected) && isFocusedNode({ editor, getPos });
   return <NodeViewWrapper as="span" className={`spectra-equation spectra-equation-inline ${focused ? "is-selected" : ""}`} data-inline-equation="true">
     <span className="spectra-equation-preview" dangerouslySetInnerHTML={{ __html: html }} />
     {focused ? <input value={latex} onChange={(event) => updateAttributes({ latex: event.target.value })} className="spectra-equation-source" aria-label="Inline LaTeX equation source" placeholder="e.g. 2n = 4" /> : null}
@@ -57,7 +57,7 @@ function InlineEquationView({ node, editor, getPos, selected, updateAttributes }
 
 export const Equation = Node.create({
   name: "equation", group: "block", atom: true, draggable: true, selectable: true,
-  addAttributes() { return { latex: { default: "" }, display: { default: "block" }, alignment: { default: "center" } }; },
+  addAttributes() { return { latex: { default: "" }, display: { default: "block" }, alignment: { default: "center" }, nativeReadOnly: { default: false } }; },
   parseHTML() { return [{ tag: "div[data-equation]" }, { tag: "span[data-equation]" }]; },
   renderHTML({ HTMLAttributes }) { return [HTMLAttributes.display === "inline" ? "span" : "div", mergeAttributes(HTMLAttributes, { "data-equation": "true" })]; },
   addNodeView() {
@@ -67,7 +67,7 @@ export const Equation = Node.create({
 
 export const InlineEquation = Node.create({
   name: "inlineEquation", group: "inline", inline: true, atom: true, selectable: true,
-  addAttributes() { return { latex: { default: "" } }; },
+  addAttributes() { return { latex: { default: "" }, nativeReadOnly: { default: false } }; },
   parseHTML() { return [{ tag: "span[data-inline-equation]" }]; },
   renderHTML({ HTMLAttributes }) { return ["span", mergeAttributes(HTMLAttributes, { "data-inline-equation": "true" })]; },
   addNodeView() {

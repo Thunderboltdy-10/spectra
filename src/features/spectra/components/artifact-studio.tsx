@@ -13,6 +13,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
   documentBlocksFromJson,
+  docxRichBlockToJson,
   docxIntentFromDocumentBlocks,
 } from "../lenses/document-projection";
 import type { LucideIcon } from "lucide-react";
@@ -2171,6 +2172,7 @@ export function documentJsonFromContent(
   title: string,
 ): JSONContent {
   const source = record(content);
+  const nativeBinding = source.nativeBinding;
   const tiptap = source.tiptap;
   const blocks = arrayOfRecords(source.blocks);
   const nativeBlocks = new Map(
@@ -2182,6 +2184,8 @@ export function documentJsonFromContent(
     if (!node.attrs || typeof node.attrs.blockId !== "string") return node;
     const nativeBlock = nativeBlocks.get(node.attrs.blockId);
     if (!nativeBlock) return node;
+    const richNode = docxRichBlockToJson(nativeBlock, nativeBinding);
+    if (richNode) return richNode as JSONContent;
     const attrs = record(nativeBlock.attrs);
     const styleId =
       typeof attrs.styleId === "string" ? attrs.styleId : undefined;
@@ -2243,6 +2247,8 @@ export function documentJsonFromContent(
       ? blocks.map((block) => {
           const text = typeof block.text === "string" ? block.text : "";
           const blockAttrs = record(block.attrs);
+          const richNode = docxRichBlockToJson(block, nativeBinding);
+          if (richNode) return richNode as JSONContent;
           const nativeAttrs = {
             ...(typeof block.id === "string" && block.id
               ? { blockId: block.id }

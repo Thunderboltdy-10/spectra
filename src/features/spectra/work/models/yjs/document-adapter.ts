@@ -5,6 +5,7 @@ import type { SemanticRegion } from "../../../artifacts/types";
 import {
   documentBlocksFromJson,
   documentNodeText,
+  docxRichBlockToJson,
   type DocumentJsonNode,
 } from "../../../lenses/document-projection";
 import type {
@@ -48,13 +49,19 @@ function inlineText(value: string): ProseMirrorJson[] | undefined {
   return value ? [{ type: "text", text: value }] : undefined;
 }
 
-function blockToJson(block: Record<string, unknown>, index: number): ProseMirrorJson {
+function blockToJson(
+  block: Record<string, unknown>,
+  index: number,
+  nativeBinding?: unknown,
+): ProseMirrorJson {
   const id =
     typeof block.id === "string" && block.id.trim()
       ? block.id
       : `block-${index + 1}`;
   const value = typeof block.text === "string" ? block.text : "";
   const attrs = record(block.attrs);
+  const richNode = docxRichBlockToJson(block, nativeBinding);
+  if (richNode) return richNode;
   if (block.type === "heading")
     return {
       type: "heading",
@@ -163,20 +170,28 @@ export function documentContentToProseMirrorJson(
         const blockId = node.attrs?.blockId;
         const block = typeof blockId === "string" ? byId.get(blockId) : undefined;
         const attrs = record(block?.attrs);
+        const richNode = block
+          ? docxRichBlockToJson(block, content.nativeBinding)
+          : null;
+        if (richNode)
+          return {
+            ...richNode,
+            attrs: { ...node.attrs, ...richNode.attrs },
+          };
         if (attrs.nativeReadOnly === true)
           return {
             ...node,
             attrs: { ...node.attrs, nativeReadOnly: true },
           };
         if (block?.type === "table") {
-          const rebuilt = blockToJson(block, 0);
+          const rebuilt = blockToJson(block, 0, content.nativeBinding);
           return { ...rebuilt, attrs: { ...node.attrs, ...rebuilt.attrs } };
         }
         if (
           typeof block?.text === "string" &&
           block.text !== documentNodeText(node as DocumentJsonNode).trimEnd()
         ) {
-          const rebuilt = blockToJson(block, 0);
+          const rebuilt = blockToJson(block, 0, content.nativeBinding);
           return { ...rebuilt, attrs: { ...node.attrs, ...rebuilt.attrs } };
         }
         const styleId = typeof attrs.styleId === "string" ? attrs.styleId : "";
@@ -197,9 +212,10 @@ export function documentContentToProseMirrorJson(
   }
   return {
     type: "doc",
-    content: (blocks.length ? blocks : [{ id: "intro", type: "paragraph", text: "" }]).map(
-      blockToJson,
-    ),
+    content: (blocks.length
+      ? blocks
+      : [{ id: "intro", type: "paragraph", text: "" }]
+    ).map((block, index) => blockToJson(block, index, content.nativeBinding)),
   };
 }
 

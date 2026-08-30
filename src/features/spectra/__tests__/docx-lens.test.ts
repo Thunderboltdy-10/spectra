@@ -9,6 +9,7 @@ import {
   type DocxRunFormat,
 } from "../lenses/docx-lens";
 import { comparePackages } from "@ariadng/office/preservation";
+import katex from "katex";
 import { assertPreservationKept } from "../commands/office/preservation-guard";
 import { mergeDocxProjections, contentProjection } from "@/app/api/spectra/lenses/docx/route";
 
@@ -149,6 +150,132 @@ describe("DOCX preservation lens", () => {
       regionId: equation.id,
       text: "Would flatten OMML",
     })).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
+  });
+
+  it("projects mixed and display OMML in native order as valid KaTeX", async () => {
+    const source = await fixture("equation-omml.docx");
+    const opened = await docxLens.open(source);
+    const mixed = opened.projection.blocks[0]!;
+    expect(mixed.inlineContent?.map((item) => item.kind)).toEqual([
+      "text",
+      "equation",
+      "text",
+    ]);
+    expect(mixed.text).toContain("\\alpha{}");
+    expect(mixed.text).toContain("(Linear)");
+
+    const equations = opened.projection.blocks.flatMap((block) => [
+      ...(block.inlineContent ?? []),
+      ...(block.richRows ?? []).flat(2),
+    ]).filter((item) => item.kind === "equation");
+    expect(equations.some((item) => item.latex.includes("\\frac"))).toBe(true);
+    expect(equations.some((item) => item.latex.includes("\\begin{matrix}"))).toBe(true);
+    expect(equations.some((item) => item.display === "block")).toBe(true);
+    for (const equation of equations)
+      expect(() =>
+        katex.renderToString(equation.latex, {
+          throwOnError: true,
+          displayMode: equation.display === "block",
+          strict: "ignore",
+        }),
+      ).not.toThrow();
+  });
+
+  it("promotes a paragraph containing only oMathPara to a protected display equation", async () => {
+    const source = await fixture("equation-omml.docx");
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const files = unzipSync(source);
+    const documentName = Object.keys(files).find((name) =>
+      name.endsWith("word/document.xml"),
+    )!;
+    const xml = strFromU8(files[documentName]!);
+    const display = xml.match(/<m:oMathPara>[\s\S]*?<\/m:oMathPara>/)?.[0];
+    expect(display).toBeTruthy();
+    files[documentName] = strToU8(
+      xml.replace(
+        /<w:body>[\s\S]*?(<w:sectPr[\s\S]*?<\/w:sectPr>)<\/w:body>/,
+        `<w:body><w:p>${display}</w:p>$1</w:body>`,
+      ),
+    );
+    const opened = await docxLens.open(zipSync(files));
+    expect(opened.projection.blocks).toHaveLength(1);
+    expect(opened.projection.blocks[0]).toMatchObject({
+      type: "equation",
+      attrs: {
+        display: "block",
+        alignment: "center",
+        nativeReadOnly: true,
+      },
+    });
+  });
+
+  it("keeps OMML and surrounding prose inside real Word table cells", async () => {
+    const source = await fixture("equation-omml.docx");
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const files = unzipSync(source);
+    const documentName = Object.keys(files).find((name) =>
+      name.endsWith("word/document.xml"),
+    )!;
+    const xml = strFromU8(files[documentName]!);
+    const equation = xml.match(/<m:oMath>[\s\S]*?<\/m:oMath>/)?.[0];
+    expect(equation).toBeTruthy();
+    const table =
+      "<w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w=\"4000\"/>" +
+      "<w:gridCol w:w=\"4000\"/></w:tblGrid><w:tr>" +
+      `<w:tc><w:tcPr/><w:p><w:r><w:t xml:space="preserve">Before </w:t></w:r>${equation}<w:r><w:t xml:space="preserve"> after</w:t></w:r></w:p></w:tc>` +
+      "<w:tc><w:tcPr/><w:p><w:r><w:t>Body survives</w:t></w:r></w:p></w:tc>" +
+      "</w:tr></w:tbl>";
+    files[documentName] = strToU8(
+      xml.replace(/<w:sectPr/, `${table}<w:sectPr`),
+    );
+    const opened = await docxLens.open(zipSync(files));
+    const projected = opened.projection.blocks.find(
+      (block) => block.type === "table",
+    )!;
+    expect(projected.rows?.[0]).toEqual([
+      expect.stringMatching(/^Before .* after$/),
+      "Body survives",
+    ]);
+    expect(projected.richRows?.[0]?.[0]?.map((item) => item.kind)).toEqual([
+      "text",
+      "equation",
+      "text",
+    ]);
+    expect(projected.attrs?.nativeReadOnly).toBe(true);
+  });
+
+  it("projects an image-only cover as a bounded package reference", async () => {
+    const document = Document.create();
+    const png = new Uint8Array(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+    document.addImage(png, {
+      widthPx: 320,
+      altText: "Extended Essay cover",
+    });
+    const opened = await docxLens.open(await document.save());
+    const cover = opened.projection.blocks.find((block) =>
+      block.inlineContent?.some((item) => item.kind === "image"),
+    )!;
+    expect(cover).toMatchObject({
+      type: "paragraph",
+      attrs: { nativeReadOnly: true },
+      inlineContent: [
+        {
+          kind: "image",
+          partName: "/word/media/image1.png",
+          mediaType: "image/png",
+          altText: "Extended Essay cover",
+          placement: "inline",
+        },
+      ],
+    });
+    const serialized = JSON.stringify(opened.projection);
+    expect(serialized).not.toContain("iVBORw0KGgo");
+    expect(serialized).not.toContain("base64");
   });
 
   it("preserves hyperlink ranges read-only instead of absorbing their text", async () => {

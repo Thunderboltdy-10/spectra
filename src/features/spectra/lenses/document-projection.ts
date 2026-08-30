@@ -2,9 +2,11 @@ import { z } from "zod";
 import {
   docxProjectionBlockSchema,
   docxProjectionSchema,
+  docxRichInlineSchema,
   docxSemanticDeltaSchema,
   type DocxOperation,
   type DocxProjection,
+  type DocxRichInline,
 } from "./projection-contracts";
 
 export type DocumentJsonNode = {
@@ -20,22 +22,308 @@ export type DocumentSemanticBlock = {
   type: string;
   text: string;
   rows?: string[][];
+  inlineContent?: DocxRichInline[];
+  richRows?: DocxRichInline[][][];
   attrs?: Record<string, unknown>;
   latex?: string;
   reference?: Record<string, unknown>;
   citation?: Record<string, unknown>;
 };
 
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function richInlineText(content: readonly DocxRichInline[]) {
+  return content
+    .map((item) => {
+      if (item.kind === "text") return item.text;
+      if (item.kind === "equation") return item.latex;
+      return item.altText;
+    })
+    .join("");
+}
+
+function richInlineHasObject(content: readonly DocxRichInline[]) {
+  return content.some((item) => item.kind !== "text");
+}
+
+export function bindDocxProjectionSource(
+  projection: DocxProjection,
+  artifactId: string,
+  payloadHash: string,
+): DocxProjection {
+  return docxProjectionSchema.parse({
+    ...projection,
+    nativeBinding: {
+      ...projection.nativeBinding,
+      sourceArtifactId: artifactId,
+      sourcePayloadHash: payloadHash,
+    },
+  });
+}
+
+export function docxNativeMediaUrl(
+  binding: unknown,
+  image: Extract<DocxRichInline, { kind: "image" }>,
+) {
+  const source = record(binding);
+  const artifactId =
+    typeof source.sourceArtifactId === "string"
+      ? source.sourceArtifactId
+      : "";
+  const payloadHash =
+    typeof source.sourcePayloadHash === "string"
+      ? source.sourcePayloadHash
+      : "";
+  if (!artifactId || !/^[a-f0-9]{64}$/.test(payloadHash)) return "";
+  const query = new URLSearchParams({
+    artifactId,
+    payloadHash,
+    partName: image.partName,
+  });
+  return `/api/spectra/lenses/docx/media?${query.toString()}`;
+}
+
+export function docxRichInlineToJson(
+  content: readonly DocxRichInline[],
+  binding: unknown,
+  nativeReadOnly = false,
+): DocumentJsonNode[] | undefined {
+  const nodes = content.flatMap((item): DocumentJsonNode[] => {
+    if (item.kind === "text")
+      return item.text ? [{ type: "text", text: item.text }] : [];
+    if (item.kind === "equation")
+      return [
+        {
+          type: "inlineEquation",
+          attrs: {
+            latex: item.latex,
+            ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
+          },
+        },
+      ];
+    return [
+      {
+        type: "nativeDocxImage",
+        attrs: {
+          src: docxNativeMediaUrl(binding, item),
+          partName: item.partName,
+          mediaType: item.mediaType,
+          alt: item.altText,
+          ...(item.widthEmu ? { widthEmu: item.widthEmu } : {}),
+          ...(item.heightEmu ? { heightEmu: item.heightEmu } : {}),
+          placement: item.placement,
+          nativeReadOnly: true,
+        },
+      },
+    ];
+  });
+  return nodes.length ? nodes : undefined;
+}
+
+function cellJsonFromRichContent(
+  content: readonly DocxRichInline[],
+  binding: unknown,
+  nativeReadOnly: boolean,
+) {
+  const meaningful = content.filter(
+    (item) => item.kind !== "text" || Boolean(item.text.trim()),
+  );
+  const displayEquation =
+    meaningful.length === 1 &&
+    meaningful[0]?.kind === "equation" &&
+    meaningful[0].display === "block"
+      ? meaningful[0]
+      : null;
+  if (displayEquation)
+    return [
+      {
+        type: "equation",
+        attrs: {
+          latex: displayEquation.latex,
+          display: "block",
+          alignment: "center",
+          ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
+        },
+      },
+    ];
+  return [
+    {
+      type: "paragraph",
+      content: docxRichInlineToJson(content, binding, nativeReadOnly),
+    },
+  ];
+}
+
+/**
+ * Convert only the native rich branches of a semantic block. Returning null
+ * leaves the established plain-text projection path untouched.
+ */
+export function docxRichBlockToJson(
+  value: Record<string, unknown>,
+  binding: unknown,
+): DocumentJsonNode | null {
+  const parsed = docxProjectionBlockSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const block = parsed.data;
+  const attrs = record(block.attrs);
+  const nativeReadOnly = attrs.nativeReadOnly === true;
+  const nativeAttrs = {
+    blockId: block.id,
+    ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
+  };
+
+  if (block.type === "equation") {
+    const equation = block.inlineContent?.find(
+      (item): item is Extract<DocxRichInline, { kind: "equation" }> =>
+        item.kind === "equation",
+    );
+    return {
+      type: "equation",
+      attrs: {
+        ...nativeAttrs,
+        latex: equation?.latex ?? block.text,
+        display: "block",
+        alignment: attrs.alignment ?? "center",
+      },
+    };
+  }
+
+  if (block.type === "table" && block.richRows) {
+    return {
+      type: "table",
+      attrs: nativeAttrs,
+      content: block.richRows.map((row, rowIndex) => ({
+        type: "tableRow",
+        content: row.map((cell) => ({
+          type: rowIndex === 0 ? "tableHeader" : "tableCell",
+          content: cellJsonFromRichContent(cell, binding, nativeReadOnly),
+        })),
+      })),
+    };
+  }
+
+  const inlineContent = block.inlineContent ?? [];
+  if (!richInlineHasObject(inlineContent)) return null;
+  const content = docxRichInlineToJson(
+    inlineContent,
+    binding,
+    nativeReadOnly,
+  );
+  if (block.type === "heading")
+    return {
+      type: "heading",
+      attrs: {
+        ...nativeAttrs,
+        level:
+          Number(String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1]) ||
+          Number(attrs.level) ||
+          2,
+      },
+      content,
+    };
+  if (block.type === "list")
+    return {
+      type: "bulletList",
+      attrs: nativeAttrs,
+      content: [
+        {
+          type: "listItem",
+          content: [{ type: "paragraph", content }],
+        },
+      ],
+    };
+  return { type: "paragraph", attrs: nativeAttrs, content };
+}
+
 export function documentNodeText(node?: DocumentJsonNode): string {
   if (!node) return "";
   if (typeof node.text === "string") return node.text;
+  if (node.type === "inlineEquation" || node.type === "equation")
+    return String(node.attrs?.latex ?? "");
+  if (node.type === "nativeDocxImage")
+    return String(node.attrs?.alt ?? "");
   const separator = node.type === "listItem" ? "" : "\n";
   return (node.content ?? []).map(documentNodeText).join(separator);
+}
+
+function appendRichInline(
+  output: DocxRichInline[],
+  item: DocxRichInline,
+) {
+  const previous = output.at(-1);
+  if (item.kind === "text" && previous?.kind === "text") {
+    previous.text += item.text;
+    return;
+  }
+  output.push(item);
+}
+
+export function documentRichInlineFromJson(
+  node: DocumentJsonNode,
+): DocxRichInline[] {
+  const output: DocxRichInline[] = [];
+  const visit = (current: DocumentJsonNode) => {
+    if (typeof current.text === "string") {
+      if (current.text)
+        appendRichInline(output, { kind: "text", text: current.text });
+      return;
+    }
+    if (current.type === "inlineEquation" || current.type === "equation") {
+      appendRichInline(output, {
+        kind: "equation",
+        latex: String(current.attrs?.latex ?? ""),
+        display: current.type === "equation" ? "block" : "inline",
+      });
+      return;
+    }
+    if (current.type === "nativeDocxImage") {
+      const widthEmu = Number(current.attrs?.widthEmu);
+      const heightEmu = Number(current.attrs?.heightEmu);
+      const parsed = docxRichInlineSchema.safeParse({
+        kind: "image",
+        partName: current.attrs?.partName,
+        mediaType: current.attrs?.mediaType,
+        altText: String(current.attrs?.alt ?? "Word image"),
+        ...(Number.isSafeInteger(widthEmu) && widthEmu > 0
+          ? { widthEmu }
+          : {}),
+        ...(Number.isSafeInteger(heightEmu) && heightEmu > 0
+          ? { heightEmu }
+          : {}),
+        placement:
+          current.attrs?.placement === "anchored" ? "anchored" : "inline",
+      });
+      if (parsed.success) appendRichInline(output, parsed.data);
+      return;
+    }
+    const children = current.content ?? [];
+    children.forEach((child, index) => {
+      if (
+        index > 0 &&
+        ["paragraph", "heading"].includes(child.type ?? "") &&
+        output.length
+      )
+        appendRichInline(output, { kind: "text", text: "\n" });
+      visit(child);
+    });
+  };
+  visit(node);
+  return output;
 }
 
 function tableRows(node: DocumentJsonNode) {
   return (node.content ?? []).map((row) =>
     (row.content ?? []).map((cell) => documentNodeText(cell).trim()),
+  );
+}
+
+function tableRichRows(node: DocumentJsonNode) {
+  return (node.content ?? []).map((row) =>
+    (row.content ?? []).map((cell) => documentRichInlineFromJson(cell)),
   );
 }
 
@@ -66,24 +354,33 @@ export function documentBlocksFromJson(
 
       if (node.type === "table") {
         const rows = tableRows(node);
+        const richRows = tableRichRows(node);
         return {
           id,
           type: "table",
           text: rows.map((row) => row.join(" | ")).join("\n"),
           rows,
+          ...(richRows.some((row) => row.some(richInlineHasObject))
+            ? { richRows }
+            : {}),
           ...(node.attrs?.nativeReadOnly === true
             ? { attrs: { nativeReadOnly: true } }
             : {}),
         };
       }
 
-      const text = documentNodeText(node).trimEnd();
+      const inlineContent = documentRichInlineFromJson(node);
+      const hasRichContent = richInlineHasObject(inlineContent);
+      const text = (
+        hasRichContent ? richInlineText(inlineContent) : documentNodeText(node)
+      ).trimEnd();
       if (node.type === "heading") {
         const level = Number(node.attrs?.level) || 2;
         return {
           id,
           type: "heading",
           text,
+          ...(hasRichContent ? { inlineContent } : {}),
           attrs: {
             level,
             styleId: `Heading${level}`,
@@ -93,9 +390,23 @@ export function documentBlocksFromJson(
           },
         };
       }
-      if (node.type === "blockquote") return { id, type: "quote", text };
+      if (node.type === "blockquote")
+        return {
+          id,
+          type: "quote",
+          text,
+          ...(hasRichContent ? { inlineContent } : {}),
+        };
       if (node.type === "bulletList" || node.type === "orderedList")
-        return { id, type: "list", text };
+        return {
+          id,
+          type: "list",
+          text,
+          ...(hasRichContent ? { inlineContent } : {}),
+          ...(node.attrs?.nativeReadOnly === true
+            ? { attrs: { nativeReadOnly: true } }
+            : {}),
+        };
       if (node.type === "callout")
         return {
           id,
@@ -110,9 +421,15 @@ export function documentBlocksFromJson(
           type: "equation",
           text: latex,
           latex,
+          inlineContent: [
+            { kind: "equation", latex, display: "block" },
+          ],
           attrs: {
             display: node.attrs?.display ?? "block",
             alignment: node.attrs?.alignment ?? "center",
+            ...(node.attrs?.nativeReadOnly === true
+              ? { nativeReadOnly: true }
+              : {}),
           },
         };
       }
@@ -141,6 +458,7 @@ export function documentBlocksFromJson(
         id,
         type: "paragraph",
         text,
+        ...(hasRichContent ? { inlineContent } : {}),
         ...(node.attrs?.nativeReadOnly === true
           ? { attrs: { nativeReadOnly: true } }
           : {}),

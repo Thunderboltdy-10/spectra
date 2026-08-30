@@ -76,7 +76,7 @@ import {
   type AiRegionDecorationTarget,
 } from "../editor/ai-region-decoration";
 import { Callout } from "../editor/callout-node";
-import { DocumentImage } from "../editor/document-image";
+import { DocumentImage, NativeDocxImage } from "../editor/document-image";
 import {
   bibliographyFromNavigator,
   bibliographyNode,
@@ -927,6 +927,7 @@ export function DocumentStudio({
         TaskList,
         TaskItem.configure({ nested: true }),
         DocumentImage.configure({ allowBase64: true, inline: false }),
+        NativeDocxImage,
         TextAlign.configure({ types: ["heading", "paragraph"] }),
         Highlight.configure({ multicolor: true }),
         // Character formatting a writer expects in the first minute: the font,

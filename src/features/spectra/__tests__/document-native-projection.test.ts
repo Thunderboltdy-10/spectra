@@ -197,6 +197,110 @@ describe("native document projection", () => {
     });
   });
 
+  it("carries ordered OMML, native media, and rich table cells through both editor paths", () => {
+    const content = {
+      nativeBinding: {
+        version: 1,
+        format: "docx",
+        profile: "strict-native",
+        macroEnabled: false,
+        semanticDigest: "a".repeat(64),
+        nativePlaceholders: [],
+        sourceArtifactId: "artifact-rich-docx",
+        sourcePayloadHash: "b".repeat(64),
+      },
+      blocks: [
+        {
+          id: "docx:paragraph:rich",
+          type: "paragraph",
+          text: "Let x^{2} finish.",
+          inlineContent: [
+            { kind: "text", text: "Let " },
+            { kind: "equation", latex: "x^{2}", display: "inline" },
+            { kind: "text", text: " finish. " },
+            {
+              kind: "image",
+              partName: "/word/media/image1.png",
+              mediaType: "image/png",
+              altText: "Cover",
+              widthEmu: 3_048_000,
+              heightEmu: 1_524_000,
+              placement: "inline",
+            },
+          ],
+          attrs: { nativeReadOnly: true },
+        },
+        {
+          id: "docx:table:rich",
+          type: "table",
+          text: "Term x_1 | Meaning",
+          rows: [["Term x_1", "Meaning"]],
+          richRows: [
+            [
+              [
+                { kind: "text", text: "Term " },
+                { kind: "equation", latex: "x_1", display: "inline" },
+              ],
+              [{ kind: "text", text: "Meaning" }],
+            ],
+          ],
+          attrs: { nativeReadOnly: true },
+        },
+      ],
+    };
+
+    const direct = documentJsonFromContent(content, "fixture");
+    expect(direct.content?.[0]?.content?.map((node) => node.type)).toEqual([
+      "text",
+      "inlineEquation",
+      "text",
+      "nativeDocxImage",
+    ]);
+    const image = direct.content?.[0]?.content?.[3];
+    expect(image?.attrs?.src).toContain(
+      "/api/spectra/lenses/docx/media?",
+    );
+    expect(image?.attrs?.src).toContain("artifactId=artifact-rich-docx");
+    expect(image?.attrs?.src).not.toContain("base64");
+    expect(
+      direct.content?.[1]?.content?.[0]?.content?.[0]?.content?.[0]?.content?.map(
+        (node) => node.type,
+      ),
+    ).toEqual(["text", "inlineEquation"]);
+
+    const yjsJson = documentContentToProseMirrorJson(content);
+    expect(yjsJson).toEqual(direct);
+    const projected = documentYjsAdapter.project(
+      documentYjsAdapter.createDocument(content),
+    );
+    expect(projected.blocks?.[0]).toMatchObject({
+      id: "docx:paragraph:rich",
+      inlineContent: [
+        { kind: "text", text: "Let " },
+        { kind: "equation", latex: "x^{2}", display: "inline" },
+        { kind: "text", text: " finish. " },
+        {
+          kind: "image",
+          partName: "/word/media/image1.png",
+          mediaType: "image/png",
+          altText: "Cover",
+        },
+      ],
+    });
+    expect(projected.blocks?.[1]).toMatchObject({
+      id: "docx:table:rich",
+      richRows: [
+        [
+          [
+            { kind: "text", text: "Term " },
+            { kind: "equation", latex: "x_1", display: "inline" },
+          ],
+          [{ kind: "text", text: "Meaning" }],
+        ],
+      ],
+    });
+  });
+
   it("derives deletions and reorders when collaborative content has no explicit intent", () => {
     const base: DocxProjection = {
       blocks: [

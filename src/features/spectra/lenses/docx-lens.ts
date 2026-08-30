@@ -16,6 +16,7 @@ import {
   type DocxParagraphFormat,
   type DocxProjection,
   type DocxProjectionBlock,
+  type DocxRichInline,
   type DocxRunFormat,
   type DocxSemanticDelta,
 } from "./projection-contracts";
@@ -24,6 +25,12 @@ const W14_NAMESPACE =
   "http://schemas.microsoft.com/office/word/2010/wordml";
 const OMML_NAMESPACE =
   "http://schemas.openxmlformats.org/officeDocument/2006/math";
+const DRAWINGML_NAMESPACE =
+  "http://schemas.openxmlformats.org/drawingml/2006/main";
+const WORDPROCESSING_DRAWING_NAMESPACE =
+  "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+const OFFICE_RELATIONSHIP_NAMESPACE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 export type DocxNativePlaceholder = {
   id: string;
@@ -43,7 +50,8 @@ export class DocxLensError extends Error {
       | "DOCX_UNSUPPORTED_EDIT"
       | "DOCX_TABLE_WRITE_UNSUPPORTED"
       | "DOCX_IDENTITY_AMBIGUOUS"
-      | "DOCX_IDENTITY_UNSTABLE",
+      | "DOCX_IDENTITY_UNSTABLE"
+      | "DOCX_KEEP_SPECTRA_WRITE_PENDING",
     message: string,
   ) {
     super(message);
@@ -155,6 +163,529 @@ function projectedWmlText(root: XmlElement) {
       return "";
     })
     .join("");
+}
+
+const OMML_PROPERTY_ELEMENTS = new Set([
+  "accPr",
+  "barPr",
+  "borderBoxPr",
+  "boxPr",
+  "ctrlPr",
+  "dPr",
+  "eqArrPr",
+  "fPr",
+  "funcPr",
+  "groupChrPr",
+  "limLowPr",
+  "limUppPr",
+  "mPr",
+  "naryPr",
+  "phantPr",
+  "radPr",
+  "rPr",
+  "sPrePr",
+  "sSubPr",
+  "sSubSupPr",
+  "sSupPr",
+]);
+
+const OMML_SYMBOLS: Readonly<Record<string, string>> = {
+  "α": "\\alpha{}",
+  "β": "\\beta{}",
+  "γ": "\\gamma{}",
+  "δ": "\\delta{}",
+  "ϵ": "\\epsilon{}",
+  "ε": "\\varepsilon{}",
+  "ζ": "\\zeta{}",
+  "η": "\\eta{}",
+  "θ": "\\theta{}",
+  "ϑ": "\\vartheta{}",
+  "ι": "\\iota{}",
+  "κ": "\\kappa{}",
+  "λ": "\\lambda{}",
+  "μ": "\\mu{}",
+  "ν": "\\nu{}",
+  "ξ": "\\xi{}",
+  "ο": "o",
+  "π": "\\pi{}",
+  "ϖ": "\\varpi{}",
+  "ρ": "\\rho{}",
+  "ϱ": "\\varrho{}",
+  "σ": "\\sigma{}",
+  "ς": "\\varsigma{}",
+  "τ": "\\tau{}",
+  "υ": "\\upsilon{}",
+  "φ": "\\phi{}",
+  "ϕ": "\\varphi{}",
+  "χ": "\\chi{}",
+  "ψ": "\\psi{}",
+  "ω": "\\omega{}",
+  "Γ": "\\Gamma{}",
+  "Δ": "\\Delta{}",
+  "Θ": "\\Theta{}",
+  "Λ": "\\Lambda{}",
+  "Ξ": "\\Xi{}",
+  "Π": "\\Pi{}",
+  "Σ": "\\Sigma{}",
+  "Υ": "\\Upsilon{}",
+  "Φ": "\\Phi{}",
+  "Ψ": "\\Psi{}",
+  "Ω": "\\Omega{}",
+  "∞": "\\infty{}",
+  "≠": "\\ne{}",
+  "≤": "\\le{}",
+  "≥": "\\ge{}",
+  "≈": "\\approx{}",
+  "≡": "\\equiv{}",
+  "∈": "\\in{}",
+  "∉": "\\notin{}",
+  "∋": "\\ni{}",
+  "⊂": "\\subset{}",
+  "⊆": "\\subseteq{}",
+  "⊃": "\\supset{}",
+  "⊇": "\\supseteq{}",
+  "∪": "\\cup{}",
+  "∩": "\\cap{}",
+  "∅": "\\varnothing{}",
+  "∀": "\\forall{}",
+  "∃": "\\exists{}",
+  "∄": "\\nexists{}",
+  "¬": "\\neg{}",
+  "∧": "\\land{}",
+  "∨": "\\lor{}",
+  "⇒": "\\Rightarrow{}",
+  "⇔": "\\Leftrightarrow{}",
+  "⇏": "\\nRightarrow{}",
+  "→": "\\to{}",
+  "←": "\\leftarrow{}",
+  "⟶": "\\longrightarrow{}",
+  "⟵": "\\longleftarrow{}",
+  "⟷": "\\longleftrightarrow{}",
+  "↦": "\\mapsto{}",
+  "↻": "\\circlearrowright{}",
+  "⋩": "\\gneqq{}",
+  "∂": "\\partial{}",
+  "∇": "\\nabla{}",
+  "±": "\\pm{}",
+  "∓": "\\mp{}",
+  "×": "\\times{}",
+  "÷": "\\div{}",
+  "⋅": "\\cdot{}",
+  "·": "\\cdot{}",
+  "…": "\\ldots{}",
+  "′": "'",
+  "″": "''",
+  "∘": "\\circ{}",
+  "∶": "\\mathbin{:}",
+  "⁡": "",
+  "〖": "",
+  "〗": "",
+  "−": "-",
+};
+
+function ommlTextToLatex(value: string) {
+  const normalized = value.replace(/\s+/gu, " ");
+  let latex = "";
+  for (const character of normalized) {
+    const symbol = OMML_SYMBOLS[character];
+    if (symbol !== undefined) {
+      latex += symbol;
+      continue;
+    }
+    if (character === " ") {
+      latex += "\\,";
+      continue;
+    }
+    if (character === "\\") {
+      latex += "\\backslash{}";
+      continue;
+    }
+    if ("%#&{}".includes(character)) {
+      latex += `\\${character}`;
+      continue;
+    }
+    latex += character;
+  }
+  return latex.replace(
+    /\b(sin|cos|tan|cot|sec|csc|sinh|cosh|tanh|log|ln|exp|min|max|det|gcd)\b/g,
+    (_match, name: string) => `\\${name}`,
+  );
+}
+
+function ommlChild(element: XmlElement, localName: string) {
+  return element.find(OMML_NAMESPACE, localName);
+}
+
+function ommlChildren(element: XmlElement, localName: string) {
+  return element.findAll(OMML_NAMESPACE, localName);
+}
+
+function ommlValue(
+  element: XmlElement | undefined,
+  localName: string,
+  fallback = "",
+) {
+  if (!element) return fallback;
+  const property = [element, ...descendants(element)].find(
+    (candidate) =>
+      candidate.namespaceUri() === OMML_NAMESPACE &&
+      candidate.localName === localName,
+  );
+  return (
+    property?.getAttributeNs(OMML_NAMESPACE, "val") ??
+    property?.getAttribute("m:val") ??
+    property?.getAttribute("val") ??
+    fallback
+  );
+}
+
+function latexGroup(value: string) {
+  return `{${value || "\\,"}}`;
+}
+
+function latexDelimiter(value: string, side: "left" | "right") {
+  if (!value) return ".";
+  const mapped: Record<string, string> = {
+    "(": "(",
+    ")": ")",
+    "[": "[",
+    "]": "]",
+    "{": "\\{",
+    "}": "\\}",
+    "|": "|",
+    "‖": "\\Vert",
+    "⟨": "\\langle",
+    "⟩": "\\rangle",
+    "⌈": "\\lceil",
+    "⌉": "\\rceil",
+    "⌊": "\\lfloor",
+    "⌋": "\\rfloor",
+    "〖": "(",
+    "〗": ")",
+  };
+  return mapped[value] ?? (side === "left" ? "(" : ")");
+}
+
+function naryOperator(value: string) {
+  const mapped: Record<string, string> = {
+    "∫": "\\int",
+    "∬": "\\iint",
+    "∭": "\\iiint",
+    "∮": "\\oint",
+    "∑": "\\sum",
+    "∏": "\\prod",
+    "∐": "\\coprod",
+    "⋃": "\\bigcup",
+    "⋂": "\\bigcap",
+  };
+  return mapped[value] ?? ommlTextToLatex(value || "∫");
+}
+
+function renderOmmlElement(element: XmlElement): string {
+  if (element.namespaceUri() !== OMML_NAMESPACE) return "";
+  const renderSlot = (name: string) => {
+    const slot = ommlChild(element, name);
+    return slot ? renderOmmlElement(slot) : "";
+  };
+  const renderChildren = () =>
+    element
+      .elements()
+      .map(renderOmmlElement)
+      .join("");
+
+  if (element.localName === "t") return ommlTextToLatex(element.text());
+  if (OMML_PROPERTY_ELEMENTS.has(element.localName)) return "";
+  if (
+    [
+      "oMath",
+      "oMathPara",
+      "r",
+      "e",
+      "num",
+      "den",
+      "sub",
+      "sup",
+      "deg",
+      "fName",
+      "lim",
+    ].includes(element.localName)
+  )
+    return renderChildren();
+
+  if (element.localName === "sSup")
+    return `${latexGroup(renderSlot("e"))}^{${renderSlot("sup")}}`;
+  if (element.localName === "sSub")
+    return `${latexGroup(renderSlot("e"))}_{${renderSlot("sub")}}`;
+  if (element.localName === "sSubSup")
+    return `${latexGroup(renderSlot("e"))}_{${renderSlot("sub")}}^{${renderSlot("sup")}}`;
+  if (element.localName === "sPre")
+    return `{}_{${renderSlot("sub")}}^{${renderSlot("sup")}}${latexGroup(renderSlot("e"))}`;
+  if (element.localName === "f") {
+    const numerator = renderSlot("num");
+    const denominator = renderSlot("den");
+    const fractionType = ommlValue(ommlChild(element, "fPr"), "type", "bar");
+    if (fractionType === "noBar") return `\\binom{${numerator}}{${denominator}}`;
+    if (fractionType === "skw" || fractionType === "lin")
+      return `${latexGroup(numerator)}/${latexGroup(denominator)}`;
+    return `\\frac{${numerator}}{${denominator}}`;
+  }
+  if (element.localName === "rad") {
+    const degree = renderSlot("deg");
+    const base = renderSlot("e");
+    return degree ? `\\sqrt[${degree}]{${base}}` : `\\sqrt{${base}}`;
+  }
+  if (element.localName === "d") {
+    const properties = ommlChild(element, "dPr");
+    const beginning = latexDelimiter(ommlValue(properties, "begChr", "("), "left");
+    const ending = latexDelimiter(ommlValue(properties, "endChr", ")"), "right");
+    const separator = ommlTextToLatex(ommlValue(properties, "sepChr", ","));
+    const entries = ommlChildren(element, "e").map(renderOmmlElement);
+    return `\\left${beginning}${entries.join(` ${separator} `)}\\right${ending}`;
+  }
+  if (element.localName === "nary") {
+    const properties = ommlChild(element, "naryPr");
+    const operator = naryOperator(ommlValue(properties, "chr", "∫"));
+    const subscript = renderSlot("sub");
+    const superscript = renderSlot("sup");
+    const base = renderSlot("e");
+    return `${operator}${subscript ? `_{${subscript}}` : ""}${superscript ? `^{${superscript}}` : ""}${base ? latexGroup(base) : ""}`;
+  }
+  if (element.localName === "m") {
+    const rows = ommlChildren(element, "mr").map((row) =>
+      ommlChildren(row, "e").map(renderOmmlElement).join(" & "),
+    );
+    return `\\begin{matrix}${rows.join(" \\\\ ")}\\end{matrix}`;
+  }
+  if (element.localName === "eqArr") {
+    const rows = ommlChildren(element, "e").map(renderOmmlElement);
+    return `\\begin{aligned}${rows.join(" \\\\ ")}\\end{aligned}`;
+  }
+  if (element.localName === "func") {
+    const rawName = renderSlot("fName").replace(/\\,/g, "");
+    const known = rawName.match(/^\\?(sin|cos|tan|cot|sec|csc|sinh|cosh|tanh|log|ln|exp|min|max|det|gcd)$/)?.[1];
+    const name = known ? `\\${known}` : `\\operatorname{${rawName.replace(/[^A-Za-z0-9 ]/g, "") || "f"}}`;
+    return `${name}${latexGroup(renderSlot("e"))}`;
+  }
+  if (element.localName === "bar") {
+    const position = ommlValue(ommlChild(element, "barPr"), "pos", "top");
+    return position === "bot"
+      ? `\\underline{${renderSlot("e")}}`
+      : `\\overline{${renderSlot("e")}}`;
+  }
+  if (element.localName === "acc") {
+    const character = ommlValue(ommlChild(element, "accPr"), "chr", "̂");
+    const commands: Record<string, string> = {
+      "̂": "hat",
+      "̌": "check",
+      "̃": "tilde",
+      "̄": "bar",
+      "̅": "bar",
+      "̇": "dot",
+      "̈": "ddot",
+      "⃗": "vec",
+    };
+    const command = commands[character];
+    return command
+      ? `\\${command}{${renderSlot("e")}}`
+      : `\\overset{${ommlTextToLatex(character)}}{${renderSlot("e")}}`;
+  }
+  if (element.localName === "groupChr") {
+    const properties = ommlChild(element, "groupChrPr");
+    const character = ommlValue(properties, "chr", "⏟");
+    const position = ommlValue(properties, "pos", "bot");
+    const base = renderSlot("e");
+    if (character === "⏞" || (character === "⏟" && position === "top"))
+      return `\\overbrace{${base}}`;
+    if (character === "⏟") return `\\underbrace{${base}}`;
+    return position === "top"
+      ? `\\overset{${ommlTextToLatex(character)}}{${base}}`
+      : `\\underset{${ommlTextToLatex(character)}}{${base}}`;
+  }
+  if (element.localName === "limLow")
+    return `${latexGroup(renderSlot("e"))}_{${renderSlot("lim")}}`;
+  if (element.localName === "limUpp")
+    return `${latexGroup(renderSlot("e"))}^{${renderSlot("lim")}}`;
+  if (element.localName === "borderBox")
+    return `\\boxed{${renderSlot("e")}}`;
+  if (["box", "phant"].includes(element.localName)) return renderSlot("e");
+  return renderChildren();
+}
+
+export function ommlToLatex(element: XmlElement) {
+  return renderOmmlElement(element).trim();
+}
+
+function positiveInteger(value: string | undefined) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function nativeImageContent(
+  document: Document,
+  drawing: XmlElement,
+): DocxRichInline[] {
+  const placement = descendants(drawing).some(
+    (candidate) =>
+      candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE &&
+      candidate.localName === "anchor",
+  )
+    ? "anchored"
+    : "inline";
+  const extent = descendants(drawing).find(
+    (candidate) =>
+      candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE &&
+      candidate.localName === "extent",
+  );
+  const properties = descendants(drawing).find(
+    (candidate) =>
+      candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE &&
+      candidate.localName === "docPr",
+  );
+  const widthEmu = positiveInteger(extent?.getAttribute("cx"));
+  const heightEmu = positiveInteger(extent?.getAttribute("cy"));
+  const altText =
+    properties?.getAttribute("descr")?.trim() ||
+    properties?.getAttribute("title")?.trim() ||
+    properties?.getAttribute("name")?.trim() ||
+    "Word image";
+  return descendants(drawing).flatMap((candidate) => {
+    if (
+      candidate.namespaceUri() !== DRAWINGML_NAMESPACE ||
+      candidate.localName !== "blip"
+    )
+      return [];
+    const relationshipId = candidate.getAttributeNs(
+      OFFICE_RELATIONSHIP_NAMESPACE,
+      "embed",
+    );
+    if (!relationshipId) return [];
+    const part = document.office.package.relatedPart(
+      document.office.mainPart,
+      relationshipId,
+    );
+    if (
+      !part ||
+      !part.name.toLowerCase().startsWith("/word/media/") ||
+      !["image/png", "image/jpeg"].includes(part.contentType.toLowerCase())
+    )
+      return [];
+    return [
+      {
+        kind: "image" as const,
+        partName: part.name,
+        mediaType: part.contentType.toLowerCase() as "image/png" | "image/jpeg",
+        altText,
+        ...(widthEmu ? { widthEmu } : {}),
+        ...(heightEmu ? { heightEmu } : {}),
+        placement,
+      },
+    ];
+  });
+}
+
+function mergeRichText(content: DocxRichInline[]) {
+  const merged: DocxRichInline[] = [];
+  for (const item of content) {
+    if (!item.kind || (item.kind === "text" && !item.text)) continue;
+    const previous = merged.at(-1);
+    if (item.kind === "text" && previous?.kind === "text") {
+      previous.text += item.text;
+      continue;
+    }
+    merged.push(item);
+  }
+  return merged;
+}
+
+function projectedRichContent(document: Document, root: XmlElement) {
+  const content: DocxRichInline[] = [];
+  const visit = (element: XmlElement) => {
+    const namespace = element.namespaceUri();
+    if (namespace === OMML_NAMESPACE && element.localName === "oMathPara") {
+      content.push({
+        kind: "equation",
+        latex: ommlToLatex(element),
+        display: "block",
+      });
+      return;
+    }
+    if (namespace === OMML_NAMESPACE && element.localName === "oMath") {
+      content.push({
+        kind: "equation",
+        latex: ommlToLatex(element),
+        display: "inline",
+      });
+      return;
+    }
+    if (namespace === WML_NAMESPACE) {
+      if (element.localName === "t") {
+        content.push({ kind: "text", text: element.text() });
+        return;
+      }
+      if (element.localName === "tab") {
+        content.push({ kind: "text", text: "\t" });
+        return;
+      }
+      if (["br", "cr"].includes(element.localName)) {
+        content.push({ kind: "text", text: "\n" });
+        return;
+      }
+      if (element.localName === "noBreakHyphen") {
+        content.push({ kind: "text", text: "‑" });
+        return;
+      }
+      if (element.localName === "softHyphen") {
+        content.push({ kind: "text", text: "­" });
+        return;
+      }
+      if (element.localName === "drawing") {
+        content.push(...nativeImageContent(document, element));
+        return;
+      }
+      // Text boxes, OLE objects and VML fallbacks have their own preserved
+      // surfaces. Their descendant text is not part of the paragraph flow.
+      if (["pict", "object", "txbxContent"].includes(element.localName))
+        return;
+    }
+    if (element.localName === "AlternateContent") {
+      const branch =
+        element.elements().find((child) => child.localName === "Choice") ??
+        element.elements().find((child) => child.localName === "Fallback");
+      if (branch) visit(branch);
+      return;
+    }
+    element.elements().forEach(visit);
+  };
+  root.elements().forEach(visit);
+  return mergeRichText(content);
+}
+
+function semanticRichText(content: readonly DocxRichInline[]) {
+  return content
+    .map((item) => {
+      if (item.kind === "text") return item.text;
+      if (item.kind === "equation") return item.latex;
+      return item.altText;
+    })
+    .join("");
+}
+
+function hasRichObject(content: readonly DocxRichInline[]) {
+  return content.some((item) => item.kind !== "text");
+}
+
+function projectedCellRichContent(
+  document: Document,
+  cell: NativeTableCell,
+) {
+  const paragraphs = cell.paragraphElements();
+  if (!paragraphs.length) return projectedRichContent(document, cell.element);
+  return mergeRichText(
+    paragraphs.flatMap((paragraph, index) => [
+      ...(index ? [{ kind: "text" as const, text: "\n" }] : []),
+      ...projectedRichContent(document, paragraph),
+    ]),
+  );
 }
 
 function wrappedTable(element: XmlElement): NativeTable {
@@ -1267,7 +1798,8 @@ async function projectDocument(
       const regionId = paragraphRegionId(paragraph, path);
       const styleId = paragraph.styleId();
       const list = paragraph.list();
-      const readOnly = hasOmml(element) || hasWml(
+      const richContent = projectedRichContent(document, element);
+      const readOnly = hasRichObject(richContent) || hasOmml(element) || hasWml(
         element,
         "ins",
         "del",
@@ -1292,14 +1824,29 @@ async function projectDocument(
           : styleId;
       const runFormat = readOnly ? undefined : uniformRunFormat(paragraph);
       const paragraphFormat = readOnly ? undefined : projectedParagraphFormat(paragraph);
+      const meaningfulRichContent = richContent.filter(
+        (item) => item.kind !== "text" || Boolean(item.text.trim()),
+      );
+      const displayEquation =
+        meaningfulRichContent.length === 1 &&
+        meaningfulRichContent[0]?.kind === "equation" &&
+        meaningfulRichContent[0].display === "block"
+          ? meaningfulRichContent[0]
+          : null;
       blocks.push({
         id: regionId,
         type: list
           ? "list"
           : /^heading[1-3]$/i.test(semanticStyleId ?? "")
             ? "heading"
-            : "paragraph",
-        text: paragraph.text(),
+            : displayEquation
+              ? "equation"
+              : "paragraph",
+        text: hasRichObject(richContent)
+          ? semanticRichText(richContent)
+          : paragraph.text(),
+        ...(displayEquation ? { latex: displayEquation.latex } : {}),
+        ...(hasRichObject(richContent) ? { inlineContent: richContent } : {}),
         attrs: {
           nativePath: path,
           ...(semanticStyleId ? { styleId: semanticStyleId } : {}),
@@ -1307,6 +1854,9 @@ async function projectDocument(
             ? { nativeStyleId: styleId }
             : {}),
           ...(list ? { list } : {}),
+          ...(displayEquation
+            ? { display: "block", alignment: "center" }
+            : {}),
           ...(readOnly ? { nativeReadOnly: true } : {}),
           // Formatting travels with the block so a writer sees the file's own
           // bold and leading rather than Spectra defaults, and so materialize
@@ -1325,7 +1875,7 @@ async function projectDocument(
           ? {
               readOnly: true,
               reason:
-                "This paragraph contains a Word revision, field, hyperlink range, content control, or OMML equation and is preserved read-only.",
+                "This paragraph contains a Word revision, field, hyperlink range, content control, native image, or OMML equation and is preserved read-only.",
             }
           : {}),
       });
@@ -1344,25 +1894,41 @@ async function projectDocument(
             candidate.namespaceUri() === WML_NAMESPACE &&
             candidate.localName === "tbl",
         );
-        const unsafeInterior = table.rows().some((row) => row.cells().some((cell) =>
-          hasOmml(cell.element) || hasWml(
-            cell.element,
-            "ins",
-            "del",
-            "moveFrom",
-            "moveTo",
-            "fldChar",
-            "instrText",
-            "hyperlink",
+        const richRows = table.rows().map((row) =>
+          row.cells().map((cell) => projectedCellRichContent(document, cell)),
+        );
+        const unsafeInterior = table.rows().some((row, rowIndex) =>
+          row.cells().some(
+            (cell, columnIndex) =>
+              hasRichObject(richRows[rowIndex]?.[columnIndex] ?? []) ||
+              hasOmml(cell.element) ||
+              hasWml(
+                cell.element,
+                "ins",
+                "del",
+                "moveFrom",
+                "moveTo",
+                "fldChar",
+                "instrText",
+                "hyperlink",
+              ),
           ),
-        ));
+        );
         const readOnly = nested || unsafeInterior;
-        const rows = table.rows().map((row) => row.cells().map((cell) => cell.text()));
+        const rows = table.rows().map((row, rowIndex) =>
+          row.cells().map((cell, columnIndex) => {
+            const content = richRows[rowIndex]?.[columnIndex] ?? [];
+            return hasRichObject(content) ? semanticRichText(content) : cell.text();
+          }),
+        );
         blocks.push({
           id: regionId,
           type: "table",
           text: rows.map((row) => row.join(" | ")).join("\n"),
           rows,
+          ...(richRows.some((row) => row.some(hasRichObject))
+            ? { richRows }
+            : {}),
           attrs: {
             nativePath: path,
             rowCount: table.rowCount(),
@@ -1381,7 +1947,7 @@ async function projectDocument(
                 reason:
                   nested
                     ? "Nested Word tables are preserved read-only until their cell topology can be rewritten safely."
-                    : "This Word table contains a linked, field, revision, or equation range whose native boundary is preserved read-only.",
+                    : "This Word table contains a linked, field, revision, image, or equation range whose native boundary is preserved read-only.",
               }
             : {}),
         });

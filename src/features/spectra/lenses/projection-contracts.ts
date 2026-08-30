@@ -43,12 +43,58 @@ const docxParagraphFormatSchema = z
   })
   .strict();
 
+/**
+ * Ordered content that Word keeps inside a paragraph or table cell.
+ *
+ * `text` alone is not a faithful DOCX projection: OMML and drawings sit
+ * between ordinary runs, so flattening with `Paragraph.text()` makes both the
+ * object and its position disappear. Native media is referenced by package
+ * part rather than copied into Convex; the authenticated route resolves it
+ * from the retained DOCX payload at render time.
+ */
+export const docxRichInlineSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("text"),
+      text: z.string().max(2_000_000),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("equation"),
+      latex: z.string().max(2_000_000),
+      display: z.enum(["inline", "block"]),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("image"),
+      partName: z.string().regex(/^\/word\/media\/[^/\\\u0000-\u001f]{1,400}$/u),
+      mediaType: z.enum(["image/png", "image/jpeg"]),
+      altText: z.string().max(4_000),
+      widthEmu: z.number().int().positive().optional(),
+      heightEmu: z.number().int().positive().optional(),
+      placement: z.enum(["inline", "anchored"]),
+    })
+    .strict(),
+]);
+
 export const docxProjectionBlockSchema = z
   .object({
     id: z.string().min(1).max(300),
-    type: z.enum(["paragraph", "heading", "list", "table"]),
+    type: z.enum(["paragraph", "heading", "list", "table", "equation"]),
     text: z.string().max(2_000_000),
+    latex: z.string().max(2_000_000).optional(),
     rows: z.array(z.array(z.string().max(250_000)).max(1_000)).max(100_000).optional(),
+    inlineContent: z.array(docxRichInlineSchema).max(100_000).optional(),
+    richRows: z
+      .array(
+        z
+          .array(z.array(docxRichInlineSchema).max(100_000))
+          .max(1_000),
+      )
+      .max(100_000)
+      .optional(),
     attrs: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
@@ -73,6 +119,11 @@ export const docxProjectionSchema = z
         format: z.enum(["docx", "docm", "dotx", "dotm"]),
         // Missing on legacy projections means native anchors were not proven.
         identityStable: z.boolean().optional(),
+        // Bound by the authenticated route, never by the format lens. These
+        // two small values let the client resolve native image parts without
+        // duplicating package bytes into artifact content.
+        sourceArtifactId: z.string().min(1).optional(),
+        sourcePayloadHash: semanticDigestSchema.optional(),
         nativePlaceholders: z.array(
           z
             .object({
@@ -90,6 +141,7 @@ export const docxProjectionSchema = z
 
 export type DocxProjectionBlock = z.infer<typeof docxProjectionBlockSchema>;
 export type DocxProjection = z.infer<typeof docxProjectionSchema>;
+export type DocxRichInline = z.infer<typeof docxRichInlineSchema>;
 export type DocxRunFormat = z.infer<typeof docxRunFormatSchema>;
 export type DocxParagraphFormat = z.infer<typeof docxParagraphFormatSchema>;
 

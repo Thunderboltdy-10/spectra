@@ -12,6 +12,12 @@ function hashBytes(bytes: Uint8Array) {
   return createHash("sha256").update(bytes).digest("base64url");
 }
 
+function arrayBufferCopy(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 function yjsUpdate(text: string) {
   const document = new Y.Doc();
   document.getMap("spectra:work-v2:live-meta").set("title", text);
@@ -98,10 +104,7 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       clientId: "client-1",
       policyVersion: 0,
       idempotencyKey: "human:one",
-      update: first.update.buffer.slice(
-        first.update.byteOffset,
-        first.update.byteOffset + first.update.byteLength,
-      ),
+      update: arrayBufferCopy(first.update),
       baseStateVectorHash: "initial-state-vector",
       stateVectorHash: first.hash,
       regionIds: ["intro"],
@@ -137,10 +140,7 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       clientId: "client-1",
       policyVersion: 0,
       idempotencyKey: "human:two",
-      update: second.update.buffer.slice(
-        second.update.byteOffset,
-        second.update.byteOffset + second.update.byteLength,
-      ),
+      update: arrayBufferCopy(second.update),
       baseStateVectorHash: first.hash,
       stateVectorHash: second.hash,
       regionIds: ["intro"],
@@ -174,10 +174,7 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     const encoded = yjsUpdate("compact-me");
     await t.run(async (ctx) => {
       const now = Date.now();
-      const update = encoded.update.buffer.slice(
-        encoded.update.byteOffset,
-        encoded.update.byteOffset + encoded.update.byteLength,
-      );
+      const update = arrayBufferCopy(encoded.update);
       for (let sequence = 1; sequence <= 12; sequence += 1) {
         await ctx.db.insert("collaborationUpdates", {
           roomId: seed.roomId,
@@ -201,14 +198,8 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     const snapshotId = await t.mutation(internal.collaboration.storeSnapshot, {
       roomId: seed.roomId,
       throughSequence: 12,
-      update: encoded.update.buffer.slice(
-        encoded.update.byteOffset,
-        encoded.update.byteOffset + encoded.update.byteLength,
-      ),
-      stateVector: encoded.stateVector.buffer.slice(
-        encoded.stateVector.byteOffset,
-        encoded.stateVector.byteOffset + encoded.stateVector.byteLength,
-      ),
+      update: arrayBufferCopy(encoded.update),
+      stateVector: arrayBufferCopy(encoded.stateVector),
       contentHash: hashBytes(encoded.update),
       schemaVersion: 2,
       createdBy: "compactor",

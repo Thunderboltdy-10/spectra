@@ -9,6 +9,7 @@ import {
   PPTX_LENS_DELTA_KINDS,
   XLSX_LENS_DELTA_KINDS,
 } from "../lenses/projection-contracts";
+import type { ConnectorNativeWriteClaim } from "../lenses/registry";
 import type { WorkType } from "../work/registry";
 import { ALL_CAPABILITIES, capabilityForLocalId, officeCapabilitiesFor } from "./catalog";
 import type { CapabilityDefinition, OfficeWorkType } from "./types";
@@ -296,6 +297,22 @@ export function capabilityGhostIssues(
   }
 
   return issues;
+}
+
+/** Extract connector claims without importing concrete lenses into UI bundles. */
+export function connectorNativeWriteClaims(
+  definitions: readonly CapabilityDefinition[] = ALL_CAPABILITIES,
+): ConnectorNativeWriteClaim[] {
+  return definitions.flatMap((definition) => {
+    const workType = definitionType(definition);
+    if (!workType) return [];
+    return (definition.connectorNative ?? []).map((mapping) => ({
+      capabilityId: definition.id,
+      workType,
+      nativeFormat: mapping.nativeFormat,
+      delta: mapping.delta,
+    }));
+  });
 }
 
 export function assertCapabilityIrGate() {

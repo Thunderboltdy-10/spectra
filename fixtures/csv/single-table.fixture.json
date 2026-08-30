@@ -1,0 +1,38 @@
+{
+  "name": "CSV quoted single-table boundary",
+  "nativeFormat": "csv",
+  "rawFixtureContains": ["\"Waves, standing\"", "Line one\nLine two"],
+  "projectionContains": ["B2=Waves, standing", "C3=Line one\nLine two"],
+  "fidelity": [
+    {
+      "feature": "cells",
+      "class": "NATIVE"
+    },
+    {
+      "feature": "singleTable",
+      "class": "EQUIVALENT",
+      "reasonContains": "one Spectra sheet table"
+    },
+    {
+      "feature": "formulas",
+      "class": "PRESERVED",
+      "readOnly": true,
+      "reasonContains": "no calculation model"
+    },
+    {
+      "feature": "sheetStructure",
+      "class": "PRESERVED",
+      "readOnly": true,
+      "reasonContains": "one table"
+    }
+  ],
+  "noOpByteIdentical": true,
+  "mutation": {
+    "delta": {
+      "kind": "set-cell",
+      "ref": "C2",
+      "value": "Changed by Spectra"
+    },
+    "projectionContains": ["C2=Changed by Spectra", "B2=Waves, standing"]
+  }
+}

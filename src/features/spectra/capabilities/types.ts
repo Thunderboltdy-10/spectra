@@ -48,6 +48,13 @@ export type NativeCapability<T extends OfficeWorkType = OfficeWorkType> = {
   unavailableReason?: string;
 };
 
+export type ConnectorNativeMapping = {
+  /** Provider/resource native format resolved through the formal lens registry. */
+  nativeFormat: string;
+  /** Format-specific semantic delta implemented by that registered lens. */
+  delta: string;
+};
+
 /**
  * The single capability source described by Reformation R6.
  *
@@ -64,6 +71,10 @@ export type CapabilityDefinition<
   scope: CapabilityScope;
   availability: (ctx: CommandContext) => CommandAvailability;
   native?: T extends OfficeWorkType ? NativeCapability<T> : never;
+  /** Connector-backed paths are cross-checked against the lens registry. */
+  connectorNative?: T extends OfficeWorkType
+    ? readonly ConnectorNativeMapping[]
+    : never;
   execute: {
     editor?: HandlerRef;
     server?: OperationRef;

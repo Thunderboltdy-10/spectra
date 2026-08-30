@@ -1,0 +1,35 @@
+{
+  "name": "Markdown frontmatter and wiki-link boundary",
+  "nativeFormat": "md",
+  "rawFixtureContains": ["course: Physics", "[[Physics IA|the investigation]]"],
+  "projectionContains": ["# Waves review", "[[Physics IA|the investigation]]"],
+  "fidelity": [
+    {
+      "feature": "body",
+      "class": "NATIVE"
+    },
+    {
+      "feature": "frontmatter",
+      "class": "PRESERVED",
+      "readOnly": true,
+      "reasonContains": "not interpreted"
+    },
+    {
+      "feature": "hyperlinks",
+      "class": "PRESERVED",
+      "readOnly": true,
+      "reasonContains": "wiki-links"
+    }
+  ],
+  "noOpByteIdentical": true,
+  "mutation": {
+    "delta": {
+      "kind": "replace-body",
+      "body": "# Waves review\n\nContinue with [[Physics IA|the investigation]] after revising standing waves.\n\n- Check boundary conditions\n- Compare the first three harmonics\n"
+    },
+    "projectionContains": [
+      "first three harmonics",
+      "[[Physics IA|the investigation]]"
+    ]
+  }
+}

@@ -11,6 +11,9 @@ import type {
   LensPreservedCarry,
   SpectraLens,
 } from "./types";
+import { sha256Payload } from "./payload-hash";
+
+export { sha256Payload } from "./payload-hash";
 import {
   docxProjectionSchema,
   type DocxParagraphFormat,
@@ -90,15 +93,6 @@ function hasOmml(element: XmlElement) {
 function bytesLookEncrypted(payload: Uint8Array) {
   const compoundFileHeader = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
   return compoundFileHeader.every((byte, index) => payload[index] === byte);
-}
-
-export async function sha256Payload(payload: Uint8Array) {
-  const stable = Uint8Array.from(payload);
-  return Array.from(
-    new Uint8Array(await crypto.subtle.digest("SHA-256", stable.buffer)),
-  )
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function stableHex(value: string) {
@@ -2370,7 +2364,11 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
       );
     const order = projection.blocks.map((block) => block.id);
     const priorOrder = carry.projection.blocks.map((block) => block.id);
-    if (order.length !== priorOrder.length || order.some((id, index) => id !== priorOrder[index]))
+    const currentIds = new Set(order);
+    const priorIds = new Set(priorOrder);
+    const retainedOrder = order.filter((id) => priorIds.has(id));
+    const priorRetainedOrder = priorOrder.filter((id) => currentIds.has(id));
+    if (retainedOrder.some((id, index) => id !== priorRetainedOrder[index]))
       operations.push({ kind: "reorder-regions", order });
     if (!operations.length) return carry.payload;
     return applyDelta(carry, { kind: "ai-edit", operations });

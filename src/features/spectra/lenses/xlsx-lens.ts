@@ -2,7 +2,7 @@ import { Workbook, parseCellRef, type CellStyleUpdate } from "@ariadng/office/xl
 import { dateToSerial } from "../sheets/excel-serial";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement } from "@ariadng/office/xml";
-import { sha256Payload } from "./docx-lens";
+import { sha256Payload } from "./payload-hash";
 import { normalizedCellFormat, xlsxOperationsBetween } from "./office-content";
 import type {
   LensCapabilitySet,
@@ -20,6 +20,9 @@ import {
   type XlsxSemanticDelta,
   type XlsxSheetProjection,
 } from "./projection-contracts";
+import { XlsxLensError } from "./xlsx-errors";
+
+export { XlsxLensError } from "./xlsx-errors";
 
 const SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
@@ -28,13 +31,6 @@ export const XLSX_RECOGNIZED_FORMULAS = new Set([
 ]);
 
 export type { XlsxCellProjection, XlsxProjection, XlsxSemanticDelta, XlsxSheetProjection } from "./projection-contracts";
-
-export class XlsxLensError extends Error {
-  constructor(public readonly code: string, message: string) {
-    super(message);
-    this.name = "XlsxLensError";
-  }
-}
 
 function descendants(root: XmlElement): XmlElement[] {
   const result: XmlElement[] = [];

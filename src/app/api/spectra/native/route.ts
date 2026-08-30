@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
-import { sha256Payload } from "@/features/spectra/lenses/docx-lens";
+import { sha256Payload } from "@/features/spectra/lenses/payload-hash";
 import { fetchVerifiedNativePayload, uploadNativePayload } from "@/features/spectra/lenses/native-payload-server";
 import { createSpectraPackage, SPECTRA_PACKAGE_TYPES } from "@/features/spectra/lenses/spectra-package";
 

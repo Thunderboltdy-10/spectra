@@ -56,6 +56,19 @@ The AI can create durable procedures for itself — below a level, always:
 - Retrieval tiers made real: initial packet keeps the current bounded shape; `retrieve_memory` `focused`/`deep` levels get distinct budgets and graph-hop depths instead of the current mostly-flat behavior; every deep retrieval logs a `memoryRetrievalEvents` row (already-existing audit) with token spend.
 - Owns: `convex/memory.ts` capture/retrieval internals, report-stage hook in the run loop.
 
+### P14.I3 implementation log — 2026-08-31
+
+- Added a hidden model proposal channel capped at three entries, 600 proposition characters, and the three P14-owned durable categories.
+- Report-stage capture queues through canonical `memoryJobs`; maintenance writes active inferred claims through `upsertClaim` with `createdBy: "model"` and normal evidence/capsule handling.
+- Disabled, paused, category-blocked, oversize, transient, secret, sensitive, empty-reason, and tampered jobs are refused again at persistence; raw prompts are not copied into evidence previews.
+- Settings → Privacy now lists server-filtered active model-authored items under “Things Spectra noticed” with loading, signed-out, empty, failure, and one-click Forget states.
+- The final rebase keeps P10 Connections and P9 summary synchronization intact, groups soul, lazy skills, model-noticed items, and personal-context controls in Privacy, and routes skill-body screening through the same forbidden-content rail as memory capture.
+- Initial retrieval keeps the existing broad bounded behavior; focused is capped at 1,500 tokens/one graph hop and deep at 4,000 tokens/three graph hops.
+- Focused/deep exclude unrelated claims; prompt projections trim to their tier boundary. Every deep tool result requires a successful audit row with estimated and actual token spend.
+- Audit-only candidate IDs stay out of the next model prompt, and over-budget retrieval audits are rejected.
+- Evidence: composed P14 Vitest 15 files / 76 tests; root TypeScript; capability IR; secret scan; diff check; scoped ESLint with only five unchanged Settings warnings; static UI detector clean.
+- No live deployment, browser/profile, Bridge, Office, real files, or protected fidelity path was used. Status: IMPLEMENTED; P14.V1 remains the independent verifier and no acceptance is claimed.
+
 ## P14.V1 — Memory verification (MT)
 
 Fresh agent, local instance:

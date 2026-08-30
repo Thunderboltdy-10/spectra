@@ -19,6 +19,12 @@ import {
   normalizeSoulText,
   soulTextIsWithinCap,
 } from "../src/features/spectra/memory/soul-policy";
+import {
+  MODEL_MEMORY_PROPOSAL_MAX_COUNT,
+  MODEL_MEMORY_PROPOSITION_MAX_CHARACTERS,
+  MODEL_MEMORY_REASON_MAX_CHARACTERS,
+  isModelMemoryClaimType,
+} from "../src/features/spectra/memory/capture-policy";
 
 export { SOUL_TOKEN_CAP } from "../src/features/spectra/memory/soul-policy";
 
@@ -26,6 +32,49 @@ const DEFAULT_TARGET_TOKENS = 1_000;
 const MAX_TARGET_TOKENS = 4_000;
 const MAX_CLAIMS_PER_CONTEXT = 24;
 const MAX_LIST = 300;
+
+const vRetrievalTier = v.union(
+  v.literal("initial"),
+  v.literal("focused"),
+  v.literal("deep"),
+);
+
+type RetrievalTier = "initial" | "focused" | "deep";
+
+function retrievalTierPolicy(tier: RetrievalTier, initialTargetTokens: number) {
+  if (tier === "focused")
+    return {
+      targetTokens: 1_500,
+      graphHops: 1,
+      maxClaims: 12,
+      seedLimit: 8,
+      frontierLimit: 12,
+      candidateLimit: 32,
+      broadFallback: false,
+    } as const;
+  if (tier === "deep")
+    return {
+      targetTokens: 4_000,
+      graphHops: 3,
+      maxClaims: MAX_CLAIMS_PER_CONTEXT,
+      seedLimit: 16,
+      frontierLimit: 32,
+      candidateLimit: 80,
+      broadFallback: false,
+    } as const;
+  return {
+    targetTokens: Math.max(
+      250,
+      Math.min(MAX_TARGET_TOKENS, Math.round(initialTargetTokens)),
+    ),
+    graphHops: 2,
+    maxClaims: MAX_CLAIMS_PER_CONTEXT,
+    seedLimit: 12,
+    frontierLimit: 24,
+    candidateLimit: 80,
+    broadFallback: true,
+  } as const;
+}
 
 const vScope = v.union(
   v.literal("private_global"),
@@ -145,18 +194,22 @@ const forbiddenCapturePatterns = [
   /\b(?:self[- ]?harm|suicid(?:e|al))\b/i,
 ];
 
-export function captureRejectionReason(proposition: string) {
-  if (proposition.length < 12) return "too_short";
-  if (proposition.length > 1_500) return "too_long";
-  if (forbiddenCapturePatterns.some((pattern) => pattern.test(proposition)))
+export function captureSafetyRejectionReason(value: string) {
+  if (forbiddenCapturePatterns.some((pattern) => pattern.test(value)))
     return "sensitive_or_secret";
   if (
     /\b(?:just for (?:today|this message)|right now only|temporary request)\b/i.test(
-      proposition,
+      value,
     )
   )
     return "transient";
   return null;
+}
+
+export function captureRejectionReason(proposition: string) {
+  if (proposition.length < 12) return "too_short";
+  if (proposition.length > 1_500) return "too_long";
+  return captureSafetyRejectionReason(proposition);
 }
 
 function soulCaptureRejectionReason(text: string) {
@@ -989,6 +1042,9 @@ export const listMine = query({
     ),
     scope: v.optional(vScope),
     claimType: v.optional(vClaimType),
+    createdBy: v.optional(
+      v.union(v.literal("user"), v.literal("policy"), v.literal("model")),
+    ),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -998,14 +1054,22 @@ export const listMine = query({
       actor,
     );
     const wantedStatus = args.status;
+    const createdBy = args.createdBy;
+    const ownedForStatus = async (
+      status: "proposed" | "active" | "disputed" | "superseded" | "expired",
+    ) => {
+      const indexed = ctx.db
+        .query("memoryClaims")
+        .withIndex("by_account_status_updated", (q) =>
+          q.eq("accountId", actor.accountId).eq("status", status),
+        );
+      const filtered = createdBy
+        ? indexed.filter((q) => q.eq(q.field("createdBy"), createdBy))
+        : indexed;
+      return filtered.order("desc").take(MAX_LIST);
+    };
     const ownedCandidates = wantedStatus
-      ? await ctx.db
-          .query("memoryClaims")
-          .withIndex("by_account_status_updated", (q) =>
-            q.eq("accountId", actor.accountId).eq("status", wantedStatus),
-          )
-          .order("desc")
-          .take(MAX_LIST)
+      ? await ownedForStatus(wantedStatus)
       : (
           await Promise.all(
             (
@@ -1016,15 +1080,7 @@ export const listMine = query({
                 "superseded",
                 "expired",
               ] as const
-            ).map((status) =>
-              ctx.db
-                .query("memoryClaims")
-                .withIndex("by_account_status_updated", (q) =>
-                  q.eq("accountId", actor.accountId).eq("status", status),
-                )
-                .order("desc")
-                .take(MAX_LIST),
-            ),
+            ).map(ownedForStatus),
           )
         ).flat();
     const sharedCandidates = (
@@ -1053,6 +1109,7 @@ export const listMine = query({
       if (claim.status === "deleted") continue;
       if (args.scope && claim.scope !== args.scope) continue;
       if (args.claimType && claim.claimType !== args.claimType) continue;
+      if (args.createdBy && claim.createdBy !== args.createdBy) continue;
       if (needle && !claim.normalizedProposition.includes(needle)) continue;
       if (!(await canReadClaim(ctx, actor, claim))) continue;
       visible.push(claim);
@@ -1315,9 +1372,7 @@ export const exportMine = query({
         await preferencesFor(ctx, actor),
         actor,
       ),
-      soul: soulProjection(
-        await soulCapsuleForAccount(ctx, actor.accountId),
-      ),
+      soul: soulProjection(await soulCapsuleForAccount(ctx, actor.accountId)),
       claims: visible,
     };
   },
@@ -1336,7 +1391,7 @@ export const contextForRunBase = internalQuery({
     queryText: v.string(),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
-    targetTokens: v.optional(v.number()),
+    tier: v.optional(vRetrievalTier),
     semanticMatches: v.optional(
       v.array(
         v.object({
@@ -1355,6 +1410,7 @@ export const contextForRunBase = internalQuery({
     if (!preferences.enabled)
       return {
         enabled: false,
+        tier: args.tier ?? "initial",
         text: "",
         selectedClaimIds: [],
         candidateClaimIds: [],
@@ -1366,14 +1422,11 @@ export const contextForRunBase = internalQuery({
           budget: 0,
         },
         estimatedTokens: 0,
+        actualTokens: 0,
       };
-    const target = Math.max(
-      250,
-      Math.min(
-        MAX_TARGET_TOKENS,
-        Math.round(args.targetTokens ?? preferences.capsuleTargetTokens),
-      ),
-    );
+    const tier = args.tier ?? "initial";
+    const policy = retrievalTierPolicy(tier, preferences.capsuleTargetTokens);
+    const target = policy.targetTokens;
     const ownedClaims = await ctx.db
       .query("memoryClaims")
       .withIndex("by_account_status_updated", (q) =>
@@ -1498,10 +1551,14 @@ export const contextForRunBase = internalQuery({
     let frontier = ranked
       .filter((item) => item.retrievalSignal >= 0.12)
       .sort((left, right) => right.score - left.score)
-      .slice(0, 12)
+      .slice(0, policy.seedLimit)
       .map((item) => item.claim._id);
     const traversed = new Set(frontier.map(String));
-    for (let depth = 0; depth < 2 && frontier.length; depth += 1) {
+    for (
+      let depth = 0;
+      depth < policy.graphHops && frontier.length;
+      depth += 1
+    ) {
       const relationSets = await Promise.all(
         frontier.map(async (claimId) => ({
           claimId,
@@ -1530,22 +1587,26 @@ export const contextForRunBase = internalQuery({
           if (item)
             item.score +=
               Math.max(0, Math.min(1, relation.confidence)) *
-              (depth === 0 ? 0.22 : 0.1);
+              (depth === 0 ? 0.22 : depth === 1 ? 0.1 : 0.05);
           if (!traversed.has(String(neighborId))) {
             traversed.add(String(neighborId));
             next.push(neighborId);
           }
         }
-      frontier = next.slice(0, 24);
+      frontier = next.slice(0, policy.frontierLimit);
     }
-    ranked.sort(
+    const eligible = (
+      policy.broadFallback
+        ? ranked
+        : ranked.filter((item) => traversed.has(String(item.claim._id)))
+    ).sort(
       (a, b) => b.score - a.score || b.claim.updatedAt - a.claim.updatedAt,
     );
     const selected: Array<Doc<"memoryClaims">> = [];
     let used = 0;
-    for (const item of ranked) {
+    for (const item of eligible) {
       const cost = tokenEstimate(item.claim.proposition) + 12;
-      if (selected.length >= MAX_CLAIMS_PER_CONTEXT || used + cost > target) {
+      if (selected.length >= policy.maxClaims || used + cost > target) {
         exclusions.budget += 1;
         continue;
       }
@@ -1575,20 +1636,41 @@ export const contextForRunBase = internalQuery({
         };
       }),
     );
-    const text = contextClaims
-      .map(
-        (claim) =>
-          `[${claim.citation}] ${claim.proposition} (${claim.scope.replaceAll("_", " ")}; ${claim.assertion}; confidence ${Math.round(claim.confidence * 100)}%)`,
-      )
-      .join("\n");
-    return {
-      enabled: true,
+    const lineForClaim = (claim: (typeof contextClaims)[number]) =>
+      `[${claim.citation}] ${claim.proposition} (${claim.scope.replaceAll("_", " ")}; ${claim.assertion}; confidence ${Math.round(claim.confidence * 100)}%)`;
+    let boundedClaims = contextClaims;
+    let boundedSelected = selected;
+    let text = boundedClaims.map(lineForClaim).join("\n");
+    const promptProjection = () => ({
+      tier,
       text,
-      claims: contextClaims,
-      selectedClaimIds: selected.map((claim) => claim._id),
-      candidateClaimIds: ranked.map((item) => item.claim._id).slice(0, 80),
+      claims: boundedClaims,
       exclusions,
       estimatedTokens: tokenEstimate(text),
+      targetTokens: target,
+    });
+    while (
+      boundedClaims.length > 0 &&
+      tokenEstimate(JSON.stringify(promptProjection())) > target
+    ) {
+      boundedClaims = boundedClaims.slice(0, -1);
+      boundedSelected = boundedSelected.slice(0, -1);
+      exclusions.budget += 1;
+      text = boundedClaims.map(lineForClaim).join("\n");
+    }
+    const actualTokens = tokenEstimate(JSON.stringify(promptProjection()));
+    return {
+      enabled: true,
+      tier,
+      text,
+      claims: boundedClaims,
+      selectedClaimIds: boundedSelected.map((claim) => claim._id),
+      candidateClaimIds: eligible
+        .map((item) => item.claim._id)
+        .slice(0, policy.candidateLimit),
+      exclusions,
+      estimatedTokens: tokenEstimate(text),
+      actualTokens,
       targetTokens: target,
     };
   },
@@ -1599,7 +1681,7 @@ export const contextForRun = action({
     queryText: v.string(),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
-    targetTokens: v.optional(v.number()),
+    tier: v.optional(vRetrievalTier),
   },
   handler: async (ctx, args): Promise<unknown> => {
     const identity = await ctx.runQuery(internal.memory.retrievalIdentity, {});
@@ -1625,6 +1707,7 @@ export const contextForRun = action({
 export const recordRetrieval = mutation({
   args: {
     runId: v.optional(v.id("spectraAiRuns")),
+    tier: vRetrievalTier,
     purpose: v.string(),
     queryHash: v.string(),
     candidateClaimIds: v.array(v.id("memoryClaims")),
@@ -1641,6 +1724,20 @@ export const recordRetrieval = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
+    const tokenLimit = retrievalTierPolicy(
+      args.tier,
+      DEFAULT_TARGET_TOKENS,
+    ).targetTokens;
+    const actualTokens = args.actualTokens ?? args.estimatedTokens;
+    if (
+      args.estimatedTokens < 0 ||
+      actualTokens < 0 ||
+      args.estimatedTokens > tokenLimit ||
+      actualTokens > tokenLimit
+    )
+      throw new Error(
+        `MEMORY_RETRIEVAL_OVER_BUDGET: ${args.tier} retrieval exceeded its ${tokenLimit}-token limit.`,
+      );
     for (const claimId of args.selectedClaimIds) {
       const claim = await ctx.db.get(claimId);
       if (
@@ -1656,13 +1753,14 @@ export const recordRetrieval = mutation({
       accountId: actor.accountId,
       schoolId: actor.schoolId,
       runId: args.runId,
+      tier: args.tier,
       purpose: compact(args.purpose, 180),
       queryHash: compact(args.queryHash, 128),
       candidateClaimIds: args.candidateClaimIds.slice(0, 100),
       selectedClaimIds: args.selectedClaimIds.slice(0, 40),
       exclusionCounts: args.exclusionCounts,
-      estimatedTokens: Math.max(0, args.estimatedTokens),
-      actualTokens: args.actualTokens,
+      estimatedTokens: args.estimatedTokens,
+      actualTokens,
       createdAt: Date.now(),
     });
   },
@@ -1715,6 +1813,149 @@ function explicitCandidateFromText(text: string) {
     };
   return null;
 }
+
+export const captureModelProposals = mutation({
+  args: {
+    runId: v.id("spectraAiRuns"),
+    prompt: v.string(),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    proposals: v.array(
+      v.object({
+        claimType: v.union(
+          v.literal("correction"),
+          v.literal("recurring_workflow"),
+          v.literal("mistake_avoidance"),
+        ),
+        proposition: v.string(),
+        reason: v.string(),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const preferences = await ensurePreferences(ctx, actor);
+    if (!preferences.enabled || preferences.capturePaused)
+      return {
+        queued: 0,
+        refused: args.proposals.length,
+        outcomes: args.proposals.map((_, index) => ({
+          index,
+          queued: false,
+          reason: preferences.enabled ? "paused" : "disabled",
+        })),
+      };
+
+    const scope: Scope = args.workspaceId ? "private_school" : "private_global";
+    const outcomes: Array<{
+      index: number;
+      queued: boolean;
+      duplicate?: boolean;
+      reason?: string;
+      jobId?: Id<"memoryJobs">;
+    }> = [];
+    for (const [index, candidate] of args.proposals.entries()) {
+      if (index >= MODEL_MEMORY_PROPOSAL_MAX_COUNT) {
+        outcomes.push({ index, queued: false, reason: "proposal_limit" });
+        continue;
+      }
+      const proposition = compact(
+        candidate.proposition,
+        MODEL_MEMORY_PROPOSITION_MAX_CHARACTERS + 1,
+      );
+      const reason = compact(
+        candidate.reason,
+        MODEL_MEMORY_REASON_MAX_CHARACTERS + 1,
+      );
+      const rejection =
+        proposition.length > MODEL_MEMORY_PROPOSITION_MAX_CHARACTERS
+          ? "too_long"
+          : reason.length > MODEL_MEMORY_REASON_MAX_CHARACTERS
+            ? "reason_too_long"
+            : !reason
+              ? "reason_required"
+              : (captureRejectionReason(proposition) ??
+                captureSafetyRejectionReason(reason));
+      if (rejection) {
+        outcomes.push({ index, queued: false, reason: rejection });
+        continue;
+      }
+      if (!isModelMemoryClaimType(candidate.claimType)) {
+        outcomes.push({
+          index,
+          queued: false,
+          reason: "unsupported_category",
+        });
+        continue;
+      }
+      if (
+        !preferences.categoryControls[categoryForClaim(candidate.claimType)]
+      ) {
+        outcomes.push({
+          index,
+          queued: false,
+          reason: "category_disabled",
+        });
+        continue;
+      }
+
+      const normalized = normalizeProposition(proposition);
+      const idempotencyKey = `model-capture:${actor.accountId}:${args.runId}:${hash(`${scope}:${candidate.claimType}:${normalized}`).slice(0, 40)}`;
+      const existing = await ctx.db
+        .query("memoryJobs")
+        .withIndex("by_idempotency", (q) =>
+          q.eq("idempotencyKey", idempotencyKey),
+        )
+        .unique();
+      if (existing) {
+        outcomes.push({
+          index,
+          queued: existing.status !== "failed",
+          duplicate: true,
+          reason:
+            existing.status === "failed" ? "previously_refused" : undefined,
+          jobId: existing._id,
+        });
+        continue;
+      }
+      const now = Date.now();
+      const jobId = await ctx.db.insert("memoryJobs", {
+        accountId: actor.accountId,
+        schoolId: actor.schoolId,
+        kind: "capture",
+        idempotencyKey,
+        payload: {
+          proposition,
+          claimType: candidate.claimType,
+          scope,
+          workspaceId: args.workspaceId,
+          artifactId: args.artifactId,
+          sourceType: "product_event",
+          sourceId: args.runId,
+          excerpt: proposition,
+          reason,
+          createdBy: "model",
+          assertion: "inferred",
+          confidence: 0.72,
+          status: "active",
+          subjectKind:
+            candidate.claimType === "correction" ? "user" : "workflow",
+        },
+        status: "queued",
+        attemptCount: 0,
+        availableAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      outcomes.push({ index, queued: true, jobId });
+    }
+    return {
+      queued: outcomes.filter((outcome) => outcome.queued).length,
+      refused: outcomes.filter((outcome) => !outcome.queued).length,
+      outcomes,
+    };
+  },
+});
 
 export const captureExplicitSignal = mutation({
   args: {
@@ -1938,9 +2179,7 @@ async function rebuildCapsulesForAccount(
               q.eq("accountId", actor.accountId).eq("scope", definition.scope),
             )
             .collect()
-        ).find(
-          (capsule) => !capsule.workspaceId && capsule.kind !== "soul",
-        );
+        ).find((capsule) => !capsule.workspaceId && capsule.kind !== "soul");
     if (existing) {
       await ctx.db.patch(existing._id, {
         kind: "context",
@@ -2029,16 +2268,37 @@ export const maintain = internalMutation({
               : {};
           const proposition = compact(payload.proposition);
           const claimType = compact(payload.claimType) as ClaimType;
-          if (
-            ![
-              "declared_fact",
-              "correction",
-              "recurring_workflow",
-              "inferred_preference",
-              "decision",
-            ].includes(claimType)
-          )
+          const createdBy =
+            payload.createdBy === "model"
+              ? ("model" as const)
+              : ("policy" as const);
+          const reason = compact(
+            payload.reason,
+            MODEL_MEMORY_REASON_MAX_CHARACTERS + 1,
+          );
+          const permittedTypes =
+            createdBy === "model"
+              ? ["correction", "recurring_workflow", "mistake_avoidance"]
+              : [
+                  "declared_fact",
+                  "correction",
+                  "recurring_workflow",
+                  "inferred_preference",
+                  "decision",
+                ];
+          if (!permittedTypes.includes(claimType))
             throw new Error("Unsupported background memory candidate.");
+          if (
+            createdBy === "model" &&
+            (proposition.length > MODEL_MEMORY_PROPOSITION_MAX_CHARACTERS ||
+              !reason ||
+              reason.length > MODEL_MEMORY_REASON_MAX_CHARACTERS ||
+              captureRejectionReason(proposition) ||
+              captureSafetyRejectionReason(reason))
+          )
+            throw new Error(
+              "Model-authored memory candidate failed capture rails.",
+            );
           await upsertClaim(ctx, actor, {
             proposition,
             scope:
@@ -2046,20 +2306,38 @@ export const maintain = internalMutation({
                 ? "private_school"
                 : "private_global",
             claimType,
-            assertion: "asserted",
-            confidence: 1,
-            createdBy: "policy",
+            assertion: createdBy === "model" ? "inferred" : "asserted",
+            confidence:
+              createdBy === "model"
+                ? Math.max(
+                    0.5,
+                    Math.min(
+                      0.85,
+                      typeof payload.confidence === "number"
+                        ? payload.confidence
+                        : 0.72,
+                    ),
+                  )
+                : 1,
+            createdBy,
+            status: createdBy === "model" ? "active" : undefined,
+            subjectKind:
+              payload.subjectKind === "workflow" ? "workflow" : "user",
             evidence: {
               sourceType:
                 payload.sourceType === "artifact" ||
-                payload.sourceType === "workspace"
+                payload.sourceType === "workspace" ||
+                payload.sourceType === "product_event"
                   ? payload.sourceType
                   : "thread",
               sourceId: compact(payload.sourceId, 180),
               sourceVersionId:
                 compact(payload.sourceVersionId, 180) || undefined,
-              excerpt: proposition,
-              captureReason: compact(payload.reason, 240),
+              excerpt:
+                createdBy === "model"
+                  ? proposition
+                  : compact(payload.excerpt, 240) || proposition,
+              captureReason: reason,
             },
           });
         }

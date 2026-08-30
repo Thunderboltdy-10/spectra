@@ -14,6 +14,12 @@ import {
   whiteboardContentSchema,
 } from "../artifacts/schemas";
 import { ARTIFACT_TYPE_KEYS, WORK_TYPE_KEYS } from "../artifacts/types";
+import {
+  MODEL_MEMORY_CLAIM_TYPES,
+  MODEL_MEMORY_PROPOSAL_MAX_COUNT,
+  MODEL_MEMORY_PROPOSITION_MAX_CHARACTERS,
+  MODEL_MEMORY_REASON_MAX_CHARACTERS,
+} from "../memory/capture-policy";
 import { coerceCommonPlanSchemaSlips } from "./plan-diagnostics";
 
 export const SPECTRA_BLUEPRINT_KEYS = ARTIFACT_TYPE_KEYS;
@@ -404,6 +410,18 @@ const boundedChoiceQuestionSchema = z
   })
   .strict();
 
+const modelMemoryProposalSchema = z
+  .object({
+    claimType: z.enum(MODEL_MEMORY_CLAIM_TYPES),
+    proposition: z
+      .string()
+      .trim()
+      .min(12)
+      .max(MODEL_MEMORY_PROPOSITION_MAX_CHARACTERS),
+    reason: z.string().trim().min(1).max(MODEL_MEMORY_REASON_MAX_CHARACTERS),
+  })
+  .strict();
+
 export const spectraPlanSchema = z
   .object({
     decision: z.enum(PLAN_DECISIONS),
@@ -427,6 +445,11 @@ export const spectraPlanSchema = z
       ])
       .nullable()
       .optional(),
+    memoryProposals: z
+      .array(modelMemoryProposalSchema)
+      .max(MODEL_MEMORY_PROPOSAL_MAX_COUNT)
+      .optional()
+      .default([]),
     finalResponse: z.string().trim().min(1).max(4_000),
     presentedArtifactIds: z.array(idText).max(8).optional().default([]),
     operations: z.array(modelOperationSchema),
@@ -1206,6 +1229,7 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
     "conversationSummary",
     "choices",
     "progressUpdates",
+    "memoryProposals",
     "finalResponse",
     "presentedArtifactIds",
     "operations",
@@ -1337,6 +1361,28 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
           },
           regionHint: {
             anyOf: [{ type: "string", maxLength: 160 }, { type: "null" }],
+          },
+        },
+      },
+    },
+    memoryProposals: {
+      type: "array",
+      maxItems: MODEL_MEMORY_PROPOSAL_MAX_COUNT,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["claimType", "proposition", "reason"],
+        properties: {
+          claimType: { enum: MODEL_MEMORY_CLAIM_TYPES },
+          proposition: {
+            type: "string",
+            minLength: 12,
+            maxLength: MODEL_MEMORY_PROPOSITION_MAX_CHARACTERS,
+          },
+          reason: {
+            type: "string",
+            minLength: 1,
+            maxLength: MODEL_MEMORY_REASON_MAX_CHARACTERS,
           },
         },
       },

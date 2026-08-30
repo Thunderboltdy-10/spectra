@@ -172,6 +172,7 @@ export function coerceCommonPlanSchemaSlips(value: unknown) {
     "conversationTitle",
     "conversationSummary",
     "choices",
+    "memoryProposals",
     "finalResponse",
     "presentedArtifactIds",
     "operations",

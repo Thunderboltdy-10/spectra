@@ -1589,6 +1589,7 @@ async function runAttempt(
         workspaceId: params.workspaceId,
         artifactId: params.artifactId,
         retrieval: context.memoryRetrieval,
+        modelProposals: plan.memoryProposals,
       });
       card = await latestCard(params.actorClerkId, params.runId);
       publish({
@@ -2314,6 +2315,7 @@ async function runAttempt(
       workspaceId: params.workspaceId,
       artifactId: params.artifactId,
       retrieval: context.memoryRetrieval,
+      modelProposals: plan.memoryProposals,
     });
     card = await latestCard(params.actorClerkId, params.runId);
     recordPhase("final_state_persisted");
@@ -3948,6 +3950,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         intent,
         finalResponse: state.run.finalSummary ?? "Confirmed changes completed.",
         presentedArtifactIds: [],
+        memoryProposals: [],
         operations,
       },
       ownedReferences(context),

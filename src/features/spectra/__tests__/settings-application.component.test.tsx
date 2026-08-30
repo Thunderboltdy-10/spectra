@@ -15,6 +15,14 @@ import { DEFAULT_SPECTRA_PREFERENCES } from "@/features/spectra/settings/schema"
 vi.mock("convex/react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("convex/react")>()),
   useConvexAuth: () => ({ isLoading: false, isAuthenticated: false }),
+  useMutation: () => vi.fn(),
+  useQuery: () => undefined,
+}));
+
+vi.mock("@/features/spectra/skills/client", () => ({
+  deleteUserSkill: vi.fn(),
+  listUserSkills: vi.fn(async () => []),
+  readUserSkill: vi.fn(),
 }));
 
 afterEach(() => {
@@ -35,12 +43,7 @@ describe("Settings application accessibility contract", () => {
     expect(
       screen.getByRole("heading", { name: "Conversations", level: 2 }),
     ).toBeTruthy();
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "More Settings sections" }),
-      { button: 0, ctrlKey: false },
-    );
-    expect(screen.getByRole("menuitem", { name: "Connections" })).toBeTruthy();
-    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Connections" })).toBeTruthy();
     expect(
       screen.getByRole("heading", {
         name: "Conversations and Live Dock",
@@ -73,6 +76,27 @@ describe("Settings application accessibility contract", () => {
     });
   });
 
+  it("keeps all personal AI context controls together under Privacy and data", () => {
+    render(
+      <ThemeProvider>
+        <SettingsApplication initialSection="privacy" />
+      </ThemeProvider>,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Privacy and data", level: 2 }),
+    ).toBeTruthy();
+    for (const heading of [
+      "How Spectra knows you",
+      "AI skills",
+      "Things Spectra noticed",
+      "Personal context",
+    ]) {
+      expect(
+        screen.getByRole("heading", { name: heading, level: 2 }),
+      ).toBeTruthy();
+    }
+  });
+
   it("hides deleted command ids and exposes rename and density for living ones", async () => {
     window.localStorage.setItem(
       "spectra:preferences:v2",
@@ -82,7 +106,10 @@ describe("Settings application accessibility contract", () => {
           document: {
             commands: {
               "document.format.bold": { pinned: true, label: "Strong" },
-              "document.format.ghostFromNova": { pinned: true, label: "Dead control" },
+              "document.format.ghostFromNova": {
+                pinned: true,
+                label: "Dead control",
+              },
             },
           },
         },
@@ -94,8 +121,12 @@ describe("Settings application accessibility contract", () => {
       </ThemeProvider>,
     );
     expect(await screen.findByDisplayValue("Strong")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Name on the workbar for Bold" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Button size for Bold" })).toBeTruthy();
+    expect(
+      screen.getByRole("textbox", { name: "Name on the workbar for Bold" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("combobox", { name: "Button size for Bold" }),
+    ).toBeTruthy();
     expect(screen.queryByDisplayValue("Dead control")).toBeNull();
     expect(screen.queryByText("document.format.ghostFromNova")).toBeNull();
   });

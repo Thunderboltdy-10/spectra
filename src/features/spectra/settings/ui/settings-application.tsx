@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { BookOpenText, Bot, Cable, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Bot, Cable, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
@@ -19,13 +19,13 @@ import { COMMAND_TABS } from "../../commands";
 import { SoulSettings } from "./soul-settings";
 import { UserSkillsSettings } from "./user-skills-settings";
 import { ConnectionsHub } from "./connections-hub";
+import { ModelMemorySettings } from "./model-memory-settings";
 
 const SECTIONS = [
   { id: "ai", label: "Conversations", icon: Bot },
   { id: "writing", label: "Writing", icon: Sparkles },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "workbar", label: "Workbars", icon: SlidersHorizontal },
-  { id: "skills", label: "AI skills", icon: BookOpenText },
   { id: "connections", label: "Connections", icon: Cable },
   { id: "privacy", label: "Privacy and data", icon: LockKeyhole },
 ] as const;
@@ -215,7 +215,7 @@ function PrivacySettings() {
   async function clearContext() {
     setBusy("clear");
     try {
-      await clearSpectraMemory("CLEAR");
+      await clearSpectraMemory("FORGET ALL");
       toast.success("Personal context cleared.");
       setConfirmClear(false);
     } catch (error) {
@@ -260,16 +260,20 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
-    skills: (
-      <SettingGroup
-        title="AI skills"
-        description="Reusable procedures Spectra has made for your account. Their full instructions load only when the work calls for them."
-      >
-        <UserSkillsSettings />
-      </SettingGroup>
-    ),
     connections: <ConnectionsHub />,
-    privacy: <div className="space-y-10"><SoulSettings /><PrivacySettings /></div>,
+    privacy: (
+      <div className="space-y-10">
+        <SoulSettings />
+        <SettingGroup
+          title="AI skills"
+          description="Reusable procedures Spectra has made for your account. Their full instructions load only when the work calls for them."
+        >
+          <UserSkillsSettings />
+        </SettingGroup>
+        <ModelMemorySettings />
+        <PrivacySettings />
+      </div>
+    ),
   };
   return (
     <main className="spectra-wave-y min-h-0 flex-1 overflow-auto bg-[var(--bg-primary)]">

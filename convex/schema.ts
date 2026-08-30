@@ -2143,6 +2143,13 @@ export default defineSchema({
     accountId: v.id("accounts"),
     schoolId: v.id("schools"),
     runId: v.optional(v.id("spectraAiRuns")),
+    tier: v.optional(
+      v.union(
+        v.literal("initial"),
+        v.literal("focused"),
+        v.literal("deep"),
+      ),
+    ),
     purpose: v.string(),
     queryHash: v.string(),
     candidateClaimIds: v.array(v.id("memoryClaims")),

@@ -2162,4 +2162,59 @@ describe("Spectra run route", () => {
     });
     expect(events.some((event) => event.type === "final")).toBe(true);
   });
+
+  it("registers model memory proposals silently during report maintenance", async () => {
+    const proposition =
+      "Do not round intermediate calculations before the final result.";
+    const plan = {
+      ...quizPlan(),
+      progressUpdates: [],
+      memoryProposals: [
+        {
+          claimType: "mistake_avoidance",
+          proposition,
+          reason: "The user corrected an early-rounding error in this turn.",
+        },
+      ],
+    };
+    const { convexMutation } = setup(plan);
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/spectra/run", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run",
+          surface: "workspace",
+          workspaceId: "workspace-real",
+          prompt:
+            "Create a six-question cellular respiration quiz and keep calculations exact until the final result.",
+        }),
+      }),
+    );
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; message?: string });
+
+    const captureCall = convexMutation.mock.calls.find(([name]) =>
+      String(name).includes("memory:captureModelProposals"),
+    );
+    expect(captureCall?.[1]).toMatchObject({
+      runId: "run-real",
+      proposals: [
+        {
+          claimType: "mistake_avoidance",
+          proposition,
+        },
+      ],
+    });
+    expect(
+      JSON.stringify(events.filter((event) => event.type !== "final")),
+    ).not.toContain(proposition);
+    expect(
+      events.some((event) =>
+        /memory|remember|maintenance/i.test(event.message ?? ""),
+      ),
+    ).toBe(false);
+  });
 });

@@ -257,6 +257,7 @@ export async function buildContext(
           queryText: prompt,
           workspaceId: body.workspaceId,
           artifactId: body.artifactId,
+          tier: "initial",
         }).catch(() => null),
     body.scopeNodeId
       ? query<unknown & object, unknown>("orgTree:subtree", {
@@ -773,6 +774,11 @@ export async function queueSilentMemoryMaintenance(input: {
   workspaceId?: string;
   artifactId?: string;
   retrieval?: Record<string, unknown> | null;
+  modelProposals?: Array<{
+    claimType: "correction" | "recurring_workflow" | "mistake_avoidance";
+    proposition: string;
+    reason: string;
+  }>;
 }) {
   const sourceType = input.artifactId
     ? ("artifact" as const)
@@ -807,10 +813,21 @@ export async function queueSilentMemoryMaintenance(input: {
       workspaceId: input.workspaceId,
       artifactId: input.artifactId,
     }).catch(() => null),
+    input.modelProposals?.length
+      ? mutate("memory:captureModelProposals", {
+          actorClerkId: input.actorClerkId,
+          runId: input.runId,
+          prompt: input.prompt,
+          workspaceId: input.workspaceId,
+          artifactId: input.artifactId,
+          proposals: input.modelProposals,
+        }).catch(() => null)
+      : Promise.resolve(null),
     selectedClaimIds.length
       ? mutate("memory:recordRetrieval", {
           actorClerkId: input.actorClerkId,
           runId: input.runId,
+          tier: "initial",
           purpose: "initial_run_context",
           queryHash: createHash("sha256").update(input.prompt).digest("hex"),
           candidateClaimIds,
@@ -831,6 +848,12 @@ export async function queueSilentMemoryMaintenance(input: {
             typeof retrieval?.estimatedTokens === "number"
               ? retrieval.estimatedTokens
               : 0,
+          actualTokens:
+            typeof retrieval?.actualTokens === "number"
+              ? retrieval.actualTokens
+              : typeof retrieval?.estimatedTokens === "number"
+                ? retrieval.estimatedTokens
+                : 0,
         }).catch(() => null)
       : Promise.resolve(null),
   ]);

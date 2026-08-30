@@ -3,7 +3,7 @@ import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
-import { captureRejectionReason } from "./memory";
+import { captureSafetyRejectionReason } from "./memory";
 import { USER_SKILL_LIMITS } from "../shared/user-skill-limits";
 
 export { USER_SKILL_LIMITS } from "../shared/user-skill-limits";
@@ -51,17 +51,9 @@ function normalizeTriggerTerms(values: readonly string[]) {
   return terms;
 }
 
-/**
- * Skill bodies have their own 4,000-character cap. Apply the sensitive-content
- * class from memory over overlapping chunks so that memory's smaller length cap
- * does not silently replace the skill cap.
- */
 export function skillBodyCaptureRejectionReason(body: string) {
-  for (let offset = 0; offset < body.length; offset += 1_200) {
-    const reason = captureRejectionReason(body.slice(offset, offset + 1_400));
-    if (reason === "sensitive_or_secret") return reason;
-  }
-  return null;
+  const reason = captureSafetyRejectionReason(body);
+  return reason === "sensitive_or_secret" ? reason : null;
 }
 
 function normalizeInput(input: {

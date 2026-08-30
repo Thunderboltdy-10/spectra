@@ -1,10 +1,6 @@
 import { NextRequest } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
-import {
-  requireAccount,
-  requireActor,
-  requirePlatformOperator,
-} from "@/lib/auth-server";
+import { requireAccount, requireAccessPrincipal } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
@@ -90,21 +86,26 @@ const PLATFORM_WRITES = new Set([
 
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    const actor = await requireActor();
     const params = request.nextUrl.searchParams;
     const action = params.get("action") ?? "identity";
-    if (PLATFORM_READS.has(action)) await requirePlatformOperator();
     const operatorSessionId = operatorSession(params.get("operatorSessionId"));
+    const principal = await requireAccessPrincipal(
+      PLATFORM_READS.has(action) || operatorSessionId ? "platform" : "school",
+    );
     const range = dateRange(params);
 
     if (action === "identity") {
+      if (principal.kind !== "school")
+        throw new Error(
+          "AUTH_SCHOOL_CONTEXT_REQUIRED: A school identity is required.",
+        );
       const account = await convexQuery("identity:account", {});
       return ok({
         account,
         membership: {
-          schoolId: actor.schoolId,
-          role: actor.schoolRole,
-          membershipId: actor.membershipId,
+          schoolId: principal.actor.schoolId,
+          role: principal.actor.schoolRole,
+          membershipId: principal.actor.membershipId,
         },
       });
     }
@@ -254,20 +255,28 @@ export async function POST(request: NextRequest) {
         await convexMutation("memberships:acceptInvitation", { tokenHash }),
       );
     }
-    const actor = await requireActor();
-    if (PLATFORM_WRITES.has(action)) await requirePlatformOperator();
     const operatorSessionId = operatorSession(body.operatorSessionId);
+    const principal = await requireAccessPrincipal(
+      PLATFORM_WRITES.has(action) || operatorSessionId ? "platform" : "school",
+    );
     const requestId = optionalText(body.requestId, 120);
 
     if (action === "invite") {
-      const targetSchoolId = operatorSessionId
-        ? (
-            await convexQuery<
-              { sessionId: string },
-              { school: { schoolId: string } }
-            >("operatorSessions:current", { sessionId: operatorSessionId })
-          ).school.schoolId
-        : actor.schoolId;
+      let targetSchoolId: string;
+      if (operatorSessionId) {
+        targetSchoolId = (
+          await convexQuery<
+            { sessionId: string },
+            { school: { schoolId: string } }
+          >("operatorSessions:current", { sessionId: operatorSessionId })
+        ).school.schoolId;
+      } else {
+        if (principal.kind !== "school")
+          throw new Error(
+            "AUTH_SCHOOL_CONTEXT_REQUIRED: A school identity is required.",
+          );
+        targetSchoolId = principal.actor.schoolId;
+      }
       const invitationToken = randomBytes(32).toString("base64url");
       const tokenHash = createHash("sha256")
         .update(invitationToken)

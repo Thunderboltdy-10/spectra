@@ -192,7 +192,7 @@ Stale lease (agent died): orchestrator verifies the agent is gone, kills leftove
 ## 7. Failure protocol
 
 - **Implementer reports a problem outside its scope** → orchestrator files it (STATE §1 via notes fold-in), routes to the owning unit or spawns a fix agent now if it blocks the graph.
-- **VU REJECTED with a paste-ready handoff** → launch the handoff prompt in a fresh agent (tier per triage: LOCAL→high, SYSTEMIC→xhigh), then a fresh verifier re-runs the VU. The verifier's own in-VU repairs need no orchestrator action beyond recording.
+- **VU REJECTED with a paste-ready handoff** → launch the handoff prompt in a fresh agent (tier per triage: LOCAL→high, SYSTEMIC→xhigh), then a fresh verifier re-runs the failed/modified behavior and every shared surface in that class's blast radius. Valid prior evidence for unrelated cards remains credited; do not repeat the whole VU merely for ceremony (Pablo 2026-08-30). The verifier's own in-VU repairs need no orchestrator action beyond recording.
 - **VU asks for relaunch / dies mid-run** → new fresh agent, same tier, pointed at STATE §1 and the evidence directory (never at the dead agent's chat).
 - **Same class fails twice** → escalate tier (§4). **Fails twice at max** → QUESTIONS.md, park that track, continue others.
 - **Merge conflict beyond mechanical** → merge agent; if the conflict reveals two units fighting over one seam, serialize those units from then on and log the lesson.

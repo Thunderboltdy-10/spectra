@@ -37,3 +37,8 @@ Format: `YYYY-MM-DD HH:MM · EVENT · detail`
 2026-08-30 04:35 · WORKTREE COMPLETE · P6.I1 commit 36f8317, focused Vitest 29/29 and static gates PASS; branch clean, held unmerged. Mixed folder/thread Empty Trash contract remains explicit P6.V1 boundary.
 2026-08-30 04:35 · VU REJECTED · RC.V1 commit 045c288 repairs RC-1 rich DOCX rendering with 38/38 focused + 87/87 seam + enabled Convex gate; round-trip blocked by LOCAL P5.I2 query-only realtime proxy normalization defect. Evidence `.shots/reformation/RC.V1/manifest.md`.
 2026-08-30 04:35 · LEASE RECLAIM · /root/rc_v1 cleaned browser/dev/Convex/Bridge/Office resources; ports 3000/1234 clear. Reclaimed all RC live leases.
+2026-08-30 04:36 · LEASE GRANT · /root/p5_i2_proxy_fix holds main-checkout + dev-server + playwright-a + bridge; corpus copies only, headless A, one local composition.
+2026-08-30 04:36 · AGENT LAUNCH · P5.I2 LOCAL proxy fix implementer, Sol high; normalize query-only WS targets, focused regression, direct/proxied 101, signed-in persistence/native proof, enabled Convex gate, one commit.
+2026-08-30 04:38 · PABLO DIRECTIVE · After rejection fixes, fresh verification re-runs only the failed/modified behavior plus shared blast-radius consumers; valid prior evidence for unrelated cards remains credited. No ceremonial full repetition.
+2026-08-30 05:04 · AGENT COMPLETE · P5.I2 LOCAL proxy/provider repair commit 34c7d7b: focused 20/20, lint/capability/secret/diff/enabled Convex gates PASS; direct/proxied sync and fresh reload evidence `.shots/reformation/P5.I2/manifest.md`.
+2026-08-30 05:04 · LEASE RECLAIM · /root/p5_i2_proxy_fix stopped browser/dev/Convex/Bridge; ports 3000/1234/47615 clear. Reclaimed main-checkout + dev-server + playwright-a + bridge.

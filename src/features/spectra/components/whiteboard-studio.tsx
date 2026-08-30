@@ -3089,7 +3089,7 @@ export function WhiteboardStudio({
           />
         }
         context={undefined}
-        className="mx-3 mt-2.5 shrink-0"
+        className="shrink-0"
         actions={projectBindingsFromIr("whiteboard", [
           ...boardActions,
           ...barPalette.map(([id, Icon, label]) => ({

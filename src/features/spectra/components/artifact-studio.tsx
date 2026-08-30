@@ -171,9 +171,9 @@ import {
 } from "./artifact-comments-panel";
 import { ArtifactEmbedsPanel } from "./artifact-embeds-panel";
 import {
+  WorkbarMenuAction,
   WorkbarMore,
   WorkbarSelect,
-  workbarMenuItemClass,
 } from "./artifact-workbar";
 import {
   markdownToDocumentHtml,
@@ -5553,72 +5553,60 @@ function ArtifactStudioEditor({
             <WorkbarMore label="More work actions">
               {nativePortableArtifact ? (
                 <>
-                  <button
-                    type="button"
-                    className={workbarMenuItemClass()}
+                  <WorkbarMenuAction
                     disabled={nativeRecoveryBusy !== null}
-                    onClick={() => void downloadNativeCopy()}
+                    onSelect={() => void downloadNativeCopy()}
                   >
                     <FileDown className="h-4 w-4" />{" "}
                     {nativeRecoveryBusy === "download"
                       ? "Preparing copy…"
                       : "Download native copy"}
-                  </button>
-                  <button
-                    type="button"
-                    className={workbarMenuItemClass()}
+                  </WorkbarMenuAction>
+                  <WorkbarMenuAction
                     disabled={nativeRecoveryBusy !== null}
-                    onClick={() => void materializeNativeCopy()}
+                    onSelect={() => void materializeNativeCopy()}
                   >
                     <Download className="h-4 w-4" />{" "}
                     {nativeRecoveryBusy === "materialize"
                       ? "Queueing local copy…"
                       : "Keep a copy on this computer"}
-                  </button>
+                  </WorkbarMenuAction>
                 </>
               ) : null}
               {onShare ? (
-                <button
-                  type="button"
-                  className={workbarMenuItemClass()}
-                  onClick={() => {
+                <WorkbarMenuAction
+                  onSelect={() => {
                     onShare();
                   }}
                 >
                   <Share2 className="h-4 w-4" /> Share work
-                </button>
+                </WorkbarMenuAction>
               ) : null}
-              <button
-                type="button"
-                className={workbarMenuItemClass()}
-                onClick={() => {
+              <WorkbarMenuAction
+                onSelect={() => {
                   setEmbedsOpen(true);
                 }}
               >
                 <Link2 className="h-4 w-4" /> References
-              </button>
+              </WorkbarMenuAction>
               {artifact.blueprintKey !== "planner_task" ? (
-                <button
-                  type="button"
-                  className={workbarMenuItemClass()}
-                  onClick={() => {
+                <WorkbarMenuAction
+                  onSelect={() => {
                     detailsPinnedRef.current = true;
                     setDetailsOpen((open) => !open);
                   }}
                 >
                   <PanelRight className="h-4 w-4" />
                   {detailsOpen ? "Close details" : "Open details"}
-                </button>
+                </WorkbarMenuAction>
               ) : null}
-              <button
-                type="button"
-                className={workbarMenuItemClass()}
-                onClick={() => {
+              <WorkbarMenuAction
+                onSelect={() => {
                   loadVersionHistory();
                 }}
               >
                 <History className="h-4 w-4" /> Version history
-              </button>
+              </WorkbarMenuAction>
             </WorkbarMore>
             <IconButton
               label={dirty ? "Save or discard before closing" : "Close"}

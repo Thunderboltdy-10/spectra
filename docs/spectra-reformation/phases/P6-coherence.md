@@ -39,6 +39,16 @@ ESLint rules escalate warn→error directory-by-directory as codemods land; top-
 
 Not Medium-simple: census codemods sit next to a11y and consolidation taste. Grok, not Luna.
 
+### P6.I2 implementation log — 2026-08-30
+
+- TRIAGE · SYSTEMIC: every artifact workbar implemented its own density and popup behavior, so narrow panes could clip labels, duplicate commands, or lose compound controls. The shared overflow planner now preserves authored order, keeps essential refusals visible, sends advanced actions to labelled overflow, collapses only safe icon-bearing actions, and moves compound controls intact.
+- Replaced workbar-owned document listeners, fixed-position menus, and hand-positioned control popovers with the shared Radix dropdown/popover primitives. Menus remain portaled, collision-aware, keyboard navigable, and use named layers.
+- Applied one studio inset/radius/layer contract across finite and infinite canvases; normalized workbar radii and removed one-off workbar shadows and stacking values.
+- Rebalanced the timetable and shared artifact shell so all mounted artifact types consume the same workbar geometry. Compact icon actions retain accessible names and tooltips; text-only and value-bearing controls never collapse to empty icons.
+- Added regression coverage for labelled advanced overflow, non-duplication, reachability, narrow shedding, and primitive menu semantics. Focused P6 tests and static gates pass.
+- The repository-wide token census remains a measured P6.V1 audit input; this unit closes the in-flight shared workbar/design-system seam without mechanically rewriting unrelated product surfaces.
+- Status: IMPLEMENTED; independent P6.V1 verification remains required. No acceptance claimed.
+
 ## P6.I3 — Remaining decompositions + dead-code sweep (S)
 
 Tier-2/3 god-file splits (content adapters, history, chrome, readonly viewers); shadow window-CustomEvent bus folded into `spectraBus` (dead listeners/emitters deleted); dead barrels, orphan tables documented or dropped (ORG-4), schema tombstones cleaned; `wire-or-delete` sweep across flagged dead affordances not already handled.

@@ -2125,7 +2125,7 @@ export function FlashcardStudio({
   return (
     <div
       ref={studioRef}
-      className="spectra-flashcard-studio ml-2.5 flex min-h-0 min-w-0 flex-col overflow-hidden" 
+      className="spectra-flashcard-studio flex min-h-0 min-w-0 flex-col overflow-hidden"
       data-studio-view={activeView}
       data-rail-collapsed={railCollapsed || undefined}
       onKeyDown={onStudioKeyDown}

@@ -14,6 +14,12 @@ export type WorkbarOverflowItem = {
   fullWidth: number;
   /** Width as icon-only. */
   iconWidth: number;
+  /**
+   * False for text-only actions and compound controls. Collapsing either one
+   * to the icon budget would create an empty button or a control whose value
+   * disappeared, so those items move to the labelled overflow instead.
+   */
+  canCollapseToIcon?: boolean;
   disabled?: boolean;
   priority?: WorkbarOverflowPriority;
 };
@@ -45,7 +51,15 @@ export function planWorkbarOverflow(
 ): WorkbarOverflowPlan {
   const visible = items.map((item) => item.id);
   const iconOnly = new Set<string>();
-  const hidden = new Set<string>();
+  // Advanced commands are overflow commands by meaning, not merely when the
+  // row happens to be narrow. Keeping them here at every width makes the
+  // documented information architecture stable and keeps rare/destructive
+  // actions out of the immediate command rail.
+  const hidden = new Set(
+    items
+      .filter((item) => item.priority === "advanced")
+      .map((item) => item.id),
+  );
 
   const widthOf = (id: string) => {
     const item = items.find((entry) => entry.id === id);
@@ -69,15 +83,18 @@ export function planWorkbarOverflow(
   let guard = items.length * 4;
   while (used() > availablePx && guard > 0) {
     guard -= 1;
-    const nextIcon = collapseOrder.find(
-      (id) => !hidden.has(id) && !iconOnly.has(id),
-    );
+    const nextIcon = collapseOrder.find((id) => {
+      if (hidden.has(id) || iconOnly.has(id)) return false;
+      const item = items.find((entry) => entry.id === id);
+      return Boolean(
+        item &&
+          item.canCollapseToIcon !== false &&
+          item.fullWidth - Math.max(ICON_ONLY_FLOOR, item.iconWidth) >= 8,
+      );
+    });
     if (nextIcon) {
-      const item = items.find((entry) => entry.id === nextIcon);
-      if (item && item.fullWidth - Math.max(ICON_ONLY_FLOOR, item.iconWidth) >= 8) {
-        iconOnly.add(nextIcon);
-        continue;
-      }
+      iconOnly.add(nextIcon);
+      continue;
     }
     const nextHide = collapseOrder.find((id) => !hidden.has(id));
     if (!nextHide) break;
@@ -87,7 +104,9 @@ export function planWorkbarOverflow(
 
   return {
     visibleIds: visible.filter((id) => !hidden.has(id)),
-    iconOnlyIds: [...iconOnly],
+    // State updates and tests consume visual order, never the internal order
+    // in which pressure happened to collapse the commands.
+    iconOnlyIds: visible.filter((id) => iconOnly.has(id)),
     overflowIds: visible.filter((id) => hidden.has(id)),
   };
 }

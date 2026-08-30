@@ -11,12 +11,14 @@ type StudioType =
   | "code"
   | "whiteboard"
   | "planner_task"
-  | "agent";
+  | "agent"
+  | "timetable";
 
 type StudioSpec = {
   type: StudioType;
   localId: string;
   description: string;
+  params?: z.ZodType;
   requires?: WorkCapability;
   embed?: readonly ArtifactEmbedInteraction[];
   exposed?: boolean;
@@ -170,6 +172,25 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   { type: "planner_task", localId: "export-ics", description: "Export this plan as calendar to-dos." },
   { type: "planner_task", localId: "export-json", description: "Export the full plan." },
 
+  { type: "timetable", localId: "today", description: "Return the calendar to today." },
+  { type: "timetable", localId: "previous", description: "Show the previous calendar range." },
+  { type: "timetable", localId: "next", description: "Show the next calendar range." },
+  {
+    type: "timetable",
+    localId: "view",
+    description: "Change the calendar view.",
+    params: z.enum(["week", "day", "month", "agenda"]),
+  },
+  { type: "timetable", localId: "calendars", description: "Choose which calendars are visible." },
+  { type: "timetable", localId: "add", description: "Add time to the calendar." },
+  {
+    type: "timetable",
+    localId: "import",
+    description: "Import an ICS or CSV calendar.",
+    requires: "edit",
+  },
+  { type: "timetable", localId: "export-ics", description: "Export the visible calendar as ICS." },
+
   { type: "agent", localId: "next", description: "Ask the next question this mission needs.", requires: "edit" },
   { type: "agent", localId: "source", description: "Add a source.", requires: "edit" },
   { type: "agent", localId: "dismissed", description: "Show dismissed suggestions." },
@@ -219,7 +240,7 @@ export const STUDIO_CAPABILITIES: readonly CapabilityDefinition[] =
     const id = stableCapabilityId(spec.type, spec.localId);
     return {
       id: id as CapabilityDefinition["id"],
-      params: none,
+      params: spec.params ?? none,
       scope: "artifact",
       availability: (ctx) => {
         if (spec.requires && !ctx.can(spec.requires)) return { state: "hidden" as const };

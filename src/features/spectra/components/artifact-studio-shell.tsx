@@ -574,7 +574,7 @@ export function StudioSplitShell({
     <aside
       ref={panelRef}
       data-studio-panel
-      className="spectra-studio-split-panel relative z-40 flex h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
+      className="spectra-studio-split-panel relative z-chrome flex h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
       style={{
         width: `${width}px`,
         flexGrow: 0,
@@ -588,7 +588,7 @@ export function StudioSplitShell({
     >
       <button
         type="button"
-        className="absolute -left-1 top-0 z-20 h-full w-2 cursor-ew-resize bg-transparent transition-colors hover:bg-[color-mix(in_oklab,var(--text-tertiary)_18%,transparent)]"
+        className="absolute -left-1 top-0 z-chrome h-full w-2 cursor-ew-resize bg-transparent transition-colors hover:bg-[color-mix(in_oklab,var(--text-tertiary)_18%,transparent)]"
         aria-label={`Resize ${ariaLabel}`}
         onPointerDown={(event) => {
           event.preventDefault();
@@ -615,7 +615,7 @@ export function StudioSplitPlaceholder({
     <aside
       data-studio-panel
       aria-hidden
-      className="spectra-studio-split-panel spectra-studio-split-placeholder relative z-40 h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
+      className="spectra-studio-split-panel spectra-studio-split-placeholder relative z-chrome h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
       style={{
         width: `${width}px`,
         flexGrow: 0,
@@ -675,7 +675,7 @@ export function StudioTabRail({
   }, []);
 
   const tabClass = (active: boolean) =>
-    `group flex h-8 min-w-[120px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-[6px] border px-2.5 text-[12px] font-medium transition ${
+    `group flex h-8 min-w-[120px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-chip border px-2.5 text-[12px] font-medium transition ${
       active
         ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
         : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -705,7 +705,7 @@ export function StudioTabRail({
             title="Go back"
             disabled={!canGoBack || !onGoBack}
             onClick={onGoBack}
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:pointer-events-none disabled:opacity-35"
+            className="flex h-8 w-8 items-center justify-center rounded-chip text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:pointer-events-none disabled:opacity-35"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -715,7 +715,7 @@ export function StudioTabRail({
             title="Go forward"
             disabled={!canGoForward || !onGoForward}
             onClick={onGoForward}
-            className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:pointer-events-none disabled:opacity-35"
+            className="flex h-8 w-8 items-center justify-center rounded-chip text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:pointer-events-none disabled:opacity-35"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -739,7 +739,7 @@ export function StudioTabRail({
                 role="button"
                 tabIndex={0}
                 aria-label={`Close ${hubTab.label}`}
-                className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 onClick={(event) => {
                   event.stopPropagation();
                   onCloseHub(hubTab.id);
@@ -789,7 +789,7 @@ export function StudioTabRail({
                 role="button"
                 tabIndex={0}
                 aria-label={`Close ${artifact.title}`}
-                className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 onClick={(event) => {
                   event.stopPropagation();
                   if (dirtyIds.has(artifact._id)) {
@@ -823,7 +823,7 @@ export function StudioTabRail({
         })}
         <button
           type="button"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-chip text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           onClick={onAddHub}
           aria-label="Open a new home view"
           title="Open a new home view"

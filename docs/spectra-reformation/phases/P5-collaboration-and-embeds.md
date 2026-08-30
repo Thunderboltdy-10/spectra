@@ -83,3 +83,17 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - Local collaboration-proxy WebSocket failures kept document body insertion local; gateway was ready and persistent embed projection still passed. Proxy/load composition remains P5.I2/P5.V1.
 - Status: IMPLEMENTED. No acceptance claimed.
 
+### P5.V1 classroom load-harness implementation log (2026-08-30)
+
+- Added a verifier-owned CLI that launches exactly 30 isolated Chromium contexts and runs one real Hocuspocus client in each against a single document.
+- The default soak is 65 minutes; configuration rejects 30-client/duration/sample/report/budget weakening, including a strict typing p95 `< 100 ms` gate.
+- Every sampled edit records local Yjs transaction time and end-to-end observation time in a designated remote browser; all 30 clients must contribute raw samples and converge to one document/state-vector hash.
+- Gateway HTTP health is sampled throughout; uptime may not reset, observation gaps are bounded, and connection deficits must recover inside 30 seconds.
+- Three default disconnect drills make an offline edit, reconnect, require remote observation, and require clean durable settlement.
+- Durability assertions cover per-client pending/ack/failure telemetry, bounded Convex update rows/bytes during the run, projected-head continuity, and a final verifier-created snapshot that Convex must verify and compact.
+- JSON evidence retains complete raw samples up to 4 MiB; overflow emits a guaranteed-bounded failure artifact instead of truncating into an apparent pass. Every assertion/config/runtime failure exits nonzero.
+- The gateway and harness now share one signed Convex bridge client, preventing the probe from becoming a second persistence protocol.
+- Focused Vitest: 2 files / 24 tests. Scoped ESLint and `tsc --noEmit`: PASS. CLI help smoke, capability gate, secret scan, and diff check: PASS.
+- No live soak, browser profile, dev stack, Bridge, Office, corpus, or evidence was used; the fresh P5.V1 verifier owns execution and verdict.
+- Status: load harness IMPLEMENTED. P5.V1 remains OPEN; no verification or acceptance claimed.
+

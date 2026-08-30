@@ -16,9 +16,9 @@ import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
 import { ProductSectionNav } from "../../components/product-section-nav";
 import { ProductPageHeader } from "../../components/product-page-header";
 import { COMMAND_TABS } from "../../commands";
-import { BridgeSettings } from "../../bridge/bridge-settings";
 import { SoulSettings } from "./soul-settings";
 import { UserSkillsSettings } from "./user-skills-settings";
+import { ConnectionsHub } from "./connections-hub";
 
 const SECTIONS = [
   { id: "ai", label: "Conversations", icon: Bot },
@@ -26,7 +26,7 @@ const SECTIONS = [
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "workbar", label: "Workbars", icon: SlidersHorizontal },
   { id: "skills", label: "AI skills", icon: BookOpenText },
-  { id: "devices", label: "Files and devices", icon: Cable },
+  { id: "connections", label: "Connections", icon: Cable },
   { id: "privacy", label: "Privacy and data", icon: LockKeyhole },
 ] as const;
 
@@ -40,6 +40,8 @@ const RETENTION_OPTIONS = [
 type SectionId = (typeof SECTIONS)[number]["id"];
 const isSection = (value: string): value is SectionId =>
   SECTIONS.some((section) => section.id === value);
+const normalizeSection = (value: string): SectionId =>
+  value === "devices" ? "connections" : isSection(value) ? value : "ai";
 
 function SettingGroup({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
@@ -249,9 +251,9 @@ function PrivacySettings() {
 }
 
 export function SettingsApplication({ initialSection = "ai" }: { initialSection?: string }) {
-  const [active, setActive] = useState<SectionId>(isSection(initialSection) ? initialSection : "ai");
+  const [active, setActive] = useState<SectionId>(normalizeSection(initialSection));
   const { preferences, hydrated, saveError, update, reset } = useSpectraPreferences();
-  useEffect(() => { if (isSection(initialSection)) setActive(initialSection); }, [initialSection]);
+  useEffect(() => { setActive(normalizeSection(initialSection)); }, [initialSection]);
   const updateSection = <K extends PreferenceSection>(section: K) => (patch: Partial<SpectraPreferences[K]>) => update(section, patch);
   const body: Record<SectionId, ReactNode> = {
     ai: <ConversationSettings p={preferences.ai} update={updateSection("ai")} />,
@@ -266,7 +268,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
         <UserSkillsSettings />
       </SettingGroup>
     ),
-    devices: <BridgeSettings />,
+    connections: <ConnectionsHub />,
     privacy: <div className="space-y-10"><SoulSettings /><PrivacySettings /></div>,
   };
   return (

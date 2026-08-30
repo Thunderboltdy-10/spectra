@@ -34,6 +34,7 @@ import type * as collaboration from "../collaboration.js";
 import type * as collaborationClaimAuthorization from "../collaborationClaimAuthorization.js";
 import type * as collaborationGatewayBridge from "../collaborationGatewayBridge.js";
 import type * as collaborationGatewayStore from "../collaborationGatewayStore.js";
+import type * as connections from "../connections.js";
 import type * as crons from "../crons.js";
 import type * as env from "../env.js";
 import type * as executionScheduler from "../executionScheduler.js";
@@ -109,6 +110,7 @@ declare const fullApi: ApiFromModules<{
   collaborationClaimAuthorization: typeof collaborationClaimAuthorization;
   collaborationGatewayBridge: typeof collaborationGatewayBridge;
   collaborationGatewayStore: typeof collaborationGatewayStore;
+  connections: typeof connections;
   crons: typeof crons;
   env: typeof env;
   executionScheduler: typeof executionScheduler;

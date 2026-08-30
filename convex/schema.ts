@@ -668,6 +668,7 @@ export default defineSchema({
   }).index("by_scope_school", ["scope", "schoolId"]),
 
   secretRecords: defineTable({
+    accountId: v.optional(v.id("accounts")),
     schoolId: v.optional(v.id("schools")),
     purpose: v.string(),
     ciphertext: v.string(),
@@ -688,7 +689,46 @@ export default defineSchema({
     revokedAt: v.optional(v.number()),
   })
     .index("by_school_purpose", ["schoolId", "purpose"])
+    .index("by_account_purpose", ["accountId", "purpose"])
     .index("by_status", ["status"]),
+
+  connections: defineTable({
+    scopeKind: v.union(v.literal("account"), v.literal("school")),
+    scopeKey: v.string(),
+    accountId: v.optional(v.id("accounts")),
+    schoolId: v.optional(v.id("schools")),
+    provider: v.string(),
+    providerAccountId: v.optional(v.string()),
+    displayLabel: v.optional(v.string()),
+    family: v.union(v.literal("file-sync"), v.literal("calendar"), v.literal("school-data")),
+    authKind: v.union(v.literal("oauth"), v.literal("token"), v.literal("file"), v.literal("device")),
+    status: v.union(
+      v.literal("connected"),
+      v.literal("expired"),
+      v.literal("rate_limited"),
+      v.literal("revoked"),
+      v.literal("error"),
+    ),
+    grantedScopes: v.array(v.string()),
+    secretPurpose: v.optional(v.string()),
+    errorCode: v.optional(v.string()),
+    statusReason: v.optional(v.string()),
+    retryAt: v.optional(v.number()),
+    expiresAt: v.optional(v.number()),
+    lastHealthAt: v.optional(v.number()),
+    connectedAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+    remoteRevocationConfirmed: v.optional(v.boolean()),
+    consecutiveFailures: v.number(),
+    createdByAccountId: v.id("accounts"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_provider", ["accountId", "provider"])
+    .index("by_school_provider", ["schoolId", "provider"])
+    .index("by_scope_provider_account", ["scopeKey", "provider", "providerAccountId"])
+    .index("by_status_retry", ["status", "retryAt"])
+    .index("by_status_expiry", ["status", "expiresAt"]),
 
   secretBridgeNonces: defineTable({
     nonce: v.string(),

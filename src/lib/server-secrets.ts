@@ -109,8 +109,18 @@ function envelopeDigest(envelope?: {
 }
 
 async function bridgeArgs(
-  operation: "read" | "use" | "status" | "write" | "revoke",
-  schoolId: string,
+  operation:
+    | "read"
+    | "use"
+    | "status"
+    | "write"
+    | "revoke"
+    | "read-account"
+    | "use-account"
+    | "status-account"
+    | "write-account"
+    | "revoke-account",
+  scopeId: string,
   purpose: string,
   envelope?: {
     ciphertext: string;
@@ -133,7 +143,7 @@ async function bridgeArgs(
   const canonical = [
     operation,
     subject,
-    schoolId,
+    scopeId,
     purpose,
     timestamp,
     nonce,
@@ -303,6 +313,173 @@ export async function revokeSchoolSecret(input: {
     schoolId: input.schoolId,
     purpose,
     operatorSessionId: input.operatorSessionId,
+    requestId: input.requestId,
+    ...bridge,
+  });
+}
+
+function accountEncryptionScope(accountId: string) {
+  return `account:${accountId}`;
+}
+
+export async function storeAccountSecret(input: {
+  accountId: string;
+  purpose: string;
+  label: string;
+  value: string;
+  requestId?: string;
+  keyVersion?: number;
+}) {
+  const purpose = input.purpose.trim().toLowerCase().slice(0, 100);
+  const value = input.value.trim();
+  if (!purpose || !value)
+    throw new Error(
+      "SECRET_VALUE_REQUIRED: Purpose and secret value are required.",
+    );
+  const envelope = encrypt(
+    value,
+    accountEncryptionScope(input.accountId),
+    purpose,
+    Math.max(1, Math.round(input.keyVersion ?? 1)),
+  );
+  const bridge = await bridgeArgs(
+    "write-account",
+    input.accountId,
+    purpose,
+    envelope,
+  );
+  return convexAction<
+    Record<string, unknown>,
+    {
+      secretId: string;
+      fingerprint: string;
+      keyVersion: number;
+      status: "active";
+    }
+  >("secretBridge:writeAccount", {
+    accountId: input.accountId,
+    purpose,
+    label: input.label.trim().slice(0, 120) || purpose,
+    requestId: input.requestId,
+    ...bridge,
+    ciphertext: envelope.ciphertext,
+    encryptionNonce: envelope.nonce,
+    authTag: envelope.authTag,
+    keyVersion: envelope.keyVersion,
+    fingerprint: envelope.fingerprint,
+  });
+}
+
+async function decodeAccountEnvelope(input: {
+  accountId: string;
+  purpose: string;
+  envelope: Envelope | null;
+}) {
+  if (!input.envelope) return null;
+  const value = decrypt(
+    input.envelope,
+    accountEncryptionScope(input.accountId),
+    input.purpose,
+  );
+  const fingerprint = createHash("sha256")
+    .update(value)
+    .digest("base64url")
+    .slice(0, 22);
+  const expected = Buffer.from(input.envelope.fingerprint);
+  const actual = Buffer.from(fingerprint);
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual))
+    throw new Error(
+      "SECRET_INTEGRITY_FAILED: The decrypted secret fingerprint does not match.",
+    );
+  return {
+    value,
+    fingerprint,
+    keyVersion: input.envelope.keyVersion,
+    label: input.envelope.label,
+  };
+}
+
+export async function loadAccountSecret(input: {
+  accountId: string;
+  purpose: string;
+}) {
+  const purpose = input.purpose.trim().toLowerCase().slice(0, 100);
+  const bridge = await bridgeArgs("read-account", input.accountId, purpose);
+  const envelope = await convexAction<Record<string, unknown>, Envelope | null>(
+    "secretBridge:readAccount",
+    {
+      accountId: input.accountId,
+      purpose,
+      ...bridge,
+    },
+  );
+  return decodeAccountEnvelope({
+    accountId: input.accountId,
+    purpose,
+    envelope,
+  });
+}
+
+export async function loadAccountSecretForConnector(input: {
+  accountId: string;
+  purpose: string;
+  serviceSubject?: string;
+}) {
+  const purpose = input.purpose.trim().toLowerCase().slice(0, 100);
+  const bridge = await bridgeArgs(
+    "use-account",
+    input.accountId,
+    purpose,
+    undefined,
+    input.serviceSubject,
+  );
+  const args = {
+    accountId: input.accountId,
+    purpose,
+    ...(input.serviceSubject ? { workerSubject: input.serviceSubject } : {}),
+    ...bridge,
+  };
+  const envelope = input.serviceSubject
+    ? await import("@/lib/convex-server").then(({ convexPublicAction }) =>
+        convexPublicAction<Record<string, unknown>, Envelope | null>(
+          "secretBridge:useForAccountConnector",
+          args,
+        ),
+      )
+    : await convexAction<Record<string, unknown>, Envelope | null>(
+        "secretBridge:useForAccountConnector",
+        args,
+      );
+  return decodeAccountEnvelope({
+    accountId: input.accountId,
+    purpose,
+    envelope,
+  });
+}
+
+export async function getAccountSecretStatus(input: {
+  accountId: string;
+  purpose: string;
+}) {
+  const purpose = input.purpose.trim().toLowerCase().slice(0, 100);
+  const bridge = await bridgeArgs("status-account", input.accountId, purpose);
+  return convexAction("secretBridge:statusAccount", {
+    accountId: input.accountId,
+    purpose,
+    ...bridge,
+  });
+}
+
+export async function revokeAccountSecret(input: {
+  accountId: string;
+  purpose: string;
+  requestId?: string;
+}) {
+  const purpose = input.purpose.trim().toLowerCase().slice(0, 100);
+  const bridge = await bridgeArgs("revoke-account", input.accountId, purpose);
+  return convexAction("secretBridge:revokeAccount", {
+    accountId: input.accountId,
+    purpose,
     requestId: input.requestId,
     ...bridge,
   });

@@ -262,6 +262,13 @@ export function persistBridgeSession(token: string) {
   window.sessionStorage.removeItem(BRIDGE_SESSION_STORAGE_KEY);
 }
 
+export function forgetBridgeSession() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(BRIDGE_SESSION_STORAGE_KEY);
+  window.sessionStorage.removeItem(BRIDGE_SESSION_STORAGE_KEY);
+  window.localStorage.removeItem(BRIDGE_STATUS_CACHE_KEY);
+}
+
 export function loadBridgeStatusCache(): BridgeStatus | null {
   if (typeof window === "undefined") return null;
   try {

@@ -31,6 +31,22 @@ describe("N3 Bridge contract", () => {
     expect(fs.readFileSync(path.join(process.cwd(), "src/features/spectra/bridge/client.ts"), "utf8")).toContain("session/resume");
   });
 
+  it("wires device revocation through a destructive confirmation and forgets the local session", () => {
+    const settings = fs.readFileSync(
+      path.join(process.cwd(), "src/features/spectra/bridge/bridge-settings.tsx"),
+      "utf8",
+    );
+    const client = fs.readFileSync(
+      path.join(process.cwd(), "src/features/spectra/bridge/client.ts"),
+      "utf8",
+    );
+    expect(settings).toContain("api.bridge.revokeDevice");
+    expect(settings).toContain("Disconnect device");
+    expect(settings).toContain("files themselves stay unchanged on this PC");
+    expect(settings).toContain("forgetBridgeSession()");
+    expect(client).toContain("export function forgetBridgeSession()");
+  });
+
   it("selects one truthful vocabulary for cloud, local, conflict and pending states", () => {
     const now = Date.now();
     expect(selectSyncTruth({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: now }], openConflictCount: 0, pendingCount: 0 }).label).toBe("Saved");

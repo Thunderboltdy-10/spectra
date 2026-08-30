@@ -88,6 +88,15 @@ const APP_SPECS: readonly AppSpec[] = [
     exposed: true,
   },
   {
+    id: "app.skill.write",
+    description:
+      "Create or revise a capped account skill with approval, safety checks, and retained versions.",
+    risk: "always-confirm",
+    availability: "editable",
+    choreography: { target: "settings-control", region: "skills" },
+    exposed: true,
+  },
+  {
     id: "app.sharing.change",
     description:
       "Change access to a work item or workspace through the shared permissions path.",

@@ -197,6 +197,8 @@ export function humanizePublicFailure(
 ): string {
   const raw = rawText(error).trim();
   const app = application.trim() || "Office";
+  const skillReason = raw.match(/USER_SKILL_INVALID:\s*(.+)/i)?.[1]?.trim();
+  if (skillReason) return skillReason;
   for (const entry of CODE_MESSAGES) {
     if (entry.test.test(raw)) return entry.message(app);
   }

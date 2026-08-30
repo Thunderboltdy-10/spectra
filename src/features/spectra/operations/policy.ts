@@ -100,6 +100,10 @@ export function evaluatePlanPolicy(
     if (!authorityRequiresConfirmation(authority.decision)) continue;
     if (command === "change_spectra_settings")
       reasons.push("Change Spectra settings");
+    else if (command === "write_skill")
+      reasons.push(
+        args.action === "update" ? "Update an AI skill" : "Create an AI skill",
+      );
     else if (command === "change_sync_policy") {
       const count = Math.max(
         0,

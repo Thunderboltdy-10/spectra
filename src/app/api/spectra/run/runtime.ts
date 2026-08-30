@@ -882,6 +882,7 @@ async function runAttempt(
           model: "spectra/focused-tools",
           provider: "Spectra",
           usage: undefined,
+          skillContextManifests: [],
         }
       : await invokeModel(
           params.surface,
@@ -1311,6 +1312,7 @@ async function runAttempt(
           requestedAgentId: params.agentId,
           disableAgentRouting: params.disableAgentRouting,
           packetVersion: 2,
+          skillContexts: modelResult.skillContextManifests,
           targetResolutions: resolved.targetResolutions.map((target) => ({
             role: target.role,
             requestedReference: target.requestedReference,

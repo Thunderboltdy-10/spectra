@@ -145,7 +145,7 @@ const forbiddenCapturePatterns = [
   /\b(?:self[- ]?harm|suicid(?:e|al))\b/i,
 ];
 
-function captureRejectionReason(proposition: string) {
+export function captureRejectionReason(proposition: string) {
   if (proposition.length < 12) return "too_short";
   if (proposition.length > 1_500) return "too_long";
   if (forbiddenCapturePatterns.some((pattern) => pattern.test(proposition)))

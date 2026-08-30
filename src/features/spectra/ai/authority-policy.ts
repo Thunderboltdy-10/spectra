@@ -11,6 +11,7 @@ export type AiTargetClass =
   | "managebac_sync"
   | "managebac_mapping"
   | "memory"
+  | "skill"
   | "credential"
   | "bridge_pair"
   | "account_security";
@@ -117,10 +118,25 @@ export function decideAiAuthority(input: AiAuthorityInput): AiAuthorityResult {
         decision: "notify",
         reason: "Memory writes proceed with attribution and revision history.",
       };
+    case "skill":
+      return {
+        decision: "confirm",
+        reason: "Creating or changing an AI skill requires explicit approval.",
+      };
     default:
       return {
         decision: "prohibited",
         reason: "This AI action has no registered authority policy.",
       };
   }
+}
+
+export function skillWriteAuthority(hasWrittenSkill: boolean): AiAuthorityResult {
+  return hasWrittenSkill
+    ? decideAiAuthority({ target: "skill" })
+    : {
+        decision: "always-confirm",
+        reason:
+          "The first AI-authored skill always requires explicit approval.",
+      };
 }

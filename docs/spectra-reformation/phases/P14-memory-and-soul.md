@@ -36,6 +36,20 @@ The AI can create durable procedures for itself — below a level, always:
 - **`public/skills/` migrate-or-delete (PROCESS §7):** the pedagogically real content (socratic-dialogue, spaced-repetition-optimizer, mermaid/diagram guidance, latex formatting) is converted to seeded system-scope skills loaded through the same lazy path; everything else — including `online/manifest.json` and its unwired trigger scheme — is deleted. No dormant parallel library survives this unit.
 - Owns: `convex/userSkills.ts` (new), tool registrations, `loop/plan.ts` skill-injection seam, `public/skills/` disposition, Settings skills list.
 
+### P14.I2 implementation log — 2026-08-31
+
+- TRIAGE · SYSTEMIC: durable procedures existed only as an unwired public file tree; replaced it with one account-scoped, versioned `userSkills` path and deleted the parallel library.
+- Enforced 40 active skills, 4,000 body characters, bounded names/purposes/triggers, retained superseded/deleted versions, and account ownership at the Convex boundary.
+- Reused the memory capture rails so secrets, credentials, and sensitive personal data are refused with the shared plain-language reason.
+- Added `list_skills`, `read_skill`, and confirmed `write_skill`; the first write is always-confirm and later writes remain confirm-only through the durable app-command authority path.
+- Added a 1,200-character metadata view and trigger-only body activation capped at two skills / 4,800 characters; bodies remain available explicitly through `read_skill`.
+- Migrated Socratic dialogue, spaced repetition, diagram guidance, and LaTeX formatting into lazy system skills; removed the entire dormant `public/skills/` tree.
+- Added Settings loading, empty, error/retry, lazy inspection, and confirmed deletion states using incumbent Spectra components and tokens.
+- Persisted bounded per-model skill context manifests in the existing run snapshot; unrelated runs record zero skill-body characters and zero estimated skill-body tokens without enlarging the context packet.
+- Evidence: focused P14 Vitest 4 files / 11 tests plus full run-route 32/32; TypeScript, capability IR, scoped lint, diff, formatting, and secret gates pass.
+- No live Convex, server, browser, Bridge, Office, secrets, soul injection, or P14.I3 capture/retrieval path was used or changed.
+- Status: IMPLEMENTED; independent P14.V1 verification and Pablo acceptance remain required. No acceptance claimed.
+
 ## P14.I3 — Model-initiated capture + retrieval tiers (MT)
 
 - Turn on the dormant `createdBy: "model"` path: during report/maintenance the model may propose memory claims (recurring workflows, corrections it observed, mistake-avoidance) — written through the same rails, marked model-authored in the audit, surfaced in the Settings memory view with one-tap forget. Silent-maintenance discipline holds: never a user-facing progress event (the existing validator already rejects memory titles).

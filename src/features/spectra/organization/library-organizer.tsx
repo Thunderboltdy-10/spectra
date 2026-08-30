@@ -48,11 +48,11 @@ import {
 import {
   useTreeActions,
   useTreeChildren,
-  useTreeErrorReporter,
   useTreePath,
   useTreeQuickView,
   useTreeSearch,
   useTreeTrash,
+  treeFailureMessage,
   type TreeNode,
 } from "./tree-client";
 import {
@@ -164,6 +164,8 @@ export type LibraryOrganizerProps = {
   busy?: boolean;
   /** Open a container the reader clicked on the board. */
   onOpenContainer?: (target: { nodeId: string; workspaceId?: string }) => void;
+  /** A fresh account gets teaching copy instead of a generic empty folder. */
+  firstRun?: boolean;
 };
 
 type MenuState = {
@@ -172,7 +174,6 @@ type MenuState = {
   /** Empty means the reader right-clicked the surface itself. */
   nodeIds: string[];
 };
-
 
 function ReplicaPresentationLoader({
   onRows,
@@ -230,6 +231,7 @@ export function LibraryOrganizer({
   selectedObjectKeys,
   busy: hostBusy = false,
   onOpenContainer,
+  firstRun = false,
 }: LibraryOrganizerProps) {
   const now = useNow(60_000);
   const productOnline = useProductOnline();
@@ -270,8 +272,6 @@ export function LibraryOrganizer({
   const actions = useTreeActions();
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
-  const reportError = useTreeErrorReporter((message) => toast.error(message));
-
   /* The scope is the floor. Everything that talks about "the top" — the rail's
      root button, the first breadcrumb, where a new folder lands — means this
      node when there is one, and the account root when there is not. */
@@ -341,7 +341,8 @@ export function LibraryOrganizer({
       : location.kind === "trash"
         ? trash
         : children.nodes;
-  const loading = source === null || (inFolder && !searching && children.isLoading);
+  const loading =
+    source === null || (inFolder && !searching && children.isLoading);
 
   const rows = useMemo(() => {
     const base = filterRows(source ?? [], filter);
@@ -352,7 +353,8 @@ export function LibraryOrganizer({
   const nodesById = useMemo(() => {
     const map = seenRef.current;
     for (const node of rows) map.set(node.nodeId, node);
-    for (const ancestor of path?.ancestors ?? []) map.set(ancestor.nodeId, ancestor);
+    for (const ancestor of path?.ancestors ?? [])
+      map.set(ancestor.nodeId, ancestor);
     if (path?.node) map.set(path.node.nodeId, path.node);
     return map;
   }, [rows, path]);
@@ -411,7 +413,10 @@ export function LibraryOrganizer({
      agree about where the reader is. */
   useEffect(() => {
     if (!path) return;
-    const ids = [...path.ancestors.map((node) => node.nodeId), path.node.nodeId];
+    const ids = [
+      ...path.ancestors.map((node) => node.nodeId),
+      path.node.nodeId,
+    ];
     setExpanded((current) => {
       if (ids.every((id) => current.has(id))) return current;
       return new Set([...current, ...ids]);
@@ -447,47 +452,69 @@ export function LibraryOrganizer({
     [onLocationChange],
   );
 
-  const run = useCallback(
-    async (label: string, operation: () => Promise<unknown>) => {
+  const run = useCallback(async function execute(
+    label: string,
+    operation: () => Promise<unknown>,
+  ) {
       setBusy(true);
       try {
         await operation();
       } catch (error) {
-        reportError(error, label);
+      toast.error(treeFailureMessage(error, label), {
+        action: {
+          label: "Retry",
+          onClick: () => void execute(label, operation),
+        },
+      });
       } finally {
         setBusy(false);
       }
-    },
-    [reportError],
-  );
+  }, []);
 
   /* Application commands and visible Library gestures share these exact tree
      mutations. The handler is semantic and awaitable; choreography may point
      at this surface, but it never performs the write itself. */
   useEffect(() => {
-    const removeOrganize = spectraBus.handle("library.organize", async (input) => {
+    const removeOrganize = spectraBus.handle(
+      "library.organize",
+      async (input) => {
       if (input.action === "create_folder") {
-        if (!input.name?.trim()) throw new Error("LIBRARY_FOLDER_NAME_REQUIRED");
-        await actionsRef.current.createFolder(input.name.trim(), input.destinationId ?? currentParentRef.current);
+          if (!input.name?.trim())
+            throw new Error("LIBRARY_FOLDER_NAME_REQUIRED");
+          await actionsRef.current.createFolder(
+            input.name.trim(),
+            input.destinationId ?? currentParentRef.current,
+          );
         return;
       }
-      if (input.targetIds.length === 0) throw new Error("LIBRARY_TARGETS_REQUIRED");
+        if (input.targetIds.length === 0)
+          throw new Error("LIBRARY_TARGETS_REQUIRED");
       if (input.action === "rename") {
-        if (input.targetIds.length !== 1 || !input.name?.trim()) throw new Error("LIBRARY_RENAME_PARAMS_REQUIRED");
-        await actionsRef.current.rename(input.targetIds[0]!, input.name.trim());
+          if (input.targetIds.length !== 1 || !input.name?.trim())
+            throw new Error("LIBRARY_RENAME_PARAMS_REQUIRED");
+          await actionsRef.current.rename(
+            input.targetIds[0]!,
+            input.name.trim(),
+          );
         return;
       }
-      if (!input.destinationId) throw new Error("LIBRARY_DESTINATION_REQUIRED");
+        if (!input.destinationId)
+          throw new Error("LIBRARY_DESTINATION_REQUIRED");
       if (input.action === "move") {
         await actionsRef.current.move(input.targetIds, input.destinationId);
         return;
       }
-      for (const nodeId of input.targetIds) await actionsRef.current.createReference(nodeId, input.destinationId);
-    });
-    const removeDelete = spectraBus.handle("library.delete", async ({ targetIds }) => {
+        for (const nodeId of input.targetIds)
+          await actionsRef.current.createReference(nodeId, input.destinationId);
+      },
+    );
+    const removeDelete = spectraBus.handle(
+      "library.delete",
+      async ({ targetIds }) => {
       if (!targetIds.length) throw new Error("LIBRARY_TARGETS_REQUIRED");
       await actionsRef.current.trash(targetIds);
-    });
+      },
+    );
     return () => {
       removeOrganize();
       removeDelete();
@@ -635,7 +662,10 @@ export function LibraryOrganizer({
     const element = scrollRef.current;
     if (!element) return;
     const top = index * ROW_HEIGHT;
-    if (top < element.scrollTop || top + ROW_HEIGHT > element.scrollTop + element.clientHeight)
+    if (
+      top < element.scrollTop ||
+      top + ROW_HEIGHT > element.scrollTop + element.clientHeight
+    )
       element.scrollTop = Math.max(0, top - element.clientHeight / 2);
   }, [renamingId, rows]);
 
@@ -690,8 +720,7 @@ export function LibraryOrganizer({
       } else if (action.type === "clear") {
         setSelection(EMPTY_SELECTION);
         publishWorkSelection(EMPTY_SELECTION);
-      }
-      else if (action.type === "rename") setRenamingId(action.nodeId);
+      } else if (action.type === "rename") setRenamingId(action.nodeId);
       else if (action.type === "trash") trashNodes(action.nodeIds);
       else if (action.type === "leave") {
         if (!inFolder || currentParentId === null) return;
@@ -727,8 +756,7 @@ export function LibraryOrganizer({
         const ids = selection.ids.has(node.nodeId)
           ? [...selection.ids]
           : [node.nodeId];
-        const label =
-          ids.length === 1 ? node.name : `${ids.length} items`;
+        const label = ids.length === 1 ? node.name : `${ids.length} items`;
         beginDrag(event, ids, label);
       },
       onClick: (event, node) => {
@@ -741,7 +769,12 @@ export function LibraryOrganizer({
           return;
         }
         setSelection((current) => {
-          const next = selectRow(current, rows, node.nodeId, clickIntent(event));
+          const next = selectRow(
+            current,
+            rows,
+            node.nodeId,
+            clickIntent(event),
+          );
           if (selectionMode) publishWorkSelection(next);
           return next;
         });
@@ -766,7 +799,9 @@ export function LibraryOrganizer({
         setMenu({ x: event.clientX, y: event.clientY, nodeIds: ids });
       },
       onMenuButton: (event, node) => {
-        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        const rect = (
+          event.currentTarget as HTMLElement
+        ).getBoundingClientRect();
         setSelection((current) =>
           current.ids.has(node.nodeId)
             ? current
@@ -775,7 +810,9 @@ export function LibraryOrganizer({
         setMenu({
           x: rect.left,
           y: rect.bottom,
-          nodeIds: selection.ids.has(node.nodeId) ? [...selection.ids] : [node.nodeId],
+          nodeIds: selection.ids.has(node.nodeId)
+            ? [...selection.ids]
+            : [node.nodeId],
         });
       },
       onTogglePin: (node) => {
@@ -786,11 +823,25 @@ export function LibraryOrganizer({
       onCommitRename: (node, name) => {
         setRenamingId(null);
         if (!name || name === node.name) return;
-        void run("The name did not change.", () => actions.rename(node.nodeId, name));
+        void run("The name did not change.", () =>
+          actions.rename(node.nodeId, name),
+        );
       },
       onCancelRename: () => setRenamingId(null),
     }),
-    [actions, beginDrag, consumeSuppressedClick, onToggleContext, openNode, publishWorkSelection, renamingId, rows, run, selection.ids, selectionMode],
+    [
+      actions,
+      beginDrag,
+      consumeSuppressedClick,
+      onToggleContext,
+      openNode,
+      publishWorkSelection,
+      renamingId,
+      rows,
+      run,
+      selection.ids,
+      selectionMode,
+    ],
   );
 
   const range = windowRange(scrollTop, viewportHeight, ROW_HEIGHT, rows.length);
@@ -839,117 +890,128 @@ export function LibraryOrganizer({
         }}
       />
 
-      <header className="flex shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-[var(--border-subtle)] px-4 py-2.5">
-        {/* The rail toggle sits with the location it uncovers, and the view
-            switch with the rows it reshapes — both views, one row of chrome. */}
-        {showRail ? (
-          <SurfaceRailToggle
-            collapsed={railCollapsed}
-            onToggle={() => setRailCollapsed((current) => !current)}
-          />
-        ) : null}
-        {onViewChange ? (
-          <SurfaceViewSwitch
-            view={view}
-            onChange={onViewChange}
-            views={VIEW_OPTIONS}
-          />
-        ) : null}
-        {toolbarLead}
-        <nav
-          aria-label="Location"
-          className="flex min-w-max flex-1 items-center gap-0.5 overflow-x-auto text-[13px]"
-        >
-          {searching ? (
-            <span className="truncate text-[var(--text-secondary)]">
-              Results for{" "}
-              <span className="font-medium text-[var(--text-primary)]">
-                {term.trim()}
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] px-4 py-2.5">
+        {/* The toolbar has two semantic groups. They share one row at full
+            width and wrap as groups beside a split artifact, so controls never
+            compete in one clipped, horizontally scrolling strip. */}
+        <div className="flex min-w-0 flex-1 basis-[300px] items-center gap-2">
+          {showRail ? (
+            <SurfaceRailToggle
+              collapsed={railCollapsed}
+              onToggle={() => setRailCollapsed((current) => !current)}
+            />
+          ) : null}
+          {onViewChange ? (
+            <SurfaceViewSwitch
+              view={view}
+              onChange={onViewChange}
+              views={VIEW_OPTIONS}
+            />
+          ) : null}
+          {toolbarLead}
+          <nav
+            aria-label="Location"
+            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-[13px]"
+          >
+            {searching ? (
+              <span className="truncate text-[var(--text-secondary)]">
+                Results for{" "}
+                <span className="font-medium text-[var(--text-primary)]">
+                  {term.trim()}
+                </span>
               </span>
-            </span>
-          ) : location.kind === "quick" ? (
-            <span className="font-medium capitalize text-[var(--text-primary)]">
-              {location.view}
-            </span>
-          ) : location.kind === "trash" ? (
-            <span className="font-medium text-[var(--text-primary)]">Trash</span>
-          ) : showBreadcrumbs ? (
-            <>
-              {/* The floor is named twice already — by the rail's root row and by
-                  the surface's own header — so it only becomes a crumb once the
-                  reader is standing below it and needs the way back. Without a
-                  rail there is nothing else naming it, so it stays. */}
-              {crumbs.length > 0 || !showRail ? (
-                <Crumb
-                  label={floorLabel}
-                  nodeId={floorId}
-                  icon
-                  active={crumbs.length === 0}
-                  dropping={
-                    drag?.target?.type === "into" &&
-                    drag.target.parentId === floorId
-                  }
-                  onNavigate={navigate}
-                />
-              ) : null}
-              {crumbs.map((node, index) => (
-                <div key={node.nodeId} className="flex items-center">
-                  <ChevronRight
-                    aria-hidden
-                    className="size-3.5 shrink-0 text-[var(--text-tertiary)]"
-                  />
+            ) : location.kind === "quick" ? (
+              <span className="font-medium capitalize text-[var(--text-primary)]">
+                {location.view}
+              </span>
+            ) : location.kind === "trash" ? (
+              <span className="font-medium text-[var(--text-primary)]">
+                Trash
+              </span>
+            ) : showBreadcrumbs ? (
+              <>
+                {/* The floor is named twice already — by the rail's root row and by
+                    the surface's own header — so it only becomes a crumb once the
+                    reader is standing below it and needs the way back. Without a
+                    rail there is nothing else naming it, so it stays. */}
+                {crumbs.length > 0 || !showRail ? (
                   <Crumb
-                    label={node.name}
-                    nodeId={node.nodeId}
-                    active={index === crumbs.length - 1}
+                    label={floorLabel}
+                    nodeId={floorId}
+                    icon
+                    active={crumbs.length === 0}
                     dropping={
                       drag?.target?.type === "into" &&
-                      drag.target.parentId === node.nodeId
+                      drag.target.parentId === floorId
                     }
                     onNavigate={navigate}
                   />
-                </div>
-              ))}
-            </>
-          ) : null}
-        </nav>
+                ) : null}
+                {crumbs.map((node, index) => (
+                  <div key={node.nodeId} className="flex items-center">
+                    <ChevronRight
+                      aria-hidden
+                      className="size-3.5 shrink-0 text-[var(--text-tertiary)]"
+                    />
+                    <Crumb
+                      label={node.name}
+                      nodeId={node.nodeId}
+                      active={index === crumbs.length - 1}
+                      dropping={
+                        drag?.target?.type === "into" &&
+                        drag.target.parentId === node.nodeId
+                      }
+                      onNavigate={navigate}
+                    />
+                  </div>
+                ))}
+              </>
+            ) : null}
+          </nav>
+        </div>
 
-        {/* One search, one filter, one create menu, for both views. */}
-        <SurfaceSearch
-          value={term}
-          onChange={setTerm}
-          scopeLabel={floorLabel}
-          className="min-w-9 w-[min(240px,28vw)] shrink"
-        />
+        <div className="flex min-w-0 flex-1 basis-[430px] flex-wrap items-center justify-end gap-2">
+          {/* One search, one filter, one create menu, for both views. */}
+          <SurfaceSearch
+            value={term}
+            onChange={setTerm}
+            scopeLabel={floorLabel}
+            className="min-w-[140px] flex-1 basis-[180px]"
+          />
 
-        <SurfaceTypeFilter filter={filter} onChange={setFilter} />
-        {/* A board's order *is* its grouping, so the two controls swap rather
-            than stacking: offering both would be two answers to one question. */}
-        {board && !searching ? (
-          <SurfaceGroupBy
-            value={boardGroupBy}
-            onChange={(next) => onBoardGroupByChange?.(next)}
+          <SurfaceTypeFilter filter={filter} onChange={setFilter} />
+          {/* A board's order *is* its grouping, so the two controls swap rather
+              than stacking: offering both would be two answers to one question. */}
+          {board && !searching ? (
+            <SurfaceGroupBy
+              value={boardGroupBy}
+              onChange={(next) => onBoardGroupByChange?.(next)}
+            />
+          ) : (
+            <SurfaceSortMenu
+              sortKey={sortKey}
+              direction={sortDirection}
+              onKeyChange={setSortKey}
+              onDirectionChange={setSortDirection}
+              settling={settling}
+            />
+          )}
+          <SurfaceNewMenu
+            disabled={!inFolder || busy}
+            importing={importing}
+            onNewFolder={createFolderHere}
+            onNewWorkspace={
+              onNewWorkspace
+                ? () => onNewWorkspace(currentParentId)
+                : undefined
+            }
+            onNewWork={createWorkHere}
+            onImport={
+              onImportFile ? () => importRef.current?.click() : undefined
+            }
           />
-        ) : (
-          <SurfaceSortMenu
-            sortKey={sortKey}
-            direction={sortDirection}
-            onKeyChange={setSortKey}
-            onDirectionChange={setSortDirection}
-            settling={settling}
-          />
-        )}
-        <SurfaceNewMenu
-          disabled={!inFolder || busy}
-          importing={importing}
-          onNewFolder={createFolderHere}
-          onNewWorkspace={
-            onNewWorkspace ? () => onNewWorkspace(currentParentId) : undefined
-          }
-          onNewWork={createWorkHere}
-          onImport={onImportFile ? () => importRef.current?.click() : undefined}
-        />
-        {toolbarTrail}
+          {toolbarTrail}
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -969,10 +1031,15 @@ export function LibraryOrganizer({
                   else next.add(nodeId);
                   return next;
                 }),
-              onBeginDrag: (event, node) => beginDrag(event, [node.nodeId], node.name),
+              onBeginDrag: (event, node) =>
+                beginDrag(event, [node.nodeId], node.name),
               onContextMenu: (event, node) => {
                 event.preventDefault();
-                setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
+                setMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  nodeIds: [node.nodeId],
+                });
               },
               onNodesSeen: noteNodes,
             }}
@@ -1027,6 +1094,9 @@ export function LibraryOrganizer({
                   ids.length === 1 ? node.name : `${ids.length} items`;
                 beginDrag(event, ids, label);
               }}
+              onMove={(nodeId, parentNodeId) =>
+                moveNodes([nodeId], parentNodeId)
+              }
               onCreate={({ blueprintKey, parentNodeId }) =>
                 void createWorkAt(blueprintKey, parentNodeId)
               }
@@ -1040,22 +1110,48 @@ export function LibraryOrganizer({
               label="Name"
               className="min-w-0 flex-1"
               sorted={sortKey === "name" ? sortDirection : null}
-              onClick={() => cycleSort("name", sortKey, sortDirection, setSortKey, setSortDirection)}
+                onClick={() =>
+                  cycleSort(
+                    "name",
+                    sortKey,
+                    sortDirection,
+                    setSortKey,
+                    setSortDirection,
+                  )
+                }
             />
             {flat ? (
-              <span className="hidden w-[190px] shrink-0 @3xl/rows:block">Location</span>
+                <span className="hidden w-[190px] shrink-0 @3xl/rows:block">
+                  Location
+                </span>
             ) : null}
             <ColumnLabel
               label="Type"
               className="hidden w-[104px] shrink-0 @xl/rows:block"
               sorted={sortKey === "type" ? sortDirection : null}
-              onClick={() => cycleSort("type", sortKey, sortDirection, setSortKey, setSortDirection)}
+                onClick={() =>
+                  cycleSort(
+                    "type",
+                    sortKey,
+                    sortDirection,
+                    setSortKey,
+                    setSortDirection,
+                  )
+                }
             />
             <ColumnLabel
               label="Updated"
               className="hidden w-[76px] shrink-0 justify-end text-right @lg/rows:flex"
               sorted={sortKey === "updated" ? sortDirection : null}
-              onClick={() => cycleSort("updated", sortKey, sortDirection, setSortKey, setSortDirection)}
+                onClick={() =>
+                  cycleSort(
+                    "updated",
+                    sortKey,
+                    sortDirection,
+                    setSortKey,
+                    setSortDirection,
+                  )
+                }
             />
             <span className="w-[52px] shrink-0" />
           </div>
@@ -1070,7 +1166,8 @@ export function LibraryOrganizer({
             onScroll={onScroll}
             onKeyDown={onKeyDown}
             onClick={(event) => {
-              if (event.target === event.currentTarget) setSelection(EMPTY_SELECTION);
+                if (event.target === event.currentTarget)
+                  setSelection(EMPTY_SELECTION);
             }}
             onContextMenu={(event) => {
               if (!(event.target as HTMLElement).closest("[data-node-row]")) {
@@ -1096,6 +1193,12 @@ export function LibraryOrganizer({
                 location={location}
                 searching={searching}
                 term={term}
+                  scopeLabel={floorLabel}
+                  firstRun={
+                    firstRun &&
+                    location.kind === "folder" &&
+                    location.nodeId === floorId
+                  }
                 filtered={filter !== "all"}
                 onNewFolder={createFolderHere}
                 onClearFilter={() => setFilter("all")}
@@ -1121,7 +1224,9 @@ export function LibraryOrganizer({
                         : null
                     }
                     inContext={
-                      node.sourceId ? (contextIds?.has(node.sourceId) ?? false) : false
+                        node.sourceId
+                          ? (contextIds?.has(node.sourceId) ?? false)
+                          : false
                     }
                     showLocation={flat}
                     picking={selectionMode}
@@ -1184,7 +1289,8 @@ export function LibraryOrganizer({
           onTogglePin={(nodes) => {
             const pin = !nodes.every((node) => node.pinned);
             void run("The pin did not change.", async () => {
-              for (const node of nodes) await actions.setPinned(node.nodeId, pin);
+              for (const node of nodes)
+                await actions.setPinned(node.nodeId, pin);
             });
           }}
           onTrash={trashNodes}
@@ -1192,7 +1298,9 @@ export function LibraryOrganizer({
             void run("Those items stayed in the Trash.", async () => {
               await actions.restore(nodeIds);
               toast.success(
-                nodeIds.length === 1 ? "Restored." : `Restored ${nodeIds.length} items.`,
+                nodeIds.length === 1
+                  ? "Restored."
+                  : `Restored ${nodeIds.length} items.`,
               );
             })
           }
@@ -1369,7 +1477,12 @@ function NodeMenu({
           }}
         />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="bottom" sideOffset={2} className="w-[224px]">
+      <DropdownMenuContent
+        align="start"
+        side="bottom"
+        sideOffset={2}
+        className="w-[224px]"
+      >
         {nodes.length === 0 ? (
           <>
             <DropdownMenuItem onSelect={onNewFolder}>
@@ -1379,14 +1492,19 @@ function NodeMenu({
             <DropdownMenuSeparator />
             <DropdownMenuLabel>New work here</DropdownMenuLabel>
             {blueprintChoices.slice(0, 6).map((choice) => (
-              <DropdownMenuItem key={choice.key} onSelect={() => onNewWork(choice.key)}>
+              <DropdownMenuItem
+                key={choice.key}
+                onSelect={() => onNewWork(choice.key)}
+              >
                 <choice.icon className="size-3.5 text-[var(--text-tertiary)]" />
                 {choice.label}
               </DropdownMenuItem>
             ))}
           </>
         ) : inTrash ? (
-          <DropdownMenuItem onSelect={() => onRestore(nodes.map((node) => node.nodeId))}>
+          <DropdownMenuItem
+            onSelect={() => onRestore(nodes.map((node) => node.nodeId))}
+          >
             <RotateCcw className="size-3.5 text-[var(--text-tertiary)]" />
             {count === 1 ? "Restore" : `Restore ${count} items`}
           </DropdownMenuItem>
@@ -1419,7 +1537,9 @@ function NodeMenu({
             ) : null}
             <DropdownMenuItem onSelect={() => onTogglePin(nodes)}>
               <Star className="size-3.5 text-[var(--text-tertiary)]" />
-              {nodes.every((node) => node.pinned) ? "Remove from Favorites" : "Add to Favorites"}
+              {nodes.every((node) => node.pinned)
+                ? "Remove from Favorites"
+                : "Add to Favorites"}
             </DropdownMenuItem>
             {work && canContext && work.sourceId ? (
               <DropdownMenuItem
@@ -1432,7 +1552,9 @@ function NodeMenu({
               </DropdownMenuItem>
             ) : null}
             {work && canShare && work.source?.owned && work.sourceId ? (
-              <DropdownMenuItem onSelect={() => onShare?.(work.sourceId as string)}>
+              <DropdownMenuItem
+                onSelect={() => onShare?.(work.sourceId as string)}
+              >
                 <Share2 className="size-3.5 text-[var(--text-tertiary)]" />
                 Share…
               </DropdownMenuItem>
@@ -1509,6 +1631,8 @@ function EmptyState({
   location,
   searching,
   term,
+  scopeLabel,
+  firstRun,
   filtered,
   onNewFolder,
   onClearFilter,
@@ -1516,6 +1640,8 @@ function EmptyState({
   location: OrganizerLocation;
   searching: boolean;
   term: string;
+  scopeLabel: string;
+  firstRun: boolean;
   filtered: boolean;
   onNewFolder: () => void;
   onClearFilter: () => void;
@@ -1523,7 +1649,7 @@ function EmptyState({
   const copy = searching
     ? {
         title: `Nothing matches “${term.trim()}”`,
-        body: "Search looks at names across every folder and workspace.",
+        body: `Search looks at names inside ${scopeLabel}.`,
       }
     : filtered
       ? {
@@ -1532,6 +1658,11 @@ function EmptyState({
         }
       : location.kind === "trash"
         ? { title: "The Trash is empty", body: "Nothing has been thrown away." }
+        : firstRun
+          ? {
+              title: "Start with one piece of work",
+              body: "Use New above to create a document, quiz, study deck, or another kind of work. Add folders when you want more structure.",
+            }
         : location.kind === "quick"
           ? {
               recent: {

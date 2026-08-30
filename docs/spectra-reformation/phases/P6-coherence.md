@@ -19,6 +19,20 @@ Grouped by the audit's root-cause classes, closed class-wide (R12 discipline):
 
 **Owns P0.V2 SYSTEMIC** Library Share silent no-op (divergent Library `Share…` vs studio `Share work`). Do not delay P1 for it; no P1 brief claims it.
 
+### P6.I1 implementation log - 2026-08-30
+
+- TRIAGE · SYSTEMIC: Library/List/Board chrome collided in split desktop widths; toolbar groups now wrap and shrink intentionally.
+- Shortcut help and registration share truthful commands; settings, chat, invitation review, and Bridge recovery use client navigation.
+- Library mutations offer Retry, search is scope-aware, Share reaches the studio dialog, and workspace deletion is named delete.
+- Live Dock keeps cross-workspace runs with badges; inspectors use a focus-trapped Sheet below `xl` and an inline rail at `xl`.
+- Board columns are drop targets and cards expose a keyboard Move menu; obsolete footer promises are gone.
+- Fresh empty accounts enter List guidance; overview/workspace loading has shaped skeletons and in-place retryable failure.
+- Shell URLs now push workspace/work history, replay browser Back, canonicalize direct work links, and strip closed/invalid work state.
+- Focused Vitest: 3 files / 29 tests. Scoped ESLint: 0 errors. Secret scan and diff checks passed.
+- `tsc --noEmit` retains only recorded cross-unit blockers; `check:copy` is blocked by its stale `artifacts-shell.tsx` path.
+- BOUNDARY · SYSTEMIC: mixed folder/thread Trash purge has no canonical mutation; only work/workspace permanent deletion exists. No unsafe purge was invented.
+- Status: IMPLEMENTED with the trash-contract boundary escalated. No acceptance claimed.
+
 ## P6.I2 — Design-system adoption sweep (MT)
 
 ESLint rules escalate warn→error directory-by-directory as codemods land; top-offender files first (artifact-studio 425 escapes, managebac 360, conversation-surface 296); radius/type/z values onto tokens; brand violet unified; dark-mode hardcoded-light patches fixed at cause; `spectra-app.css` burn-down (remediation selectors deleted with their causes; !important count tracked as a ratchet in the owning unit). A11y: icon-button names (439 missing), contrast fixes (tertiary/placeholder), focus-visible verified product-wide. Component consolidation: dialogs (done P0/P6 remainder), tooltips→1, skeletons→1, spinners→1, empty states→1 voice.

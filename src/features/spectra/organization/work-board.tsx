@@ -1,8 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type MouseEvent, type PointerEvent } from "react";
-import { FolderOpen, Layers, Loader2 } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
+import { FolderInput, FolderOpen, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ArtifactCard, workTypeMeta } from "../components/artifact-card";
 import type { ArtifactCardView } from "../components/artifact-card";
 import {
@@ -141,6 +153,7 @@ export function WorkBoard({
   onCreate,
   onContextMenu,
   onBeginDrag,
+  onMove,
 }: {
   /** The folder or workspace the board covers; null is the whole account. */
   scopeNodeId: string | null;
@@ -163,6 +176,7 @@ export function WorkBoard({
   }) => void;
   onContextMenu?: (event: MouseEvent, node: TreeNode) => void;
   onBeginDrag?: (event: PointerEvent, node: TreeNode) => void;
+  onMove?: (nodeId: string, parentNodeId: string | null) => void;
 }) {
   const board = useBoardColumns(scopeNodeId, groupBy, typeFilter);
   const placementBoard = useBoardColumns(
@@ -189,7 +203,10 @@ export function WorkBoard({
   if (board.columns.length === 0)
     return (
       <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 rounded-[10px] border border-dashed border-[var(--border-default)] text-center">
-        <Layers className="size-5 text-[var(--text-tertiary)]" strokeWidth={1.6} />
+        <Layers
+          className="size-5 text-[var(--text-tertiary)]"
+          strokeWidth={1.6}
+        />
         <p className="text-[13px] font-medium text-[var(--text-primary)]">
           Nothing to lay out yet
         </p>
@@ -232,6 +249,7 @@ export function WorkBoard({
             onCreate={onCreate}
             onContextMenu={onContextMenu}
             onBeginDrag={onBeginDrag}
+            onMove={onMove}
             placementColumns={placementBoard.columns}
           />
         ))}
@@ -257,6 +275,7 @@ function BoardColumnView({
   onCreate,
   onContextMenu,
   onBeginDrag,
+  onMove,
   placementColumns,
 }: {
   column: BoardColumn;
@@ -278,6 +297,7 @@ function BoardColumnView({
   }) => void;
   onContextMenu?: (event: MouseEvent, node: TreeNode) => void;
   onBeginDrag?: (event: PointerEvent, node: TreeNode) => void;
+  onMove?: (nodeId: string, parentNodeId: string | null) => void;
   placementColumns: BoardColumn[];
 }) {
   const page = useBoardColumnCards(
@@ -314,6 +334,14 @@ function BoardColumnView({
   return (
     <section
       data-board-column={column.key}
+      data-drop-node={
+        column.fixes.parentNodeId === undefined
+          ? undefined
+          : (column.fixes.parentNodeId ?? "root")
+      }
+      data-drop-kind={
+        column.fixes.parentNodeId === undefined ? undefined : "container"
+      }
       className="flex min-h-0 flex-col overflow-hidden rounded-[10px] border p-2.5"
       style={{
         borderColor: `color-mix(in oklab, ${color} 26%, var(--border-default))`,
@@ -432,6 +460,15 @@ function BoardColumnView({
               onBeginDrag={
                 onBeginDrag ? (event) => onBeginDrag(event, card) : undefined
               }
+              actions={
+                onMove && placementColumns.length > 0 ? (
+                  <BoardMoveMenu
+                    node={card}
+                    columns={placementColumns}
+                    onMove={onMove}
+                  />
+                ) : undefined
+              }
             />
           ),
         )}
@@ -453,6 +490,52 @@ function BoardColumnView({
         />
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Pointer drag and keyboard movement resolve to the same tree mutation. The
+ * menu is always reachable from a focused card's actions button, so moving work
+ * between board columns never depends on a mouse gesture.
+ */
+function BoardMoveMenu({
+  node,
+  columns,
+  onMove,
+}: {
+  node: TreeNode;
+  columns: BoardColumn[];
+  onMove: (nodeId: string, parentNodeId: string | null) => void;
+}) {
+  const destinations = columns.filter(
+    (column) =>
+      column.fixes.parentNodeId !== undefined &&
+      column.fixes.parentNodeId !== node.parentId,
+  );
+  if (destinations.length === 0) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Move ${node.name}`}
+        title="Move"
+        className="grid size-7 place-items-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+      >
+        <FolderInput className="size-3.5" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-[220px]">
+        {destinations.map((column) => (
+          <DropdownMenuItem
+            key={column.key}
+            onSelect={() =>
+              onMove(node.nodeId, column.fixes.parentNodeId ?? null)
+            }
+          >
+            <FolderOpen className="size-3.5 text-[var(--text-tertiary)]" />
+            {columnLabel(column)}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -486,9 +569,7 @@ function ColumnCreate({
      is pointing — which is exactly what `parentNodeId: undefined` means to the
      server: file it in this scope, or in General at the root (D31). */
   const parentNodeId =
-    column.fixes.parentNodeId === undefined
-      ? null
-      : column.fixes.parentNodeId;
+    column.fixes.parentNodeId === undefined ? null : column.fixes.parentNodeId;
 
   /* Threads and nested workspaces are not made from a board column: a thread
      begins as a conversation and a workspace is a place, not a piece of work. */
@@ -571,7 +652,11 @@ function PlaceCard({
         className="flex size-7 shrink-0 items-center justify-center rounded-[6px]"
         style={{ backgroundColor: identity.soft }}
       >
-        <Icon className="size-4" style={{ color: identity.color }} strokeWidth={1.8} />
+        <Icon
+          className="size-4"
+          style={{ color: identity.color }}
+          strokeWidth={1.8}
+        />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">

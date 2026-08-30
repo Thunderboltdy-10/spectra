@@ -25,6 +25,7 @@ import { SHEETS_CAPABILITY_DEFERRALS } from "../commands/office/sheets-commands"
 import { COMMAND_TABS, commandForBinding } from "../commands/registry";
 import type { CommandContext } from "../commands/types";
 import { requireArtifactTypeManifest } from "../artifacts/registry";
+import { SHEETS_NATIVE_REASONS } from "../capabilities";
 
 /**
  * The Sheets command surface, audited mechanically.
@@ -296,7 +297,7 @@ describe("sheets command bindings", () => {
     expect(add?.hint).toBe(reason);
     expect(add?.strictNative).toEqual({
       available: false,
-      reason: "Spectra does not add, remove, hide, or reorder worksheets in a linked Excel file.",
+      reason: SHEETS_NATIVE_REASONS.sheetStructure,
     });
   });
 

@@ -958,7 +958,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "insert.row",
     "Insert a row at the selection.",
     {
-      reason: SHEETS_NATIVE_REASONS.sheetStructure,
+      reason: SHEETS_NATIVE_REASONS.rowColumnStructure,
       touches: ["sheetStructure"],
       manifest: "insert_structure",
     },
@@ -967,7 +967,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "insert.column",
     "Insert a column at the selection.",
     {
-      reason: SHEETS_NATIVE_REASONS.sheetStructure,
+      reason: SHEETS_NATIVE_REASONS.rowColumnStructure,
       touches: ["sheetStructure"],
       manifest: "insert_structure",
     },
@@ -976,7 +976,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "delete.row",
     "Delete the selected rows.",
     {
-      reason: SHEETS_NATIVE_REASONS.sheetStructure,
+      reason: SHEETS_NATIVE_REASONS.rowColumnStructure,
       touches: ["sheetStructure"],
       manifest: "insert_structure",
       risk: "confirm",
@@ -986,7 +986,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "delete.column",
     "Delete the selected columns.",
     {
-      reason: SHEETS_NATIVE_REASONS.sheetStructure,
+      reason: SHEETS_NATIVE_REASONS.rowColumnStructure,
       touches: ["sheetStructure"],
       manifest: "insert_structure",
       risk: "confirm",
@@ -1173,7 +1173,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "data.duplicates",
     "Highlight or remove duplicate values.",
     {
-      reason: SHEETS_NATIVE_REASONS.sort,
+      reason: SHEETS_NATIVE_REASONS.duplicateRows,
       touches: ["sortFilter"],
       manifest: "sort_filter",
     },
@@ -1444,7 +1444,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "slide.hide",
     "Hide this slide from the show.",
-    { params: bool, reason: R.slideHidden, touches: ["slides"] },
+    { params: bool, delta: "set-slide-hidden", touches: ["slides"] },
   ],
   [
     "slide.delete",
@@ -1499,7 +1499,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "insert.equation",
     "Insert an equation on this slide.",
-    { reason: R.newShape, touches: SHAPES },
+    { reason: R.newEquation, touches: SHAPES },
   ],
   [
     "insert.component",
@@ -1575,12 +1575,12 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "arrange.align",
     "Align the selected objects.",
-    { params: text, reason: R.order, touches: SHAPES, field: true },
+    { params: text, reason: R.geometry, touches: SHAPES, field: true },
   ],
   [
     "arrange.distribute",
     "Distribute the selected objects.",
-    { params: text, reason: R.order, touches: SHAPES, field: true },
+    { params: text, reason: R.geometry, touches: SHAPES, field: true },
   ],
   [
     "arrange.group",

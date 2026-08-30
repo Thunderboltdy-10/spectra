@@ -19,13 +19,16 @@ export function availabilityFor(
       return { state: "enabled" };
     }
     if (!native.delta) {
-      const blocked = regionBlockedBy(ctx.fidelity, native.touches);
       return {
         state: "disabled",
-        reason: blocked
-          ? preservedRegionRefusal(blocked.region)
-          : (native.unavailableReason ??
-            "This change cannot be written safely to the linked native file."),
+        // A no-delta capability is refused because this exact operation has no
+        // native writer. Prefer its action-specific sentence even when the
+        // broader fidelity region is PRESERVED; otherwise Insert row, Align,
+        // and dozens of unrelated controls collapse to the same vague region
+        // label and stop telling a person what they can do instead.
+        reason:
+          native.unavailableReason ??
+          "This change cannot be written safely to the linked native file.",
       };
     }
     const blocked = regionBlockedBy(ctx.fidelity, native.touches);

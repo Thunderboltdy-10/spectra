@@ -247,21 +247,31 @@ describe("presentation command set", () => {
     );
   });
 
-  it("refuses speaker notes when the linked file has no notes page", () => {
-    // Accepting text here would tell a person the note was written while the
-    // native package has nowhere to store it.
-    const withoutNotesPage = presentationCommandBindings(
-      presentationStubHandlers({ notesUnsupported: true }),
+  it("keeps speaker notes native even when old content carries the legacy unsupported marker", () => {
+    // Old stored content can still contain this compatibility marker. The PPTX
+    // lens now creates a native notes page and master, so that stale value must
+    // not turn the editor control into a false refusal.
+    const legacy = normalizePresentationContent({
+      theme: { id: "spectra-botanical" },
+      slides: [
+        {
+          ...createPresentationSlide(1),
+          nativeCompatibility: { speakerNotes: "unsupported" },
+        },
+      ],
+    });
+    expect(legacy.slides[0]!.nativeCompatibility?.speakerNotes).toBe(
+      "unsupported",
     );
-    const index = withoutNotesPage.findIndex((binding) => binding.id === "notes.set");
+    const withLegacyMarker = presentationCommandBindings(
+      presentationStubHandlers(),
+    );
+    const index = withLegacyMarker.findIndex((binding) => binding.id === "notes.set");
     expect(index).toBeGreaterThanOrEqual(0);
-    const command = commandForBinding("presentation", withoutNotesPage[index]!, index);
+    const command = commandForBinding("presentation", withLegacyMarker[index]!, index);
     const availability = command.availability(fullContext());
-    expect(availability.state).toBe("disabled");
-    if (availability.state !== "disabled") {
-      throw new Error("Speaker notes must be refused without a notes page.");
-    }
-    expect(availability.reason).toContain("no notes page");
+    expect(availability).toEqual({ state: "enabled" });
+    expect(command.nativeDelta).toBe("set-notes");
   });
 
   it("enables adding a slide to a linked PowerPoint deck because the lens writes add-slide", () => {
@@ -270,6 +280,24 @@ describe("presentation command set", () => {
     expect(add?.availability(fullContext("strict-native"))).toEqual({
       state: "enabled",
     });
+  });
+
+  it("writes hidden-slide state through the same strict-native capability", () => {
+    const hide = commands().find(
+      (command) => command.id === "presentation.slide.hide",
+    );
+    expect(hide?.nativeDelta).toBe("set-slide-hidden");
+    expect(hide?.availability(fullContext("strict-native", { slides: "NATIVE" })))
+      .toEqual({ state: "enabled" });
+    expect(
+      gateOperation({
+        type: "presentation",
+        operation: "presentation.slide.hide",
+        bindings: bindings(),
+        compatibilityProfile: "strict-native",
+        fidelity: { slides: "NATIVE" },
+      }),
+    ).toEqual({ allowed: true });
   });
 
   it("passes the office capability audit with one command per operation", () => {

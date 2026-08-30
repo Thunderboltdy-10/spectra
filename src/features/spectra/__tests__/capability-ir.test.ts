@@ -4,6 +4,7 @@ import {
   PRESENTATION_TEXT_FORMAT_NATIVE_REASON,
   capabilityGhostIssues,
   formattingCapabilitiesFor,
+  officeCapabilitiesFor,
   proposeOperationJsonSchemaFor,
   proposeOperationSchemaFor,
   type CapabilityDefinition,
@@ -20,6 +21,7 @@ import {
   presentationCommandBindings,
   presentationStubHandlers,
 } from "../commands/office/presentation-commands";
+import { gateOperation } from "../commands/office/operation-gate";
 import {
   officeCapabilityAudit,
   officeOperationsFor,
@@ -249,6 +251,84 @@ describe("Office formatting capability IR", () => {
       reason: PRESENTATION_TEXT_FORMAT_NATIVE_REASON,
     });
     expect(fromCommand).toEqual(fromDefinition);
+  });
+
+  it("gives every Office no-delta refusal exact human copy, a next action, and AI parity", () => {
+    const nativeFidelity = {
+      artifact: "NATIVE",
+      body: "NATIVE",
+      styles: "NATIVE",
+      lists: "NATIVE",
+      tables: "NATIVE",
+      images: "NATIVE",
+      hyperlinks: "NATIVE",
+      equations: "NATIVE",
+      sections: "NATIVE",
+      headersFooters: "NATIVE",
+      fields: "NATIVE",
+      tableStructure: "NATIVE",
+      cells: "NATIVE",
+      formulas: "NATIVE",
+      numberFormats: "NATIVE",
+      merges: "NATIVE",
+      freezePanes: "NATIVE",
+      sheetStructure: "NATIVE",
+      dimensions: "NATIVE",
+      sortFilter: "NATIVE",
+      charts: "NATIVE",
+      validation: "NATIVE",
+      conditionalFormat: "NATIVE",
+      namedRanges: "NATIVE",
+      calculationSettings: "NATIVE",
+      slides: "NATIVE",
+      shapes: "NATIVE",
+      speakerNotes: "NATIVE",
+      transitions: "NATIVE",
+      animations: "NATIVE",
+      masters: "NATIVE",
+      layouts: "NATIVE",
+      media: "NATIVE",
+    } as const;
+    const action = /\b(?:accept|add|align|change|choose|create|crop|delete|duplicate|edit|group|hide|import|insert|lock|make|manage|move|nest|open|promote|protect|recalculate|recreate|reject|relink|remove|reorder|reshape|resize|restyle|set|show|sort|unlink|ungroup|unprotect)\b/i;
+    const machineToken = /(?:\b(?:DOCX|PPTX|XLSX)_[A-Z_]+\b|[{}\[\]]|\b(?:document|sheets|presentation)\.[a-z])/;
+
+    for (const { type, bindings } of SETS) {
+      const byCapability = new Map(
+        bindings.map((binding) => [binding.capabilityId, binding]),
+      );
+      for (const definition of officeCapabilitiesFor(type)) {
+        if (!definition.native || definition.native.delta) continue;
+        const reason = definition.native.unavailableReason ?? "";
+        expect(reason, definition.id).toMatch(/[.!?]$/);
+        expect(reason, definition.id).toMatch(action);
+        expect(reason, definition.id).not.toMatch(machineToken);
+
+        const ctx = {
+          ...commandContext(type, () => true, "edit"),
+          compatibilityProfile: "strict-native" as const,
+          fidelity: nativeFidelity,
+        };
+        const human = definition.availability(ctx);
+        expect(human, definition.id).toEqual({ state: "disabled", reason });
+        const binding = byCapability.get(definition.id);
+        expect(binding, definition.id).toBeDefined();
+        expect(
+          commandForBinding(type, { ...binding!, disabled: undefined }, 0)
+            .availability(ctx),
+          definition.id,
+        ).toEqual(human);
+        expect(
+          gateOperation({
+            type,
+            operation: definition.id,
+            bindings,
+            compatibilityProfile: "strict-native",
+            fidelity: nativeFidelity,
+          }),
+          definition.id,
+        ).toMatchObject({ allowed: false, reason });
+      }
+    }
   });
 
   it("refuses DOC-10 hyperlinks in strict-native even when the region reads native", () => {

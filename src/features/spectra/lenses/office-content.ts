@@ -222,6 +222,7 @@ export function pptxArtifactContent(
         id: slide.id,
         title: slide.title,
         ...(slide.layoutPartName ? { layoutId: slide.layoutPartName } : {}),
+        ...(slide.hidden ? { hidden: true } : {}),
         // The lens reads the file's notes pages, so the studio has to receive
         // them. Dropping them here made an opened deck look as though it had no
         // speaker notes at all, and then saving could only ever write them back
@@ -473,6 +474,7 @@ const pptxEditorContentSchema = z
           id: z.string(),
           title: z.string().optional(),
           speakerNotes: z.string().optional(),
+          hidden: z.boolean().optional(),
           objects: z
             .array(
               z
@@ -546,6 +548,7 @@ export function pptxProjectionFromContent(
           objects: incomingObjects,
           hasTransition: false,
           hasTiming: false,
+          ...(next.hidden ? { hidden: true } : {}),
           speakerNotes: next.speakerNotes ?? "",
         };
       const incomingById = new Map(
@@ -571,6 +574,7 @@ export function pptxProjectionFromContent(
         ...slide,
         index,
         title: next.title ?? slide.title,
+        hidden: next.hidden === true || undefined,
         speakerNotes: next.speakerNotes ?? slide.speakerNotes,
         text: text.length ? text : slide.text,
         objects,
@@ -620,6 +624,12 @@ export function pptxOperationsBetween(
           slideId: slide.id,
           text: slide.speakerNotes,
         });
+      if (slide.hidden)
+        operations.push({
+          kind: "set-slide-hidden",
+          slideId: slide.id,
+          hidden: true,
+        });
       return;
     }
     if (slide.title !== old.title)
@@ -633,6 +643,12 @@ export function pptxOperationsBetween(
         kind: "set-notes",
         slideId: slide.id,
         text: slide.speakerNotes,
+      });
+    if (Boolean(slide.hidden) !== Boolean(old.hidden))
+      operations.push({
+        kind: "set-slide-hidden",
+        slideId: slide.id,
+        hidden: Boolean(slide.hidden),
       });
     const oldObjects = new Map(
       old.objects.map((object) => [object.id, object]),

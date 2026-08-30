@@ -173,7 +173,7 @@ export function regionLabel(region: FidelityRegionKey) {
  * their footnotes, the assistant must not then offer to rewrite them.
  */
 export function preservedRegionRefusal(region: FidelityRegionKey) {
-  return `Spectra preserves ${regionLabel(region)} in this file but cannot edit it yet, so this stays unavailable while the original is linked.`;
+  return `Spectra preserves ${regionLabel(region)} in this file but cannot edit it yet. Open the original file in its native app to make this change.`;
 }
 
 /**

@@ -328,13 +328,6 @@ export type PresentationCommandState = {
   /** The linked slide already carries a transition Spectra must not replace. */
   transitionPreserved: boolean;
   animationsPreserved: boolean;
-  /**
-   * The linked slide has no notes page, so a note cannot reach the file. The
-   * lens reports this as `nativeCompatibility.speakerNotes: "unsupported"`; the
-   * notes command refuses in advance rather than accepting text that materialize
-   * would have nowhere to put.
-   */
-  notesUnsupported: boolean;
   snapToObjects: boolean;
   showGrid: boolean;
   showGuides: boolean;
@@ -708,8 +701,7 @@ export function presentationCommandBindings(
       group: "Slides",
       requires: "edit",
       active: state.slideHidden,
-      hint: "A hidden slide stays in the deck and is skipped while presenting. Spectra holds the flag, so a linked PowerPoint file still shows every slide in PowerPoint.",
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.slideHidden },
+      hint: "A hidden slide stays in the deck and is skipped while presenting, including in linked PowerPoint files.",
       onSelect: () => handlers.slide.toggleHidden(),
     },
     {
@@ -1559,10 +1551,7 @@ export function presentationCommandBindings(
       group: "Notes",
       priority: "advanced",
       requires: "edit",
-      disabled: state.notesUnsupported,
-      hint: state.notesUnsupported
-        ? "This linked deck has no notes page, so speaker notes cannot be written safely."
-        : "What you will say on this slide",
+      hint: "What you will say on this slide",
       touches: ["speakerNotes"],
       manifestOps: ["write_speaker_notes"],
       onSelect: (value) => {
@@ -2191,7 +2180,6 @@ export function presentationStubHandlers(
       showSlideNumbers: true,
       transitionPreserved: false,
       animationsPreserved: false,
-      notesUnsupported: false,
       snapToObjects: true,
       showGrid: false,
       showGuides: false,

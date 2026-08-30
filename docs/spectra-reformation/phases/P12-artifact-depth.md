@@ -71,6 +71,22 @@ Foundry: evaluation-run UX depth, release comparison, skill authoring ergonomics
 
 Re-run the document/sheets/presentation inventories against their post-P3 state (the existing inventories predate the IR migration): close what P2.I3's R7 refusal list left honestly refusable but is now cheaply shippable; re-verify each remaining refusal still reads truthfully; file genuinely-large items (tracked changes UI, pivot tables) as Field Notes with owners rather than silently re-deferring.
 
+### P12.I7 implementation log — 2026-08-31
+
+- Re-audited against Microsoft Word, Excel, and PowerPoint; the 2026-08-22 inventories are retained only as explicitly superseded archaeology.
+- Standing IR census: Document 103 = 39 writers / 46 honest refusals / 18 UI-only; Sheets 111 = 42 / 42 / 27; Presentation 118 = 16 / 66 / 36.
+- Promoted PowerPoint hidden-slide state through one `set-slide-hidden` delta using the native slide visibility flag; only the selected slide part changes.
+- Removed the stale speaker-notes studio gate; the existing lens creates a native notes page and master when absent.
+- Hidden state now survives PPTX projection, editor/Yjs projection, native materialization, reopen, and three-way merge.
+- No-delta Office capabilities now keep their exact IR-owned refusal instead of collapsing to a generic preserved-region sentence.
+- Rewrote all Office refusal families as specific, punctuation-complete human guidance with a next action; row/column, duplicate-row, equation, and multi-object geometry families are distinct.
+- Added exhaustive human/AI refusal parity coverage plus focused hidden-slide and notes promotion tests.
+- Focused Vitest: 8 files / 124 tests PASS; seam contract: 13/13 PASS; PPTX command fixtures: 20 assertions / 0 failures.
+- TypeScript, capability ghost gate, secret scan, and `git diff --check` PASS; scoped ESLint has 0 errors and the existing 11 design-token warnings.
+- Aggregate DOCX/Office scripts were run and reproduce recorded unrelated baseline blockers: DOCX wrapper move/delete refusal and XLSX paste-values error-code drift; no lens expectation was weakened.
+- Filed Word Review/Structure/Rich Objects/Automation, Excel Analytical Objects/Package Writer/Structural Rewrite/External Data, and PowerPoint Rich Objects/Motion/Structure/Shape Tree/Advanced Objects Field Notes with orchestrator-owned future units.
+- No browser, dev server, Convex, Bridge, Office application, cloud resource, lease, or primary checkout was used; P12.V2 owns independent live grading.
+
 ## P12.V1 — Depth verification wave 1 (H, max) — verifies I1–I3
 
 Fresh agent, local instance. Per type: inventory-vs-product walk (every "ship" row demonstrated, every "refuse" row showing its sentence), L3 authoring + consumption journeys (author a quiz → cohort attempt → review; build a deck → study cycle with SRS state advancing across days via clock control; facilitate a board session), AI-plane symmetry spot-checks (the AI can drive a sample of each new capability family), conformance + ghost gates, narrow-width workbar grading.

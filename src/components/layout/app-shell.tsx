@@ -209,11 +209,7 @@ function ShellNavigation() {
     setSidebarCollapsed(false);
     window.localStorage.setItem("spectra:sidebar-collapsed", "false");
     delete document.documentElement.dataset.spectraSidebarCollapsed;
-    window.dispatchEvent(
-      new CustomEvent("spectra:sidebar-layout", {
-        detail: { collapsed: false },
-      }),
-    );
+    spectraBus.emit("shell.sidebarLayout", { collapsed: false });
     window.requestAnimationFrame(() => {
       const search = document.querySelector<HTMLInputElement>(
         "[data-spectra-sidebar-search]",
@@ -223,14 +219,10 @@ function ShellNavigation() {
     });
   }, []);
 
-  useEffect(() => {
-    window.addEventListener("spectra:focus-sidebar-search", focusSidebarSearch);
-    return () =>
-      window.removeEventListener(
-        "spectra:focus-sidebar-search",
-        focusSidebarSearch,
-      );
-  }, [focusSidebarSearch]);
+  useEffect(
+    () => spectraBus.on("shell.focusSidebarSearch", focusSidebarSearch),
+    [focusSidebarSearch],
+  );
 
   const coreDestinations = useMemo(() => {
     const destinations: Array<{
@@ -1108,9 +1100,7 @@ export function AppShell({
           );
           composer?.focus();
         }}
-        onFocusSearch={() => {
-          window.dispatchEvent(new Event("spectra:focus-sidebar-search"));
-        }}
+        onFocusSearch={() => spectraBus.emit("shell.focusSidebarSearch", {})}
       />
       <KeyboardShortcutsHelp />
       <ShellNavigation />

@@ -71,6 +71,7 @@ export type SpectraEvents = {
   "notifications.changed": Record<string, never>;
   "workspaces.changed": Record<string, never>;
   "shell.sidebarLayout": { collapsed: boolean };
+  "shell.focusSidebarSearch": Record<string, never>;
   "work.updated": { workId: string; origin: "human" | "ai" | "system" };
   "run.requiredInput": {
     runId: string;

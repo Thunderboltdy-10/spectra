@@ -31,7 +31,8 @@ describe("checkDeploymentConsistency", () => {
 
   it("warns on mismatched Convex deployment slugs without relying on prod/dev keywords", () => {
     process.env.CONVEX_DEPLOYMENT = "calm-fox-123";
-    process.env.NEXT_PUBLIC_CONVEX_URL = "https://silent-whale-999.convex.cloud";
+    process.env.NEXT_PUBLIC_CONVEX_URL =
+      "https://silent-whale-999.convex.cloud";
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const result = checkDeploymentConsistency();
@@ -51,5 +52,32 @@ describe("checkDeploymentConsistency", () => {
 
     expect(result.ok).toBe(true);
     expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "http://127.0.0.1:3002",
+    "http://localhost:3022",
+    "http://[::1]:3042",
+  ])("accepts a local Convex deployment at %s", (url) => {
+    process.env.CONVEX_DEPLOYMENT = "local:local-spectra-instance";
+    process.env.NEXT_PUBLIC_CONVEX_URL = url;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = checkDeploymentConsistency();
+
+    expect(result.ok).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("still warns when a cloud deployment selector is paired with a local URL", () => {
+    process.env.CONVEX_DEPLOYMENT = "prod:steady-swan-321";
+    process.env.NEXT_PUBLIC_CONVEX_URL = "http://127.0.0.1:3002";
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = checkDeploymentConsistency();
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('signals "prod"');
+    expect(warnSpy).toHaveBeenCalledOnce();
   });
 });

@@ -10,7 +10,7 @@ const COLLECTION_KEYS: Record<string, readonly string[]> = {
   code: ["files"],
   whiteboard: ["nodes", "edges"],
   timetable: ["events"],
-  planner_task: ["subtasks"],
+  planner_task: ["tasks"],
   sheets: ["sheets"],
   agent: ["profile"],
 };

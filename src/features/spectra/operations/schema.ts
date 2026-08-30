@@ -697,9 +697,6 @@ export function parseSpectraPlan(value: unknown) {
 const nullableString = {
   anyOf: [{ type: "string" }, { type: "null" }],
 } as const;
-const nullableNumber = {
-  anyOf: [{ type: "number" }, { type: "null" }],
-} as const;
 
 const documentContentJsonSchema = {
   type: "object",
@@ -924,68 +921,9 @@ const quizContentJsonSchema = {
   },
 } as const;
 
-const plannerContentJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "description",
-    "dueAt",
-    "startAt",
-    "endAt",
-    "allDay",
-    "status",
-    "priority",
-    "linkedArtifactIds",
-    "linkedThreadIds",
-    "subtasks",
-    "attachments",
-    "reminders",
-    "estimateMinutes",
-    "progressNote",
-    "sourceRefs",
-  ],
-  properties: {
-    description: { type: "string" },
-    dueAt: nullableNumber,
-    startAt: nullableNumber,
-    endAt: nullableNumber,
-    allDay: { type: "boolean" },
-    status: { enum: ["todo", "doing", "done"] },
-    priority: { enum: ["low", "medium", "high"] },
-    linkedArtifactIds: { type: "array", items: { type: "string" } },
-    linkedThreadIds: { type: "array", items: { type: "string" } },
-    subtasks: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["id", "title", "done"],
-        properties: {
-          id: { type: "string" },
-          title: { type: "string" },
-          done: { type: "boolean" },
-        },
-      },
-    },
-    attachments: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["id", "name", "meta"],
-        properties: {
-          id: { type: "string" },
-          name: { type: "string" },
-          meta: { type: "string" },
-        },
-      },
-    },
-    reminders: { type: "array", items: { type: "string" } },
-    estimateMinutes: nullableNumber,
-    progressNote: { type: "string" },
-    sourceRefs: { type: "array", items: { type: "string" } },
-  },
-} as const;
+const plannerContentJsonSchema = z.toJSONSchema(plannerTaskContentSchema, {
+  target: "draft-7",
+});
 
 // The agent transport uses the same canonical content contracts as the final
 // plan validator. Exporting these avoids a second, looser set of tool schemas
@@ -1041,6 +979,14 @@ export function creationToolContentJsonSchema(
       ...(properties.nodes as object),
       minItems: 1,
       description: "Required canvas nodes for a whiteboard create.",
+    };
+  }
+  if (blueprintKey === "planner_task" && properties.tasks) {
+    properties.tasks = {
+      ...(properties.tasks as object),
+      minItems: 1,
+      description:
+        "Required Plan v4 tasks. Nested subtasks are tasks whose parentTaskId points to another task in this array.",
     };
   }
   if (blueprintKey === "sheets") {

@@ -145,6 +145,7 @@ describe("Calendar, School, and administration V2", () => {
       "list",
       "board",
       "timeline",
+      "workload",
     ]);
     expect(normalizePlanContent(migrated)).toEqual(migrated);
     const cyclic = normalizePlanContent({

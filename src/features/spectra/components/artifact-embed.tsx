@@ -28,6 +28,7 @@ import { transitionFor } from "../motion/grammar";
 import { ArtifactEmbedQuiz } from "./artifact-embed-quiz";
 import { shouldMountArtifactEmbedRuntime } from "./artifact-embed-runtime";
 import { sheetCellEntries } from "../../../../shared/sheet-cells";
+import { normalizePlanContent } from "../plan/model";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -246,18 +247,22 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   }
 
   if (type === "planner_task") {
+    const plan = normalizePlanContent(content);
+    const nextDue = plan.tasks
+      .filter((task) => task.dueAt !== undefined && task.status !== "done")
+      .sort((left, right) => left.dueAt! - right.dueAt!)[0];
     if (embed.mode === "compact")
       return (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           <span className="text-[11px] font-semibold capitalize text-[var(--text-primary)]">
-            {String(content.status ?? "todo").replaceAll("_", " ")}
+            {plan.tasks.length} task{plan.tasks.length === 1 ? "" : "s"}
           </span>
           <span className="text-micro capitalize text-[var(--text-tertiary)]">
-            {String(content.priority ?? "medium")} priority
+            {plan.tasks.filter((task) => task.status === "done").length} complete
           </span>
           <span className="ml-auto text-micro text-[var(--text-secondary)]">
-            {typeof content.dueAt === "number"
-              ? new Date(content.dueAt).toLocaleString()
+            {nextDue?.dueAt !== undefined
+              ? new Date(nextDue.dueAt).toLocaleString()
               : "No due date"}
           </span>
         </div>
@@ -265,15 +270,18 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
     return (
       <div className="grid gap-2 sm:grid-cols-3">
         <Metric
-          label="Status"
-          value={String(content.status ?? "todo").replaceAll("_", " ")}
+          label="Tasks"
+          value={String(plan.tasks.length)}
         />
-        <Metric label="Priority" value={String(content.priority ?? "medium")} />
         <Metric
-          label="Due"
+          label="Complete"
+          value={String(plan.tasks.filter((task) => task.status === "done").length)}
+        />
+        <Metric
+          label="Next due"
           value={
-            typeof content.dueAt === "number"
-              ? new Date(content.dueAt).toLocaleString()
+            nextDue?.dueAt !== undefined
+              ? new Date(nextDue.dueAt).toLocaleString()
               : "No date"
           }
         />

@@ -2,6 +2,7 @@ import type { SpectraBlueprintKey } from "../data/api";
 import { normalizeFoundryContent } from "../agents/foundry/foundry-document";
 import { normalizeCodeContent } from "../code/model";
 import { normalizePresentationContent } from "../presentation/model";
+import { normalizePlanContent } from "../plan/model";
 import { normalizeSheetsContent } from "../sheets/model";
 import { sharedTimetableContent } from "../timetable/model";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
@@ -328,87 +329,7 @@ export function normalizeQuizContent(value: unknown) {
 }
 
 export function normalizePlannerTaskContent(value: unknown) {
-  const content = row(value);
-  const statusAliases: Record<string, string> = {
-    pending: "todo",
-    not_started: "todo",
-    open: "todo",
-    in_progress: "doing",
-    active: "doing",
-    complete: "done",
-    completed: "done",
-    finished: "done",
-  };
-  const status = stringValue(content.status, "todo")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s.-]+/g, "_");
-  content.status = statusAliases[status] ?? status;
-  const priority = stringValue(content.priority, "medium").trim().toLowerCase();
-  content.priority = ["low", "medium", "high"].includes(priority)
-    ? priority
-    : "medium";
-  content.timezone =
-    typeof content.timezone === "string" && content.timezone.trim()
-      ? content.timezone.trim()
-      : "UTC";
-  const recurrence = row(content.recurrence);
-  const frequency = stringValue(recurrence.frequency, "none").toLowerCase();
-  content.recurrence = {
-    ...recurrence,
-    frequency: ["none", "daily", "weekly", "monthly", "yearly"].includes(
-      frequency,
-    )
-      ? frequency
-      : "none",
-    interval:
-      typeof recurrence.interval === "number" &&
-      Number.isFinite(recurrence.interval)
-        ? Math.max(1, Math.min(365, Math.round(recurrence.interval)))
-        : 1,
-    weekdays: Array.isArray(recurrence.weekdays)
-      ? recurrence.weekdays
-          .filter(
-            (day): day is number =>
-              typeof day === "number" &&
-              Number.isInteger(day) &&
-              day >= 0 &&
-              day <= 6,
-          )
-          .slice(0, 7)
-      : [],
-    exceptions: Array.isArray(recurrence.exceptions)
-      ? recurrence.exceptions
-          .filter(
-            (timestamp): timestamp is number =>
-              typeof timestamp === "number" && Number.isFinite(timestamp),
-          )
-          .slice(0, 500)
-      : [],
-  };
-  if (Array.isArray(content.subtasks)) {
-    content.subtasks = content.subtasks.map((value, index) => {
-      const subtask = row(value);
-      subtask.id = stableId(subtask.id, "subtask", index);
-      subtask.title = stringValue(subtask.title, subtask.text, subtask.name);
-      if (typeof subtask.done !== "boolean")
-        subtask.done = /^(done|complete|completed)$/i.test(
-          stringValue(subtask.status),
-        );
-      return subtask;
-    });
-  } else content.subtasks = [];
-  for (const field of [
-    "attachments",
-    "reminders",
-    "sourceRefs",
-    "assignees",
-    "watchers",
-    "linkedArtifactIds",
-    "linkedThreadIds",
-  ])
-    if (!Array.isArray(content[field])) content[field] = [];
-  return content;
+  return normalizePlanContent(value) as unknown as Row;
 }
 
 export function normalizeArtifactContent(

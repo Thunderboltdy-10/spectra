@@ -158,25 +158,18 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
       };
     case "planner_task":
       return {
-        id: "task-root",
-        taskTitle: "",
+        version: 4,
         description: "",
-        status: "todo",
-        priority: "medium",
         timezone: "UTC",
-        allDay: false,
-        recurrence: {
-          frequency: "none",
-          interval: 1,
-          weekdays: [],
-          exceptions: [],
-        },
-        subtasks: [],
-        attachments: [],
-        reminders: [],
-        sourceRefs: [],
-        assignees: [],
-        watchers: [],
+        sections: [],
+        milestones: [],
+        tasks: [],
+        views: [
+          { id: "list", kind: "list", title: "List", system: true },
+          { id: "board", kind: "board", title: "Board", system: true },
+          { id: "timeline", kind: "timeline", title: "Timeline", system: true },
+          { id: "workload", kind: "workload", title: "Workload", system: true },
+        ],
         linkedArtifactIds: [],
         linkedThreadIds: [],
       };
@@ -412,10 +405,10 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
 
 export function defaultArtifactSchemaVersion(blueprintKey: BlueprintKey) {
   if (blueprintKey === "document") return 2;
+  if (blueprintKey === "planner_task") return 4;
   if (
     blueprintKey === "flashcard_deck" ||
-    blueprintKey === "quiz" ||
-    blueprintKey === "planner_task"
+    blueprintKey === "quiz"
   )
     return 3;
   return 1;
@@ -430,7 +423,7 @@ export function fallbackArtifactSummary(blueprintKey: BlueprintKey) {
     case "quiz":
       return "Quiz artifact with questions and review metadata.";
     case "planner_task":
-      return "Planner task artifact with status and links.";
+      return "Connected plan with tasks, views, workload, and scheduling.";
     case "agent":
       return "A reusable Spectra agent with scoped skills, tools, and resources.";
     case "timetable":
@@ -558,15 +551,18 @@ export function isHollowDefaultContent(
     case "planner_task": {
       const description =
         typeof record.description === "string" ? record.description.trim() : "";
-      const subtasks = Array.isArray(record.subtasks) ? record.subtasks : [];
-      const titled = subtasks.filter(
+      const tasks = Array.isArray(record.tasks) ? record.tasks : [];
+      const meaningful = tasks.filter(
         (item) =>
           item &&
           typeof item === "object" &&
-          typeof (item as { title?: unknown }).title === "string" &&
-          String((item as { title: string }).title).trim(),
+          !Array.isArray(item) &&
+          ((typeof (item as { title?: unknown }).title === "string" &&
+            String((item as { title: string }).title).trim()) ||
+            (typeof (item as { description?: unknown }).description === "string" &&
+              String((item as { description: string }).description).trim())),
       );
-      return description.length < 8 && titled.length === 0;
+      return description.length < 8 && meaningful.length === 0;
     }
     case "presentation": {
       const slides = Array.isArray(record.slides) ? record.slides : [];
@@ -627,7 +623,7 @@ export function hollowFinalizeFailureMessage(
     case "quiz":
       return "The generated quiz is hollow/incomplete — it has no usable questions.";
     case "planner_task":
-      return "The generated planner task is hollow/incomplete — it has no description or subtasks.";
+      return "The generated plan is hollow/incomplete — it has no meaningful tasks.";
     case "whiteboard":
       return "The generated whiteboard is hollow/incomplete — it has no nodes.";
     case "agent":
@@ -686,6 +682,12 @@ export function finalizeArtifactSummary(params: {
       return count
         ? `${count}-block document about ${topic}.`
         : fallbackArtifactSummary("document");
+    }
+    case "planner_task": {
+      const count = Array.isArray(record.tasks) ? record.tasks.length : 0;
+      return count
+        ? `${count}-task plan about ${topic}.`
+        : fallbackArtifactSummary("planner_task");
     }
     case "timetable": {
       const count = Array.isArray(record.events) ? record.events.length : 0;

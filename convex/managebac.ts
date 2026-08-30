@@ -1819,6 +1819,182 @@ async function classWorkspaceId(
     : null;
 }
 
+function stringList(value: unknown, maximum: number) {
+  return array(value)
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, maximum);
+}
+
+function accountIdList(value: unknown, maximum: number) {
+  return [
+    ...new Set(
+      array(value).flatMap((candidate) => {
+        if (typeof candidate === "string")
+          return candidate.trim() ? [candidate.trim()] : [];
+        const person = record(candidate);
+        return typeof person.accountId === "string" && person.accountId.trim()
+          ? [person.accountId.trim()]
+          : [];
+      }),
+    ),
+  ].slice(0, maximum);
+}
+
+function canonicalManageBacPlanTask(
+  source: Doc<"externalRecords">,
+  normalized: Record<string, unknown>,
+  content: Record<string, unknown>,
+  existing: Record<string, unknown> = {},
+) {
+  const officialDeadlineRef = `managebac:${source.providerRecordKey}`;
+  const title = text(
+    normalized.title ?? normalized.name,
+    240,
+    text(existing.title ?? content.taskTitle, 240, "ManageBac task"),
+  );
+  const description = plainText(normalized.description, 20_000);
+  const rawStatus = existing.status ?? content.status;
+  const status = ["backlog", "todo", "doing", "blocked", "done"].includes(
+    String(rawStatus),
+  )
+    ? String(rawStatus)
+    : "todo";
+  const rawPriority = existing.priority ?? content.priority ?? normalized.priority;
+  const priority = ["none", "low", "medium", "high", "urgent"].includes(
+    String(rawPriority),
+  )
+    ? String(rawPriority)
+    : "medium";
+  const checklistSource = Array.isArray(existing.checklist)
+    ? existing.checklist
+    : Array.isArray(content.checklist)
+      ? content.checklist
+      : array(content.subtasks);
+  const checklist = checklistSource.slice(0, 500).flatMap((candidate, index) => {
+    const item = record(candidate);
+    const itemTitle = text(item.title ?? item.text, 500);
+    if (!itemTitle) return [];
+    return [
+      {
+        id: text(item.id, 180, `check-${index + 1}`),
+        title: itemTitle,
+        done: item.done === true,
+      },
+    ];
+  });
+  const reminderSource = Array.isArray(existing.reminders)
+    ? existing.reminders
+    : array(content.reminders);
+  const reminders = reminderSource.slice(0, 24).flatMap((candidate, index) => {
+    const reminder = record(candidate);
+    if (
+      typeof reminder.minutesBefore !== "number" ||
+      !Number.isFinite(reminder.minutesBefore)
+    )
+      return [];
+    return [
+      {
+        id: text(reminder.id, 180, `reminder-${index + 1}`),
+        minutesBefore: Math.max(
+          0,
+          Math.min(525_600, Math.round(reminder.minutesBefore)),
+        ),
+        enabled: reminder.enabled !== false,
+      },
+    ];
+  });
+  const sourceRefs = [
+    ...new Set([
+      ...stringList(existing.sourceRefs ?? content.sourceRefs, 100),
+      officialDeadlineRef,
+    ]),
+  ];
+  const dueAt = timestampValue(normalized.dueAt);
+  const rawEstimate = existing.estimateMinutes ?? content.estimateMinutes;
+  const estimateMinutes =
+    typeof rawEstimate === "number" &&
+    Number.isInteger(rawEstimate) &&
+    rawEstimate > 0
+      ? Math.min(100_000, rawEstimate)
+      : undefined;
+  return {
+    id: text(existing.id, 180, `task-${source._id}`),
+    title,
+    description,
+    ...(typeof existing.sectionId === "string"
+      ? { sectionId: existing.sectionId }
+      : {}),
+    ...(typeof existing.parentTaskId === "string"
+      ? { parentTaskId: existing.parentTaskId }
+      : {}),
+    ...(typeof existing.milestoneId === "string"
+      ? { milestoneId: existing.milestoneId }
+      : {}),
+    dependencyIds: stringList(existing.dependencyIds, 500),
+    ...(estimateMinutes === undefined ? {} : { estimateMinutes }),
+    status,
+    priority,
+    labels: stringList(existing.labels ?? content.labels, 100),
+    assigneeIds: accountIdList(
+      existing.assigneeIds ??
+        existing.assignees ??
+        content.assigneeIds ??
+        content.assignees,
+      100,
+    ),
+    referenceIds: stringList(
+      existing.referenceIds ??
+        content.referenceIds ??
+        content.linkedArtifactIds,
+      100,
+    ),
+    sourceRefs,
+    ...(dueAt === undefined ? {} : { dueAt }),
+    officialDeadlineRef,
+    calendarBlockIds: stringList(
+      existing.calendarBlockIds ?? content.calendarBlockIds,
+      500,
+    ),
+    checklist,
+    // Official deadlines never acquire a repeating personal schedule during
+    // source refresh. People can create a separate recurring personal task.
+    recurrence: {
+      frequency: "none",
+      interval: 1,
+      weekdays: [],
+      exceptions: [],
+    },
+    reminders,
+    completedOccurrences: array(
+      existing.completedOccurrences ?? content.completedOccurrences,
+    )
+      .slice(-500)
+      .flatMap((candidate) => {
+        const occurrence = record(candidate);
+        if (
+          typeof occurrence.completedAt !== "number" ||
+          !Number.isFinite(occurrence.completedAt)
+        )
+          return [];
+        return [
+          {
+            completedAt: occurrence.completedAt,
+            ...(typeof occurrence.scheduledDueAt === "number" &&
+            Number.isFinite(occurrence.scheduledDueAt)
+              ? { scheduledDueAt: occurrence.scheduledDueAt }
+              : {}),
+          },
+        ];
+      }),
+    order:
+      typeof existing.order === "number" && Number.isFinite(existing.order)
+        ? existing.order
+        : 0,
+  };
+}
+
 async function ensurePlannerProjection(
   ctx: MutationCtx,
   integration: Doc<"schoolIntegrations">,
@@ -1835,38 +2011,26 @@ async function ensurePlannerProjection(
   if (existing) return { projection: existing, created: false };
   const normalized = record(source.normalized);
   const now = Date.now();
+  const task = canonicalManageBacPlanTask(source, normalized, {});
+  const title = task.title;
   const content = {
     ...(defaultArtifactContent("planner_task") as Record<string, unknown>),
-    taskTitle: text(normalized.title ?? normalized.name, 240, "ManageBac task"),
     description: plainText(normalized.description, 20_000),
-    status: "todo",
-    priority:
-      normalized.priority === "high" || normalized.priority === "low"
-        ? normalized.priority
-        : "medium",
-    dueAt:
-      typeof normalized.dueAt === "number"
-        ? normalized.dueAt
-        : typeof normalized.dueAt === "string" &&
-            !Number.isNaN(Date.parse(normalized.dueAt))
-          ? Date.parse(normalized.dueAt)
-          : undefined,
+    tasks: [task],
     source: {
       provider: "managebac",
       externalId: source.providerRecordId,
       version: source.payloadVersion,
       hash: source.sourceHash,
       status: source.tombstone ? "removed" : "active",
-      lockedFields: ["taskTitle", "description", "dueAt", "source"],
+      lockedFields: [
+        "tasks/0/title",
+        "tasks/0/description",
+        "tasks/0/dueAt",
+        "source",
+      ],
     },
-    sourceRefs: [`managebac:${source.providerRecordKey}`],
-    personalOverlay: {},
   };
-  const title = text(
-    normalized.title ?? normalized.name,
-    240,
-    "ManageBac task",
-  );
   const artifactId = await ctx.db.insert("spectraArtifacts", {
     ownerAccountId: accountId,
     schoolId: integration.schoolId,
@@ -2093,18 +2257,29 @@ async function safelyRefreshProjection(
       240,
       artifact.title,
     );
+    const tasks = Array.isArray(content.tasks) ? content.tasks : [];
+    const primaryTask = canonicalManageBacPlanTask(
+      source,
+      normalized,
+      content,
+      record(tasks[0]),
+    );
     const nextContent = {
       ...content,
-      taskTitle: title,
       description: plainText(normalized.description, 20_000),
-      dueAt: timestampValue(normalized.dueAt) ?? null,
+      tasks: [primaryTask, ...tasks.slice(1)],
       source: {
         ...sourceState,
         externalId: source.providerRecordId,
         version: source.payloadVersion,
         hash: source.sourceHash,
         status: "active",
-        lockedFields: ["taskTitle", "description", "dueAt", "source"],
+        lockedFields: [
+          "tasks/0/title",
+          "tasks/0/description",
+          "tasks/0/dueAt",
+          "source",
+        ],
       },
     };
     const now = Date.now();

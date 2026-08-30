@@ -1,9 +1,18 @@
 import {
   validatePlanDependencies,
   type PlanContent,
+  type PlanFilter,
+  type PlanPriority,
   type PlanStatus,
   type PlanTask,
 } from "./model";
+import {
+  completePlanTask,
+  normalizePlanLabels,
+  parsePlanDue,
+} from "./operations";
+
+export type { PlanFilter, PlanViewKind } from "./model";
 
 /**
  * Plan views (§11H).
@@ -13,20 +22,6 @@ import {
  * and vanish from another, and so the equivalence is something code can check
  * rather than something the UI is trusted to maintain.
  */
-
-export type PlanViewKind = "list" | "board" | "timeline";
-
-export type PlanFilter = {
-  statuses?: readonly PlanStatus[];
-  sectionIds?: readonly string[];
-  milestoneIds?: readonly string[];
-  assigneeIds?: readonly string[];
-  /** Only tasks with a due date inside this window. */
-  dueBetween?: { from?: number; to?: number };
-  /** Only tasks that came from an official source deadline, or only those that did not. */
-  fromOfficialSource?: boolean;
-  search?: string;
-};
 
 export const PLAN_STATUS_ORDER: readonly PlanStatus[] = Object.freeze([
   "backlog",
@@ -64,6 +59,13 @@ function matchesFilter(task: PlanTask, filter: PlanFilter | undefined) {
     !task.assigneeIds.some((id) => filter.assigneeIds!.includes(id))
   )
     return false;
+  if (filter.priorities?.length && !filter.priorities.includes(task.priority))
+    return false;
+  if (
+    filter.labels?.length &&
+    !filter.labels.every((label) => task.labels.includes(label))
+  )
+    return false;
   if (filter.fromOfficialSource !== undefined) {
     const official = Boolean(task.officialDeadlineRef);
     if (official !== filter.fromOfficialSource) return false;
@@ -84,6 +86,38 @@ function matchesFilter(task: PlanTask, filter: PlanFilter | undefined) {
 
 function byOrder(left: PlanTask, right: PlanTask) {
   return left.order - right.order || left.id.localeCompare(right.id);
+}
+
+function hierarchicalTaskOrder(plan: PlanContent) {
+  const byId = new Map(plan.tasks.map((task) => [task.id, task]));
+  const children = new Map<string, PlanTask[]>();
+  const roots: PlanTask[] = [];
+  for (const task of plan.tasks) {
+    if (!task.parentTaskId || !byId.has(task.parentTaskId)) {
+      roots.push(task);
+      continue;
+    }
+    const siblings = children.get(task.parentTaskId) ?? [];
+    siblings.push(task);
+    children.set(task.parentTaskId, siblings);
+  }
+  roots.sort(byOrder);
+  for (const siblings of children.values()) siblings.sort(byOrder);
+
+  const ordered: PlanTask[] = [];
+  const visited = new Set<string>();
+  const visit = (task: PlanTask) => {
+    if (visited.has(task.id)) return;
+    visited.add(task.id);
+    ordered.push(task);
+    for (const child of children.get(task.id) ?? []) visit(child);
+  };
+  for (const root of roots) visit(root);
+  // Invalid historical content can still reach a read-only projection before
+  // its next canonical commit. Keep every task visible even if it belongs to a
+  // cycle; the schema boundary will refuse that relationship on write.
+  for (const task of [...plan.tasks].sort(byOrder)) visit(task);
+  return ordered;
 }
 
 export function filterPlanTasks(
@@ -120,7 +154,12 @@ export function planListView(
   plan: PlanContent,
   filter?: PlanFilter,
 ): readonly PlanListSection[] {
-  const visible = filterPlanTasks(plan, filter);
+  const visibleIds = new Set(
+    filterPlanTasks(plan, filter).map((task) => task.id),
+  );
+  const visible = hierarchicalTaskOrder(plan).filter((task) =>
+    visibleIds.has(task.id),
+  );
   const byId = new Map(plan.tasks.map((task) => [task.id, task]));
   const unfinished = new Set(
     plan.tasks.filter((task) => task.status !== "done").map((task) => task.id),
@@ -333,11 +372,6 @@ export type PlanScheduleEntry =
       /** The school source this deadline came from. It is never moved here. */
       sourceRef: string;
     }
-  | {
-      kind: "work_block";
-      taskId: string;
-      calendarBlockId: string;
-    }
   | { kind: "personal_due"; taskId: string; at: number };
 
 /**
@@ -360,8 +394,6 @@ export function planScheduleEntries(
       });
     else if (task.dueAt !== undefined)
       entries.push({ kind: "personal_due", taskId: task.id, at: task.dueAt });
-    for (const calendarBlockId of task.calendarBlockIds)
-      entries.push({ kind: "work_block", taskId: task.id, calendarBlockId });
   }
   return entries;
 }
@@ -403,9 +435,14 @@ export function reschedulePlanTask(
 // ------------------------------------------------------------ bulk safety
 
 export type PlanBulkAction =
-  | { kind: "set_status"; status: PlanStatus }
+  | { kind: "set_status"; status: PlanStatus; completedAt?: number }
   | { kind: "assign"; assigneeId: string }
   | { kind: "move_to_section"; sectionId?: string }
+  | { kind: "set_priority"; priority: PlanPriority }
+  | { kind: "set_labels"; labels: readonly string[] }
+  | { kind: "add_labels"; labels: readonly string[] }
+  | { kind: "remove_labels"; labels: readonly string[] }
+  | { kind: "set_due"; dueAt?: number }
   | { kind: "delete" };
 
 export type PlanBulkPlan = {
@@ -496,6 +533,15 @@ export function planBulkAction(
         });
     }
   }
+  if (action.kind === "set_due") {
+    for (const id of selected) {
+      if (byId.get(id)?.officialDeadlineRef)
+        refusals.push({
+          taskId: id,
+          reason: "This deadline is set by its source. Schedule personal work around it instead.",
+        });
+    }
+  }
 
   const refused = new Set(refusals.map((entry) => entry.taskId));
   return {
@@ -525,6 +571,18 @@ export function applyPlanBulkAction(
     validatePlanDependencies(next);
     return next;
   }
+  if (action.kind === "set_status" && action.status === "done") {
+    let next = plan;
+    for (const taskId of bulk.taskIds) {
+      const completed = completePlanTask(
+        next,
+        taskId,
+        action.completedAt ?? Date.now(),
+      );
+      if (completed.ok) next = completed.plan;
+    }
+    return next;
+  }
   return {
     ...plan,
     tasks: plan.tasks.map((task) => {
@@ -540,6 +598,26 @@ export function applyPlanBulkAction(
           return action.sectionId
             ? { ...task, sectionId: action.sectionId }
             : { ...task, sectionId: undefined };
+        case "set_priority":
+          return { ...task, priority: action.priority };
+        case "set_labels":
+          return { ...task, labels: normalizePlanLabels(action.labels) };
+        case "add_labels":
+          return {
+            ...task,
+            labels: normalizePlanLabels([...task.labels, ...action.labels]),
+          };
+        case "remove_labels": {
+          const removed = new Set(action.labels);
+          return {
+            ...task,
+            labels: task.labels.filter((label) => !removed.has(label)),
+          };
+        }
+        case "set_due":
+          return action.dueAt === undefined
+            ? { ...task, dueAt: undefined }
+            : { ...task, dueAt: action.dueAt };
       }
     }),
   };
@@ -559,12 +637,17 @@ export function planToCsv(plan: PlanContent) {
     "id",
     "title",
     "status",
+    "priority",
+    "labels",
     "section",
     "milestone",
+    "parentTaskId",
     "dueAt",
     "estimateMinutes",
     "assignees",
     "dependencies",
+    "recurrence",
+    "reminders",
     "officialDeadline",
   ];
   const sections = new Map(plan.sections.map((s) => [s.id, s.title]));
@@ -574,12 +657,19 @@ export function planToCsv(plan: PlanContent) {
       task.id,
       task.title,
       task.status,
+      task.priority,
+      task.labels.join(" "),
       task.sectionId ? (sections.get(task.sectionId) ?? "") : "",
       task.milestoneId ? (milestones.get(task.milestoneId) ?? "") : "",
+      task.parentTaskId ?? "",
       task.dueAt ? new Date(task.dueAt).toISOString() : "",
       task.estimateMinutes ?? "",
       task.assigneeIds.join(" "),
       task.dependencyIds.join(" "),
+      task.recurrence.frequency === "none"
+        ? ""
+        : JSON.stringify(task.recurrence),
+      task.reminders.length ? JSON.stringify(task.reminders) : "",
       task.officialDeadlineRef ?? "",
     ]
       .map(csvCell)
@@ -594,6 +684,20 @@ function icsDate(timestamp: number) {
 
 function icsText(value: string) {
   return value.replaceAll(/([,;\\])/g, "\\$1").replaceAll(/\r?\n/g, "\\n");
+}
+
+function importedDueAt(value: string, timezone: string) {
+  const bounded = parsePlanDue(value, { now: Date.now(), timezone });
+  if (bounded.ok) return bounded.dueAt;
+  if (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})$/i.test(
+      value,
+    )
+  ) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 /**
@@ -689,6 +793,10 @@ export function planFromDelimited(
       warnings: ["No title column found. Name one column Title and try again."],
     };
   const statusIndex = header.indexOf("status");
+  const priorityIndex = header.indexOf("priority");
+  const labelsIndex = header.findIndex((cell) =>
+    ["labels", "label", "tags", "tag"].includes(cell),
+  );
   const dueIndex = header.findIndex((cell) =>
     ["dueat", "due", "due date", "deadline"].includes(cell),
   );
@@ -718,9 +826,22 @@ export function planFromDelimited(
         : rawStatus === "to do"
           ? "todo"
           : "todo";
+    const rawPriority = (cells[priorityIndex] ?? "")
+      .trim()
+      .toLocaleLowerCase();
+    const priority = ["none", "low", "medium", "high", "urgent"].includes(
+      rawPriority,
+    )
+      ? (rawPriority as PlanTask["priority"])
+      : "none";
+    const labels = normalizePlanLabels(
+      (cells[labelsIndex] ?? "")
+        .split(/[|;,\s]+/)
+        .map((label) => label.trim()),
+    );
     const rawDue = (cells[dueIndex] ?? "").trim();
-    const dueAt = rawDue ? Date.parse(rawDue) : Number.NaN;
-    if (rawDue && !Number.isFinite(dueAt))
+    const dueAt = rawDue ? importedDueAt(rawDue, plan.timezone) : undefined;
+    if (rawDue && dueAt === undefined)
       warnings.push(`Row ${index + 2} has a date Spectra could not read.`);
     const rawEstimate = Number((cells[estimateIndex] ?? "").trim());
 
@@ -730,13 +851,23 @@ export function planFromDelimited(
       description: "",
       dependencyIds: [],
       status,
+      priority,
+      labels,
       assigneeIds: [],
       referenceIds: [],
       sourceRefs: [],
       calendarBlockIds: [],
       checklist: [],
+      recurrence: {
+        frequency: "none",
+        interval: 1,
+        weekdays: [],
+        exceptions: [],
+      },
+      reminders: [],
+      completedOccurrences: [],
       order,
-      ...(Number.isFinite(dueAt) ? { dueAt } : {}),
+      ...(dueAt === undefined ? {} : { dueAt }),
       ...(Number.isFinite(rawEstimate) && rawEstimate > 0
         ? { estimateMinutes: Math.round(rawEstimate) }
         : {}),

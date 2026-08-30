@@ -61,7 +61,13 @@ export type FidelityRegionKey =
  * picker, a size stepper, a colour well) are commands too — they carry one
  * scalar, which keeps the human path and the AI path on the same `execute`.
  */
-export type CommandParam = string | number | boolean | null | undefined;
+/**
+ * Capability params are Zod-typed at the IR boundary. Workbar controls usually
+ * send a scalar, while inspector and AI paths may send the same structured
+ * operation object; keeping this as unknown prevents a second scalar-only
+ * protocol from growing beside CapabilityDefinition.params.
+ */
+export type CommandParam = unknown;
 
 export type CommandControlOption = {
   value: string;

@@ -60,15 +60,18 @@ const modes = {
     ["Results", "view"],
   ],
   planner_task: [
-    // Three readings of one task set, each editable in place. There is no
+    // Four readings of one task set, each editable in place. Workload is a
+    // read-only scheduling projection whose blocks still belong to Calendar.
+    // There is no
     // reading/writing twin here the way a document has Edit and Preview, so
-    // none of these is a permission printed as a tab (D1/D2) and all three are
+    // none of these is a permission printed as a tab (D1/D2) and all four are
     // `view` — a read-only collaborator could previously open a shared plan
     // only in `Review`, which no surface implemented. `Review` is gone rather
     // than left as a door onto nothing.
     ["List", "view"],
     ["Board", "view"],
     ["Timeline", "view"],
+    ["Workload", "view"],
   ],
   // Overview is how an agent is read: it is the mission, the
   // approved skills and the sources, and declaring it `edit` left a read-only

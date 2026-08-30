@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { normalizePlanContent } from "../plan/model";
+import type { ModelOperation } from "../operations/schema";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -387,6 +389,40 @@ describe("Spectra run route", () => {
     });
   });
 
+  it("rejects planner output with more than the exact requested subtasks", async () => {
+    const { assertRequestedArtifactContent } = await import(
+      "@/app/api/spectra/run/loop/plan"
+    );
+    const content = normalizePlanContent({
+      tasks: [
+        { id: "root", title: "Prepare launch" },
+        { id: "one", title: "Read brief", parentTaskId: "root" },
+        { id: "two", title: "Draft copy", parentTaskId: "root" },
+        { id: "three", title: "Review copy", parentTaskId: "root" },
+      ],
+    });
+    const operation: ModelOperation = {
+      type: "artifact.create",
+      input: {
+        blueprintKey: "planner_task",
+        title: "Launch plan",
+        summary: null,
+        content,
+        tags: [],
+        workspaceId: null,
+        placement: "inbox",
+        pinned: false,
+        exclusivePin: false,
+      },
+    };
+    expect(() =>
+      assertRequestedArtifactContent(
+        [operation],
+        "Create a plan with exactly 2 subtasks.",
+      ),
+    ).toThrow(/exactly the requested titled subtasks/i);
+  });
+
   it("fans independent multi-output study packs into typed parallel workers", async () => {
     const { fetchMock } = setup({});
     fetchMock.mockImplementation(async (_url, init) => {
@@ -600,18 +636,15 @@ describe("Spectra run route", () => {
         .tool_choice?.function?.name === "create_planner_task",
     );
     expect(String((creationCall?.[1] as RequestInit).body)).not.toContain("Add the tag");
-    const content = getSavedArtifact().content as {
-      dueAt?: number;
-      description?: string;
-      subtasks?: Array<{ title: string; done: boolean }>;
-    };
-    expect(content.dueAt).toEqual(expect.any(Number));
-    expect(new Date(content.dueAt!).getHours()).toBe(16);
-    expect(new Date(content.dueAt!).getMinutes()).toBe(0);
-    expect(content.description).toBe("Review the task graph notes.");
-    expect(content.subtasks).toEqual([
-      expect.objectContaining({ title: "Read both sections", done: false }),
-      expect.objectContaining({ title: "Write one correction", done: false }),
+    const content = normalizePlanContent(getSavedArtifact().content);
+    const root = content.tasks.find((task) => !task.parentTaskId)!;
+    expect(root.dueAt).toEqual(expect.any(Number));
+    expect(new Date(root.dueAt!).getHours()).toBe(16);
+    expect(new Date(root.dueAt!).getMinutes()).toBe(0);
+    expect(root.description).toBe("Review the task graph notes.");
+    expect(content.tasks.filter((task) => task.parentTaskId === root.id)).toEqual([
+      expect.objectContaining({ title: "Read both sections", status: "todo" }),
+      expect.objectContaining({ title: "Write one correction", status: "todo" }),
     ]);
   });
 
@@ -1571,13 +1604,15 @@ describe("Spectra run route", () => {
     await response.text();
 
     expect(fetchMock).not.toHaveBeenCalled();
-    const updated = getSavedArtifact().content as typeof content & {
-      assignees?: unknown[];
-      watchers?: unknown[];
-    };
-    expect(new Date(updated.dueAt!).getHours()).toBe(16);
-    const { assignees: _assignees, watchers: _watchers, ...rest } = updated;
-    expect({ ...rest, dueAt: originalDueAt }).toEqual(content);
+    const updated = normalizePlanContent(getSavedArtifact().content);
+    const original = normalizePlanContent(content);
+    expect(new Date(updated.tasks[0]!.dueAt!).getHours()).toBe(16);
+    expect({
+      ...updated,
+      tasks: updated.tasks.map((task, index) =>
+        index === 0 ? { ...task, dueAt: originalDueAt } : task,
+      ),
+    }).toEqual(original);
   });
 
   it("does not let a contextual subtask mention hijack a semantic progress-note edit", async () => {

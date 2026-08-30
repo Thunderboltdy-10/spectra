@@ -158,24 +158,33 @@ function isHollowQuizContent(content: unknown) {
 }
 
 function isHollowPlannerContent(content: unknown) {
+  const raw = asRecord(content);
+  if (!Array.isArray(raw.tasks)) {
+    const title =
+      typeof raw.taskTitle === "string" ? raw.taskTitle.trim() : "";
+    const description =
+      typeof raw.description === "string" ? raw.description.trim() : "";
+    const subtasks = Array.isArray(raw.subtasks) ? raw.subtasks : [];
+    const hasNamedSubtask = subtasks.some((item) => {
+      const subtask = asRecord(item);
+      return (
+        (typeof subtask.title === "string" && subtask.title.trim().length > 0) ||
+        (typeof subtask.text === "string" && subtask.text.trim().length > 0)
+      );
+    });
+    return !title && description.length < 8 && !hasNamedSubtask;
+  }
   const normalized = asRecord(
     normalizeArtifactContent("planner_task", content),
   );
-  const description =
-    typeof normalized.description === "string"
-      ? normalized.description.trim()
-      : "";
-  const subtasks = Array.isArray(normalized.subtasks)
-    ? normalized.subtasks
-    : [];
-  const titled = subtasks.filter(
-    (item) =>
-      item &&
-      typeof item === "object" &&
-      typeof (item as { title?: unknown }).title === "string" &&
-      String((item as { title: string }).title).trim(),
-  );
-  return description.length < 8 && titled.length === 0;
+  const tasks = Array.isArray(normalized.tasks) ? normalized.tasks : [];
+  return !tasks.some((item) => {
+    const task = asRecord(item);
+    return (
+      (typeof task.title === "string" && task.title.trim().length > 0) ||
+      (typeof task.description === "string" && task.description.trim().length >= 8)
+    );
+  });
 }
 
 function isHollowPresentationContent(content: unknown) {
@@ -256,7 +265,7 @@ export function hollowCreateFailureMessage(
     case "quiz":
       return "The generated quiz is hollow/incomplete — it has no usable questions.";
     case "planner_task":
-      return "The generated planner task is hollow/incomplete — it has no description or subtasks.";
+      return "The generated plan is hollow/incomplete - it has no usable tasks.";
     case "presentation":
       return "The generated presentation is hollow/incomplete — slides have no meaningful content.";
     case "sheets":
@@ -370,9 +379,8 @@ export function deriveCreateArtifactSummary(params: {
       );
     }
     case "planner_task": {
-      const description =
-        typeof record.description === "string" ? record.description.trim() : "";
-      return (description || `Planner task for ${topic}.`).slice(0, 320);
+      const tasks = Array.isArray(record.tasks) ? record.tasks.length : 0;
+      return `${tasks || "Actionable"}-task plan for ${topic}.`.slice(0, 320);
     }
     case "sheets": {
       const sheets = Array.isArray(record.sheets) ? record.sheets : [];
@@ -458,10 +466,12 @@ export function artifactPopulationScore(
     case "code":
       return Array.isArray(record.files) ? record.files.length : 0;
     case "planner_task": {
-      const description =
-        typeof record.description === "string" ? record.description.trim() : "";
-      const subtasks = Array.isArray(record.subtasks) ? record.subtasks.length : 0;
-      return (description ? 2 : 0) + subtasks;
+      const tasks = Array.isArray(record.tasks) ? record.tasks : [];
+      return tasks.reduce((score, item) => {
+        const task = asRecord(item);
+        const checklist = Array.isArray(task.checklist) ? task.checklist.length : 0;
+        return score + 1 + checklist;
+      }, 0);
     }
     case "agent": {
       const text = asRecord(record.instructions).text;

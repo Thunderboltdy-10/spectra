@@ -454,7 +454,8 @@ export function operationEffectProgress(
         ? `${question}, answer option ${optionIndex + 1}`
         : (question ?? "the quiz");
   } else if (operation.input.blueprintKey === "planner_task") {
-    const step = numbered("subtasks", "task step");
+    const step =
+      numbered("tasks", "task") ?? numbered("subtasks", "task step");
     const labels: Record<string, string> = {
       dueAt: "the task deadline",
       startAt: "the task start time",
@@ -556,7 +557,7 @@ export function progressiveArtifactFrames(
                 : blueprintKey === "timetable"
                   ? "events"
                   : blueprintKey === "planner_task"
-                    ? "subtasks"
+                    ? "tasks"
                     : null;
   if (
     !listKey ||

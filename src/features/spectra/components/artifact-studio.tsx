@@ -219,6 +219,7 @@ import {
   StudioPresenceIndicator,
 } from "./studio-presence-layer";
 import { ContextSourceBoundary } from "./context-source-boundary";
+import { normalizePlanContent } from "../plan/model";
 import { ThreadConversation } from "./conversation-surface";
 import { SandboxedArtifactRuntime } from "./sandboxed-artifact-runtime";
 import {
@@ -835,8 +836,8 @@ function ReadonlyArtifactSnapshot({
   const questions =
     blueprintKey === "quiz" ? quizQuestions(snapshot.content) : [];
   const blocks = blueprintKey === "document" ? arrayOfRecords(body.blocks) : [];
-  const subtasks =
-    blueprintKey === "planner_task" ? arrayOfRecords(body.subtasks) : [];
+  const plan =
+    blueprintKey === "planner_task" ? normalizePlanContent(snapshot.content) : null;
   const slides =
     blueprintKey === "presentation" ? arrayOfRecords(body.slides) : [];
   const sheets = blueprintKey === "sheets" ? arrayOfRecords(body.sheets) : [];
@@ -949,31 +950,34 @@ function ReadonlyArtifactSnapshot({
             <div className="grid grid-cols-2 gap-4 text-[11px]">
               <div>
                 <span className="block text-[var(--text-tertiary)]">
-                  Status
+                  Tasks
                 </span>
-                <strong className="mt-1 block capitalize">
-                  {String(body.status ?? "Not set")}
+                <strong className="mt-1 block">
+                  {plan?.tasks.length ?? 0}
                 </strong>
               </div>
               <div>
                 <span className="block text-[var(--text-tertiary)]">
-                  Priority
+                  Complete
                 </span>
-                <strong className="mt-1 block capitalize">
-                  {String(body.priority ?? "Not set")}
+                <strong className="mt-1 block">
+                  {plan?.tasks.filter((task) => task.status === "done").length ?? 0}
                 </strong>
               </div>
             </div>
           </section>
-          {subtasks.map((task, index) => (
+          {plan?.tasks.slice(0, 30).map((task) => (
             <div
-              key={String(task.id ?? index)}
+              key={task.id}
               className="flex items-center gap-3 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-[12px]"
             >
               <span
-                className={`h-4 w-4 rounded-full border ${task.completed ? "border-[var(--success)] bg-[var(--success)]" : "border-[var(--border-default)]"}`}
+                className={`h-4 w-4 rounded-full border ${task.status === "done" ? "border-[var(--success)] bg-[var(--success)]" : "border-[var(--border-default)]"}`}
               />
-              <span>{String(task.title ?? task.text ?? "Untitled step")}</span>
+              <span>{task.title}</span>
+              <span className="ml-auto capitalize text-[var(--text-tertiary)]">
+                {task.priority}
+              </span>
             </div>
           ))}
         </div>
@@ -1739,8 +1743,8 @@ function humanFieldLabel(path: string[]) {
     return `Question ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
   if (clean[0] === "blocks" && /^\d+$/.test(clean[1] ?? ""))
     return `Document block ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
-  if (clean[0] === "subtasks" && /^\d+$/.test(clean[1] ?? ""))
-    return `Subtask ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
+  if (clean[0] === "tasks" && /^\d+$/.test(clean[1] ?? ""))
+    return `Task ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
   return clean.map(humanizeKey).join(" · ") || "Artifact";
 }
 
@@ -4743,7 +4747,7 @@ function ArtifactStudioEditor({
       if (artifact.blueprintKey === "planner_task") {
         setContent((current: unknown) => ({
           ...record(current),
-          taskTitle: next.title,
+          title: next.title,
         }));
       }
     }

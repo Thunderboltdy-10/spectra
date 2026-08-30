@@ -768,11 +768,21 @@ function planTask(partial: Partial<PlanTask> & { id: string }): PlanTask {
     description: "",
     dependencyIds: [],
     status: "todo",
+    priority: "none",
+    labels: [],
     assigneeIds: [],
     referenceIds: [],
     sourceRefs: [],
     calendarBlockIds: [],
     checklist: [],
+    recurrence: {
+      frequency: "none",
+      interval: 1,
+      weekdays: [],
+      exceptions: [],
+    },
+    reminders: [],
+    completedOccurrences: [],
     order: 0,
     ...partial,
   };
@@ -783,6 +793,7 @@ function demoPlan(): PlanContent {
     version: 4,
     title: "Revision",
     description: "",
+    timezone: "UTC",
     sections: [{ id: "sec-1", title: "Week one", order: 0 }],
     milestones: [
       {
@@ -979,6 +990,12 @@ describe("§11H plan import and export", () => {
     const partial = planFromDelimited(plan, "title,status\n,doing\nGood one,x");
     expect(partial.imported).toBe(1);
     expect(partial.warnings[0]).toMatch(/no title/i);
+    const ambiguous = planFromDelimited(
+      { ...plan, tasks: [] },
+      "title,due date\nAmbiguous,09/04/2026",
+    );
+    expect(ambiguous.warnings[0]).toMatch(/date Spectra could not read/i);
+    expect(ambiguous.plan.tasks[0]?.dueAt).toBeUndefined();
   });
 
   it("exports ICS to-dos with the official-deadline distinction preserved", () => {

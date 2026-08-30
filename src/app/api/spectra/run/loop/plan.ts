@@ -37,6 +37,7 @@ import {
   authorityRequiresConfirmation,
 } from "@/features/spectra/ai/authority-execution";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
+import { normalizePlanContent } from "@/features/spectra/plan/model";
 import { resolveLibraryDestinationId } from "@/features/spectra/ai/library-operation-context";
 import {
   SPECTRA_FALLBACK_PROVIDERS,
@@ -135,7 +136,7 @@ For the first exchange, provide a specific conversationTitle of 2 to 4 words and
 
 Use operation ids only when the exact id is present in owned context. Never invent, combine, prefix, suffix, or transform an id. Never use an operation key as a database id. A flashcard deck is ONE artifact with content.cards[]. A quiz is ONE artifact with content.questions[]. Memory cues belong in each flashcard's hint. Multiple-choice correctAnswer must exactly match one option. Planner tasks use one planner_task artifact. Threads are first-class conversations and must never be created as artifacts.
 When a later operation must reference an artifact created earlier in the same plan, use the dependency id @created:<zero-based operation index> (for example @created:0). It may reference only a prior artifact.create operation. Use this for artifact.link and other declared dependency fields; Spectra resolves it to the committed owned id during execution. Never invent any other temporary id.
-For planner_task creation or updates, encode every requested date, status, priority, estimate, reminder, and subtask in operation.input.content—not only in the title, summary, or finalResponse. If the user requests N subtasks, content.subtasks must contain exactly N titled items. Never claim a task is due, scheduled, or subdivided unless the corresponding canonical content fields are present.
+For planner_task creation or updates, encode every requested date, status, priority, estimate, reminder, and subtask in operation.input.content—not only in the title, summary, or finalResponse. Planner content is Plan v4: tasks live in content.tasks, and nested subtasks use parentTaskId. If the user requests N subtasks, content.tasks must contain exactly N titled children of the requested parent task. Never claim a task is due, scheduled, or subdivided unless the corresponding canonical fields are present.
 
 artifact.create already places a new artifact according to placement; never add a separate workspaceItem.add for that newly generated artifact. Set pinned=true when the new artifact should be important, and exclusivePin=true only when the user explicitly says it should be the only pinned item. For existing items use workspaceItem.setPinned. Never claim a pin changed unless one of those fields or operations performs it. For artifact.update include blueprintKey. Prefer contentPatch for narrow edits to an existing artifact instead of echoing its entire content. contentPatch.changes uses JSON Pointer paths into the canonical content (for example /questions/0/explanation or /cards/2/hint); indices must refer to existing array entries. For documents, prefer stable block paths \`/blocks/id:<blockId>/text\` (or the numeric index shown on each block) and edit only the requested section's body blocks — never overwrite earlier headings when rewriting a later section. For sheets, prefer cell paths like \`/sheets/0/cells/D1\` (or a partial \`/sheets/0/cells\` map of only the new addresses) when adding a column or formulas — never replace the whole workbook or wipe unrelated cells. For whiteboards, recolor with numeric node paths such as \`/nodes/0/style/fill\` (use the index shown on each node in context); set fill/stroke/color under style, never replace the whole board for a single node tint. Each change object contains only \`path\` and \`value\`; do not emit JSON Patch's \`op\` field. Use complete content only for broad rewrites.
 artifact.archive is destructive to the active workspace experience and always pauses for confirmation. Use it only when the user explicitly asks to archive the exact owned artifact; never substitute workspaceItem.hide or artifact.update.
@@ -529,7 +530,8 @@ export function parseStreamedPlanText(
                   ? "flashcard_deck"
                   : Array.isArray(content.questions)
                     ? "quiz"
-                    : Array.isArray(content.subtasks) ||
+                    : Array.isArray(content.tasks) ||
+                        Array.isArray(content.subtasks) ||
                         "status" in content ||
                         "dueAt" in content
                       ? "planner_task"
@@ -1292,7 +1294,8 @@ export function fastConversationalPlan(
           },
           {
             title: "Planner Task",
-            description: "A single task with details, due date, and subtasks.",
+            description:
+              "A plan with tasks, due dates, priorities, and nested subtasks.",
           },
         ],
       },
@@ -1581,32 +1584,24 @@ export function assertRequestedArtifactContent(
       (plannerOperation.input as { content: unknown }).content =
         reconcileExplicitPlannerRequirements(rawContent, prompt);
     }
-    const content =
-      plannerOperation.input.content &&
-      typeof plannerOperation.input.content === "object" &&
-      !Array.isArray(plannerOperation.input.content)
-        ? (plannerOperation.input.content as Record<string, unknown>)
-        : {};
+    const content = normalizePlanContent(plannerOperation.input.content);
+    const root = content.tasks[0];
     const requestedCount = explicitPlannerSubtaskCount(prompt);
-    const subtasks = Array.isArray(content.subtasks) ? content.subtasks : [];
-    const titledSubtasks = subtasks.filter(
-      (item) =>
-        item &&
-        typeof item === "object" &&
-        typeof (item as { title?: unknown }).title === "string" &&
-        String((item as { title: string }).title).trim(),
-    );
+    const subtasks = root
+      ? content.tasks.filter((task) => task.parentTaskId === root.id)
+      : [];
+    const titledSubtasks = subtasks.filter((task) => task.title.trim());
     if (
       requestedCount !== undefined &&
-      (subtasks.length < requestedCount ||
-        titledSubtasks.length < requestedCount)
+      (subtasks.length !== requestedCount ||
+        titledSubtasks.length !== requestedCount)
     )
       throw new Error(
-        "The generated planner task omitted requested subtask titles.",
+        "The generated planner task did not contain exactly the requested titled subtasks.",
       );
     if (
       /\bdue(?:\s+date)?(?:\s+to)?\s+tomorrow\b/i.test(prompt) &&
-      typeof content.dueAt !== "number"
+      typeof root?.dueAt !== "number"
     )
       throw new Error(
         "The generated planner task omitted its requested due date.",
@@ -1848,9 +1843,13 @@ export function tomorrowDueAt(prompt: string, existing?: unknown) {
   return tomorrow.getTime();
 }
 
-export function dueAtWithExplicitTime(prompt: string, existing?: unknown) {
+export function dueAtWithExplicitTime(
+  prompt: string,
+  existing?: unknown,
+): number | undefined {
   const requested = explicitPlannerDueTime(prompt);
-  if (!requested || typeof existing !== "number") return existing;
+  if (typeof existing !== "number") return undefined;
+  if (!requested) return existing;
   const date = new Date(existing);
   date.setHours(requested.hours, requested.minutes, 0, 0);
   return date.getTime();
@@ -1860,10 +1859,8 @@ export function reconcileExplicitPlannerRequirements(
   value: unknown,
   prompt: string,
 ) {
-  const content = normalizeArtifactContent("planner_task", value) as Record<
-    string,
-    unknown
-  >;
+  let content = normalizePlanContent(value);
+  const root = content.tasks[0];
   const requestedCount = explicitPlannerSubtaskCount(prompt);
   const namedMarker = /\bsubtasks?\s+(?:named|called|titled)\b/i.exec(prompt);
   if (namedMarker && requestedCount && Number.isFinite(requestedCount)) {
@@ -1874,41 +1871,76 @@ export function reconcileExplicitPlannerRequirements(
       .map((match) => match[1]?.trim())
       .filter((title): title is string => Boolean(title))
       .slice(0, requestedCount);
-    if (requestedTitles.length === requestedCount) {
-      const existing = Array.isArray(content.subtasks) ? content.subtasks : [];
-      content.subtasks = requestedTitles.map((title, index) => {
-        const current =
-          existing[index] &&
-          typeof existing[index] === "object" &&
-          !Array.isArray(existing[index])
-            ? (existing[index] as Record<string, unknown>)
-            : {};
+    if (root && requestedTitles.length === requestedCount) {
+      const existing = content.tasks.filter(
+        (task) => task.parentTaskId === root.id,
+      );
+      const replaced = new Set(existing.map((task) => task.id));
+      const children = requestedTitles.map((title, index) => {
+        const current = existing[index];
         return {
-          ...current,
-          id:
-            typeof current.id === "string" && current.id.trim()
-              ? current.id
-              : `subtask-${index + 1}`,
+          ...(current ?? {
+            id: `subtask-${index + 1}`,
+            description: "",
+            dependencyIds: [],
+            status: "todo" as const,
+            priority: "none" as const,
+            labels: [],
+            assigneeIds: [],
+            referenceIds: [],
+            sourceRefs: [],
+            calendarBlockIds: [],
+            checklist: [],
+            recurrence: {
+              frequency: "none" as const,
+              interval: 1,
+              weekdays: [],
+              exceptions: [],
+            },
+            reminders: [],
+            completedOccurrences: [],
+            order: root.order + index + 1,
+          }),
           title,
-          done: typeof current.done === "boolean" ? current.done : false,
+          parentTaskId: root.id,
         };
       });
+      content = {
+        ...content,
+        tasks: [
+          ...content.tasks.filter((task) => !replaced.has(task.id)),
+          ...children,
+        ],
+      };
     }
   }
-  if (/\bdue(?:\s+date)?(?:\s+to)?\s+tomorrow\b/i.test(prompt)) {
+  if (root && /\bdue(?:\s+date)?(?:\s+to)?\s+tomorrow\b/i.test(prompt)) {
     // Relative dates are an execution constraint, not prose. Resolve them in
     // Spectra's local runtime and preserve an explicit/user-requested time so
     // a correct model value is never flattened to the old noon placeholder.
-    content.dueAt = tomorrowDueAt(prompt, content.dueAt);
+    const dueAt = tomorrowDueAt(prompt, root.dueAt);
+    content = {
+      ...content,
+      tasks: content.tasks.map((task) =>
+        task.id === root.id ? { ...task, dueAt } : task,
+      ),
+    };
   } else if (
+    root &&
     explicitPlannerDueTime(prompt) &&
-    typeof content.dueAt === "number"
+    typeof root.dueAt === "number"
   ) {
     // Epochs authored by a remote provider are frequently UTC-oriented while
     // the student's request and Planner Studio are local-time interactions.
     // Reapply the explicit clock value in the runtime's local zone before the
     // canonical write so “4 PM” cannot silently become 6 PM in Madrid.
-    content.dueAt = dueAtWithExplicitTime(prompt, content.dueAt);
+    const dueAt = dueAtWithExplicitTime(prompt, root.dueAt);
+    content = {
+      ...content,
+      tasks: content.tasks.map((task) =>
+        task.id === root.id ? { ...task, dueAt } : task,
+      ),
+    };
   }
   return content;
 }
@@ -2099,12 +2131,13 @@ export function fastFocusedPlannerPlan(
   )
     return null;
   if (!plannerFieldMutation) return null;
-  const current =
-    focusedArtifact.content &&
-    typeof focusedArtifact.content === "object" &&
-    !Array.isArray(focusedArtifact.content)
-      ? (structuredClone(focusedArtifact.content) as Record<string, unknown>)
-      : {};
+  const current = normalizePlanContent(
+    focusedArtifact.content && typeof focusedArtifact.content === "object"
+      ? structuredClone(focusedArtifact.content)
+      : {},
+  );
+  const root = current.tasks[0];
+  if (!root) return null;
   const titleTail =
     prompt.match(/(?:exact\s+titles?|titles?|named)\s*:\s*([^\n]+)$/i)?.[1] ??
     prompt.match(/subtasks?\s+named\s+([^\n]+)$/i)?.[1];
@@ -2128,22 +2161,54 @@ export function fastFocusedPlannerPlan(
         .filter(Boolean)
     : [];
   if (requestedCount > 0 && titles.length !== requestedCount) return null;
+  const existingChildren = current.tasks.filter(
+    (task) => task.parentTaskId === root.id,
+  );
+  const replaced = new Set(existingChildren.map((task) => task.id));
+  const children = titles.map((title, index) => ({
+    ...(existingChildren[index] ?? {
+      id: `task-${Date.now()}-${index + 1}`,
+      description: "",
+      dependencyIds: [],
+      status: "todo" as const,
+      priority: "none" as const,
+      labels: [],
+      assigneeIds: [],
+      referenceIds: [],
+      sourceRefs: [],
+      calendarBlockIds: [],
+      checklist: [],
+      reminders: [],
+      completedOccurrences: [],
+      recurrence: {
+        frequency: "none" as const,
+        interval: 1,
+        weekdays: [],
+        exceptions: [],
+      },
+      order: root.order + index + 1,
+      ...(root.sectionId ? { sectionId: root.sectionId } : {}),
+    }),
+    title,
+    parentTaskId: root.id,
+  }));
+  const dueAt = /\bdue(?:\s+date)?(?:\s+to)?\s+tomorrow\b/i.test(prompt)
+    ? tomorrowDueAt(prompt, root.dueAt)
+    : explicitPlannerDueTime(prompt) && typeof root.dueAt === "number"
+      ? dueAtWithExplicitTime(prompt, root.dueAt)
+      : root.dueAt;
   const content = {
     ...current,
-    ...(titles.length
-      ? {
-          subtasks: titles.map((title, index) => ({
-            id: `task-${Date.now()}-${index + 1}`,
-            title,
-            done: false,
-          })),
-        }
-      : {}),
-    ...(/\bdue(?:\s+date)?(?:\s+to)?\s+tomorrow\b/i.test(prompt)
-      ? { dueAt: tomorrowDueAt(prompt, current.dueAt) }
-      : explicitPlannerDueTime(prompt) && typeof current.dueAt === "number"
-        ? { dueAt: dueAtWithExplicitTime(prompt, current.dueAt) }
-        : {}),
+    tasks: [
+      ...current.tasks
+        .filter((task) => !titles.length || !replaced.has(task.id))
+        .map((task) =>
+          task.id === root.id
+            ? { ...task, ...(dueAt === undefined ? {} : { dueAt }) }
+            : task,
+        ),
+      ...children,
+    ],
   };
   return parseSpectraPlan({
     decision: "operate",
@@ -4540,7 +4605,7 @@ export async function callModel(
       document: { field: "blocks", itemLabel: "block" },
       flashcard_deck: { field: "cards", itemLabel: "card" },
       quiz: { field: "questions", itemLabel: "question" },
-      planner_task: { field: "subtasks", itemLabel: "step" },
+      planner_task: { field: "tasks", itemLabel: "task" },
       agent: { field: "skills", itemLabel: "skill" },
       timetable: { field: "events", itemLabel: "event" },
       presentation: { field: "slides", itemLabel: "slide" },

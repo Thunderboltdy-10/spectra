@@ -39,6 +39,13 @@ import { isArtifactTypeKey } from "../artifacts/registry";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { SelectField } from "@/components/ui/select";
+import {
+  normalizePlanContent,
+  type PlanContent,
+  type PlanPriority,
+  type PlanStatus,
+  type PlanTask,
+} from "../plan/model";
 
 type EditableBlueprintKey = ArtifactTypeKey;
 type SheetMode = "create" | "edit";
@@ -80,25 +87,6 @@ type QuizQuestion = {
   timeLimitSeconds?: number;
   sourceRefs?: string[];
   feedback?: string;
-};
-type PlannerSubtask = { id: string; title: string; done: boolean };
-type PlannerAttachment = { id: string; name: string; meta?: string; url?: string };
-type PlannerTaskContent = {
-  description?: string;
-  dueAt?: number;
-  startAt?: number;
-  endAt?: number;
-  allDay?: boolean;
-  status?: "todo" | "doing" | "done";
-  priority?: "low" | "medium" | "high";
-  subtasks?: PlannerSubtask[];
-  attachments?: PlannerAttachment[];
-  linkedArtifactIds?: string[];
-  linkedThreadIds?: string[];
-  reminders?: string[];
-  estimateMinutes?: number;
-  progressNote?: string;
-  sourceRefs?: string[];
 };
 type ThreadReferenceContent = { threadId?: string | null; summary?: string; linkedArtifactIds?: string[] };
 export const blueprintChoices: Array<{ key: EditableBlueprintKey; label: string; icon: LucideIcon; description: string }> = [
@@ -147,19 +135,8 @@ function dateInputValue(value?: number) {
   return new Date(value).toISOString().slice(0, 10);
 }
 
-function dateTimeInputValue(value?: number) {
-  if (!value) return "";
-  const date = new Date(value);
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(value - offset).toISOString().slice(0, 16);
-}
-
 function dateValue(value: string) {
   return value ? new Date(`${value}T12:00:00`).getTime() : undefined;
-}
-
-function dateTimeValue(value: string) {
-  return value ? new Date(value).getTime() : undefined;
 }
 
 function documentText(content: unknown) {
@@ -220,38 +197,9 @@ function quizQuestions(content: unknown): QuizQuestion[] {
   return questions.length > 0 ? questions : [{ id: "question-1", prompt: "", type: "multiple_choice", options: ["", "", "", ""], correctAnswer: "", explanation: "", difficulty: "medium", points: 1, timeLimitSeconds: 90 }];
 }
 
-type PlannerTask = Required<Pick<PlannerTaskContent, "status" | "priority" | "allDay" | "subtasks" | "attachments" | "linkedArtifactIds" | "linkedThreadIds" | "reminders" | "sourceRefs">> & PlannerTaskContent;
-
-function plannerTask(content: unknown): PlannerTask {
-  const task = record(content);
-  const status = task.status === "doing" || task.status === "done" ? task.status : "todo";
-  const priority = task.priority === "low" || task.priority === "high" ? task.priority : "medium";
-  return {
-    description: typeof task.description === "string" ? task.description : "",
-    dueAt: typeof task.dueAt === "number" ? task.dueAt : undefined,
-    startAt: typeof task.startAt === "number" ? task.startAt : undefined,
-    endAt: typeof task.endAt === "number" ? task.endAt : undefined,
-    allDay: task.allDay === true,
-    status,
-    priority,
-    subtasks: arrayOfRecords(task.subtasks).map((subtask, index) => ({
-      id: typeof subtask.id === "string" ? subtask.id : `subtask-${index + 1}`,
-      title: typeof subtask.title === "string" ? subtask.title : "",
-      done: subtask.done === true,
-    })),
-    attachments: arrayOfRecords(task.attachments).map((attachment, index) => ({
-      id: typeof attachment.id === "string" ? attachment.id : `attachment-${index + 1}`,
-      name: typeof attachment.name === "string" ? attachment.name : "",
-      meta: typeof attachment.meta === "string" ? attachment.meta : "",
-      url: typeof attachment.url === "string" ? attachment.url : undefined,
-    })),
-    linkedArtifactIds: Array.isArray(task.linkedArtifactIds) ? task.linkedArtifactIds.filter((value): value is string => typeof value === "string") : [],
-    linkedThreadIds: Array.isArray(task.linkedThreadIds) ? task.linkedThreadIds.filter((value): value is string => typeof value === "string") : [],
-    reminders: Array.isArray(task.reminders) ? task.reminders.filter((value): value is string => typeof value === "string") : [],
-    estimateMinutes: typeof task.estimateMinutes === "number" ? task.estimateMinutes : undefined,
-    progressNote: typeof task.progressNote === "string" ? task.progressNote : "",
-    sourceRefs: Array.isArray(task.sourceRefs) ? task.sourceRefs.filter((value): value is string => typeof value === "string") : [],
-  };
+function plannerTask(content: unknown): PlanContent {
+  const plan = normalizePlanContent(content);
+  return plan.tasks.length ? plan : { ...plan, tasks: [newPlanTask()] };
 }
 
 function threadReference(content: unknown): ThreadReferenceContent {
@@ -267,7 +215,10 @@ function metricPreview(artifact: SpectraArtifact | null, blueprintKey: EditableB
   if (blueprintKey === "document") return `${documentText(draftContent || artifact?.content).split(/\s+/).filter(Boolean).length} words`;
   if (blueprintKey === "flashcard_deck") return `${deckCards(draftContent || artifact?.content).length} cards`;
   if (blueprintKey === "quiz") return `${quizQuestions(draftContent || artifact?.content).length} questions`;
-  if (blueprintKey === "planner_task") return plannerTask(draftContent || artifact?.content).status;
+  if (blueprintKey === "planner_task") {
+    const plan = plannerTask(draftContent || artifact?.content);
+    return `${plan.tasks.length} task${plan.tasks.length === 1 ? "" : "s"}`;
+  }
   return "reference";
 }
 
@@ -305,7 +256,7 @@ export function ArtifactBlueprintSheet({
     if (blueprintKey === "document") return documentContent(documentDraft, artifact?.content);
     if (blueprintKey === "flashcard_deck") return { ...record(artifact?.content), cards, settings: record(artifact?.content).settings ?? { shuffle: true, revealMode: "click" } };
     if (blueprintKey === "quiz") return { ...record(artifact?.content), questions: questions.map((question) => ({ ...question, type: (question.options?.length ?? 0) > 0 ? "multiple_choice" : "short_answer" })), settings: record(artifact?.content).settings ?? { showAnswersImmediately: true, timed: false } };
-    if (blueprintKey === "planner_task") return { ...record(artifact?.content), ...task };
+    if (blueprintKey === "planner_task") return task;
     return { ...record(artifact?.content), ...thread, summary };
   }, [artifact?.content, blueprintKey, cards, documentDraft, questions, summary, task, thread]);
 
@@ -327,7 +278,12 @@ export function ArtifactBlueprintSheet({
 
   async function submit() {
     const trimmedTitle = title.trim();
-    if (!trimmedTitle) return;
+    if (
+      !trimmedTitle ||
+      (blueprintKey === "planner_task" &&
+        (!task.tasks.length || task.tasks.some((item) => !item.title.trim())))
+    )
+      return;
     const tags = tagDraft.split(",").map((tag) => tag.trim()).filter(Boolean);
     await onSubmit({
       blueprintKey,
@@ -431,7 +387,7 @@ export function ArtifactBlueprintSheet({
           </div>
           <div className="ml-auto flex items-center gap-2">
             <button type="button" className={secondaryButtonClass()} onClick={onClose}>Cancel</button>
-            <button type="button" className={primaryButtonClass()} disabled={!title.trim() || busy} onClick={() => void submit()} aria-live="polite">
+            <button type="button" className={primaryButtonClass()} disabled={!title.trim() || busy || (blueprintKey === "planner_task" && (!task.tasks.length || task.tasks.some((item) => !item.title.trim())))} onClick={() => void submit()} aria-live="polite">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "create" ? <Plus className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
               {mode === "create" ? "Create" : "Save"}
             </button>
@@ -726,77 +682,91 @@ function QuizEditor({ questions, setQuestions }: { questions: QuizQuestion[]; se
   );
 }
 
-function TaskEditor({ task, setTask }: { task: PlannerTask; setTask: (task: PlannerTask) => void }) {
-  const [subtaskDraft, setSubtaskDraft] = useState("");
-  const [linkName, setLinkName] = useState("");
-  const [linkUrl, setLinkUrl] = useState("");
-  const [reminderDraft, setReminderDraft] = useState("");
-  const completed = task.subtasks.filter((subtask) => subtask.done).length;
-  const progress = task.subtasks.length ? Math.round(completed / task.subtasks.length * 100) : task.status === "done" ? 100 : task.status === "doing" ? 50 : 0;
+function TaskEditor({ task: plan, setTask }: { task: PlanContent; setTask: (task: PlanContent) => void }) {
+  const [checklistDraft, setChecklistDraft] = useState("");
+  const first = plan.tasks[0] ?? newPlanTask();
+  const completed = first.checklist.filter((item) => item.done).length;
+  const progress = first.checklist.length
+    ? Math.round((completed / first.checklist.length) * 100)
+    : first.status === "done"
+      ? 100
+      : first.status === "doing"
+        ? 50
+        : 0;
 
-  function addSubtask() {
-    const title = subtaskDraft.trim();
+  function updateFirst(patch: Partial<PlanTask>) {
+    setTask({
+      ...plan,
+      tasks: plan.tasks.length
+        ? plan.tasks.map((candidate, index) =>
+            index === 0 ? { ...candidate, ...patch } : candidate,
+          )
+        : [{ ...first, ...patch }],
+    });
+  }
+
+  function addChecklistItem() {
+    const title = checklistDraft.trim();
     if (!title) return;
-    setTask({ ...task, subtasks: [...task.subtasks, { id: id("subtask"), title, done: false }] });
-    setSubtaskDraft("");
-  }
-
-  function toggleSubtask(subtaskId: string) {
-    const nextSubtasks = task.subtasks.map((subtask) => subtask.id === subtaskId ? { ...subtask, done: !subtask.done } : subtask);
-    const nextCompleted = nextSubtasks.filter((subtask) => subtask.done).length;
-    const nextStatus = nextSubtasks.length > 0 && nextCompleted === nextSubtasks.length ? "done" : nextCompleted > 0 || task.status === "doing" || task.status === "done" ? "doing" : task.status;
-    setTask({ ...task, subtasks: nextSubtasks, status: nextStatus });
-  }
-
-  function addLink() {
-    const url = linkUrl.trim();
-    if (!url) return;
-    const normalizedUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-    setTask({ ...task, attachments: [...task.attachments, { id: id("link"), name: linkName.trim() || url, url: normalizedUrl, meta: normalizedUrl }] });
-    setLinkName("");
-    setLinkUrl("");
+    updateFirst({
+      checklist: [
+        ...first.checklist,
+        { id: id("check"), title, done: false },
+      ],
+    });
+    setChecklistDraft("");
   }
 
   return (
     <section className="spectra-sheet-task space-y-5 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-5">
       <div className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
-        <div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#d47a16_10%,var(--bg-elevated))] text-[#d47a16]"><CalendarCheck2 className="h-4 w-4" /></div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2 text-[11px]"><span className="font-semibold text-[var(--text-primary)]">Task progress</span><span className="text-[var(--text-tertiary)]">{progress}%</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]" role="progressbar" aria-label="Task progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span className="block h-full rounded-full bg-[#d47a16] transition-[width] motion-reduce:transition-none" style={{ width: `${progress}%` }} /></div></div></div>
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#d47a16_10%,var(--bg-elevated))] text-[#d47a16]"><CalendarCheck2 className="h-4 w-4" /></div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2 text-[11px]"><span className="font-semibold text-[var(--text-primary)]">First task</span><span className="text-[var(--text-tertiary)]">{progress}%</span></div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]" role="progressbar" aria-label="Task progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span className="block h-full rounded-full bg-[#d47a16] transition-[width] motion-reduce:transition-none" style={{ width: `${progress}%` }} /></div>
+          </div>
+        </div>
       </div>
-      <Field label="Task description">
-        <LocalAutocompleteTextarea surface="description" value={task.description ?? ""} onValueChange={(description) => setTask({ ...task, description })} className="w-full" textareaClassName={textareaClass("min-h-[130px] text-[14px] leading-6")} placeholder="What needs to happen? Add context, notes, and a clear outcome." />
-      </Field>
+      <Field label="Task title"><input value={first.title} onChange={(event) => updateFirst({ title: event.target.value })} className={inputClass()} placeholder="What needs to happen?" /></Field>
+      <Field label="Task description"><LocalAutocompleteTextarea surface="description" value={first.description} onValueChange={(description) => updateFirst({ description })} className="w-full" textareaClassName={textareaClass("min-h-[120px] text-[14px] leading-6")} placeholder="Add context and a clear outcome." /></Field>
       <div className="grid gap-3 md:grid-cols-3">
-        <Segmented label="Status" value={task.status} options={["todo", "doing", "done"]} onChange={(value) => setTask({ ...task, status: value as "todo" | "doing" | "done" })} />
-        <Segmented label="Priority" value={task.priority} options={["low", "medium", "high"]} onChange={(value) => setTask({ ...task, priority: value as "low" | "medium" | "high" })} />
-        <Field label="Due date">
-          <input type="date" value={dateInputValue(task.dueAt)} onChange={(event) => setTask({ ...task, dueAt: dateValue(event.target.value) })} className={inputClass()} />
-        </Field>
+        <Segmented label="Status" value={first.status} options={["backlog", "todo", "doing", "blocked", "done"]} onChange={(value) => updateFirst({ status: value as PlanStatus })} />
+        <Segmented label="Priority" value={first.priority} options={["none", "low", "medium", "high", "urgent"]} onChange={(value) => updateFirst({ priority: value as PlanPriority })} />
+        <Field label="Due date"><input type="date" value={dateInputValue(first.dueAt)} onChange={(event) => updateFirst({ dueAt: dateValue(event.target.value) })} className={inputClass()} /></Field>
       </div>
-      <div className="grid gap-3 md:grid-cols-3">
-        <Field label="Starts"><input type="datetime-local" value={dateTimeInputValue(task.startAt)} onChange={(event) => setTask({ ...task, startAt: dateTimeValue(event.target.value) })} className={inputClass()} /></Field>
-        <Field label="Ends"><input type="datetime-local" value={dateTimeInputValue(task.endAt)} min={dateTimeInputValue(task.startAt)} onChange={(event) => setTask({ ...task, endAt: dateTimeValue(event.target.value) })} className={inputClass()} /></Field>
-        <Field label="Estimate (minutes)"><div className="relative"><Clock3 className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-[var(--text-tertiary)]" /><input type="number" min={1} max={100000} value={task.estimateMinutes ?? ""} onChange={(event) => setTask({ ...task, estimateMinutes: event.target.value ? Math.max(1, Number(event.target.value)) : undefined })} className={`${inputClass()} pl-9`} placeholder="90" /></div></Field>
-      </div>
-      <label className="inline-flex items-center gap-2 text-[12px] text-[var(--text-secondary)]"><input type="checkbox" checked={task.allDay} onChange={(event) => setTask({ ...task, allDay: event.target.checked })} />All-day task</label>
+      <Field label="Estimate (minutes)"><div className="relative"><Clock3 className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-[var(--text-tertiary)]" /><input type="number" min={1} max={100000} value={first.estimateMinutes ?? ""} onChange={(event) => updateFirst({ estimateMinutes: event.target.value ? Math.max(1, Number(event.target.value)) : undefined })} className={`${inputClass()} pl-9`} placeholder="90" /></div></Field>
       <section>
-        <div className="mb-2 flex items-center justify-between"><h3 className="text-[12px] font-semibold text-[var(--text-secondary)]">Subtasks <span className="font-normal text-[var(--text-tertiary)]">{completed}/{task.subtasks.length}</span></h3></div>
+        <div className="mb-2 flex items-center justify-between"><h3 className="text-[12px] font-semibold text-[var(--text-secondary)]">Checklist <span className="font-normal text-[var(--text-tertiary)]">{completed}/{first.checklist.length}</span></h3></div>
         <div className="overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
-          {task.subtasks.map((subtask) => <div key={subtask.id} className="flex items-center gap-2 border-b border-[var(--border-default)] px-3 py-2 last:border-b-0"><button type="button" className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${subtask.done ? "border-[var(--success)] bg-[var(--success)] text-white" : "border-[var(--border-default)] text-transparent hover:border-[var(--success)]"}`} onClick={() => toggleSubtask(subtask.id)} aria-label={subtask.done ? `Mark ${subtask.title} incomplete` : `Complete ${subtask.title}`}><Check className="h-3 w-3" /></button><input value={subtask.title} onChange={(event) => setTask({ ...task, subtasks: task.subtasks.map((item) => item.id === subtask.id ? { ...item, title: event.target.value } : item) })} className={`min-w-0 flex-1 bg-transparent text-[12px] outline-none ${subtask.done ? "text-[var(--text-tertiary)] line-through" : "text-[var(--text-primary)]"}`} aria-label="Subtask title" /><ToolbarButton label={`Delete ${subtask.title || "subtask"}`} icon={Trash2} danger onClick={() => setTask({ ...task, subtasks: task.subtasks.filter((item) => item.id !== subtask.id) })} /></div>)}
-          <div className="flex items-center gap-2 px-3 py-2"><Plus className="h-4 w-4 text-[var(--text-tertiary)]" /><input value={subtaskDraft} onChange={(event) => setSubtaskDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSubtask(); } }} className="min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="Add a subtask and press Enter" /><button type="button" onClick={addSubtask} disabled={!subtaskDraft.trim()} className="text-[11px] font-medium text-[var(--accent-cyan)] disabled:opacity-35">Add</button></div>
+          {first.checklist.map((item) => <div key={item.id} className="flex items-center gap-2 border-b border-[var(--border-default)] px-3 py-2 last:border-b-0"><button type="button" className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${item.done ? "border-[var(--success)] bg-[var(--success)] text-white" : "border-[var(--border-default)] text-transparent hover:border-[var(--success)]"}`} onClick={() => updateFirst({ checklist: first.checklist.map((candidate) => candidate.id === item.id ? { ...candidate, done: !candidate.done } : candidate) })} aria-label={item.done ? `Mark ${item.title} incomplete` : `Complete ${item.title}`}><Check className="h-3 w-3" /></button><input value={item.title} onChange={(event) => updateFirst({ checklist: first.checklist.map((candidate) => candidate.id === item.id ? { ...candidate, title: event.target.value } : candidate) })} className={`min-w-0 flex-1 bg-transparent text-[12px] outline-none ${item.done ? "text-[var(--text-tertiary)] line-through" : "text-[var(--text-primary)]"}`} aria-label="Checklist item title" /><ToolbarButton label={`Delete ${item.title || "checklist item"}`} icon={Trash2} danger onClick={() => updateFirst({ checklist: first.checklist.filter((candidate) => candidate.id !== item.id) })} /></div>)}
+          <div className="flex items-center gap-2 px-3 py-2"><Plus className="h-4 w-4 text-[var(--text-tertiary)]" /><input value={checklistDraft} onChange={(event) => setChecklistDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addChecklistItem(); } }} className="min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="Add a checklist item" /><button type="button" onClick={addChecklistItem} disabled={!checklistDraft.trim()} className="text-[11px] font-medium text-[var(--accent-cyan)] disabled:opacity-35">Add</button></div>
         </div>
       </section>
-      <Field label="Progress note"><LocalAutocompleteTextarea surface="plan_note" value={task.progressNote ?? ""} onValueChange={(progressNote) => setTask({ ...task, progressNote })} className="w-full" textareaClassName={textareaClass("min-h-[90px]")} placeholder="Capture the latest decision, blocker, or next step" /></Field>
-      <section>
-        <h3 className="mb-2 text-[12px] font-semibold text-[var(--text-secondary)]">Notes and links</h3>
-        {task.attachments.length > 0 ? <div className="mb-2 space-y-1.5">{task.attachments.map((attachment) => <div key={attachment.id} className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2"><Link2 className="h-3.5 w-3.5 text-[#d47a16]" /><a href={attachment.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-[11px] font-medium text-[var(--text-primary)] hover:text-[var(--accent-cyan)]">{attachment.name || attachment.url}</a><ToolbarButton label={`Remove ${attachment.name || "link"}`} icon={Trash2} danger onClick={() => setTask({ ...task, attachments: task.attachments.filter((item) => item.id !== attachment.id) })} /></div>)}</div> : null}
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,.8fr)_minmax(0,1.4fr)_auto]"><input value={linkName} onChange={(event) => setLinkName(event.target.value)} className={inputClass()} placeholder="Link label" /><input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addLink(); } }} className={inputClass()} inputMode="url" placeholder="https://…" /><button type="button" className={secondaryButtonClass()} disabled={!linkUrl.trim()} onClick={addLink}><Link2 className="h-3.5 w-3.5" />Add</button></div>
-      </section>
-      <section>
-        <h3 className="mb-2 text-[12px] font-semibold text-[var(--text-secondary)]">Reminders</h3>
-        <div className="flex flex-wrap gap-2">{task.reminders.map((reminder) => <button key={reminder} type="button" onClick={() => setTask({ ...task, reminders: task.reminders.filter((item) => item !== reminder) })} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[11px] text-[var(--text-secondary)]" title="Remove reminder"><Clock3 className="h-3 w-3" />{reminder}<X className="h-3 w-3" /></button>)}<div className="flex h-8 items-center gap-1 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2"><input value={reminderDraft} onChange={(event) => setReminderDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && reminderDraft.trim()) { event.preventDefault(); setTask({ ...task, reminders: [...task.reminders, reminderDraft.trim()] }); setReminderDraft(""); } }} className="w-28 bg-transparent text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="e.g. 1 day before" /><button type="button" onClick={() => { if (!reminderDraft.trim()) return; setTask({ ...task, reminders: [...task.reminders, reminderDraft.trim()] }); setReminderDraft(""); }} aria-label="Add reminder"><Plus className="h-3 w-3 text-[var(--text-tertiary)]" /></button></div></div>
-      </section>
+      <p className="text-[11px] leading-5 text-[var(--text-tertiary)]">Create the plan with one task here; sections, recurrence, reminders, saved views, and workload are available in the Plan studio.</p>
     </section>
   );
+}
+
+function newPlanTask(): PlanTask {
+  return {
+    id: "task-1",
+    title: "First task",
+    description: "",
+    dependencyIds: [],
+    status: "todo",
+    priority: "none",
+    labels: [],
+    assigneeIds: [],
+    referenceIds: [],
+    sourceRefs: [],
+    calendarBlockIds: [],
+    checklist: [],
+    recurrence: { frequency: "none", interval: 1, weekdays: [], exceptions: [] },
+    reminders: [],
+    completedOccurrences: [],
+    order: 0,
+  };
 }
 
 function questionIsComplete(question: QuizQuestion) {

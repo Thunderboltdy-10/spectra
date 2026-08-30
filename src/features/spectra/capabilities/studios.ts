@@ -89,13 +89,6 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   { type: "whiteboard", localId: "export-pdf", description: "Export a PDF." },
   { type: "whiteboard", localId: "export-package", description: "Export a portable board." },
 
-  { type: "planner_task", localId: "find", description: "Find tasks." },
-  { type: "planner_task", localId: "filters", description: "Filter the plan." },
-  { type: "planner_task", localId: "import", description: "Import tasks.", requires: "edit" },
-  { type: "planner_task", localId: "export-csv", description: "Export this plan as a spreadsheet." },
-  { type: "planner_task", localId: "export-ics", description: "Export this plan as calendar to-dos." },
-  { type: "planner_task", localId: "export-json", description: "Export the full plan." },
-
   { type: "timetable", localId: "today", description: "Return the calendar to today." },
   { type: "timetable", localId: "previous", description: "Show the previous calendar range." },
   { type: "timetable", localId: "next", description: "Show the next calendar range." },

@@ -127,6 +127,36 @@ describe("hollow create content detection", () => {
     ).toBe(false);
   });
 
+  it("requires real Plan v4 tasks for generated planner creates", () => {
+    expect(isHollowCreateContent("planner_task", {}, "create")).toBe(true);
+    expect(
+      isHollowCreateContent(
+        "planner_task",
+        {
+          version: 4,
+          description: "",
+          timezone: "UTC",
+          sections: [],
+          milestones: [],
+          tasks: [],
+          views: [],
+        },
+        "create",
+      ),
+    ).toBe(true);
+    expect(
+      isHollowCreateContent(
+        "planner_task",
+        { taskTitle: "Prepare revision notes", status: "todo" },
+        "create",
+      ),
+    ).toBe(false);
+    const plannerSchema = creationToolContentJsonSchema("planner_task") as {
+      properties?: { tasks?: { minItems?: number } };
+    };
+    expect(plannerSchema.properties?.tasks?.minItems).toBe(1);
+  });
+
   it("throws a quiet-retryable hollow failure", () => {
     expect(() =>
       assertCreateContentNotHollow(

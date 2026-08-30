@@ -60,33 +60,20 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
     },
   },
   planner_task: {
+    version: 4,
     description: "",
-    dueAt: null,
-    startAt: null,
-    endAt: null,
-    allDay: false,
-    status: "todo",
-    priority: "medium",
+    timezone: "UTC",
+    sections: [],
+    milestones: [],
+    tasks: [],
+    views: [
+      { id: "list", kind: "list", title: "List", system: true },
+      { id: "board", kind: "board", title: "Board", system: true },
+      { id: "timeline", kind: "timeline", title: "Timeline", system: true },
+      { id: "workload", kind: "workload", title: "Workload", system: true },
+    ],
     linkedArtifactIds: [],
     linkedThreadIds: [],
-    subtasks: [],
-    attachments: [],
-    reminders: [],
-    estimateMinutes: null,
-    progressNote: "",
-    sourceRefs: [],
-    // Required by the task schema: a plan without a timezone cannot place a
-    // deadline, and a task with no recurrence record cannot be told apart from
-    // one whose recurrence was cleared.
-    timezone: "UTC",
-    recurrence: {
-      frequency: "none",
-      interval: 1,
-      weekdays: [],
-      exceptions: [],
-    },
-    assignees: [],
-    watchers: [],
   },
   agent: {
     profile: {

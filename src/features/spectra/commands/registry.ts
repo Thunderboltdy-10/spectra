@@ -16,7 +16,7 @@ export const COMMAND_TABS: Record<WorkType, readonly string[]> = {
   presentation: ["Insert", "Design", "Arrange", "Animate", "Present"],
   quiz: ["General", "Questions", "Review"],
   flashcard_deck: ["General", "Cards", "Study"],
-  planner_task: ["General", "Plan"],
+  planner_task: ["General", "Plan", "Views"],
   code: ["General", "Run", "Files", "Notebook", "Results"],
   whiteboard: ["General", "Insert", "Arrange"],
   agent: ["General", "Configure", "Evaluate", "Release"],

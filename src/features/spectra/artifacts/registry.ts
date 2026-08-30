@@ -296,72 +296,77 @@ const regionAdapters: Record<
   },
   planner_task: (content) => {
     const value = record(content);
-    const scalarFields = [
-      "taskTitle",
+    const taskFields = [
+      "title",
       "description",
       "status",
       "priority",
+      "labels",
       "dueAt",
-      "startAt",
-      "endAt",
-      "allDay",
       "estimateMinutes",
-      "progressNote",
-      "timezone",
+      "sectionId",
+      "parentTaskId",
+      "milestoneId",
+      "dependencyIds",
       "recurrence",
-      "linkedArtifactIds",
-      "linkedThreadIds",
+      "referenceIds",
       "sourceRefs",
-      "personalOverlay",
     ];
     return [
-      ...scalarFields.map((field) =>
-        region(`task:${field}`, "task_field", field.replaceAll("At", " time"), [
-          field,
-        ]),
-      ),
-      ...rows(value.subtasks).flatMap((subtask, index) => {
-        const subtaskId = stringValue(subtask.id, `subtask-${index + 1}`);
+      region("plan:description", "plan_field", "Plan description", [
+        "description",
+      ]),
+      region("plan:timezone", "plan_field", "Plan timezone", ["timezone"]),
+      ...rows(value.tasks).flatMap((task, taskIndex) => {
+        const taskId = stringValue(task.id, `task-${taskIndex + 1}`);
         return [
-          region(
-            `task:subtask:${subtaskId}:title`,
-            "task_subtask_field",
-            `Subtask ${index + 1} title`,
-            ["subtasks", index, "title"],
+          ...taskFields.map((field) =>
+            region(
+              `plan:task:${taskId}:${field}`,
+              "task_field",
+              `Task ${taskIndex + 1} ${field.replaceAll("At", " time")}`,
+              ["tasks", taskIndex, field],
+              taskId,
+            ),
           ),
-          region(
-            `task:subtask:${subtaskId}:done`,
-            "task_subtask_field",
-            `Subtask ${index + 1} completion`,
-            ["subtasks", index, "done"],
+          ...rows(task.checklist).flatMap((item, itemIndex) => {
+            const itemId = stringValue(item.id, `check-${itemIndex + 1}`);
+            return [
+              region(
+                `plan:task:${taskId}:checklist:${itemId}:title`,
+                "task_checklist_field",
+                `Checklist item ${itemIndex + 1} title`,
+                ["tasks", taskIndex, "checklist", itemIndex, "title"],
+                taskId,
+              ),
+              region(
+                `plan:task:${taskId}:checklist:${itemId}:done`,
+                "task_checklist_field",
+                `Checklist item ${itemIndex + 1} completion`,
+                ["tasks", taskIndex, "checklist", itemIndex, "done"],
+                taskId,
+              ),
+            ];
+          }),
+          ...rows(task.reminders).map((reminder, reminderIndex) =>
+            region(
+              `plan:task:${taskId}:reminder:${stringValue(reminder.id, `reminder-${reminderIndex + 1}`)}`,
+              "task_reminder",
+              `Task ${taskIndex + 1} reminder ${reminderIndex + 1}`,
+              ["tasks", taskIndex, "reminders", reminderIndex],
+              taskId,
+            ),
           ),
         ];
       }),
-      ...rows(value.reminders).map((reminder, index) =>
+      ...rows(value.views).map((view, index) =>
         region(
-          `task:reminder:${stringValue(reminder.id, `reminder-${index + 1}`)}`,
-          "task_reminder",
-          `Reminder ${index + 1}`,
-          ["reminders", index],
+          `plan:view:${stringValue(view.id, `view-${index + 1}`)}`,
+          "plan_saved_view",
+          stringValue(view.title, `View ${index + 1}`),
+          ["views", index],
         ),
       ),
-      ...rows(value.assignees).map((person, index) =>
-        region(
-          `task:assignee:${stringValue(person.accountId, `assignee-${index + 1}`)}`,
-          "task_person",
-          `Assignee ${stringValue(person.name, String(index + 1))}`,
-          ["assignees", index],
-        ),
-      ),
-      ...rows(value.watchers).map((person, index) =>
-        region(
-          `task:watcher:${stringValue(person.accountId, `watcher-${index + 1}`)}`,
-          "task_person",
-          `Watcher ${stringValue(person.name, String(index + 1))}`,
-          ["watchers", index],
-        ),
-      ),
-      region("task:source", "task_source", "Source authority", ["source"]),
     ];
   },
   agent: (content) => {
@@ -1092,12 +1097,20 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
     "validate_formative",
   ],
   planner_task: [
-    "inspect_task",
+    "inspect_plan",
     "create_task",
-    "triage",
+    "delete_task",
+    "create_section",
     "update_field",
-    "decompose",
+    "update_status",
+    "set_due",
     "estimate",
+    "set_priority",
+    "set_labels",
+    "set_parent",
+    "move_to_section",
+    "set_milestone",
+    "set_dependencies",
     "add_subtask",
     "update_subtask",
     "set_reminder",
@@ -1105,6 +1118,13 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
     "assign",
     "link_artifact",
     "schedule",
+    "save_view",
+    "rename_view",
+    "delete_view",
+    "bulk_update",
+    "import_tasks",
+    "export",
+    "read_workload",
     "reconcile_source",
     "detach_source",
     "validate",
@@ -1318,8 +1338,10 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
             ? 4
             : typeKey === "flashcard_deck"
               ? 4
-              : typeKey === "quiz" || typeKey === "planner_task"
+              : typeKey === "quiz"
                 ? 3
+              : typeKey === "planner_task"
+                ? 4
                 : typeKey === "code"
                   ? CODE_CONTENT_SCHEMA_VERSION
                   : 1,

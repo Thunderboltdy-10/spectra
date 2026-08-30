@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { PublishedCodeRuntime } from "../components/published-code-runtime";
 import { sheetCellEntries } from "../../../../shared/sheet-cells";
+import { normalizePlanContent } from "../plan/model";
 
 type PublicArtifact = {
   artifactId: string;
@@ -131,7 +132,10 @@ function ArtifactContent({
   const files = rows(content.files);
   const events = rows(content.events);
   const nodes = rows(content.nodes);
-  const subtasks = rows(content.subtasks);
+  const plan =
+    artifact.blueprintKey === "planner_task"
+      ? normalizePlanContent(content)
+      : null;
 
   return (
     <article className="mx-auto w-full max-w-[920px] rounded-[16px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_18px_70px_rgba(37,31,24,0.08)]">
@@ -234,31 +238,24 @@ function ArtifactContent({
         {artifact.blueprintKey === "planner_task" ? (
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-3">
-              {["status", "priority", "dueAt"].map((field) => (
-                <div
-                  key={field}
-                  className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
-                >
-                  <span className="text-micro capitalize text-[var(--text-tertiary)]">
-                    {field.replace("At", "")}
-                  </span>
-                  <strong className="mt-1 block text-[13px] capitalize">
-                    {field === "dueAt" && typeof content[field] === "number"
-                      ? formatUpdated(content[field] as number)
-                      : String(content[field] ?? "Not set")}
-                  </strong>
-                </div>
-              ))}
+              <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"><span className="text-micro text-[var(--text-tertiary)]">Tasks</span><strong className="mt-1 block text-[13px]">{plan?.tasks.length ?? 0}</strong></div>
+              <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"><span className="text-micro text-[var(--text-tertiary)]">Complete</span><strong className="mt-1 block text-[13px]">{plan?.tasks.filter((task) => task.status === "done").length ?? 0}</strong></div>
+              <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"><span className="text-micro text-[var(--text-tertiary)]">Timezone</span><strong className="mt-1 block text-[13px]">{plan?.timezone ?? "UTC"}</strong></div>
             </div>
-            {subtasks.map((task, index) => (
+            {plan?.tasks.map((task) => (
               <div
-                key={String(task.id ?? index)}
+                key={task.id}
                 className="flex items-center gap-3 rounded-[9px] border border-[var(--border-subtle)] px-4 py-3 text-[12px]"
               >
                 <span
-                  className={`h-4 w-4 rounded-full border ${task.completed ? "border-[var(--success)] bg-[var(--success)]" : "border-[var(--border-default)]"}`}
+                  className={`h-4 w-4 rounded-full border ${task.status === "done" ? "border-[var(--success)] bg-[var(--success)]" : "border-[var(--border-default)]"}`}
                 />
-                {text(task.title, text(task.text, "Untitled step"))}
+                {task.title}
+                {task.dueAt !== undefined ? (
+                  <span className="ml-auto text-[var(--text-tertiary)]">
+                    {formatUpdated(task.dueAt)}
+                  </span>
+                ) : null}
               </div>
             ))}
           </div>

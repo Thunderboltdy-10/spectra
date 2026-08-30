@@ -9,6 +9,7 @@ import {
   boundSoulText,
   estimateSoulTokens,
 } from "../memory/soul-policy";
+import { normalizePlanContent } from "../plan/model";
 
 export const CONTEXT_LIMITS = {
   packetCharacters: 28_000,
@@ -159,18 +160,42 @@ export function typedArtifactStructure(
         };
       }),
     };
-  if (artifact.blueprintKey === "planner_task")
+  if (artifact.blueprintKey === "planner_task") {
+    const plan = normalizePlanContent(content);
     return {
-      description: text(content.description, 1_200),
-      dueAt: content.dueAt,
-      startAt: content.startAt,
-      endAt: content.endAt,
-      status: content.status,
-      priority: content.priority,
-      subtasks: Array.isArray(content.subtasks)
-        ? content.subtasks.slice(0, 20).map((item) => text(item, 300))
-        : [],
+      title: plan.title,
+      description: text(plan.description, 1_200),
+      timezone: plan.timezone,
+      linkedArtifactIds: plan.linkedArtifactIds,
+      linkedThreadIds: plan.linkedThreadIds,
+      source: plan.source,
+      personalOverlay: plan.personalOverlay,
+      sections: plan.sections.slice(0, 30),
+      milestones: plan.milestones.slice(0, 30),
+      tasks: plan.tasks.slice(0, 40).map((task) => ({
+        id: task.id,
+        title: text(task.title, 400),
+        description: text(task.description, 600),
+        status: task.status,
+        priority: task.priority,
+        dueAt: task.dueAt,
+        estimateMinutes: task.estimateMinutes,
+        sectionId: task.sectionId,
+        parentTaskId: task.parentTaskId,
+        milestoneId: task.milestoneId,
+        dependencyIds: task.dependencyIds,
+        labels: task.labels,
+        assigneeIds: task.assigneeIds,
+        referenceIds: task.referenceIds,
+        sourceRefs: task.sourceRefs,
+        officialDeadlineRef: task.officialDeadlineRef,
+        checklist: task.checklist.slice(0, 20),
+        recurrence: task.recurrence,
+        reminders: task.reminders,
+      })),
+      views: plan.views.slice(0, 30),
     };
+  }
   if (artifact.blueprintKey === "agent") {
     const profile =
       content.profile && typeof content.profile === "object"

@@ -144,7 +144,7 @@ describe("control descriptors", () => {
     expect(matchControl("timetable", "/events/0")?.parts).toContain(
       "handle:start",
     );
-    expect(matchControl("planner_task", "/status")?.parts).toEqual([]);
+    expect(matchControl("planner_task", "/tasks/0/status")?.parts).toEqual([]);
   });
 
   it("falls back to the shell fields shared by all types", () => {
@@ -410,7 +410,11 @@ describe("descriptor coverage per type", () => {
     document: ["/blocks/0/text", "/blocks/0/type", "/outline/1"],
     flashcard_deck: ["/cards/0/front", "/cards/0/occlusions/1", "/settings/shuffle"],
     quiz: ["/questions/0/options/2", "/questions/0/type", "/published"],
-    planner_task: ["/status", "/subtasks/0/done", "/recurrence/frequency"],
+    planner_task: [
+      "/tasks/0/status",
+      "/tasks/0/checklist/0/done",
+      "/tasks/0/recurrence/frequency",
+    ],
     agent: ["/instructions/text", "/skills/0/enabled", "/modelPolicy/primary"],
     timetable: ["/events/0/start", "/events/0/layerId", "/layers/0/visible"],
     presentation: ["/slides/0/objects/0", "/slides/0/speakerNotes", "/theme/palette"],

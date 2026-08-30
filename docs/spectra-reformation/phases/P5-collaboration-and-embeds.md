@@ -55,6 +55,18 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - CS-9 payload GC (`beginPayloadUpload` refCount) is not this unit. L4 30-client / multi-writer stays P5.V1. Embeds stay P5.I3.
 - Status: IMPLEMENTED. No acceptance claimed.
 
+### P5.I2 realtime proxy repair log (2026-08-30)
+
+- RC.V1 falsified query-only WebSocket upgrades: Next forwarded `?foo=1` instead of `/?foo=1`, so the proxy returned HTTP 400 while direct port 1234 returned 101.
+- One shared proxy-path helper now preserves `/` for empty, query-only, and ordinary room targets; gateway regression coverage includes all four shapes.
+- Live raw handshakes now return `101 Switching Protocols` both direct and through `localhost:3000/_spectra/realtime?foo=1`.
+- Hocuspocus v4 does not attach or lifecycle-manage an externally supplied socket. The transport now attaches before connect and owns socket reconnect, disconnect, failure cleanup, and destroy.
+- Lifecycle regression coverage red-proved missing `attach()` and now verifies attach/connect/retry/disconnect/destroy ownership.
+- Fresh Account A loaded the real RC corpus copy through the proxy with one gateway connection and no repeated WebSocket warning; no production-host claim is made.
+- The protected-paragraph materialization probe refused honestly and was reverted; the corpus copy remained byte-identical.
+- Focused Vitest 4 files / 20 tests; scoped ESLint, capability IR, secret scan, scoped diff-check, and mandatory Convex one-shot typecheck all passed.
+- Evidence: `.shots/reformation/P5.I2/manifest.md`. Status remains **IMPLEMENTED** pending independent RC.V1/P5.V1 verification.
+
 ### P5.I3 implementation log (2026-08-30)
 
 - Canonical `ArtifactEmbedReference` now owns shared validators and client/server identity; legacy document references adopt one stable Convex row.

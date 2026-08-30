@@ -221,6 +221,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   readonly document = new Y.Doc();
   readonly clientId: string;
   private provider: HocuspocusProvider | null = null;
+  private websocketProvider: HocuspocusProviderWebsocket | null = null;
   private readonly snapshots = new ScopedCollaborationSnapshots();
   private state: CollaborationSyncState = "connecting";
   private level: "read" | "modify" | null = null;
@@ -355,8 +356,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           });
           // Reconnect so the gateway's connection-level readOnly flag is
           // rebuilt from the new token before the editor is unlocked.
-          this.provider?.disconnect();
-          this.provider?.connect();
+          this.websocketProvider?.disconnect();
+          void this.websocketProvider?.connect();
         })
         .catch((error) => {
           const reason =
@@ -367,7 +368,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             level: null,
             error: reason,
           });
-          this.provider?.disconnect();
+          this.websocketProvider?.disconnect();
         })
         .finally(() => {
           this.authorizationRefreshRunning = false;
@@ -390,17 +391,19 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       // is still being issued. Never resurrect a provider after its transport
       // has been destroyed; doing so creates an invisible reconnect/token loop.
       if (this.destroyed) return;
-      this.provider = new HocuspocusProvider({
-        websocketProvider: new HocuspocusProviderWebsocket({
-          url: initial.url,
-          delay: COLLAB_RECONNECT.delay,
-          factor: COLLAB_RECONNECT.factor,
-          minDelay: COLLAB_RECONNECT.minDelay,
-          maxDelay: COLLAB_RECONNECT.maxDelay,
-          jitter: COLLAB_RECONNECT.jitter,
-          maxAttempts: COLLAB_RECONNECT.maxAttempts,
-          initialDelay: COLLAB_RECONNECT.initialDelay,
-        }),
+      const websocketProvider = new HocuspocusProviderWebsocket({
+        url: initial.url,
+        autoConnect: false,
+        delay: COLLAB_RECONNECT.delay,
+        factor: COLLAB_RECONNECT.factor,
+        minDelay: COLLAB_RECONNECT.minDelay,
+        maxDelay: COLLAB_RECONNECT.maxDelay,
+        jitter: COLLAB_RECONNECT.jitter,
+        maxAttempts: COLLAB_RECONNECT.maxAttempts,
+        initialDelay: COLLAB_RECONNECT.initialDelay,
+      });
+      const provider = new HocuspocusProvider({
+        websocketProvider,
         name: initial.documentName,
         document: this.document,
         flushDelay: 180,
@@ -661,6 +664,12 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           });
         },
       });
+      this.websocketProvider = websocketProvider;
+      this.provider = provider;
+      // An externally supplied websocket is not managed by HocuspocusProvider.
+      // Attach first so the provider can authenticate and start Yjs sync as
+      // soon as the socket opens; then explicitly own connect/disconnect/destroy.
+      provider.attach();
       this.localPresence = {
         clientId: this.clientId,
         accountId: initial.accountId,
@@ -668,9 +677,14 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         actorKind: "human",
       };
       this.localPresenceSignature = JSON.stringify(this.localPresence);
-      this.provider.setAwarenessField("user", this.localPresence);
+      provider.setAwarenessField("user", this.localPresence);
       this.startAuthorizationWatch();
+      await websocketProvider.connect();
     } catch (error) {
+      this.provider?.destroy();
+      this.provider = null;
+      this.websocketProvider?.destroy();
+      this.websocketProvider = null;
       this.update({
         state: "unsynchronized",
         error:
@@ -687,7 +701,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       window.clearInterval(this.authorizationTimer);
       this.authorizationTimer = undefined;
     }
-    this.provider?.disconnect();
+    this.websocketProvider?.disconnect();
     this.update({
       state: this.unsynchronizedChanges > 0 ? "unsynchronized" : "closed",
     });
@@ -703,6 +717,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     }
     this.provider?.destroy();
     this.provider = null;
+    this.websocketProvider?.destroy();
+    this.websocketProvider = null;
     this.document.destroy();
     this.update({ state: "closed", presence: [] });
     this.snapshots.clear();
@@ -718,12 +734,10 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     }
     this.intentionallyDisconnected = false;
     this.update({ state: "reconnecting", error: undefined });
-    await this.provider.connect();
-    // `connect()` is a no-op while the socket is already open. That matters
-    // when one broadcast was missed: the transport can still look perfectly
-    // "synchronized" while its Y.Doc is one durable commit behind. A sync-step
-    // round trip asks the gateway for the actual state-vector delta and makes
-    // retry a real reconciliation rather than a cosmetic status transition.
+    await this.websocketProvider?.connect();
+    // A socket connect is a no-op while already open. A sync-step round trip
+    // still asks the gateway for the actual state-vector delta so retry is a
+    // real reconciliation rather than a cosmetic status transition.
     this.provider.forceSync();
     this.provider.flushPendingUpdates();
     await this.flush();

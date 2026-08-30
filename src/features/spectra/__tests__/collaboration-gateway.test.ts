@@ -3,6 +3,7 @@ import * as Y from "yjs";
 import { COLLAB_RECONNECT } from "../collaboration/reconnect-backoff";
 import { createCheckpointScheduler } from "../../../../scripts/collaboration-checkpoint.mjs";
 import { gatewayHealthPayload, isGatewayHealthBody } from "../../../../scripts/collaboration-health.mjs";
+import { collaborationPath } from "../../../../scripts/collaboration-proxy-path.mjs";
 import {
   COLLAB_RECONNECT as gatewayReconnect,
   reconnectDelayMs,
@@ -13,6 +14,19 @@ import {
 } from "../../../../scripts/collaboration-room-state.mjs";
 
 describe("P5.I2 gateway production helpers", () => {
+  it("keeps a leading slash on every proxied WebSocket upgrade target", () => {
+    expect(collaborationPath("/_spectra/realtime")).toBe("/");
+    expect(collaborationPath("/_spectra/realtime?token=abc&foo=1")).toBe(
+      "/?token=abc&foo=1",
+    );
+    expect(collaborationPath("/_spectra/realtime/?token=abc&foo=1")).toBe(
+      "/?token=abc&foo=1",
+    );
+    expect(collaborationPath("/_spectra/realtime/room?token=abc&foo=1")).toBe(
+      "/room?token=abc&foo=1",
+    );
+  });
+
   it("keeps client and gateway reconnect constants aligned", () => {
     expect(COLLAB_RECONNECT).toMatchObject({
       delay: gatewayReconnect.delay,

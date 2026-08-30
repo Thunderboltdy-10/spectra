@@ -23,6 +23,19 @@ Question-type depth (matching, ordering, numeric with tolerance, hotspot, multi-
 
 A real SRS scheduler (FSRS-family, parameterized per deck) replacing/upgrading study heuristics; deck options presets; cloze depth (multi-cloze, hints); image occlusion polish; nested decks/tags; leech handling; study statistics (retention, forecast, heatmap); bulk edit; the P11.I5 import/export capabilities exposed as IR operations.
 
+### P12.I2 implementation log — 2026-08-31
+
+- Inventory: the Anki/Quizlet comparison closes with 63 registered Flashcards capabilities and records that count as the standing IR baseline.
+- Added a version-4 deck model and migration with nested decks/tags, multi-cloze hints, image occlusion, bidirectional cards, scheduler options, and private study-state separation.
+- Replaced the study heuristic with a parameterized FSRS-family scheduler, deck presets, learning/relearning steps, bury/suspend/reschedule/reset/undo controls, and leech handling.
+- Added private retention, forecast, heatmap, and leech analytics; study mutations refresh those views and distinguish saved mutations from refresh failures.
+- Added bulk editing plus preview/commit imports and CSV, TSV, portable-package, and print exports through shared operations.
+- Registered the per-type capability IR directly in the catalog, projected it through the workbar, and extended the manifest and Flashcards AI skill with matching operation families.
+- Regression coverage spans scheduler transitions, migration and normalization, operations, content isolation, IR projection, conformance, and work-type passes.
+- Evidence: focused Vitest 5 files / 72 tests; TypeScript; capability ghost gate; secret scan; scoped ESLint with zero errors; diff checks.
+- No live server, browser, Convex, Bridge, Office, or cloud resources were used.
+- Status: IMPLEMENTED only. P12.V1 remains an independent verification unit; no acceptance claimed.
+
 ## P12.I3 — Whiteboard depth (H) — leaders: Miro, FigJam, Excalidraw
 
 Shape library depth + connectors that stay attached, frames/sections, sticky notes + voting, laser/pointer presence polish, alignment/distribution/snapping, locking/grouping depth, templates, minimap/navigation at scale (virtualize past `virtualizeAfter`), export (PNG/SVG per frame).

@@ -2,45 +2,9 @@ import {
   normalizeQuizExperience,
   type QuizExperience,
 } from "../quiz/experience";
+import type { FlashcardCard } from "../flashcards/model";
 
-export type DeckCard = {
-  id: string;
-  variant?: "basic" | "cloze" | "image_occlusion";
-  front: string;
-  back: string;
-  hint?: string;
-  explanation?: string;
-  acceptedAlternatives?: string[];
-  section?: string;
-  confidence?: "unknown" | "weak" | "medium" | "strong";
-  difficulty?: "easy" | "medium" | "hard";
-  learningObjective?: string;
-  language?: string;
-  bidirectional?: boolean;
-  media?: {
-    assetId: string;
-    name: string;
-    mediaType: string;
-    altText?: string;
-    placement?: "front" | "back";
-  };
-  occlusions?: Array<{
-    id: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    label?: string;
-  }>;
-  sourceRefs?: string[];
-  tags?: string[];
-  review?: {
-    state?: "new" | "learning" | "review" | "mastered";
-    correctStreak?: number;
-    lastReviewedAt?: number | null;
-    nextReviewAt?: number | null;
-  };
-};
+export type DeckCard = FlashcardCard;
 
 export type DeckStudyDirection = "forward" | "reverse";
 export type DeckStudyItem = { cardId: string; direction: DeckStudyDirection };

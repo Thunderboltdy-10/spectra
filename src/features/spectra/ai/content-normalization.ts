@@ -5,6 +5,7 @@ import { normalizePresentationContent } from "../presentation/model";
 import { normalizeSheetsContent } from "../sheets/model";
 import { sharedTimetableContent } from "../timetable/model";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
+import { normalizeFlashcardDeckContent as normalizeFlashcardDeckV4 } from "../flashcards/model";
 
 type Row = Record<string, unknown>;
 
@@ -125,42 +126,7 @@ export function normalizeDocumentContent(value: unknown) {
 }
 
 export function normalizeFlashcardDeckContent(value: unknown) {
-  const content = row(value);
-  if (!Array.isArray(content.cards)) return content;
-  content.cards = ensureUniqueRecordIds(
-    content.cards.map((value, index) => {
-      const card = row(value);
-      card.id = stableId(card.id, "card", index);
-      card.front = stringValue(
-        card.front,
-        card.question,
-        card.term,
-        card.title,
-      ).trim();
-      card.back = stringValue(
-        card.back,
-        card.answer,
-        card.definition,
-        card.explanation,
-      ).trim();
-      if (typeof card.hint !== "string" && typeof card.cue === "string")
-        card.hint = card.cue;
-      if (typeof card.section !== "string" && typeof card.group === "string")
-        card.section = card.group;
-      // Progress belongs to each learner, not to the deck. A model that hands
-      // back a whole card object can carry a scheduling block with it, and
-      // saving that would rewrite everyone's revision at once. `review` is the
-      // pre-separation field that stored progress on the shared card; it is
-      // superseded by per-account study state and dropped on write (§11B).
-      delete card.review;
-      delete card.studyState;
-      delete card.progress;
-      return card;
-    }),
-    "id",
-    "card",
-  );
-  return content;
+  return normalizeFlashcardDeckV4(value);
 }
 
 export function normalizeQuizContent(value: unknown) {

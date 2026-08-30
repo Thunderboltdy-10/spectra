@@ -60,58 +60,6 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   { type: "quiz", localId: "import", description: "Import questions.", requires: "edit" },
   { type: "quiz", localId: "unpublish", description: "Stop new attempts on this quiz.", requires: "edit" },
 
-  { type: "flashcard_deck", localId: "add-card", description: "Add a card to this deck.", requires: "edit" },
-  { type: "flashcard_deck", localId: "rail", description: "Show or hide the card list." },
-  { type: "flashcard_deck", localId: "browse", description: "Read the deck." },
-  {
-    type: "flashcard_deck",
-    localId: "study.reveal",
-    description: "Reveal the back of the current card.",
-    requires: "interact",
-    embed: ["interact", "edit"],
-  },
-  {
-    type: "flashcard_deck",
-    localId: "study.navigate",
-    description: "Move between flashcards.",
-    requires: "interact",
-    embed: ["interact", "edit"],
-  },
-  {
-    type: "flashcard_deck",
-    localId: "progress",
-    description: "Show your study progress.",
-    requires: "submit",
-  },
-  { type: "flashcard_deck", localId: "import", description: "Import cards.", requires: "edit" },
-  { type: "flashcard_deck", localId: "add-section", description: "Add a section.", requires: "edit" },
-  {
-    type: "flashcard_deck",
-    localId: "template-concept",
-    description: "Add a concept and cloze card.",
-    requires: "edit",
-  },
-  {
-    type: "flashcard_deck",
-    localId: "template-language",
-    description: "Add a vocabulary card.",
-    requires: "edit",
-  },
-  {
-    type: "flashcard_deck",
-    localId: "template-formula",
-    description: "Add a formula card.",
-    requires: "edit",
-  },
-  { type: "flashcard_deck", localId: "export-csv", description: "Export this deck as CSV." },
-  { type: "flashcard_deck", localId: "export-tsv", description: "Export this deck as TSV." },
-  {
-    type: "flashcard_deck",
-    localId: "export-package",
-    description: "Export a portable deck package.",
-  },
-  { type: "flashcard_deck", localId: "print", description: "Print or save this deck as PDF." },
-
   { type: "whiteboard", localId: "undo", description: "Undo the last board change.", requires: "edit" },
   { type: "whiteboard", localId: "redo", description: "Redo the last undone board change.", requires: "edit" },
   { type: "whiteboard", localId: "zoom-out", description: "Zoom the board out." },
@@ -191,7 +139,7 @@ const FIELD_FORMAT_LOCAL_IDS = [
   "insert.blockEquation",
 ] as const;
 
-const FIELD_FORMAT_TYPES = ["quiz", "flashcard_deck", "planner_task"] as const;
+const FIELD_FORMAT_TYPES = ["quiz", "planner_task"] as const;
 
 const FIELD_FORMAT_SPECS: readonly StudioSpec[] = FIELD_FORMAT_TYPES.flatMap((type) =>
   FIELD_FORMAT_LOCAL_IDS.map((localId) => ({

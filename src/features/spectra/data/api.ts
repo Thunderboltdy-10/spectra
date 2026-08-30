@@ -3,10 +3,13 @@ import type { CompilerStageState as FoundryCompilerStageState } from "../agents/
 import type { ArtifactCardView } from "../components/artifact-card";
 import type { PublishedCodeBuildProjection } from "../code/published-build";
 import type { QuizExperience } from "../quiz/experience";
+import type { QuizResponse } from "../quiz/model";
+import type { QuizQuestionResult, SafeQuizQuestion } from "../quiz/operations";
 import type { TimetablePersonalState } from "../timetable/model";
 import { spectraBus } from "../events";
 
-export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference" | "resource";
+export type SpectraBlueprintKey =
+  ArtifactTypeKey | "thread_reference" | "resource";
 
 export type SpectraAiEffect = {
   effectId: string;
@@ -785,44 +788,44 @@ export type SpectraTimetableReminderNotification = {
 
 export type SpectraArtifactEmbed =
   import("../../../../shared/artifact-embed").ArtifactEmbedReference & {
-  effectiveInteraction?: "read" | "interact" | "edit";
-  canConfigure?: boolean;
-  canRequestAccess?: boolean;
-  accessRequest?: { requestId: string; status: "pending"; createdAt: number };
-  source?: {
-    artifactId: string;
-    title: string;
-    summary?: string;
-    blueprintKey: SpectraBlueprintKey;
-    tags?: string[];
-    updatedAt?: number;
-    snapshot?: {
-      title?: string;
+    effectiveInteraction?: "read" | "interact" | "edit";
+    canConfigure?: boolean;
+    canRequestAccess?: boolean;
+    accessRequest?: { requestId: string; status: "pending"; createdAt: number };
+    source?: {
+      artifactId: string;
+      title: string;
       summary?: string;
+      blueprintKey: SpectraBlueprintKey;
       tags?: string[];
-      content?: unknown;
+      updatedAt?: number;
+      snapshot?: {
+        title?: string;
+        summary?: string;
+        tags?: string[];
+        content?: unknown;
+      };
     };
+    version?: {
+      versionId: string;
+      createdAt: number;
+      summary?: string;
+      name?: string;
+    };
+    runtimeBuild?: {
+      buildId: string;
+      artifactVersionId: string;
+      runtime: "browser" | "react" | "python";
+      sourceHash: string;
+      payloadHash?: string;
+      sdkVersion: string;
+      sourceBytes: number;
+      outputBytes: number;
+      payloadBytes?: number;
+      publishedAt?: number;
+    };
+    runtimeResources?: Record<string, unknown>;
   };
-  version?: {
-    versionId: string;
-    createdAt: number;
-    summary?: string;
-    name?: string;
-  };
-  runtimeBuild?: {
-    buildId: string;
-    artifactVersionId: string;
-    runtime: "browser" | "react" | "python";
-    sourceHash: string;
-    payloadHash?: string;
-    sdkVersion: string;
-    sourceBytes: number;
-    outputBytes: number;
-    payloadBytes?: number;
-    publishedAt?: number;
-  };
-  runtimeResources?: Record<string, unknown>;
-};
 
 export type SpectraArtifactAccessRequest = {
   requestId: string;
@@ -1402,37 +1405,12 @@ export async function resetSpectraFlashcardStudy(artifactId: string) {
   });
 }
 
-export type SpectraQuizPracticeQuestion = {
-  id: string;
-  prompt: string;
-  type:
-    | "multiple_choice"
-    | "short_answer"
-    | "true_false"
-    | "select_all"
-    | "ordering"
-    | "numeric"
-    | "fill_blank"
-    | "long_response"
-    | "matching";
-  options: string[];
-  matchingPairs?: Array<{ id: string; left: string }>;
-  matchingChoices?: string[];
-  points: number;
-  difficulty?: string;
-  timeLimitSeconds?: number;
-  media?: unknown;
-};
+export type SpectraQuizPracticeQuestion = SafeQuizQuestion;
 
-export type SpectraQuizPracticeResult = {
-  questionId: string;
-  correct: boolean | null;
-  awardedPoints: number;
-  maxPoints: number;
-  response: string | string[];
-  expected: string | string[];
-  explanation?: string;
-  advisoryFeedback?: string;
+export type SpectraQuizPracticeResult = QuizQuestionResult & {
+  scoreVisible?: boolean;
+  correctnessVisible?: boolean;
+  answersVisible?: boolean;
 };
 
 export type SpectraQuizPracticeAttempt = {
@@ -1442,7 +1420,7 @@ export type SpectraQuizPracticeAttempt = {
   contentHash: string;
   status: "in_progress" | "submitted";
   questions: SpectraQuizPracticeQuestion[];
-  responses: Record<string, string | string[]>;
+  responses: Record<string, QuizResponse>;
   score?: number;
   maxScore?: number;
   percentage?: number;
@@ -1460,6 +1438,11 @@ export type SpectraQuizPracticeAttempt = {
    * cannot extend it. `null` means this quiz is untimed.
    */
   timeRemainingMs?: number | null;
+  /** Server-persisted first visit and current remaining time per question. */
+  questionTiming?: Record<
+    string,
+    { startedAt?: number; remainingMs: number | null }
+  >;
   /** Whether the reveal policy has released answers to this learner yet. */
   answersRevealed?: boolean;
   /** Set when the attempt was submitted after its clock ran out. */
@@ -1489,9 +1472,15 @@ export type SpectraQuizResponseSummary =
       inProgressCount: number;
       timeElapsedCount: number;
       averagePercentage?: number;
+      scoreDistribution: Array<{
+        label: string;
+        min: number;
+        max: number;
+        count: number;
+      }>;
+      duration?: { medianMs: number; minMs: number; maxMs: number };
       questions: Array<{
         questionId: string;
-        prompt: string;
         answered: number;
         correct: number;
         commonResponses: Array<{ response: string; count: number }>;
@@ -1525,7 +1514,7 @@ export async function startSpectraQuizPractice(input: {
 export async function saveSpectraQuizPracticeResponse(input: {
   attemptId: string;
   questionId: string;
-  response: string | string[];
+  response: QuizResponse;
   clientMutationId: string;
 }) {
   return postSpectra<{
@@ -1533,9 +1522,24 @@ export async function saveSpectraQuizPracticeResponse(input: {
     reused: boolean;
     /** The server's own remaining time, used to re-anchor the countdown. */
     timeRemainingMs?: number | null;
+    questionTimeRemainingMs?: number | null;
     result?: SpectraQuizPracticeResult;
   }>({
     action: "saveQuizPracticeResponse",
+    ...input,
+  });
+}
+
+export async function visitSpectraQuizPracticeQuestion(input: {
+  attemptId: string;
+  questionId: string;
+}) {
+  return postSpectra<{
+    questionId: string;
+    startedAt: number;
+    questionTimeRemainingMs: number | null;
+  }>({
+    action: "visitQuizPracticeQuestion",
     ...input,
   });
 }

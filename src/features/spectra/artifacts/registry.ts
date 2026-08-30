@@ -1077,19 +1077,38 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
   quiz: [
     "inspect_questions",
     "add_questions",
+    "remove_questions",
     "rewrite_field",
     "add_option",
     "mark_correct",
+    "configure_question",
+    "configure_answer_model",
     "configure_matching",
     "configure_pool",
+    "configure_banks",
+    "configure_pools",
+    "configure_delivery",
+    "configure_timing",
+    "configure_attempts",
+    "configure_scoring",
+    "configure_feedback",
+    "configure_review",
     "write_explanation",
     "write_formative_rubric",
     "check_ambiguity",
     "check_accessibility",
     "check_source_coverage",
     "reorder_questions",
+    "inspect_results",
+    "export_aggregate_results",
+    "export_interchange",
     "publish_practice",
     "validate_formative",
+    "refuse_live_game",
+    "refuse_proctoring",
+    "refuse_grades",
+    "refuse_manual_grading",
+    "refuse_rosters",
   ],
   planner_task: [
     "inspect_task",
@@ -1316,9 +1335,9 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
           ? 2
           : typeKey === "sheets"
             ? 4
-            : typeKey === "flashcard_deck"
+            : typeKey === "flashcard_deck" || typeKey === "quiz"
               ? 4
-              : typeKey === "quiz" || typeKey === "planner_task"
+              : typeKey === "planner_task"
                 ? 3
                 : typeKey === "code"
                   ? CODE_CONTENT_SCHEMA_VERSION

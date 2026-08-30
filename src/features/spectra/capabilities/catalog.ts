@@ -5,6 +5,7 @@ import { OFFICE_REMAINING_CAPABILITIES } from "./office-remaining";
 import { FLASHCARD_CAPABILITIES } from "./studio-flashcards";
 import { STUDIO_CAPABILITIES, stableCapabilityId } from "./studios";
 import { CODE_STUDIO_CAPABILITIES } from "./studio-code";
+import { QUIZ_CAPABILITIES } from "./studio-quiz";
 import type {
   CapabilityDefinition,
   CapabilityOwner,
@@ -16,6 +17,7 @@ export const ALL_CAPABILITIES: readonly CapabilityDefinition[] = [
   ...OFFICE_FORMATTING_CAPABILITIES,
   ...OFFICE_REMAINING_CAPABILITIES,
   ...APPLICATION_CAPABILITIES,
+  ...QUIZ_CAPABILITIES,
   ...STUDIO_CAPABILITIES,
   ...CODE_STUDIO_CAPABILITIES,
   ...FLASHCARD_CAPABILITIES,

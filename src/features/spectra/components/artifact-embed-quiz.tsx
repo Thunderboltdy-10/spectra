@@ -8,17 +8,21 @@ import {
   ChevronUp,
   Loader2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SelectField } from "@/components/ui/select";
 import { embedCapabilityEnabled } from "../capabilities";
 import {
+  getArtifactAssets,
   saveSpectraQuizPracticeResponse,
   startSpectraQuizPractice,
   submitSpectraQuizPractice,
+  visitSpectraQuizPracticeQuestion,
   type SpectraArtifactEmbed,
+  type SpectraArtifactAsset,
   type SpectraQuizPracticeAttempt,
   type SpectraQuizPracticeQuestion,
 } from "../data/api";
+import type { QuizResponse } from "../quiz/model";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -54,12 +58,18 @@ export function embeddedQuizIsPublished(embed: SpectraArtifactEmbed) {
   return record(snapshot.content).published === true;
 }
 
-function answerArray(value: string | string[] | undefined) {
+function answerArray(value: QuizResponse | undefined) {
   return Array.isArray(value) ? value : [];
 }
 
-function answerText(value: string | string[] | undefined) {
+function answerText(value: QuizResponse | undefined) {
   return typeof value === "string" ? value : "";
+}
+
+function responseRecord(value: QuizResponse | undefined) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
 }
 
 export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
@@ -87,6 +97,120 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [busy, setBusy] = useState<"start" | "save" | "submit" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const [questionClock, setQuestionClock] = useState<{
+    questionId: string;
+    remainingMs: number;
+    at: number;
+  }>();
+  const [practiceMediaAssets, setPracticeMediaAssets] = useState<
+    SpectraArtifactAsset[]
+  >([]);
+  const activeQuestion =
+    attempt?.questions[
+      Math.min(activeIndex, Math.max(0, attempt.questions.length - 1))
+    ];
+  const attemptId = attempt?.attemptId;
+  const attemptStatus = attempt?.status;
+  const activeQuestionId = activeQuestion?.id;
+  const questionSecondsRemaining =
+    questionClock && questionClock.questionId === activeQuestion?.id
+      ? Math.max(
+          0,
+          Math.ceil(
+            (questionClock.remainingMs -
+              Math.max(0, clockNow - questionClock.at)) /
+              1_000,
+          ),
+        )
+      : null;
+
+  useEffect(() => {
+    const artifactId = embed.source?.artifactId;
+    const assetIds = [
+      ...new Set(
+        (attempt?.questions ?? []).flatMap((question) =>
+          question.media?.assetId ? [question.media.assetId] : [],
+        ),
+      ),
+    ];
+    if (!artifactId || !assetIds.length) {
+      setPracticeMediaAssets([]);
+      return;
+    }
+    let active = true;
+    void getArtifactAssets(artifactId, assetIds)
+      .then((result) => {
+        if (active) setPracticeMediaAssets(result.assets);
+      })
+      .catch(() => {
+        if (active) setPracticeMediaAssets([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [attempt?.questions, embed.source?.artifactId]);
+
+  useEffect(() => {
+    if (attempt?.status !== "in_progress" || !questionClock) return;
+    setClockNow(Date.now());
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [attempt?.status, questionClock]);
+
+  useEffect(() => {
+    if (!attemptId || attemptStatus !== "in_progress" || !activeQuestionId)
+      return;
+    let active = true;
+    void visitSpectraQuizPracticeQuestion({
+      attemptId,
+      questionId: activeQuestionId,
+    })
+      .then((timing) => {
+        if (!active) return;
+        setAttempt((current) =>
+          current
+            ? {
+                ...current,
+                questionTiming: {
+                  ...(current.questionTiming ?? {}),
+                  [activeQuestionId]: {
+                    startedAt: timing.startedAt,
+                    remainingMs: timing.questionTimeRemainingMs,
+                  },
+                },
+              }
+            : current,
+        );
+        if (typeof timing.questionTimeRemainingMs === "number")
+          setQuestionClock({
+            questionId: activeQuestionId,
+            remainingMs: timing.questionTimeRemainingMs,
+            at: Date.now(),
+          });
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          if (
+            reason instanceof Error &&
+            reason.message.includes("QUIZ_QUESTION_TIME_ELAPSED")
+          )
+            setQuestionClock({
+              questionId: activeQuestionId,
+              remainingMs: 0,
+              at: Date.now(),
+            });
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "This question’s timer could not be synchronized.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeQuestionId, attemptId, attemptStatus]);
 
   async function start() {
     if (!embed.source || !canAnswer || !published || busy) return;
@@ -110,7 +234,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
     }
   }
 
-  async function saveResponse(questionId: string, response: string | string[]) {
+  async function saveResponse(questionId: string, response: QuizResponse) {
     if (!attempt || attempt.status !== "in_progress" || !canAnswer || busy)
       return;
     const previous = attempt.responses[questionId];
@@ -125,12 +249,18 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
     setBusy("save");
     setError(null);
     try {
-      await saveSpectraQuizPracticeResponse({
+      const synchronized = await saveSpectraQuizPracticeResponse({
         attemptId: attempt.attemptId,
         questionId,
         response,
         clientMutationId: crypto.randomUUID(),
       });
+      if (typeof synchronized.questionTimeRemainingMs === "number")
+        setQuestionClock({
+          questionId,
+          remainingMs: synchronized.questionTimeRemainingMs,
+          at: Date.now(),
+        });
     } catch (reason) {
       setAttempt((current) => {
         if (!current) return current;
@@ -149,10 +279,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
     }
   }
 
-  function updateLocalResponse(
-    questionId: string,
-    response: string | string[],
-  ) {
+  function updateLocalResponse(questionId: string, response: QuizResponse) {
     setAttempt((current) =>
       current
         ? {
@@ -274,17 +401,16 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
           Practice submitted
         </p>
         <p className="mt-1 text-[14px] font-semibold text-[var(--success)]">
-          {attempt.score ?? 0} / {attempt.maxScore ?? 0}
-          {typeof attempt.percentage === "number"
-            ? ` (${Math.round(attempt.percentage)}%)`
-            : ""}
+          {typeof attempt.score === "number" &&
+          typeof attempt.maxScore === "number"
+            ? `${attempt.score} / ${attempt.maxScore}${typeof attempt.percentage === "number" ? ` (${Math.round(attempt.percentage)}%)` : ""}`
+            : "Score hidden by the review policy"}
         </p>
       </div>
     );
   }
 
-  const question =
-    attempt.questions[Math.min(activeIndex, attempt.questions.length - 1)];
+  const question = activeQuestion;
   if (!question)
     return (
       <p className="text-micro text-[var(--text-tertiary)]">
@@ -298,14 +424,31 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
         <p className="text-[13px] font-semibold leading-5 text-[var(--text-primary)]">
           {richText(question.prompt) || "Empty question"}
         </p>
-        <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
+        <span className="shrink-0 text-right text-micro text-[var(--text-tertiary)]">
           {activeIndex + 1} / {attempt.questions.length}
+          {questionSecondsRemaining !== null ? (
+            <strong
+              role="timer"
+              className={`mt-1 block tabular-nums ${questionSecondsRemaining > 30 ? "text-[var(--text-secondary)]" : questionSecondsRemaining > 0 ? "text-[var(--warning)]" : "text-[var(--danger)]"}`}
+            >
+              {questionSecondsRemaining > 0
+                ? `${Math.floor(questionSecondsRemaining / 60)}:${String(questionSecondsRemaining % 60).padStart(2, "0")}`
+                : "Time ended"}
+            </strong>
+          ) : null}
         </span>
       </div>
       <QuestionResponse
         question={question}
         response={response}
-        disabled={busy !== null}
+        mediaUrl={
+          question.media
+            ? (practiceMediaAssets.find(
+                (asset) => asset.assetId === question.media?.assetId,
+              )?.downloadUrl ?? undefined)
+            : undefined
+        }
+        disabled={busy !== null || questionSecondsRemaining === 0}
         onChange={(value) => updateLocalResponse(question.id, value)}
         onCommit={(value) => void saveResponse(question.id, value)}
       />
@@ -360,15 +503,17 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
 function QuestionResponse({
   question,
   response,
+  mediaUrl,
   disabled,
   onChange,
   onCommit,
 }: {
   question: SpectraQuizPracticeQuestion;
-  response: string | string[] | undefined;
+  response: QuizResponse | undefined;
+  mediaUrl?: string;
   disabled: boolean;
-  onChange: (response: string | string[]) => void;
-  onCommit: (response: string | string[]) => void;
+  onChange: (response: QuizResponse) => void;
+  onCommit: (response: QuizResponse) => void;
 }) {
   const options =
     question.type === "true_false" && question.options.length === 0
@@ -497,6 +642,94 @@ function QuestionResponse({
             </div>
           );
         })}
+      </div>
+    );
+  }
+  if (question.type === "hotspot") {
+    const selected = answerArray(response);
+    const regions = question.hotspot?.regions ?? [];
+    const allowMultiple = question.hotspot?.allowMultiple === true;
+    return (
+      <div className="mt-3">
+        <div
+          className="relative aspect-video overflow-hidden rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
+          aria-label="Hotspot answer regions"
+        >
+          {mediaUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={mediaUrl}
+              alt={question.media?.altText ?? ""}
+              className="absolute inset-0 h-full w-full object-contain"
+            />
+          ) : question.media ? (
+            <span className="absolute inset-0 flex items-center justify-center p-3 text-center text-micro text-[var(--text-tertiary)]">
+              Question image unavailable
+            </span>
+          ) : null}
+          {regions.map((region) => {
+            const active = selected.includes(region.id);
+            return (
+              <button
+                key={region.id}
+                type="button"
+                aria-pressed={active}
+                aria-label={region.label || "Answer region"}
+                disabled={disabled}
+                onClick={() => {
+                  const next = allowMultiple
+                    ? active
+                      ? selected.filter((id) => id !== region.id)
+                      : [...selected, region.id]
+                    : [region.id];
+                  onCommit(next);
+                }}
+                style={{
+                  left: `${region.x * 100}%`,
+                  top: `${region.y * 100}%`,
+                  width: `${region.width * 100}%`,
+                  height: `${region.height * 100}%`,
+                }}
+                className={`absolute min-h-7 min-w-7 rounded-[5px] border-2 text-micro font-semibold outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cyan)] ${active ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_22%,transparent)] text-[var(--text-primary)]" : "border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] text-[var(--text-secondary)]"}`}
+              >
+                {region.label}
+              </button>
+            );
+          })}
+        </div>
+        {regions.length === 0 ? (
+          <p className="mt-2 text-micro text-[var(--text-tertiary)]">
+            This question has no answer regions.
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+  if (question.type === "multipart") {
+    const responses = responseRecord(response);
+    return (
+      <div className="mt-3 space-y-3">
+        {(question.parts ?? []).map((part, index) => (
+          <section
+            key={part.id}
+            className="rounded-[8px] border border-[var(--border-subtle)] p-3"
+          >
+            <p className="mb-2 text-[11px] font-semibold text-[var(--text-primary)]">
+              Part {index + 1}: {richText(part.prompt) || "Untitled part"}
+            </p>
+            <QuestionResponse
+              question={part}
+              response={responses[part.id]}
+              disabled={disabled}
+              onChange={(next) =>
+                onChange({ ...responses, [part.id]: next as string | string[] })
+              }
+              onCommit={(next) =>
+                onCommit({ ...responses, [part.id]: next as string | string[] })
+              }
+            />
+          </section>
+        ))}
       </div>
     );
   }

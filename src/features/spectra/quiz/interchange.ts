@@ -1,5 +1,16 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { delimitedValue, parseDelimited } from "../sheets/model";
+import {
+  normalizeQuizContent,
+  normalizeQuizQuestion,
+  type QuizAccessibilityPolicy,
+  type QuizBank,
+  type QuizPart,
+  type QuizPool,
+  type QuizQuestion,
+  type QuizReviewPolicy,
+  type QuizScoring,
+} from "./model";
 
 export const QUIZ_QUESTION_TYPES = [
   "multiple_choice",
@@ -11,21 +22,40 @@ export const QUIZ_QUESTION_TYPES = [
   "fill_blank",
   "long_response",
   "matching",
+  "hotspot",
+  "multipart",
 ] as const;
 
 export type QuizQuestionType = (typeof QUIZ_QUESTION_TYPES)[number];
 
-export type PortableQuizQuestion = {
+export type PortableQuizQuestion = Omit<
+  QuizQuestion,
+  | "optionIds"
+  | "correctOptionIds"
+  | "matchingPairs"
+  | "parts"
+  | "scoring"
+  | "answerFeedback"
+  | "points"
+> & {
   id: string;
   prompt: string;
   type: QuizQuestionType;
   options: string[];
   optionIds?: string[];
+  correctOptionIds?: string[];
   correctAnswer?: string;
   correctAnswers?: string[];
   numericTolerance?: number;
   rubric?: string;
   matchingPairs?: Array<{ id: string; left: string; right?: string }>;
+  matchingChoices?: string[];
+  hotspot?: QuizQuestion["hotspot"];
+  parts?: QuizPart[];
+  scoring?: QuizScoring;
+  correctFeedback?: string;
+  incorrectFeedback?: string;
+  answerFeedback?: Record<string, string>;
   explanation?: string;
   feedback?: string;
   difficulty?: "easy" | "medium" | "hard";
@@ -43,6 +73,7 @@ export type PortableQuizQuestion = {
   standards?: string[];
   tags?: string[];
   poolId?: string;
+  bankId?: string;
   poolDrawCount?: number;
   section?: string;
 };
@@ -50,6 +81,8 @@ export type PortableQuizQuestion = {
 export type QuizInterchangeContent = {
   questions: PortableQuizQuestion[];
   settings?: Record<string, unknown>;
+  banks?: QuizBank[];
+  pools?: QuizPool[];
 };
 
 export type QuizImportResult = {
@@ -114,6 +147,10 @@ function questionType(value: unknown): QuizQuestionType {
     fill_in_the_blank: "fill_blank",
     ordering: "ordering",
     matching: "matching",
+    hotspot: "hotspot",
+    graphic_hotspot: "hotspot",
+    multipart: "multipart",
+    stimulus: "multipart",
   };
   return aliases[normalized] ?? "multiple_choice";
 }
@@ -235,8 +272,8 @@ function parseJson(text: string): QuizImportResult {
       candidate && typeof candidate === "object"
         ? (candidate as Record<string, unknown>)
         : {};
-    const question = normalizedQuestion(value, index);
-    return question ? [question] : [];
+    if (!cleanText(value.prompt ?? value.question ?? value.text)) return [];
+    return [normalizeQuizQuestion(value, index)];
   });
   if (!questions.length)
     throw new Error("The JSON file does not contain any usable questions.");
@@ -254,6 +291,8 @@ function parseJson(text: string): QuizImportResult {
         root.settings && typeof root.settings === "object"
           ? (root.settings as Record<string, unknown>)
           : undefined,
+      banks: normalizeQuizContent(root).banks,
+      pools: normalizeQuizContent(root).pools,
     },
     format: "spectra-json",
     fidelity: [
@@ -690,7 +729,7 @@ export function quizJson(content: QuizInterchangeContent) {
   return JSON.stringify(
     {
       format: "spectra-quiz",
-      version: 1,
+      version: 4,
       exportedAt: new Date().toISOString(),
       ...content,
     },
@@ -776,8 +815,53 @@ export function quizQtiPackage(questions: PortableQuizQuestion[]) {
   });
 }
 
+export function quizExportFidelity(
+  questions: PortableQuizQuestion[],
+  format: "spectra-json" | "csv" | "qti-2.2" | "print",
+) {
+  if (format === "spectra-json")
+    return {
+      level: "exact" as const,
+      notes: [
+        "Quiz schema v4, stable identities, hotspot regions, and multipart parts are retained.",
+      ],
+    };
+  const hotspot = questions.some((question) => question.type === "hotspot");
+  const multipart = questions.some((question) => question.type === "multipart");
+  const notes: string[] = [
+    format === "csv"
+      ? "CSV is a flat question exchange; banks, pools, nested stable identities, scoring policy, and answer-level feedback remain only in Spectra JSON."
+      : format === "qti-2.2"
+        ? "QTI exports supported choice and text-entry interactions; Spectra banks, pools, timers, penalties, review policy, and unsupported interaction behavior are adapted."
+        : "Print preserves the visible reading sequence; interactive scoring, feedback release, timers, randomization, and review behavior are not interactive on paper.",
+  ];
+  if (hotspot)
+    notes.push(
+      format === "qti-2.2"
+        ? "Hotspot geometry is adapted because artifact media is not embedded in this QTI package."
+        : "Hotspot geometry remains only in Spectra JSON.",
+    );
+  if (multipart)
+    notes.push(
+      format === "print"
+        ? "Multipart prompts print in order without interactive scoring behavior."
+        : "Multipart scoring and shared-stimulus identity remain only in Spectra JSON.",
+    );
+  return {
+    level: "adapted" as const,
+    notes,
+  };
+}
+
 export function validateQuizForPublishing(
   questions: PortableQuizQuestion[],
+  context: {
+    banks?: QuizBank[];
+    pools?: QuizPool[];
+    reviewPolicy?: QuizReviewPolicy;
+    accessibilityPolicy?: QuizAccessibilityPolicy;
+    enforceQuestionTimeLimits?: boolean;
+  } = {},
 ): Array<{ questionId?: string; message: string }> {
   const issues: Array<{ questionId?: string; message: string }> = [];
   if (!questions.length) issues.push({ message: "Add at least one question." });
@@ -800,6 +884,11 @@ export function validateQuizForPublishing(
         questionId: question.id,
         message: `${label} cannot use negative practice points.`,
       });
+    if (context.enforceQuestionTimeLimits && !question.timeLimitSeconds)
+      issues.push({
+        questionId: question.id,
+        message: `${label} needs a question time limit while per-question timing is enforced.`,
+      });
     if (
       question.type === "multiple_choice" ||
       question.type === "true_false" ||
@@ -809,10 +898,11 @@ export function validateQuizForPublishing(
       const options = question.options
         .map((option) => option.trim())
         .filter(Boolean);
+      const optionIds = question.optionIds ?? [];
       if (
         question.optionIds &&
-        (question.optionIds.length !== question.options.length ||
-          new Set(question.optionIds).size !== question.optionIds.length)
+        (optionIds.length !== question.options.length ||
+          new Set(optionIds).size !== optionIds.length)
       )
         issues.push({
           questionId: question.id,
@@ -831,20 +921,40 @@ export function validateQuizForPublishing(
           questionId: question.id,
           message: `${label} contains duplicate answer options.`,
         });
+      const validOptionIds = new Set(optionIds);
+      const markedOptionIds = question.correctOptionIds ?? [];
+      const invalidMarkedIds = markedOptionIds.some(
+        (id) => !validOptionIds.has(id),
+      );
+      const textAnswers = [
+        question.correctAnswer,
+        ...(question.correctAnswers ?? []),
+      ]
+        .filter((answer): answer is string => typeof answer === "string")
+        .map((answer) => answer.trim())
+        .filter(Boolean);
+      const resolvedMarkedAnswers = markedOptionIds.length
+        ? [...new Set(markedOptionIds.filter((id) => validOptionIds.has(id)))]
+        : [
+            ...new Set(
+              textAnswers.filter((answer) => options.includes(answer)),
+            ),
+          ];
+      if (invalidMarkedIds)
+        issues.push({
+          questionId: question.id,
+          message: `${label} has a marked answer that no longer matches an answer option.`,
+        });
       if (
         (question.type === "multiple_choice" ||
           question.type === "true_false") &&
-        !options.includes(question.correctAnswer?.trim() ?? "")
+        resolvedMarkedAnswers.length !== 1
       )
         issues.push({
           questionId: question.id,
           message: `${label} needs exactly one marked correct option.`,
         });
-      if (
-        question.type === "select_all" &&
-        (!question.correctAnswers?.length ||
-          question.correctAnswers.some((answer) => !options.includes(answer)))
-      )
+      if (question.type === "select_all" && resolvedMarkedAnswers.length === 0)
         issues.push({
           questionId: question.id,
           message: `${label} needs one or more valid marked answers.`,
@@ -853,11 +963,104 @@ export function validateQuizForPublishing(
       const pairs = (question.matchingPairs ?? []).filter(
         (pair) => pair.left.trim() && pair.right?.trim(),
       );
+      const pairIds = (question.matchingPairs ?? []).map((pair) => pair.id);
       if (pairs.length < 2)
         issues.push({
           questionId: question.id,
           message: `${label} needs at least two complete matching pairs.`,
         });
+      if (new Set(pairIds).size !== pairIds.length)
+        issues.push({
+          questionId: question.id,
+          message: `${label} needs one unique stable identity per matching pair.`,
+        });
+    } else if (question.type === "hotspot") {
+      const regions = question.hotspot?.regions ?? [];
+      const correctRegions = regions.filter((region) => region.correct);
+      const regionIds = regions.map((region) => region.id);
+      if (!question.media)
+        issues.push({
+          questionId: question.id,
+          message: `${label} needs one image for its hotspot regions.`,
+        });
+      if (!regions.length)
+        issues.push({
+          questionId: question.id,
+          message: `${label} needs at least one named hotspot region.`,
+        });
+      if (regions.some((region) => !region.label.trim()))
+        issues.push({
+          questionId: question.id,
+          message: `${label} needs a keyboard label for every hotspot region.`,
+        });
+      if (new Set(regionIds).size !== regionIds.length)
+        issues.push({
+          questionId: question.id,
+          message: `${label} needs one unique stable identity per hotspot region.`,
+        });
+      if (!correctRegions.length)
+        issues.push({
+          questionId: question.id,
+          message: `${label} needs at least one correct hotspot region.`,
+        });
+      if (question.hotspot?.allowMultiple !== true && correctRegions.length > 1)
+        issues.push({
+          questionId: question.id,
+          message: `${label} allows one selection, so exactly one hotspot region can be correct.`,
+        });
+      if (
+        regions.some(
+          (region) =>
+            region.width <= 0 ||
+            region.height <= 0 ||
+            region.x < 0 ||
+            region.y < 0 ||
+            region.x + region.width > 1 ||
+            region.y + region.height > 1,
+        )
+      )
+        issues.push({
+          questionId: question.id,
+          message: `${label} has a hotspot region outside the image bounds.`,
+        });
+    } else if (question.type === "multipart") {
+      const parts = question.parts ?? [];
+      const partIds = new Set<string>();
+      if (!parts.length)
+        issues.push({
+          questionId: question.id,
+          message: `${label} needs at least one complete part.`,
+        });
+      for (const [partIndex, part] of parts.entries()) {
+        const partLabel = `${label}, part ${partIndex + 1}`;
+        if (partIds.has(part.id))
+          issues.push({
+            questionId: question.id,
+            message: `${partLabel} needs a unique stable identity.`,
+          });
+        partIds.add(part.id);
+        if (!part.prompt.trim())
+          issues.push({
+            questionId: question.id,
+            message: `${partLabel} needs a prompt.`,
+          });
+        const result = validateQuizForPublishing(
+          [
+            {
+              ...part,
+              id: part.id,
+              prompt: part.prompt || `Part ${partIndex + 1}`,
+              points: part.points ?? 1,
+            },
+          ],
+          {},
+        );
+        for (const issue of result)
+          issues.push({
+            questionId: question.id,
+            message: `${partLabel} ${issue.message.replace(/^Question 1\s*/i, "")}`,
+          });
+      }
     } else if (
       question.type !== "long_response" &&
       !question.correctAnswer?.trim()
@@ -883,6 +1086,61 @@ export function validateQuizForPublishing(
         message: `${label} has a pool draw count but no random-pool name.`,
       });
   });
+  const bankIds = new Set<string>();
+  for (const bank of context.banks ?? []) {
+    if (!bank.id.trim() || bankIds.has(bank.id))
+      issues.push({
+        message: `Question bank “${bank.name || bank.id || "untitled"}” needs a unique stable identity.`,
+      });
+    bankIds.add(bank.id);
+    if (!bank.name.trim())
+      issues.push({ message: `Question bank “${bank.id}” needs a name.` });
+  }
+  const poolIds = new Set<string>();
+  for (const pool of context.pools ?? []) {
+    if (!pool.id.trim() || poolIds.has(pool.id))
+      issues.push({
+        message: `Random pool “${pool.name || pool.id || "untitled"}” needs a unique stable identity.`,
+      });
+    poolIds.add(pool.id);
+  }
+  const poolById = new Map(
+    (context.pools ?? []).map((pool) => [pool.id, pool]),
+  );
+  for (const question of questions) {
+    if (question.bankId && !bankIds.has(question.bankId))
+      issues.push({
+        questionId: question.id,
+        message: `Question “${question.id}” refers to a missing question bank.`,
+      });
+    if (question.poolId && context.pools && !poolById.has(question.poolId))
+      issues.push({
+        questionId: question.id,
+        message: `Question “${question.id}” refers to a missing random-draw pool.`,
+      });
+  }
+  if (context.pools) {
+    for (const pool of context.pools) {
+      const members = questions.filter(
+        (question) => question.poolId === pool.id,
+      );
+      if (!pool.name.trim())
+        issues.push({ message: `Random pool “${pool.id}” needs a name.` });
+      if (!Number.isInteger(pool.drawCount) || pool.drawCount < 1)
+        issues.push({
+          message: `Random pool “${pool.name || pool.id}” needs a positive whole-number draw count.`,
+        });
+      if (!members.length)
+        issues.push({
+          message: `Random pool “${pool.name}” has no questions.`,
+        });
+      else if (pool.drawCount > members.length)
+        issues.push({
+          questionId: members[0]?.id,
+          message: `Random pool “${pool.name}” asks for ${pool.drawCount} questions but contains only ${members.length}.`,
+        });
+    }
+  }
   const pools = new Map<string, PortableQuizQuestion[]>();
   for (const question of questions) {
     if (!question.poolId?.trim()) continue;
@@ -891,7 +1149,7 @@ export function validateQuizForPublishing(
       question,
     ]);
   }
-  for (const [poolId, pool] of pools) {
+  for (const [poolId, pool] of context.pools ? [] : pools) {
     const counts = new Set(pool.map((question) => question.poolDrawCount ?? 1));
     if (counts.size > 1)
       issues.push({

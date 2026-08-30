@@ -1402,6 +1402,14 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
+    if (action === "visitQuizPracticeQuestion") {
+      const result = await spectraMutation("quizPractice:visitQuestion", {
+        attemptId: requireString(body.attemptId, "attemptId"),
+        questionId: requireString(body.questionId, "questionId"),
+      });
+      return ok(result);
+    }
+
     if (action === "submitQuizPractice") {
       const result = await spectraMutation("quizPractice:submit", {
         attemptId: requireString(body.attemptId, "attemptId"),

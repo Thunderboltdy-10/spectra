@@ -44,6 +44,7 @@ import {
   submitSpectraQuizPractice,
   uploadArtifactAsset,
   uploadArtifactImportOriginal,
+  visitSpectraQuizPracticeQuestion,
   type SpectraArtifactAsset,
   type SpectraQuizPracticeAttempt,
   type SpectraQuizResponseSummary,
@@ -60,6 +61,10 @@ import {
 } from "../quiz/experience";
 import {
   parseQuizImport,
+  quizCsv,
+  quizExportFidelity,
+  quizJson,
+  quizQtiPackage,
   validateQuizForPublishing,
   type PortableQuizQuestion,
 } from "../quiz/interchange";
@@ -72,17 +77,27 @@ import {
   iconButtonClass,
   inputClass,
   plannerDescriptionText,
-  quizQuestions,
   smallActionClass,
   textareaClass,
 } from "./artifact-studio";
+import { id, record } from "./artifact-content-model";
 import {
-  id,
+  newQuizQuestion,
+  newQuizPart,
+  duplicateQuizQuestion,
+  normalizeQuizContent,
+  normalizeQuizQuestion,
+  quizQuestions,
   quizSettingsFromContent,
-  record,
   type QuizQuestion,
+  type QuizBank,
+  type QuizPool,
+  type QuizPart,
+  type QuizResponse,
+  type QuizResponseAtom,
   type QuizSettings,
-} from "./artifact-content-model";
+} from "../quiz/model";
+import { gradeQuizQuestion } from "../quiz/operations";
 import { artifactBlobSha256 } from "./artifact-studio-file-utils";
 import { formatShortDate } from "./spectra-view-model";
 import {
@@ -90,7 +105,7 @@ import {
   WorkbarItemSelector,
   type CommandBinding,
 } from "./artifact-workbar";
-import { projectBindingsFromIr } from "../capabilities";
+import { projectBindingsFromIr, QUIZ_REFUSAL_REASONS } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
 
@@ -108,11 +123,26 @@ const QUIZ_TYPE_LABELS: Record<QuizQuestion["type"], string> = {
   fill_blank: "Fill in the blank",
   long_response: "Long response",
   matching: "Matching",
+  hotspot: "Hotspot",
+  multipart: "Multipart",
 };
 
 const QUIZ_TYPE_OPTIONS = (
   Object.keys(QUIZ_TYPE_LABELS) as Array<QuizQuestion["type"]>
 ).map((type) => ({ value: type, label: QUIZ_TYPE_LABELS[type] }));
+
+const MULTIPART_TYPE_OPTIONS = QUIZ_TYPE_OPTIONS.filter(({ value }) =>
+  [
+    "multiple_choice",
+    "true_false",
+    "select_all",
+    "ordering",
+    "short_answer",
+    "numeric",
+    "fill_blank",
+    "matching",
+  ].includes(value),
+);
 
 /**
  * `work/registry` mode ids to the quiz's own mode vocabulary. The registry is
@@ -360,8 +390,7 @@ function QuizExperienceSection({
             value={experience.resultsVisibility}
             onChange={(value) =>
               onChange({
-                resultsVisibility:
-                  value as QuizExperience["resultsVisibility"],
+                resultsVisibility: value as QuizExperience["resultsVisibility"],
               })
             }
             options={[
@@ -388,10 +417,16 @@ function quizClockLabel(totalSeconds: number) {
     : `${minutes}:${paddedSeconds}`;
 }
 
+function quizDurationLabel(milliseconds: number) {
+  return quizClockLabel(Math.max(0, Math.round(milliseconds / 1_000)));
+}
+
 function quizPracticeErrorMessage(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : "";
   if (message.includes("QUIZ_ATTEMPT_TIME_ELAPSED"))
     return "Time ran out, so this answer was not recorded. Submit to see how you did.";
+  if (message.includes("QUIZ_QUESTION_TIME_ELAPSED"))
+    return "Time for this question has ended. Your earlier synchronized answer is safe; move to another question.";
   if (message.includes("QUIZ_PRACTICE_UNAVAILABLE")) {
     // The server already phrases why an attempt cannot start — a deadline that
     // has passed, an attempt allowance that is used up — so pass its own words
@@ -440,7 +475,9 @@ function QuizResultPie({
           {" · right"}
         </li>
         <li>
-          <span className="font-semibold text-[var(--danger)]">{incorrect}</span>
+          <span className="font-semibold text-[var(--danger)]">
+            {incorrect}
+          </span>
           {" · wrong"}
         </li>
         {pending ? (
@@ -486,6 +523,12 @@ export function QuizStudio({
   >(readOnly ? "preview" : "builder");
   const [quizSettings, setQuizSettings] = useState<QuizSettings>(() =>
     quizSettingsFromContent(content),
+  );
+  const [banks, setBanks] = useState<QuizBank[]>(
+    () => normalizeQuizContent(content).banks,
+  );
+  const [pools, setPools] = useState<QuizPool[]>(
+    () => normalizeQuizContent(content).pools,
   );
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
@@ -584,6 +627,9 @@ export function QuizStudio({
     remainingMs: number;
     at: number;
   }>();
+  const [practiceQuestionClocks, setPracticeQuestionClocks] = useState<
+    Record<string, { remainingMs: number; at: number }>
+  >({});
   const practiceAutoSubmitted = useRef<string | undefined>(undefined);
   const activeQuestion =
     questions.find((question) => question.id === activeQuestionId) ??
@@ -602,6 +648,9 @@ export function QuizStudio({
         : (nextQuestions[0]?.id ?? ""),
     );
     setQuizSettings(quizSettingsFromContent(content));
+    const normalized = normalizeQuizContent(content);
+    setBanks(normalized.banks);
+    setPools(normalized.pools);
     setPublished(record(content).published === true);
   }, [content]);
 
@@ -641,14 +690,14 @@ export function QuizStudio({
   }, [artifactId]);
 
   useEffect(() => {
-    if (practiceAttempt?.status !== "in_progress" || !practiceClock) return;
+    if (practiceAttempt?.status !== "in_progress") return;
     setPracticeClockNow(Date.now());
     const timer = window.setInterval(
       () => setPracticeClockNow(Date.now()),
       1_000,
     );
     return () => window.clearInterval(timer);
-  }, [practiceAttempt, practiceClock]);
+  }, [practiceAttempt?.attemptId, practiceAttempt?.status]);
 
   useEffect(() => {
     let active = true;
@@ -708,6 +757,8 @@ export function QuizStudio({
     onChange({
       ...record(content),
       questions: next,
+      banks,
+      pools,
       settings: quizSettings,
       published: nextPublished,
     });
@@ -736,6 +787,8 @@ export function QuizStudio({
     onChange({
       ...record(content),
       questions,
+      banks,
+      pools,
       settings: next,
       published: false,
     });
@@ -785,23 +838,7 @@ export function QuizStudio({
 
   function addQuestion() {
     const questionId = id("question");
-    const question = {
-      id: questionId,
-      prompt: "",
-      type: "multiple_choice" as const,
-      options: ["", "", "", ""],
-      optionIds: [0, 1, 2, 3].map(
-        (optionIndex) => `${questionId}:option:${optionIndex + 1}`,
-      ),
-      correctAnswer: "",
-      explanation: "",
-      difficulty: "medium" as const,
-      points: 1,
-      timeLimitSeconds: 90,
-      bloomLevel: "remember" as const,
-      standards: [],
-      tags: [],
-    };
+    const question = newQuizQuestion(questionId);
     commit([...questions, question]);
     setActiveQuestionId(question.id);
   }
@@ -932,47 +969,40 @@ export function QuizStudio({
     }
   }
 
-  function answerValueArray(value: string) {
+  function answerResponseValue(value: string): QuizResponse {
     try {
       const parsed: unknown = JSON.parse(value);
-      return Array.isArray(parsed)
-        ? parsed.filter((item): item is string => typeof item === "string")
-        : [];
+      if (Array.isArray(parsed))
+        return parsed.filter(
+          (item): item is string => typeof item === "string",
+        );
+      if (parsed && typeof parsed === "object")
+        return Object.fromEntries(
+          Object.entries(parsed).flatMap(([key, item]) =>
+            typeof item === "string" ||
+            (Array.isArray(item) &&
+              item.every((candidate) => typeof candidate === "string"))
+              ? [[key, item as string | string[]]]
+              : [],
+          ),
+        );
+      return value;
     } catch {
-      return [];
+      return value;
     }
   }
 
+  function answerObject(questionId: string) {
+    const value = answerResponseValue(answers[questionId] ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : {};
+  }
+
   const displayedQuestions: QuizQuestion[] = practiceAttempt
-    ? practiceAttempt.questions.map((question) => ({
-        ...question,
-        optionIds: question.options.map(
-          (_, optionIndex) =>
-            `${question.id}:attempt-option:${optionIndex + 1}`,
-        ),
-        difficulty:
-          question.difficulty === "easy" ||
-          question.difficulty === "medium" ||
-          question.difficulty === "hard"
-            ? question.difficulty
-            : undefined,
-        media:
-          record(question.media).assetId &&
-          typeof record(question.media).assetId === "string"
-            ? {
-                assetId: String(record(question.media).assetId),
-                name: String(record(question.media).name ?? "Question media"),
-                mediaType: String(
-                  record(question.media).mediaType ??
-                    "application/octet-stream",
-                ),
-                altText:
-                  typeof record(question.media).altText === "string"
-                    ? String(record(question.media).altText)
-                    : undefined,
-              }
-            : undefined,
-      }))
+    ? practiceAttempt.questions.map((question, index) =>
+        normalizeQuizQuestion(question, index),
+      )
     : questions;
   const activeDisplayedQuestionIndex = Math.max(
     0,
@@ -980,6 +1010,13 @@ export function QuizStudio({
       (question) => question.id === activeQuestionId,
     ),
   );
+  const activeDisplayedQuestionId =
+    displayedQuestions[activeDisplayedQuestionIndex]?.id;
+  const practiceAttemptId = practiceAttempt?.attemptId;
+  const practiceAttemptStatus = practiceAttempt?.status;
+  const activePracticeQuestionClock = activeDisplayedQuestionId
+    ? practiceQuestionClocks[activeDisplayedQuestionId]
+    : undefined;
   const practiceResultByQuestion = new Map(
     (practiceAttempt?.results ?? []).map((result) => [
       result.questionId,
@@ -1002,9 +1039,16 @@ export function QuizStudio({
       .filter((question) => {
         const answer = (answers[question.id] ?? "").trim();
         if (!answer) return false;
-        if (!answer.startsWith("[")) return true;
+        if (!answer.startsWith("[") && !answer.startsWith("{")) return true;
         try {
-          return (JSON.parse(answer) as unknown[]).length > 0;
+          const parsed: unknown = JSON.parse(answer);
+          return Array.isArray(parsed)
+            ? parsed.length > 0
+            : Boolean(
+                parsed &&
+                typeof parsed === "object" &&
+                Object.keys(parsed).length,
+              );
         } catch {
           return true;
         }
@@ -1060,6 +1104,23 @@ export function QuizStudio({
         ),
       )
     : null;
+  const practiceQuestionSecondsRemaining = activePracticeQuestionClock
+    ? Math.max(
+        0,
+        Math.ceil(
+          (activePracticeQuestionClock.remainingMs -
+            Math.max(0, practiceClockNow - activePracticeQuestionClock.at)) /
+            1_000,
+        ),
+      )
+    : null;
+  const practiceShowTimerWarnings =
+    record(record(practiceAttempt?.settings).accessibilityPolicy)
+      .showTimerWarnings !== false;
+  const activeQuestionInputDisabled =
+    submitted ||
+    (practiceAttempt?.status === "in_progress" &&
+      practiceQuestionSecondsRemaining === 0);
   const practiceExperience = practiceAttempt?.experience;
   const practiceAnswersRevealed = practiceAttempt?.answersRevealed !== false;
   const resumableAttempt = practiceAttempts.find(
@@ -1139,6 +1200,7 @@ export function QuizStudio({
   function leaveAttempt() {
     setPracticeAttempt(undefined);
     setPracticeClock(undefined);
+    setPracticeQuestionClocks({});
     setAnswers({});
     setSubmitted(false);
     setInspectAttempt(false);
@@ -1165,11 +1227,22 @@ export function QuizStudio({
     anchorPracticeClock(
       attempt.status === "in_progress" ? attempt.timeRemainingMs : undefined,
     );
+    const anchor = currentTimeMs();
+    setPracticeQuestionClocks(
+      Object.fromEntries(
+        Object.entries(attempt.questionTiming ?? {}).flatMap(
+          ([questionId, timing]) =>
+            typeof timing.remainingMs === "number"
+              ? [[questionId, { remainingMs: timing.remainingMs, at: anchor }]]
+              : [],
+        ),
+      ),
+    );
     setAnswers(
       Object.fromEntries(
         Object.entries(attempt.responses).map(([questionId, response]) => [
           questionId,
-          Array.isArray(response) ? JSON.stringify(response) : response,
+          typeof response === "string" ? response : JSON.stringify(response),
         ]),
       ),
     );
@@ -1183,6 +1256,171 @@ export function QuizStudio({
     setPracticeError(undefined);
     setView("preview");
   }
+
+  function commitCollections(input: {
+    questions?: QuizQuestion[];
+    banks?: QuizBank[];
+    pools?: QuizPool[];
+  }) {
+    const nextQuestions = input.questions ?? questions;
+    const nextBanks = input.banks ?? banks;
+    const nextPools = input.pools ?? pools;
+    setQuestions(nextQuestions);
+    setBanks(nextBanks);
+    setPools(nextPools);
+    setPublished(false);
+    setPublishIssues([]);
+    onChange({
+      ...record(content),
+      questions: nextQuestions,
+      banks: nextBanks,
+      pools: nextPools,
+      settings: quizSettings,
+      published: false,
+    });
+  }
+
+  function addBank() {
+    const bank: QuizBank = {
+      id: id("bank"),
+      name: `Bank ${banks.length + 1}`,
+    };
+    commitCollections({ banks: [...banks, bank] });
+  }
+
+  function removeBank(bankId: string) {
+    commitCollections({
+      banks: banks.filter((bank) => bank.id !== bankId),
+      questions: questions.map((question) =>
+        question.bankId === bankId
+          ? { ...question, bankId: undefined }
+          : question,
+      ),
+    });
+  }
+
+  function addPool() {
+    const pool: QuizPool = {
+      id: id("pool"),
+      name: `Pool ${pools.length + 1}`,
+      drawCount: 1,
+    };
+    commitCollections({ pools: [...pools, pool] });
+  }
+
+  function removePool(poolId: string) {
+    commitCollections({
+      pools: pools.filter((pool) => pool.id !== poolId),
+      questions: questions.map((question) =>
+        question.poolId === poolId
+          ? { ...question, poolId: undefined, poolDrawCount: undefined }
+          : question,
+      ),
+    });
+  }
+
+  function exportQuizAggregate() {
+    if (!responseSummary?.available) return;
+    const rows: Array<Array<string | number>> = [
+      ["metric", "key", "value"],
+      ["cohort", "attempts", responseSummary.attemptCount],
+      ["cohort", "submitted", responseSummary.submittedCount],
+      ["cohort", "in_progress", responseSummary.inProgressCount],
+      ["cohort", "timed_out", responseSummary.timeElapsedCount],
+      ["cohort", "average_percentage", responseSummary.averagePercentage ?? ""],
+      ["duration", "median_ms", responseSummary.duration?.medianMs ?? ""],
+      ["duration", "min_ms", responseSummary.duration?.minMs ?? ""],
+      ["duration", "max_ms", responseSummary.duration?.maxMs ?? ""],
+      ...responseSummary.scoreDistribution.map((bucket) => [
+        "score_bucket",
+        bucket.label,
+        bucket.count,
+      ]),
+      ...responseSummary.questions.flatMap((question) => [
+        ["question_answered", question.questionId, question.answered],
+        ["question_correct", question.questionId, question.correct],
+      ]),
+    ];
+    const csv = rows
+      .map((row) =>
+        row
+          .map((value) => `"${String(value).replaceAll('"', '""')}"`)
+          .join(","),
+      )
+      .join("\r\n");
+    const url = URL.createObjectURL(
+      new Blob([csv], { type: "text/csv;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `quiz-${artifactId}-aggregate.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  useEffect(() => {
+    if (
+      !practiceAttemptId ||
+      practiceAttemptStatus !== "in_progress" ||
+      !activeDisplayedQuestionId
+    )
+      return;
+    let active = true;
+    void visitSpectraQuizPracticeQuestion({
+      attemptId: practiceAttemptId,
+      questionId: activeDisplayedQuestionId,
+    })
+      .then((timing) => {
+        if (!active) return;
+        setPracticeAttempt((current) =>
+          current
+            ? {
+                ...current,
+                questionTiming: {
+                  ...(current.questionTiming ?? {}),
+                  [activeDisplayedQuestionId]: {
+                    startedAt: timing.startedAt,
+                    remainingMs: timing.questionTimeRemainingMs,
+                  },
+                },
+              }
+            : current,
+        );
+        const remainingMs = timing.questionTimeRemainingMs;
+        if (typeof remainingMs === "number")
+          setPracticeQuestionClocks((current) => ({
+            ...current,
+            [activeDisplayedQuestionId]: {
+              remainingMs,
+              at: currentTimeMs(),
+            },
+          }));
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          if (
+            error instanceof Error &&
+            error.message.includes("QUIZ_QUESTION_TIME_ELAPSED")
+          )
+            setPracticeQuestionClocks((current) => ({
+              ...current,
+              [activeDisplayedQuestionId]: {
+                remainingMs: 0,
+                at: currentTimeMs(),
+              },
+            }));
+          setPracticeError(
+            quizPracticeErrorMessage(
+              error,
+              "This question’s timer could not be synchronized.",
+            ),
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeDisplayedQuestionId, practiceAttemptId, practiceAttemptStatus]);
 
   async function beginPractice() {
     // The bar already hides an action the viewer cannot perform; this is the
@@ -1238,7 +1476,7 @@ export function QuizStudio({
       const synchronized = await saveSpectraQuizPracticeResponse({
         attemptId: practiceAttempt.attemptId,
         questionId,
-        response: value.startsWith("[") ? answerValueArray(value) : value,
+        response: answerResponseValue(value),
         clientMutationId: crypto.randomUUID(),
       });
       if (synchronized.result)
@@ -1248,15 +1486,22 @@ export function QuizStudio({
         }));
       if (synchronized.timeRemainingMs !== undefined)
         anchorPracticeClock(synchronized.timeRemainingMs);
+      const questionRemainingMs = synchronized.questionTimeRemainingMs;
+      if (typeof questionRemainingMs === "number")
+        setPracticeQuestionClocks((current) => ({
+          ...current,
+          [questionId]: {
+            remainingMs: questionRemainingMs,
+            at: currentTimeMs(),
+          },
+        }));
       setPracticeAttempt((current) =>
         current
           ? {
               ...current,
               responses: {
                 ...current.responses,
-                [questionId]: value.startsWith("[")
-                  ? answerValueArray(value)
-                  : value,
+                [questionId]: answerResponseValue(value),
               },
             }
           : current,
@@ -1285,7 +1530,7 @@ export function QuizStudio({
           await saveSpectraQuizPracticeResponse({
             attemptId: practiceAttempt.attemptId,
             questionId,
-            response: value.startsWith("[") ? answerValueArray(value) : value,
+            response: answerResponseValue(value),
             clientMutationId: crypto.randomUUID(),
           });
         } catch {
@@ -1341,65 +1586,25 @@ export function QuizStudio({
       return (
         revealedPracticeResultByQuestion.get(question.id)?.correct === true
       );
-    if (question.type === "select_all") {
-      const actual = [...answerArray(question.id)].sort();
-      const expected = [...(question.correctAnswers ?? [])].sort();
-      return (
-        actual.length === expected.length &&
-        actual.every((value, index) => value === expected[index])
-      );
-    }
-    if (question.type === "ordering") {
-      const actual = answerArray(question.id);
-      const expected = question.correctAnswers?.length
-        ? question.correctAnswers
-        : question.options;
-      return (
-        actual.length === expected.length &&
-        actual.every((value, index) => value === expected[index])
-      );
-    }
-    if (question.type === "matching") {
-      const actual = [...answerArray(question.id)].sort();
-      const expected = (question.matchingPairs ?? [])
-        .map(
-          (pair) =>
-            `${pair.id}:${(pair.right ?? "").trim().toLocaleLowerCase()}`,
-        )
-        .sort();
-      return (
-        actual.length === expected.length &&
-        actual.every(
-          (value, index) =>
-            value.trim().toLocaleLowerCase() === expected[index],
-        )
-      );
-    }
-    if (question.type === "numeric") {
-      const actual = Number(answers[question.id]);
-      const expected = Number(question.correctAnswer);
-      return (
-        Number.isFinite(actual) &&
-        Number.isFinite(expected) &&
-        Math.abs(actual - expected) <= (question.numericTolerance ?? 0)
-      );
-    }
-    if (question.type === "fill_blank") {
-      const actual = (answers[question.id] ?? "").trim().toLocaleLowerCase();
-      return [question.correctAnswer, ...(question.correctAnswers ?? [])]
-        .filter(Boolean)
-        .some((answer) => answer!.trim().toLocaleLowerCase() === actual);
-    }
     if (question.type === "long_response") return false;
     return (
-      (answers[question.id] ?? "").trim().toLocaleLowerCase() ===
-      (question.correctAnswer ?? "").trim().toLocaleLowerCase()
+      gradeQuizQuestion(
+        question,
+        answerResponseValue(answers[question.id] ?? ""),
+      ).correct === true
     );
   }
 
   function publishQuiz() {
     const issues = validateQuizForPublishing(
       questions as PortableQuizQuestion[],
+      {
+        banks,
+        pools,
+        reviewPolicy: quizSettings.reviewPolicy,
+        accessibilityPolicy: quizSettings.accessibilityPolicy,
+        enforceQuestionTimeLimits: quizSettings.enforceQuestionTimeLimits,
+      },
     );
     if (issues.length) {
       setPublishIssues(issues);
@@ -1419,6 +1624,8 @@ export function QuizStudio({
     onChange({
       ...record(content),
       questions,
+      banks,
+      pools,
       settings: quizSettings,
       published: true,
       publishedAt: currentTimeMs(),
@@ -1435,6 +1642,8 @@ export function QuizStudio({
     onChange({
       ...record(content),
       questions,
+      banks,
+      pools,
       settings: quizSettings,
       published: false,
     });
@@ -1460,24 +1669,56 @@ export function QuizStudio({
       await uploadArtifactImportOriginal(jobId, file);
       const result = await parseQuizImport(file);
       const imported = result.content.questions.map(
-        (question): QuizQuestion => ({
-          ...question,
-          options: question.options ?? [],
-          optionIds: (question.options ?? []).map(
-            (_, optionIndex) =>
-              `${question.id}:option:${optionIndex + 1}-${crypto.randomUUID()}`,
+        (question, index): QuizQuestion =>
+          normalizeQuizQuestion(
+            {
+              ...question,
+              options: question.options ?? [],
+              optionIds: (question.options ?? []).map(
+                (_, optionIndex) =>
+                  `${question.id}:option:${optionIndex + 1}-${crypto.randomUUID()}`,
+              ),
+              difficulty: question.difficulty ?? "medium",
+              points: question.points ?? 1,
+              timeLimitSeconds: question.timeLimitSeconds ?? 90,
+            },
+            index,
           ),
-          difficulty: question.difficulty ?? "medium",
-          points: question.points ?? 1,
-          timeLimitSeconds: question.timeLimitSeconds ?? 90,
-        }),
       );
       const onlyBlankStarter =
         questions.length === 1 &&
         !questions[0]?.prompt.trim() &&
         questions[0]?.options.every((option) => !option.trim());
       const next = onlyBlankStarter ? imported : [...questions, ...imported];
-      commit(next);
+      const nextBanks = [
+        ...banks,
+        ...(result.content.banks ?? []).filter(
+          (bank) => !banks.some((candidate) => candidate.id === bank.id),
+        ),
+      ];
+      const nextPools = [
+        ...pools,
+        ...(result.content.pools ?? []).filter(
+          (pool) => !pools.some((candidate) => candidate.id === pool.id),
+        ),
+      ];
+      const nextSettings = result.content.settings
+        ? quizSettingsFromContent({ settings: result.content.settings })
+        : quizSettings;
+      setQuestions(next);
+      setBanks(nextBanks);
+      setPools(nextPools);
+      setQuizSettings(nextSettings);
+      setPublished(false);
+      setPublishIssues([]);
+      onChange({
+        ...record(content),
+        questions: next,
+        banks: nextBanks,
+        pools: nextPools,
+        settings: nextSettings,
+        published: false,
+      });
       setActiveQuestionId(imported[0]?.id ?? next[0]?.id ?? "");
       await completeArtifactImport({
         jobId,
@@ -1487,6 +1728,8 @@ export function QuizStudio({
         unsupportedFeatures: result.unsupportedFeatures,
         importedContent: {
           questions: imported,
+          banks: result.content.banks,
+          pools: result.content.pools,
           settings: result.content.settings,
         },
       });
@@ -1523,6 +1766,42 @@ export function QuizStudio({
     }
   }
 
+  function exportQuizInterchange(
+    format: "qti-2.2" | "csv" | "spectra-json" | "print",
+  ) {
+    const fidelity = quizExportFidelity(questions, format);
+    if (format === "print") {
+      setQuizImportReport(
+        fidelity.notes.join(" ") ||
+          "The print sheet preserves the visible formative question sequence.",
+      );
+      window.print();
+      return;
+    }
+    const blob =
+      format === "spectra-json"
+        ? new Blob(
+            [quizJson({ questions, settings: quizSettings, banks, pools })],
+            { type: "application/json" },
+          )
+        : format === "csv"
+          ? new Blob([quizCsv(questions)], {
+              type: "text/csv;charset=utf-8",
+            })
+          : quizQtiPackage(questions);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `quiz.${format === "spectra-json" ? "json" : format === "qti-2.2" ? "zip" : "csv"}`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setQuizImportReport(
+      fidelity.notes.length
+        ? `Exported with fidelity notes: ${fidelity.notes.join(" ")}`
+        : `Exported ${format} with exact supported question content.`,
+    );
+  }
+
   /**
    * One bar, declared rather than drawn. Modes are `[]` on purpose: Attempt and
    * Preview as learner are activities, and CANON D3 forbids an activity as a
@@ -1533,112 +1812,168 @@ export function QuizStudio({
   const workbarActions: CommandBinding[] = projectBindingsFromIr(
     "quiz",
     canEditQuiz
-    ? [
-        activeQuizMode === "build"
-          ? {
-              id: "preview",
-              label: "Preview as learner",
-              icon: Eye,
-              priority: "essential",
-              onSelect: () => openQuizMode("preview"),
-            }
-          : {
-              id: "build",
-              label: "Back to build",
-              icon: Pencil,
-              priority: "essential",
-              keepLabel: true,
-              onSelect: () => openQuizMode("build"),
+      ? [
+          activeQuizMode === "build"
+            ? {
+                id: "preview",
+                label: "Preview as learner",
+                icon: Eye,
+                priority: "essential",
+                onSelect: () => openQuizMode("preview"),
+              }
+            : {
+                id: "build",
+                label: "Back to build",
+                icon: Pencil,
+                priority: "essential",
+                keepLabel: true,
+                onSelect: () => openQuizMode("build"),
+              },
+          {
+            id: "settings",
+            label: "Quiz settings",
+            icon: SlidersHorizontal,
+            active: view === "settings",
+            // Every one of these is a toggle, not a one-way door: pressing the
+            // active control returns to authoring.
+            onSelect: () =>
+              setView(view === "settings" ? "builder" : "settings"),
+          },
+          ...(showQuestionRail
+            ? [
+                {
+                  id: "questions",
+                  label: questionNavigatorOpen
+                    ? "Hide questions"
+                    : "Show questions",
+                  icon: PanelLeft,
+                  priority: "essential" as const,
+                  active: questionNavigatorOpen,
+                  onSelect: () => setQuestionNavigatorOpen((open) => !open),
+                },
+              ]
+            : []),
+          ...(view === "builder"
+            ? [
+                {
+                  id: "question.add",
+                  label: "Add question",
+                  icon: Plus,
+                  priority: "secondary" as const,
+                  onSelect: addQuestion,
+                },
+                {
+                  id: "question-details",
+                  label: "Question details",
+                  icon: List,
+                  priority: "secondary" as const,
+                  active: questionDetailsOpen,
+                  onSelect: () => setQuestionDetailsOpen((open) => !open),
+                },
+              ]
+            : []),
+          ...(view === "settings"
+            ? [
+                {
+                  id: "bank.create",
+                  label: "Add bank",
+                  icon: Plus,
+                  priority: "advanced" as const,
+                  onSelect: addBank,
+                },
+                {
+                  id: "pool.create",
+                  label: "Add pool",
+                  icon: Shuffle,
+                  priority: "advanced" as const,
+                  onSelect: addPool,
+                },
+              ]
+            : []),
+          ...(quizModes.includes("responses")
+            ? [
+                {
+                  id: "cohort",
+                  label: "Cohort responses",
+                  icon: BarChart3,
+                  active: view === "summary",
+                  onSelect: () =>
+                    view === "summary"
+                      ? openQuizMode("build")
+                      : openQuizMode("responses"),
+                } as CommandBinding,
+              ]
+            : []),
+          {
+            id: "attempts",
+            label: "Your attempts",
+            icon: History,
+            active: view === "responses",
+            onSelect: () =>
+              setView(view === "responses" ? "builder" : "responses"),
+          },
+          ...(view === "summary" && responseSummary?.available
+            ? [
+                {
+                  id: "analytics.export",
+                  label: "Export aggregate CSV",
+                  icon: Import,
+                  priority: "advanced" as const,
+                  onSelect: exportQuizAggregate,
+                },
+              ]
+            : []),
+          {
+            id: "import",
+            label: quizImporting ? "Importing questions…" : "Import questions",
+            icon: quizImporting ? Loader2 : Import,
+            priority: "advanced",
+            disabled: quizImporting,
+            onSelect: () => quizImportRef.current?.click(),
+          },
+          {
+            id: "export.interchange",
+            label: "Export quiz",
+            icon: Import,
+            priority: "advanced",
+            control: {
+              kind: "menu",
+              options: [
+                { value: "spectra-json", label: "Spectra JSON · exact v4" },
+                { value: "qti-2.2", label: "QTI 2.2 package" },
+                { value: "csv", label: "CSV question table" },
+                { value: "print", label: "Print / save PDF" },
+              ],
             },
-        {
-          id: "settings",
-          label: "Quiz settings",
-          icon: SlidersHorizontal,
-          active: view === "settings",
-          // Every one of these is a toggle, not a one-way door: pressing the
-          // active control returns to authoring.
-          onSelect: () => setView(view === "settings" ? "builder" : "settings"),
-        },
-        ...(showQuestionRail
-          ? [
-              {
-                id: "questions",
-                label: questionNavigatorOpen
-                  ? "Hide questions"
-                  : "Show questions",
-                icon: PanelLeft,
-                priority: "essential" as const,
-                active: questionNavigatorOpen,
-                onSelect: () =>
-                  setQuestionNavigatorOpen((open) => !open),
-              },
-            ]
-          : []),
-        ...(view === "builder"
-          ? [
-              {
-                id: "question-details",
-                label: "Question details",
-                icon: List,
-                priority: "secondary" as const,
-                active: questionDetailsOpen,
-                onSelect: () => setQuestionDetailsOpen((open) => !open),
-              },
-            ]
-          : []),
-        ...(quizModes.includes("responses")
-          ? [
-              {
-                id: "cohort",
-                label: "Cohort responses",
-                icon: BarChart3,
-                active: view === "summary",
-                onSelect: () =>
-                  view === "summary"
-                    ? openQuizMode("build")
-                    : openQuizMode("responses"),
-              } as CommandBinding,
-            ]
-          : []),
-        {
-          id: "attempts",
-          label: "Your attempts",
-          icon: History,
-          active: view === "responses",
-          onSelect: () =>
-            setView(view === "responses" ? "builder" : "responses"),
-        },
-        {
-          id: "import",
-          label: quizImporting ? "Importing questions…" : "Import questions",
-          icon: quizImporting ? Loader2 : Import,
-          priority: "advanced",
-          disabled: quizImporting,
-          onSelect: () => quizImportRef.current?.click(),
-        },
-        ...(published
-          ? [
-              {
-                id: "unpublish",
-                label: "Unpublish",
-                icon: EyeOff,
-                priority: "advanced",
-                hint: "Stops new attempts; attempts already taken keep their own version",
-                onSelect: unpublishQuiz,
-              } as CommandBinding,
-            ]
-          : []),
-      ]
-    : [
-        {
-          id: "attempts",
-          label: "Your attempts",
-          icon: History,
-          priority: "essential",
-          active: view === "responses",
-          onSelect: () => setView("responses"),
-        },
-      ],
+            onSelect: (value) =>
+              exportQuizInterchange(
+                (typeof value === "string" ? value : "spectra-json") as
+                  "qti-2.2" | "csv" | "spectra-json" | "print",
+              ),
+          },
+          ...(published
+            ? [
+                {
+                  id: "unpublish",
+                  label: "Unpublish",
+                  icon: EyeOff,
+                  priority: "advanced",
+                  hint: "Stops new attempts; attempts already taken keep their own version",
+                  onSelect: unpublishQuiz,
+                } as CommandBinding,
+              ]
+            : []),
+        ]
+      : [
+          {
+            id: "attempts",
+            label: "Your attempts",
+            icon: History,
+            priority: "essential",
+            active: view === "responses",
+            onSelect: () => setView("responses"),
+          },
+        ],
   );
 
   return (
@@ -1830,7 +2165,10 @@ export function QuizStudio({
                   {submitted ? (
                     <div className="rounded-[8px] bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] px-3 py-2 text-right text-[12px] font-semibold text-[var(--success)]">
                       {practiceAttempt?.status === "submitted"
-                        ? `${practiceAttempt.score ?? 0}/${practiceAttempt.maxScore ?? 0} points · ${practiceAttempt.percentage ?? 0}%`
+                        ? typeof practiceAttempt.score === "number" &&
+                          typeof practiceAttempt.maxScore === "number"
+                          ? `${practiceAttempt.score}/${practiceAttempt.maxScore} points · ${practiceAttempt.percentage ?? 0}%`
+                          : "Submitted · score hidden"
                         : `${displayedQuestions.filter((question) => questionCorrect(question)).length}/${displayedQuestions.length} correct`}
                       {/* The practice target is set in settings, so a result
                           that never mentions it made the setting decorative. */}
@@ -1930,448 +2268,636 @@ export function QuizStudio({
                   </button>
                 </div>
               ) : (
-              <>
-              <div>
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                    {practiceAttempt ? "Answer sheet" : "Questions"}
-                  </span>
-                  <span className="text-micro text-[var(--text-secondary)]">
-                    {answeredQuestionCount} of {displayedQuestions.length}{" "}
-                    answered
-                  </span>
-                </div>
-                <div
-                  className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]"
-                  role="progressbar"
-                  aria-label="Questions answered"
-                  aria-valuemin={0}
-                  aria-valuemax={displayedQuestions.length}
-                  aria-valuenow={answeredQuestionCount}
-                >
-                  <div
-                    className="h-full rounded-full bg-[var(--text-primary)] transition-[width] duration-300 ease-out motion-reduce:transition-none"
-                    style={{
-                      width: `${displayedQuestions.length ? (answeredQuestionCount / displayedQuestions.length) * 100 : 0}%`,
-                    }}
-                  />
-                </div>
-                {submitted && inspectAttempt ? (
-                <nav
-                  aria-label={
-                    practiceAttempt ? "Attempt questions" : "Preview questions"
-                  }
-                  className="mt-2.5 flex flex-wrap gap-1.5"
-                >
-                  {displayedQuestions.map((question, index) => {
-                    const graded = submitted
-                      ? practiceAttempt
-                        ? (revealedPracticeResultByQuestion.get(question.id)
-                            ?.correct ?? null)
-                        : question.type === "long_response"
-                          ? null
-                          : questionCorrect(question)
-                      : undefined;
-                    const answered = answeredQuestionIds.has(question.id);
-                    const active = index === activeDisplayedQuestionIndex;
-                    return (
-                      <button
-                        key={question.id}
-                        type="button"
-                        aria-current={active ? "true" : undefined}
-                        aria-label={`Question ${index + 1}${
-                          graded === true
-                            ? ", correct"
-                            : graded === false
-                              ? ", not correct"
-                              : graded === null
-                                ? ", awaiting review"
-                                : answered
-                                  ? ", answered"
-                                  : ", not answered yet"
-                        }`}
-                        title={
-                          plannerDescriptionText(question.prompt) ||
-                          `Question ${index + 1}`
-                        }
-                        onClick={() => setActiveQuestionId(question.id)}
-                        className={`h-8 min-w-8 rounded-[7px] border px-1.5 text-[12px] font-semibold tabular-nums ${
-                          active
-                            ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]"
-                            : graded === true
-                              ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-primary))] text-[var(--success)]"
-                              : graded === false
-                                ? "border-[color-mix(in_oklab,var(--danger)_44%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] text-[var(--danger)]"
-                                : answered
-                                  ? "border-[var(--border-strong)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-                                  : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                        }`}
-                      >
-                        {index + 1}
-                      </button>
-                    );
-                  })}
-                </nav>
-                ) : null}
-              </div>
-              {displayedQuestions
-                .filter((_, index) => index === activeDisplayedQuestionIndex)
-                .map((question) => (
-                  <div
-                    key={question.id}
-                    className={`rounded-[8px] border bg-transparent p-4 ${submitted || revealedPracticeResultByQuestion.has(question.id) ? ((practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response") ? "border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))]" : questionCorrect(question) ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]") : "border-[var(--border-default)]"}`}
-                  >
-                    <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-secondary)]">
-                      <button
-                        type="button"
-                        className={iconButtonClass()}
-                        disabled={activeDisplayedQuestionIndex <= 0}
-                        aria-label="Previous question"
-                        onClick={() => goDisplayedQuestion(-1)}
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </button>
-                      <span className="min-w-0 flex-1 text-center">
-                        Question {activeDisplayedQuestionIndex + 1}
-                        {displayedQuestions.length
-                          ? ` of ${displayedQuestions.length}`
-                          : ""}
+                <>
+                  <div>
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                        {practiceAttempt ? "Answer sheet" : "Questions"}
                       </span>
-                      <button
-                        type="button"
-                        className={iconButtonClass()}
-                        disabled={isLastDisplayedQuestion}
-                        aria-label="Next question"
-                        onClick={() => goDisplayedQuestion(1)}
+                      <span className="text-micro text-[var(--text-secondary)]">
+                        {answeredQuestionCount} of {displayedQuestions.length}{" "}
+                        answered
+                      </span>
+                    </div>
+                    <div
+                      className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]"
+                      role="progressbar"
+                      aria-label="Questions answered"
+                      aria-valuemin={0}
+                      aria-valuemax={displayedQuestions.length}
+                      aria-valuenow={answeredQuestionCount}
+                    >
+                      <div
+                        className="h-full rounded-full bg-[var(--text-primary)] transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                        style={{
+                          width: `${displayedQuestions.length ? (answeredQuestionCount / displayedQuestions.length) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                    {submitted && inspectAttempt ? (
+                      <nav
+                        aria-label={
+                          practiceAttempt
+                            ? "Attempt questions"
+                            : "Preview questions"
+                        }
+                        className="mt-2.5 flex flex-wrap gap-1.5"
                       >
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="mt-2 text-[15px] font-medium text-[var(--text-primary)]">
-                      {plannerDescriptionText(question.prompt) ||
-                        "Untitled question"}
-                    </div>
-                    {question.media ? (
-                      quizAssetMap.get(question.media.assetId)?.downloadUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={
-                            quizAssetMap.get(question.media.assetId)!
-                              .downloadUrl!
-                          }
-                          alt={question.media.altText ?? ""}
-                          className="mt-3 max-h-[320px] w-full rounded-[8px] border border-[var(--border-default)] object-contain"
-                        />
-                      ) : (
-                        <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-micro text-[var(--text-tertiary)]">
-                          Question image unavailable
-                        </div>
-                      )
-                    ) : null}
-                    <div className="mt-3 space-y-2">
-                      {question.type === "multiple_choice" ||
-                      question.type === "true_false" ? (
-                        question.options.map((option, optionIndex) => (
-                          <button
-                            type="button"
-                            disabled={submitted}
-                            onClick={() =>
-                              void synchronizePracticeAnswer(
-                                question.id,
-                                option,
-                              )
-                            }
-                            key={`${question.id}-${optionIndex}`}
-                            className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] transition ${answers[question.id] === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
-                          >
-                            <Radio className="h-3.5 w-3.5" />
-                            {option || `Option ${optionIndex + 1}`}
-                          </button>
-                        ))
-                      ) : question.type === "select_all" ? (
-                        question.options.map((option, optionIndex) => {
-                          const selected = answerArray(question.id).includes(
-                            option,
-                          );
+                        {displayedQuestions.map((question, index) => {
+                          const graded = submitted
+                            ? practiceAttempt
+                              ? (revealedPracticeResultByQuestion.get(
+                                  question.id,
+                                )?.correct ?? null)
+                              : question.type === "long_response"
+                                ? null
+                                : questionCorrect(question)
+                            : undefined;
+                          const answered = answeredQuestionIds.has(question.id);
+                          const active = index === activeDisplayedQuestionIndex;
                           return (
                             <button
+                              key={question.id}
                               type="button"
-                              disabled={submitted}
-                              onClick={() => {
-                                const current = answerArray(question.id);
-                                void synchronizePracticeAnswer(
-                                  question.id,
-                                  JSON.stringify(
-                                    selected
-                                      ? current.filter(
-                                          (value) => value !== option,
-                                        )
-                                      : [...current, option],
-                                  ),
-                                );
-                              }}
-                              key={`${question.id}-${optionIndex}`}
-                              className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] ${selected ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))]" : "border-[var(--border-default)]"}`}
+                              aria-current={active ? "true" : undefined}
+                              aria-label={`Question ${index + 1}${
+                                graded === true
+                                  ? ", correct"
+                                  : graded === false
+                                    ? ", not correct"
+                                    : graded === null
+                                      ? ", awaiting review"
+                                      : answered
+                                        ? ", answered"
+                                        : ", not answered yet"
+                              }`}
+                              title={
+                                plannerDescriptionText(question.prompt) ||
+                                `Question ${index + 1}`
+                              }
+                              onClick={() => setActiveQuestionId(question.id)}
+                              className={`h-8 min-w-8 rounded-[7px] border px-1.5 text-[12px] font-semibold tabular-nums ${
+                                active
+                                  ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]"
+                                  : graded === true
+                                    ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-primary))] text-[var(--success)]"
+                                    : graded === false
+                                      ? "border-[color-mix(in_oklab,var(--danger)_44%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] text-[var(--danger)]"
+                                      : answered
+                                        ? "border-[var(--border-strong)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                                        : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                              }`}
                             >
-                              <span
-                                className={`flex h-4 w-4 items-center justify-center rounded-[4px] border ${selected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)]"}`}
-                              >
-                                {selected ? (
-                                  <Check className="h-3 w-3" />
-                                ) : null}
-                              </span>
-                              {option || `Option ${optionIndex + 1}`}
+                              {index + 1}
                             </button>
                           );
-                        })
-                      ) : question.type === "ordering" ? (
-                        <div className="space-y-2">
-                          {(answerArray(question.id).length
-                            ? answerArray(question.id)
-                            : question.options
-                          ).map((option, optionIndex, order) => (
-                            <div
-                              key={`${question.id}-${option}-${optionIndex}`}
-                              className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[13px]"
+                        })}
+                      </nav>
+                    ) : null}
+                  </div>
+                  {displayedQuestions
+                    .filter(
+                      (_, index) => index === activeDisplayedQuestionIndex,
+                    )
+                    .map((question) => (
+                      <div
+                        key={question.id}
+                        className={`rounded-[8px] border bg-transparent p-4 ${submitted || revealedPracticeResultByQuestion.has(question.id) ? ((practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response") ? "border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))]" : questionCorrect(question) ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]") : "border-[var(--border-default)]"}`}
+                      >
+                        <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-secondary)]">
+                          <button
+                            type="button"
+                            className={iconButtonClass()}
+                            disabled={activeDisplayedQuestionIndex <= 0}
+                            aria-label="Previous question"
+                            onClick={() => goDisplayedQuestion(-1)}
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </button>
+                          <span className="min-w-0 flex-1 text-center">
+                            Question {activeDisplayedQuestionIndex + 1}
+                            {displayedQuestions.length
+                              ? ` of ${displayedQuestions.length}`
+                              : ""}
+                          </span>
+                          {practiceShowTimerWarnings &&
+                          practiceQuestionSecondsRemaining !== null ? (
+                            <span
+                              role="timer"
+                              aria-label={`${practiceQuestionSecondsRemaining} seconds left for this question`}
+                              className={`rounded-[6px] border px-2 py-1 text-micro tabular-nums ${practiceQuestionSecondsRemaining > 30 ? "border-[var(--border-default)] text-[var(--text-secondary)]" : practiceQuestionSecondsRemaining > 0 ? "border-[color-mix(in_oklab,var(--warning)_42%,var(--border-default))] text-[var(--warning)]" : "border-[color-mix(in_oklab,var(--danger)_42%,var(--border-default))] text-[var(--danger)]"}`}
                             >
-                              <strong>{optionIndex + 1}</strong>
-                              <span>
-                                {option || `Option ${optionIndex + 1}`}
-                              </span>
-                              <div className="flex gap-1">
-                                <button
-                                  type="button"
-                                  disabled={submitted || optionIndex === 0}
-                                  onClick={() => {
-                                    const next = [...order];
-                                    [next[optionIndex - 1], next[optionIndex]] =
-                                      [
-                                        next[optionIndex]!,
-                                        next[optionIndex - 1]!,
-                                      ];
-                                    void synchronizePracticeAnswer(
-                                      question.id,
-                                      JSON.stringify(next),
-                                    );
-                                  }}
-                                  aria-label={`Move ${option} earlier`}
-                                >
-                                  <ChevronDown className="h-3.5 w-3.5 rotate-180" />
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={
-                                    submitted ||
-                                    optionIndex === order.length - 1
-                                  }
-                                  onClick={() => {
-                                    const next = [...order];
-                                    [next[optionIndex], next[optionIndex + 1]] =
-                                      [
-                                        next[optionIndex + 1]!,
-                                        next[optionIndex]!,
-                                      ];
-                                    void synchronizePracticeAnswer(
-                                      question.id,
-                                      JSON.stringify(next),
-                                    );
-                                  }}
-                                  aria-label={`Move ${option} later`}
-                                >
-                                  <ChevronDown className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
+                              {practiceQuestionSecondsRemaining > 0
+                                ? `${quizClockLabel(practiceQuestionSecondsRemaining)} left`
+                                : "Time ended"}
+                            </span>
+                          ) : null}
+                          <button
+                            type="button"
+                            className={iconButtonClass()}
+                            disabled={isLastDisplayedQuestion}
+                            aria-label="Next question"
+                            onClick={() => goDisplayedQuestion(1)}
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="mt-2 text-[15px] font-medium text-[var(--text-primary)]">
+                          {plannerDescriptionText(question.prompt) ||
+                            "Untitled question"}
+                        </div>
+                        {question.media && question.type !== "hotspot" ? (
+                          quizAssetMap.get(question.media.assetId)
+                            ?.downloadUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={
+                                quizAssetMap.get(question.media.assetId)!
+                                  .downloadUrl!
+                              }
+                              alt={question.media.altText ?? ""}
+                              className="mt-3 max-h-[320px] w-full rounded-[8px] border border-[var(--border-default)] object-contain"
+                            />
+                          ) : (
+                            <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-micro text-[var(--text-tertiary)]">
+                              Question image unavailable
                             </div>
-                          ))}
-                        </div>
-                      ) : question.type === "matching" ? (
-                        <div className="space-y-2">
-                          {(question.matchingPairs ?? []).map((pair) => {
-                            const current = answerArray(question.id);
-                            const selected = current
-                              .find((value) => value.startsWith(`${pair.id}:`))
-                              ?.slice(pair.id.length + 1);
-                            const choices =
-                              question.matchingChoices ??
-                              (question.matchingPairs ?? []).map(
-                                (candidate) => candidate.right ?? "",
-                              );
-                            return (
-                              <div
-                                key={pair.id}
-                                className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2"
+                          )
+                        ) : null}
+                        <div className="mt-3 space-y-2">
+                          {question.type === "multiple_choice" ||
+                          question.type === "true_false" ? (
+                            question.options.map((option, optionIndex) => (
+                              <button
+                                type="button"
+                                disabled={activeQuestionInputDisabled}
+                                onClick={() =>
+                                  void synchronizePracticeAnswer(
+                                    question.id,
+                                    option,
+                                  )
+                                }
+                                key={`${question.id}-${optionIndex}`}
+                                className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] transition ${answers[question.id] === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                               >
-                                <span className="text-[12px] font-medium text-[var(--text-primary)]">
-                                  {pair.left || "Untitled prompt"}
-                                </span>
-                                <span
-                                  aria-hidden="true"
-                                  className="text-center text-[var(--text-tertiary)]"
-                                >
-                                  →
-                                </span>
-                                <SelectField
-                                  ariaLabel={`Match for ${pair.left || "untitled prompt"}`}
-                                  size="sm"
-                                  disabled={submitted}
-                                  placeholder="Choose a match"
-                                  value={selected ?? ""}
-                                  onChange={(value) => {
-                                    const next = current.filter(
-                                      (entry) =>
-                                        !entry.startsWith(`${pair.id}:`),
-                                    );
-                                    if (value) next.push(`${pair.id}:${value}`);
+                                <Radio className="h-3.5 w-3.5" />
+                                {option || `Option ${optionIndex + 1}`}
+                              </button>
+                            ))
+                          ) : question.type === "select_all" ? (
+                            question.options.map((option, optionIndex) => {
+                              const selected = answerArray(
+                                question.id,
+                              ).includes(option);
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={activeQuestionInputDisabled}
+                                  onClick={() => {
+                                    const current = answerArray(question.id);
                                     void synchronizePracticeAnswer(
                                       question.id,
-                                      JSON.stringify(next),
+                                      JSON.stringify(
+                                        selected
+                                          ? current.filter(
+                                              (value) => value !== option,
+                                            )
+                                          : [...current, option],
+                                      ),
                                     );
                                   }}
-                                  options={choices.map(
-                                    (choice, choiceIndex) => ({
-                                      value: choice,
-                                      label:
-                                        choice ||
-                                        `Match ${choiceIndex + 1}`,
-                                    }),
-                                  )}
-                                  className="min-w-0"
-                                  triggerClassName="w-full"
-                                />
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : question.type === "long_response" ? (
-                        <textarea
-                          disabled={submitted}
-                          value={answers[question.id] ?? ""}
-                          onChange={(event) =>
-                            setAnswers((current) => ({
-                              ...current,
-                              [question.id]: event.target.value,
-                            }))
-                          }
-                          onBlur={(event) =>
-                            void synchronizePracticeAnswer(
-                              question.id,
-                              event.currentTarget.value,
-                            )
-                          }
-                          className={textareaClass("min-h-[150px]")}
-                          placeholder="Develop your response"
-                        />
-                      ) : (
-                        <input
-                          type={question.type === "numeric" ? "number" : "text"}
-                          disabled={submitted}
-                          value={answers[question.id] ?? ""}
-                          onChange={(event) =>
-                            setAnswers((current) => ({
-                              ...current,
-                              [question.id]: event.target.value,
-                            }))
-                          }
-                          onBlur={(event) =>
-                            void synchronizePracticeAnswer(
-                              question.id,
-                              event.currentTarget.value,
-                            )
-                          }
-                          className={inputClass()}
-                          placeholder="Type your answer"
-                        />
-                      )}
-                    </div>
-                    {revealedPracticeResultByQuestion.has(question.id) ||
-                    (submitted && canEditQuiz && !practiceAttempt) ? (
-                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-[11px] leading-5 text-[var(--text-secondary)]">
-                        <div>
-                          <strong className="text-[var(--text-primary)]">
-                            Answer:
-                          </strong>{" "}
-                          {practiceAttempt
-                            ? Array.isArray(
-                                revealedPracticeResultByQuestion.get(
-                                  question.id,
-                                )?.expected,
-                              )
-                              ? (
-                                  revealedPracticeResultByQuestion.get(
-                                    question.id,
-                                  )?.expected as string[]
-                                ).join(" · ")
-                              : String(
-                                  revealedPracticeResultByQuestion.get(
-                                    question.id,
-                                  )?.expected ?? "Not available",
-                                )
-                            : question.type === "matching"
-                              ? (question.matchingPairs ?? [])
-                                  .map(
-                                    (pair) =>
-                                      `${pair.left} → ${pair.right ?? ""}`,
+                                  key={`${question.id}-${optionIndex}`}
+                                  className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] ${selected ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))]" : "border-[var(--border-default)]"}`}
+                                >
+                                  <span
+                                    className={`flex h-4 w-4 items-center justify-center rounded-[4px] border ${selected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)]"}`}
+                                  >
+                                    {selected ? (
+                                      <Check className="h-3 w-3" />
+                                    ) : null}
+                                  </span>
+                                  {option || `Option ${optionIndex + 1}`}
+                                </button>
+                              );
+                            })
+                          ) : question.type === "ordering" ? (
+                            <div className="space-y-2">
+                              {(answerArray(question.id).length
+                                ? answerArray(question.id)
+                                : question.options
+                              ).map((option, optionIndex, order) => (
+                                <div
+                                  key={`${question.id}-${option}-${optionIndex}`}
+                                  className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[13px]"
+                                >
+                                  <strong>{optionIndex + 1}</strong>
+                                  <span>
+                                    {option || `Option ${optionIndex + 1}`}
+                                  </span>
+                                  <div className="flex gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        activeQuestionInputDisabled ||
+                                        optionIndex === 0
+                                      }
+                                      onClick={() => {
+                                        const next = [...order];
+                                        [
+                                          next[optionIndex - 1],
+                                          next[optionIndex],
+                                        ] = [
+                                          next[optionIndex]!,
+                                          next[optionIndex - 1]!,
+                                        ];
+                                        void synchronizePracticeAnswer(
+                                          question.id,
+                                          JSON.stringify(next),
+                                        );
+                                      }}
+                                      aria-label={`Move ${option} earlier`}
+                                    >
+                                      <ChevronDown className="h-3.5 w-3.5 rotate-180" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        activeQuestionInputDisabled ||
+                                        optionIndex === order.length - 1
+                                      }
+                                      onClick={() => {
+                                        const next = [...order];
+                                        [
+                                          next[optionIndex],
+                                          next[optionIndex + 1],
+                                        ] = [
+                                          next[optionIndex + 1]!,
+                                          next[optionIndex]!,
+                                        ];
+                                        void synchronizePracticeAnswer(
+                                          question.id,
+                                          JSON.stringify(next),
+                                        );
+                                      }}
+                                      aria-label={`Move ${option} later`}
+                                    >
+                                      <ChevronDown className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : question.type === "matching" ? (
+                            <div className="space-y-2">
+                              {(question.matchingPairs ?? []).map((pair) => {
+                                const current = answerArray(question.id);
+                                const selected = current
+                                  .find((value) =>
+                                    value.startsWith(`${pair.id}:`),
                                   )
-                                  .join(" · ")
-                              : question.type === "long_response"
-                                ? "Advisory review, no single auto-scored answer"
-                                : question.type === "select_all" ||
-                                    question.type === "ordering"
-                                  ? (
-                                      question.correctAnswers ??
-                                      question.options
-                                    ).join(" · ")
-                                  : question.correctAnswer}
-                        </div>
-                        {(
-                          practiceAttempt
-                            ? revealedPracticeResultByQuestion.get(question.id)
-                                ?.explanation
-                            : question.explanation
-                        ) ? (
-                          <div className="mt-1">
-                            {practiceAttempt
-                              ? revealedPracticeResultByQuestion.get(
+                                  ?.slice(pair.id.length + 1);
+                                const choices =
+                                  question.matchingChoices ??
+                                  (question.matchingPairs ?? []).map(
+                                    (candidate) => candidate.right ?? "",
+                                  );
+                                return (
+                                  <div
+                                    key={pair.id}
+                                    className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2"
+                                  >
+                                    <span className="text-[12px] font-medium text-[var(--text-primary)]">
+                                      {pair.left || "Untitled prompt"}
+                                    </span>
+                                    <span
+                                      aria-hidden="true"
+                                      className="text-center text-[var(--text-tertiary)]"
+                                    >
+                                      →
+                                    </span>
+                                    <SelectField
+                                      ariaLabel={`Match for ${pair.left || "untitled prompt"}`}
+                                      size="sm"
+                                      disabled={activeQuestionInputDisabled}
+                                      placeholder="Choose a match"
+                                      value={selected ?? ""}
+                                      onChange={(value) => {
+                                        const next = current.filter(
+                                          (entry) =>
+                                            !entry.startsWith(`${pair.id}:`),
+                                        );
+                                        if (value)
+                                          next.push(`${pair.id}:${value}`);
+                                        void synchronizePracticeAnswer(
+                                          question.id,
+                                          JSON.stringify(next),
+                                        );
+                                      }}
+                                      options={choices.map(
+                                        (choice, choiceIndex) => ({
+                                          value: choice,
+                                          label:
+                                            choice ||
+                                            `Match ${choiceIndex + 1}`,
+                                        }),
+                                      )}
+                                      className="min-w-0"
+                                      triggerClassName="w-full"
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : question.type === "hotspot" ? (
+                            <div>
+                              <div className="relative aspect-video overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+                                {question.media &&
+                                quizAssetMap.get(question.media.assetId)
+                                  ?.downloadUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={
+                                      quizAssetMap.get(question.media.assetId)!
+                                        .downloadUrl!
+                                    }
+                                    alt={question.media.altText ?? ""}
+                                    className="absolute inset-0 h-full w-full object-contain"
+                                  />
+                                ) : null}
+                                {(question.hotspot?.regions ?? []).map(
+                                  (region) => {
+                                    const selected = answerArray(question.id);
+                                    const active = selected.includes(region.id);
+                                    return (
+                                      <button
+                                        key={region.id}
+                                        type="button"
+                                        aria-pressed={active}
+                                        aria-label={
+                                          region.label || "Answer region"
+                                        }
+                                        disabled={activeQuestionInputDisabled}
+                                        onClick={() => {
+                                          const next = question.hotspot
+                                            ?.allowMultiple
+                                            ? active
+                                              ? selected.filter(
+                                                  (id) => id !== region.id,
+                                                )
+                                              : [...selected, region.id]
+                                            : [region.id];
+                                          void synchronizePracticeAnswer(
+                                            question.id,
+                                            JSON.stringify(next),
+                                          );
+                                        }}
+                                        style={{
+                                          left: `${region.x * 100}%`,
+                                          top: `${region.y * 100}%`,
+                                          width: `${region.width * 100}%`,
+                                          height: `${region.height * 100}%`,
+                                        }}
+                                        className={`absolute min-h-8 min-w-8 rounded-[5px] border-2 px-1 text-micro font-semibold outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cyan)] ${active ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_22%,transparent)] text-[var(--text-primary)]" : "border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] text-[var(--text-secondary)]"}`}
+                                      >
+                                        {region.label}
+                                      </button>
+                                    );
+                                  },
+                                )}
+                              </div>
+                              <p className="mt-2 text-micro text-[var(--text-tertiary)]">
+                                Every region is a named keyboard button; select{" "}
+                                {question.hotspot?.allowMultiple
+                                  ? "one or more"
+                                  : "one"}
+                                .
+                              </p>
+                            </div>
+                          ) : question.type === "multipart" ? (
+                            <div className="space-y-3">
+                              {question.parts.map((part, partIndex) => {
+                                const response = answerObject(question.id);
+                                return (
+                                  <section
+                                    key={part.id}
+                                    className="rounded-[8px] border border-[var(--border-subtle)] p-3"
+                                  >
+                                    <p className="mb-2 text-[12px] font-semibold text-[var(--text-primary)]">
+                                      Part {partIndex + 1}:{" "}
+                                      {part.prompt || "Untitled part"}
+                                    </p>
+                                    <QuizPartResponse
+                                      part={part}
+                                      response={response[part.id]}
+                                      disabled={activeQuestionInputDisabled}
+                                      onChange={(next, commitNow) => {
+                                        const value = JSON.stringify({
+                                          ...response,
+                                          [part.id]: next,
+                                        });
+                                        if (commitNow)
+                                          void synchronizePracticeAnswer(
+                                            question.id,
+                                            value,
+                                          );
+                                        else
+                                          setAnswers((current) => ({
+                                            ...current,
+                                            [question.id]: value,
+                                          }));
+                                      }}
+                                    />
+                                  </section>
+                                );
+                              })}
+                            </div>
+                          ) : question.type === "long_response" ? (
+                            <textarea
+                              disabled={activeQuestionInputDisabled}
+                              value={answers[question.id] ?? ""}
+                              onChange={(event) =>
+                                setAnswers((current) => ({
+                                  ...current,
+                                  [question.id]: event.target.value,
+                                }))
+                              }
+                              onBlur={(event) =>
+                                void synchronizePracticeAnswer(
                                   question.id,
-                                )?.explanation
-                              : question.explanation}
-                          </div>
-                        ) : null}
-                        {practiceAttempt &&
-                        revealedPracticeResultByQuestion.get(question.id)
-                          ?.advisoryFeedback ? (
-                          <div className="mt-1 rounded-[6px] bg-[var(--bg-secondary)] px-2 py-1.5 text-[var(--text-secondary)]">
-                            {
-                              revealedPracticeResultByQuestion.get(question.id)
-                                ?.advisoryFeedback
-                            }
-                          </div>
-                        ) : null}
-                        {question.sourceRefs?.length ? (
-                          <div className="mt-1 text-[var(--text-tertiary)]">
-                            Sources: {question.sourceRefs.join(" · ")}
+                                  event.currentTarget.value,
+                                )
+                              }
+                              className={textareaClass("min-h-[150px]")}
+                              placeholder="Develop your response"
+                            />
+                          ) : (
+                            <input
+                              type={
+                                question.type === "numeric" ? "number" : "text"
+                              }
+                              disabled={activeQuestionInputDisabled}
+                              value={answers[question.id] ?? ""}
+                              onChange={(event) =>
+                                setAnswers((current) => ({
+                                  ...current,
+                                  [question.id]: event.target.value,
+                                }))
+                              }
+                              onBlur={(event) =>
+                                void synchronizePracticeAnswer(
+                                  question.id,
+                                  event.currentTarget.value,
+                                )
+                              }
+                              className={inputClass()}
+                              placeholder="Type your answer"
+                            />
+                          )}
+                        </div>
+                        {revealedPracticeResultByQuestion.has(question.id) ||
+                        (submitted && canEditQuiz && !practiceAttempt) ? (
+                          <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-[11px] leading-5 text-[var(--text-secondary)]">
+                            {!practiceAttempt ||
+                            revealedPracticeResultByQuestion.get(question.id)
+                              ?.answersVisible !== false ? (
+                              <div>
+                                <strong className="text-[var(--text-primary)]">
+                                  Answer:
+                                </strong>{" "}
+                                {practiceAttempt
+                                  ? Array.isArray(
+                                      revealedPracticeResultByQuestion.get(
+                                        question.id,
+                                      )?.expected,
+                                    )
+                                    ? (
+                                        revealedPracticeResultByQuestion.get(
+                                          question.id,
+                                        )?.expected as string[]
+                                      ).join(" · ")
+                                    : String(
+                                        revealedPracticeResultByQuestion.get(
+                                          question.id,
+                                        )?.expected ?? "Not available",
+                                      )
+                                  : question.type === "matching"
+                                    ? (question.matchingPairs ?? [])
+                                        .map(
+                                          (pair) =>
+                                            `${pair.left} → ${pair.right ?? ""}`,
+                                        )
+                                        .join(" · ")
+                                    : question.type === "long_response"
+                                      ? "Advisory review, no single auto-scored answer"
+                                      : question.type === "select_all" ||
+                                          question.type === "ordering"
+                                        ? (
+                                            question.correctAnswers ??
+                                            question.options
+                                          ).join(" · ")
+                                        : question.correctAnswer}
+                              </div>
+                            ) : null}
+                            {practiceAttempt &&
+                            revealedPracticeResultByQuestion.get(question.id)
+                              ?.scoreVisible ? (
+                              <div className="mt-1 font-medium tabular-nums text-[var(--text-primary)]">
+                                {revealedPracticeResultByQuestion.get(
+                                  question.id,
+                                )?.awardedPoints ?? 0}
+                                /
+                                {revealedPracticeResultByQuestion.get(
+                                  question.id,
+                                )?.maxPoints ?? 0}{" "}
+                                points
+                                {(revealedPracticeResultByQuestion.get(
+                                  question.id,
+                                )?.penaltyApplied ?? 0) > 0
+                                  ? ` · ${revealedPracticeResultByQuestion.get(question.id)?.penaltyApplied} penalty applied`
+                                  : ""}
+                              </div>
+                            ) : null}
+                            {(
+                              practiceAttempt
+                                ? revealedPracticeResultByQuestion.get(
+                                    question.id,
+                                  )?.explanation
+                                : question.explanation
+                            ) ? (
+                              <div className="mt-1">
+                                {practiceAttempt
+                                  ? revealedPracticeResultByQuestion.get(
+                                      question.id,
+                                    )?.explanation
+                                  : question.explanation}
+                              </div>
+                            ) : null}
+                            {practiceAttempt &&
+                            revealedPracticeResultByQuestion.get(question.id)
+                              ?.advisoryFeedback ? (
+                              <div className="mt-1 rounded-[6px] bg-[var(--bg-secondary)] px-2 py-1.5 text-[var(--text-secondary)]">
+                                {
+                                  revealedPracticeResultByQuestion.get(
+                                    question.id,
+                                  )?.advisoryFeedback
+                                }
+                              </div>
+                            ) : null}
+                            {practiceAttempt &&
+                            revealedPracticeResultByQuestion.get(question.id)
+                              ?.answerFeedback?.length ? (
+                              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[var(--text-secondary)]">
+                                {revealedPracticeResultByQuestion
+                                  .get(question.id)!
+                                  .answerFeedback!.map((feedback) => (
+                                    <li key={feedback}>{feedback}</li>
+                                  ))}
+                              </ul>
+                            ) : null}
+                            {practiceAttempt &&
+                            revealedPracticeResultByQuestion.get(question.id)
+                              ?.partResults?.length ? (
+                              <ol className="mt-2 space-y-1 border-t border-[var(--border-subtle)] pt-2">
+                                {revealedPracticeResultByQuestion
+                                  .get(question.id)!
+                                  .partResults!.map((part, index) => (
+                                    <li key={part.questionId}>
+                                      Part {index + 1}: {part.awardedPoints}/
+                                      {part.maxPoints} points
+                                      {part.correct === null
+                                        ? " · advisory review"
+                                        : part.correct
+                                          ? " · correct"
+                                          : " · review this part"}
+                                    </li>
+                                  ))}
+                              </ol>
+                            ) : null}
+                            {question.sourceRefs?.length ? (
+                              <div className="mt-1 text-[var(--text-tertiary)]">
+                                Sources: {question.sourceRefs.join(" · ")}
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
-                    ) : null}
-                  </div>
-                ))}
-              </>
+                    ))}
+                </>
               )}
               <div className="flex flex-wrap items-center gap-2 pt-3">
                 {submitted && !inspectAttempt ? null : (
-                <WorkbarItemSelector
-                  ariaLabel="Current question"
-                  itemNoun="question"
-                  value={activeQuestion?.id ?? ""}
-                  onChange={setActiveQuestionId}
-                  items={displayedQuestions.map((question) => ({
-                    value: question.id,
-                    label:
-                      plannerDescriptionText(question.prompt) ||
-                      "Untitled question",
-                  }))}
-                />
+                  <WorkbarItemSelector
+                    ariaLabel="Current question"
+                    itemNoun="question"
+                    value={activeQuestion?.id ?? ""}
+                    onChange={setActiveQuestionId}
+                    items={displayedQuestions.map((question) => ({
+                      value: question.id,
+                      label:
+                        plannerDescriptionText(question.prompt) ||
+                        "Untitled question",
+                    }))}
+                  />
                 )}
                 {practiceSyncing.length ? (
                   <span className="ml-auto inline-flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
@@ -2445,7 +2971,9 @@ export function QuizStudio({
         ) : view === "settings" ? (
           <div
             className="mx-auto grid max-w-[900px] gap-4 p-6"
-            style={{ gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))" }}
+            style={{
+              gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))",
+            }}
           >
             <div style={{ gridColumn: "1 / -1" }}>
               <QuizExperienceSection
@@ -2466,6 +2994,148 @@ export function QuizStudio({
                 />
               </Field>
             </div>
+            <section
+              style={{ gridColumn: "1 / -1" }}
+              className="grid gap-4 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 md:grid-cols-2"
+            >
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                      Question banks
+                    </h3>
+                    <p className="text-micro text-[var(--text-tertiary)]">
+                      Reusable organization; removing a bank keeps its
+                      questions.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={smallActionClass()}
+                    onClick={addBank}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add bank
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  {banks.map((bank) => (
+                    <div
+                      key={bank.id}
+                      className="grid grid-cols-[minmax(0,1fr)_30px] items-center gap-2"
+                    >
+                      <input
+                        value={bank.name}
+                        aria-label="Bank name"
+                        onChange={(event) =>
+                          commitCollections({
+                            banks: banks.map((candidate) =>
+                              candidate.id === bank.id
+                                ? { ...candidate, name: event.target.value }
+                                : candidate,
+                            ),
+                          })
+                        }
+                        className={inputClass()}
+                      />
+                      <button
+                        type="button"
+                        className={iconButtonClass()}
+                        onClick={() => removeBank(bank.id)}
+                        aria-label={`Remove ${bank.name || "bank"}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {!banks.length ? (
+                    <p className="rounded-[7px] bg-[var(--bg-secondary)] px-3 py-2 text-micro text-[var(--text-tertiary)]">
+                      No banks yet
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                      Random-draw pools
+                    </h3>
+                    <p className="text-micro text-[var(--text-tertiary)]">
+                      Each attempt deterministically draws the configured count.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={smallActionClass()}
+                    onClick={addPool}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add pool
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  {pools.map((pool) => (
+                    <div
+                      key={pool.id}
+                      className="grid grid-cols-[minmax(0,1fr)_72px_30px] items-center gap-2"
+                    >
+                      <input
+                        value={pool.name}
+                        aria-label="Pool name"
+                        onChange={(event) =>
+                          commitCollections({
+                            pools: pools.map((candidate) =>
+                              candidate.id === pool.id
+                                ? { ...candidate, name: event.target.value }
+                                : candidate,
+                            ),
+                          })
+                        }
+                        className={inputClass()}
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={pool.drawCount}
+                        aria-label={`Draw count for ${pool.name || "pool"}`}
+                        onChange={(event) =>
+                          commitCollections({
+                            pools: pools.map((candidate) =>
+                              candidate.id === pool.id
+                                ? {
+                                    ...candidate,
+                                    drawCount: Math.max(
+                                      1,
+                                      Math.min(
+                                        100,
+                                        Number(event.target.value) || 1,
+                                      ),
+                                    ),
+                                  }
+                                : candidate,
+                            ),
+                          })
+                        }
+                        className={inputClass()}
+                      />
+                      <button
+                        type="button"
+                        className={iconButtonClass()}
+                        onClick={() => removePool(pool.id)}
+                        aria-label={`Remove ${pool.name || "pool"}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {!pools.length ? (
+                    <p className="rounded-[7px] bg-[var(--bg-secondary)] px-3 py-2 text-micro text-[var(--text-tertiary)]">
+                      No pools yet
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </section>
             <button
               type="button"
               onClick={() =>
@@ -2485,6 +3155,29 @@ export function QuizStudio({
               </span>
               <CheckCircle2
                 className={`h-5 w-5 ${quizSettings.shuffleQuestions ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                commitSettings({
+                  enforceQuestionTimeLimits:
+                    !quizSettings.enforceQuestionTimeLimits,
+                })
+              }
+              className="flex items-center justify-between rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"
+            >
+              <span>
+                <span className="block text-[13px] font-semibold text-[var(--text-primary)]">
+                  Enforce question timers
+                </span>
+                <span className="mt-1 block text-[11px] text-[var(--text-secondary)]">
+                  Start each question once and keep its server clock across
+                  navigation or refresh.
+                </span>
+              </span>
+              <CheckCircle2
+                className={`h-5 w-5 ${quizSettings.enforceQuestionTimeLimits ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}
               />
             </button>
             <button
@@ -2528,10 +3221,10 @@ export function QuizStudio({
                 className={`h-5 w-5 ${quizSettings.allowResume ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}
               />
             </button>
-            <Field label="Printed sheet time allowance">
+            <Field label="Learner time allowance">
               <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
                 <SelectField
-                  ariaLabel="Printed sheet time allowance"
+                  ariaLabel="Learner time allowance"
                   value={String(quizSettings.defaultTimeMultiplier)}
                   onChange={(value) =>
                     commitSettings({ defaultTimeMultiplier: Number(value) })
@@ -2545,13 +3238,115 @@ export function QuizStudio({
                   triggerClassName="w-full"
                 />
                 <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
-                  Scales the suggested duration printed on the paper sheet. The
-                  on-screen countdown is set by Time above and is held by the
-                  server, so it is not changed here. Learner reduced-motion and
-                  text-size preferences are always respected independently.
+                  Scales countdown and per-question time on the server, and the
+                  suggested duration on the printed sheet. Deadlines remain one
+                  shared closing time. Reduced-motion and text-size preferences
+                  are respected independently.
                 </p>
               </div>
             </Field>
+            <section
+              style={{ gridColumn: "1 / -1" }}
+              className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
+            >
+              <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                Review contents
+              </h3>
+              <p className="mt-1 text-micro text-[var(--text-tertiary)]">
+                Answer release timing remains the outer gate. These controls
+                decide what appears after that gate opens.
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                {(
+                  [
+                    ["showScore", "Score"],
+                    ["showCorrectness", "Correctness"],
+                    ["showCorrectAnswers", "Correct answers"],
+                    ["showFeedback", "Feedback"],
+                    ["showExplanations", "Explanations"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={quizSettings.reviewPolicy[key]}
+                    onClick={() =>
+                      commitSettings({
+                        reviewPolicy: {
+                          ...quizSettings.reviewPolicy,
+                          [key]: !quizSettings.reviewPolicy[key],
+                        },
+                      })
+                    }
+                    className={`rounded-[7px] border px-3 py-2 text-left text-[11px] font-medium ${quizSettings.reviewPolicy[key] ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)]"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section
+              style={{ gridColumn: "1 / -1" }}
+              className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
+            >
+              <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                Attempt accessibility policy
+              </h3>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {(
+                  [
+                    [
+                      "keyboardSafeRequired",
+                      "Require keyboard-safe interactions",
+                    ],
+                    ["showTimerWarnings", "Show visible timer warnings"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={quizSettings.accessibilityPolicy[key]}
+                    onClick={() =>
+                      commitSettings({
+                        accessibilityPolicy: {
+                          ...quizSettings.accessibilityPolicy,
+                          [key]: !quizSettings.accessibilityPolicy[key],
+                        },
+                      })
+                    }
+                    className={`rounded-[7px] border px-3 py-2 text-left text-[11px] font-medium ${quizSettings.accessibilityPolicy[key] ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)]"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section
+              style={{ gridColumn: "1 / -1" }}
+              className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
+            >
+              <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                Formative scope
+              </h3>
+              <p className="mt-1 text-micro text-[var(--text-tertiary)]">
+                These boundaries are part of the quiz capability contract, not
+                missing switches.
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {Object.entries(QUIZ_REFUSAL_REASONS).map(
+                  ([capabilityId, reason]) => (
+                    <div
+                      key={capabilityId}
+                      data-capability-id={capabilityId}
+                      aria-disabled="true"
+                      className="rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] leading-5 text-[var(--text-secondary)]"
+                    >
+                      {reason}
+                    </div>
+                  ),
+                )}
+              </div>
+            </section>
             <Field label="Personal practice target">
               <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
                 <input
@@ -2643,6 +3438,18 @@ export function QuizStudio({
                         "Ran out of time",
                         String(responseSummary.timeElapsedCount),
                       ],
+                      [
+                        "Median time",
+                        responseSummary.duration
+                          ? quizDurationLabel(responseSummary.duration.medianMs)
+                          : "None yet",
+                      ],
+                      [
+                        "Time range",
+                        responseSummary.duration
+                          ? `${quizDurationLabel(responseSummary.duration.minMs)}–${quizDurationLabel(responseSummary.duration.maxMs)}`
+                          : "None yet",
+                      ],
                     ] as const
                   ).map(([label, value]) => (
                     <div
@@ -2658,6 +3465,46 @@ export function QuizStudio({
                     </div>
                   ))}
                 </div>
+                <section className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
+                  <div className="mb-3 flex items-baseline justify-between gap-3">
+                    <h4 className="text-[12px] font-semibold text-[var(--text-primary)]">
+                      Score distribution
+                    </h4>
+                    <span className="text-micro text-[var(--text-tertiary)]">
+                      Submitted attempts
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-5 items-end gap-2">
+                    {responseSummary.scoreDistribution.map((bucket) => {
+                      const height = responseSummary.submittedCount
+                        ? Math.max(
+                            bucket.count ? 8 : 2,
+                            Math.round(
+                              (bucket.count / responseSummary.submittedCount) *
+                                56,
+                            ),
+                          )
+                        : 2;
+                      return (
+                        <div key={bucket.label} className="text-center">
+                          <strong className="block text-micro tabular-nums text-[var(--text-secondary)]">
+                            {bucket.count}
+                          </strong>
+                          <div className="mt-1 flex h-14 items-end justify-center rounded-[5px] bg-[var(--bg-secondary)] px-1">
+                            <span
+                              aria-hidden="true"
+                              className="w-full rounded-t-[3px] bg-[var(--accent-cyan)]"
+                              style={{ height }}
+                            />
+                          </div>
+                          <span className="mt-1 block text-[9px] tabular-nums text-[var(--text-tertiary)]">
+                            {bucket.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
                 <div className="space-y-2">
                   {responseSummary.questions.map((entry, index) => {
                     const share = entry.answered
@@ -2673,7 +3520,11 @@ export function QuizStudio({
                             <span className="mr-2 text-micro tabular-nums text-[var(--text-tertiary)]">
                               {index + 1}
                             </span>
-                            {entry.prompt}
+                            {plannerDescriptionText(
+                              questions.find(
+                                (question) => question.id === entry.questionId,
+                              )?.prompt ?? "",
+                            ) || `Question ${index + 1}`}
                           </p>
                           <strong className="shrink-0 font-display text-[16px] tabular-nums text-[var(--text-primary)]">
                             {entry.answered ? `${share}%` : "No answers"}
@@ -2783,7 +3634,9 @@ export function QuizStudio({
                     <span className="text-right">
                       <strong className="block font-display text-[18px] text-[var(--text-primary)]">
                         {attempt.status === "submitted"
-                          ? `${attempt.percentage ?? 0}%`
+                          ? typeof attempt.percentage === "number"
+                            ? `${attempt.percentage}%`
+                            : "Done"
                           : `${Object.keys(attempt.responses).length}/${attempt.questions.length}`}
                       </strong>
                       <span className="text-micro text-[var(--text-tertiary)]">
@@ -2864,14 +3717,10 @@ export function QuizStudio({
                   onRemove={() => void removeQuestion(activeQuestion.id)}
                   onDuplicate={() => {
                     const questionId = id("question");
-                    const duplicate: QuizQuestion = {
-                      ...structuredClone(activeQuestion),
-                      id: questionId,
-                      optionIds: activeQuestion.options.map(
-                        (_, optionIndex) =>
-                          `${questionId}:option:${optionIndex + 1}`,
-                      ),
-                    };
+                    const duplicate = duplicateQuizQuestion(
+                      activeQuestion,
+                      questionId,
+                    );
                     // A duplicate belongs beside its original, not at the end of
                     // a twelve-question set.
                     const next = [...questions];
@@ -2886,12 +3735,11 @@ export function QuizStudio({
               ) : null}
             </section>
             {questionDetailsOpen ? (
-            <aside
-              data-quiz-panel="settings"
-              className="spectra-studio-inspector-overlay min-w-0 p-3"
-            >
-              {
-                activeQuestion ? (
+              <aside
+                data-quiz-panel="settings"
+                className="spectra-studio-inspector-overlay min-w-0 p-3"
+              >
+                {activeQuestion ? (
                   <div className="grid gap-3">
                     <Field
                       label="Difficulty"
@@ -3051,46 +3899,50 @@ export function QuizStudio({
                             placeholder="e.g. Foundations"
                           />
                         </Field>
-                        <Field label="Random pool">
-                          <input
-                            value={activeQuestion.poolId ?? ""}
-                            onChange={(event) =>
+                        <Field label="Question bank">
+                          <SelectField
+                            ariaLabel="Question bank"
+                            size="sm"
+                            value={activeQuestion.bankId ?? ""}
+                            onChange={(value) =>
                               updateQuestion(activeQuestion.id, {
-                                poolId: event.target.value || undefined,
-                                poolDrawCount: event.target.value
-                                  ? (activeQuestion.poolDrawCount ?? 1)
-                                  : undefined,
+                                bankId: value || undefined,
                               })
                             }
-                            className={inputClass()}
-                            placeholder="e.g. glycolysis-core"
+                            options={[
+                              { value: "", label: "No bank" },
+                              ...banks.map((bank) => ({
+                                value: bank.id,
+                                label: bank.name,
+                              })),
+                            ]}
+                            triggerClassName="w-full"
                           />
                         </Field>
-                        {activeQuestion.poolId ? (
-                          <Field label="Questions drawn from pool">
-                            <input
-                              type="number"
-                              min={1}
-                              max={100}
-                              value={activeQuestion.poolDrawCount ?? 1}
-                              onChange={(event) =>
-                                updateQuestion(activeQuestion.id, {
-                                  poolDrawCount: Math.max(
-                                    1,
-                                    Math.min(
-                                      100,
-                                      Number(event.target.value) || 1,
-                                    ),
-                                  ),
-                                })
-                              }
-                              className={inputClass()}
-                            />
-                          </Field>
-                        ) : null}
+                        <Field label="Random pool">
+                          <SelectField
+                            ariaLabel="Random pool"
+                            size="sm"
+                            value={activeQuestion.poolId ?? ""}
+                            onChange={(value) =>
+                              updateQuestion(activeQuestion.id, {
+                                poolId: value || undefined,
+                                poolDrawCount: undefined,
+                              })
+                            }
+                            options={[
+                              { value: "", label: "Always include" },
+                              ...pools.map((pool) => ({
+                                value: pool.id,
+                                label: `${pool.name} · draw ${pool.drawCount}`,
+                              })),
+                            ]}
+                            triggerClassName="w-full"
+                          />
+                        </Field>
                         <p>
-                          Questions with the same pool name share one draw
-                          count. Ungrouped questions always appear.
+                          Pool draw counts are configured once in Quiz settings.
+                          Questions outside a pool always appear.
                         </p>
                       </div>
                     </details>
@@ -3177,9 +4029,8 @@ export function QuizStudio({
                       ) : null}
                     </div>
                   </div>
-                ) : null
-              }
-            </aside>
+                ) : null}
+              </aside>
             ) : null}
           </div>
         )}
@@ -3300,9 +4151,8 @@ function QuestionEditor({
     const filled = question.options.filter((option) => option.trim());
     const duplicate = filled.find(
       (option, index) =>
-        filled.findIndex(
-          (candidate) => candidate.trim() === option.trim(),
-        ) !== index,
+        filled.findIndex((candidate) => candidate.trim() === option.trim()) !==
+        index,
     );
     if (duplicate)
       problems.push(
@@ -3319,6 +4169,32 @@ function QuestionEditor({
       problems.push("Mark the correct option.");
     return problems;
   })();
+  const feedbackTargets: Array<{ id: string; label: string }> = [
+    "multiple_choice",
+    "true_false",
+    "select_all",
+    "ordering",
+  ].includes(question.type)
+    ? question.optionIds.map((optionId, index) => ({
+        id: optionId,
+        label: question.options[index] || `Option ${index + 1}`,
+      }))
+    : question.type === "matching"
+      ? (question.matchingPairs ?? []).map((pair) => ({
+          id: pair.id,
+          label: pair.left || "Untitled pair",
+        }))
+      : question.type === "hotspot"
+        ? (question.hotspot?.regions ?? []).map((region) => ({
+            id: region.id,
+            label: region.label || "Untitled region",
+          }))
+        : question.type === "multipart"
+          ? question.parts.map((part, index) => ({
+              id: part.id,
+              label: part.prompt || `Part ${index + 1}`,
+            }))
+          : [];
 
   function addTag() {
     const tag = tagDraft.trim().replace(/^#+/, "");
@@ -3430,6 +4306,7 @@ function QuestionEditor({
                   type === "fill_blank"
                     ? (question.correctAnswers ?? [])
                     : [],
+                correctOptionIds: [],
                 matchingPairs:
                   type === "matching" &&
                   (question.matchingPairs ?? []).length < 2
@@ -3438,6 +4315,17 @@ function QuestionEditor({
                         { id: id("pair"), left: "", right: "" },
                       ]
                     : question.matchingPairs,
+                hotspot:
+                  type === "hotspot"
+                    ? (question.hotspot ?? {
+                        allowMultiple: false,
+                        regions: [],
+                      })
+                    : question.hotspot,
+                parts:
+                  type === "multipart" && question.parts.length === 0
+                    ? [newQuizPart(question.id, 0), newQuizPart(question.id, 1)]
+                    : question.parts,
               });
             }}
             options={QUIZ_TYPE_OPTIONS}
@@ -3483,24 +4371,37 @@ function QuestionEditor({
                     type="button"
                     className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
                       question.type === "select_all"
-                        ? (question.correctAnswers ?? []).includes(option) &&
-                          option
+                        ? (question.correctOptionIds ?? []).includes(
+                            question.optionIds[index] ?? "",
+                          ) && option
                           ? "border-[var(--success)] bg-[var(--success)] text-white"
                           : "border-[var(--border-default)] text-[var(--text-tertiary)]"
-                        : question.correctAnswer === option && option
+                        : (question.correctOptionIds ?? []).includes(
+                              question.optionIds[index] ?? "",
+                            ) && option
                           ? "border-[var(--success)] text-[var(--success)]"
                           : "border-[var(--border-default)] text-[var(--text-tertiary)]"
                     }`}
                     onClick={() => {
                       if (!option) return;
+                      const optionId = question.optionIds[index];
+                      if (!optionId) return;
                       if (question.type === "select_all") {
                         const current = question.correctAnswers ?? [];
+                        const currentIds = question.correctOptionIds ?? [];
                         onChange({
                           correctAnswers: current.includes(option)
                             ? current.filter((answer) => answer !== option)
                             : [...current, option],
+                          correctOptionIds: currentIds.includes(optionId)
+                            ? currentIds.filter((id) => id !== optionId)
+                            : [...currentIds, optionId],
                         });
-                      } else onChange({ correctAnswer: option });
+                      } else
+                        onChange({
+                          correctAnswer: option,
+                          correctOptionIds: [optionId],
+                        });
                     }}
                     {...targetAttrs(
                       `${qPath}/${
@@ -3513,14 +4414,20 @@ function QuestionEditor({
                     )}
                     aria-label={`${
                       question.type === "select_all" &&
-                      (question.correctAnswers ?? []).includes(option)
+                      (question.correctOptionIds ?? []).includes(
+                        question.optionIds[index] ?? "",
+                      )
                         ? "Unmark"
                         : "Mark"
                     } option ${index + 1} correct`}
                   >
                     {(question.type === "select_all"
-                      ? (question.correctAnswers ?? []).includes(option)
-                      : question.correctAnswer === option) && option ? (
+                      ? (question.correctOptionIds ?? []).includes(
+                          question.optionIds[index] ?? "",
+                        )
+                      : (question.correctOptionIds ?? []).includes(
+                          question.optionIds[index] ?? "",
+                        )) && option ? (
                       <Check className="h-3 w-3" />
                     ) : (
                       <Circle className="h-3 w-3" />
@@ -3610,6 +4517,9 @@ function QuestionEditor({
                         onChange({
                           options,
                           optionIds,
+                          correctOptionIds: (
+                            question.correctOptionIds ?? []
+                          ).filter((id) => id !== question.optionIds[index]),
                           correctAnswer:
                             question.correctAnswer === removed
                               ? ""
@@ -3784,6 +4694,403 @@ function QuestionEditor({
             side remains hidden from learners until feedback is released.
           </p>
         </section>
+      ) : question.type === "hotspot" ? (
+        <section className="mt-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-[12px] font-semibold text-[var(--text-secondary)]">
+                Hotspot regions
+              </h4>
+              <p className="text-micro text-[var(--text-tertiary)]">
+                Percent-based regions stay aligned when the question image
+                resizes.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-pressed={question.hotspot?.allowMultiple === true}
+                className={smallActionClass()}
+                onClick={() =>
+                  onChange({
+                    hotspot: {
+                      allowMultiple: question.hotspot?.allowMultiple !== true,
+                      regions: question.hotspot?.regions ?? [],
+                    },
+                  })
+                }
+              >
+                {question.hotspot?.allowMultiple
+                  ? "Multiple regions"
+                  : "One region"}
+              </button>
+              <button
+                type="button"
+                className={smallActionClass()}
+                onClick={() =>
+                  onChange({
+                    hotspot: {
+                      allowMultiple: question.hotspot?.allowMultiple === true,
+                      regions: [
+                        ...(question.hotspot?.regions ?? []),
+                        {
+                          id: id("region"),
+                          label: `Region ${(question.hotspot?.regions.length ?? 0) + 1}`,
+                          x: 0.1,
+                          y: 0.1,
+                          width: 0.25,
+                          height: 0.2,
+                          correct: false,
+                        },
+                      ],
+                    },
+                  })
+                }
+              >
+                <Plus className="h-3.5 w-3.5" /> Add region
+              </button>
+            </div>
+          </div>
+          <div className="relative aspect-video overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+            {(question.hotspot?.regions ?? []).map((region) => (
+              <button
+                key={region.id}
+                type="button"
+                aria-pressed={region.correct}
+                aria-label={`${region.label || "Region"}${region.correct ? ", correct" : ", not correct"}`}
+                onClick={() =>
+                  onChange({
+                    hotspot: {
+                      allowMultiple: question.hotspot?.allowMultiple === true,
+                      regions: (question.hotspot?.regions ?? []).map(
+                        (candidate) =>
+                          candidate.id === region.id
+                            ? { ...candidate, correct: !candidate.correct }
+                            : candidate,
+                      ),
+                    },
+                  })
+                }
+                style={{
+                  left: `${region.x * 100}%`,
+                  top: `${region.y * 100}%`,
+                  width: `${region.width * 100}%`,
+                  height: `${region.height * 100}%`,
+                }}
+                className={`absolute min-h-7 min-w-7 rounded-[5px] border-2 px-1 text-micro font-semibold outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cyan)] ${region.correct ? "border-[var(--success)] bg-[color-mix(in_oklab,var(--success)_18%,transparent)] text-[var(--text-primary)]" : "border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-primary)_70%,transparent)] text-[var(--text-secondary)]"}`}
+              >
+                {region.label}
+              </button>
+            ))}
+          </div>
+          <div className="space-y-2">
+            {(question.hotspot?.regions ?? []).map((region, index) => (
+              <div
+                key={region.id}
+                className="grid grid-cols-[minmax(120px,1fr)_repeat(4,64px)_30px] items-end gap-2 overflow-x-auto rounded-[7px] border border-[var(--border-subtle)] p-2"
+              >
+                <Field label={`Region ${index + 1}`}>
+                  <input
+                    value={region.label}
+                    onChange={(event) =>
+                      onChange({
+                        hotspot: {
+                          allowMultiple:
+                            question.hotspot?.allowMultiple === true,
+                          regions: (question.hotspot?.regions ?? []).map(
+                            (candidate) =>
+                              candidate.id === region.id
+                                ? { ...candidate, label: event.target.value }
+                                : candidate,
+                          ),
+                        },
+                      })
+                    }
+                    className={inputClass()}
+                  />
+                </Field>
+                {(
+                  [
+                    ["x", "X %"],
+                    ["y", "Y %"],
+                    ["width", "W %"],
+                    ["height", "H %"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Field key={key} label={label}>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={Math.round(region[key] * 100)}
+                      onChange={(event) => {
+                        const value =
+                          Math.max(
+                            0,
+                            Math.min(100, Number(event.target.value) || 0),
+                          ) / 100;
+                        onChange({
+                          hotspot: {
+                            allowMultiple:
+                              question.hotspot?.allowMultiple === true,
+                            regions: (question.hotspot?.regions ?? []).map(
+                              (candidate) =>
+                                candidate.id === region.id
+                                  ? { ...candidate, [key]: value }
+                                  : candidate,
+                            ),
+                          },
+                        });
+                      }}
+                      className={inputClass()}
+                    />
+                  </Field>
+                ))}
+                <button
+                  type="button"
+                  className={iconButtonClass()}
+                  onClick={() =>
+                    onChange({
+                      hotspot: {
+                        allowMultiple: question.hotspot?.allowMultiple === true,
+                        regions: (question.hotspot?.regions ?? []).filter(
+                          (candidate) => candidate.id !== region.id,
+                        ),
+                      },
+                    })
+                  }
+                  aria-label={`Remove ${region.label || `region ${index + 1}`}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="text-micro text-[var(--text-tertiary)]">
+            Select regions in the preview to mark them correct. Learners receive
+            the same named regions as keyboard buttons.
+          </p>
+        </section>
+      ) : question.type === "multipart" ? (
+        <section className="mt-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h4 className="text-[12px] font-semibold text-[var(--text-secondary)]">
+                Question parts
+              </h4>
+              <p className="text-micro text-[var(--text-tertiary)]">
+                Ordered auto-scored parts share the prompt above.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={smallActionClass()}
+              onClick={() =>
+                onChange({
+                  parts: [
+                    ...question.parts,
+                    newQuizPart(question.id, question.parts.length),
+                  ],
+                })
+              }
+            >
+              <Plus className="h-3.5 w-3.5" /> Add part
+            </button>
+          </div>
+          {question.parts.map((part, partIndex) => {
+            const choiceType = [
+              "multiple_choice",
+              "true_false",
+              "select_all",
+              "ordering",
+            ].includes(part.type);
+            const updatePart = (patch: Partial<typeof part>) =>
+              onChange({
+                parts: question.parts.map((candidate) =>
+                  candidate.id === part.id
+                    ? { ...candidate, ...patch }
+                    : candidate,
+                ),
+              });
+            return (
+              <article
+                key={part.id}
+                className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3"
+              >
+                <div className="grid grid-cols-[auto_minmax(0,1fr)_160px_auto] items-center gap-2">
+                  <strong className="text-micro tabular-nums text-[var(--text-tertiary)]">
+                    {partIndex + 1}
+                  </strong>
+                  <input
+                    value={part.prompt}
+                    onChange={(event) =>
+                      updatePart({ prompt: event.target.value })
+                    }
+                    className={inputClass()}
+                    placeholder="Part prompt"
+                    aria-label={`Part ${partIndex + 1} prompt`}
+                  />
+                  <SelectField
+                    ariaLabel={`Part ${partIndex + 1} type`}
+                    size="sm"
+                    value={part.type}
+                    onChange={(value) => {
+                      const type = value as typeof part.type;
+                      updatePart({
+                        type,
+                        options:
+                          type === "true_false"
+                            ? ["True", "False"]
+                            : choiceType && !part.options.length
+                              ? ["", "", "", ""]
+                              : part.options,
+                        correctOptionIds: [],
+                      });
+                    }}
+                    options={MULTIPART_TYPE_OPTIONS}
+                    triggerClassName="w-full"
+                  />
+                  <button
+                    type="button"
+                    className={iconButtonClass()}
+                    disabled={question.parts.length <= 1}
+                    onClick={() =>
+                      onChange({
+                        parts: question.parts.filter(
+                          (candidate) => candidate.id !== part.id,
+                        ),
+                      })
+                    }
+                    aria-label={`Remove part ${partIndex + 1}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
+                  {choiceType ? (
+                    <Field label="Options (one per line)">
+                      <textarea
+                        rows={3}
+                        value={part.options.join("\n")}
+                        readOnly={part.type === "true_false"}
+                        onChange={(event) => {
+                          const options = event.target.value.split("\n");
+                          updatePart({
+                            options,
+                            optionIds: options.map(
+                              (_, index) =>
+                                part.optionIds[index] ??
+                                `${part.id}:option:${index + 1}`,
+                            ),
+                          });
+                        }}
+                        className={textareaClass("min-h-[76px]")}
+                      />
+                    </Field>
+                  ) : part.type === "matching" ? (
+                    <Field label="Pairs (prompt → match)">
+                      <textarea
+                        rows={3}
+                        value={(part.matchingPairs ?? [])
+                          .map((pair) => `${pair.left} → ${pair.right}`)
+                          .join("\n")}
+                        onChange={(event) =>
+                          updatePart({
+                            matchingPairs: event.target.value
+                              .split("\n")
+                              .filter(Boolean)
+                              .map((line, index) => {
+                                const [left = "", right = ""] = line.split(
+                                  /\s*(?:→|=>)\s*/,
+                                  2,
+                                );
+                                return {
+                                  id:
+                                    part.matchingPairs?.[index]?.id ??
+                                    `${part.id}:pair:${index + 1}`,
+                                  left,
+                                  right,
+                                };
+                              }),
+                            matchingChoices: event.target.value
+                              .split("\n")
+                              .filter(Boolean)
+                              .map(
+                                (line) =>
+                                  line.split(/\s*(?:→|=>)\s*/, 2)[1] ?? "",
+                              ),
+                          })
+                        }
+                        className={textareaClass("min-h-[76px]")}
+                      />
+                    </Field>
+                  ) : (
+                    <Field label="Expected answer">
+                      <input
+                        type={part.type === "numeric" ? "number" : "text"}
+                        value={part.correctAnswer ?? ""}
+                        onChange={(event) =>
+                          updatePart({ correctAnswer: event.target.value })
+                        }
+                        className={inputClass()}
+                      />
+                    </Field>
+                  )}
+                  <div className="grid gap-2">
+                    <Field label="Points">
+                      <input
+                        type="number"
+                        min={0.01}
+                        max={100}
+                        step="0.25"
+                        value={part.points ?? 1}
+                        onChange={(event) =>
+                          updatePart({
+                            points: Number(event.target.value) || 1,
+                          })
+                        }
+                        className={inputClass()}
+                      />
+                    </Field>
+                    {choiceType && part.type !== "ordering" ? (
+                      <Field label="Correct answer(s)">
+                        <input
+                          value={
+                            part.type === "select_all"
+                              ? (part.correctAnswers ?? []).join("; ")
+                              : (part.correctAnswer ?? "")
+                          }
+                          onChange={(event) => {
+                            const answers = event.target.value
+                              .split(";")
+                              .map((answer) => answer.trim())
+                              .filter(Boolean);
+                            const correctOptionIds = part.optionIds.filter(
+                              (_, index) =>
+                                answers.includes(part.options[index] ?? ""),
+                            );
+                            updatePart(
+                              part.type === "select_all"
+                                ? { correctAnswers: answers, correctOptionIds }
+                                : {
+                                    correctAnswer: event.target.value,
+                                    correctOptionIds,
+                                  },
+                            );
+                          }}
+                          className={inputClass()}
+                          placeholder={
+                            part.type === "select_all" ? "A; C" : "Answer"
+                          }
+                        />
+                      </Field>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </section>
       ) : question.type === "long_response" ? (
         <div className="mt-4">
           <Field
@@ -3895,6 +5202,97 @@ function QuestionEditor({
           ) : null}
         </div>
       )}
+      <section className="mt-4 grid gap-3 rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3 sm:grid-cols-2">
+        <Field label="Partial credit">
+          <SelectField
+            ariaLabel="Partial credit"
+            size="sm"
+            value={question.scoring.partialCredit}
+            onChange={(value) =>
+              onChange({
+                scoring: {
+                  ...question.scoring,
+                  partialCredit: value as "none" | "proportional",
+                },
+              })
+            }
+            options={[
+              { value: "none", label: "All or nothing" },
+              { value: "proportional", label: "Proportional" },
+            ]}
+            triggerClassName="w-full"
+          />
+        </Field>
+        <Field label="Incorrect-answer penalty">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step="0.25"
+            value={question.scoring.penaltyPoints}
+            onChange={(event) =>
+              onChange({
+                scoring: {
+                  ...question.scoring,
+                  penaltyPoints: Math.max(
+                    0,
+                    Math.min(100, Number(event.target.value) || 0),
+                  ),
+                },
+              })
+            }
+            className={inputClass()}
+          />
+        </Field>
+        <Field label="When correct">
+          <textarea
+            value={question.correctFeedback ?? ""}
+            onChange={(event) =>
+              onChange({ correctFeedback: event.target.value })
+            }
+            className={textareaClass("min-h-[72px]")}
+            placeholder="Reinforce what worked"
+          />
+        </Field>
+        <Field label="When incorrect">
+          <textarea
+            value={question.incorrectFeedback ?? ""}
+            onChange={(event) =>
+              onChange({ incorrectFeedback: event.target.value })
+            }
+            className={textareaClass("min-h-[72px]")}
+            placeholder="Offer a next step or misconception check"
+          />
+        </Field>
+        {feedbackTargets.length ? (
+          <details className="spectra-quiz-content-advanced sm:col-span-2">
+            <summary>
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Feedback per answer
+              <ChevronDown className="ml-auto h-3.5 w-3.5" />
+            </summary>
+            <div className="grid gap-2 pt-3">
+              {feedbackTargets.map((target) => (
+                <Field key={target.id} label={target.label}>
+                  <input
+                    value={question.answerFeedback[target.id] ?? ""}
+                    onChange={(event) =>
+                      onChange({
+                        answerFeedback: {
+                          ...question.answerFeedback,
+                          [target.id]: event.target.value,
+                        },
+                      })
+                    }
+                    className={inputClass()}
+                    placeholder="Optional feedback for this answer"
+                  />
+                </Field>
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </section>
       <div className="mt-4">
         <Field
           label="Explanation"
@@ -3990,5 +5388,167 @@ function QuestionEditor({
         </div>
       </details>
     </div>
+  );
+}
+
+function QuizPartResponse({
+  part,
+  response,
+  disabled,
+  onChange,
+}: {
+  part: QuizPart;
+  response: QuizResponseAtom | undefined;
+  disabled: boolean;
+  onChange: (response: QuizResponseAtom, commitNow: boolean) => void;
+}) {
+  const selected = Array.isArray(response) ? response : [];
+  const options =
+    part.type === "true_false" && part.options.length === 0
+      ? ["True", "False"]
+      : part.options;
+  if (part.type === "select_all")
+    return (
+      <div className="space-y-1.5">
+        {options.map((option, index) => {
+          const active = selected.includes(option);
+          return (
+            <button
+              key={`${part.id}:${index}`}
+              type="button"
+              disabled={disabled}
+              aria-pressed={active}
+              onClick={() =>
+                onChange(
+                  active
+                    ? selected.filter((value) => value !== option)
+                    : [...selected, option],
+                  true,
+                )
+              }
+              className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[11px] ${active ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))]" : "border-[var(--border-default)]"}`}
+            >
+              <span className="flex h-4 w-4 items-center justify-center rounded-[4px] border border-current">
+                {active ? <Check className="h-3 w-3" /> : null}
+              </span>
+              {option || `Option ${index + 1}`}
+            </button>
+          );
+        })}
+      </div>
+    );
+  if (part.type === "ordering") {
+    const order = selected.length ? selected : options;
+    return (
+      <div className="space-y-1.5">
+        {order.map((option, index) => (
+          <div
+            key={`${part.id}:${option}:${index}`}
+            className="grid grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[11px]"
+          >
+            <strong>{index + 1}</strong>
+            <span>{option || `Option ${index + 1}`}</span>
+            <span>
+              <button
+                type="button"
+                disabled={disabled || index === 0}
+                aria-label={`Move ${option} earlier`}
+                onClick={() => {
+                  const next = [...order];
+                  [next[index - 1], next[index]] = [
+                    next[index]!,
+                    next[index - 1]!,
+                  ];
+                  onChange(next, true);
+                }}
+                className="p-1 disabled:opacity-30"
+              >
+                <ChevronUp className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                disabled={disabled || index === order.length - 1}
+                aria-label={`Move ${option} later`}
+                onClick={() => {
+                  const next = [...order];
+                  [next[index], next[index + 1]] = [
+                    next[index + 1]!,
+                    next[index]!,
+                  ];
+                  onChange(next, true);
+                }}
+                className="p-1 disabled:opacity-30"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (part.type === "matching")
+    return (
+      <div className="space-y-1.5">
+        {(part.matchingPairs ?? []).map((pair) => {
+          const current = selected
+            .find((entry) => entry.startsWith(`${pair.id}:`))
+            ?.slice(pair.id.length + 1);
+          return (
+            <div
+              key={pair.id}
+              className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2"
+            >
+              <span className="text-[11px] font-medium">{pair.left}</span>
+              <SelectField
+                ariaLabel={`Match for ${pair.left || "part prompt"}`}
+                size="sm"
+                disabled={disabled}
+                value={current ?? ""}
+                placeholder="Choose"
+                onChange={(value) => {
+                  const next = selected.filter(
+                    (entry) => !entry.startsWith(`${pair.id}:`),
+                  );
+                  if (value) next.push(`${pair.id}:${value}`);
+                  onChange(next, true);
+                }}
+                options={(part.matchingChoices ?? []).map((choice) => ({
+                  value: choice,
+                  label: choice,
+                }))}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  if (options.length)
+    return (
+      <div className="space-y-1.5">
+        {options.map((option, index) => (
+          <button
+            key={`${part.id}:${index}`}
+            type="button"
+            disabled={disabled}
+            aria-pressed={response === option}
+            onClick={() => onChange(option, true)}
+            className={`w-full rounded-[7px] border px-3 py-2 text-left text-[11px] ${response === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))]" : "border-[var(--border-default)]"}`}
+          >
+            {String.fromCharCode(65 + index)}. {option || `Option ${index + 1}`}
+          </button>
+        ))}
+      </div>
+    );
+  return (
+    <input
+      type={part.type === "numeric" ? "number" : "text"}
+      disabled={disabled}
+      value={typeof response === "string" ? response : ""}
+      onChange={(event) => onChange(event.target.value, false)}
+      onBlur={(event) => onChange(event.currentTarget.value, true)}
+      className={inputClass()}
+      placeholder="Type your answer"
+    />
   );
 }

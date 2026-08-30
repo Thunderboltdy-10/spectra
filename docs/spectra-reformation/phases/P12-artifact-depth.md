@@ -19,6 +19,20 @@ Ownership per unit: `components/<type>-studio.tsx`, `capabilities/studio-<type>.
 
 Question-type depth (matching, ordering, numeric with tolerance, hotspot, multi-part), question banks + pools, shuffling, per-question/whole-quiz timers, points/partial credit/penalties, feedback per answer, attempt limits + review policies, accessibility of attempt mode, results/analytics view for cohorts.
 
+### Implementation log — 2026-08-31
+
+- Wrote the Kahoot / Google Forms / Canvas New Quizzes inventory first: 78 measured IR definitions, with 23 retained, 50 depth additions, and 5 exact visible refusals.
+- Added one idempotent quiz v4 migration with stable nested identities, banks, pools, scoring, feedback, review, and accessibility policies.
+- Moved quiz command truth into `capabilities/studio-quiz.ts`; the manifest, schema operation vocabulary, AI skill, workbar bindings, and conformance tests share it.
+- Added hotspot and ordered multipart authoring, keyboard-capable attempts, shared grading, safe projections, duplication, and publish validation.
+- Added deterministic question-pool draw and option ordering while pinning attempts to immutable quiz snapshots.
+- Made whole-quiz and per-question clocks server-authoritative, persistent across refresh/navigation, multiplier-aware, and enforced on visit/save/submit paths.
+- Added granular answer release and review projection without exposing unreleased answers or hidden scores to the client.
+- Expanded anonymous cohort results with score buckets, duration metrics, timeout counts, per-question correctness, safe closed-choice labels, and aggregate CSV export.
+- Kept Spectra JSON v4 exact; QTI, CSV, and print explicitly report hotspot/multipart adaptation.
+- Kept proctoring, gradebook, manual grading, roster moderation, and live-game hosting outside formative scope through exact non-mutating refusals.
+- Focused tests, TypeScript, scoped ESLint, and the capability ghost gate pass; P12.V1 remains the independent local-instance acceptance owner.
+
 ## P12.I2 — Flashcards depth (H) — leaders: Anki, Quizlet
 
 A real SRS scheduler (FSRS-family, parameterized per deck) replacing/upgrading study heuristics; deck options presets; cloze depth (multi-cloze, hints); image occlusion polish; nested decks/tags; leech handling; study statistics (retention, forecast, heatmap); bulk edit; the P11.I5 import/export capabilities exposed as IR operations.

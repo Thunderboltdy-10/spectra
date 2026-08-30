@@ -14,6 +14,11 @@ import { workYjsAdapter } from "./registry";
 import { workMeta } from "./shared";
 import { workYjsOrigins } from "./origins";
 import type { WorkActorIdentity, WorkYjsAdapter } from "./contracts";
+import {
+  applySheetsCellProjection,
+  planSheetsCellProjection,
+  type SheetsCellProjectionPlan,
+} from "./structured-adapters";
 
 export const NATIVE_WORK_LIVE_META_MAP = "spectra:work-v2:live-meta";
 const SNAPSHOT_PROJECTION_DELAY_MS = 120;
@@ -153,10 +158,47 @@ export class NativeArtifactYjsModel {
     this.emit();
   }
 
+  private rebuildSnapshotImmediately() {
+    if (this.refreshTimer !== null) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this.rebuildSnapshot();
+  }
+
+  private exposeAppliedSheetSnapshot(
+    value: ArtifactLiveValue,
+    plan: SheetsCellProjectionPlan,
+  ) {
+    this.snapshot = {
+      initialized: true,
+      validity: "valid",
+      value: {
+        title: value.title,
+        ...(value.summary ? { summary: value.summary } : {}),
+        tags: [...value.tags],
+        content: plan.content,
+      },
+      // A cell-only edit keeps the existing semantic index usable until the
+      // scheduled bounded projection refresh accounts for an added/deleted
+      // address. Crucially, native materialization can read the new cell now.
+      regionIds: this.snapshot.regionIds,
+    };
+    this.emit();
+  }
+
   private writeMetadata(value: ArtifactLiveValue) {
-    this.liveMeta.set("title", value.title);
-    this.liveMeta.set("summary", value.summary ?? "");
-    this.liveMeta.set("tags", [...value.tags]);
+    if (this.liveMeta.get("title") !== value.title)
+      this.liveMeta.set("title", value.title);
+    if (this.liveMeta.get("summary") !== (value.summary ?? ""))
+      this.liveMeta.set("summary", value.summary ?? "");
+    const currentTags = this.liveMeta.get("tags");
+    if (
+      !Array.isArray(currentTags) ||
+      currentTags.length !== value.tags.length ||
+      currentTags.some((tag, index) => tag !== value.tags[index])
+    )
+      this.liveMeta.set("tags", [...value.tags]);
   }
 
   async initialize(
@@ -194,6 +236,7 @@ export class NativeArtifactYjsModel {
         this.writeMetadata(source);
       },
     );
+    if (result.applied) this.rebuildSnapshotImmediately();
     return result.applied
       ? { applied: true as const }
       : {
@@ -227,9 +270,11 @@ export class NativeArtifactYjsModel {
     controller: ArtifactRegionController,
   ) {
     const regionId = `metadata:${field}`;
-    return controller.edit(regionId, [regionId], () => {
+    const result = await controller.edit(regionId, [regionId], () => {
       this.liveMeta.set(field, Array.isArray(value) ? [...value] : value);
     });
+    if (result.applied) this.rebuildSnapshotImmediately();
+    return result;
   }
 
   async replaceMetadataSnapshot(
@@ -254,7 +299,11 @@ export class NativeArtifactYjsModel {
         : []),
     ];
     if (!claims.length) return { applied: true as const, claims: [] };
-    return controller.editMany(claims, () => this.writeMetadata(value));
+    const result = await controller.editMany(claims, () =>
+      this.writeMetadata(value),
+    );
+    if (result.applied) this.rebuildSnapshotImmediately();
+    return result;
   }
 
   async replaceRegion(
@@ -271,14 +320,28 @@ export class NativeArtifactYjsModel {
   ) {
     if (!this.snapshot.initialized) return this.initialize(value, controller);
     const current = this.snapshot.value;
-    const contentChanged = current
-      ? changedArtifactRegionIds(this.typeKey, current.content, value.content)
-          .length > 0
-      : true;
+    const sheetPlan =
+      this.typeKey === "sheets" && current
+        ? planSheetsCellProjection(current.content, value.content)
+        : null;
+    const contentChanged = sheetPlan
+      ? sheetPlan.changes.length > 0
+      : current
+        ? changedArtifactRegionIds(
+            this.typeKey,
+            current.content,
+            value.content,
+          ).length > 0
+        : true;
     const regions = contentChanged
-      ? regionClaims(
-          this.adapter.deriveSemanticRegions(this.transport.document),
-        )
+      ? sheetPlan
+        ? sheetPlan.changes.map((change) => ({
+            regionId: change.regionId,
+            overlapDomains: [change.regionId],
+          }))
+        : regionClaims(
+            this.adapter.deriveSemanticRegions(this.transport.document),
+          )
       : [];
     const metadataClaims = [
       ...(current?.title !== value.title
@@ -298,8 +361,14 @@ export class NativeArtifactYjsModel {
     ];
     const claims = [...regions, ...metadataClaims];
     if (!claims.length) return { applied: true as const, claims: [] };
-    return controller.editMany(claims.slice(0, 128), () => {
-      if (contentChanged)
+    const result = await controller.editMany(claims.slice(0, 128), () => {
+      if (contentChanged && sheetPlan)
+        applySheetsCellProjection(
+          this.transport.document,
+          sheetPlan,
+          workYjsOrigins(this.actor).localHuman,
+        );
+      else if (contentChanged)
         this.adapter.applyProjection(
           this.transport.document,
           value.content,
@@ -307,6 +376,11 @@ export class NativeArtifactYjsModel {
         );
       this.writeMetadata(value);
     });
+    if (result.applied) {
+      if (sheetPlan) this.exposeAppliedSheetSnapshot(value, sheetPlan);
+      else this.rebuildSnapshotImmediately();
+    }
+    return result;
   }
 
   async replaceRegionsFromSnapshot(
@@ -323,7 +397,7 @@ export class NativeArtifactYjsModel {
         regionId,
         overlapDomains: [regionId],
       }));
-      return controller.editMany(claims, () => {
+      const result = await controller.editMany(claims, () => {
         if (selected.has("metadata:title"))
           this.liveMeta.set("title", value.title);
         if (selected.has("metadata:summary"))
@@ -331,6 +405,8 @@ export class NativeArtifactYjsModel {
         if (selected.has("metadata:tags"))
           this.liveMeta.set("tags", [...value.tags]);
       });
+      if (result.applied) this.rebuildSnapshotImmediately();
+      return result;
     }
     return this.replaceSnapshot(value, controller);
   }
@@ -388,22 +464,26 @@ export function planNativeArtifactYjsMutation(
       },
     };
   }
-  const changed = changedArtifactRegionIds(
-    typeKey,
-    current.content,
-    value.content,
-  );
-  const descriptors = new Map(
-    adapter
-      .deriveSemanticRegions(document)
-      .map((region) => [region.regionId, region] as const),
-  );
+  const sheetPlan =
+    typeKey === "sheets"
+      ? planSheetsCellProjection(current.content, value.content)
+      : null;
+  const changed = sheetPlan
+    ? sheetPlan.changes.map((change) => change.regionId)
+    : changedArtifactRegionIds(typeKey, current.content, value.content);
+  const descriptors = sheetPlan
+    ? null
+    : new Map(
+        adapter
+          .deriveSemanticRegions(document)
+          .map((region) => [region.regionId, region] as const),
+      );
   const regions = changed.map((regionId) => ({
     regionId,
     overlapDomains: [
       regionId === "artifact:structure"
         ? "artifact:structure"
-        : (descriptors.get(regionId)?.overlapDomain ?? regionId),
+        : (descriptors?.get(regionId)?.overlapDomain ?? regionId),
     ],
   }));
   if (current.title !== value.title)
@@ -424,16 +504,29 @@ export function planNativeArtifactYjsMutation(
   return {
     regions,
     apply: () => {
-      if (changed.length)
+      if (changed.length && sheetPlan)
+        applySheetsCellProjection(
+          document,
+          sheetPlan,
+          workYjsOrigins(actor).ai,
+        );
+      else if (changed.length)
         adapter.applyProjection(
           document,
           value.content,
           workYjsOrigins(actor).ai,
         );
       const meta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
-      meta.set("title", value.title);
-      meta.set("summary", value.summary ?? "");
-      meta.set("tags", [...value.tags]);
+      if (meta.get("title") !== value.title) meta.set("title", value.title);
+      if (meta.get("summary") !== (value.summary ?? ""))
+        meta.set("summary", value.summary ?? "");
+      const currentTags = meta.get("tags");
+      if (
+        !Array.isArray(currentTags) ||
+        currentTags.length !== value.tags.length ||
+        currentTags.some((tag, index) => tag !== value.tags[index])
+      )
+        meta.set("tags", [...value.tags]);
     },
   };
 }

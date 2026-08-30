@@ -4,7 +4,12 @@ import type { ArtifactTypeKey, SemanticRegion } from "../../../artifacts/types";
 import { normalizeArtifactContent } from "../../../ai/content-normalization";
 import { normalizeFoundryContent } from "../../../agents/foundry/foundry-document";
 import { normalizePresentationContent } from "../../../presentation/model";
-import { normalizeSheetsContent } from "../../../sheets/model";
+import {
+  normalizeSheetsContent,
+  type SheetCell,
+  type SheetsContent,
+  type WorkbookSheet,
+} from "../../../sheets/model";
 import { sharedTimetableContent } from "../../../timetable/model";
 import { normalizeWhiteboardContent } from "../../../whiteboard/model";
 import type {
@@ -150,6 +155,28 @@ function isCollection(map: Y.Map<unknown>) {
   return map.get(COLLECTION_MARKER) === true;
 }
 
+function plainEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right))
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((entry, index) => plainEqual(entry, right[index]))
+    );
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(right, key) &&
+        plainEqual(left[key], right[key]),
+    )
+  );
+}
+
 function syncCollection(
   collection: Y.Map<unknown>,
   values: readonly unknown[],
@@ -205,6 +232,7 @@ function syncArray(
     });
     return array;
   }
+  if (plainEqual(projectValue(array), values)) return array;
   if (array.length) array.delete(0, array.length);
   values.forEach((entry, index) => {
     const nextPath = [...path, String(index)];
@@ -255,9 +283,121 @@ function syncRecord(map: Y.Map<unknown>, value: JsonRecord, path: readonly strin
       if (child !== existing) map.set(key, child);
       syncRecord(child, entry, nextPath);
     } else {
-      map.set(key, entry);
+      if (!Object.is(existing, entry)) map.set(key, entry);
     }
   }
+}
+
+export type SheetsCellProjectionChange = {
+  sheetId: string;
+  address: string;
+  cell?: SheetCell;
+  regionId: string;
+};
+
+export type SheetsCellProjectionPlan = {
+  content: SheetsContent;
+  changes: SheetsCellProjectionChange[];
+};
+
+function sheetColumnIndex(name: string) {
+  return name
+    .split("")
+    .reduce(
+      (total, character) => total * 26 + character.charCodeAt(0) - 64,
+      0,
+    ) - 1;
+}
+
+function sheetCellRegionId(sheet: WorkbookSheet, address: string) {
+  const match = /^([A-Z]+)([1-9][0-9]*)$/.exec(address);
+  if (!match) return `${sheet.id}:${address}:${address}`;
+  const rowId =
+    sheet.rowIdentities?.[String(Number(match[2]) - 1)] ??
+    `${sheet.id}:row:${match[2]}`;
+  const column = sheetColumnIndex(match[1]!);
+  const columnId =
+    sheet.columnIdentities?.[String(column)] ??
+    `${sheet.id}:column:${column + 1}`;
+  return `${sheet.id}:${rowId}:${columnId}`;
+}
+
+/**
+ * Returns a cell-only plan when workbook and sheet structure are unchanged.
+ * Structural changes deliberately fall back to the adapter's complete
+ * projection path; the hot formula-input path never decomposes every semantic
+ * region in a dense workbook merely to discover that one address changed.
+ */
+export function planSheetsCellProjection(
+  before: unknown,
+  after: unknown,
+): SheetsCellProjectionPlan | null {
+  const previous = normalizeSheetsContent(before);
+  const content = normalizeSheetsContent(after);
+  if (
+    previous.activeSheetId !== content.activeSheetId ||
+    !plainEqual(previous.workbook, content.workbook) ||
+    !plainEqual(previous.nativeBinding, content.nativeBinding) ||
+    previous.sheets.length !== content.sheets.length
+  )
+    return null;
+  const changes: SheetsCellProjectionChange[] = [];
+  for (let index = 0; index < previous.sheets.length; index += 1) {
+    const previousSheet = previous.sheets[index]!;
+    const nextSheet = content.sheets[index]!;
+    if (previousSheet.id !== nextSheet.id) return null;
+    const { cells: previousCells, ...previousStructure } = previousSheet;
+    const { cells: nextCells, ...nextStructure } = nextSheet;
+    if (!plainEqual(previousStructure, nextStructure)) return null;
+    const addresses = new Set([
+      ...Object.keys(previousCells),
+      ...Object.keys(nextCells),
+    ]);
+    for (const address of addresses) {
+      if (plainEqual(previousCells[address], nextCells[address])) continue;
+      changes.push({
+        sheetId: nextSheet.id,
+        address,
+        ...(nextCells[address] ? { cell: nextCells[address] } : {}),
+        regionId: sheetCellRegionId(nextSheet, address),
+      });
+    }
+  }
+  return { content, changes };
+}
+
+export function applySheetsCellProjection(
+  doc: Y.Doc,
+  plan: SheetsCellProjectionPlan,
+  origin: WorkTransactionOrigin,
+) {
+  doc.transact(() => {
+    const sheets = structuredCollection(doc, ["sheets"]);
+    if (!sheets) throw new Error("SHEETS_YJS_COLLECTION_MISSING");
+    for (const change of plan.changes) {
+      const sheet = sheets.items.get(change.sheetId);
+      const cells = sheet?.get("cells");
+      if (!(sheet instanceof Y.Map) || !(cells instanceof Y.Map))
+        throw new Error("SHEETS_YJS_CELL_MAP_MISSING");
+      if (!change.cell) {
+        if (cells.has(change.address)) cells.delete(change.address);
+        continue;
+      }
+      const existing = cells.get(change.address);
+      const cell =
+        existing instanceof Y.Map && !isCollection(existing)
+          ? existing
+          : new Y.Map<unknown>();
+      if (cell !== existing) cells.set(change.address, cell);
+      syncRecord(cell, change.cell as JsonRecord, [
+        "sheets",
+        change.sheetId,
+        "cells",
+        change.address,
+      ]);
+    }
+    setWorkModelMetadata(doc, "sheets", sheetsYjsAdapter.modelVersion);
+  }, origin);
 }
 
 function projectCollection(collection: Y.Map<unknown>) {

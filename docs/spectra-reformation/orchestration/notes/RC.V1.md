@@ -32,3 +32,15 @@ Status: **REJECTED**. RC-1 and the realtime proxy are repaired, and the real DOC
 ## Paste-ready continuation
 
 > Repair the real-sheet commit/provider durability path while preserving guarded room recovery, bounded cell storage, and absent-vs-zero freeze semantics. Prove a real React A1 commit stays responsive, appends durably, survives reload, reaches Bridge `file.write`, reads back in Excel, and preserves untouched package parts. Add boundary-level regression coverage and run the mandatory Convex and repository gates. Then launch a fresh max RC.V1 verifier for XLSX followed by the unstarted PPTX leg; do not claim PASS before the entire corpus journey is green.
+
+## Sheet repair addendum — 2026-08-30
+
+- Structured Yjs writes are now equality-aware; dense sheets use a cell-only plan. The exact 4-sheet / 1,785-cell corpus model changes A1 in 7.02 ms with a 98-byte delta and one cell claim, versus the prior 393,582-byte projection.
+- Transport synchronization now includes provider work, durable pending IDs, and a local-durability latch cleared only by `spectra.durable_ack`. Region edits wait for `transport.flush()` before semantic completion/native materialization.
+- Focused repair tests pass: 3 files / 20 tests. A broader confirmation run passes 13 files / 128 tests.
+- The bounded live pass remains red before Yjs: workbook open took over two minutes to expose A1, then the real formula-input `fill` + Enter path became unresponsive before `Syncing…`; the next probe exceeded 30 seconds.
+- Post-attempt signed room is unchanged (`x972…`, schema 4, `nextSequence: 2`, bootstrap-only, marker absent). Native A1 is unchanged. Bridge was paired/healthy, but there was no append to materialize; Excel/package proof did not start.
+- Evidence: `.shots/reformation/RC.V1/45-sheet-repair-class-benchmark.json` through `47-sheet-repair-bridge-health.json`.
+- RC.V1 remains **REJECTED**. Remaining owner: exact-corpus React sheet-open/commit renderer boundary, preserving the bounded Yjs/durability repair.
+
+> Next: profile that React boundary on this corpus copy; require prompt A1 interactivity, local Yjs, visible durable pending/ack, signed sequence advance, reload, Bridge write, Excel readback, and untouched-part hashes. Then run the unstarted PPTX leg; do not upgrade RC.V1 early.

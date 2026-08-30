@@ -112,8 +112,37 @@ function replaceYText(text, value) {
 }
 
 function replaceYArray(array, values) {
+  if (
+    array.length === values.length &&
+    values.every((value, index) => Object.is(array.get(index), value))
+  )
+    return;
   if (array.length) array.delete(0, array.length);
   if (values.length) array.push([...values]);
+}
+
+function plainEqual(left, right) {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right))
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((entry, index) => plainEqual(entry, right[index]))
+    );
+  const leftRecord = record(left);
+  const rightRecord = record(right);
+  if (leftRecord !== left || rightRecord !== right) return false;
+  const leftKeys = Object.keys(leftRecord);
+  const rightKeys = Object.keys(rightRecord);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(rightRecord, key) &&
+        plainEqual(leftRecord[key], rightRecord[key]),
+    )
+  );
 }
 
 function plainToY(value) {
@@ -201,11 +230,24 @@ function syncArray(existing, values, path) {
   const textArray =
     TEXT_ARRAY_FIELDS.has(path.at(-1) ?? "") &&
     values.every((entry) => typeof entry === "string");
-  if (array.length) array.delete(0, array.length);
   if (textArray) {
-    for (const entry of values) array.push([new Y.Text(String(entry))]);
+    if (array.length > values.length)
+      array.delete(values.length, array.length - values.length);
+    values.forEach((entry, index) => {
+      const current = array.get(index);
+      if (current instanceof Y.Text) {
+        replaceYText(current, String(entry));
+        return;
+      }
+      const text = new Y.Text();
+      if (index < array.length) array.delete(index, 1);
+      array.insert(index, [text]);
+      replaceYText(text, String(entry));
+    });
     return array;
   }
+  if (plainEqual(projectValue(array), values)) return array;
+  if (array.length) array.delete(0, array.length);
   values.forEach((entry, index) => {
     const nextPath = [...path, String(index)];
     if (entry && typeof entry === "object" && !Array.isArray(entry)) {
@@ -261,7 +303,7 @@ function syncRecord(map, value, path) {
           : new Y.Map();
       if (child !== existing) map.set(key, child);
       syncRecord(child, entry, nextPath);
-    } else map.set(key, entry);
+    } else if (!Object.is(existing, entry)) map.set(key, entry);
   }
 }
 
@@ -289,13 +331,23 @@ function appendJsonNode(parent, node) {
 
 function setNativeEnvelope(document, projection) {
   const meta = document.getMap(WORK_META_MAP);
-  meta.set("initialized", true);
-  meta.set("workType", projection.typeKey);
-  meta.set("modelVersion", WORK_MODEL_VERSION);
+  if (meta.get("initialized") !== true) meta.set("initialized", true);
+  if (meta.get("workType") !== projection.typeKey)
+    meta.set("workType", projection.typeKey);
+  if (meta.get("modelVersion") !== WORK_MODEL_VERSION)
+    meta.set("modelVersion", WORK_MODEL_VERSION);
   const liveMeta = document.getMap(WORK_LIVE_META_MAP);
-  liveMeta.set("title", projection.title);
-  liveMeta.set("summary", projection.summary ?? "");
-  liveMeta.set("tags", [...projection.tags]);
+  if (liveMeta.get("title") !== projection.title)
+    liveMeta.set("title", projection.title);
+  if (liveMeta.get("summary") !== (projection.summary ?? ""))
+    liveMeta.set("summary", projection.summary ?? "");
+  const currentTags = liveMeta.get("tags");
+  if (
+    !Array.isArray(currentTags) ||
+    currentTags.length !== projection.tags.length ||
+    currentTags.some((tag, index) => tag !== projection.tags[index])
+  )
+    liveMeta.set("tags", [...projection.tags]);
 }
 
 function initializeDocument(document, content) {

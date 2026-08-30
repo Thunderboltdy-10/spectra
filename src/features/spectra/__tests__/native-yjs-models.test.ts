@@ -21,6 +21,10 @@ import {
   type WorkActorIdentity,
 } from "@/features/spectra/work/models/yjs";
 import {
+  NativeArtifactYjsModel,
+  NATIVE_WORK_LIVE_META_MAP,
+} from "@/features/spectra/work/models/yjs/native-artifact-model";
+import {
   BoundedYjsLocalPersistence,
   MemoryYjsStore,
   type LocalYjsRecord,
@@ -67,6 +71,41 @@ function defaultContent(type: ArtifactTypeKey) {
   const blueprint = getBlueprint(type);
   if (!blueprint) throw new Error(`Missing blueprint ${type}`);
   return structuredClone(blueprint.defaultContent);
+}
+
+function denseWorkbook(cellCount = 1_800) {
+  const sheetCount = 4;
+  const cellsPerSheet = Math.ceil(cellCount / sheetCount);
+  return {
+    workbook: { calculationMode: "automatic" as const, locale: "en-US" },
+    activeSheetId: "sheet-1",
+    sheets: Array.from({ length: sheetCount }, (_, sheetIndex) => {
+      const cells = Object.fromEntries(
+        Array.from({ length: cellsPerSheet }, (_, cellIndex) => {
+          const row = Math.floor(cellIndex / 15) + 1;
+          const column = String.fromCharCode(65 + (cellIndex % 15));
+          return [
+            `${column}${row}`,
+            {
+              value: `S${sheetIndex + 1}-${cellIndex + 1}`,
+              ...(cellIndex % 9 === 0
+                ? { formula: `=${column}${Math.max(1, row - 1)}+1` }
+                : {}),
+            },
+          ];
+        }),
+      );
+      return {
+        id: `sheet-${sheetIndex + 1}`,
+        name: `Sheet ${sheetIndex + 1}`,
+        cells,
+        tables: [],
+        charts: [],
+        rowCount: Math.ceil(cellsPerSheet / 15),
+        columnCount: 15,
+      };
+    }),
+  };
 }
 
 function mergeFixtureContent(type: ArtifactTypeKey) {
@@ -333,6 +372,90 @@ describe("native fine-grained Yjs models", () => {
       slides: Array<{ objects: Array<{ x: number; y: number }> }>;
     };
     expect(deck.slides[0]?.objects[0]).toMatchObject({ x: 440, y: 220 });
+  });
+
+  it("commits one dense-workbook cell as a compact native update with an immediate live snapshot", async () => {
+    const adapter = workYjsAdapter("sheets");
+    const initial = denseWorkbook();
+    const document = adapter.createDocument(initial);
+    const liveMeta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+    liveMeta.set("title", "Dense workbook");
+    liveMeta.set("summary", "");
+    liveMeta.set("tags", []);
+    const peer = new Y.Doc();
+    sync(document, peer);
+    const beforeVector = Y.encodeStateVector(document);
+    const transport = {
+      clientId: "dense-sheet-client",
+      document,
+      getSnapshot: () => ({
+        state: "synchronized" as const,
+        level: "modify" as const,
+        accountId: "account-1",
+        displayName: "Pablo",
+        unsynchronizedChanges: 0,
+        presence: [],
+      }),
+    };
+    const model = new NativeArtifactYjsModel(
+      "sheets",
+      transport as unknown as ConstructorParameters<
+        typeof NativeArtifactYjsModel
+      >[1],
+    );
+    const nextContent = structuredClone(adapter.project(document)) as ReturnType<
+      typeof denseWorkbook
+    >;
+    nextContent.sheets[0]!.cells.A1 = { value: "RCV1-DENSE-A1" };
+    const claims: Array<{ regionId: string; overlapDomains: string[] }> = [];
+    const controller = {
+      editMany: async (
+        regions: Array<{ regionId: string; overlapDomains: string[] }>,
+        change: () => void,
+      ) => {
+        claims.push(...regions);
+        document.transact(change);
+        return { applied: true as const, claims: [] };
+      },
+    };
+
+    const started = performance.now();
+    await model.replaceSnapshot(
+      {
+        title: "Dense workbook",
+        tags: [],
+        content: nextContent,
+      },
+      controller as unknown as Parameters<typeof model.replaceSnapshot>[1],
+    );
+    const elapsed = performance.now() - started;
+    const delta = Y.encodeStateAsUpdate(document, beforeVector);
+
+    expect(elapsed).toBeLessThan(100);
+    expect(delta.byteLength).toBeLessThan(8 * 1024);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]?.regionId).toBe(
+      "sheet-1:sheet-1:row:1:sheet-1:column:1",
+    );
+    expect(
+      (
+        model.getSnapshot().value?.content as ReturnType<
+          typeof denseWorkbook
+        >
+      ).sheets[0]!.cells.A1?.value,
+    ).toBe("RCV1-DENSE-A1");
+
+    Y.applyUpdate(peer, delta);
+    const projectedPeer = adapter.project(peer) as ReturnType<
+      typeof denseWorkbook
+    >;
+    expect(projectedPeer.sheets[0]!.cells.A1?.value).toBe("RCV1-DENSE-A1");
+    expect(projectedPeer.sheets[0]!.cells.B1?.value).toBe("S1-2");
+    expect(projectedPeer.sheets[3]!.cells.O30?.value).toBe("S4-450");
+
+    model.destroy();
+    peer.destroy();
+    document.destroy();
   });
 
   it("keeps quiz attempts and flashcard study progress outside authored Yjs source", () => {

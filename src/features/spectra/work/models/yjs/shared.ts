@@ -17,9 +17,10 @@ export function setWorkModelMetadata(
   modelVersion: number,
 ) {
   const meta = workMeta(doc);
-  meta.set("initialized", true);
-  meta.set("workType", workType);
-  meta.set("modelVersion", modelVersion);
+  if (meta.get("initialized") !== true) meta.set("initialized", true);
+  if (meta.get("workType") !== workType) meta.set("workType", workType);
+  if (meta.get("modelVersion") !== modelVersion)
+    meta.set("modelVersion", modelVersion);
 }
 
 export function assertWorkModelMetadata(
@@ -79,6 +80,11 @@ export function yToPlain(value: unknown): unknown {
 }
 
 export function replaceYArray<T>(array: Y.Array<T>, values: readonly T[]) {
+  if (
+    array.length === values.length &&
+    values.every((value, index) => Object.is(array.get(index), value))
+  )
+    return;
   if (array.length) array.delete(0, array.length);
   if (values.length) array.push([...values]);
 }

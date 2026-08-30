@@ -70,6 +70,11 @@ export class ArtifactRegionController {
       unique.map((entry) => entry.regionId).join(","),
       change,
     );
+    // A Yjs provider acknowledgement is only transport acceptance. Hold this
+    // semantic edit until the gateway's spectra.durable_ack confirms the
+    // corresponding Convex append; native materialization and local-cache
+    // eviction must never run in the acknowledgement gap.
+    await this.transport.flush();
     return { applied: true as const, claims: [] as RegionClaimResult[] };
   }
 

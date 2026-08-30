@@ -26,6 +26,24 @@ const initialWorkbook = {
   ],
 };
 
+const denseWorkbook = {
+  ...initialWorkbook,
+  sheets: [
+    {
+      ...initialWorkbook.sheets[0],
+      cells: Object.fromEntries(
+        Array.from({ length: 1_800 }, (_, index) => {
+          const row = Math.floor(index / 15) + 1;
+          const column = String.fromCharCode(65 + (index % 15));
+          return [`${column}${row}`, { value: `Dense ${index + 1}` }];
+        }),
+      ),
+      rowCount: 120,
+      columnCount: 15,
+    },
+  ],
+};
+
 beforeEach(() => {
   class ResizeObserverStub {
     observe() {}
@@ -97,6 +115,47 @@ describe("SheetsStudio commits", () => {
     expect(
       consoleError.mock.calls.some(([message]) =>
         String(message).includes("Cannot update a component"),
+      ),
+    ).toBe(false);
+  });
+
+  it("commits one dense-workbook formula input without a render/update loop", async () => {
+    const changes: unknown[] = [];
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    function DenseHost() {
+      const [content, setContent] = useState<unknown>(denseWorkbook);
+      return (
+        <SheetsStudio
+          artifactId="dense-workbook-1"
+          content={content}
+          onChange={(next) => {
+            changes.push(next);
+            setContent(next);
+          }}
+        />
+      );
+    }
+
+    render(<DenseHost />);
+    const formulaBar = screen.getByLabelText("Formula for A1");
+    const started = performance.now();
+    fireEvent.change(formulaBar, { target: { value: "RCV1-REACT-A1" } });
+    fireEvent.keyDown(formulaBar, { key: "Enter" });
+
+    await waitFor(() => expect(changes).toHaveLength(1));
+    expect(performance.now() - started).toBeLessThan(250);
+    const committed = changes[0] as {
+      sheets: Array<{ cells: Record<string, { value?: unknown }> }>;
+    };
+    expect(committed.sheets[0]!.cells.A1?.value).toBe("RCV1-REACT-A1");
+    expect(committed.sheets[0]!.cells.B1?.value).toBe("Dense 2");
+    expect(committed.sheets[0]!.cells.O120?.value).toBe("Dense 1800");
+    expect(
+      consoleError.mock.calls.some(([message]) =>
+        String(message).includes("Maximum update depth"),
       ),
     ).toBe(false);
   });

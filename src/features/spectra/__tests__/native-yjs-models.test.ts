@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { getBlueprint } from "@/features/spectra/artifacts/blueprint-catalog";
 import {
@@ -456,6 +456,54 @@ describe("native fine-grained Yjs models", () => {
     model.destroy();
     peer.destroy();
     document.destroy();
+  });
+
+  it("projects a dense live model once and reuses its semantic descriptor index", () => {
+    const adapter = workYjsAdapter("sheets");
+    const document = adapter.createDocument(denseWorkbook());
+    const liveMeta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+    liveMeta.set("title", "Dense workbook");
+    liveMeta.set("summary", "");
+    liveMeta.set("tags", []);
+    const project = vi.spyOn(adapter, "project");
+    const validate = vi.spyOn(adapter, "validate");
+    const deriveSemanticRegions = vi.spyOn(
+      adapter,
+      "deriveSemanticRegions",
+    );
+    const model = new NativeArtifactYjsModel("sheets", {
+      clientId: "dense-descriptor-client",
+      document,
+      getSnapshot: () => ({
+        state: "synchronized" as const,
+        level: "modify" as const,
+        accountId: "account-1",
+        displayName: "Pablo",
+        unsynchronizedChanges: 0,
+        presence: [],
+      }),
+    } as unknown as ConstructorParameters<typeof NativeArtifactYjsModel>[1]);
+
+    try {
+      expect(project).toHaveBeenCalledTimes(1);
+      expect(validate).toHaveBeenCalledTimes(1);
+      expect(deriveSemanticRegions).toHaveBeenCalledTimes(1);
+
+      const regionIds = model.getSnapshot().regionIds.slice(0, 64);
+      expect(regionIds).toHaveLength(64);
+      expect(regionIds.every((regionId) => model.descriptor(regionId))).toBe(
+        true,
+      );
+      expect(project).toHaveBeenCalledTimes(1);
+      expect(validate).toHaveBeenCalledTimes(1);
+      expect(deriveSemanticRegions).toHaveBeenCalledTimes(1);
+    } finally {
+      model.destroy();
+      deriveSemanticRegions.mockRestore();
+      validate.mockRestore();
+      project.mockRestore();
+      document.destroy();
+    }
   });
 
   it("keeps quiz attempts and flashcard study progress outside authored Yjs source", () => {

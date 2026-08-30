@@ -146,13 +146,19 @@ export class CodeYjsAdapter implements WorkYjsAdapter<CodeContent> {
     return normalizeCodeContent({ ...(project as Record<string, unknown>), files: ordered });
   }
 
-  deriveSemanticRegions(doc: Y.Doc): readonly SemanticRegion[] {
-    return enumerateArtifactRegions("code", this.project(doc));
+  deriveSemanticRegions(
+    doc: Y.Doc,
+    projection?: CodeContent,
+  ): readonly SemanticRegion[] {
+    return enumerateArtifactRegions("code", projection ?? this.project(doc));
   }
 
-  validate(doc: Y.Doc): WorkValidationResult {
+  validate(doc: Y.Doc, projection?: CodeContent): WorkValidationResult {
     try {
-      const result = validateArtifactContent("code", this.project(doc));
+      const result = validateArtifactContent(
+        "code",
+        projection ?? this.project(doc),
+      );
       return result.success
         ? { valid: true }
         : { valid: false, issues: result.error.issues.map((issue) => issue.message) };
@@ -168,7 +174,7 @@ export class CodeYjsAdapter implements WorkYjsAdapter<CodeContent> {
     const rollback = snapshot.rollbackUpdate ?? rollbackUpdate(snapshot);
     const document = this.createDocument(snapshot.content);
     const projected = this.project(document);
-    const validation = this.validate(document);
+    const validation = this.validate(document, projected);
     if (!validation.valid) throw new Error(`CODE_YJS_MIGRATION_INVALID: ${validation.issues.join("; ")}`);
     const migrationId = `code:${snapshot.schemaVersion ?? 1}:v${this.modelVersion}`;
     const rollbackMap = document.getMap<unknown>(CODE_ROLLBACK_MAP);

@@ -469,13 +469,22 @@ export class StructuredWorkYjsAdapter<TModel> implements WorkYjsAdapter<TModel> 
     return this.normalize(projectMap(workRoot(doc)));
   }
 
-  deriveSemanticRegions(doc: Y.Doc): readonly SemanticRegion[] {
-    return enumerateArtifactRegions(this.workType, this.project(doc));
+  deriveSemanticRegions(
+    doc: Y.Doc,
+    projection?: TModel,
+  ): readonly SemanticRegion[] {
+    return enumerateArtifactRegions(
+      this.workType,
+      projection ?? this.project(doc),
+    );
   }
 
-  validate(doc: Y.Doc): WorkValidationResult {
+  validate(doc: Y.Doc, projection?: TModel): WorkValidationResult {
     try {
-      const result = validateArtifactContent(this.workType, this.project(doc));
+      const result = validateArtifactContent(
+        this.workType,
+        projection ?? this.project(doc),
+      );
       return result.success
         ? { valid: true }
         : { valid: false, issues: result.error.issues.map((issue) => issue.message) };
@@ -492,7 +501,7 @@ export class StructuredWorkYjsAdapter<TModel> implements WorkYjsAdapter<TModel> 
     const rollback = snapshot.rollbackUpdate ?? rollbackUpdate(snapshot);
     const document = this.createDocument(snapshot.content);
     const projected = this.project(document);
-    const validation = this.validate(document);
+    const validation = this.validate(document, projected);
     if (!validation.valid)
       throw new Error(`${this.workType.toUpperCase()}_YJS_MIGRATION_INVALID: ${validation.issues.join("; ")}`);
     const migrationId = `${this.workType}:${snapshot.schemaVersion ?? 1}:v${this.modelVersion}`;

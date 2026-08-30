@@ -56,6 +56,7 @@ export class NativeArtifactYjsModel {
   private readonly liveMeta: Y.Map<unknown>;
   private readonly listeners = new Set<() => void>();
   private snapshot: ArtifactLiveModelSnapshot = EMPTY;
+  private regionsById = new Map<string, SemanticRegion>();
   private destroyed = false;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly scheduleRefresh: () => void;
@@ -107,6 +108,7 @@ export class NativeArtifactYjsModel {
       this.transport.document.off("update", this.scheduleRefresh);
       this.undoManager.destroy();
     }
+    this.regionsById.clear();
     this.listeners.clear();
   }
 
@@ -117,12 +119,16 @@ export class NativeArtifactYjsModel {
   private rebuildSnapshot() {
     if (workMeta(this.transport.document).get("initialized") !== true) {
       this.snapshot = EMPTY;
+      this.regionsById.clear();
       this.emit();
       return;
     }
     try {
       const content = this.adapter.project(this.transport.document);
-      const validation = this.adapter.validate(this.transport.document);
+      const validation = this.adapter.validate(
+        this.transport.document,
+        content,
+      );
       if (!validation.valid) throw new Error(validation.issues.join("; "));
       const title = this.liveMeta.get("title");
       const summary = this.liveMeta.get("summary");
@@ -131,6 +137,10 @@ export class NativeArtifactYjsModel {
         throw new Error("NATIVE_WORK_METADATA_INVALID");
       const regions = this.adapter.deriveSemanticRegions(
         this.transport.document,
+        content,
+      );
+      this.regionsById = new Map(
+        regions.map((region) => [region.regionId, region]),
       );
       this.snapshot = {
         initialized: true,
@@ -144,6 +154,7 @@ export class NativeArtifactYjsModel {
         regionIds: regions.map((region) => region.regionId).sort(),
       };
     } catch (error) {
+      this.regionsById.clear();
       this.snapshot = {
         initialized: true,
         validity: "invalid",
@@ -247,9 +258,7 @@ export class NativeArtifactYjsModel {
   }
 
   descriptor(regionId: string): StoredArtifactRegionDescriptor | null {
-    const region = this.adapter
-      .deriveSemanticRegions(this.transport.document)
-      .find((candidate) => candidate.regionId === regionId);
+    const region = this.regionsById.get(regionId);
     return region
       ? {
           regionId: region.regionId,
@@ -340,7 +349,10 @@ export class NativeArtifactYjsModel {
             overlapDomains: [change.regionId],
           }))
         : regionClaims(
-            this.adapter.deriveSemanticRegions(this.transport.document),
+            this.adapter.deriveSemanticRegions(
+              this.transport.document,
+              current?.content,
+            ),
           )
       : [];
     const metadataClaims = [
@@ -418,7 +430,8 @@ export function readNativeArtifactYjsDocument(
 ): ArtifactLiveValue | null {
   if (workMeta(document).get("initialized") !== true) return null;
   const adapter = workYjsAdapter(typeKey);
-  const validation = adapter.validate(document);
+  const content = adapter.project(document);
+  const validation = adapter.validate(document, content);
   if (!validation.valid)
     throw new Error(`NATIVE_WORK_INVALID: ${validation.issues.join("; ")}`);
   const liveMeta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
@@ -431,7 +444,7 @@ export function readNativeArtifactYjsDocument(
     title,
     ...(typeof summary === "string" && summary ? { summary } : {}),
     tags: tags.filter((entry): entry is string => typeof entry === "string"),
-    content: adapter.project(document),
+    content,
   };
 }
 
@@ -475,7 +488,7 @@ export function planNativeArtifactYjsMutation(
     ? null
     : new Map(
         adapter
-          .deriveSemanticRegions(document)
+          .deriveSemanticRegions(document, current.content)
           .map((region) => [region.regionId, region] as const),
       );
   const regions = changed.map((regionId) => ({

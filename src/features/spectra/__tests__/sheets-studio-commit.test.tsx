@@ -7,8 +7,14 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { useState } from "react";
+import {
+  useCallback,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useInteractionPresence } from "../collaboration/use-interaction-presence";
 import { SheetsStudio } from "../components/sheets-studio";
 
 const initialWorkbook = {
@@ -158,5 +164,86 @@ describe("SheetsStudio commits", () => {
         String(message).includes("Maximum update depth"),
       ),
     ).toBe(false);
+  });
+
+  it("keeps native formula input ahead of synchronous presence reconciliation", async () => {
+    const changes: unknown[] = [];
+    const listeners = new Set<() => void>();
+    let presenceRevision = 0;
+    let now = 1_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    const subscribe = (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    };
+    const getSnapshot = () => presenceRevision;
+
+    function PresenceComposedHost() {
+      useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+      const surfaceRef = useRef<HTMLDivElement>(null);
+      const [content, setContent] = useState<unknown>(initialWorkbook);
+      const publish = useCallback(
+        (state: Parameters<
+          typeof useInteractionPresence
+        >[0]["onPublish"] extends (value: infer Value) => void
+          ? Value
+          : never) => {
+          if (state?.act.kind !== "type") return;
+          presenceRevision += 1;
+          for (const listener of listeners) listener();
+        },
+        [],
+      );
+
+      useInteractionPresence({
+        artifactId: "workbook-1",
+        typeKey: "sheets",
+        actor: {
+          clientId: "local-client",
+          kind: "human",
+          name: "Local user",
+        },
+        surfaceRef,
+        onPublish: publish,
+      });
+
+      return (
+        <div ref={surfaceRef} data-spectra-surface>
+          <SheetsStudio
+            artifactId="workbook-1"
+            content={content}
+            onChange={(next) => {
+              changes.push(next);
+              setContent(next);
+            }}
+          />
+        </div>
+      );
+    }
+
+    render(<PresenceComposedHost />);
+    const formulaBar = screen.getByLabelText("Formula for A1");
+    formulaBar.focus();
+    now += 100;
+    fireEvent.input(formulaBar, {
+      target: { value: "RCV1-PRESENCE-A1" },
+    });
+
+    await waitFor(() =>
+      expect((formulaBar as HTMLInputElement).value).toBe(
+        "RCV1-PRESENCE-A1",
+      ),
+    );
+    fireEvent.keyDown(formulaBar, { key: "Enter" });
+
+    await waitFor(() => expect(changes).toHaveLength(1));
+    expect(
+      (
+        changes[0] as {
+          sheets: Array<{ cells: Record<string, { value?: unknown }> }>;
+        }
+      ).sheets[0]!.cells.A1?.value,
+    ).toBe("RCV1-PRESENCE-A1");
   });
 });

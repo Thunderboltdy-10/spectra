@@ -84,8 +84,11 @@ export type WorkYjsAdapter<TModel = unknown> = {
   applyProjection(doc: Y.Doc, model: TModel, origin: WorkTransactionOrigin): void;
   bind(doc: Y.Doc, editor: unknown, actor: WorkActorIdentity): WorkBinding;
   project(doc: Y.Doc): TModel;
-  deriveSemanticRegions(doc: Y.Doc): readonly SemanticRegion[];
-  validate(doc: Y.Doc): WorkValidationResult;
+  deriveSemanticRegions(
+    doc: Y.Doc,
+    projection?: TModel,
+  ): readonly SemanticRegion[];
+  validate(doc: Y.Doc, projection?: TModel): WorkValidationResult;
   migrateLegacy(snapshot: LegacyWorkSnapshot<TModel>): WorkMigrationResult<TModel>;
   createUndoManager(doc: Y.Doc, actor: WorkActorIdentity): Y.UndoManager;
   origins(actor: WorkActorIdentity): WorkYjsOriginSet;

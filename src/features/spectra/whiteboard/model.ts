@@ -5,10 +5,49 @@ export type WhiteboardNodeType =
   | "image"
   | "embed"
   | "frame"
+  | "section"
   | "group"
   | "table"
   | "card"
   | "drawing";
+
+export const WHITEBOARD_SHAPE_KINDS = [
+  "rectangle",
+  "rounded-rectangle",
+  "ellipse",
+  "pill",
+  "diamond",
+  "triangle",
+  "hexagon",
+] as const;
+export type WhiteboardShapeKind = (typeof WHITEBOARD_SHAPE_KINDS)[number];
+
+export const WHITEBOARD_CONNECTOR_ROUTES = [
+  "straight",
+  "elbow",
+  "curve",
+] as const;
+export type WhiteboardConnectorRoute =
+  (typeof WHITEBOARD_CONNECTOR_ROUTES)[number];
+
+export const WHITEBOARD_CONNECTOR_ANCHORS = [
+  "auto",
+  "top",
+  "right",
+  "bottom",
+  "left",
+  "center",
+] as const;
+export type WhiteboardConnectorAnchor =
+  (typeof WHITEBOARD_CONNECTOR_ANCHORS)[number];
+
+export const WHITEBOARD_CONNECTOR_CAPS = [
+  "none",
+  "arrow",
+  "circle",
+  "diamond",
+] as const;
+export type WhiteboardConnectorCap = (typeof WHITEBOARD_CONNECTOR_CAPS)[number];
 
 export type WhiteboardNode = {
   id: string;
@@ -23,6 +62,8 @@ export type WhiteboardNode = {
   zIndex: number;
   content: unknown;
   style?: Record<string, unknown>;
+  shapeKind?: WhiteboardShapeKind;
+  voteCount?: number;
   parentId?: string;
   frameId?: string;
   semanticLabel?: string;
@@ -42,8 +83,11 @@ export type WhiteboardEdge = {
   layerId: string;
   from: string;
   to: string;
-  fromAnchor?: string;
-  toAnchor?: string;
+  fromAnchor?: WhiteboardConnectorAnchor;
+  toAnchor?: WhiteboardConnectorAnchor;
+  route?: WhiteboardConnectorRoute;
+  startCap?: WhiteboardConnectorCap;
+  endCap?: WhiteboardConnectorCap;
   label?: string;
   style?: Record<string, unknown>;
   locked?: boolean;
@@ -51,6 +95,7 @@ export type WhiteboardEdge = {
 };
 
 export type WhiteboardContent = {
+  zOrder: string[];
   viewport: { x: number; y: number; zoom: number; pageId: string };
   pages: Array<{ id: string; name: string; background?: string }>;
   nodes: WhiteboardNode[];
@@ -73,6 +118,7 @@ export type WhiteboardContent = {
     snapToGrid?: boolean;
     showGrid?: boolean;
     canvasColor?: string;
+    virtualizeAfter?: number;
   };
 };
 
@@ -83,11 +129,23 @@ const nodeTypes = new Set<WhiteboardNodeType>([
   "image",
   "embed",
   "frame",
+  "section",
   "group",
   "table",
   "card",
   "drawing",
 ]);
+
+const shapeKinds = new Set<WhiteboardShapeKind>(WHITEBOARD_SHAPE_KINDS);
+const connectorRoutes = new Set<WhiteboardConnectorRoute>(
+  WHITEBOARD_CONNECTOR_ROUTES,
+);
+const connectorAnchors = new Set<WhiteboardConnectorAnchor>(
+  WHITEBOARD_CONNECTOR_ANCHORS,
+);
+const connectorCaps = new Set<WhiteboardConnectorCap>(
+  WHITEBOARD_CONNECTOR_CAPS,
+);
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -155,8 +213,26 @@ export function createWhiteboardNode(
     layerId,
     x,
     y,
-    width: type === "frame" ? 720 : type === "text" ? 280 : type === "embed" ? 400 : 240,
-    height: type === "frame" ? 460 : type === "text" ? 90 : type === "embed" ? 300 : 150,
+    width:
+      type === "frame"
+        ? 720
+        : type === "section"
+          ? 560
+          : type === "text"
+            ? 280
+            : type === "embed"
+              ? 400
+              : 240,
+    height:
+      type === "frame"
+        ? 460
+        : type === "section"
+          ? 360
+          : type === "text"
+            ? 90
+            : type === "embed"
+              ? 300
+              : 150,
     rotation: 0,
     zIndex: ordinal,
     accessibilityOrder: ordinal,
@@ -179,6 +255,7 @@ export function createWhiteboardNode(
     return {
       ...base,
       content: { text: "Concept", shape: "rounded-rectangle" },
+      shapeKind: "rounded-rectangle",
       style: {
         fill: "#f4f1ff",
         stroke: "#8874ee",
@@ -193,6 +270,13 @@ export function createWhiteboardNode(
       content: { title: "New frame" },
       style: { fill: "#ffffff", stroke: "#b8bbb7" },
       semanticLabel: "Frame",
+    };
+  if (type === "section")
+    return {
+      ...base,
+      content: { title: "New section" },
+      style: { fill: "#f7f8f5", stroke: "#9aa39d" },
+      semanticLabel: "Section",
     };
   if (type === "card")
     return {
@@ -301,6 +385,25 @@ export function normalizeWhiteboardContent(value: unknown): WhiteboardContent {
           rotation: bounded(row.rotation, 0, -360, 360),
           zIndex: Math.round(bounded(row.zIndex, index, -100_000, 100_000)),
           content: row.content ?? {},
+          ...(type === "shape"
+            ? {
+                shapeKind: shapeKinds.has(row.shapeKind as WhiteboardShapeKind)
+                  ? (row.shapeKind as WhiteboardShapeKind)
+                  : shapeKinds.has(
+                        record(row.content).shape as WhiteboardShapeKind,
+                      )
+                    ? (record(row.content).shape as WhiteboardShapeKind)
+                    : "rounded-rectangle",
+              }
+            : {}),
+          ...(typeof row.voteCount === "number"
+            ? {
+                voteCount: Math.max(
+                  0,
+                  Math.min(100_000, Math.round(row.voteCount)),
+                ),
+              }
+            : {}),
           ...(row.style && typeof row.style === "object"
             ? { style: record(row.style) }
             : {}),
@@ -361,12 +464,25 @@ export function normalizeWhiteboardContent(value: unknown): WhiteboardContent {
             : fromNode.layerId,
           from,
           to,
-          ...(typeof row.fromAnchor === "string"
-            ? { fromAnchor: row.fromAnchor.slice(0, 100) }
-            : {}),
-          ...(typeof row.toAnchor === "string"
-            ? { toAnchor: row.toAnchor.slice(0, 100) }
-            : {}),
+          fromAnchor: connectorAnchors.has(
+            row.fromAnchor as WhiteboardConnectorAnchor,
+          )
+            ? (row.fromAnchor as WhiteboardConnectorAnchor)
+            : "auto",
+          toAnchor: connectorAnchors.has(
+            row.toAnchor as WhiteboardConnectorAnchor,
+          )
+            ? (row.toAnchor as WhiteboardConnectorAnchor)
+            : "auto",
+          route: connectorRoutes.has(row.route as WhiteboardConnectorRoute)
+            ? (row.route as WhiteboardConnectorRoute)
+            : "straight",
+          startCap: connectorCaps.has(row.startCap as WhiteboardConnectorCap)
+            ? (row.startCap as WhiteboardConnectorCap)
+            : "none",
+          endCap: connectorCaps.has(row.endCap as WhiteboardConnectorCap)
+            ? (row.endCap as WhiteboardConnectorCap)
+            : "arrow",
           ...(typeof row.label === "string"
             ? { label: row.label.slice(0, 500) }
             : {}),
@@ -384,7 +500,22 @@ export function normalizeWhiteboardContent(value: unknown): WhiteboardContent {
   const viewportPage = pageIds.has(text(viewport.pageId))
     ? text(viewport.pageId)
     : defaultPageId;
+  const requestedOrder = Array.isArray(input.zOrder)
+    ? input.zOrder.filter(
+        (candidate): candidate is string =>
+          typeof candidate === "string" && nodeIds.has(candidate),
+      )
+    : [];
+  const zOrder = [
+    ...new Set(requestedOrder),
+    ...nodes
+      .slice()
+      .sort((left, right) => left.zIndex - right.zIndex)
+      .map((node) => node.id)
+      .filter((nodeId) => !requestedOrder.includes(nodeId)),
+  ];
   return {
+    zOrder,
     viewport: {
       x: bounded(viewport.x, 0, -1_000_000, 1_000_000),
       y: bounded(viewport.y, 0, -1_000_000, 1_000_000),
@@ -421,6 +552,9 @@ export function normalizeWhiteboardContent(value: unknown): WhiteboardContent {
       snapToGrid: settings.snapToGrid !== false,
       showGrid: settings.showGrid !== false,
       canvasColor: text(settings.canvasColor, "#fbfbf8").slice(0, 100),
+      virtualizeAfter: Math.round(
+        bounded(settings.virtualizeAfter, 300, 50, 100_000),
+      ),
     },
   };
 }

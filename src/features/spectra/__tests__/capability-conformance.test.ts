@@ -88,11 +88,12 @@ describe("P3.V1 protocol conformance", () => {
   });
 
   it("projects every Office definition into a reachable UI surface and every binding into the IR", () => {
-    const canvasReachable: Record<(typeof OFFICE)[number], readonly string[]> = {
-      document: ["document.rewrite.paragraph", "document.edit.tableCell"],
-      sheets: [],
-      presentation: [],
-    };
+    const canvasReachable: Record<(typeof OFFICE)[number], readonly string[]> =
+      {
+        document: ["document.rewrite.paragraph", "document.edit.tableCell"],
+        sheets: [],
+        presentation: [],
+      };
 
     const sheetsWithNativeObjects = sheetsCommandBindings(
       (() => {
@@ -123,7 +124,9 @@ describe("P3.V1 protocol conformance", () => {
       officeCapabilitiesFor("presentation").map((definition) => definition.id),
     ).toEqual(
       expect.arrayContaining(
-        PRESENTATION_EXPORT_COPIES.map((copy) => `presentation.export.${copy.format}`),
+        PRESENTATION_EXPORT_COPIES.map(
+          (copy) => `presentation.export.${copy.format}`,
+        ),
       ),
     );
     expect(
@@ -199,7 +202,10 @@ describe("P3.V1 protocol conformance", () => {
         const binding = OFFICE_BINDINGS[type].find(
           (candidate) => candidate.capabilityId === `${type}.${spec.local}`,
         );
-        expect(binding, `${type}.${spec.local} missing from workbar`).toBeTruthy();
+        expect(
+          binding,
+          `${type}.${spec.local} missing from workbar`,
+        ).toBeTruthy();
         expect(binding!.label).toBe(spec.label);
         expect(binding!.control?.kind ?? "toggle").toBe(spec.kind);
         if ("shortcut" in spec) expect(binding!.shortcut).toBe(spec.shortcut);
@@ -208,12 +214,16 @@ describe("P3.V1 protocol conformance", () => {
   });
 
   it("projects every application definition onto the shared app command surface", () => {
-    const fromCommands = APP_COMMANDS.map((command) => command.capabilityId ?? command.id);
+    const fromCommands = APP_COMMANDS.map(
+      (command) => command.capabilityId ?? command.id,
+    );
     const fromIr = APPLICATION_CAPABILITIES.map((definition) => definition.id);
     expect([...fromCommands].sort()).toEqual([...fromIr].sort());
 
     for (const definition of APPLICATION_CAPABILITIES) {
-      const command = APP_COMMANDS.find((candidate) => candidate.id === definition.id);
+      const command = APP_COMMANDS.find(
+        (candidate) => candidate.id === definition.id,
+      );
       expect(command).toBeTruthy();
       expect(command!.availability).toBe(definition.availability);
       expect(command!.risk).toBe(definition.ai.riskClass);

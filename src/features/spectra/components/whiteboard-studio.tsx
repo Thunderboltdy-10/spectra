@@ -82,7 +82,31 @@ import {
   type WhiteboardEdge,
   type WhiteboardNode,
   type WhiteboardNodeType,
+  type WhiteboardConnectorAnchor,
+  type WhiteboardConnectorCap,
+  type WhiteboardConnectorRoute,
+  type WhiteboardShapeKind,
+  WHITEBOARD_CONNECTOR_ANCHORS,
+  WHITEBOARD_CONNECTOR_CAPS,
+  WHITEBOARD_CONNECTOR_ROUTES,
+  WHITEBOARD_SHAPE_KINDS,
 } from "../whiteboard/model";
+import {
+  adjustWhiteboardVote,
+  applyWhiteboardTemplate,
+  arrangeWhiteboardNodes,
+  groupWhiteboardNodes,
+  reorderWhiteboardNodes,
+  setWhiteboardNodeLock,
+  setWhiteboardShapeKind,
+  shouldVirtualizeWhiteboard,
+  ungroupWhiteboardNodes,
+  whiteboardConnectorGeometry,
+  whiteboardFrameNodeIds,
+  type WhiteboardAlignment,
+  type WhiteboardDistribution,
+  type WhiteboardTemplate,
+} from "../whiteboard/operations";
 import {
   buildWhiteboardPackage,
   buildWhiteboardSvg,
@@ -105,9 +129,14 @@ import {
   type CommandBinding,
 } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
+import {
+  commandContextFromContract,
+  dispatchStudioCommand,
+} from "../commands/dispatch";
+import type { CommandParam } from "../commands/types";
 import { ArtifactEmbedById } from "./artifact-embed-host";
 
-type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
+type Tool = "select" | "hand" | "connector" | "laser" | WhiteboardNodeType;
 type Drag = {
   mode: "node" | "pan" | "resize" | "marquee";
   pointerId: number;
@@ -138,6 +167,7 @@ const NODE_NOUNS: Record<WhiteboardNodeType, string> = {
   image: "Image",
   embed: "Linked work",
   frame: "Frame",
+  section: "Section",
   group: "Group",
   table: "Table",
   card: "Card",
@@ -159,11 +189,13 @@ const BOARD_PALETTE = [
   ["connector", CircleDot, "Connector"],
   ["text", TextCursorInput, "Text"],
   ["shape", Square, "Shape"],
+  ["laser", MousePointer2, "Laser pointer"],
 ] as const satisfies readonly (readonly [Tool, LucideIcon, string])[];
 
 /** Object tools that always live in the overflow menu. */
 const BOARD_OBJECTS = [
   ["frame", Frame, "Frame"],
+  ["section", BoxSelect, "Section"],
   ["card", BoxSelect, "Card"],
   ["table", Table2, "Table"],
   // D15: "artifact" is not a user-facing word. This inserts a live reference to
@@ -357,6 +389,18 @@ function BoardNode({
       control.setSelectionRange(control.value.length, control.value.length);
     });
   };
+  const nodeFill = String(
+    visual(
+      node,
+      content,
+      "fill",
+      ["fill"],
+      node.type === "note" ? "#fff3c9" : "#ffffff",
+    ),
+  );
+  const nodeStroke = String(
+    visual(node, content, "stroke", ["stroke"], "#d5d7d2"),
+  );
   return (
     <div
       ref={nodeElementRef}
@@ -364,37 +408,32 @@ function BoardNode({
       data-ai-region={aiRegionAttr(aiActive)}
       {...(path ? targetAttrs(path) : {})}
       data-type={node.type}
+      data-shape={node.type === "shape" ? node.shapeKind : undefined}
       data-selected={selected || undefined}
       data-locked={node.locked || undefined}
-      style={{
-        left: node.x,
-        top: node.y,
-        width: node.width,
-        height: node.height,
-        zIndex: node.zIndex,
-        transform: `rotate(${node.rotation}deg)`,
-        background: String(
-          visual(
-            node,
-            content,
-            "fill",
-            ["fill"],
-            node.type === "note" ? "#fff3c9" : "#ffffff",
+      style={
+        {
+          left: node.x,
+          top: node.y,
+          width: node.width,
+          height: node.height,
+          zIndex: node.zIndex,
+          transform: `rotate(${node.rotation}deg)`,
+          background: node.type === "shape" ? "transparent" : nodeFill,
+          borderColor: node.type === "shape" ? "transparent" : nodeStroke,
+          borderWidth: Number(
+            visual(node, content, "strokeWidth", ["strokeWidth"], 1),
           ),
-        ),
-        borderColor: String(
-          visual(node, content, "stroke", ["stroke"], "#d5d7d2"),
-        ),
-        borderWidth: Number(
-          visual(node, content, "strokeWidth", ["strokeWidth"], 1),
-        ),
-        borderRadius: Number(
-          visual(node, content, "borderRadius", ["borderRadius"], 11),
-        ),
-        color: String(
-          visual(node, content, "color", ["textColor", "color"], "#29352f"),
-        ),
-      }}
+          borderRadius: Number(
+            visual(node, content, "borderRadius", ["borderRadius"], 11),
+          ),
+          color: String(
+            visual(node, content, "color", ["textColor", "color"], "#29352f"),
+          ),
+          "--whiteboard-node-fill": nodeFill,
+          "--whiteboard-node-stroke": nodeStroke,
+        } as CSSProperties
+      }
       onClick={(event) => {
         event.stopPropagation();
         const textControl = (event.target as Element).closest<
@@ -422,9 +461,20 @@ function BoardNode({
       }}
       onPointerDown={onPointerDown}
     >
-      {node.type === "frame" ? (
-        <span className="whiteboard-frame-title">
-          {String(content.title ?? "Frame")}
+      {node.type === "shape" ? (
+        <span className="whiteboard-shape-surface" aria-hidden="true" />
+      ) : null}
+      {node.type === "frame" || node.type === "section" ? (
+        <span
+          className={
+            node.type === "frame"
+              ? "whiteboard-frame-title"
+              : "whiteboard-section-title"
+          }
+        >
+          {String(
+            content.title ?? (node.type === "frame" ? "Frame" : "Section"),
+          )}
         </span>
       ) : node.type === "embed" && typeof content.embedId === "string" ? (
         <div className="h-full w-full overflow-auto rounded-[10px]">
@@ -595,6 +645,15 @@ function BoardNode({
           }}
         />
       )}
+      {(node.type === "note" || node.type === "card") &&
+      (node.voteCount ?? 0) > 0 ? (
+        <span
+          className="whiteboard-vote-count"
+          aria-label={`${node.voteCount} vote${node.voteCount === 1 ? "" : "s"}`}
+        >
+          {node.voteCount}
+        </span>
+      ) : null}
       {selected &&
       !readOnly &&
       !compact &&
@@ -711,6 +770,7 @@ export function WhiteboardStudio({
   const [marquee, setMarquee] = useState<Marquee>();
   const dragRef = useRef<Drag | undefined>(undefined);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const laserRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const boardInputRef = useRef<HTMLInputElement>(null);
   const selectionHandledRef = useRef(false);
@@ -728,6 +788,10 @@ export function WhiteboardStudio({
     (edge) => edge.pageId === page.id && visibleLayerIds.has(edge.layerId),
   );
   const renderedNodes = useMemo(() => {
+    if (
+      !shouldVirtualizeWhiteboard(nodes.length, board.settings?.virtualizeAfter)
+    )
+      return nodes;
     const margin = 520 / Math.max(viewport.zoom, 0.05);
     const left = viewport.x - margin;
     const top = viewport.y - margin;
@@ -747,6 +811,7 @@ export function WhiteboardStudio({
     canvasSize.height,
     canvasSize.width,
     nodes,
+    board.settings?.virtualizeAfter,
   ]);
   const renderedNodeIds = useMemo(
     () => new Set(renderedNodes.map((node) => node.id)),
@@ -773,6 +838,33 @@ export function WhiteboardStudio({
     selectedNodeIds.includes(node.id),
   );
   const selectedEdge = board.edges.find((edge) => edge.id === selectedEdgeId);
+  const boardCommandContext = {
+    ...commandContextFromContract(
+      "whiteboard",
+      {
+        can: contract.can,
+        role: contract.role,
+        permissions: { role: contract.role, editable: canEdit },
+        compatibilityProfile: contract.compatibilityProfile,
+        fidelity: contract.fidelity,
+        artifactId,
+        executeApplicationCommand: contract.executeApplicationCommand,
+      },
+      selectedEdge
+        ? "Connector"
+        : selectedNode
+          ? NODE_NOUNS[selectedNode.type]
+          : undefined,
+    ),
+    selection: {
+      kind: selectedEdge
+        ? "Connector"
+        : selectedNode
+          ? NODE_NOUNS[selectedNode.type]
+          : undefined,
+      ids: selectedEdge ? [selectedEdge.id] : selectedNodeIds,
+    },
+  };
   const nodeById = useMemo(
     () => new Map(board.nodes.map((node) => [node.id, node])),
     [board.nodes],
@@ -834,7 +926,7 @@ export function WhiteboardStudio({
         setUndo((stack) => [...stack.slice(-79), clone(board)]);
         setRedo([]);
       }
-      onChange(next);
+      onChange(normalizeWhiteboardContent(next));
     },
     [board, onChange, readOnly],
   );
@@ -1290,7 +1382,10 @@ export function WhiteboardStudio({
       snap(y ?? center.y - 75),
       board.nodes.length + 1,
     );
-    mutate((draft) => draft.nodes.push(node));
+    mutate((draft) => {
+      draft.nodes.push(node);
+      draft.zOrder.push(node.id);
+    });
     setSelectedNodeId(node.id);
     onActiveRegionChange?.(node.id);
     setTool("select");
@@ -1303,7 +1398,12 @@ export function WhiteboardStudio({
       selectionHandledRef.current = false;
       return;
     }
-    if (tool === "select" || tool === "hand" || tool === "connector") {
+    if (
+      tool === "select" ||
+      tool === "hand" ||
+      tool === "connector" ||
+      tool === "laser"
+    ) {
       setSelectedNodeId(undefined);
       setSelectedEdgeId(undefined);
       setConnectorFrom(undefined);
@@ -1333,6 +1433,11 @@ export function WhiteboardStudio({
               layerId: layer.id,
               from: connectorFrom,
               to: node.id,
+              fromAnchor: "auto",
+              toAnchor: "auto",
+              route: "straight",
+              startCap: "none",
+              endCap: "arrow",
               zIndex: -1,
             }),
           );
@@ -1464,6 +1569,10 @@ export function WhiteboardStudio({
    */
   function beginCanvasPointer(event: ReactPointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest(".whiteboard-node")) return;
+    if (tool === "laser") {
+      updateLaser(event.clientX, event.clientY);
+      return;
+    }
     // Self-heal: a drag released outside the window never produces a click, so
     // the suppression flag from the last gesture is cleared on the next press
     // rather than swallowing it.
@@ -1495,8 +1604,19 @@ export function WhiteboardStudio({
       snapshot: clone(board),
     };
   }
+  function updateLaser(clientX: number, clientY: number) {
+    const element = laserRef.current;
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    if (!element || !bounds) return;
+    element.style.opacity = "1";
+    element.style.transform = `translate3d(${clientX - bounds.left}px, ${clientY - bounds.top}px, 0)`;
+  }
   function movePointer(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
+    if (tool === "laser" && !drag) {
+      updateLaser(event.clientX, event.clientY);
+      return;
+    }
     if (!drag || drag.pointerId !== event.pointerId) return;
     if (drag.mode === "pan")
       setViewport((current) => ({
@@ -1722,56 +1842,14 @@ export function WhiteboardStudio({
     setSelectedNodeIds([]);
   }
 
-  function alignSelected(mode: "left" | "center" | "right") {
-    const editable = selectedNodes.filter(
-      (node) =>
-        !node.locked &&
-        !layers.find((layer) => layer.id === node.layerId)?.locked,
-    );
-    if (editable.length < 2) return;
-    const left = Math.min(...editable.map((node) => node.x));
-    const right = Math.max(...editable.map((node) => node.x + node.width));
-    const center = (left + right) / 2;
-    const ids = new Set(editable.map((node) => node.id));
-    mutate((draft) => {
-      for (const node of draft.nodes) {
-        if (!ids.has(node.id)) continue;
-        node.x =
-          mode === "left"
-            ? left
-            : mode === "right"
-              ? right - node.width
-              : center - node.width / 2;
-      }
-    });
+  function alignSelected(mode: WhiteboardAlignment) {
+    const next = arrangeWhiteboardNodes(board, selectedNodeIds, mode);
+    if (next !== board) emit(next);
   }
 
-  function distributeSelected() {
-    const editable = selectedNodes
-      .filter(
-        (node) =>
-          !node.locked &&
-          !layers.find((layer) => layer.id === node.layerId)?.locked,
-      )
-      .sort((left, right) => left.x - right.x);
-    if (editable.length < 3) return;
-    const first = editable[0]!;
-    const last = editable.at(-1)!;
-    const totalWidth = editable.reduce((total, node) => total + node.width, 0);
-    const gap =
-      (last.x + last.width - first.x - totalWidth) / (editable.length - 1);
-    const positions = new Map<string, number>();
-    let cursor = first.x;
-    editable.forEach((node) => {
-      positions.set(node.id, cursor);
-      cursor += node.width + gap;
-    });
-    mutate((draft) => {
-      for (const node of draft.nodes) {
-        const x = positions.get(node.id);
-        if (x !== undefined) node.x = x;
-      }
-    });
+  function distributeSelected(axis: WhiteboardDistribution) {
+    const next = arrangeWhiteboardNodes(board, selectedNodeIds, axis);
+    if (next !== board) emit(next);
   }
 
   function groupSelected() {
@@ -1784,33 +1862,10 @@ export function WhiteboardStudio({
       setAssetError("Move objects to one layer before grouping them.");
       return;
     }
-    const x = Math.min(...candidates.map((node) => node.x)) - 12;
-    const y = Math.min(...candidates.map((node) => node.y)) - 12;
-    const right = Math.max(...candidates.map((node) => node.x + node.width));
-    const bottom = Math.max(...candidates.map((node) => node.y + node.height));
     const groupId = `group-${crypto.randomUUID()}`;
-    const selected = new Set(candidates.map((node) => node.id));
-    mutate((draft) => {
-      draft.nodes.push({
-        id: groupId,
-        type: "group",
-        pageId: page.id,
-        layerId,
-        x,
-        y,
-        width: right - x + 12,
-        height: bottom - y + 12,
-        rotation: 0,
-        zIndex: Math.min(...candidates.map((node) => node.zIndex)) - 1,
-        content: { label: "Object group" },
-        semanticLabel: "Grouped whiteboard objects",
-        accessibilityOrder: Math.min(
-          ...candidates.map((node) => node.accessibilityOrder ?? 0),
-        ),
-      });
-      for (const node of draft.nodes)
-        if (selected.has(node.id)) node.parentId = groupId;
-    });
+    const next = groupWhiteboardNodes(board, selectedNodeIds, groupId);
+    if (next === board) return;
+    emit(next);
     setSelectedNodeIds([groupId]);
     onActiveRegionChange?.(groupId);
   }
@@ -1822,12 +1877,9 @@ export function WhiteboardStudio({
     const childIds = board.nodes
       .filter((node) => node.parentId && groupIds.has(node.parentId))
       .map((node) => node.id);
-    mutate((draft) => {
-      draft.nodes = draft.nodes.filter((node) => !groupIds.has(node.id));
-      for (const node of draft.nodes)
-        if (node.parentId && groupIds.has(node.parentId))
-          node.parentId = undefined;
-    });
+    const next = ungroupWhiteboardNodes(board, groupIds);
+    if (next === board) return;
+    emit(next);
     setSelectedNodeIds(childIds);
   }
   /**
@@ -1995,7 +2047,9 @@ export function WhiteboardStudio({
       event.preventDefault();
       // With nothing selected the same keys pan, so the canvas is reachable
       // without a pointer instead of trapping keyboard users at the origin.
-      if (!nudgeSelected(arrow[0] * step, arrow[1] * step))
+      const nudgeId = arrow[0] ? "selection-nudge-x" : "selection-nudge-y";
+      const amount = (arrow[0] || arrow[1]) * step;
+      if (!dispatchBoardCommand(nudgeId, amount))
         setViewport((current) => ({
           ...current,
           x: current.x + (arrow[0] * 120) / current.zoom,
@@ -2014,45 +2068,45 @@ export function WhiteboardStudio({
       (selectedNodeIds.length || selectedEdgeId)
     ) {
       event.preventDefault();
-      void deleteSelected();
+      dispatchBoardCommand("selection-delete");
       return;
     }
     // Zoom keys stay off the modifier: Ctrl+Plus, Ctrl+Minus and Ctrl+0 are the
     // browser's own zoom, and a canvas has no business taking them.
     if ((key === "+" || key === "=") && !accel) {
       event.preventDefault();
-      setZoom(viewport.zoom * 1.2);
+      dispatchBoardCommand("zoom-in");
       return;
     }
     if ((key === "-" || key === "_") && !accel) {
       event.preventDefault();
-      setZoom(viewport.zoom / 1.2);
+      dispatchBoardCommand("zoom-out");
       return;
     }
     if (key === "0" && !accel) {
       event.preventDefault();
-      fitToContent();
+      dispatchBoardCommand("fit");
       return;
     }
     if (!accel) return;
     const letter = key.toLowerCase();
     if (letter === "g") {
       event.preventDefault();
-      if (event.shiftKey) ungroupSelected();
-      else groupSelected();
+      dispatchBoardCommand(
+        event.shiftKey ? "selection-ungroup" : "selection-group",
+      );
     } else if (letter === "d") {
       event.preventDefault();
-      duplicateSelected();
+      dispatchBoardCommand("selection-duplicate");
     } else if (letter === "a") {
       event.preventDefault();
-      setSelectedNodeIds(nodes.map((node) => node.id));
+      dispatchBoardCommand("selection-all");
     } else if (letter === "z") {
       event.preventDefault();
-      if (event.shiftKey) void redoAction();
-      else void undoAction();
+      dispatchBoardCommand(event.shiftKey ? "redo" : "undo");
     } else if (letter === "y") {
       event.preventDefault();
-      void redoAction();
+      dispatchBoardCommand("redo");
     }
   }
 
@@ -2136,16 +2190,7 @@ export function WhiteboardStudio({
 
   function exportScope() {
     if (selectedNode?.type !== "frame") return undefined;
-    return new Set([
-      selectedNode.id,
-      ...board.nodes
-        .filter(
-          (node) =>
-            node.frameId === selectedNode.id ||
-            node.parentId === selectedNode.id,
-        )
-        .map((node) => node.id),
-    ]);
+    return whiteboardFrameNodeIds(board, selectedNode.id);
   }
 
   function exportName(extension: string) {
@@ -2366,6 +2411,7 @@ export function WhiteboardStudio({
       await pdfDocument.destroy();
     }
     next.nodes.push(...importedNodes);
+    next.zOrder.push(...importedNodes.map((node) => node.id));
     const refreshed = await getArtifactAssets(artifactId);
     setAssets(refreshed.assets);
     return {
@@ -2523,70 +2569,24 @@ export function WhiteboardStudio({
     );
   }
 
-  function applyTemplate(kind: "concept" | "study" | "retro") {
+  function applyTemplate(kind: WhiteboardTemplate) {
     const layer = layers.find(
       (candidate) => candidate.visible && !candidate.locked,
     );
     if (!layer || readOnly) return;
     const baseX = viewport.x + (kind === "concept" ? 72 : 180);
     const baseY = viewport.y + (kind === "concept" ? 34 : 120);
-    mutate((draft) => {
-      const specs =
-        kind === "concept"
-          ? ([
-              ["shape", "Central idea", 400, 210, "#f0ecff", 240, 124],
-              ["card", "Evidence", 0, 0, "#ecf7f1", 260, 132],
-              ["note", "Key fact", 320, 12, "#fff1c7", 220, 104],
-              ["card", "Implications", 680, 0, "#fff3dc", 280, 132],
-              ["card", "Examples", 0, 230, "#fbecef", 260, 144],
-              ["note", "Remember", 710, 230, "#eaf1ff", 250, 144],
-              ["card", "Process", 70, 430, "#eef6ff", 250, 112],
-              ["note", "Questions", 365, 430, "#fff1c7", 240, 112],
-              ["card", "Connections", 650, 430, "#ecf7f1", 270, 112],
-            ] as const)
-          : kind === "study"
-            ? ([
-                ["text", "Study map", 220, 0, "transparent", 320, 80],
-                ["card", "What I know", 0, 150, "#ecf7f1", 250, 180],
-                ["card", "What to review", 280, 150, "#fff3dc", 250, 180],
-                ["card", "Questions", 560, 150, "#f0ecff", 250, 180],
-              ] as const)
-            : ([
-                ["note", "Went well", 0, 100, "#e6f6eb", 250, 180],
-                ["note", "Learned", 280, 100, "#fff1c7", 250, 180],
-                ["note", "Try next", 560, 100, "#eee9ff", 250, 180],
-              ] as const);
-      const created = specs.map(
-        ([type, label, x, y, fill, width, height], index) => {
-          const node = createWhiteboardNode(
-            type,
-            page.id,
-            layer.id,
-            snap(baseX + x),
-            snap(baseY + y),
-            draft.nodes.length + index + 1,
-          );
-          node.content = { text: label, title: label };
-          node.semanticLabel = label;
-          node.width = width;
-          node.height = height;
-          node.style = { ...node.style, fill };
-          draft.nodes.push(node);
-          return node;
-        },
-      );
-      if (kind === "concept") {
-        created.slice(1).forEach((node) =>
-          draft.edges.push({
-            id: `edge-${uniqueToken()}`,
-            pageId: page.id,
-            layerId: layer.id,
-            from: created[0]!.id,
-            to: node.id,
-          }),
-        );
-      }
-    });
+    emit(
+      applyWhiteboardTemplate(board, {
+        template: kind,
+        pageId: page.id,
+        layerId: layer.id,
+        x: baseX,
+        y: baseY,
+        snap,
+        id: (type) => `${type}-${uniqueToken()}`,
+      }),
+    );
     setPanel("none");
   }
 
@@ -2598,6 +2598,7 @@ export function WhiteboardStudio({
         className="whiteboard-canvas"
         data-tool={compact ? "present" : tool}
         data-compact={compact || undefined}
+        data-grid={board.settings?.showGrid !== false || undefined}
         style={
           {
             "--board-zoom": viewport.zoom,
@@ -2613,6 +2614,13 @@ export function WhiteboardStudio({
         onPointerMove={compact ? undefined : movePointer}
         onPointerUp={compact ? undefined : finishPointer}
         onPointerCancel={compact ? undefined : finishPointer}
+        onPointerLeave={
+          compact
+            ? undefined
+            : () => {
+                if (laserRef.current) laserRef.current.style.opacity = "0";
+              }
+        }
         onWheel={compact ? undefined : wheel}
         onKeyDown={compact ? undefined : canvasKeyDown}
       >
@@ -2623,6 +2631,64 @@ export function WhiteboardStudio({
           }}
         >
           <svg className="whiteboard-edges" aria-label="Connectors">
+            <defs>
+              <marker
+                id="whiteboard-arrow-end"
+                markerWidth="8"
+                markerHeight="8"
+                refX="7"
+                refY="4"
+                orient="auto"
+              >
+                <path d="M0 0 L8 4 L0 8 Z" />
+              </marker>
+              <marker
+                id="whiteboard-arrow-start"
+                markerWidth="8"
+                markerHeight="8"
+                refX="1"
+                refY="4"
+                orient="auto"
+              >
+                <path d="M8 0 L0 4 L8 8 Z" />
+              </marker>
+              <marker
+                id="whiteboard-circle-end"
+                markerWidth="8"
+                markerHeight="8"
+                refX="4"
+                refY="4"
+              >
+                <circle cx="4" cy="4" r="3" />
+              </marker>
+              <marker
+                id="whiteboard-circle-start"
+                markerWidth="8"
+                markerHeight="8"
+                refX="4"
+                refY="4"
+              >
+                <circle cx="4" cy="4" r="3" />
+              </marker>
+              <marker
+                id="whiteboard-diamond-end"
+                markerWidth="10"
+                markerHeight="10"
+                refX="8"
+                refY="5"
+              >
+                <path d="M1 5 L5 1 L9 5 L5 9 Z" />
+              </marker>
+              <marker
+                id="whiteboard-diamond-start"
+                markerWidth="10"
+                markerHeight="10"
+                refX="2"
+                refY="5"
+              >
+                <path d="M1 5 L5 1 L9 5 L5 9 Z" />
+              </marker>
+            </defs>
             {renderedEdges.map((edge) => {
               const from = nodeById.get(edge.from);
               const to = nodeById.get(edge.to);
@@ -2641,10 +2707,16 @@ export function WhiteboardStudio({
               // Both ends are read from the live nodes, so a connector follows
               // whatever it is attached to, and the label sits on the midpoint of
               // the line that is actually drawn rather than floating beside it.
-              const x1 = centerX(from);
-              const y1 = centerY(from);
-              const x2 = centerX(to);
-              const y2 = centerY(to);
+              const geometry = whiteboardConnectorGeometry(edge, from, to);
+              const startMarker =
+                edge.startCap && edge.startCap !== "none"
+                  ? `url(#whiteboard-${edge.startCap}-start)`
+                  : undefined;
+              const endCap = edge.endCap ?? "arrow";
+              const endMarker =
+                endCap !== "none"
+                  ? `url(#whiteboard-${endCap}-end)`
+                  : undefined;
               const selected = !compact && selectedEdgeId === edge.id;
               return (
                 <g
@@ -2653,36 +2725,26 @@ export function WhiteboardStudio({
                   data-selected={selected || undefined}
                   {...(index >= 0 ? targetAttrs(`/edges/${index}`) : {})}
                 >
-                  <line
-                    x1={x1}
-                    y1={y1}
-                    x2={x2}
-                    y2={y2}
+                  <path
+                    d={geometry.path}
+                    fill="none"
+                    markerStart={startMarker}
+                    markerEnd={endMarker}
                     style={
                       selected
                         ? { stroke: "var(--brand-primary)", strokeWidth: 2.5 }
                         : undefined
                     }
                   />
-                  <circle
-                    cx={x2}
-                    cy={y2}
-                    r="3"
-                    style={
-                      selected ? { fill: "var(--brand-primary)" } : undefined
-                    }
-                  />
                   {edge.label ? (
-                    <text x={(x1 + x2) / 2} y={(y1 + y2) / 2}>
+                    <text x={geometry.label.x} y={geometry.label.y}>
                       {edge.label}
                     </text>
                   ) : null}
                   {compact ? null : (
-                    <line
-                      x1={x1}
-                      y1={y1}
-                      x2={x2}
-                      y2={y2}
+                    <path
+                      d={geometry.path}
+                      fill="none"
                       // A 1.35px line is not a pointer target. This invisible
                       // twin is what makes a connector selectable at all.
                       style={{
@@ -2705,7 +2767,7 @@ export function WhiteboardStudio({
                           ? `Connector: ${edge.label}`
                           : `Connector from ${whiteboardNodeText(from) || "object"} to ${whiteboardNodeText(to) || "object"}`}
                       </title>
-                    </line>
+                    </path>
                   )}
                 </g>
               );
@@ -2803,38 +2865,23 @@ export function WhiteboardStudio({
                   }}
                   onResizePointerDown={(event) => beginResize(node, event)}
                   onTextChange={(value) =>
-                    mutate((draft) => {
-                      const candidate = draft.nodes.find(
-                        (item) => item.id === node.id,
-                      );
-                      if (candidate)
-                        Object.assign(
-                          candidate,
-                          withWhiteboardNodeText(candidate, value),
-                        );
-                    })
+                    void dispatchBoardCommand("node-text", value)
                   }
                   aiActive={nodeAiActive}
                   path={index >= 0 ? `/nodes/${index}` : undefined}
                   onContentChange={(change) =>
-                    mutate((draft) => {
-                      const candidate = draft.nodes.find(
-                        (item) => item.id === node.id,
-                      );
-                      if (!candidate) return;
-                      const current =
-                        candidate.content &&
-                        typeof candidate.content === "object" &&
-                        !Array.isArray(candidate.content)
-                          ? (candidate.content as Record<string, unknown>)
-                          : {};
-                      candidate.content = { ...current, ...change };
-                    })
+                    void dispatchBoardCommand(
+                      "node-content",
+                      JSON.stringify(change),
+                    )
                   }
                 />
               );
             })}
         </div>
+        {!compact ? (
+          <div ref={laserRef} className="whiteboard-laser" aria-hidden="true" />
+        ) : null}
         {!compact && minimap ? (
           <button
             type="button"
@@ -3044,7 +3091,729 @@ export function WhiteboardStudio({
       disabled: Boolean(ioBusy),
       onSelect: () => void exportBoard(format),
     })),
+    {
+      id: "page-add",
+      label: "Add page",
+      icon: Plus,
+      tab: "Insert",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit,
+      onSelect: addPage,
+    },
+    {
+      id: "page-navigate",
+      label: "Go to page",
+      icon: PanelLeft,
+      priority: "advanced",
+      onSelect: (value) => {
+        if (typeof value !== "string") return;
+        if (!board.pages.some((candidate) => candidate.id === value)) return;
+        setViewport((current) => ({ ...current, pageId: value, x: 0, y: 0 }));
+      },
+    },
+    {
+      id: "layer-add",
+      label: "Add layer",
+      icon: Layers3,
+      tab: "Insert",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit,
+      onSelect: addLayer,
+    },
+    {
+      id: "layer-visibility",
+      label: "Show or hide layer",
+      icon: Eye,
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit,
+      onSelect: (value) => {
+        if (typeof value !== "string") return;
+        mutate((draft) => {
+          const layer = draft.layers.find(
+            (candidate) => candidate.id === value,
+          );
+          if (layer) layer.visible = !layer.visible;
+        });
+      },
+    },
+    {
+      id: "layer-lock",
+      label: "Lock or unlock layer",
+      icon: Lock,
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit,
+      onSelect: (value) => {
+        if (typeof value !== "string") return;
+        mutate((draft) => {
+          const layer = draft.layers.find(
+            (candidate) => candidate.id === value,
+          );
+          if (layer) layer.locked = !layer.locked;
+        });
+      },
+    },
+    {
+      id: "grid-show",
+      label: "Show grid",
+      icon: Magnet,
+      tab: "Arrange",
+      priority: "advanced",
+      requires: "edit",
+      active: board.settings?.showGrid !== false,
+      disabled: !canEdit,
+      onSelect: (value) =>
+        mutate((draft) => {
+          draft.settings = {
+            ...draft.settings,
+            showGrid:
+              typeof value === "boolean"
+                ? value
+                : draft.settings?.showGrid === false,
+          };
+        }),
+    },
+    {
+      id: "virtualization-threshold",
+      label: "Virtualize after",
+      icon: Scan,
+      tab: "Arrange",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit,
+      control: {
+        kind: "numeric",
+        value: board.settings?.virtualizeAfter ?? 300,
+        min: 50,
+        max: 100_000,
+        step: 50,
+        presets: [100, 300, 500, 1_000],
+      },
+      onSelect: (value) => {
+        if (typeof value !== "number") return;
+        mutate((draft) => {
+          draft.settings = {
+            ...draft.settings,
+            virtualizeAfter: Math.max(50, Math.min(100_000, Math.round(value))),
+          };
+        });
+      },
+    },
+    {
+      id: "selection-all",
+      label: "Select all",
+      icon: BoxSelect,
+      tab: "Arrange",
+      priority: "advanced",
+      disabled: !nodes.length,
+      shortcut: "Mod+A",
+      onSelect: () => setSelectedNodeIds(nodes.map((node) => node.id)),
+    },
+    {
+      id: "selection-duplicate",
+      label: "Duplicate selection",
+      icon: Plus,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || !selectedNodeIds.length,
+      shortcut: "Mod+D",
+      onSelect: duplicateSelected,
+    },
+    {
+      id: "selection-delete",
+      label: "Delete selection",
+      icon: Trash2,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || (!selectedNodeIds.length && !selectedEdgeId),
+      onSelect: () => void deleteSelected(),
+    },
+    ...([false, true] as const).map((locked) => ({
+      id: locked ? "selection-lock" : "selection-unlock",
+      label: locked ? "Lock selection" : "Unlock selection",
+      icon: locked ? Lock : Unlock,
+      contextualTab: "Shape",
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: !canEdit || !selectedNodeIds.length,
+      onSelect: () => {
+        const next = setWhiteboardNodeLock(board, selectedNodeIds, locked);
+        if (next !== board) emit(next);
+      },
+    })),
+    ...(["front", "back"] as const).map((edge) => ({
+      id: edge === "front" ? "selection-bring-front" : "selection-send-back",
+      label: edge === "front" ? "Bring to front" : "Send to back",
+      icon: Layers3,
+      contextualTab: "Shape",
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: !canEdit || !selectedNodeIds.length,
+      onSelect: () => {
+        const next = reorderWhiteboardNodes(board, selectedNodeIds, edge);
+        if (next !== board) emit(next);
+      },
+    })),
+    {
+      id: "selection-group",
+      label: "Group objects",
+      icon: Group,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || selectedNodeIds.length < 2,
+      shortcut: "Mod+G",
+      onSelect: groupSelected,
+    },
+    {
+      id: "selection-ungroup",
+      label: "Ungroup objects",
+      icon: Ungroup,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled:
+        !canEdit || !selectedNodes.some((node) => node.type === "group"),
+      shortcut: "Mod+Shift+G",
+      onSelect: ungroupSelected,
+    },
+    ...(["x", "y"] as const).map((axis) => ({
+      id: `selection-nudge-${axis}`,
+      label: `Nudge ${axis === "x" ? "horizontally" : "vertically"}`,
+      icon: MousePointer2,
+      contextualTab: "Shape",
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: !canEdit || !selectedNodeIds.length,
+      onSelect: (value?: CommandParam) => {
+        if (typeof value !== "number") return;
+        nudgeSelected(axis === "x" ? value : 0, axis === "y" ? value : 0);
+      },
+    })),
+    ...(["left", "center", "right", "top", "middle", "bottom"] as const).map(
+      (mode) => ({
+        id: `align-${mode}`,
+        label: `Align ${mode}`,
+        icon:
+          mode === "left" || mode === "top"
+            ? AlignLeft
+            : mode === "right" || mode === "bottom"
+              ? AlignRight
+              : AlignCenter,
+        tab: "Arrange",
+        contextualTab: "Shape",
+        priority: "advanced" as const,
+        requires: "edit" as const,
+        disabled: !canEdit || selectedNodeIds.length < 2,
+        onSelect: () => alignSelected(mode),
+      }),
+    ),
+    ...(["horizontal", "vertical"] as const).map((axis) => ({
+      id: `distribute-${axis}`,
+      label: `Distribute ${axis}`,
+      icon: BoxSelect,
+      tab: "Arrange",
+      contextualTab: "Shape",
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: !canEdit || selectedNodeIds.length < 3,
+      onSelect: () => distributeSelected(axis),
+    })),
+    {
+      id: "shape-kind",
+      label: "Shape",
+      icon: Square,
+      contextualTab: "Shape",
+      priority: "secondary",
+      requires: "edit",
+      disabled: !canEdit || selectedNode?.type !== "shape",
+      control: {
+        kind: "select",
+        value: selectedNode?.shapeKind ?? "rounded-rectangle",
+        width: "9.5rem",
+        options: WHITEBOARD_SHAPE_KINDS.map((kind) => ({
+          value: kind,
+          label: kind
+            .split("-")
+            .map((word) => word[0]!.toUpperCase() + word.slice(1))
+            .join(" "),
+        })),
+      },
+      onSelect: (value) => {
+        if (
+          !selectedNode ||
+          typeof value !== "string" ||
+          !WHITEBOARD_SHAPE_KINDS.includes(value as WhiteboardShapeKind)
+        )
+          return;
+        const next = setWhiteboardShapeKind(
+          board,
+          selectedNode.id,
+          value as WhiteboardShapeKind,
+        );
+        if (next !== board) emit(next);
+      },
+    },
+    {
+      id: "vote-adjust",
+      label: "Add vote",
+      icon: Plus,
+      tab: "Facilitate",
+      contextualTab: "Shape",
+      priority: "secondary",
+      requires: "edit",
+      disabled:
+        !canEdit ||
+        (selectedNode?.type !== "note" && selectedNode?.type !== "card"),
+      onSelect: (value) => {
+        if (!selectedNode) return;
+        const next = adjustWhiteboardVote(
+          board,
+          selectedNode.id,
+          typeof value === "number" ? value : 1,
+        );
+        if (next !== board) emit(next);
+      },
+    },
+    {
+      id: "vote-clear",
+      label: "Clear votes",
+      icon: X,
+      tab: "Facilitate",
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled:
+        !canEdit ||
+        !selectedNode?.voteCount ||
+        (selectedNode.type !== "note" && selectedNode.type !== "card"),
+      onSelect: () => {
+        if (!selectedNode) return;
+        const next = adjustWhiteboardVote(
+          board,
+          selectedNode.id,
+          -(selectedNode.voteCount ?? 0),
+        );
+        if (next !== board) emit(next);
+      },
+    },
+    {
+      id: "connector-reverse",
+      label: "Reverse connector",
+      icon: Repeat2,
+      contextualTab: "Shape",
+      priority: "secondary",
+      requires: "edit",
+      disabled: !canEdit || !selectedEdge,
+      onSelect: () => {
+        if (!selectedEdge) return;
+        updateEdge(selectedEdge.id, (edge) => {
+          [edge.from, edge.to] = [edge.to, edge.from];
+          [edge.fromAnchor, edge.toAnchor] = [edge.toAnchor, edge.fromAnchor];
+          [edge.startCap, edge.endCap] = [edge.endCap, edge.startCap];
+        });
+      },
+    },
+    {
+      id: "connector-delete",
+      label: "Delete connector",
+      icon: Trash2,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || !selectedEdge,
+      onSelect: () => selectedEdge && deleteEdge(selectedEdge.id),
+    },
+    {
+      id: "connector-label",
+      label: "Connector label",
+      icon: TextCursorInput,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || !selectedEdge,
+      onSelect: (value) => {
+        if (!selectedEdge || typeof value !== "string") return;
+        updateEdge(selectedEdge.id, (edge) => {
+          edge.label = value || undefined;
+        });
+      },
+    },
+    {
+      id: "connector-route",
+      label: "Connector route",
+      icon: Link2,
+      contextualTab: "Shape",
+      priority: "secondary",
+      requires: "edit",
+      disabled: !canEdit || !selectedEdge,
+      control: {
+        kind: "select",
+        value: selectedEdge?.route ?? "straight",
+        options: WHITEBOARD_CONNECTOR_ROUTES.map((route) => ({
+          value: route,
+          label: route[0]!.toUpperCase() + route.slice(1),
+        })),
+      },
+      onSelect: (value) => {
+        if (
+          !selectedEdge ||
+          typeof value !== "string" ||
+          !WHITEBOARD_CONNECTOR_ROUTES.includes(
+            value as WhiteboardConnectorRoute,
+          )
+        )
+          return;
+        updateEdge(selectedEdge.id, (edge) => {
+          edge.route = value as WhiteboardConnectorRoute;
+        });
+      },
+    },
+    ...(["from", "to"] as const).map((end) => ({
+      id: `connector-${end}-anchor`,
+      label: `${end === "from" ? "Start" : "End"} anchor`,
+      icon: CircleDot,
+      contextualTab: "Shape",
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: !canEdit || !selectedEdge,
+      control: {
+        kind: "select" as const,
+        value:
+          (end === "from"
+            ? selectedEdge?.fromAnchor
+            : selectedEdge?.toAnchor) ?? "auto",
+        options: WHITEBOARD_CONNECTOR_ANCHORS.map((anchor) => ({
+          value: anchor,
+          label: anchor[0]!.toUpperCase() + anchor.slice(1),
+        })),
+      },
+      onSelect: (value?: CommandParam) => {
+        if (
+          !selectedEdge ||
+          typeof value !== "string" ||
+          !WHITEBOARD_CONNECTOR_ANCHORS.includes(
+            value as WhiteboardConnectorAnchor,
+          )
+        )
+          return;
+        updateEdge(selectedEdge.id, (edge) => {
+          if (end === "from")
+            edge.fromAnchor = value as WhiteboardConnectorAnchor;
+          else edge.toAnchor = value as WhiteboardConnectorAnchor;
+        });
+      },
+    })),
+    ...(["start", "end"] as const).map((end) => ({
+      id: `connector-${end}-cap`,
+      label: `${end === "start" ? "Start" : "End"} cap`,
+      icon: CircleDot,
+      contextualTab: "Shape",
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: !canEdit || !selectedEdge,
+      control: {
+        kind: "select" as const,
+        value:
+          (end === "start" ? selectedEdge?.startCap : selectedEdge?.endCap) ??
+          (end === "start" ? "none" : "arrow"),
+        options: WHITEBOARD_CONNECTOR_CAPS.map((cap) => ({
+          value: cap,
+          label: cap[0]!.toUpperCase() + cap.slice(1),
+        })),
+      },
+      onSelect: (value?: CommandParam) => {
+        if (
+          !selectedEdge ||
+          typeof value !== "string" ||
+          !WHITEBOARD_CONNECTOR_CAPS.includes(value as WhiteboardConnectorCap)
+        )
+          return;
+        updateEdge(selectedEdge.id, (edge) => {
+          if (end === "start") edge.startCap = value as WhiteboardConnectorCap;
+          else edge.endCap = value as WhiteboardConnectorCap;
+        });
+      },
+    })),
+    {
+      id: "connector-layer",
+      label: "Connector layer",
+      icon: Layers3,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || !selectedEdge,
+      control: {
+        kind: "select",
+        value: selectedEdge?.layerId,
+        options: layers.map((layer) => ({
+          value: layer.id,
+          label: layer.name,
+        })),
+      },
+      onSelect: (value) => {
+        if (!selectedEdge || typeof value !== "string") return;
+        if (!layers.some((layer) => layer.id === value)) return;
+        updateEdge(selectedEdge.id, (edge) => {
+          edge.layerId = value;
+        });
+      },
+    },
+    {
+      id: "node-text",
+      label: "Object text",
+      icon: TextCursorInput,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || !selectedNode,
+      onSelect: (value) => {
+        if (typeof value !== "string") return;
+        updateSelected((node) =>
+          Object.assign(node, withWhiteboardNodeText(node, value)),
+        );
+      },
+    },
+    {
+      id: "node-content",
+      label: "Structured object content",
+      icon: SlidersHorizontal,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || !selectedNode,
+      onSelect: (value) => {
+        if (typeof value !== "string") return;
+        try {
+          const change: unknown = JSON.parse(value);
+          if (!change || typeof change !== "object" || Array.isArray(change))
+            return;
+          updateSelected((node) => {
+            node.content = {
+              ...objectRecord(node.content),
+              ...(change as Record<string, unknown>),
+            };
+          });
+        } catch {
+          setIoNotice(
+            "Object content was not changed because its value was not valid JSON.",
+          );
+        }
+      },
+    },
+    {
+      id: "node-label",
+      label: "Semantic label",
+      icon: TextCursorInput,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || !selectedNode,
+      onSelect: (value) => {
+        if (typeof value !== "string") return;
+        updateSelected((node) => {
+          node.semanticLabel = value;
+        });
+      },
+    },
+    ...(["x", "y", "width", "height"] as const).map((key) => ({
+      id: `node-${key}`,
+      label: key === "x" || key === "y" ? key.toUpperCase() : key,
+      icon: SlidersHorizontal,
+      contextualTab: "Shape",
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: !canEdit || !selectedNode || selectedNode.locked,
+      control: {
+        kind: "numeric" as const,
+        value: selectedNode ? Math.round(selectedNode[key]) : 0,
+        min: key === "width" || key === "height" ? 20 : -1_000_000,
+        max: key === "width" || key === "height" ? 100_000 : 1_000_000,
+        step: 1,
+      },
+      onSelect: (value?: CommandParam) => {
+        if (typeof value !== "number") return;
+        updateSelected((node) => {
+          node[key] = value;
+        });
+      },
+    })),
+    {
+      id: "node-layer",
+      label: "Object layer",
+      icon: Layers3,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || !selectedNode || selectedNode.locked,
+      control: {
+        kind: "select",
+        value: selectedNode?.layerId,
+        options: layers.map((layer) => ({
+          value: layer.id,
+          label: layer.name,
+        })),
+      },
+      onSelect: (value) => {
+        if (typeof value !== "string") return;
+        updateSelected((node) => {
+          if (layers.some((layer) => layer.id === value)) node.layerId = value;
+        });
+      },
+    },
+    ...(["fill", "stroke"] as const).map((key) => ({
+      id: `node-${key}`,
+      label: key === "fill" ? "Fill" : "Border",
+      icon: Square,
+      contextualTab: "Shape",
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: !canEdit || !selectedNode || selectedNode.locked,
+      control: {
+        kind: "color" as const,
+        value: selectedNode
+          ? String(
+              styleValue(
+                selectedNode,
+                key,
+                key === "fill" ? "#ffffff" : "#d5d7d2",
+              ),
+            )
+          : undefined,
+        swatches: [
+          "#ffffff",
+          "#fff1c7",
+          "#e6f6eb",
+          "#eaf1ff",
+          "#f0ecff",
+          "#3f5f72",
+        ],
+      },
+      onSelect: (value?: CommandParam) => {
+        if (typeof value !== "string") return;
+        updateSelected((node) => {
+          node.style = { ...node.style, [key]: value };
+        });
+      },
+    })),
+    {
+      id: "node-embed-source",
+      label: "Linked work",
+      icon: Link2,
+      contextualTab: "Shape",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || selectedNode?.type !== "embed" || linkingEmbed,
+      onSelect: (value) => {
+        if (typeof value !== "string") return;
+        void linkSelectedEmbed(value);
+      },
+    },
+    ...(["concept", "study", "retro", "brainwriting"] as const).map(
+      (template) => ({
+        id: `template-${template}`,
+        label:
+          template === "retro"
+            ? "Reflection template"
+            : `${template[0]!.toUpperCase()}${template.slice(1)} template`,
+        icon: LayoutTemplate,
+        tab: "Facilitate",
+        priority: "advanced" as const,
+        requires: "edit" as const,
+        disabled: !canEdit,
+        onSelect: () => applyTemplate(template),
+      }),
+    ),
+    ...(["png", "svg"] as const).map((format) => ({
+      id: `export-frame-${format}`,
+      label: `Export selected frame as ${format.toUpperCase()}`,
+      icon: format === "png" ? ImageIcon : FileCode,
+      tab: "Export",
+      priority: "advanced" as const,
+      disabled: Boolean(ioBusy) || selectedNode?.type !== "frame",
+      onSelect: () => void exportBoard(format),
+    })),
+    ...[
+      [
+        "tool-freehand",
+        "Freehand ink",
+        "Freehand ink is not available yet. Use shapes, connectors, text, or the laser pointer.",
+      ],
+      [
+        "connector-auto-route",
+        "Automatic connector routing",
+        "Automatic obstacle-avoiding routes are not available yet. Choose straight, elbow, or curved routing.",
+      ],
+      [
+        "voting-session",
+        "Timed voting session",
+        "Timed or anonymous voting sessions are not available. This board keeps a visible tally on each note.",
+      ],
+      [
+        "import-miro",
+        "Import Miro or FigJam board",
+        "Miro and FigJam board files cannot be imported directly. Export SVG or PDF first.",
+      ],
+      [
+        "facilitation-widgets",
+        "Facilitation widgets",
+        "Shared timers, music, and reaction widgets are not part of this board yet.",
+      ],
+    ].map(([id, label, reason]) => ({
+      id,
+      label,
+      icon: CircleDot,
+      tab: "Facilitate",
+      priority: "advanced" as const,
+      disabled: true,
+      hint: reason,
+      onSelect: () => undefined,
+    })),
   ];
+
+  const boardCommandBindings = projectBindingsFromIr("whiteboard", [
+    ...boardActions,
+    ...barPalette.map(([id, Icon, label]) => ({
+      id: `tool-${id}`,
+      label,
+      icon: Icon,
+      priority: "essential" as const,
+      active: tool === id,
+      disabled: !canEdit && id !== "select" && id !== "hand" && id !== "laser",
+      onSelect: () => setTool(id),
+    })),
+  ]);
+  const internalCommandIds = new Set([
+    "page-navigate",
+    "layer-visibility",
+    "layer-lock",
+    "selection-nudge-x",
+    "selection-nudge-y",
+    "node-text",
+    "node-content",
+    "node-label",
+    "connector-label",
+    "connector-layer",
+    "node-embed-source",
+  ]);
+  const workbarActions = boardCommandBindings.filter(
+    (binding) => !internalCommandIds.has(binding.id),
+  );
+
+  function dispatchBoardCommand(id: string, params?: CommandParam) {
+    return dispatchStudioCommand({
+      type: "whiteboard",
+      id,
+      bindings: boardCommandBindings,
+      ctx: boardCommandContext,
+      params,
+    });
+  }
 
   return (
     <section className="whiteboard-studio">
@@ -3080,7 +3849,7 @@ export function WhiteboardStudio({
             itemNoun="page"
             value={page.id}
             onChange={(pageId) =>
-              setViewport((current) => ({ ...current, pageId, x: 0, y: 0 }))
+              void dispatchBoardCommand("page-navigate", pageId)
             }
             items={board.pages.map((candidate) => ({
               value: candidate.id,
@@ -3090,18 +3859,7 @@ export function WhiteboardStudio({
         }
         context={undefined}
         className="shrink-0"
-        actions={projectBindingsFromIr("whiteboard", [
-          ...boardActions,
-          ...barPalette.map(([id, Icon, label]) => ({
-            id: `tool-${id}`,
-            label,
-            icon: Icon,
-            priority: "essential" as const,
-            active: tool === id,
-            disabled: !canEdit && id !== "select" && id !== "hand",
-            onSelect: () => setTool(id),
-          })),
-        ])}
+        actions={workbarActions}
         trailing={
           <span className="spectra-workbar-count" title="Zoom level">
             {Math.round(viewport.zoom * 100)}%
@@ -3150,8 +3908,12 @@ export function WhiteboardStudio({
               subtitle: `${board.nodes.filter((node) => node.pageId === candidate.id).length} objects`,
               active: candidate.id === page.id,
             }))}
-            onSelect={(pageId) => setViewport({ pageId, x: 0, y: 0, zoom: 1 })}
-            onAdd={readOnly ? undefined : addPage}
+            onSelect={(pageId) =>
+              void dispatchBoardCommand("page-navigate", pageId)
+            }
+            onAdd={
+              readOnly ? undefined : () => void dispatchBoardCommand("page-add")
+            }
             addLabel="Add page"
             canEdit={!readOnly}
           />
@@ -3218,12 +3980,7 @@ export function WhiteboardStudio({
                       type="button"
                       data-active={candidate.id === page.id || undefined}
                       onClick={() =>
-                        setViewport({
-                          pageId: candidate.id,
-                          x: 0,
-                          y: 0,
-                          zoom: 1,
-                        })
+                        void dispatchBoardCommand("page-navigate", candidate.id)
                       }
                     >
                       <strong>{candidate.name}</strong>
@@ -3242,7 +3999,7 @@ export function WhiteboardStudio({
                   type="button"
                   className="whiteboard-panel-add"
                   disabled={readOnly}
-                  onClick={addPage}
+                  onClick={() => void dispatchBoardCommand("page-add")}
                 >
                   <Plus className="h-3.5 w-3.5" /> Add page
                 </button>
@@ -3258,12 +4015,10 @@ export function WhiteboardStudio({
                         title={layer.visible ? "Hide layer" : "Show layer"}
                         disabled={readOnly}
                         onClick={() =>
-                          mutate((draft) => {
-                            const found = draft.layers.find(
-                              (candidate) => candidate.id === layer.id,
-                            );
-                            if (found) found.visible = !found.visible;
-                          })
+                          void dispatchBoardCommand(
+                            "layer-visibility",
+                            layer.id,
+                          )
                         }
                       >
                         {layer.visible ? (
@@ -3277,12 +4032,7 @@ export function WhiteboardStudio({
                         title={layer.locked ? "Unlock layer" : "Lock layer"}
                         disabled={readOnly}
                         onClick={() =>
-                          mutate((draft) => {
-                            const found = draft.layers.find(
-                              (candidate) => candidate.id === layer.id,
-                            );
-                            if (found) found.locked = !found.locked;
-                          })
+                          void dispatchBoardCommand("layer-lock", layer.id)
                         }
                       >
                         {layer.locked ? (
@@ -3298,7 +4048,7 @@ export function WhiteboardStudio({
                   type="button"
                   className="whiteboard-panel-add"
                   disabled={readOnly}
-                  onClick={addLayer}
+                  onClick={() => void dispatchBoardCommand("layer-add")}
                 >
                   <Plus className="h-3.5 w-3.5" /> Add layer
                 </button>
@@ -3308,7 +4058,7 @@ export function WhiteboardStudio({
                 <button
                   type="button"
                   disabled={readOnly}
-                  onClick={() => applyTemplate("concept")}
+                  onClick={() => void dispatchBoardCommand("template-concept")}
                 >
                   <i data-template="concept" />
                   <span>
@@ -3319,7 +4069,7 @@ export function WhiteboardStudio({
                 <button
                   type="button"
                   disabled={readOnly}
-                  onClick={() => applyTemplate("study")}
+                  onClick={() => void dispatchBoardCommand("template-study")}
                 >
                   <i data-template="study" />
                   <span>
@@ -3330,12 +4080,27 @@ export function WhiteboardStudio({
                 <button
                   type="button"
                   disabled={readOnly}
-                  onClick={() => applyTemplate("retro")}
+                  onClick={() => void dispatchBoardCommand("template-retro")}
                 >
                   <i data-template="retro" />
                   <span>
                     <strong>Reflection</strong>
                     <small>What worked, learning, and next step</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() =>
+                    void dispatchBoardCommand("template-brainwriting")
+                  }
+                >
+                  <i data-template="brainwriting" />
+                  <span>
+                    <strong>Brainwriting</strong>
+                    <small>
+                      Quiet idea rounds with one lane per contributor
+                    </small>
                   </span>
                 </button>
               </div>
@@ -3442,21 +4207,21 @@ export function WhiteboardStudio({
                   <button
                     type="button"
                     title="Align left"
-                    onClick={() => alignSelected("left")}
+                    onClick={() => void dispatchBoardCommand("align-left")}
                   >
                     <AlignLeft className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
                     title="Align centers"
-                    onClick={() => alignSelected("center")}
+                    onClick={() => void dispatchBoardCommand("align-center")}
                   >
                     <AlignCenter className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
                     title="Align right"
-                    onClick={() => alignSelected("right")}
+                    onClick={() => void dispatchBoardCommand("align-right")}
                   >
                     <AlignRight className="h-3.5 w-3.5" />
                   </button>
@@ -3464,14 +4229,16 @@ export function WhiteboardStudio({
                     type="button"
                     title="Distribute horizontally"
                     disabled={selectedNodeIds.length < 3}
-                    onClick={distributeSelected}
+                    onClick={() =>
+                      void dispatchBoardCommand("distribute-horizontal")
+                    }
                   >
                     <BoxSelect className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
                     title="Group objects"
-                    onClick={groupSelected}
+                    onClick={() => void dispatchBoardCommand("selection-group")}
                   >
                     <Group className="h-3.5 w-3.5" />
                   </button>
@@ -3482,7 +4249,9 @@ export function WhiteboardStudio({
                   <button
                     type="button"
                     title="Ungroup objects"
-                    onClick={ungroupSelected}
+                    onClick={() =>
+                      void dispatchBoardCommand("selection-ungroup")
+                    }
                   >
                     <Ungroup className="h-3.5 w-3.5" />
                   </button>
@@ -3491,7 +4260,7 @@ export function WhiteboardStudio({
               <button
                 type="button"
                 title="Delete selection"
-                onClick={deleteSelected}
+                onClick={() => void dispatchBoardCommand("selection-delete")}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -3521,13 +4290,7 @@ export function WhiteboardStudio({
                   type="button"
                   title="Reverse direction"
                   disabled={!canEdit}
-                  onClick={() =>
-                    updateEdge(selectedEdge.id, (edge) => {
-                      const from = edge.from;
-                      edge.from = edge.to;
-                      edge.to = from;
-                    })
-                  }
+                  onClick={() => void dispatchBoardCommand("connector-reverse")}
                 >
                   <Repeat2 className="h-3.5 w-3.5" />
                 </button>
@@ -3535,7 +4298,7 @@ export function WhiteboardStudio({
                   type="button"
                   title="Delete connector"
                   disabled={!canEdit}
-                  onClick={() => deleteEdge(selectedEdge.id)}
+                  onClick={() => void dispatchBoardCommand("connector-delete")}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -3547,9 +4310,10 @@ export function WhiteboardStudio({
                   disabled={!canEdit}
                   placeholder="How these connect"
                   onChange={(event) =>
-                    updateEdge(selectedEdge.id, (edge) => {
-                      edge.label = event.target.value || undefined;
-                    })
+                    void dispatchBoardCommand(
+                      "connector-label",
+                      event.target.value,
+                    )
                   }
                 />
               </label>
@@ -3565,9 +4329,7 @@ export function WhiteboardStudio({
                     label: layer.name,
                   }))}
                   onChange={(value) =>
-                    updateEdge(selectedEdge.id, (edge) => {
-                      edge.layerId = value;
-                    })
+                    void dispatchBoardCommand("connector-layer", value)
                   }
                 />
               </label>
@@ -3583,9 +4345,11 @@ export function WhiteboardStudio({
                   type="button"
                   title={selectedNode.locked ? "Unlock object" : "Lock object"}
                   onClick={() =>
-                    updateSelected((node) => {
-                      node.locked = !node.locked;
-                    })
+                    void dispatchBoardCommand(
+                      selectedNode.locked
+                        ? "selection-unlock"
+                        : "selection-lock",
+                    )
                   }
                 >
                   {selectedNode.locked ? (
@@ -3597,7 +4361,7 @@ export function WhiteboardStudio({
                 <button
                   type="button"
                   title="Delete object"
-                  onClick={deleteSelected}
+                  onClick={() => void dispatchBoardCommand("selection-delete")}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -3608,9 +4372,7 @@ export function WhiteboardStudio({
                   value={selectedNode.semanticLabel ?? ""}
                   disabled={readOnly}
                   onChange={(event) =>
-                    updateSelected((node) => {
-                      node.semanticLabel = event.target.value;
-                    })
+                    void dispatchBoardCommand("node-label", event.target.value)
                   }
                 />
               </label>
@@ -3623,9 +4385,10 @@ export function WhiteboardStudio({
                       value={Math.round(selectedNode[key])}
                       disabled={readOnly || selectedNode.locked}
                       onChange={(event) =>
-                        updateSelected((node) => {
-                          node[key] = Number(event.target.value);
-                        })
+                        void dispatchBoardCommand(
+                          `node-${key}`,
+                          Number(event.target.value),
+                        )
                       }
                     />
                   </label>
@@ -3643,9 +4406,7 @@ export function WhiteboardStudio({
                     label: layer.name,
                   }))}
                   onChange={(value) =>
-                    updateSelected((node) => {
-                      node.layerId = value;
-                    })
+                    void dispatchBoardCommand("node-layer", value)
                   }
                 />
               </label>
@@ -3657,12 +4418,7 @@ export function WhiteboardStudio({
                     value={String(styleValue(selectedNode, "fill", "#ffffff"))}
                     disabled={readOnly || selectedNode.locked}
                     onChange={(event) =>
-                      updateSelected((node) => {
-                        node.style = {
-                          ...node.style,
-                          fill: event.target.value,
-                        };
-                      })
+                      void dispatchBoardCommand("node-fill", event.target.value)
                     }
                   />
                 </label>
@@ -3675,12 +4431,10 @@ export function WhiteboardStudio({
                     )}
                     disabled={readOnly || selectedNode.locked}
                     onChange={(event) =>
-                      updateSelected((node) => {
-                        node.style = {
-                          ...node.style,
-                          stroke: event.target.value,
-                        };
-                      })
+                      void dispatchBoardCommand(
+                        "node-stroke",
+                        event.target.value,
+                      )
                     }
                   />
                 </label>
@@ -3714,7 +4468,9 @@ export function WhiteboardStudio({
                           label: artifact.title,
                         })),
                     ]}
-                    onChange={(value) => void linkSelectedEmbed(value)}
+                    onChange={(value) =>
+                      void dispatchBoardCommand("node-embed-source", value)
+                    }
                   />
                 </label>
               ) : null}

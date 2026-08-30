@@ -4,6 +4,7 @@ import { OFFICE_FORMATTING_CAPABILITIES } from "./office-formatting";
 import { OFFICE_REMAINING_CAPABILITIES } from "./office-remaining";
 import { STUDIO_CAPABILITIES, stableCapabilityId } from "./studios";
 import { CODE_STUDIO_CAPABILITIES } from "./studio-code";
+import { WHITEBOARD_CAPABILITIES } from "./studio-whiteboard";
 import type {
   CapabilityDefinition,
   CapabilityOwner,
@@ -17,6 +18,7 @@ export const ALL_CAPABILITIES: readonly CapabilityDefinition[] = [
   ...APPLICATION_CAPABILITIES,
   ...STUDIO_CAPABILITIES,
   ...CODE_STUDIO_CAPABILITIES,
+  ...WHITEBOARD_CAPABILITIES,
 ];
 
 const BY_ID = new Map<string, CapabilityDefinition>(

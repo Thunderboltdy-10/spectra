@@ -1,5 +1,8 @@
 import * as Y from "yjs";
-import { enumerateArtifactRegions, validateArtifactContent } from "../../../artifacts/registry";
+import {
+  enumerateArtifactRegions,
+  validateArtifactContent,
+} from "../../../artifacts/registry";
 import type { ArtifactTypeKey, SemanticRegion } from "../../../artifacts/types";
 import { normalizeArtifactContent } from "../../../ai/content-normalization";
 import { normalizeFoundryContent } from "../../../agents/foundry/foundry-document";
@@ -11,7 +14,7 @@ import {
   type WorkbookSheet,
 } from "../../../sheets/model";
 import { sharedTimetableContent } from "../../../timetable/model";
-import { normalizeWhiteboardContent } from "../../../whiteboard/model";
+import { migrateWhiteboardContent } from "../../../artifacts/schema/whiteboard";
 import type {
   LegacyWorkSnapshot,
   WorkActorIdentity,
@@ -136,7 +139,10 @@ function stableId(value: unknown, index: number) {
 function stringIsText(path: readonly string[]) {
   const key = path.at(-1) ?? "";
   if (ATOMIC_STRING_FIELDS.has(key)) return false;
-  return TEXT_STRING_FIELDS.has(key) || /(?:Text|Notes|Description|Prompt|Content)$/i.test(key);
+  return (
+    TEXT_STRING_FIELDS.has(key) ||
+    /(?:Text|Notes|Description|Prompt|Content)$/i.test(key)
+  );
 }
 
 function collectionMap() {
@@ -194,7 +200,10 @@ function syncCollection(
       item = new Y.Map<unknown>();
       items.set(id, item);
     }
-    syncRecord(item, isRecord(entry) ? entry : { [VALUE_MARKER]: entry }, [...path, id]);
+    syncRecord(item, isRecord(entry) ? entry : { [VALUE_MARKER]: entry }, [
+      ...path,
+      id,
+    ]);
   });
   replaceYArray(order, ids);
 }
@@ -204,7 +213,9 @@ function syncArray(
   values: readonly unknown[],
   path: readonly string[],
 ) {
-  const keyed = values.length > 0 && values.every((entry) => isRecord(entry) && typeof entry.id === "string");
+  const keyed =
+    values.length > 0 &&
+    values.every((entry) => isRecord(entry) && typeof entry.id === "string");
   if (keyed) {
     if (!(existing instanceof Y.Map && isCollection(existing)))
       throw new Error("STRUCTURED_COLLECTION_MUST_BE_ATTACHED_BEFORE_SYNC");
@@ -251,7 +262,11 @@ function syncArray(
   return array;
 }
 
-function syncRecord(map: Y.Map<unknown>, value: JsonRecord, path: readonly string[]) {
+function syncRecord(
+  map: Y.Map<unknown>,
+  value: JsonRecord,
+  path: readonly string[],
+) {
   const keys = new Set(Object.keys(value));
   for (const key of [...map.keys()]) if (!keys.has(key)) map.delete(key);
   for (const [key, entry] of Object.entries(value)) {
@@ -264,7 +279,10 @@ function syncRecord(map: Y.Map<unknown>, value: JsonRecord, path: readonly strin
     } else if (Array.isArray(entry)) {
       const keyed =
         entry.length > 0 &&
-        entry.every((candidate) => isRecord(candidate) && typeof candidate.id === "string");
+        entry.every(
+          (candidate) =>
+            isRecord(candidate) && typeof candidate.id === "string",
+        );
       let attached = existing;
       if (keyed && !(existing instanceof Y.Map && isCollection(existing))) {
         const collection = collectionMap();
@@ -279,7 +297,10 @@ function syncRecord(map: Y.Map<unknown>, value: JsonRecord, path: readonly strin
       const array = syncArray(attached, entry, nextPath);
       if (array !== attached) map.set(key, array);
     } else if (isRecord(entry)) {
-      const child = existing instanceof Y.Map && !isCollection(existing) ? existing : new Y.Map<unknown>();
+      const child =
+        existing instanceof Y.Map && !isCollection(existing)
+          ? existing
+          : new Y.Map<unknown>();
       if (child !== existing) map.set(key, child);
       syncRecord(child, entry, nextPath);
     } else {
@@ -301,12 +322,14 @@ export type SheetsCellProjectionPlan = {
 };
 
 function sheetColumnIndex(name: string) {
-  return name
-    .split("")
-    .reduce(
-      (total, character) => total * 26 + character.charCodeAt(0) - 64,
-      0,
-    ) - 1;
+  return (
+    name
+      .split("")
+      .reduce(
+        (total, character) => total * 26 + character.charCodeAt(0) - 64,
+        0,
+      ) - 1
+  );
 }
 
 function sheetCellRegionId(sheet: WorkbookSheet, address: string) {
@@ -415,12 +438,15 @@ function projectCollection(collection: Y.Map<unknown>) {
 function projectValue(value: unknown): unknown {
   if (value instanceof Y.Text) return value.toString();
   if (value instanceof Y.Array) return value.toArray().map(projectValue);
-  if (value instanceof Y.Map) return isCollection(value) ? projectCollection(value) : projectMap(value);
+  if (value instanceof Y.Map)
+    return isCollection(value) ? projectCollection(value) : projectMap(value);
   return value;
 }
 
 function projectMap(map: Y.Map<unknown>): JsonRecord {
-  return Object.fromEntries([...map.entries()].map(([key, value]) => [key, projectValue(value)]));
+  return Object.fromEntries(
+    [...map.entries()].map(([key, value]) => [key, projectValue(value)]),
+  );
 }
 
 function rollbackUpdate<T>(snapshot: LegacyWorkSnapshot<T>) {
@@ -433,7 +459,9 @@ function rollbackUpdate<T>(snapshot: LegacyWorkSnapshot<T>) {
   return Y.encodeStateAsUpdate(rollback);
 }
 
-export class StructuredWorkYjsAdapter<TModel> implements WorkYjsAdapter<TModel> {
+export class StructuredWorkYjsAdapter<
+  TModel,
+> implements WorkYjsAdapter<TModel> {
   readonly modelVersion = WORK_YJS_SCHEMA_VERSION;
 
   constructor(
@@ -453,7 +481,8 @@ export class StructuredWorkYjsAdapter<TModel> implements WorkYjsAdapter<TModel> 
 
   applyProjection(doc: Y.Doc, model: TModel, origin: WorkTransactionOrigin) {
     const normalized = this.normalize(model);
-    if (!isRecord(normalized)) throw new Error("STRUCTURED_WORK_MODEL_NOT_OBJECT");
+    if (!isRecord(normalized))
+      throw new Error("STRUCTURED_WORK_MODEL_NOT_OBJECT");
     doc.transact(() => {
       syncRecord(workRoot(doc), normalized, [this.workType]);
       setWorkModelMetadata(doc, this.workType, this.modelVersion);
@@ -487,28 +516,46 @@ export class StructuredWorkYjsAdapter<TModel> implements WorkYjsAdapter<TModel> 
       );
       return result.success
         ? { valid: true }
-        : { valid: false, issues: result.error.issues.map((issue) => issue.message) };
+        : {
+            valid: false,
+            issues: result.error.issues.map((issue) => issue.message),
+          };
     } catch (error) {
       return {
         valid: false,
-        issues: [error instanceof Error ? error.message : `${this.workType} model is invalid.`],
+        issues: [
+          error instanceof Error
+            ? error.message
+            : `${this.workType} model is invalid.`,
+        ],
       };
     }
   }
 
-  migrateLegacy(snapshot: LegacyWorkSnapshot<TModel>): WorkMigrationResult<TModel> {
-    if (snapshot.workType !== this.workType) throw new Error("WORK_YJS_MIGRATION_TYPE_MISMATCH");
+  migrateLegacy(
+    snapshot: LegacyWorkSnapshot<TModel>,
+  ): WorkMigrationResult<TModel> {
+    if (snapshot.workType !== this.workType)
+      throw new Error("WORK_YJS_MIGRATION_TYPE_MISMATCH");
     const rollback = snapshot.rollbackUpdate ?? rollbackUpdate(snapshot);
     const document = this.createDocument(snapshot.content);
     const projected = this.project(document);
     const validation = this.validate(document, projected);
     if (!validation.valid)
-      throw new Error(`${this.workType.toUpperCase()}_YJS_MIGRATION_INVALID: ${validation.issues.join("; ")}`);
+      throw new Error(
+        `${this.workType.toUpperCase()}_YJS_MIGRATION_INVALID: ${validation.issues.join("; ")}`,
+      );
     const migrationId = `${this.workType}:${snapshot.schemaVersion ?? 1}:v${this.modelVersion}`;
     const rollbackMap = document.getMap<unknown>(STRUCTURED_ROLLBACK_MAP);
     rollbackMap.set("migrationId", migrationId);
     rollbackMap.set("rollbackUpdate", rollback);
-    return { document, projected, rollbackUpdate: rollback, migrated: true, migrationId };
+    return {
+      document,
+      projected,
+      rollbackUpdate: rollback,
+      migrated: true,
+      migrationId,
+    };
   }
 
   createUndoManager(doc: Y.Doc, actor: WorkActorIdentity) {
@@ -535,33 +582,46 @@ export type LegacyFlashcardStudySeed = {
 export function extractLegacyFlashcardStudyState(
   value: unknown,
 ): LegacyFlashcardStudySeed[] {
-  const content = normalizeArtifactContent("flashcard_deck", value) as JsonRecord;
+  const content = normalizeArtifactContent(
+    "flashcard_deck",
+    value,
+  ) as JsonRecord;
   // Source normalization intentionally strips personal review state from the
   // shared deck. Extract it from the incoming legacy payload first so the
   // per-account migration does not silently discard a learner's progress.
   const incomingCards =
     isRecord(value) && Array.isArray(value.cards) ? value.cards : content.cards;
-  return (Array.isArray(incomingCards) ? incomingCards : []).flatMap((entry) => {
-    if (!isRecord(entry) || typeof entry.id !== "string") return [];
-    if (entry.review === undefined && entry.confidence === undefined) return [];
-    return [
-      {
-        cardId: entry.id,
-        ...(entry.confidence !== undefined ? { confidence: entry.confidence } : {}),
-        ...(entry.review !== undefined ? { review: entry.review } : {}),
-      },
-    ];
-  });
+  return (Array.isArray(incomingCards) ? incomingCards : []).flatMap(
+    (entry) => {
+      if (!isRecord(entry) || typeof entry.id !== "string") return [];
+      if (entry.review === undefined && entry.confidence === undefined)
+        return [];
+      return [
+        {
+          cardId: entry.id,
+          ...(entry.confidence !== undefined
+            ? { confidence: entry.confidence }
+            : {}),
+          ...(entry.review !== undefined ? { review: entry.review } : {}),
+        },
+      ];
+    },
+  );
 }
 
 function normalizeFlashcardSource(value: unknown) {
-  const content = normalizeArtifactContent("flashcard_deck", value) as JsonRecord;
+  const content = normalizeArtifactContent(
+    "flashcard_deck",
+    value,
+  ) as JsonRecord;
   return {
     ...content,
     cards: (Array.isArray(content.cards) ? content.cards : []).map((entry) => {
-      const { review: _review, confidence: _confidence, ...source } = isRecord(entry)
-        ? entry
-        : {};
+      const {
+        review: _review,
+        confidence: _confidence,
+        ...source
+      } = isRecord(entry) ? entry : {};
       return source;
     }),
   };
@@ -599,22 +659,7 @@ export const presentationYjsAdapter = new StructuredWorkYjsAdapter(
 );
 export const whiteboardYjsAdapter = new StructuredWorkYjsAdapter(
   "whiteboard",
-  (value) => {
-    const normalized = normalizeWhiteboardContent(value);
-    const requested = isRecord(value) && Array.isArray(value.zOrder)
-      ? value.zOrder.filter((entry): entry is string => typeof entry === "string")
-      : [];
-    const nodeIds = new Set(normalized.nodes.map((node) => node.id));
-    const zOrder = [
-      ...requested.filter((id) => nodeIds.has(id)),
-      ...normalized.nodes
-        .slice()
-        .sort((left, right) => left.zIndex - right.zIndex)
-        .map((node) => node.id)
-        .filter((id) => !requested.includes(id)),
-    ];
-    return { ...normalized, zOrder };
-  },
+  migrateWhiteboardContent,
 );
 export const quizYjsAdapter = new StructuredWorkYjsAdapter(
   "quiz",

@@ -36,6 +36,14 @@ export type AccountIdentity = {
   platformOperator: boolean;
 };
 
+export type PlatformOperatorAccount = AccountIdentity & {
+  platformOperator: true;
+};
+
+export type AccessPrincipal =
+  | { kind: "school"; actor: SessionActor }
+  | { kind: "platform"; account: PlatformOperatorAccount };
+
 function operatorEmails() {
   const values = (process.env.SUPER_ADMIN_EMAILS ?? "")
     .split(",")
@@ -148,11 +156,20 @@ export async function requireActor(): Promise<SessionActor> {
   };
 }
 
-export async function requirePlatformOperator() {
-  const actor = await requireActor();
-  if (!isPlatformOperatorEmail(actor.email))
+export async function requirePlatformOperator(): Promise<PlatformOperatorAccount> {
+  const account = await requireAccount();
+  if (!account.platformOperator || !isPlatformOperatorEmail(account.email))
     throw new Error(
       "AUTH_OPERATOR_REQUIRED: Platform operator access is required.",
     );
-  return actor;
+  return { ...account, platformOperator: true };
+}
+
+export async function requireAccessPrincipal(
+  scope: "school" | "platform",
+): Promise<AccessPrincipal> {
+  if (scope === "platform") {
+    return { kind: "platform", account: await requirePlatformOperator() };
+  }
+  return { kind: "school", actor: await requireActor() };
 }

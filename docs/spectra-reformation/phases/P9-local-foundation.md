@@ -86,6 +86,18 @@ Fresh agent, first VU on a `local-deploy` lease:
 
 N≥3 instances documented and startable; both accounts live on the seeded instance with ManageBac connected and folders imported; the five efficiency classes fixed with measured before/after evidence; budget baselines recorded; V1 PASS. From this gate onward **every VU in the program runs on a local instance (CANON R23)** and the cloud dev deployment is retired for testing.
 
+### P9.I2 implementation log — 2026-08-31
+
+- Status: **IMPLEMENTED**; no acceptance claimed. No live deployment, Bridge, Office, or cloud resource was used.
+- `listTabs` now reads the tab projection plus latest result card; the former full run + full thread reads (two full documents per tab poll) are gone. A bounded 100-row backfill repairs legacy tabs.
+- Stale-run recovery replaced two owner-wide collections per stale run with `by_ai_run` equality queries plus direct ids already named by run operations; every repaired AI-card write also synchronizes P9.I3's bounded Library summary.
+- Planner and timetable reminders reconcile at source mutation time, retain scheduler handles, rearm failed/cancelled occurrences, validate source + access at delivery, and chain recurrence.
+- The two minute crons formerly admitted up to 60,000 planner documents and 300,000 timetable user-state documents per hour before nested reads. Idle safety is now hourly: two indexed overdue/missing-handle windows per family, empty when no work is pending (bounded at 300 candidate rows per family/run).
+- Red-first source contracts failed 3/3 before the repair; final focused contracts/behavior pass 9/9. AI lifecycle + Live Dock + P9.I3 projection regressions pass 28/28.
+- Root `tsc --noEmit`, scoped ESLint (0 warnings), capability ghost gate, secret scan (2,341 tracked files), and `git diff --check` pass.
+- Convex dry-run codegen was not available without `CONVEX_DEPLOYMENT`; it stopped before generation or deployment. P9.V1 owns local-instance delivery and measured dashboard budgets.
+- Merge-queue rebase: shell Convex settings were unset and `.env.local` classified local-only; no Convex CLI, server, browser, or cloud resource was used.
+
 ## P9.I3 unit log — 2026-08-30
 
 - Status: IMPLEMENTED; no acceptance or P9.V1 verdict claimed.

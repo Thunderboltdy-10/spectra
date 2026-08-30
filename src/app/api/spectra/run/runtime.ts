@@ -20,6 +20,7 @@ import type {
 import {
   buildContext,
   gatherResolvedArtifactContext,
+  loadSoulForRun,
   queueSilentMemoryMaintenance,
   summarizeArtifact,
 } from "./loop/gather";
@@ -304,11 +305,20 @@ async function runAttempt(
           : "Resolving the requested objects",
       resultActions: [],
     });
-    const immediatePlan =
+    const deterministicPlan =
       params.agentId || params.continuedThread
         ? null
         : (fastConversationalPlan(params.prompt) ??
           (await fastUnavailableManageBacPlan(params.prompt)));
+    const fastSoul = deterministicPlan
+      ? await loadSoulForRun(params.actorClerkId)
+      : null;
+    const immediatePlan = deterministicPlan
+      ? (fastConversationalPlan(
+          params.prompt,
+          typeof fastSoul?.text === "string" ? fastSoul.text : "",
+        ) ?? deterministicPlan)
+      : null;
     if (immediatePlan) {
       loop.enter("plan");
       publicText = immediatePlan.finalResponse;
@@ -732,7 +742,10 @@ async function runAttempt(
     const focusedToolPlan =
       parallelCreations.length || (params.attachments?.length ?? 0) > 0
         ? null
-        : (fastConversationalPlan(params.prompt) ??
+        : (fastConversationalPlan(
+            params.prompt,
+            context.packet.soul.text,
+          ) ??
           (explicitlyTargetsFocusedArtifact
             ? (fastFocusedPlannerPlan(params.prompt, context.focusedArtifact) ??
               fastFocusedDeckHintPlan(params.prompt, context.focusedArtifact) ??

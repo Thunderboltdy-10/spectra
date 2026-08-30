@@ -17,6 +17,7 @@ import { ProductSectionNav } from "../../components/product-section-nav";
 import { ProductPageHeader } from "../../components/product-page-header";
 import { COMMAND_TABS } from "../../commands";
 import { BridgeSettings } from "../../bridge/bridge-settings";
+import { SoulSettings } from "./soul-settings";
 
 const SECTIONS = [
   { id: "ai", label: "Conversations", icon: Bot },
@@ -256,7 +257,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
     devices: <BridgeSettings />,
-    privacy: <PrivacySettings />,
+    privacy: <div className="space-y-10"><SoulSettings /><PrivacySettings /></div>,
   };
   return (
     <main className="spectra-wave-y min-h-0 flex-1 overflow-auto bg-[var(--bg-primary)]">

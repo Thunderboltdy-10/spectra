@@ -82,6 +82,24 @@ export async function gatherResolvedArtifactContext(
   );
 }
 
+export type SoulContext = {
+  text?: unknown;
+  tokenCount?: unknown;
+  maxTokens?: unknown;
+  userEdited?: unknown;
+};
+
+export async function loadSoulForRun(actorClerkId: string) {
+  return query<unknown & object, SoulContext>("memory:soul", {
+    actorClerkId,
+  }).catch(() => ({
+    text: "",
+    tokenCount: 0,
+    maxTokens: 350,
+    userEdited: false,
+  }));
+}
+
 export async function buildContext(
   actorClerkId: string,
   body: Pick<
@@ -161,6 +179,7 @@ export async function buildContext(
     ),
   ].slice(0, 6);
   const [
+    soul,
     artifactRows,
     retrievedRows,
     workspaceRows,
@@ -173,6 +192,7 @@ export async function buildContext(
     libraryScope,
     libraryPath,
   ] = await Promise.all([
+    loadSoulForRun(actorClerkId),
     shouldLoadArtifactCatalog
       ? query<unknown & object, unknown>("spectraArtifacts:list", {
           actorClerkId,
@@ -630,6 +650,7 @@ export async function buildContext(
     : undefined;
   const contextPacket = buildBoundedContextPacket({
     prompt,
+    soul,
     focusMode,
     workspace: focusMode === "global" ? null : currentWorkspace,
     artifacts: ordinaryContextArtifacts,

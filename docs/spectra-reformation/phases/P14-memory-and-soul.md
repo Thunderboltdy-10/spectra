@@ -13,6 +13,19 @@
 - Plain-words surface (R13): never "capsule", "claims", "retrieval" in UI copy.
 - Owns: `convex/memory.ts` (soul kind + injection), `loop/gather.ts` + `context-builder.ts` (injection order, packet accounting), the Settings section.
 
+### P14.I1 implementation log — 2026-08-30
+
+- Added one account-scoped `soul` capsule row with a shared 350-token/1,400-character policy enforced at writes and re-applied at injection.
+- Capsule rebuilds now assemble strong permitted claims into generated soul text; a bounded user edit takes priority without destroying the generated fallback.
+- Every user revision journals a normal claim, evidence row, and correction relation; resetting the edit supersedes its audit claim and restores the learned version.
+- Soul audit claims are omitted from ordinary retrieval and context-capsule rebuilds so the always-present text is never duplicated against the packet budget.
+- The soul is the first packet and orientation property, survives compact/hard packet shapes, and keeps the existing 28,000-character ceiling.
+- Lightweight deterministic runs fetch the soul without loading workspace context; greetings use only a strict self-declared name phrase when one exists.
+- Settings → Privacy now exposes “How Spectra knows you” through plain copy, an inline character budget, learned-version reset, and in-place refusal/save states.
+- Evidence: focused Vitest 7 files / 54 tests; root `tsc --noEmit`; capability IR gate; secret scan; scoped ESLint with zero new warnings.
+- No live deployment, browser profile, Bridge, Office, or visual lease was used; protected fidelity paths were untouched.
+- Status: IMPLEMENTED; P14.V1 remains the independent phase verifier after P14.I1–I3. No acceptance claimed.
+
 ## P14.I2 — Self-authored skills (H)
 
 The AI can create durable procedures for itself — below a level, always:

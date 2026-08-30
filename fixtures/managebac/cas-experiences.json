@@ -1,0 +1,27 @@
+{
+  "students": [
+    {
+      "id": 11001,
+      "experiences": [
+        {
+          "id": 18001,
+          "name": "Sample community garden",
+          "description": "Fictional CAS experience for contract testing.",
+          "status": "approved",
+          "start_date": "2026-08-01",
+          "end_date": "2026-10-31",
+          "creativity": false,
+          "activity": true,
+          "service": true,
+          "creativity_hours": 0,
+          "activity_hours": 4,
+          "service_hours": 8,
+          "updated_at": "2026-08-20T11:00:00Z"
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "next_page": null
+  }
+}

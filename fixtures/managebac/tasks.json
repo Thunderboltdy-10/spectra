@@ -1,0 +1,17 @@
+{
+  "tasks": [
+    {
+      "id": 15001,
+      "title": "Sample lab preparation",
+      "description": "Read the fictional method sheet and prepare a results table.",
+      "due_at": "2026-09-03T15:30:00Z",
+      "starts_at": "2026-08-28T08:00:00Z",
+      "task_type_name": "Homework",
+      "class_name": "Sample Physics",
+      "updated_at": "2026-08-20T10:00:00Z"
+    }
+  ],
+  "meta": {
+    "next_page": null
+  }
+}

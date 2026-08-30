@@ -1,0 +1,15 @@
+{
+  "resources": [
+    {
+      "id": 17001,
+      "title": "Sample method sheet",
+      "description": "Fictional resource for contract testing.",
+      "url": "https://resources.example.invalid/sample-method-sheet.pdf",
+      "class_name": "Sample Physics",
+      "updated_at": "2026-08-20T10:05:00Z"
+    }
+  ],
+  "meta": {
+    "next_page": null
+  }
+}

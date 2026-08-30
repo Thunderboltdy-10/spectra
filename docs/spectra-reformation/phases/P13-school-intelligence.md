@@ -15,6 +15,19 @@ Turn the tenant's real API surface into verified, documented contracts:
 - Extend `officialPersonalCapabilities()` with newly verified routes; unavailable capabilities are recorded as such so the UI can refuse honestly (no more sections-without-sources like discussions/grades today).
 - Secrets discipline: token via existing `secretStore` path only; fixtures must pass the secret scan.
 
+### P13.I1 implementation log — 2026-08-30
+
+- TRIAGE · SYSTEMIC: API knowledge lived inside the route with no portable contract corpus; extracted one runtime-owned v2p2 manifest module and deleted the inline twin.
+- Retained the seven existing manually verified personal GET routes and their schema hashes; no unapproved frontier route was promoted.
+- Corrected CAS normalization from the student envelope to `students.*.experiences`; the old path produced the student ID as the experience ID.
+- Added sanitized fictional fixtures for student, membership, class, task, timetable, resource, and CAS response envelopes, with route/hash/ID parity metadata.
+- Added `MANAGEBAC-API.md`: auth, rate/page budgets, entity shapes, pagination, verified verdicts, unverified frontier, and the approved live-probe procedure.
+- Recorded standalone year groups, CAS reflections/evidence, grades, term grades, attendance, groups, discussions/messages, and events with null provider paths and `live_probe_required` verdicts.
+- Anti-theater mutation: restoring the old CAS path failed the new contract (`11001` received vs experience `18001` expected); restored fix passed.
+- Checks: focused Vitest 1 file / 4 tests; root `tsc --noEmit`; scoped ESLint; `check:capabilities`; secret scan 2,304 tracked files; staged diff check.
+- Boundary: Pablo's queued read-only approval and a `cloud-dev` lease are still required for fresh TGC capture. No token was read, no tenant request was sent, and no ManageBac write exists.
+- Status: IMPLEMENTED. No verification or acceptance claimed; P13.V1 retains the live-tenant proof.
+
 ## P13.I2 — Class selection & sync scope (MT)
 
 - Bulk class materialization: multi-select in `/school-data`, "create workspaces for my 6 classes" as one operation; per-class sync scope (tasks / resources / timetable toggles) stored on the integration, honored by `projectRecord`.

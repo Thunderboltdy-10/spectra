@@ -1,0 +1,19 @@
+{
+  "class": {
+    "id": 13001,
+    "uniq_class_id": "SAMPLE-PHYSICS-HL",
+    "name": "Sample Physics",
+    "description": "Fictional class used by the sanitized contract corpus.",
+    "program": {
+      "name": "IB Diploma"
+    },
+    "year_group": {
+      "id": 14001,
+      "name": "Year 1"
+    },
+    "level": {
+      "name": "Higher Level"
+    },
+    "updated_at": "2026-08-20T09:15:00Z"
+  }
+}

@@ -18,6 +18,20 @@ Make `npm run dev:local` (or equivalent) bring up one complete isolated stack: l
 - Runbook `docs/spectra-reformation/runbooks/LOCAL-DEPLOY.md`: start/stop/reset an instance, add an instance, where data lives, how a VU claims a `local-deploy-n` lease.
 - Owns: `scripts/local/`, `package.json` scripts, `.env.local.example`, runbooks. Does not own: seeding (I4), any Convex function bodies.
 
+### P9.I1 implementation log — 2026-08-30
+
+- `dev:local` now starts one health-gated local Convex + Next.js + Hocuspocus stack; lifecycle commands add, inspect, stop, and explicitly reset an instance.
+- Numeric instance ids map to deterministic 20-port blocks. Manifests freeze the mapping; tests prove three non-overlapping instances and the general N mapping.
+- Every instance owns a gitignored env file and `project/.convex/local/default` database/object store. Convex bundles the repository functions through an instance-local project config with codegen disabled.
+- Startup validates the required Clerk/model/bridge secrets, configures the official `convex dev` local deployment once, allowlist-syncs backend env, restarts it, and only then exposes web/collaboration health.
+- `.env.local.example` documents managed URLs, required app/backend values, optional ManageBac, routing, email, worker, role, and observability values. P9.I4 seed logic is untouched.
+- Bridge deployment selection now requires a valid `SPECTRA_CONVEX_URL`; neither the old `proper-orca-653` debug fallback nor journal memory can select a deployment.
+- Boot diagnostics recognize `local:` selectors paired with loopback Convex URLs and still warn on cloud/local mismatches.
+- Runbook: `runbooks/LOCAL-DEPLOY.md` covers N≥3, first configuration, lifecycle, storage, Bridge targeting, and orchestrator-owned `local-deploy-n` leases.
+- Focused evidence: local harness + boot diagnostics 13/13; Bridge app tests 5/5; scoped ESLint, `tsc --noEmit`, capability ghost gate, secret scan, seam fidelity 13/13, rustfmt, and diff check pass.
+- Required fidelity executions remain red on unchanged owned-by-other-unit code: DOCX stops at `DOCX_UNSUPPORTED_EDIT` in `docx-lens.ts`; Office fails its existing aggregate assertion. No lens/harness expectation was changed.
+- No Convex function body, seed/bootstrap path, shared runtime, browser profile, Bridge process, Office process, or lease was used.
+
 ## P9.I2 — Convex efficiency: runs + reminders (H)
 
 Fix the class, not the counter. Known offenders and their required shape:

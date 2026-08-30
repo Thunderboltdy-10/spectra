@@ -56,10 +56,7 @@ import {
 } from "../runs/live-dock";
 import { CrossfadeText, transitionFor, useSpectraMotion } from "../motion";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
-import {
-  followAiActor,
-  useFollowAi,
-} from "../collaboration/follow-ai";
+import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
 
 const activeStatuses = new Set([
   "queued",
@@ -548,10 +545,6 @@ export function LiveDock({
     if (story) return tabs;
     return tabs
       .filter((tab) => !respondingInputRuns.has(tab.runId))
-      .filter(
-        (tab) =>
-          !workspaceId || tab.workspaceId === workspaceId || !tab.workspaceId,
-      )
       .filter((tab) => {
         if (activeStatuses.has(tab.run.status)) return true;
         if (continuation?.id === tab.threadId || openThreadId === tab.threadId)
@@ -599,7 +592,6 @@ export function LiveDock({
     respondingInputRuns,
     story,
     tabs,
-    workspaceId,
   ]);
 
   const sources = useMemo(() => visible.map(tabSource), [visible]);
@@ -822,6 +814,13 @@ export function LiveDock({
               model.state === "completing";
             const followingThis =
               follow.following && follow.followedActorId === tab.runId;
+              const outsideCurrentWorkspace = Boolean(
+                workspaceId &&
+                tab.workspaceId &&
+                tab.workspaceId !== workspaceId,
+              );
+              const workspaceLabel =
+                tab.card?.provenance?.workspaceTitle ?? "Other workspace";
             const hoverOpen = hoveredRunId === tab.runId;
             const traceSteps = dockTraceSteps(
               tab,
@@ -897,6 +896,14 @@ export function LiveDock({
                           {model.attachmentNames.length}
                         </span>
                       ) : null}
+                        {outsideCurrentWorkspace ? (
+                          <span
+                            className="max-w-24 shrink-0 truncate rounded-control bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]"
+                            title={`Running in ${workspaceLabel}`}
+                          >
+                            {workspaceLabel}
+                          </span>
+                        ) : null}
                     </span>
                     <span className="flex min-w-0 items-baseline text-micro text-[var(--text-tertiary)]">
                       <span
@@ -915,7 +922,7 @@ export function LiveDock({
                         {preferences.ai.showLiveDockProgress ? (
                           <CrossfadeText value={model.semanticStep} />
                         ) : (
-                          stateLabel ?? "Ready"
+                            (stateLabel ?? "Ready")
                         )}
                       </span>
                     </span>
@@ -964,7 +971,9 @@ export function LiveDock({
                     items={[
                       {
                         key: "follow" as const,
-                        label: followingThis ? "Stop following" : "Follow AI",
+                            label: followingThis
+                              ? "Stop following"
+                              : "Follow AI",
                         icon: Crosshair,
                       },
                       ...(canUndo && card
@@ -1027,7 +1036,9 @@ export function LiveDock({
                     />
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-micro text-[var(--text-tertiary)]">
                       {model.targetNames.length ? (
-                        <span>{model.targetNames.slice(0, 2).join(" · ")}</span>
+                          <span>
+                            {model.targetNames.slice(0, 2).join(" · ")}
+                          </span>
                       ) : null}
                       {model.attachmentNames.length ? (
                         <span>{model.attachmentNames.length} attached</span>
@@ -1039,7 +1050,8 @@ export function LiveDock({
                         onClick={() => openQuickChat(tab)}
                         className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                       >
-                        <SquareArrowOutUpRight className="h-3 w-3" /> Open conversation
+                          <SquareArrowOutUpRight className="h-3 w-3" /> Open
+                          conversation
                       </button>
                       {!active ? (
                         <button
@@ -1158,7 +1170,9 @@ export function LiveDock({
                                       <button
                                         key={option.title}
                                         type="button"
-                                        aria-pressed={selected === option.title}
+                                          aria-pressed={
+                                            selected === option.title
+                                          }
                                         onClick={() =>
                                           setBatchAnswers((current) => ({
                                             ...current,
@@ -1210,7 +1224,8 @@ export function LiveDock({
                                       )
                                       .join("; ")
                                   : "";
-                              if (response) void respondToInput(tab, response);
+                                if (response)
+                                  void respondToInput(tab, response);
                             }}
                             className="sticky bottom-0 h-9 w-full rounded-[7px] bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
                           >
@@ -1242,7 +1257,9 @@ export function LiveDock({
                           </div>
                           <button
                             type="button"
-                            onClick={() => void respondToInput(tab, "Skipped")}
+                              onClick={() =>
+                                void respondToInput(tab, "Skipped")
+                              }
                             className="mt-1.5 h-7 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
                           >
                             Skip for now
@@ -1282,7 +1299,9 @@ export function LiveDock({
                           </button>
                           <button
                             type="button"
-                            onClick={() => void respondToInput(tab, "Skipped")}
+                              onClick={() =>
+                                void respondToInput(tab, "Skipped")
+                              }
                             className="h-9 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
                           >
                             Skip
@@ -1290,8 +1309,8 @@ export function LiveDock({
                         </div>
                       ) : model.inputRequest?.kind === "file" ? (
                         <label className="mt-2 flex min-h-10 cursor-pointer items-center justify-center rounded-[7px] border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro font-semibold text-[var(--text-secondary)] hover:border-[var(--accent-cyan)]">
-                          <FileText className="mr-1.5 h-3.5 w-3.5" /> Attach the
-                          requested file
+                            <FileText className="mr-1.5 h-3.5 w-3.5" /> Attach
+                            the requested file
                           <input
                             type="file"
                             accept={model.inputRequest.accept}
@@ -1299,7 +1318,8 @@ export function LiveDock({
                             onChange={async (event) => {
                               const file = event.target.files?.[0];
                               if (!file) return;
-                              const attachment = await attachmentFromFile(file);
+                                const attachment =
+                                  await attachmentFromFile(file);
                               await respondToInput(
                                 tab,
                                 `Attached ${file.name}.`,

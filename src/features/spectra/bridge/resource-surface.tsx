@@ -1,12 +1,9 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import {
-  Download,
-  FileText,
-  Loader2,
-} from "lucide-react";
+import { Download, FileText, Loader2 } from "lucide-react";
 import type { SpectraArtifact } from "../data/api";
 import { spectraBus } from "../events";
 import { humanizePublicFailure } from "./humanize";
@@ -45,6 +42,7 @@ export function ResourceSurface({
   artifact: SpectraArtifact;
   onClose: () => void;
 }) {
+  const router = useRouter();
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string>();
   const [fileAction, setFileAction] = useState<
@@ -107,7 +105,8 @@ export function ResourceSurface({
       ? "both"
       : "spectra");
   const [strategyBusy, setStrategyBusy] = useState(false);
-  const strategyPending = strategyBusy || strategyTransition?.state === "pending";
+  const strategyPending =
+    strategyBusy || strategyTransition?.state === "pending";
   const autoOpenedRef = useRef<string | undefined>(undefined);
   async function protectedAction(action: "apply" | "fork" | "discard") {
     setFileAction("materialize");
@@ -144,7 +143,9 @@ export function ResourceSurface({
       await transitionStorageStrategy({
         workId: artifact._id as never,
         toPreset,
-        ...(toPreset !== "spectra" && !truth?.replicas.some((replica) => replica.kind === "local") && activeMounts?.[0]
+        ...(toPreset !== "spectra" &&
+        !truth?.replicas.some((replica) => replica.kind === "local") &&
+        activeMounts?.[0]
           ? { mountId: activeMounts[0]._id, relativePath: artifact.title }
           : {}),
       });
@@ -254,9 +255,7 @@ export function ResourceSurface({
             className="mt-1 text-micro font-medium text-[var(--text-secondary)]"
             onClick={
               presentation.action?.kind === "reconnect"
-                ? () => {
-                    window.location.href = BRIDGE_SETTINGS_HREF;
-                  }
+                ? () => router.push(BRIDGE_SETTINGS_HREF)
                 : undefined
             }
           >
@@ -329,7 +328,8 @@ export function ResourceSurface({
                   className="mt-3 max-w-[430px] text-micro leading-5 text-[var(--danger)]"
                   role="alert"
                 >
-                  {humanizePublicFailure(openError)} The file has not been changed.
+                  {humanizePublicFailure(openError)} The file has not been
+                  changed.
                 </p>
               ) : null}
             </div>
@@ -418,7 +418,8 @@ export function ResourceSurface({
                 How this file is stored
               </h2>
               <p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">
-                Changing this keeps the same Spectra item. If Spectra stops using a copy on this computer, the file stays on disk.
+                Changing this keeps the same Spectra item. If Spectra stops
+                using a copy on this computer, the file stays on disk.
               </p>
               <div className="mt-3">
                 <StorageToggleGroup
@@ -456,11 +457,18 @@ export function ResourceSurface({
               ) : null}
               {strategyTransition?.state === "pending" ? (
                 <p className="mt-2 text-micro text-[var(--text-secondary)]">
-                  Moving this work between Spectra and this computer. The item stays open while Spectra Bridge verifies the file.
+                  Moving this work between Spectra and this computer. The item
+                  stays open while Spectra Bridge verifies the file.
                 </p>
               ) : strategyTransition?.state === "failed" ? (
-                <p className="mt-2 text-micro text-[var(--danger)]" role="alert">
-                  {humanizePublicFailure(strategyTransition.errorCode ?? "strategy-transition-failed")}
+                <p
+                  className="mt-2 text-micro text-[var(--danger)]"
+                  role="alert"
+                >
+                  {humanizePublicFailure(
+                    strategyTransition.errorCode ??
+                      "strategy-transition-failed",
+                  )}
                 </p>
               ) : null}
             </div>

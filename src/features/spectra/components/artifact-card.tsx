@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+} from "react";
 import {
   Building2,
   Check,
@@ -208,6 +216,18 @@ export function ArtifactCard({
       }}
       onContextMenu={onContextMenu}
       onPointerDown={onBeginDrag}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={
+        interactive
+          ? (event: KeyboardEvent<HTMLElement>) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              onSelect?.();
+            }
+          : undefined
+      }
       data-interactive={interactive ? "true" : undefined}
       data-ai-state={liveAiActivity ? "updating" : liveAiState}
       data-context-state={
@@ -325,7 +345,9 @@ export function ArtifactCard({
           {artifact.accessExplanation ? (
             <div className="mt-2 flex min-w-0 items-center gap-1.5 text-micro text-[var(--text-tertiary)]">
               <Building2 className="h-3 w-3 shrink-0" />
-              <span className="truncate" title={artifact.accessExplanation}>{artifact.accessExplanation}</span>
+              <span className="truncate" title={artifact.accessExplanation}>
+                {artifact.accessExplanation}
+              </span>
             </div>
           ) : null}
           {liveAiActivity?.detail ? (
@@ -367,10 +389,16 @@ export function ArtifactCard({
                   key={label}
                   className="min-w-0 overflow-hidden border-l border-[var(--card-border-soft)] px-2 py-0.5 first:border-l-0 first:pl-0"
                 >
-                  <div className="truncate font-sans text-[12px] font-normal text-[var(--text-primary)]" title={String(value)}>
+                  <div
+                    className="truncate font-sans text-[12px] font-normal text-[var(--text-primary)]"
+                    title={String(value)}
+                  >
                     {value}
                   </div>
-                  <div className="truncate text-micro text-[var(--text-tertiary)]" title={label}>
+                  <div
+                    className="truncate text-micro text-[var(--text-tertiary)]"
+                    title={label}
+                  >
                     {label}
                   </div>
                 </div>
@@ -380,7 +408,9 @@ export function ArtifactCard({
           <div className="mt-2.5 flex min-h-7 min-w-0 items-end justify-between gap-2">
             <div className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
               {artifact.footer ??
-                (artifact.placement === "workspace" ? "In workspace" : "General")}
+                (artifact.placement === "workspace"
+                  ? "In workspace"
+                  : "General")}
             </div>
             {actions ? (
               <div

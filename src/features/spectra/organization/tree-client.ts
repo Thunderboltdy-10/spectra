@@ -154,10 +154,7 @@ export function useTreeContainers(parentId: string | null, enabled = true) {
 }
 
 export function useTreePath(nodeId: string | null) {
-  const result = useQuery(
-    api.orgTree.path,
-    nodeId ? { nodeId } : "skip",
-  );
+  const result = useQuery(api.orgTree.path, nodeId ? { nodeId } : "skip");
   if (!result) return null;
   return {
     node: result.node as unknown as TreeNode,
@@ -176,7 +173,12 @@ export function useTreeSearch(
   const result = useQuery(
     api.orgTree.search,
     trimmed.length >= 2
-      ? { term: trimmed, kinds, limit: 60, scopeNodeId: scopeNodeId ?? undefined }
+      ? {
+          term: trimmed,
+          kinds,
+          limit: 60,
+          scopeNodeId: scopeNodeId ?? undefined,
+        }
       : "skip",
   );
   return {
@@ -384,14 +386,18 @@ export function useTreeActions() {
 }
 
 /** A stable failure message: the server's reason, or a plain fallback. */
-export function useTreeErrorReporter(report: (message: string) => void) {
-  return useCallback(
-    (error: unknown, fallback: string) => {
+export function treeFailureMessage(error: unknown, fallback: string) {
       const raw = error instanceof Error ? error.message : "";
       /* Convex prefixes thrown messages; the sentence we wrote is what a reader
          needs, not the frame around it. */
       const match = raw.match(/Uncaught Error:\s*([^\n]+)/);
-      report((match?.[1] ?? raw ?? "").trim() || fallback);
+  return (match?.[1] ?? raw ?? "").trim() || fallback;
+}
+
+export function useTreeErrorReporter(report: (message: string) => void) {
+  return useCallback(
+    (error: unknown, fallback: string) => {
+      report(treeFailureMessage(error, fallback));
     },
     [report],
   );

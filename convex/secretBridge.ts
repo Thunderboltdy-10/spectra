@@ -45,7 +45,7 @@ function digestEnvelope(envelope?: {
 function verify(input: {
   operation: string;
   subject: string;
-  schoolId: string;
+  scopeId: string;
   purpose: string;
   timestamp: number;
   nonce: string;
@@ -57,7 +57,7 @@ function verify(input: {
   const canonical = [
     input.operation,
     input.subject,
-    input.schoolId,
+    input.scopeId,
     input.purpose,
     input.timestamp,
     input.nonce,
@@ -76,6 +76,15 @@ const bridge = {
   schoolId: v.string(),
   purpose: v.string(),
   operatorSessionId: v.optional(v.string()),
+  timestamp: v.number(),
+  nonce: v.string(),
+  signature: v.string(),
+  requestId: v.optional(v.string()),
+};
+
+const accountBridge = {
+  accountId: v.string(),
+  purpose: v.string(),
   timestamp: v.number(),
   nonce: v.string(),
   signature: v.string(),
@@ -102,7 +111,7 @@ export const read = action({
     verify({
       operation: "read",
       subject,
-      schoolId: args.schoolId,
+      scopeId: args.schoolId,
       purpose: args.purpose,
       timestamp: args.timestamp,
       nonce: args.nonce,
@@ -131,7 +140,7 @@ export const useForSchoolConnector = action({
     verify({
       operation: "use",
       subject,
-      schoolId: args.schoolId,
+      scopeId: args.schoolId,
       purpose: args.purpose,
       timestamp: args.timestamp,
       nonce: args.nonce,
@@ -171,7 +180,7 @@ export const status = action({
     verify({
       operation: "status",
       subject,
-      schoolId: args.schoolId,
+      scopeId: args.schoolId,
       purpose: args.purpose,
       timestamp: args.timestamp,
       nonce: args.nonce,
@@ -235,7 +244,7 @@ export const write = action({
     verify({
       operation: "write",
       subject,
-      schoolId: args.schoolId,
+      scopeId: args.schoolId,
       purpose: args.purpose,
       timestamp: args.timestamp,
       nonce: args.nonce,
@@ -274,7 +283,7 @@ export const revoke = action({
     verify({
       operation: "revoke",
       subject,
-      schoolId: args.schoolId,
+      scopeId: args.schoolId,
       purpose: args.purpose,
       timestamp: args.timestamp,
       nonce: args.nonce,
@@ -291,6 +300,204 @@ export const revoke = action({
       subject,
       schoolId: args.schoolId,
       operatorSessionId: args.operatorSessionId,
+      purpose: args.purpose,
+      requestId: args.requestId,
+    });
+  },
+});
+
+export const readAccount = action({
+  args: accountBridge,
+  handler: async (ctx, args): Promise<StoredEnvelope | null> => {
+    const subject = await authenticatedSubject(ctx);
+    verify({
+      operation: "read-account",
+      subject,
+      scopeId: args.accountId,
+      purpose: args.purpose,
+      timestamp: args.timestamp,
+      nonce: args.nonce,
+      signature: args.signature,
+      envelopeDigest: "-",
+    });
+    await ctx.runMutation(internal.secretStore.reserveNonce, {
+      subject,
+      nonce: args.nonce,
+      operation: "read-account",
+      expiresAt: args.timestamp + 60_000,
+    });
+    return ctx.runQuery(internal.secretStore.readAccountEnvelope, {
+      subject,
+      accountId: args.accountId,
+      purpose: args.purpose,
+    });
+  },
+});
+
+export const useForAccountConnector = action({
+  args: { ...accountBridge, workerSubject: v.optional(v.string()) },
+  handler: async (ctx, args): Promise<StoredEnvelope | null> => {
+    const subject = await authenticatedSubject(ctx, args.workerSubject);
+    verify({
+      operation: "use-account",
+      subject,
+      scopeId: args.accountId,
+      purpose: args.purpose,
+      timestamp: args.timestamp,
+      nonce: args.nonce,
+      signature: args.signature,
+      envelopeDigest: "-",
+    });
+    await ctx.runMutation(internal.secretStore.reserveNonce, {
+      subject,
+      nonce: args.nonce,
+      operation: "use-account",
+      expiresAt: args.timestamp + 60_000,
+    });
+    return ctx.runQuery(internal.secretStore.readAccountEnvelope, {
+      subject,
+      accountId: args.accountId,
+      purpose: args.purpose,
+    });
+  },
+});
+
+export const statusAccount = action({
+  args: accountBridge,
+  handler: async (
+    ctx,
+    args,
+  ): Promise<
+    | { configured: false }
+    | {
+        configured: true;
+        fingerprint: string;
+        keyVersion: number;
+        label: string;
+        createdAt: number;
+      }
+  > => {
+    const subject = await authenticatedSubject(ctx);
+    verify({
+      operation: "status-account",
+      subject,
+      scopeId: args.accountId,
+      purpose: args.purpose,
+      timestamp: args.timestamp,
+      nonce: args.nonce,
+      signature: args.signature,
+      envelopeDigest: "-",
+    });
+    await ctx.runMutation(internal.secretStore.reserveNonce, {
+      subject,
+      nonce: args.nonce,
+      operation: "status-account",
+      expiresAt: args.timestamp + 60_000,
+    });
+    const envelope: StoredEnvelope | null = await ctx.runQuery(
+      internal.secretStore.readAccountEnvelope,
+      {
+        subject,
+        accountId: args.accountId,
+        purpose: args.purpose,
+      },
+    );
+    return envelope
+      ? {
+          configured: true,
+          fingerprint: envelope.fingerprint,
+          keyVersion: envelope.keyVersion,
+          label: envelope.label,
+          createdAt: envelope.createdAt,
+        }
+      : { configured: false };
+  },
+});
+
+export const writeAccount = action({
+  args: {
+    ...accountBridge,
+    label: v.string(),
+    ciphertext: v.string(),
+    encryptionNonce: v.string(),
+    authTag: v.string(),
+    keyVersion: v.number(),
+    fingerprint: v.string(),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    secretId: Id<"secretRecords">;
+    fingerprint: string;
+    keyVersion: number;
+    status: "active";
+  }> => {
+    const subject = await authenticatedSubject(ctx);
+    const envelope = {
+      ciphertext: args.ciphertext,
+      nonce: args.encryptionNonce,
+      authTag: args.authTag,
+      keyVersion: args.keyVersion,
+      fingerprint: args.fingerprint,
+    };
+    verify({
+      operation: "write-account",
+      subject,
+      scopeId: args.accountId,
+      purpose: args.purpose,
+      timestamp: args.timestamp,
+      nonce: args.nonce,
+      signature: args.signature,
+      envelopeDigest: digestEnvelope(envelope),
+    });
+    await ctx.runMutation(internal.secretStore.reserveNonce, {
+      subject,
+      nonce: args.nonce,
+      operation: "write-account",
+      expiresAt: args.timestamp + 60_000,
+    });
+    return ctx.runMutation(internal.secretStore.writeAccountEnvelope, {
+      subject,
+      accountId: args.accountId,
+      purpose: args.purpose,
+      label: args.label,
+      ciphertext: args.ciphertext,
+      nonce: args.encryptionNonce,
+      authTag: args.authTag,
+      keyVersion: args.keyVersion,
+      fingerprint: args.fingerprint,
+      requestId: args.requestId,
+    });
+  },
+});
+
+export const revokeAccount = action({
+  args: accountBridge,
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ revoked: number; revokedAt: number }> => {
+    const subject = await authenticatedSubject(ctx);
+    verify({
+      operation: "revoke-account",
+      subject,
+      scopeId: args.accountId,
+      purpose: args.purpose,
+      timestamp: args.timestamp,
+      nonce: args.nonce,
+      signature: args.signature,
+      envelopeDigest: "-",
+    });
+    await ctx.runMutation(internal.secretStore.reserveNonce, {
+      subject,
+      nonce: args.nonce,
+      operation: "revoke-account",
+      expiresAt: args.timestamp + 60_000,
+    });
+    return ctx.runMutation(internal.secretStore.revokeAccount, {
+      subject,
+      accountId: args.accountId,
       purpose: args.purpose,
       requestId: args.requestId,
     });

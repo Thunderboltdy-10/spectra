@@ -51,3 +51,19 @@ Fresh agent, local instance, `office-com` + `bridge` leases. The single question
 ## Exit gate
 
 The "add one connector" walk-through recorded as evidence: descriptor + worker + (lens | shim | projection) with **zero core schema changes**. All Office/local suites green on unchanged tests; RC corpus green; V1 PASS. **P11 is frozen until this gate passes.**
+
+## P10.I1 implementation log — 2026-08-31
+
+- Added account/school-scoped `connections` truth with explicit health transitions, a two-minute stalled-state sweeper, audit events, and token-free query projections.
+- Extended the AES-GCM secret bridge with account envelopes bound to `connector:<provider>:<connectionId>:oauth-token`; ownership, provider, scope, and purpose are revalidated at every read/write/revoke.
+- Added the provider registry contract and registered the existing Bridge and ManageBac implementations without merging their workers or truth stores.
+- Walk-through proof: the ManageBac descriptor selects `school-data`, its existing `executionScheduler:dispatchManageBacSync` worker, and existing `externalRecords` projections; no provider-specific core schema branch was required.
+- Added generic authorize/callback, refresh, and revoke plumbing. Invalid grants become `expired`; HTTP 429 becomes a scheduled `rate_limited` retry; local revoke failure remains actionable instead of claiming success.
+- Replaced Files and devices with a unified Connections settings section while preserving the legacy `devices` URL alias. Bridge mounts and ManageBac project into the same overview without migration.
+- Wired `bridge.revokeDevice` through a destructive confirmation, cleared the local Bridge session, and stated that local files remain unchanged.
+- Focused Vitest: 4 files / 25 tests passed. TypeScript passed. Scoped ESLint: 0 errors, 5 pre-existing Settings token warnings.
+- Capability ghost gate, secret scan, seam fidelity (13 tests), and `git diff --check` passed.
+- DOCX fidelity inherited failure: `bibliography-source.docx` insert-paragraph aborts with `DOCX_UNSUPPORTED_EDIT` in untouched lens/harness code.
+- Office fidelity inherited failure: `sheets.clipboard.paste.values` reports expected `XLSX_FORMULA_LITERALIZATION_BLOCKED`, got `UNKNOWN`; all other recorded Office assertions passed.
+- No browser screenshot was taken because this worktree held no browser/local-stack lease. No live Convex, Bridge, Office, or cloud resource was used.
+- Implementation complete; no acceptance claimed. Merge remains gated on RC.V1 PASS and P10.V1 owns the inherited fidelity verdicts.

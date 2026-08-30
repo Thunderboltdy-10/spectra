@@ -35,6 +35,12 @@ describe("Settings application accessibility contract", () => {
     expect(
       screen.getByRole("heading", { name: "Conversations", level: 2 }),
     ).toBeTruthy();
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "More Settings sections" }),
+      { button: 0, ctrlKey: false },
+    );
+    expect(screen.getByRole("menuitem", { name: "Connections" })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     expect(
       screen.getByRole("heading", {
         name: "Conversations and Live Dock",

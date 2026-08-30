@@ -22,6 +22,12 @@ crons.interval(
   {},
 );
 crons.interval(
+  "sweep-connection-health",
+  { minutes: 2 },
+  internal.connections.sweepStalledHealth,
+  {},
+);
+crons.interval(
   "reconcile-legacy-replica-truth",
   { minutes: 1 },
   internal.replicas.reconcileReplicaTruthMigration,

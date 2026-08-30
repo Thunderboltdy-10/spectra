@@ -2,6 +2,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useBridgeHealth } from "./use-bridge";
 import { useMutation, useQuery, useConvexAuth } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -19,6 +26,7 @@ import {
   selectBridgeFolder,
   bridgeReachabilityCopy,
   folderChipLabel,
+  forgetBridgeSession,
 } from "./client";
 import { StorageToggleGroup } from "./storage-toggle-group";
 import {
@@ -56,6 +64,7 @@ export function BridgeSettings() {
   );
   const overridePolicy = useMutation(api.syncPolicy.overrideAccount);
   const requestPairing = useMutation(api.bridge.requestPairing);
+  const revokeDevice = useMutation(api.bridge.revokeDevice);
   const [pairing, setPairing] = useState<{
     challenge: string;
     shortCode: string;
@@ -67,6 +76,8 @@ export function BridgeSettings() {
   const [folderBusy, setFolderBusy] = useState<string | null>(null);
   const [error, setError] = useState<string>();
   const [updateNote, setUpdateNote] = useState<string>();
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const pairingTimer = useRef<number | null>(null);
   const pairingExpiry = useRef<number | null>(null);
   const stopPairingPoll = useCallback(() => {
@@ -80,6 +91,13 @@ export function BridgeSettings() {
   useEffect(() => stopPairingPoll, [stopPairingPoll]);
   const storageChoice = storageChoiceFromPreset(effectivePolicy?.preset);
   const connected = local.state === "connected";
+  const activeDevice = useMemo(() => {
+    const devices = cloudOverview?.devices ?? [];
+    return (
+      devices.find((device) => String(device._id) === local.status?.deviceId) ??
+      (devices.length === 1 ? devices[0] : undefined)
+    );
+  }, [cloudOverview?.devices, local.status?.deviceId]);
   const reachability = local.reachability;
   const discovery = local.discovery;
   async function beginPairing() {
@@ -197,6 +215,24 @@ export function BridgeSettings() {
       idempotencyKey: `account:${preset}:${Date.now()}`,
     });
   }
+  async function disconnectDevice() {
+    if (!activeDevice) return;
+    setDisconnecting(true);
+    setError(undefined);
+    try {
+      await revokeDevice({ deviceId: activeDevice._id });
+      forgetBridgeSession();
+      setDisconnectOpen(false);
+      setUpdateNote(
+        "This device is disconnected. Its files and folders remain unchanged on this PC.",
+      );
+      await local.refresh();
+    } catch (reason) {
+      setError(humanizePublicFailure(reason));
+    } finally {
+      setDisconnecting(false);
+    }
+  }
   const reachabilityCopy = bridgeReachabilityCopy(reachability);
   const stateLabel = reachabilityCopy.label;
   const stateDetail =
@@ -208,10 +244,11 @@ export function BridgeSettings() {
       <section className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10">
         <header className="pt-2">
           <h2 className="font-display text-subhead font-semibold text-[var(--text-primary)]">
-            Spectra Bridge
+            This device
           </h2>
           <p className="mt-1 text-caption leading-5 text-[var(--text-secondary)]">
-            Selected folders remain yours. Paths never leave this device.
+            Spectra Bridge keeps selected folders local. Paths never leave this
+            device.
           </p>
         </header>
         <div className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
@@ -224,6 +261,16 @@ export function BridgeSettings() {
                 {stateDetail}
               </p>
             </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {activeDevice ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDisconnectOpen(true)}
+                >
+                  Disconnect
+                </Button>
+              ) : null}
             {reachability === "update-required" ? (
               <Button
                 size="sm"
@@ -247,6 +294,7 @@ export function BridgeSettings() {
                 {busy ? "Preparing…" : "Connect this device"}
               </Button>
             ) : null}
+            </div>
           </div>
           {pairing ? (
             <div
@@ -419,6 +467,31 @@ export function BridgeSettings() {
           ) : null}
         </div>
       </section>
+      <Dialog open={disconnectOpen} onOpenChange={setDisconnectOpen}>
+        <DialogContent layer="modal" className="max-w-[460px]">
+          <DialogTitle>Disconnect this device?</DialogTitle>
+          <DialogDescription className="mt-1.5">
+            Spectra will stop using this device and its selected folders. The
+            files themselves stay unchanged on this PC.
+          </DialogDescription>
+          <DialogFooter className="mt-5">
+            <Button
+              variant="ghost"
+              disabled={disconnecting}
+              onClick={() => setDisconnectOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={disconnecting}
+              onClick={() => void disconnectDevice()}
+            >
+              {disconnecting ? "Disconnecting…" : "Disconnect device"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

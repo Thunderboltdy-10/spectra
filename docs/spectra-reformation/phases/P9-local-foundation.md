@@ -127,3 +127,11 @@ N≥3 instances documented and startable; both accounts live on the seeded insta
 - Standing gate: root `tsc --noEmit`, scoped ESLint, `check:capabilities`, secret scan (2,328 tracked files after rebase), and `git diff --check` passed.
 - No fidelity harness required: no lens, Bridge, replica, bridgeSync, or `shared/` path changed.
 - Merge coordination: P9.I2's `spectraRuns` and the concurrently owned ManageBac writer must call exported summary sync after their artifact patches; route as product-logic integration, not a P9.I3 ownership violation.
+
+### P9.I3 summary-writer integration addendum — 2026-08-31
+
+- SYSTEMIC triage: write-maintained summaries were correct inside P9.I3, but later and cross-track artifact writers could leave the bounded Library row stale after changing its projection inputs.
+- The existing `syncArtifactSummary` seam now follows ManageBac planner/timetable refresh and source removal, the direct Agent improvement editor, and calendar migration tagging. P9.I2's stale-run repair already used the seam and was left unchanged.
+- A bounded writer audit also closed no-projection collaboration activity/recovery, legacy thread-reference deletion, and deleted-workspace provenance. Projection-bearing gateway commits continue through `syncSourceNodes`, which already synchronizes the summary.
+- Red-first parity coverage failed 5/5 before integration and passes 6/6 after it; the P9 Library/run/collaboration blast-radius suite passes 4 files / 22 tests.
+- `convex/replicas.ts` and `convex/bridgeSync.ts` remain untouched under the binding P10.I2 ownership split. No fidelity trigger path changed.

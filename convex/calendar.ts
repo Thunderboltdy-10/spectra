@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
+import { syncArtifactSummary } from "./orgTreeShared";
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -533,6 +534,7 @@ export const ensureLegacyMigration = mutation({
       const tags = new Set(artifact.tags ?? []);
       tags.add("calendar-migrated");
       await ctx.db.patch(artifact._id, { tags: [...tags], updatedAt: Date.now() });
+      await syncArtifactSummary(ctx, artifact._id);
       migratedArtifacts += 1;
       migratedEvents += migrated;
       skippedEvents += skipped;

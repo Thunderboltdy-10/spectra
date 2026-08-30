@@ -7,6 +7,7 @@ import {
 } from "./spectraShared";
 import { writeAuditEvent } from "./auditShared";
 import { commitDirectHumanChange, commitHumanCheckpoint } from "./changeGroups";
+import { syncArtifactSummary } from "./orgTreeShared";
 
 const vEvalResult = v.object({
   caseId: v.string(),
@@ -671,6 +672,7 @@ export const decideImprovement = mutation({
         lastSynchronizedAt: now,
         updatedAt: now,
       });
+      await syncArtifactSummary(ctx, artifact._id);
       await commitDirectHumanChange(ctx, {
         artifactId: artifact._id,
         actorAccountId: actor.accountId,

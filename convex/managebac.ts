@@ -10,6 +10,7 @@ import {
   ensureWorkspaceNode,
   findPrimaryNode,
   placeSourceNode,
+  syncArtifactSummary,
 } from "./orgTreeShared";
 import {
   getAccountByClerkId,
@@ -2119,6 +2120,7 @@ async function safelyRefreshProjection(
       }),
       updatedAt: now,
     });
+    await syncArtifactSummary(ctx, artifact._id);
     return true;
   }
   if (projection.projectionType === "timetable_event") {
@@ -2178,6 +2180,7 @@ async function safelyRefreshProjection(
       }),
       updatedAt: now,
     });
+    await syncArtifactSummary(ctx, artifact._id);
     return true;
   }
   return true;
@@ -2203,6 +2206,7 @@ async function markProjectionSourceRemoved(
       },
       updatedAt: Date.now(),
     });
+    await syncArtifactSummary(ctx, artifact._id);
     return;
   }
   if (projection.projectionType === "timetable_event") {

@@ -32,6 +32,19 @@ Make `npm run dev:local` (or equivalent) bring up one complete isolated stack: l
 - Required fidelity executions remain red on unchanged owned-by-other-unit code: DOCX stops at `DOCX_UNSUPPORTED_EDIT` in `docx-lens.ts`; Office fails its existing aggregate assertion. No lens/harness expectation was changed.
 - No Convex function body, seed/bootstrap path, shared runtime, browser profile, Bridge process, Office process, or lease was used.
 
+### P9.I1 local-package fix addendum — 2026-08-31
+
+- P9.I4 exposed a fresh-instance harness defect: Convex CLI 1.41 requires its
+  current project root to own `package.json` and declare `convex`; the generated
+  per-instance project owned only `convex.json`, so startup stopped before local
+  configuration unless a package was copied into the runtime directory.
+- Instance scaffolding now writes a private, deterministic package contract
+  using the checkout's declared Convex version on every add/start. The package
+  is isolated per numeric instance and contains no secrets or app scripts.
+- A red-to-green CLI-scaffolding regression creates two fresh runtime roots and
+  proves each gets the required independent manifest; focused harness tests are
+  now 15/15. This is a P9.I1 harness repair only; no P9.I4 seed path changed.
+
 ## P9.I2 — Convex efficiency: runs + reminders (H)
 
 Fix the class, not the counter. Known offenders and their required shape:

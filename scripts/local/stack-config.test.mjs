@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convexEnvFrom,
   derivedInstanceEnv,
+  localConvexProjectPackage,
   normalizeInstanceId,
   parseEnv,
   portsForInstance,
@@ -46,6 +47,22 @@ describe("local stack instance configuration", () => {
     expect(() => portsForInstance(1, { stride: 3 })).toThrow("at least 4");
     expect(() => portsForInstance(1_000, { base: 65_000, stride: 20 })).toThrow(
       "port range",
+    );
+  });
+
+  it("derives a private Convex CLI project package from the repository contract", () => {
+    expect(
+      localConvexProjectPackage(
+        { dependencies: { convex: "^1.41.0", unrelated: "1.0.0" } },
+        3,
+      ),
+    ).toEqual({
+      name: "spectra-local-instance-3",
+      private: true,
+      dependencies: { convex: "^1.41.0" },
+    });
+    expect(() => localConvexProjectPackage({ dependencies: {} }, 1)).toThrow(
+      "must declare the Convex runtime dependency",
     );
   });
 

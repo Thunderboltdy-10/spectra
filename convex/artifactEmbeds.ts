@@ -11,20 +11,14 @@ import {
   projectQuizSnapshotForLearner,
   projectTimetableSnapshot,
 } from "./quizPrivacy";
-
-const containerType = v.union(v.literal("artifact"), v.literal("thread"));
-const mode = v.union(v.literal("compact"), v.literal("expanded"));
-const interaction = v.union(
-  v.literal("read"),
-  v.literal("interact"),
-  v.literal("edit"),
-);
-const versionPolicy = v.union(v.literal("live"), v.literal("pinned"));
-const contextPolicy = v.union(
-  v.literal("none"),
-  v.literal("summary"),
-  v.literal("visible_region"),
-);
+import {
+  artifactEmbedContainerTypeValidator,
+  artifactEmbedContextPolicyValidator,
+  artifactEmbedInteractionValidator,
+  artifactEmbedModeValidator,
+  artifactEmbedVersionPolicyValidator,
+  type ArtifactEmbedReference,
+} from "../shared/artifact-embed";
 
 type EmbedCtx = QueryCtx | MutationCtx;
 type EmbedActor = NonNullable<
@@ -207,10 +201,8 @@ async function codeRuntimeResources(
             artifactId: target._id,
             title: target.title,
             blueprintKey: target.blueprintKey,
-            content: projectArtifactForAccess(
-              target,
-              targetDecision.level,
-            ).content,
+            content: projectArtifactForAccess(target, targetDecision.level)
+              .content,
           };
     const encoded = JSON.stringify(value);
     if (bytes + encoded.length > 180_000) continue;
@@ -231,20 +223,26 @@ async function projection(
     actorValue,
     embed.sourceArtifactId,
   );
-  const safe = {
+  const safe: ArtifactEmbedReference & { canConfigure: boolean } = {
     embedId: embed._id,
     containerType: embed.containerType,
     containerId: embed.containerId,
     containerRegionId: embed.containerRegionId,
+    sourceArtifactId: embed.sourceArtifactId,
     mode: embed.mode,
     interaction: embed.interaction,
     versionPolicy: embed.versionPolicy,
+    pinnedVersionId: embed.pinnedVersionId,
     contextPolicy: embed.contextPolicy,
     displayPreferences: embed.displayPreferences,
     canConfigure,
+    state: "ready" as const,
     createdAt: embed.createdAt,
     updatedAt: embed.updatedAt,
   };
+  if (embed.removedAt) {
+    return { ...safe, state: "removed" as const };
+  }
   if (
     source &&
     source.schoolId === actorValue.schoolId &&
@@ -370,10 +368,7 @@ async function projection(
           candidate.storageId,
       )
       .sort((left, right) => right.updatedAt - left.updatedAt)[0];
-    const storageUrl = selected?.storageId
-      ? await ctx.storage.getUrl(selected.storageId)
-      : null;
-    if (selected && storageUrl) {
+    if (selected) {
       runtimeBuild = {
         buildId: selected._id,
         artifactVersionId: selected.artifactVersionId,
@@ -385,7 +380,6 @@ async function projection(
         outputBytes: selected.outputBytes,
         payloadBytes: selected.payloadBytes,
         publishedAt: selected.publishedAt,
-        storageUrl,
       };
     }
     const snapshotRecord =
@@ -474,16 +468,16 @@ async function wouldCreateArtifactCycle(
 
 export const create = mutation({
   args: {
-    containerType,
+    containerType: artifactEmbedContainerTypeValidator,
     containerId: v.string(),
     containerRegionId: v.string(),
     sourceArtifactId: v.id("spectraArtifacts"),
-    mode,
-    interaction,
-    versionPolicy,
+    mode: artifactEmbedModeValidator,
+    interaction: artifactEmbedInteractionValidator,
+    versionPolicy: artifactEmbedVersionPolicyValidator,
     pinnedVersionId: v.optional(v.id("spectraArtifactVersions")),
     displayPreferences: v.optional(v.any()),
-    contextPolicy,
+    contextPolicy: artifactEmbedContextPolicyValidator,
   },
   handler: async (ctx, args) => {
     const actorValue = await actor(ctx);
@@ -547,15 +541,114 @@ export const create = mutation({
   },
 });
 
+/**
+ * One-way adoption for protocol-v2 document nodes. The legacy reference id is
+ * converted into a stable container region, so concurrent opens converge on
+ * one server row instead of duplicating the same historical placement.
+ */
+export const migrateLegacy = mutation({
+  args: {
+    containerId: v.string(),
+    legacyReferenceId: v.string(),
+    sourceArtifactId: v.id("spectraArtifacts"),
+    mode: artifactEmbedModeValidator,
+    versionPolicy: artifactEmbedVersionPolicyValidator,
+    pinnedVersionId: v.optional(v.id("spectraArtifactVersions")),
+    displayPreferences: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const actorValue = await actor(ctx);
+    const legacyReferenceId = args.legacyReferenceId.trim().slice(0, 180);
+    if (!legacyReferenceId)
+      throw new Error("EMBED_LEGACY_REFERENCE_ID_REQUIRED");
+    const containerRegionId = `document:reference:${legacyReferenceId}`;
+    const container = await requireContainer(
+      ctx,
+      actorValue,
+      "artifact",
+      args.containerId,
+      "modify",
+    );
+    const source = await requireArtifactCapability(
+      ctx,
+      args.sourceArtifactId,
+      "read",
+    );
+    if (
+      container.schoolId !== source.artifact.schoolId ||
+      source.artifact.schoolId !== actorValue.schoolId
+    )
+      throw new Error("EMBED_SCHOOL_BOUNDARY");
+    if (
+      await wouldCreateArtifactCycle(
+        ctx,
+        args.containerId,
+        args.sourceArtifactId,
+      )
+    )
+      throw new Error(
+        "EMBED_CYCLE: An artifact cannot embed itself directly or indirectly.",
+      );
+    const existing = (
+      await ctx.db
+        .query("artifactEmbeds")
+        .withIndex("by_container", (q) =>
+          q.eq("containerType", "artifact").eq("containerId", args.containerId),
+        )
+        .collect()
+    ).find(
+      (candidate) =>
+        candidate.containerRegionId === containerRegionId &&
+        candidate.sourceArtifactId === args.sourceArtifactId,
+    );
+    if (existing) {
+      if (existing.removedAt)
+        await ctx.db.patch(existing._id, {
+          removedAt: undefined,
+          updatedAt: Date.now(),
+        });
+      return { embedId: existing._id, containerRegionId };
+    }
+    if (args.versionPolicy === "pinned") {
+      if (!args.pinnedVersionId)
+        throw new Error("EMBED_PINNED_VERSION_REQUIRED");
+      const version = await ctx.db.get(args.pinnedVersionId);
+      if (!version || version.artifactId !== args.sourceArtifactId)
+        throw new Error("EMBED_PINNED_VERSION_INVALID");
+      await loadVersionAfter(ctx, version);
+    }
+    const now = Date.now();
+    const embedId = await ctx.db.insert("artifactEmbeds", {
+      containerType: "artifact",
+      containerId: args.containerId,
+      containerRegionId,
+      sourceArtifactId: args.sourceArtifactId,
+      schoolId: actorValue.schoolId,
+      mode: args.mode,
+      interaction: "read",
+      versionPolicy: args.versionPolicy,
+      pinnedVersionId:
+        args.versionPolicy === "pinned" ? args.pinnedVersionId : undefined,
+      displayPreferences: args.displayPreferences,
+      contextPolicy: "summary",
+      createdByAccountId: actorValue.accountId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { embedId, containerRegionId };
+  },
+});
+
 export const update = mutation({
   args: {
     embedId: v.id("artifactEmbeds"),
-    mode: v.optional(mode),
-    interaction: v.optional(interaction),
-    versionPolicy: v.optional(versionPolicy),
+    containerRegionId: v.optional(v.string()),
+    mode: v.optional(artifactEmbedModeValidator),
+    interaction: v.optional(artifactEmbedInteractionValidator),
+    versionPolicy: v.optional(artifactEmbedVersionPolicyValidator),
     pinnedVersionId: v.optional(v.id("spectraArtifactVersions")),
     displayPreferences: v.optional(v.any()),
-    contextPolicy: v.optional(contextPolicy),
+    contextPolicy: v.optional(artifactEmbedContextPolicyValidator),
   },
   handler: async (ctx, args) => {
     const actorValue = await actor(ctx);
@@ -575,6 +668,12 @@ export const update = mutation({
       nextInteraction === "edit" ? "modify" : "read",
     );
     const nextVersionPolicy = args.versionPolicy ?? embed.versionPolicy;
+    const nextContainerRegionId =
+      args.containerRegionId === undefined
+        ? embed.containerRegionId
+        : args.containerRegionId.trim().slice(0, 240);
+    if (!nextContainerRegionId)
+      throw new Error("EMBED_CONTAINER_REGION_REQUIRED");
     const nextPinnedVersionId =
       nextVersionPolicy === "pinned"
         ? (args.pinnedVersionId ?? embed.pinnedVersionId)
@@ -588,6 +687,7 @@ export const update = mutation({
       await loadVersionAfter(ctx, version);
     }
     await ctx.db.patch(embed._id, {
+      containerRegionId: nextContainerRegionId,
       mode: args.mode ?? embed.mode,
       interaction: nextInteraction,
       versionPolicy: nextVersionPolicy,
@@ -638,8 +738,100 @@ export const remove = mutation({
   },
 });
 
+export const removeMany = mutation({
+  args: { embedIds: v.array(v.id("artifactEmbeds")) },
+  handler: async (ctx, args) => {
+    const actorValue = await actor(ctx);
+    const ids = [...new Set(args.embedIds)];
+    if (ids.length > 64)
+      throw new Error("Remove at most 64 linked objects at a time.");
+    const embeds = (
+      await Promise.all(ids.map((embedId) => ctx.db.get(embedId)))
+    ).filter((embed): embed is Doc<"artifactEmbeds"> => Boolean(embed));
+    for (const embed of embeds) {
+      if (embed.removedAt) continue;
+      await requireContainer(
+        ctx,
+        actorValue,
+        embed.containerType,
+        embed.containerId,
+        "modify",
+      );
+    }
+    const active = embeds.filter((embed) => !embed.removedAt);
+    const now = Date.now();
+    await Promise.all(
+      active.map((embed) =>
+        ctx.db.patch(embed._id, { removedAt: now, updatedAt: now }),
+      ),
+    );
+    const pendingRequests = (
+      await Promise.all(
+        active.map((embed) =>
+          ctx.db
+            .query("artifactAccessRequests")
+            .withIndex("by_embed_status", (q) =>
+              q.eq("embedId", embed._id).eq("status", "pending"),
+            )
+            .collect(),
+        ),
+      )
+    ).flat();
+    await Promise.all(
+      pendingRequests.map((request) =>
+        ctx.db.patch(request._id, {
+          status: "cancelled",
+          updatedAt: now,
+          resolvedAt: now,
+          resolvedByAccountId: actorValue.accountId,
+        }),
+      ),
+    );
+    return { removed: active.length };
+  },
+});
+
+/** Restores the same row when a host-level Undo brings its placement back. */
+export const restore = mutation({
+  args: { embedId: v.id("artifactEmbeds") },
+  handler: async (ctx, args) => {
+    const actorValue = await actor(ctx);
+    const embed = await ctx.db.get(args.embedId);
+    if (!embed) throw new Error("EMBED_NOT_FOUND");
+    if (!embed.removedAt) return { restored: false };
+    const container = await requireContainer(
+      ctx,
+      actorValue,
+      embed.containerType,
+      embed.containerId,
+      "modify",
+    );
+    if (embed.schoolId && container.schoolId !== embed.schoolId)
+      throw new Error("EMBED_SCHOOL_BOUNDARY");
+    if (
+      embed.containerType === "artifact" &&
+      (await wouldCreateArtifactCycle(
+        ctx,
+        embed.containerId,
+        embed.sourceArtifactId,
+      ))
+    )
+      throw new Error(
+        "EMBED_CYCLE: An artifact cannot embed itself directly or indirectly.",
+      );
+    await ctx.db.patch(embed._id, {
+      removedAt: undefined,
+      updatedAt: Date.now(),
+    });
+    return { restored: true };
+  },
+});
+
 export const listForContainer = query({
-  args: { containerType, containerId: v.string() },
+  args: {
+    containerType: artifactEmbedContainerTypeValidator,
+    containerId: v.string(),
+  },
   handler: async (ctx, args) => {
     const actorValue = await actor(ctx);
     const container = await requireContainer(
@@ -675,7 +867,7 @@ export const getProjection = query({
   handler: async (ctx, args) => {
     const actorValue = await actor(ctx);
     const embed = await ctx.db.get(args.embedId);
-    if (!embed || embed.removedAt) throw new Error("EMBED_NOT_FOUND");
+    if (!embed) throw new Error("EMBED_NOT_FOUND");
     const container = await requireContainer(
       ctx,
       actorValue,
@@ -684,6 +876,78 @@ export const getProjection = query({
       "read",
     );
     return projection(ctx, actorValue, embed, container.canConfigure);
+  },
+});
+
+/**
+ * The authenticated Next route is the only product consumer. Ordinary embed
+ * projections never receive this bearer URL; the route streams and verifies
+ * the bytes while the browser only sees a same-origin embed id.
+ */
+export const runtimeBuildAccess = query({
+  args: { embedId: v.id("artifactEmbeds") },
+  handler: async (ctx, args) => {
+    const actorValue = await actor(ctx);
+    const embed = await ctx.db.get(args.embedId);
+    if (!embed || embed.removedAt) throw new Error("EMBED_NOT_FOUND");
+    await requireContainer(
+      ctx,
+      actorValue,
+      embed.containerType,
+      embed.containerId,
+      "read",
+    );
+    const { source, decision } = await sourceDecision(
+      ctx,
+      actorValue,
+      embed.sourceArtifactId,
+    );
+    if (
+      !source ||
+      source.blueprintKey !== "code" ||
+      source.status === "deleted" ||
+      !decision?.allowed ||
+      !decision.capabilities.includes("read")
+    )
+      throw new Error("AUTH_NO_ACCESS");
+    const candidates =
+      embed.versionPolicy === "pinned" && embed.pinnedVersionId
+        ? await ctx.db
+            .query("spectraRuntimeBuilds")
+            .withIndex("by_artifact_version", (q) =>
+              q
+                .eq("artifactId", source._id)
+                .eq("artifactVersionId", embed.pinnedVersionId!),
+            )
+            .collect()
+        : await ctx.db
+            .query("spectraRuntimeBuilds")
+            .withIndex("by_artifact_status", (q) =>
+              q.eq("artifactId", source._id).eq("status", "published"),
+            )
+            .collect();
+    const selected = candidates
+      .filter(
+        (candidate) =>
+          (candidate.status === "published" ||
+            candidate.status === "superseded") &&
+          candidate.storageId &&
+          candidate.payloadHash &&
+          candidate.payloadBytes !== undefined,
+      )
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    const storageUrl = selected?.storageId
+      ? await ctx.storage.getUrl(selected.storageId)
+      : null;
+    if (!selected || !storageUrl) throw new Error("RUNTIME_BUILD_UNAVAILABLE");
+    return {
+      storageUrl,
+      payloadHash: selected.payloadHash!,
+      payloadBytes: selected.payloadBytes!,
+      runtime: selected.runtime,
+      artifactVersionId: selected.artifactVersionId,
+      sdkVersion: selected.sdkVersion,
+    };
   },
 });
 

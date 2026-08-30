@@ -178,22 +178,13 @@ export function adaptLegacyReferencePreview(
   legacy: LegacyReferencePreview,
 ) {
   return {
-    protocolVersion: SPECTRA_PROTOCOL_VERSIONS.references,
-    id: legacy.id,
-    target: {
-      workId: legacy.artifactId,
-      anchor: legacy.regionId
-        ? {
-            workId: legacy.artifactId,
-            workType: "legacy",
-            kind: "region",
-            path: [legacy.regionId],
-            schemaVersion: 1,
-          }
-        : undefined,
-    },
-    state: legacy.expanded ? "expanded" : "collapsed",
+    legacyReferenceId: legacy.id,
+    sourceArtifactId: legacy.artifactId,
+    mode: legacy.expanded ? "expanded" : "compact",
     versionPolicy: "live",
+    displayPreferences: legacy.regionId
+      ? { regionIds: [legacy.regionId], view: "excerpt" }
+      : undefined,
   } as const;
 }
 

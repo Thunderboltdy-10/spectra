@@ -13,27 +13,31 @@ export type NativeReferenceInsertion = {
 
 export function createNativeReferenceInsertion(hostWorkType: ArtifactTypeKey, reference: ReferenceNode, origin: ReferenceInsertionOrigin): NativeReferenceInsertion {
   const contract = getWorkReferenceContract(hostWorkType);
-  const anchorKind = reference.target.anchor?.kind ?? getWorkReferenceContract(reference.target.workType).targets[0]?.kind ?? "work";
-  if (!validateReferenceView(reference.target.workType, anchorKind, reference.target.view)) throw new Error("REFERENCE_VIEW_UNSUPPORTED");
-  const common = {
-    id: reference.id, protocolVersion: reference.protocolVersion, workId: reference.target.workId,
-    workType: reference.target.workType, anchor: reference.target.anchor, view: reference.target.view,
-    state: reference.state, versionPolicy: reference.versionPolicy, displayPreferences: reference.displayPreferences,
-  };
+  const view = typeof reference.displayPreferences?.view === "string"
+    ? reference.displayPreferences.view
+    : undefined;
+  const anchorKind = typeof reference.displayPreferences?.anchorKind === "string"
+    ? reference.displayPreferences.anchorKind
+    : "work:root";
+  const sourceType = reference.displayPreferences?.sourceWorkType;
+  if (typeof sourceType === "string" && view && !validateReferenceView(sourceType as ArtifactTypeKey, anchorKind, view)) {
+    throw new Error("REFERENCE_VIEW_UNSUPPORTED");
+  }
+  const common = { ...reference };
   const payload: Record<string, unknown> = contract.insertion === "tiptap_node"
     ? { type: "spectraReference", attrs: common }
     : contract.insertion === "slide_element"
-      ? { type: "reference", elementId: reference.id, reference: common }
+      ? { type: "reference", elementId: reference.embedId, reference: common }
       : contract.insertion === "board_object"
-        ? { kind: "reference", objectId: reference.id, reference: common }
+        ? { kind: "reference", objectId: reference.embedId, reference: common }
         : contract.insertion === "sheet_object"
-          ? { kind: "reference", objectId: reference.id, reference: common }
+          ? { kind: "reference", objectId: reference.embedId, reference: common }
           : contract.insertion === "detail_block"
-            ? { kind: "reference", blockId: reference.id, reference: common }
+            ? { kind: "reference", blockId: reference.embedId, reference: common }
             : contract.insertion === "calendar_reference"
               ? { kind: "calendar_reference", reference: common }
-              : { kind: "source_reference", sourceElementId: reference.id, reference: common };
-  return { hostWorkType, primitive: contract.insertion, origin, referenceId: reference.id, payload };
+              : { kind: "source_reference", sourceElementId: reference.embedId, reference: common };
+  return { hostWorkType, primitive: contract.insertion, origin, referenceId: reference.embedId, payload };
 }
 
 export function parseSpectraWorkUrl(value: string) {

@@ -20,6 +20,7 @@ import {
   type PythonRuntimeEvent,
 } from "../code/python-runtime";
 import { pythonChartToHtml } from "../code/python-chart";
+import { publishedRuntimeSourceUrl } from "../code/published-runtime-source";
 import { SandboxedArtifactRuntime } from "./sandboxed-artifact-runtime";
 
 type RuntimeBuild = {
@@ -29,7 +30,7 @@ type RuntimeBuild = {
   payloadHash?: string;
   sdkVersion: string;
   payloadBytes?: number;
-  storageUrl: string;
+  storageUrl?: string;
 };
 
 const MAX_PAYLOAD_BYTES = 14_000_000;
@@ -78,8 +79,13 @@ async function verifyEmbeddedAssets(
   }
 }
 
-async function loadBuild(build: RuntimeBuild, signal: AbortSignal) {
-  const response = await fetch(build.storageUrl, {
+async function loadBuild(
+  build: RuntimeBuild,
+  signal: AbortSignal,
+  embedId?: string,
+) {
+  const sourceUrl = publishedRuntimeSourceUrl(build, embedId);
+  const response = await fetch(sourceUrl, {
     cache: "no-store",
     signal,
     credentials: "omit",
@@ -124,12 +130,14 @@ async function loadBuild(build: RuntimeBuild, signal: AbortSignal) {
 export function PublishedCodeRuntime({
   title,
   build,
+  embedId,
   compact,
   resources,
   allowInteraction = true,
 }: {
   title: string;
   build: RuntimeBuild;
+  embedId?: string;
   compact: boolean;
   resources?: Record<string, unknown>;
   allowInteraction?: boolean;
@@ -161,7 +169,7 @@ export function PublishedCodeRuntime({
     setPythonOutput([]);
     setPythonPreview(null);
     const controller = new AbortController();
-    void loadBuild(build, controller.signal)
+    void loadBuild(build, controller.signal, embedId)
       .then((value) => {
         if (generation !== generationRef.current) return;
         setPayload(value);
@@ -178,7 +186,7 @@ export function PublishedCodeRuntime({
         setLoadState("error");
       });
     return () => controller.abort();
-  }, [build]);
+  }, [build, embedId]);
 
   useEffect(() => reload(), [reload]);
   useEffect(() => () => workerRef.current?.cancel(), []);

@@ -1,6 +1,7 @@
 import { z } from "zod";
-import type { WorkType } from "../work/registry";
+import type { WorkCapability, WorkType } from "../work/registry";
 import type { CapabilityDefinition } from "./types";
+import type { ArtifactEmbedInteraction } from "../../../../shared/artifact-embed";
 
 const none = z.null();
 
@@ -16,7 +17,8 @@ type StudioSpec = {
   type: StudioType;
   localId: string;
   description: string;
-  requires?: "edit" | "submit" | "present";
+  requires?: WorkCapability;
+  embed?: readonly ArtifactEmbedInteraction[];
   exposed?: boolean;
 };
 
@@ -32,12 +34,47 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   },
   { type: "quiz", localId: "cohort", description: "Show cohort responses." },
   { type: "quiz", localId: "attempts", description: "Show your attempts." },
+  {
+    type: "quiz",
+    localId: "attempt.answer",
+    description: "Answer the current quiz question.",
+    requires: "attempt",
+    embed: ["interact", "edit"],
+  },
+  {
+    type: "quiz",
+    localId: "attempt.navigate",
+    description: "Move between quiz questions.",
+    requires: "attempt",
+    embed: ["interact", "edit"],
+  },
+  {
+    type: "quiz",
+    localId: "attempt.submit",
+    description: "Submit this quiz attempt.",
+    requires: "submit",
+    embed: ["interact", "edit"],
+  },
   { type: "quiz", localId: "import", description: "Import questions.", requires: "edit" },
   { type: "quiz", localId: "unpublish", description: "Stop new attempts on this quiz.", requires: "edit" },
 
   { type: "flashcard_deck", localId: "add-card", description: "Add a card to this deck.", requires: "edit" },
   { type: "flashcard_deck", localId: "rail", description: "Show or hide the card list." },
   { type: "flashcard_deck", localId: "browse", description: "Read the deck." },
+  {
+    type: "flashcard_deck",
+    localId: "study.reveal",
+    description: "Reveal the back of the current card.",
+    requires: "interact",
+    embed: ["interact", "edit"],
+  },
+  {
+    type: "flashcard_deck",
+    localId: "study.navigate",
+    description: "Move between flashcards.",
+    requires: "interact",
+    embed: ["interact", "edit"],
+  },
   {
     type: "flashcard_deck",
     localId: "progress",
@@ -74,6 +111,13 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   { type: "flashcard_deck", localId: "print", description: "Print or save this deck as PDF." },
 
   { type: "code", localId: "controls", description: "Edit the parameters a reader can change." },
+  {
+    type: "code",
+    localId: "runtime.interact",
+    description: "Interact with the published runtime.",
+    requires: "execute",
+    embed: ["interact", "edit"],
+  },
   { type: "code", localId: "files", description: "Show or hide the file list." },
   { type: "code", localId: "find", description: "Find in the current file." },
   { type: "code", localId: "format", description: "Format the current file.", requires: "edit" },
@@ -188,6 +232,7 @@ export const STUDIO_CAPABILITIES: readonly CapabilityDefinition[] =
         riskClass: "safe",
       },
       choreography: { target: "workbar-command", region: id },
+      ...(spec.embed ? { embed: { levels: spec.embed } } : {}),
       ...(spec.requires ? { requires: spec.requires } : {}),
     } satisfies CapabilityDefinition;
   });

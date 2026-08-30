@@ -54,6 +54,7 @@ import {
 import { CommandBar } from "./command-bar";
 import { ResultCardStack } from "./result-card";
 import { workTypeMeta } from "./artifact-card";
+import { ArtifactEmbedList } from "./artifact-embed-host";
 import { publicSpectraFailureText } from "../runs/live-dock";
 
 function operationLabel(
@@ -1689,6 +1690,7 @@ function LiveContentReveal({
 
 export function ConversationSurface({
   detail,
+  threadId,
   loading = false,
   empty,
   composer,
@@ -1705,6 +1707,7 @@ export function ConversationSurface({
   onRetryRun,
 }: {
   detail: SpectraThreadDetail | null;
+  threadId?: string;
   loading?: boolean;
   empty?: ReactNode;
   composer?: ReactNode;
@@ -1956,9 +1959,7 @@ export function ConversationSurface({
                             <BatchedChoiceBlock
                               questions={choices.questions}
                               selectedTitle={choices.selectedTitle}
-                              onSubmit={(answer) =>
-                                saveAnswer("batch", answer)
-                              }
+                              onSubmit={(answer) => saveAnswer("batch", answer)}
                             />
                           );
                         }
@@ -2172,6 +2173,14 @@ export function ConversationSurface({
                   </div>
                 ))
             : null}
+          {threadId ? (
+            <ArtifactEmbedList
+              containerType="thread"
+              containerId={threadId}
+              className="mb-8 space-y-3"
+              onOpenSource={onOpenArtifact}
+            />
+          ) : null}
           {activeCards?.some((card) =>
             card.actions.some(
               (action) =>
@@ -2334,6 +2343,7 @@ export function ThreadConversation({
   return (
     <ConversationSurface
       detail={detail}
+      threadId={threadId}
       loading={loading}
       compact={compact}
       liveExchange={parentLiveExchange ?? runEngine.liveExchange}

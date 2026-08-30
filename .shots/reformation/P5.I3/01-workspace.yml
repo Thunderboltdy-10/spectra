@@ -1,0 +1,736 @@
+- generic [active] [ref=f2e1]:
+  - link "Skip to content" [ref=f2e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - complementary "Spectra navigation" [ref=f2e5]:
+        - generic [ref=f2e6]:
+          - button "Collapse sidebar" [ref=f2e7] [cursor=pointer]
+          - link "Spectra home" [ref=f2e11] [cursor=pointer]:
+            - /url: /workspace?home=1
+            - img "Spectra" [ref=f2e12]
+            - generic [ref=f2e21]: spectra
+        - generic [ref=f2e22]:
+          - textbox "⌘ K" [ref=f2e23]:
+            - /placeholder: Search
+          - generic: ⌘ K
+        - navigation "Main destinations" [ref=f2e24]:
+          - link "Chat" [ref=f2e25] [cursor=pointer]:
+            - /url: /chat
+          - link "Workspace" [ref=f2e29] [cursor=pointer]:
+            - /url: /workspace?home=1
+          - link "Library" [ref=f2e36] [cursor=pointer]:
+            - /url: /library
+          - link "Calendar" [ref=f2e41] [cursor=pointer]:
+            - /url: /calendar
+          - link "Agents" [ref=f2e47] [cursor=pointer]:
+            - /url: /agents
+          - link "School" [ref=f2e52] [cursor=pointer]:
+            - /url: /school
+          - link "Analytics" [ref=f2e59] [cursor=pointer]:
+            - /url: /analytics
+          - link "Admin" [ref=f2e232] [cursor=pointer]:
+            - /url: /admin
+          - link "Super Admin" [ref=f2e238] [cursor=pointer]:
+            - /url: /superadmin
+        - link "New chat" [ref=f2e63] [cursor=pointer]:
+          - /url: /chat
+        - generic [ref=f2e243]:
+          - heading "Recents" [level=2] [ref=f2e244]
+          - generic [ref=f2e245]:
+            - link "Update P4V1 Pendulum Lab 1d ago" [ref=f2e246] [cursor=pointer]:
+              - /url: /chat?threadId=qs73562m11mb7d6adjxapnfj4h8dab0f
+              - generic [ref=f2e247]: Update P4V1 Pendulum Lab
+              - generic [ref=f2e248]: 1d ago
+            - link "P4V1 Finalizer Probe 1d ago" [ref=f2e249] [cursor=pointer]:
+              - /url: /chat?threadId=qs7e28g7rnd4w7c7vpt0xbe0w98daegj
+              - generic [ref=f2e250]: P4V1 Finalizer Probe
+              - generic [ref=f2e251]: 1d ago
+            - link "Pendulum Marker Append 1d ago" [ref=f2e252] [cursor=pointer]:
+              - /url: /chat?threadId=qs7e0kd71fmxx0x5chdfefnws98day3r
+              - generic [ref=f2e253]: Pendulum Marker Append
+              - generic [ref=f2e254]: 1d ago
+            - link "Archive Pendulum Guide 1d ago" [ref=f2e255] [cursor=pointer]:
+              - /url: /chat?threadId=qs72ywmtjsfc5725h5rd82nkwd8daw71
+              - generic [ref=f2e256]: Archive Pendulum Guide
+              - generic [ref=f2e257]: 1d ago
+            - link "Pendulum Draft Marker 1d ago" [ref=f2e258] [cursor=pointer]:
+              - /url: /chat?threadId=qs7fsm80nyj0cygrx7eh9k9zf58daj52
+              - generic [ref=f2e259]: Pendulum Draft Marker
+              - generic [ref=f2e260]: 1d ago
+            - link "P4V1 Pendulum Method Guide 1d ago" [ref=f2e261] [cursor=pointer]:
+              - /url: /chat?threadId=qs7bvp9v2bx4k23mxb4f77sx598dbzqg
+              - generic [ref=f2e262]: P4V1 Pendulum Method Guide
+              - generic [ref=f2e263]: 1d ago
+            - link "New conversation 1d ago" [ref=f2e264] [cursor=pointer]:
+              - /url: /chat?threadId=qs7b5mefgrrckrd6gbs4f2rh5d8da2yn
+              - generic [ref=f2e265]: New conversation
+              - generic [ref=f2e266]: 1d ago
+            - link "P4V1 Experimental Design Deck 1d ago" [ref=f2e267] [cursor=pointer]:
+              - /url: /chat?threadId=qs7awh7rfrn5bexwenvdq7abxn8daak2
+              - generic [ref=f2e268]: P4V1 Experimental Design Deck
+              - generic [ref=f2e269]: 1d ago
+            - link "New conversation 1d ago" [ref=f2e270] [cursor=pointer]:
+              - /url: /chat?threadId=qs7b5f0bzv17r0ca72qp6xm3xn8db8ff
+              - generic [ref=f2e271]: New conversation
+              - generic [ref=f2e272]: 1d ago
+            - link "New conversation 1d ago" [ref=f2e273] [cursor=pointer]:
+              - /url: /chat?threadId=qs7a60y6gyh5j2nhz1vshrzjmh8dapp7
+              - generic [ref=f2e274]: New conversation
+              - generic [ref=f2e275]: 1d ago
+        - generic [ref=f2e67]:
+          - generic [ref=f2e68]:
+            - button "Share current page" [ref=f2e69] [cursor=pointer]
+            - button "Notifications, 1 unread" [ref=f2e276] [cursor=pointer]:
+              - generic [ref=f2e277]: "1"
+            - button "Settings" [ref=f2e80] [cursor=pointer]
+          - button "Manage account" [ref=f2e278] [cursor=pointer]:
+            - generic [ref=f2e279]: PM
+            - generic [ref=f2e280]:
+              - strong [ref=f2e281]: P MD
+              - generic [ref=f2e282]: school admin
+      - main [ref=f2e84]:
+        - generic [ref=f2e285]:
+          - generic [ref=f2e286]:
+            - button "Go back" [disabled]
+            - button "Go forward" [disabled]
+          - generic [ref=f2e287]:
+            - button "Home Close Home" [ref=f2e288] [cursor=pointer]:
+              - generic [ref=f2e291]: Home
+              - button "Close Home" [ref=f2e292]
+            - button "Open a new home view" [ref=f2e296] [cursor=pointer]
+        - generic [ref=f2e87]:
+          - button "Import a Spectra workspace manifest" [ref=f2e88]
+          - generic [ref=f2e91]:
+            - generic [ref=f2e94]:
+              - generic [ref=f2e102]:
+                - heading "Workspace" [level=1] [ref=f2e103]
+                - paragraph [ref=f2e104]: 5 workspaces, and everything filed across them.
+              - main [ref=f2e105]:
+                - generic [ref=f2e106]:
+                  - button [ref=f2e107]
+                  - generic [ref=f2e108]:
+                    - button "Hide the folder rail" [ref=f2e109] [cursor=pointer]
+                    - navigation "View" [ref=f2e113]:
+                      - button "List" [ref=f2e114] [cursor=pointer]
+                      - button "Board" [pressed] [ref=f2e117] [cursor=pointer]
+                    - navigation "Location"
+                    - textbox "Search Library" [ref=f2e124]
+                    - button "Filter by type" [ref=f2e125] [cursor=pointer]: All types
+                    - button "Group columns by" [ref=f2e298] [cursor=pointer]: Grouped by workspace
+                    - button "New" [ref=f2e131] [cursor=pointer]
+                    - button "Select objects" [ref=f2e134] [cursor=pointer]
+                  - generic [ref=f2e139]:
+                    - navigation "Library folders" [ref=f2e140]:
+                      - button "Library" [ref=f2e141] [cursor=pointer]
+                      - tree "Top level" [ref=f2e301]:
+                        - treeitem "Expand General General" [ref=f2e302]:
+                          - generic [ref=f2e303]:
+                            - button "Expand General" [ref=f2e304] [cursor=pointer]
+                            - generic [ref=f2e312]: General
+                        - treeitem "Expand Spectra Launch Studio Spectra Launch Studio" [ref=f2e313]:
+                          - generic [ref=f2e314]:
+                            - button "Expand Spectra Launch Studio" [ref=f2e315] [cursor=pointer]
+                            - generic [ref=f2e323]: Spectra Launch Studio
+                        - treeitem "Expand Semester Two Semester Two" [ref=f2e324]:
+                          - generic [ref=f2e325]:
+                            - button "Expand Semester Two" [ref=f2e326] [cursor=pointer]
+                            - generic [ref=f2e332]: Semester Two
+                        - treeitem "Expand Start here Start here" [ref=f2e333]:
+                          - generic [ref=f2e334]:
+                            - button "Expand Start here" [ref=f2e335] [cursor=pointer]
+                            - generic [ref=f2e343]: Start here
+                        - treeitem "ManageBac class" [ref=f2e344]
+                        - treeitem "Expand Physics Physics" [ref=f2e352]:
+                          - generic [ref=f2e353]:
+                            - button "Expand Physics" [ref=f2e354] [cursor=pointer]
+                            - generic [ref=f2e360]: Physics
+                        - treeitem "Expand N4 controlled fixture N4 controlled fixture" [ref=f2e361]:
+                          - generic [ref=f2e362]:
+                            - button "Expand N4 controlled fixture" [ref=f2e363] [cursor=pointer]
+                            - generic [ref=f2e369]: N4 controlled fixture
+                        - treeitem "Expand .tmp-n5-office-fixture .tmp-n5-office-fixture" [ref=f2e370]:
+                          - generic [ref=f2e371]:
+                            - button "Expand .tmp-n5-office-fixture" [ref=f2e372] [cursor=pointer]
+                            - generic [ref=f2e378]: .tmp-n5-office-fixture
+                        - treeitem "Expand Physics Physics" [ref=f2e379]:
+                          - generic [ref=f2e380]:
+                            - button "Expand Physics" [ref=f2e381] [cursor=pointer]
+                            - generic [ref=f2e387]: Physics
+                        - treeitem "Expand .tmp-n4-mount .tmp-n4-mount" [ref=f2e388]:
+                          - generic [ref=f2e389]:
+                            - button "Expand .tmp-n4-mount" [ref=f2e390] [cursor=pointer]
+                            - generic [ref=f2e396]: .tmp-n4-mount
+                        - treeitem "N8 AI verification scratch" [ref=f2e397]
+                        - treeitem "Expand hi hi" [ref=f2e405]:
+                          - generic [ref=f2e406]:
+                            - button "Expand hi" [ref=f2e407] [cursor=pointer]
+                            - generic [ref=f2e413]: hi
+                        - treeitem "Expand Physics Physics" [ref=f2e414]:
+                          - generic [ref=f2e415]:
+                            - button "Expand Physics" [ref=f2e416] [cursor=pointer]
+                            - generic [ref=f2e422]: Physics
+                        - treeitem "spectra-p1v3-fixture" [ref=f2e423]
+                        - treeitem "Expand spectra-p1v3-rerun-fixture spectra-p1v3-rerun-fixture" [ref=f2e429]:
+                          - generic [ref=f2e430]:
+                            - button "Expand spectra-p1v3-rerun-fixture" [ref=f2e431] [cursor=pointer]
+                            - generic [ref=f2e437]: spectra-p1v3-rerun-fixture
+                        - treeitem "Expand spectra-p2v1-reexec spectra-p2v1-reexec" [ref=f2e438]:
+                          - generic [ref=f2e439]:
+                            - button "Expand spectra-p2v1-reexec" [ref=f2e440] [cursor=pointer]
+                            - generic [ref=f2e446]: spectra-p2v1-reexec
+                        - treeitem "Expand spectra-p2v2-schoolwork spectra-p2v2-schoolwork" [ref=f2e447]:
+                          - generic [ref=f2e448]:
+                            - button "Expand spectra-p2v2-schoolwork" [ref=f2e449] [cursor=pointer]
+                            - generic [ref=f2e455]: spectra-p2v2-schoolwork
+                      - generic [ref=f2e152]: Quick views
+                      - generic [ref=f2e153]:
+                        - button "Recent" [ref=f2e154] [cursor=pointer]
+                        - button "Favorites" [ref=f2e158] [cursor=pointer]
+                        - button "Shared" [ref=f2e161] [cursor=pointer]
+                        - button "Trash" [ref=f2e167] [cursor=pointer]
+                    - generic [ref=f2e457]:
+                      - generic [ref=f2e458]:
+                        - generic [ref=f2e459]:
+                          - button "General" [ref=f2e461] [cursor=pointer]
+                          - generic "287 in total" [ref=f2e462]: "287"
+                        - generic [ref=f2e463]:
+                          - article [ref=f2e464] [cursor=pointer]:
+                            - generic [ref=f2e469]:
+                              - generic [ref=f2e470]: Thread
+                              - button "Update P4V1 Pendulum Lab" [ref=f2e472]
+                              - paragraph [ref=f2e473]: Add a concise pendulum principle to the draft
+                              - generic [ref=f2e474]: 1d ago
+                          - article [ref=f2e476] [cursor=pointer]:
+                            - generic [ref=f2e481]:
+                              - generic [ref=f2e482]: Thread
+                              - button "P4V1 Finalizer Probe" [ref=f2e484]
+                              - paragraph [ref=f2e485]: Created a new document containing only the requested sentence.
+                              - generic [ref=f2e486]: 1d ago
+                          - article [ref=f2e488] [cursor=pointer]:
+                            - generic [ref=f2e494]:
+                              - generic [ref=f2e495]: Document
+                              - button "P4V1 Finalizer Probe" [ref=f2e497]
+                              - paragraph [ref=f2e498]: A single-sentence finalizer probe.
+                              - generic [ref=f2e499]: 1d ago
+                          - article [ref=f2e501] [cursor=pointer]:
+                            - generic [ref=f2e506]:
+                              - generic [ref=f2e507]: Thread
+                              - button "Pendulum Marker Append" [ref=f2e509]
+                              - paragraph [ref=f2e510]: Appending the requested marker paragraph to P4V1 Pendulum Lab Draft.
+                              - generic [ref=f2e511]: 1d ago
+                          - article [ref=f2e513] [cursor=pointer]:
+                            - generic [ref=f2e518]:
+                              - generic [ref=f2e519]: Thread
+                              - button "Archive Pendulum Guide" [ref=f2e521]
+                              - paragraph [ref=f2e522]: The document will be kept and nothing will be archived.
+                              - generic [ref=f2e523]: 1d ago
+                          - article [ref=f2e525] [cursor=pointer]:
+                            - generic [ref=f2e530]:
+                              - generic [ref=f2e531]: Thread
+                              - button "Pendulum Draft Marker" [ref=f2e533]
+                              - paragraph [ref=f2e534]: Appending the requested marker paragraph to P4V1 Pendulum Lab Draft only.
+                              - generic [ref=f2e535]: 1d ago
+                          - article [ref=f2e537] [cursor=pointer]:
+                            - generic [ref=f2e542]:
+                              - generic [ref=f2e543]: Thread
+                              - button "P4V1 Pendulum Method Guide" [ref=f2e545]
+                              - paragraph [ref=f2e546]: Created a teacher-facing structured guide for measuring how pendulum string length affects period.
+                              - generic [ref=f2e547]: 1d ago
+                          - article [ref=f2e549] [cursor=pointer]:
+                            - generic [ref=f2e555]:
+                              - generic [ref=f2e556]: Document
+                              - button "P4V1 Pendulum Method Guide V5" [ref=f2e558]
+                              - paragraph [ref=f2e559]: A structured teacher guide for a fair pendulum investigation, covering the aim, apparatus, safety, method, recording, analysis, uncertainty, and conclusion.
+                              - generic [ref=f2e560]: 1d ago
+                          - article [ref=f2e562] [cursor=pointer]:
+                            - generic [ref=f2e567]:
+                              - generic [ref=f2e568]: Thread
+                              - button "New conversation" [ref=f2e570]
+                              - paragraph
+                              - generic [ref=f2e571]: 1d ago
+                          - article [ref=f2e573] [cursor=pointer]:
+                            - generic [ref=f2e578]:
+                              - generic [ref=f2e579]: Thread
+                              - button "P4V1 Experimental Design Deck" [ref=f2e581]
+                              - paragraph [ref=f2e582]: Built P4V1 Experimental Design Deck V3 and applied the related workspace changes.
+                              - generic [ref=f2e583]: 1d ago
+                          - article [ref=f2e585] [cursor=pointer]:
+                            - generic [ref=f2e591]:
+                              - generic [ref=f2e592]: Presentation
+                              - button "P4V1 Experimental Design Deck V3" [ref=f2e594]
+                              - paragraph [ref=f2e595]: A 12-slide student-facing visual guide to designing, running, recording, analysing, and concluding a fair pendulum-period investigation.
+                              - generic [ref=f2e596]: 1d ago
+                          - article [ref=f2e598] [cursor=pointer]:
+                            - generic [ref=f2e603]:
+                              - generic [ref=f2e604]: Thread
+                              - button "New conversation" [ref=f2e606]
+                              - paragraph
+                              - generic [ref=f2e607]: 1d ago
+                          - article [ref=f2e609] [cursor=pointer]:
+                            - generic [ref=f2e614]:
+                              - generic [ref=f2e615]: Thread
+                              - button "New conversation" [ref=f2e617]
+                              - paragraph
+                              - generic [ref=f2e618]: 1d ago
+                          - article [ref=f2e620] [cursor=pointer]:
+                            - generic [ref=f2e625]:
+                              - generic [ref=f2e626]: Thread
+                              - button "Pong Reply" [ref=f2e628]
+                              - paragraph [ref=f2e629]: Provided the requested one-word response without changing any files or settings.
+                              - generic [ref=f2e630]: 1d ago
+                          - article [ref=f2e632] [cursor=pointer]:
+                            - generic [ref=f2e637]:
+                              - generic [ref=f2e638]: Thread
+                              - button "New conversation" [ref=f2e640]
+                              - paragraph [ref=f2e641]: Rewrote only the introduction in the General copy of P4V1 Pendulum Method Guide.
+                              - generic [ref=f2e642]: 1d ago
+                          - article [ref=f2e644] [cursor=pointer]:
+                            - generic [ref=f2e649]:
+                              - generic [ref=f2e650]: Thread
+                              - button "New conversation" [ref=f2e652]
+                              - paragraph [ref=f2e653]: Document suggestions is staged to be turned off in place; no files were changed and no different page was opened.
+                              - generic [ref=f2e654]: 1d ago
+                          - article [ref=f2e656] [cursor=pointer]:
+                            - generic [ref=f2e661]:
+                              - generic [ref=f2e662]: Thread
+                              - button "Append Lifecycle Marker" [ref=f2e664]
+                              - paragraph [ref=f2e665]: The exact marker sentence was staged as a new final paragraph in P4V1 Lifecycle Proof only.
+                              - generic [ref=f2e666]: 1d ago
+                          - article [ref=f2e668] [cursor=pointer]:
+                            - generic [ref=f2e673]:
+                              - generic [ref=f2e674]: Thread
+                              - button "One-Word Acknowledgment" [ref=f2e676]
+                              - paragraph [ref=f2e677]: Provided the requested one-word response.
+                              - generic [ref=f2e678]: 1d ago
+                          - article [ref=f2e680] [cursor=pointer]:
+                            - generic [ref=f2e685]:
+                              - generic [ref=f2e686]: Thread
+                              - button "Acknowledgment Reply" [ref=f2e688]
+                              - paragraph [ref=f2e689]: Provided the requested acknowledgment.
+                              - generic [ref=f2e690]: 1d ago
+                          - article [ref=f2e692] [cursor=pointer]:
+                            - generic [ref=f2e697]:
+                              - generic [ref=f2e698]: Thread
+                              - button "Ping Response" [ref=f2e700]
+                              - paragraph [ref=f2e701]: Provided the requested one-word response.
+                              - generic [ref=f2e702]: 1d ago
+                        - button "New here" [ref=f2e705] [cursor=pointer]:
+                          - generic [ref=f2e706]: +
+                          - text: New here
+                      - generic [ref=f2e707]:
+                        - generic [ref=f2e708]:
+                          - button "M4 QA — Artifact Rebuild" [ref=f2e710] [cursor=pointer]
+                          - generic "14 in total" [ref=f2e711]: "14"
+                        - generic [ref=f2e712]:
+                          - article [ref=f2e713] [cursor=pointer]:
+                            - generic [ref=f2e718]:
+                              - generic [ref=f2e719]: Thread
+                              - button "New conversation" [ref=f2e721]
+                              - paragraph [ref=f2e722]: Rewriting only the introduction of P4V1 Pendulum Method Guide.
+                              - generic [ref=f2e723]: 1d ago
+                          - article [ref=f2e725] [cursor=pointer]:
+                            - generic [ref=f2e730]:
+                              - generic [ref=f2e731]: Sheets
+                              - button "Titration results — class data" [ref=f2e733]
+                              - paragraph [ref=f2e734]: Ten students, three trials, live formulas, frozen headers and a named range.
+                              - generic [ref=f2e735]: 2d ago
+                          - article [ref=f2e737] [cursor=pointer]:
+                            - generic [ref=f2e742]:
+                              - generic [ref=f2e743]: Thread
+                              - button "Workspace Artifact Types" [ref=f2e745]
+                              - paragraph [ref=f2e746]: The workspace is currently empty, while the broader catalog contains several artifact types.
+                              - generic [ref=f2e747]: 4d ago
+                          - article [ref=f2e749] [cursor=pointer]:
+                            - generic [ref=f2e755]:
+                              - generic [ref=f2e756]: Document
+                              - button "Photosynthesis — Unit 4 study notes" [ref=f2e758]
+                              - paragraph [ref=f2e759]: Structured revision notes with headings, a worked practical and an equation.
+                              - generic [ref=f2e760]: 19 Aug
+                          - article [ref=f2e762] [cursor=pointer]:
+                            - generic [ref=f2e767]:
+                              - generic [ref=f2e768]: Thread
+                              - button "Compensation Point" [ref=f2e770]
+                              - paragraph [ref=f2e771]: Answered the definition of the compensation point in photosynthesis.
+                              - generic [ref=f2e772]: 19 Aug
+                          - article [ref=f2e774] [cursor=pointer]:
+                            - generic [ref=f2e779]:
+                              - generic [ref=f2e780]: Thread
+                              - button "Photosynthesis Limiting Factors" [ref=f2e782]
+                              - paragraph [ref=f2e783]: A detailed greenhouse-based explanation shows how the three limiting factors change and interact from morning to afternoon.
+                              - generic [ref=f2e784]: 19 Aug
+                          - article [ref=f2e786] [cursor=pointer]:
+                            - generic [ref=f2e792]:
+                              - generic [ref=f2e793]: Quiz
+                              - button "Photosynthesis — end of unit quiz" [ref=f2e795]
+                              - paragraph [ref=f2e796]: Twelve mixed questions with explanations, timing and shuffled options.
+                              - generic [ref=f2e797]: 17 Aug
+                          - article [ref=f2e799] [cursor=pointer]:
+                            - generic [ref=f2e805]:
+                              - generic [ref=f2e806]: Presentation
+                              - button "Rates of reaction — Lesson 3" [ref=f2e808]
+                              - paragraph [ref=f2e809]: Eight-slide lesson deck with speaker notes and a botanical theme.
+                              - generic [ref=f2e810]: 16 Aug
+                          - article [ref=f2e812] [cursor=pointer]:
+                            - generic [ref=f2e818]:
+                              - generic [ref=f2e819]: Planner task
+                              - button "Chemistry IA — analysis and evaluation" [ref=f2e821]
+                              - paragraph [ref=f2e822]: Planner task artifact with status and links.
+                              - generic [ref=f2e823]: 16 Aug
+                          - article [ref=f2e825] [cursor=pointer]:
+                            - generic [ref=f2e831]:
+                              - generic [ref=f2e832]: Agent
+                              - button "IB Biology HL coach" [ref=f2e834]
+                              - paragraph [ref=f2e835]: A configured agent with scope, instructions, three skills and routing examples.
+                              - generic [ref=f2e836]: 16 Aug
+                          - article [ref=f2e838] [cursor=pointer]:
+                            - generic [ref=f2e845]:
+                              - generic [ref=f2e846]: Whiteboard
+                              - button "Unit 4 concept map" [ref=f2e848]
+                              - paragraph [ref=f2e849]: Two pages, three layers, a frame, sticky notes and labelled connectors.
+                              - generic [ref=f2e850]: 16 Aug
+                          - article [ref=f2e852] [cursor=pointer]:
+                            - generic [ref=f2e859]:
+                              - generic [ref=f2e860]: Code
+                              - button "Projectile motion visualiser" [ref=f2e862]
+                              - paragraph [ref=f2e863]: Three files with a live canvas visualisation and slider controls.
+                              - generic [ref=f2e864]: 16 Aug
+                          - article [ref=f2e866] [cursor=pointer]:
+                            - generic [ref=f2e872]:
+                              - generic [ref=f2e873]: Planner task
+                              - button "Finish Chemistry IA first draft" [ref=f2e875]
+                              - paragraph [ref=f2e876]: A high-priority task with five subtasks, a reminder and a real due date.
+                              - generic [ref=f2e877]: 16 Aug
+                          - article [ref=f2e879] [cursor=pointer]:
+                            - generic [ref=f2e884]:
+                              - generic [ref=f2e885]: Flashcard deck
+                              - button "Biology HL — Photosynthesis recall deck" [ref=f2e887]
+                              - paragraph [ref=f2e888]: Twenty-eight spaced-repetition cards with confidence tracking.
+                              - generic [ref=f2e889]: 16 Aug
+                        - button "New here" [ref=f2e892] [cursor=pointer]:
+                          - generic [ref=f2e893]: +
+                          - text: New here
+                      - generic [ref=f2e894]:
+                        - generic [ref=f2e895]:
+                          - button "ManageBac class" [ref=f2e897] [cursor=pointer]
+                          - generic "0 in total" [ref=f2e898]: "0"
+                        - paragraph [ref=f2e900]: Empty
+                        - button "New here" [ref=f2e902] [cursor=pointer]:
+                          - generic [ref=f2e903]: +
+                          - text: New here
+                      - generic [ref=f2e904]:
+                        - generic [ref=f2e905]:
+                          - button "Spectra Launch Studio" [ref=f2e907] [cursor=pointer]
+                          - generic "262 in total" [ref=f2e908]: "262"
+                        - generic [ref=f2e909]:
+                          - article [ref=f2e910] [cursor=pointer]:
+                            - generic [ref=f2e915]:
+                              - generic [ref=f2e916]: Thread
+                              - button "M2 Dock Check" [ref=f2e918]
+                              - paragraph [ref=f2e919]: Answered the question about the main cause of Earth's ocean tides.
+                              - generic [ref=f2e920]: 13 Aug
+                          - article [ref=f2e922] [cursor=pointer]:
+                            - generic [ref=f2e927]:
+                              - generic [ref=f2e928]: Thread
+                              - button "New conversation" [ref=f2e930]
+                              - paragraph [ref=f2e931]: Filled the empty center rectangle with the eight-lab AI model comparison table.
+                              - generic [ref=f2e932]: 13 Aug
+                          - article [ref=f2e934] [cursor=pointer]:
+                            - generic [ref=f2e939]:
+                              - generic [ref=f2e940]: Thread
+                              - button "Simple Addition" [ref=f2e942]
+                              - paragraph [ref=f2e943]: Answered the user's question about adding 2 and 2.
+                              - generic [ref=f2e944]: 13 Aug
+                          - article [ref=f2e946] [cursor=pointer]:
+                            - generic [ref=f2e951]:
+                              - generic [ref=f2e952]: Thread
+                              - button "Update Latest AI Models" [ref=f2e954]
+                              - paragraph [ref=f2e955]: The existing “M2 verify” sticky note remains unchanged.
+                              - generic [ref=f2e956]: 13 Aug
+                          - article [ref=f2e958] [cursor=pointer]:
+                            - generic [ref=f2e963]:
+                              - generic [ref=f2e964]: Thread
+                              - button "Latest AI Models &" [ref=f2e966]
+                              - paragraph [ref=f2e967]: Corrected the AI model timetable using searched 2026 release evidence, with confirmed entries separated from labs not verified in this search pass.
+                              - generic [ref=f2e968]: 12 Aug
+                          - article [ref=f2e970] [cursor=pointer]:
+                            - generic [ref=f2e975]:
+                              - generic [ref=f2e976]: Thread
+                              - button "Tides Quiz" [ref=f2e978]
+                              - paragraph [ref=f2e979]: Created a two-question formative quiz about the causes of tides and what high tide means.
+                              - generic [ref=f2e980]: 12 Aug
+                          - article [ref=f2e982] [cursor=pointer]:
+                            - generic [ref=f2e987]:
+                              - generic [ref=f2e988]: Thread
+                              - button "Clouds Quiz" [ref=f2e990]
+                              - paragraph [ref=f2e991]: Created a two-question formative quiz for age 10 covering cloud formation and storm clouds.
+                              - generic [ref=f2e992]: 12 Aug
+                          - article [ref=f2e994] [cursor=pointer]:
+                            - generic [ref=f2e999]:
+                              - generic [ref=f2e1000]: Thread
+                              - button "Volcanoes Quiz" [ref=f2e1002]
+                              - paragraph [ref=f2e1003]: Created a two-question formative quiz about volcanoes for age 12.
+                              - generic [ref=f2e1004]: 12 Aug
+                          - article [ref=f2e1006] [cursor=pointer]:
+                            - generic [ref=f2e1011]:
+                              - generic [ref=f2e1012]: Thread
+                              - button "Light Quiz" [ref=f2e1014]
+                              - paragraph [ref=f2e1015]: Renamed the two-question light quiz for age 11 to “Light Basics Quiz.”
+                              - generic [ref=f2e1016]: 12 Aug
+                          - article [ref=f2e1018] [cursor=pointer]:
+                            - generic [ref=f2e1023]:
+                              - generic [ref=f2e1024]: Thread
+                              - button "Sound Quiz" [ref=f2e1026]
+                              - paragraph [ref=f2e1027]: Created a two-question formative quiz about sound for an 11-year-old.
+                              - generic [ref=f2e1028]: 12 Aug
+                          - article [ref=f2e1030] [cursor=pointer]:
+                            - generic [ref=f2e1035]:
+                              - generic [ref=f2e1036]: Thread
+                              - button "Moon Quiz" [ref=f2e1038]
+                              - paragraph [ref=f2e1039]: Created a two-question formative quiz about the Moon for an 11-year-old.
+                              - generic [ref=f2e1040]: 12 Aug
+                          - article [ref=f2e1042] [cursor=pointer]:
+                            - generic [ref=f2e1047]:
+                              - generic [ref=f2e1048]: Thread
+                              - button "Friction Quiz" [ref=f2e1050]
+                              - paragraph [ref=f2e1051]: Created a two-question formative quiz about friction for an 11-year-old.
+                              - generic [ref=f2e1052]: 12 Aug
+                          - article [ref=f2e1054] [cursor=pointer]:
+                            - generic [ref=f2e1059]:
+                              - generic [ref=f2e1060]: Thread
+                              - button "Gravity Quiz" [ref=f2e1062]
+                              - paragraph [ref=f2e1063]: Created a two-question formative gravity quiz for an 11-year-old.
+                              - generic [ref=f2e1064]: 12 Aug
+                          - article [ref=f2e1066] [cursor=pointer]:
+                            - generic [ref=f2e1071]:
+                              - generic [ref=f2e1072]: Thread
+                              - button "Update Water Cycle Quiz" [ref=f2e1074]
+                              - paragraph [ref=f2e1075]: Turning the quiz into a two-question magnets quiz for age 11.
+                              - generic [ref=f2e1076]: 12 Aug
+                          - article [ref=f2e1078] [cursor=pointer]:
+                            - generic [ref=f2e1083]:
+                              - generic [ref=f2e1084]: Thread
+                              - button "Water Cycle Quiz" [ref=f2e1086]
+                              - paragraph [ref=f2e1087]: Created a three-question water-cycle quiz with four options per question and concise explanations for the correct answers.
+                              - generic [ref=f2e1088]: 12 Aug
+                          - article [ref=f2e1090] [cursor=pointer]:
+                            - generic [ref=f2e1095]:
+                              - generic [ref=f2e1096]: Thread
+                              - button "Update Study Physics" [ref=f2e1098]
+                              - paragraph [ref=f2e1099]: Refining the study goal to require four choices and explanations for every quiz question.
+                              - generic [ref=f2e1100]: 12 Aug
+                          - article [ref=f2e1102] [cursor=pointer]:
+                            - generic [ref=f2e1107]:
+                              - generic [ref=f2e1108]: Thread
+                              - button "New conversation" [ref=f2e1110]
+                              - paragraph
+                              - generic [ref=f2e1111]: 12 Aug
+                          - article [ref=f2e1113] [cursor=pointer]:
+                            - generic [ref=f2e1118]:
+                              - generic [ref=f2e1119]: Thread
+                              - button "Retrieval Practice Pitfalls" [ref=f2e1121]
+                              - paragraph [ref=f2e1122]: A practical, source-linked comparison of retrieval-practice design in mathematics and language-learning classrooms.
+                              - generic [ref=f2e1123]: 12 Aug
+                          - article [ref=f2e1125] [cursor=pointer]:
+                            - generic [ref=f2e1130]:
+                              - generic [ref=f2e1131]: Thread
+                              - button "Plate Tectonics Explained" [ref=f2e1133]
+                              - paragraph [ref=f2e1134]: A concise ten-paragraph explanation of how Earth’s tectonic plates move and shape the planet.
+                              - generic [ref=f2e1135]: 12 Aug
+                        - button "New here" [ref=f2e1138] [cursor=pointer]:
+                          - generic [ref=f2e1139]: +
+                          - text: New here
+                      - generic [ref=f2e1140]:
+                        - generic [ref=f2e1141]:
+                          - button "Start here" [ref=f2e1143] [cursor=pointer]
+                          - generic "1 in total" [ref=f2e1144]: "1"
+                        - article [ref=f2e1146] [cursor=pointer]:
+                          - generic [ref=f2e1152]:
+                            - generic [ref=f2e1153]: Document
+                            - button "P3V1-A" [ref=f2e1155]
+                            - paragraph [ref=f2e1156]: Structured writing, notes, and authored resources.
+                            - generic [ref=f2e1157]: 2d ago
+                        - button "New here" [ref=f2e1160] [cursor=pointer]:
+                          - generic [ref=f2e1161]: +
+                          - text: New here
+                      - generic [ref=f2e1162]:
+                        - generic [ref=f2e1163]:
+                          - heading "Top level" [level=3] [ref=f2e1165]
+                          - generic "21 in total" [ref=f2e1166]: "21"
+                        - paragraph [ref=f2e1167]: Filed in the Library, not in a workspace
+                        - generic [ref=f2e1168]:
+                          - article [ref=f2e1169] [cursor=pointer]:
+                            - generic [ref=f2e1175]:
+                              - generic [ref=f2e1176]:
+                                - generic [ref=f2e1177]: Document
+                                - generic [ref=f2e1178]: •
+                                - generic [ref=f2e1179]: Physics
+                              - button "Physics IA 1.docx" [ref=f2e1180]
+                              - paragraph [ref=f2e1181]: 4.62 MB
+                              - generic [ref=f2e1182]: 1d ago
+                          - article [ref=f2e1184] [cursor=pointer]:
+                            - generic [ref=f2e1190]:
+                              - generic [ref=f2e1191]: Document
+                              - button "P4V1 Pendulum Lab Draft" [ref=f2e1193]
+                              - paragraph [ref=f2e1194]: Draft pendulum report used only for P4.V1 targeting verification.
+                              - generic [ref=f2e1195]: 1d ago
+                          - article [ref=f2e1197] [cursor=pointer]:
+                            - generic [ref=f2e1203]:
+                              - generic [ref=f2e1204]: Document
+                              - button "P4V1 Pendulum Lab Final" [ref=f2e1206]
+                              - paragraph [ref=f2e1207]: Final pendulum report used only for P4.V1 targeting verification.
+                              - generic [ref=f2e1208]: 1d ago
+                          - article [ref=f2e1210] [cursor=pointer]:
+                            - generic [ref=f2e1216]:
+                              - generic [ref=f2e1217]: Document
+                              - button "P3V1-B" [ref=f2e1219]
+                              - paragraph [ref=f2e1220]: Structured writing, notes, and authored resources.
+                              - generic [ref=f2e1221]: 2d ago
+                          - article [ref=f2e1223] [cursor=pointer]:
+                            - generic [ref=f2e1229]:
+                              - generic [ref=f2e1230]:
+                                - generic [ref=f2e1231]: Presentation
+                                - generic [ref=f2e1232]: •
+                                - generic [ref=f2e1233]: spectra-p2v2-schoolwork
+                              - button "Geography presentation.pptx" [ref=f2e1234]
+                              - paragraph [ref=f2e1235]: 638 KB
+                              - generic [ref=f2e1236]: 2d ago
+                          - article [ref=f2e1238] [cursor=pointer]:
+                            - generic [ref=f2e1243]:
+                              - generic [ref=f2e1244]:
+                                - generic [ref=f2e1245]: Sheets
+                                - generic [ref=f2e1246]: •
+                                - generic [ref=f2e1247]: spectra-p2v2-schoolwork
+                              - button "Chemistry data.xlsx" [ref=f2e1248]
+                              - paragraph [ref=f2e1249]: 114 KB
+                              - generic [ref=f2e1250]: 2d ago
+                          - article [ref=f2e1252] [cursor=pointer]:
+                            - generic [ref=f2e1258]:
+                              - generic [ref=f2e1259]:
+                                - generic [ref=f2e1260]: Document
+                                - generic [ref=f2e1261]: •
+                                - generic [ref=f2e1262]: spectra-p2v2-schoolwork
+                              - button "Year 12 English essay.docx" [ref=f2e1263]
+                              - paragraph [ref=f2e1264]: 42.3 KB
+                              - generic [ref=f2e1265]: 2d ago
+                          - article [ref=f2e1267] [cursor=pointer]:
+                            - generic [ref=f2e1273]:
+                              - generic [ref=f2e1274]:
+                                - generic [ref=f2e1275]: File
+                                - generic [ref=f2e1276]: •
+                                - generic [ref=f2e1277]: spectra-p2v2-schoolwork
+                              - button "TOK presentation.pptx" [ref=f2e1278]
+                              - paragraph [ref=f2e1279]: 72.7 KB
+                              - generic [ref=f2e1280]: 2d ago
+                          - article [ref=f2e1282] [cursor=pointer]:
+                            - generic [ref=f2e1288]:
+                              - generic [ref=f2e1289]:
+                                - generic [ref=f2e1290]: File
+                                - generic [ref=f2e1291]: •
+                                - generic [ref=f2e1292]: spectra-p2v2-schoolwork
+                              - button "History notes.docx" [ref=f2e1293]
+                              - paragraph [ref=f2e1294]: 9.84 KB
+                              - generic [ref=f2e1295]: 2d ago
+                          - article [ref=f2e1297] [cursor=pointer]:
+                            - generic [ref=f2e1303]:
+                              - generic [ref=f2e1304]:
+                                - generic [ref=f2e1305]: File
+                                - generic [ref=f2e1306]: •
+                                - generic [ref=f2e1307]: spectra-p2v2-schoolwork
+                              - button "Economics spreadsheet.xlsx" [ref=f2e1308]
+                              - paragraph [ref=f2e1309]: 68.9 KB
+                              - generic [ref=f2e1310]: 2d ago
+                          - article [ref=f2e1312] [cursor=pointer]:
+                            - generic [ref=f2e1318]:
+                              - generic [ref=f2e1319]:
+                                - generic [ref=f2e1320]: File
+                                - generic [ref=f2e1321]: •
+                                - generic [ref=f2e1322]: spectra-p2v2-schoolwork
+                              - button "Biology lab report.docx" [ref=f2e1323]
+                              - paragraph [ref=f2e1324]: 15.7 KB
+                              - generic [ref=f2e1325]: 2d ago
+                          - article [ref=f2e1327] [cursor=pointer]:
+                            - generic [ref=f2e1333]:
+                              - generic [ref=f2e1334]:
+                                - generic [ref=f2e1335]: Presentation
+                                - generic [ref=f2e1336]: •
+                                - generic [ref=f2e1337]: spectra-p2v1-reexec
+                              - button "Biology deck.pptx" [ref=f2e1338]
+                              - paragraph [ref=f2e1339]: 638 KB
+                              - generic [ref=f2e1340]: 2d ago
+                          - article [ref=f2e1342] [cursor=pointer]:
+                            - generic [ref=f2e1347]:
+                              - generic [ref=f2e1348]:
+                                - generic [ref=f2e1349]: Sheets
+                                - generic [ref=f2e1350]: •
+                                - generic [ref=f2e1351]: spectra-p2v1-reexec
+                              - button "Lab data.xlsx" [ref=f2e1352]
+                              - paragraph [ref=f2e1353]: 114 KB
+                              - generic [ref=f2e1354]: 2d ago
+                          - article [ref=f2e1356] [cursor=pointer]:
+                            - generic [ref=f2e1362]:
+                              - generic [ref=f2e1363]:
+                                - generic [ref=f2e1364]: Document
+                                - generic [ref=f2e1365]: •
+                                - generic [ref=f2e1366]: spectra-p2v1-reexec
+                              - button "Last-year essay.docx" [ref=f2e1367]
+                              - paragraph [ref=f2e1368]: 42.3 KB
+                              - generic [ref=f2e1369]: 2d ago
+                          - article [ref=f2e1371] [cursor=pointer]:
+                            - generic [ref=f2e1377]:
+                              - generic [ref=f2e1378]:
+                                - generic [ref=f2e1379]: File
+                                - generic [ref=f2e1380]: •
+                                - generic [ref=f2e1381]: spectra-p2v1-reexec
+                              - button "word-com-close-essay.txt" [ref=f2e1382]
+                              - paragraph [ref=f2e1383]: 240 B
+                              - generic [ref=f2e1384]: 2d ago
+                          - article [ref=f2e1386] [cursor=pointer]:
+                            - generic [ref=f2e1392]:
+                              - generic [ref=f2e1393]:
+                                - generic [ref=f2e1394]: File
+                                - generic [ref=f2e1395]: •
+                                - generic [ref=f2e1396]: spectra-p2v1-reexec
+                              - button "word-com-close-essay.ps1" [ref=f2e1397]
+                              - paragraph [ref=f2e1398]: 797 B
+                              - generic [ref=f2e1399]: 2d ago
+                          - article [ref=f2e1401] [cursor=pointer]:
+                            - generic [ref=f2e1407]:
+                              - generic [ref=f2e1408]:
+                                - generic [ref=f2e1409]: File
+                                - generic [ref=f2e1410]: •
+                                - generic [ref=f2e1411]: spectra-p2v1-reexec
+                              - button "word-com-italic.txt" [ref=f2e1412]
+                              - paragraph [ref=f2e1413]: 67 B
+                              - generic [ref=f2e1414]: 2d ago
+                          - article [ref=f2e1416] [cursor=pointer]:
+                            - generic [ref=f2e1422]:
+                              - generic [ref=f2e1423]:
+                                - generic [ref=f2e1424]: File
+                                - generic [ref=f2e1425]: •
+                                - generic [ref=f2e1426]: spectra-p2v1-reexec
+                              - button "word-com-italic.ps1" [ref=f2e1427]
+                              - paragraph [ref=f2e1428]: 975 B
+                              - generic [ref=f2e1429]: 2d ago
+                          - article [ref=f2e1431] [cursor=pointer]:
+                            - generic [ref=f2e1437]:
+                              - generic [ref=f2e1438]:
+                                - generic [ref=f2e1439]: File
+                                - generic [ref=f2e1440]: •
+                                - generic [ref=f2e1441]: spectra-p2v1-reexec
+                              - button "word-com-bold2.txt" [ref=f2e1442]
+                              - paragraph [ref=f2e1443]: 854 B
+                              - generic [ref=f2e1444]: 2d ago
+                        - button "New here" [ref=f2e1447] [cursor=pointer]:
+                          - generic [ref=f2e1448]: +
+                          - text: New here
+            - generic [ref=f2e213]:
+              - button "Open actions" [ref=f2e214] [cursor=pointer]
+              - generic [ref=f2e217]:
+                - generic [ref=f2e219]:
+                  - 'button "Choose AI focus: All Spectra objects" [ref=f2e220] [cursor=pointer]'
+                  - generic [ref=f2e226]: Starting a new conversation. 0 context objects included.
+                - textbox "Ask Spectra anything..." [ref=f2e228]
+                - button "Send command" [disabled] [ref=f2e229]
+    - region "Notifications alt+T"
+  - alert [ref=f2e1449]

@@ -480,27 +480,11 @@ export async function GET(request: NextRequest) {
       return ok({ links });
     }
 
-    if (action === "artifactEmbeds") {
-      const result = await spectraQuery("artifactEmbeds:listForContainer", {
-        containerType:
-          params.get("containerType") === "thread" ? "thread" : "artifact",
-        containerId: requireString(params.get("containerId"), "containerId"),
-      });
-      return ok(result);
-    }
-
     if (action === "artifactEmbed") {
       const embed = await spectraQuery("artifactEmbeds:getProjection", {
         embedId: requireString(params.get("embedId"), "embedId"),
       });
       return ok({ embed });
-    }
-
-    if (action === "artifactEmbedContext") {
-      const context = await spectraQuery("artifactEmbeds:contextContribution", {
-        embedId: requireString(params.get("embedId"), "embedId"),
-      });
-      return ok({ context });
     }
 
     if (action === "search") {
@@ -1016,80 +1000,6 @@ export async function POST(request: NextRequest) {
         artifactId: requireString(body.artifactId, "artifactId"),
         kind: "timetable",
         state: body.state,
-      });
-      return ok(result);
-    }
-
-    if (action === "createArtifactEmbed") {
-      const result = await spectraMutation("artifactEmbeds:create", {
-        containerType: body.containerType === "thread" ? "thread" : "artifact",
-        containerId: requireString(body.containerId, "containerId"),
-        containerRegionId: requireString(
-          body.containerRegionId,
-          "containerRegionId",
-        ),
-        sourceArtifactId: requireString(
-          body.sourceArtifactId,
-          "sourceArtifactId",
-        ),
-        mode: body.mode === "expanded" ? "expanded" : "compact",
-        interaction:
-          body.interaction === "edit"
-            ? "edit"
-            : body.interaction === "interact"
-              ? "interact"
-              : "read",
-        versionPolicy: body.versionPolicy === "pinned" ? "pinned" : "live",
-        pinnedVersionId: optionalString(body.pinnedVersionId),
-        displayPreferences:
-          body.displayPreferences && typeof body.displayPreferences === "object"
-            ? body.displayPreferences
-            : undefined,
-        contextPolicy:
-          body.contextPolicy === "none"
-            ? "none"
-            : body.contextPolicy === "visible_region"
-              ? "visible_region"
-              : "summary",
-      });
-      return ok(result);
-    }
-
-    if (action === "updateArtifactEmbed") {
-      const result = await spectraMutation("artifactEmbeds:update", {
-        embedId: requireString(body.embedId, "embedId"),
-        mode:
-          body.mode === "compact" || body.mode === "expanded"
-            ? body.mode
-            : undefined,
-        interaction:
-          body.interaction === "read" ||
-          body.interaction === "interact" ||
-          body.interaction === "edit"
-            ? body.interaction
-            : undefined,
-        versionPolicy:
-          body.versionPolicy === "live" || body.versionPolicy === "pinned"
-            ? body.versionPolicy
-            : undefined,
-        pinnedVersionId: optionalString(body.pinnedVersionId),
-        displayPreferences:
-          body.displayPreferences && typeof body.displayPreferences === "object"
-            ? body.displayPreferences
-            : undefined,
-        contextPolicy:
-          body.contextPolicy === "none" ||
-          body.contextPolicy === "summary" ||
-          body.contextPolicy === "visible_region"
-            ? body.contextPolicy
-            : undefined,
-      });
-      return ok(result);
-    }
-
-    if (action === "removeArtifactEmbed") {
-      const result = await spectraMutation("artifactEmbeds:remove", {
-        embedId: requireString(body.embedId, "embedId"),
       });
       return ok(result);
     }

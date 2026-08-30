@@ -44,10 +44,11 @@ describe("definitive migration foundation", () => {
       expanded: true,
     });
     expect(reference).toMatchObject({
-      protocolVersion: SPECTRA_PROTOCOL_VERSIONS.references,
-      id: "ref-1",
-      state: "expanded",
-      target: { workId: "work-1" },
+      legacyReferenceId: "ref-1",
+      sourceArtifactId: "work-1",
+      mode: "expanded",
+      versionPolicy: "live",
+      displayPreferences: { regionIds: ["block-1"], view: "excerpt" },
     });
   });
 

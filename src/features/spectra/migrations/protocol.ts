@@ -1,7 +1,6 @@
 export const SPECTRA_PROTOCOL_VERSIONS = {
   collaboration: 1,
   runItems: 2,
-  references: 2,
   preferences: 1,
   schoolSource: 2,
 } as const;

@@ -24,6 +24,9 @@ import {
 import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
+import { useMutation } from "convex/react";
+import type { Id } from "../../../../convex/_generated/dataModel";
+import { api } from "../../../../convex/_generated/api";
 import StarterKit from "@tiptap/starter-kit";
 import {
   AlertCircle,
@@ -44,6 +47,7 @@ import {
   type ReactNode,
 } from "react";
 import type * as Y from "yjs";
+import { toast } from "sonner";
 import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
 import {
   commandContext,
@@ -53,6 +57,7 @@ import {
   type CommandParam,
 } from "../commands";
 import { DOCUMENT_EXPORT_COPIES } from "../capabilities";
+import { isArtifactTypeKey } from "../artifacts/registry";
 import {
   DOCUMENT_STYLE_OPTIONS,
   documentCommandBindings,
@@ -62,6 +67,7 @@ import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
   completeArtifactImport,
+  getSpectraArtifactEmbed,
   uploadArtifactImportOriginal,
 } from "../data/api";
 import {
@@ -104,14 +110,16 @@ import {
 import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
 import { StableBlockId } from "../editor/stable-block-id";
 import { spectraBus } from "../events";
-import { parseSpectraWorkUrl } from "../references";
+import { parseSpectraWorkUrl, type ReferenceNode } from "../references";
+import {
+  renderReferenceFallbackPng,
+  type ReferenceFallback,
+} from "../references/export/reference-fallback";
 import { useSpectraPreferences } from "../settings/preference-store";
 import type { SourceRecord } from "../sources/records/source-record";
 import { createDocumentRelativeSelection } from "../work/models/yjs";
-import { availableWorkModes } from "../work/registry";
-import {
-  DropdownMenuLabel,
-} from "@/components/ui/dropdown-menu";
+import { availableWorkModes, getWorkDefinition } from "../work/registry";
+import { DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import {
   blocksFromJson,
   documentContentFromJson,
@@ -125,12 +133,31 @@ import {
   markdownToDocumentHtml,
   sanitizeDocumentHtml,
 } from "./artifact-studio-file-utils";
-import {
-  ArtifactWorkbar,
-  workbarMenuItemClass,
-} from "./artifact-workbar";
+import { ArtifactWorkbar, workbarMenuItemClass } from "./artifact-workbar";
 import { WorkbarCommandControl, isRenderedControl } from "./workbar-controls";
 import { useStudioContract } from "./artifact-studio-shell";
+
+type ReferenceDocument = {
+  descendants: (
+    callback: (node: {
+      type: { name: string };
+      attrs: Record<string, unknown>;
+    }) => boolean | void,
+  ) => void;
+};
+
+function documentReferenceIds(document: ReferenceDocument) {
+  const ids = new Set<string>();
+  document.descendants((node) => {
+    if (
+      node.type.name === "spectraReference" &&
+      typeof node.attrs.embedId === "string" &&
+      node.attrs.embedId
+    )
+      ids.add(node.attrs.embedId);
+  });
+  return ids;
+}
 
 function documentMarkdown(json: JSONContent) {
   const renderInline = (node: JSONContent): string => {
@@ -191,7 +218,8 @@ function pointsFromCssSize(value: unknown) {
   if (!Number.isFinite(size) || size <= 0) return null;
   const unit = match[2] ?? "px";
   if (unit === "pt") return Math.round(size * 10) / 10;
-  if (unit === "rem" || unit === "em") return Math.round(size * 16 * 0.75 * 10) / 10;
+  if (unit === "rem" || unit === "em")
+    return Math.round(size * 16 * 0.75 * 10) / 10;
   return Math.round(size * 0.75 * 10) / 10;
 }
 
@@ -228,14 +256,18 @@ function blockRunFormat(node: JSONContent) {
   const read = (text: JSONContent) => {
     const marks = text.marks ?? [];
     const attributesOf = (type: string) =>
-      (marks.find((mark) => mark.type === type)?.attrs ?? {}) as Record<string, unknown>;
+      (marks.find((mark) => mark.type === type)?.attrs ?? {}) as Record<
+        string,
+        unknown
+      >;
     const style = attributesOf("textStyle");
     return {
       bold: marks.some((mark) => mark.type === "bold"),
       italic: marks.some((mark) => mark.type === "italic"),
       underline: marks.some((mark) => mark.type === "underline"),
       strike: marks.some((mark) => mark.type === "strike"),
-      fontFamily: typeof style.fontFamily === "string" ? style.fontFamily : null,
+      fontFamily:
+        typeof style.fontFamily === "string" ? style.fontFamily : null,
       fontSizePoints: pointsFromCssSize(style.fontSize),
       color: wordHex(style.color),
       shading: wordHex(attributesOf("highlight").color),
@@ -243,7 +275,9 @@ function blockRunFormat(node: JSONContent) {
   };
   const first = read(texts[0]!);
   const agreed = <K extends keyof typeof first>(key: K) =>
-    texts.every((text) => read(text)[key] === first[key]) ? first[key] : undefined;
+    texts.every((text) => read(text)[key] === first[key])
+      ? first[key]
+      : undefined;
   const format: Record<string, unknown> = {};
   for (const key of [
     "bold",
@@ -265,7 +299,9 @@ function blockRunFormat(node: JSONContent) {
 function blockParagraphFormat(node: JSONContent) {
   const attrs = (node.attrs ?? {}) as Record<string, unknown>;
   const alignment =
-    attrs.textAlign === "center" || attrs.textAlign === "right" || attrs.textAlign === "justify"
+    attrs.textAlign === "center" ||
+    attrs.textAlign === "right" ||
+    attrs.textAlign === "justify"
       ? attrs.textAlign
       : "left";
   const numeric = (value: unknown) => {
@@ -307,7 +343,10 @@ function blockParagraphFormat(node: JSONContent) {
  * a property the document already had does not survive this function, the next
  * save writes a change nobody asked for.
  */
-export function withDocumentFormatting(content: Record<string, unknown>, json: JSONContent) {
+export function withDocumentFormatting(
+  content: Record<string, unknown>,
+  json: JSONContent,
+) {
   const blocks = Array.isArray(content.blocks) ? content.blocks : [];
   if (!blocks.length) return content;
   const nodes = Array.isArray(json.content) ? json.content : [];
@@ -338,7 +377,8 @@ export function withDocumentFormatting(content: Record<string, unknown>, json: J
     blocks: blocks.map((block) => {
       if (!block || typeof block !== "object") return block;
       const entry = block as Record<string, unknown>;
-      const patch = typeof entry.id === "string" ? formatting.get(entry.id) : undefined;
+      const patch =
+        typeof entry.id === "string" ? formatting.get(entry.id) : undefined;
       if (!patch) return block;
       return {
         ...entry,
@@ -399,7 +439,9 @@ function DocumentSelectionToolbar({
             disabled={!state.enabled}
             title={state.reason ?? binding.hint ?? binding.label}
             aria-label={binding.label}
-            aria-pressed={binding.active === undefined ? undefined : binding.active}
+            aria-pressed={
+              binding.active === undefined ? undefined : binding.active
+            }
             onClick={() => run(id)}
           >
             {Icon ? <Icon className="h-4 w-4" /> : binding.label}
@@ -441,7 +483,11 @@ function DocumentInlinePanel({
   onConfirm: () => void;
 }) {
   return (
-    <div className="spectra-document-inline-panel" role="group" aria-label={label}>
+    <div
+      className="spectra-document-inline-panel"
+      role="group"
+      aria-label={label}
+    >
       <span>
         <strong>{label}</strong>
         {detail ? <small>{detail}</small> : null}
@@ -495,7 +541,10 @@ type DocumentMode = "write" | "read" | "review" | "focus";
  * flatness back over the file. `documentJsonFromContent` is shared with the
  * other artifact types, so the document-specific half is applied here.
  */
-function withEditorFormatting(json: JSONContent, content: Record<string, unknown>) {
+function withEditorFormatting(
+  json: JSONContent,
+  content: Record<string, unknown>,
+) {
   const blocks = Array.isArray(content.blocks) ? content.blocks : [];
   if (!blocks.length || !Array.isArray(json.content)) return json;
   const attrsById = new Map<string, Record<string, unknown>>();
@@ -512,7 +561,8 @@ function withEditorFormatting(json: JSONContent, content: Record<string, unknown
   return {
     ...json,
     content: json.content.map((node) => {
-      const blockId = typeof node.attrs?.blockId === "string" ? node.attrs.blockId : "";
+      const blockId =
+        typeof node.attrs?.blockId === "string" ? node.attrs.blockId : "";
       const stored = blockId ? attrsById.get(blockId) : undefined;
       if (!stored) return node;
       const runFormat = record(stored.format);
@@ -524,7 +574,9 @@ function withEditorFormatting(json: JSONContent, content: Record<string, unknown
         ...(Number(runFormat.fontSizePoints) > 0
           ? { fontSize: `${Number(runFormat.fontSizePoints)}pt` }
           : {}),
-        ...(typeof runFormat.color === "string" ? { color: `#${runFormat.color}` } : {}),
+        ...(typeof runFormat.color === "string"
+          ? { color: `#${runFormat.color}` }
+          : {}),
       };
       const marks = [
         ...(runFormat.bold === true ? [markFor("bold")] : []),
@@ -542,15 +594,20 @@ function withEditorFormatting(json: JSONContent, content: Record<string, unknown
       const indent = Number(paragraphFormat.indentLevel);
       const attrs = {
         ...node.attrs,
-        ...(alignment === "center" || alignment === "right" || alignment === "justify"
+        ...(alignment === "center" ||
+        alignment === "right" ||
+        alignment === "justify"
           ? { textAlign: alignment }
           : {}),
         ...(Number.isFinite(spacing) && spacing > 0 && spacing !== 1
           ? { lineSpacing: spacing }
           : {}),
         ...(Number.isFinite(after) && after > 0 ? { spacingAfter: after } : {}),
-        ...(Number.isFinite(indent) && indent !== 0 ? { indentLevel: indent } : {}),
-        ...(typeof paragraphFormat.border === "string" && paragraphFormat.border !== "none"
+        ...(Number.isFinite(indent) && indent !== 0
+          ? { indentLevel: indent }
+          : {}),
+        ...(typeof paragraphFormat.border === "string" &&
+        paragraphFormat.border !== "none"
           ? { frameBorder: paragraphFormat.border }
           : {}),
         ...(typeof paragraphFormat.shading === "string"
@@ -562,11 +619,18 @@ function withEditorFormatting(json: JSONContent, content: Record<string, unknown
       const applyMarks = (child: JSONContent): JSONContent =>
         child.type === "text"
           ? { ...child, marks: [...(child.marks ?? []), ...marks] }
-          : { ...child, ...(child.content ? { content: child.content.map(applyMarks) } : {}) };
+          : {
+              ...child,
+              ...(child.content
+                ? { content: child.content.map(applyMarks) }
+                : {}),
+            };
       return {
         ...node,
         attrs,
-        ...(marks.length && node.content ? { content: node.content.map(applyMarks) } : {}),
+        ...(marks.length && node.content
+          ? { content: node.content.map(applyMarks) }
+          : {}),
       };
     }),
   };
@@ -604,12 +668,39 @@ export function DocumentStudio({
 }) {
   const studioContract = useStudioContract();
   const strictNative = studioContract.compatibilityProfile === "strict-native";
+  const createReference = useMutation(api.artifactEmbeds.create);
+  const migrateLegacyReference = useMutation(api.artifactEmbeds.migrateLegacy);
+  const removeReference = useMutation(api.artifactEmbeds.remove);
+  const restoreReference = useMutation(api.artifactEmbeds.restore);
+  const migratingLegacyReferencesRef = useRef(new Set<string>());
+  const referenceLifecycleRef = useRef(new Map<string, Promise<void>>());
+  const enqueueReferenceLifecycle = useCallback(
+    (embedId: string, action: () => Promise<unknown>) => {
+      const prior =
+        referenceLifecycleRef.current.get(embedId) ?? Promise.resolve();
+      const next = prior
+        .catch(() => undefined)
+        .then(async () => {
+          await action();
+        })
+        .finally(() => {
+          if (referenceLifecycleRef.current.get(embedId) === next)
+            referenceLifecycleRef.current.delete(embedId);
+        });
+      referenceLifecycleRef.current.set(embedId, next);
+      return next;
+    },
+    [],
+  );
   const nativeReadOnlyKey = nativeReadOnlyRegionIds.join("|");
   const onLocalCollaborativeChangeRef = useRef(onLocalCollaborativeChange);
   onLocalCollaborativeChangeRef.current = onLocalCollaborativeChange;
   const { preferences } = useSpectraPreferences();
   const [initialContent] = useState(() =>
-    withEditorFormatting(documentJsonFromContent(content, title), record(content)),
+    withEditorFormatting(
+      documentJsonFromContent(content, title),
+      record(content),
+    ),
   );
   const [importing, setImporting] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
@@ -636,9 +727,66 @@ export function DocumentStudio({
   const [importReport, setImportReport] = useState<string>();
   const [importError, setImportError] = useState<string>();
   const nativeNoticeKey = `spectra:native-features-notice:${artifactId}`;
-  const [nativeNoticeDismissed, setNativeNoticeDismissed] = useState(() =>
-    typeof window !== "undefined" &&
-    window.localStorage.getItem(nativeNoticeKey) === "dismissed",
+  const [nativeNoticeDismissed, setNativeNoticeDismissed] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(nativeNoticeKey) === "dismissed",
+  );
+  const createLiveReference = useCallback(
+    async ({
+      sourceArtifactId,
+      containerRegionId = "artifact:structure",
+      target,
+    }: {
+      sourceArtifactId: string;
+      containerRegionId?: string;
+      target?: {
+        workType: string;
+        kind: string;
+        path: string[];
+        stableIds?: Record<string, string>;
+        fallbackExcerpt?: string;
+        schemaVersion: number;
+      };
+    }): Promise<ReferenceNode> => {
+      const result = await createReference({
+        containerType: "artifact",
+        containerId: artifactId,
+        containerRegionId,
+        sourceArtifactId: sourceArtifactId as Id<"spectraArtifacts">,
+        mode: "compact",
+        interaction: "read",
+        versionPolicy: "live",
+        contextPolicy: "summary",
+        displayPreferences: target
+          ? {
+              sourceWorkType: target.workType,
+              anchorKind: target.kind,
+              sourceAnchor: target,
+            }
+          : undefined,
+      });
+      return {
+        embedId: result.embedId,
+        containerType: "artifact",
+        containerId: artifactId,
+        containerRegionId,
+        sourceArtifactId,
+        mode: "compact",
+        interaction: "read",
+        versionPolicy: "live",
+        contextPolicy: "summary",
+        displayPreferences: target
+          ? {
+              sourceWorkType: target.workType,
+              anchorKind: target.kind,
+              sourceAnchor: target,
+            }
+          : undefined,
+        state: "ready",
+      };
+    },
+    [artifactId, createReference],
   );
   const nativePlaceholders = useMemo(() => {
     const binding = record(record(content).nativeBinding);
@@ -647,14 +795,16 @@ export function DocumentStudio({
           const placeholder = record(value);
           return typeof placeholder.label === "string" &&
             typeof placeholder.detail === "string"
-            ? [{
-                id:
-                  typeof placeholder.id === "string"
-                    ? placeholder.id
-                    : placeholder.label,
-                label: placeholder.label,
-                detail: placeholder.detail,
-              }]
+            ? [
+                {
+                  id:
+                    typeof placeholder.id === "string"
+                      ? placeholder.id
+                      : placeholder.label,
+                  label: placeholder.label,
+                  detail: placeholder.detail,
+                },
+              ]
             : [];
         })
       : [];
@@ -693,9 +843,13 @@ export function DocumentStudio({
     const columns = Number(stored.columns);
     return {
       size: typeof stored.size === "string" ? stored.size : "a4",
-      orientation: stored.orientation === "landscape" ? "landscape" as const : "portrait" as const,
+      orientation:
+        stored.orientation === "landscape"
+          ? ("landscape" as const)
+          : ("portrait" as const),
       margins: typeof stored.margins === "string" ? stored.margins : "normal",
-      columns: Number.isFinite(columns) && columns > 0 ? Math.min(3, columns) : 1,
+      columns:
+        Number.isFinite(columns) && columns > 0 ? Math.min(3, columns) : 1,
       header: typeof stored.header === "string" ? stored.header : "",
       footer: typeof stored.footer === "string" ? stored.footer : "",
     };
@@ -822,7 +976,10 @@ export function DocumentStudio({
             // the editor out of the dependency list — a stale closure here would
             // silently freeze the menu on the first render's availability.
             items: ({ query }: { query: string }) =>
-              filterSlashCommands(documentSlashItems(slashDispatchRef.current), query),
+              filterSlashCommands(
+                documentSlashItems(slashDispatchRef.current),
+                query,
+              ),
           },
         }),
         // TipTap packages resolve through mixed @tiptap/core versions in this
@@ -857,33 +1014,94 @@ export function DocumentStudio({
           },
         },
         handlePaste: (view, event) => {
-          if (strictNative) return false;
           const target = parseSpectraWorkUrl(
             event.clipboardData?.getData("text/plain") ?? "",
           );
           const nodeType = view.state.schema.nodes.spectraReference;
           if (!target || !nodeType) return false;
-          const node = nodeType.create({
-            id: uniqueToken(),
-            workId: target.workId,
-            anchor: target.fragment
-              ? { kind: "fragment", path: [target.fragment], schemaVersion: 1 }
-              : null,
-            state: "collapsed",
-            versionPolicy: "live",
-            label: "Referenced work",
-          });
-          view.dispatch(
-            view.state.tr.replaceSelectionWith(node).scrollIntoView(),
-          );
+          if (strictNative) {
+            toast.error(
+              "This file keeps strict native compatibility. Change it to Enhanced before adding a live reference.",
+            );
+            return true;
+          }
+          void createLiveReference({
+            sourceArtifactId: target.workId,
+            target: target.fragment
+              ? {
+                  workType: "document",
+                  kind: "fragment",
+                  path: [target.fragment],
+                  schemaVersion: 1,
+                }
+              : undefined,
+          })
+            .then((reference) => {
+              if (view.isDestroyed) {
+                void removeReference({
+                  embedId: reference.embedId as Id<"artifactEmbeds">,
+                });
+                return;
+              }
+              const node = nodeType.create(reference);
+              view.dispatch(
+                view.state.tr.replaceSelectionWith(node).scrollIntoView(),
+              );
+            })
+            .catch((error) =>
+              toast.error(
+                error instanceof Error
+                  ? error.message
+                  : "The live reference could not be added.",
+              ),
+            );
           return true;
         },
       },
       onUpdate: ({ editor, transaction }) => {
-        if (!editorReadyForUserChanges.current || readOnly) return;
+        const referenceMigration = Boolean(
+          transaction.getMeta("spectra-reference-migration"),
+        );
+        if (
+          (!editorReadyForUserChanges.current && !referenceMigration) ||
+          readOnly
+        )
+          return;
+        const localChange =
+          !collaborationDocument ||
+          isLocalCollaborativeDocumentChange(transaction);
+        if (localChange) {
+          const before = documentReferenceIds(transaction.before);
+          const after = documentReferenceIds(transaction.doc);
+          for (const embedId of before)
+            if (!after.has(embedId))
+              void enqueueReferenceLifecycle(embedId, () =>
+                removeReference({
+                  embedId: embedId as Id<"artifactEmbeds">,
+                }),
+              ).catch((error) =>
+                toast.error(
+                  error instanceof Error
+                    ? error.message
+                    : "The reference could not be removed.",
+                ),
+              );
+          for (const embedId of after)
+            if (!before.has(embedId))
+              void enqueueReferenceLifecycle(embedId, () =>
+                restoreReference({
+                  embedId: embedId as Id<"artifactEmbeds">,
+                }),
+              ).catch((error) =>
+                toast.error(
+                  error instanceof Error
+                    ? error.message
+                    : "The reference could not be restored.",
+                ),
+              );
+        }
         if (collaborationDocument) {
-          if (isLocalCollaborativeDocumentChange(transaction))
-            onLocalCollaborativeChangeRef.current?.();
+          if (localChange) onLocalCollaborativeChangeRef.current?.();
           return;
         }
         const nextJson = editor.getJSON();
@@ -953,40 +1171,223 @@ export function DocumentStudio({
     },
     [
       collaborationDocument,
+      createLiveReference,
+      enqueueReferenceLifecycle,
       nativeReadOnlyKey,
+      removeReference,
+      restoreReference,
+      strictNative,
+    ],
+  );
+
+  useEffect(() => {
+    if (!editor || readOnly) return;
+    const legacy: Array<{
+      legacyReferenceId: string;
+      sourceArtifactId: string;
+      mode: "compact" | "expanded";
+      versionPolicy: "live" | "pinned";
+      pinnedVersionId?: string;
+      displayPreferences?: Record<string, unknown>;
+    }> = [];
+    editor.state.doc.descendants((node) => {
+      if (
+        node.type.name !== "spectraReference" ||
+        typeof node.attrs.embedId === "string" ||
+        typeof node.attrs.id !== "string" ||
+        !node.attrs.id ||
+        typeof node.attrs.workId !== "string" ||
+        !node.attrs.workId ||
+        migratingLegacyReferencesRef.current.has(node.attrs.id)
+      )
+        return;
+      const legacyVersion = node.attrs.versionPolicy;
+      const pinnedVersionId =
+        legacyVersion &&
+        typeof legacyVersion === "object" &&
+        typeof (legacyVersion as Record<string, unknown>).pinnedVersionId ===
+          "string"
+          ? String((legacyVersion as Record<string, unknown>).pinnedVersionId)
+          : undefined;
+      const sourceAnchor = record(node.attrs.anchor);
+      const preferences = {
+        ...record(node.attrs.displayPreferences),
+        ...(typeof node.attrs.workType === "string"
+          ? { sourceWorkType: node.attrs.workType }
+          : {}),
+        ...(typeof sourceAnchor.kind === "string"
+          ? { anchorKind: sourceAnchor.kind, sourceAnchor: node.attrs.anchor }
+          : {}),
+        ...(typeof node.attrs.view === "string"
+          ? { view: node.attrs.view }
+          : {}),
+        ...(typeof node.attrs.width === "number"
+          ? { width: node.attrs.width }
+          : {}),
+        ...(typeof node.attrs.height === "number"
+          ? { height: node.attrs.height }
+          : {}),
+      };
+      migratingLegacyReferencesRef.current.add(node.attrs.id);
+      legacy.push({
+        legacyReferenceId: node.attrs.id,
+        sourceArtifactId: node.attrs.workId,
+        mode: node.attrs.state === "expanded" ? "expanded" : "compact",
+        versionPolicy: pinnedVersionId ? "pinned" : "live",
+        pinnedVersionId,
+        displayPreferences: Object.keys(preferences).length
+          ? preferences
+          : undefined,
+      });
+    });
+    for (const candidate of legacy) {
+      void migrateLegacyReference({
+        containerId: artifactId,
+        legacyReferenceId: candidate.legacyReferenceId,
+        sourceArtifactId: candidate.sourceArtifactId as Id<"spectraArtifacts">,
+        mode: candidate.mode,
+        versionPolicy: candidate.versionPolicy,
+        pinnedVersionId: candidate.pinnedVersionId
+          ? (candidate.pinnedVersionId as Id<"spectraArtifactVersions">)
+          : undefined,
+        displayPreferences: candidate.displayPreferences,
+      })
+        .then((result) => {
+          if (editor.isDestroyed) return;
+          let transaction = editor.state.tr;
+          let changed = false;
+          editor.state.doc.descendants((node, position) => {
+            if (
+              node.type.name !== "spectraReference" ||
+              node.attrs.embedId ||
+              node.attrs.id !== candidate.legacyReferenceId
+            )
+              return;
+            const canonical: ReferenceNode = {
+              embedId: result.embedId,
+              containerType: "artifact",
+              containerId: artifactId,
+              containerRegionId: result.containerRegionId,
+              sourceArtifactId: candidate.sourceArtifactId,
+              mode: candidate.mode,
+              interaction: "read",
+              versionPolicy: candidate.versionPolicy,
+              ...(candidate.pinnedVersionId
+                ? { pinnedVersionId: candidate.pinnedVersionId }
+                : {}),
+              contextPolicy: "summary",
+              displayPreferences: candidate.displayPreferences,
+              state: "ready",
+            };
+            transaction = transaction.setNodeMarkup(position, undefined, {
+              ...node.attrs,
+              ...canonical,
+              id: null,
+              workId: null,
+              workType: null,
+              anchor: null,
+              view: null,
+              width: null,
+              height: null,
+              status: null,
+              label: null,
+              protocolVersion: null,
+            });
+            changed = true;
+          });
+          if (changed)
+            editor.view.dispatch(
+              transaction.setMeta("spectra-reference-migration", true),
+            );
+        })
+        .catch((error) => {
+          migratingLegacyReferencesRef.current.delete(
+            candidate.legacyReferenceId,
+          );
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "An older live reference could not be restored.",
+          );
+        });
+    }
+  }, [artifactId, editor, migrateLegacyReference, readOnly]);
+
+  useEffect(
+    () =>
+      spectraBus.handle(
+        "reference.insert",
+        async ({ hostWorkId, target, reference: suppliedReference }) => {
+          if (hostWorkId !== artifactId) return;
+          if (!editor || readOnly)
+            throw new Error(
+              "This document is read-only, so the reference was not added.",
+            );
+          if (strictNative)
+            throw new Error(
+              "This file keeps strict native compatibility. Change it to Enhanced before adding a live reference.",
+            );
+          if (!suppliedReference && !target)
+            throw new Error(
+              "Choose source work before adding a live reference.",
+            );
+          const reference =
+            suppliedReference ??
+            (await createLiveReference({
+              sourceArtifactId: target!.workId,
+              target: {
+                workType: target!.workType,
+                kind: target!.kind,
+                path: [...target!.path],
+                stableIds: target!.stableIds,
+                fallbackExcerpt: target!.fallbackExcerpt,
+                schemaVersion: target!.schemaVersion,
+              },
+            }));
+          const inserted = editor
+            .chain()
+            .focus()
+            .insertContent({ type: "spectraReference", attrs: reference })
+            .run();
+          if (!inserted) {
+            if (!suppliedReference)
+              await removeReference({
+                embedId: reference.embedId as Id<"artifactEmbeds">,
+              }).catch(() => undefined);
+            throw new Error(
+              "The live reference could not be placed in this document.",
+            );
+          }
+        },
+      ),
+    [
+      artifactId,
+      createLiveReference,
+      editor,
+      readOnly,
+      removeReference,
+      strictNative,
     ],
   );
 
   useEffect(
     () =>
-      spectraBus.handle("reference.insert", ({ hostWorkId, target }) => {
-        if (hostWorkId !== artifactId || !editor || readOnly || strictNative)
-          return;
-        editor
-          .chain()
-          .focus()
-          .insertContent({
-            type: "spectraReference",
-            attrs: {
-              id: uniqueToken(),
-              workId: target.workId,
-              anchor: {
-                workId: target.workId,
-                workType: target.workType,
-                kind: target.kind,
-                path: [...target.path],
-                stableIds: target.stableIds,
-                fallbackExcerpt: target.fallbackExcerpt,
-                schemaVersion: target.schemaVersion,
-              },
-              state: "collapsed",
-              versionPolicy: "live",
-              label: target.fallbackExcerpt ?? "Referenced work",
-            },
-          })
-          .run();
+      spectraBus.handle("reference.remove", async ({ hostWorkId, embedId }) => {
+        if (hostWorkId !== artifactId || !editor) return;
+        let range: { from: number; to: number } | undefined;
+        editor.state.doc.descendants((node, position) => {
+          if (
+            node.type.name === "spectraReference" &&
+            node.attrs.embedId === embedId
+          ) {
+            range = { from: position, to: position + node.nodeSize };
+            return false;
+          }
+          return range === undefined;
+        });
+        if (range) editor.chain().focus().deleteRange(range).run();
       }),
-    [artifactId, editor, readOnly, strictNative],
+    [artifactId, editor],
   );
 
   useEffect(() => {
@@ -1014,7 +1415,11 @@ export function DocumentStudio({
   }, [editor, editor?.isInitialized]);
 
   const incomingEditorJson = useMemo(
-    () => withEditorFormatting(documentJsonFromContent(content, title), record(content)),
+    () =>
+      withEditorFormatting(
+        documentJsonFromContent(content, title),
+        record(content),
+      ),
     [content, title],
   );
   useEffect(() => {
@@ -1329,30 +1734,118 @@ export function DocumentStudio({
       });
       document.save(`${safeTitle}.pdf`);
     } else {
-      const { Document, HeadingLevel, Packer, Paragraph, TextRun } =
-        await import("docx");
-      const blocks = blocksFromJson(editor.getJSON());
+      const {
+        Document,
+        ExternalHyperlink,
+        HeadingLevel,
+        ImageRun,
+        Packer,
+        Paragraph,
+        TextRun,
+      } = await import("docx");
+      const editorJson = editor.getJSON();
+      const referenceIds = [
+        ...new Set(
+          (editorJson.content ?? []).flatMap((node) =>
+            node.type === "spectraReference" &&
+            typeof node.attrs?.embedId === "string"
+              ? [node.attrs.embedId]
+              : [],
+          ),
+        ),
+      ];
+      const liveReferences = new Map<
+        string,
+        Awaited<ReturnType<typeof getSpectraArtifactEmbed>>["embed"]
+      >();
+      await Promise.all(
+        referenceIds.map(async (embedId) => {
+          try {
+            const result = await getSpectraArtifactEmbed(embedId);
+            liveReferences.set(embedId, result.embed);
+          } catch {
+            // The export remains honest when access changed: the fallback uses
+            // a generic title and the source id retained by the host record.
+          }
+        }),
+      );
+      const children: InstanceType<typeof Paragraph>[] = [];
+      for (const node of editorJson.content ?? []) {
+        if (node.type === "spectraReference") {
+          const embedId =
+            typeof node.attrs?.embedId === "string" ? node.attrs.embedId : "";
+          const embed = liveReferences.get(embedId);
+          const sourceArtifactId =
+            embed?.sourceArtifactId ||
+            (typeof node.attrs?.sourceArtifactId === "string"
+              ? node.attrs.sourceArtifactId
+              : "");
+          const sourceUrl = `${window.location.origin}/library/${encodeURIComponent(sourceArtifactId)}`;
+          const fallback: ReferenceFallback = {
+            title: embed?.source?.title ?? "Spectra reference",
+            typeLabel:
+              embed?.source && isArtifactTypeKey(embed.source.blueprintKey)
+                ? getWorkDefinition(embed.source.blueprintKey).userFacingName
+                : "Referenced work",
+            sourceArtifactId,
+            sourceUrl,
+            versionLabel: embed?.versionPolicy === "pinned" ? "Pinned" : "Live",
+          };
+          const png = await renderReferenceFallbackPng(fallback);
+          children.push(
+            new Paragraph({
+              children: [
+                new ImageRun({
+                  data: png,
+                  transformation: { width: 480, height: 210 },
+                  altText: {
+                    title: fallback.title,
+                    description: `${fallback.typeLabel} reference in Spectra`,
+                    name: fallback.title,
+                  },
+                }),
+              ],
+            }),
+            new Paragraph({
+              children: [
+                new ExternalHyperlink({
+                  link: sourceUrl,
+                  children: [
+                    new TextRun({
+                      text: `Open in Spectra: ${sourceUrl}`,
+                      style: "Hyperlink",
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          );
+          continue;
+        }
+        const blocks = blocksFromJson({ type: "doc", content: [node] });
+        children.push(
+          ...blocks.map((block) =>
+            block.type === "heading"
+              ? new Paragraph({
+                  text: block.text,
+                  heading:
+                    Number(record(block.attrs).level) === 1
+                      ? HeadingLevel.HEADING_1
+                      : Number(record(block.attrs).level) === 3
+                        ? HeadingLevel.HEADING_3
+                        : HeadingLevel.HEADING_2,
+                })
+              : new Paragraph({
+                  children: [new TextRun(block.text)],
+                  ...(block.type === "quote" ? { style: "IntenseQuote" } : {}),
+                }),
+          ),
+        );
+      }
       const document = new Document({
         sections: [
           {
-            children: blocks.map((block) =>
-              block.type === "heading"
-                ? new Paragraph({
-                    text: block.text,
-                    heading:
-                      Number(record(block.attrs).level) === 1
-                        ? HeadingLevel.HEADING_1
-                        : Number(record(block.attrs).level) === 3
-                          ? HeadingLevel.HEADING_3
-                          : HeadingLevel.HEADING_2,
-                  })
-                : new Paragraph({
-                    children: [new TextRun(block.text)],
-                    ...(block.type === "quote"
-                      ? { style: "IntenseQuote" }
-                      : {}),
-                  }),
-            ),
+            children,
           },
         ],
       });
@@ -1594,8 +2087,8 @@ export function DocumentStudio({
 
   const sourcesHaveWork = Boolean(
     sourceNavigator.entries.length ||
-      sourceNavigator.unresolved.length ||
-      sourceNavigator.uncited.length,
+    sourceNavigator.unresolved.length ||
+    sourceNavigator.uncited.length,
   );
 
   /* ------------------------------------------------------------------ *
@@ -1649,12 +2142,19 @@ export function DocumentStudio({
     const { selection } = editor.state;
     const selected = (selection as { node?: { type: { name: string } } }).node;
     if (selected && names.includes(selected.type.name))
-      return { pos: selection.from, attrs: (selected as unknown as { attrs: Record<string, unknown> }).attrs };
+      return {
+        pos: selection.from,
+        attrs: (selected as unknown as { attrs: Record<string, unknown> })
+          .attrs,
+      };
     const { $from } = selection;
     for (let depth = $from.depth; depth > 0; depth -= 1) {
       const node = $from.node(depth);
       if (names.includes(node.type.name))
-        return { pos: $from.before(depth), attrs: node.attrs as Record<string, unknown> };
+        return {
+          pos: $from.before(depth),
+          attrs: node.attrs as Record<string, unknown>,
+        };
     }
     const after = $from.nodeAfter;
     if (after && names.includes(after.type.name))
@@ -1668,8 +2168,8 @@ export function DocumentStudio({
   const inTable = Boolean(editor?.isActive("table"));
   const inList = Boolean(
     editor?.isActive("bulletList") ||
-      editor?.isActive("orderedList") ||
-      editor?.isActive("taskList"),
+    editor?.isActive("orderedList") ||
+    editor?.isActive("taskList"),
   );
   const activeStyle = !editor
     ? "paragraph"
@@ -1685,7 +2185,9 @@ export function DocumentStudio({
               ? "code"
               : "paragraph";
   const trackedPlaceholders = nativePlaceholders.filter((placeholder) =>
-    /revision|tracked change/i.test(`${placeholder.label} ${placeholder.detail}`),
+    /revision|tracked change/i.test(
+      `${placeholder.label} ${placeholder.detail}`,
+    ),
   );
 
   function applyStyle(style: string) {
@@ -1693,8 +2195,7 @@ export function DocumentStudio({
       const chain = editor!.chain().focus();
       if (style === "h1" || style === "h2" || style === "h3")
         chain.setNode("heading", { level: Number(style.slice(1)) }).run();
-      else if (style === "quote")
-        chain.setParagraph().toggleBlockquote().run();
+      else if (style === "quote") chain.setParagraph().toggleBlockquote().run();
       else if (style === "code") chain.toggleCodeBlock().run();
       else chain.clearNodes().setParagraph().run();
     });
@@ -1724,10 +2225,24 @@ export function DocumentStudio({
         .chain()
         .focus()
         .insertContent([
-          { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Contents" }] },
+          {
+            type: "heading",
+            attrs: { level: 2 },
+            content: [{ type: "text", text: "Contents" }],
+          },
           ...(items.length
             ? items
-            : [{ type: "paragraph", content: [{ type: "text", text: "Add headings and insert this again." }] }]),
+            : [
+                {
+                  type: "paragraph",
+                  content: [
+                    {
+                      type: "text",
+                      text: "Add headings and insert this again.",
+                    },
+                  ],
+                },
+              ]),
         ])
         .run();
     });
@@ -1744,7 +2259,12 @@ export function DocumentStudio({
           {
             type: "text",
             text: target.title,
-            marks: [{ type: "link", attrs: { href: `#${target.blockId ?? target.position}` } }],
+            marks: [
+              {
+                type: "link",
+                attrs: { href: `#${target.blockId ?? target.position}` },
+              },
+            ],
           },
         ])
         .run();
@@ -1752,7 +2272,8 @@ export function DocumentStudio({
   }
 
   function insertCitation() {
-    const source = sourceNavigator.uncited[0] ?? sourceNavigator.entries[0]?.source;
+    const source =
+      sourceNavigator.uncited[0] ?? sourceNavigator.entries[0]?.source;
     if (!source) {
       setSourcesOpen(true);
       return;
@@ -1787,11 +2308,21 @@ export function DocumentStudio({
           // like, so "make everything else look like this" is one click rather
           // than five remembered settings.
           attrs: {
-            ...(blockAttrs.lineSpacing ? { lineSpacing: blockAttrs.lineSpacing } : {}),
-            ...(blockAttrs.spacingAfter ? { spacingAfter: blockAttrs.spacingAfter } : {}),
-            ...(blockAttrs.indentLevel ? { indentLevel: blockAttrs.indentLevel } : {}),
-            ...(blockAttrs.frameBorder ? { frameBorder: blockAttrs.frameBorder } : {}),
-            ...(blockAttrs.frameShading ? { frameShading: blockAttrs.frameShading } : {}),
+            ...(blockAttrs.lineSpacing
+              ? { lineSpacing: blockAttrs.lineSpacing }
+              : {}),
+            ...(blockAttrs.spacingAfter
+              ? { spacingAfter: blockAttrs.spacingAfter }
+              : {}),
+            ...(blockAttrs.indentLevel
+              ? { indentLevel: blockAttrs.indentLevel }
+              : {}),
+            ...(blockAttrs.frameBorder
+              ? { frameBorder: blockAttrs.frameBorder }
+              : {}),
+            ...(blockAttrs.frameShading
+              ? { frameShading: blockAttrs.frameShading }
+              : {}),
           },
         },
       ],
@@ -1802,12 +2333,19 @@ export function DocumentStudio({
   function applyNamedStyle(styleId: string) {
     const style = namedStyles.find((entry) => entry.id === styleId);
     withEdit(() => {
-      const chain = editor!.chain().focus().setParagraphStyle(styleId || null);
+      const chain = editor!
+        .chain()
+        .focus()
+        .setParagraphStyle(styleId || null);
       const attrs = style?.attrs ?? {};
-      if (typeof attrs.lineSpacing === "number") chain.setParagraphLineSpacing(attrs.lineSpacing);
-      if (typeof attrs.spacingAfter === "number") chain.setParagraphSpacing(attrs.spacingAfter);
-      if (typeof attrs.frameBorder === "string") chain.setParagraphBorder(attrs.frameBorder);
-      if (typeof attrs.frameShading === "string") chain.setParagraphShading(attrs.frameShading);
+      if (typeof attrs.lineSpacing === "number")
+        chain.setParagraphLineSpacing(attrs.lineSpacing);
+      if (typeof attrs.spacingAfter === "number")
+        chain.setParagraphSpacing(attrs.spacingAfter);
+      if (typeof attrs.frameBorder === "string")
+        chain.setParagraphBorder(attrs.frameBorder);
+      if (typeof attrs.frameShading === "string")
+        chain.setParagraphShading(attrs.frameShading);
       chain.run();
     });
   }
@@ -1845,7 +2383,11 @@ export function DocumentStudio({
         : {}),
     },
     format: {
-      style: { value: activeStyle, set: applyStyle, options: DOCUMENT_STYLE_OPTIONS },
+      style: {
+        value: activeStyle,
+        set: applyStyle,
+        options: DOCUMENT_STYLE_OPTIONS,
+      },
       fontFamily: {
         ...(typeof textStyleAttrs.fontFamily === "string"
           ? { value: textStyleAttrs.fontFamily }
@@ -1864,26 +2406,34 @@ export function DocumentStudio({
             ? Number.parseFloat(textStyleAttrs.fontSize)
             : 11,
         set: (size) =>
-          withEdit(() => editor!.chain().focus().setFontSize(`${size}px`).run()),
+          withEdit(() =>
+            editor!.chain().focus().setFontSize(`${size}px`).run(),
+          ),
       },
       bold: {
         active: editor?.isActive("bold"),
-        toggle: () => withEdit(() => editor!.chain().focus().toggleBold().run()),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleBold().run()),
       },
       italic: {
         active: editor?.isActive("italic"),
-        toggle: () => withEdit(() => editor!.chain().focus().toggleItalic().run()),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleItalic().run()),
       },
       underline: {
         active: editor?.isActive("underline"),
-        toggle: () => withEdit(() => editor!.chain().focus().toggleUnderline().run()),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleUnderline().run()),
       },
       strike: {
         active: editor?.isActive("strike"),
-        toggle: () => withEdit(() => editor!.chain().focus().toggleStrike().run()),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleStrike().run()),
       },
       color: {
-        ...(typeof textStyleAttrs.color === "string" ? { value: textStyleAttrs.color } : {}),
+        ...(typeof textStyleAttrs.color === "string"
+          ? { value: textStyleAttrs.color }
+          : {}),
         set: (value) =>
           withEdit(() =>
             value
@@ -1910,22 +2460,27 @@ export function DocumentStudio({
             : editor?.isActive({ textAlign: "justify" })
               ? "justify"
               : "left",
-        set: (value) => withEdit(() => editor!.chain().focus().setTextAlign(value).run()),
+        set: (value) =>
+          withEdit(() => editor!.chain().focus().setTextAlign(value).run()),
       },
       lineHeight: {
         ...(typeof blockAttrs.lineSpacing === "number"
           ? { value: blockAttrs.lineSpacing }
           : { value: 1 }),
         set: (value) =>
-          withEdit(() => editor!.chain().focus().setParagraphLineSpacing(value).run()),
+          withEdit(() =>
+            editor!.chain().focus().setParagraphLineSpacing(value).run(),
+          ),
       },
       bulletList: {
         active: editor?.isActive("bulletList"),
-        toggle: () => withEdit(() => editor!.chain().focus().toggleBulletList().run()),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleBulletList().run()),
       },
       numberedList: {
         active: editor?.isActive("orderedList"),
-        toggle: () => withEdit(() => editor!.chain().focus().toggleOrderedList().run()),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleOrderedList().run()),
       },
       indent: {
         increase: () => shiftIndent(1),
@@ -1935,7 +2490,9 @@ export function DocumentStudio({
           : Number(blockAttrs.indentLevel) > -8,
       },
       clear: () =>
-        withEdit(() => editor!.chain().focus().unsetAllMarks().clearNodes().run()),
+        withEdit(() =>
+          editor!.chain().focus().unsetAllMarks().clearNodes().run(),
+        ),
       disabled: !canEdit,
       generalPins: ["fontFamily", "fontSize", "bold", "italic"],
     },
@@ -1944,42 +2501,64 @@ export function DocumentStudio({
         ? { spacingAfter: blockAttrs.spacingAfter }
         : {}),
       setSpacingAfter: (points) =>
-        withEdit(() => editor!.chain().focus().setParagraphSpacing(points).run()),
-      border: typeof blockAttrs.frameBorder === "string" ? blockAttrs.frameBorder : "none",
+        withEdit(() =>
+          editor!.chain().focus().setParagraphSpacing(points).run(),
+        ),
+      border:
+        typeof blockAttrs.frameBorder === "string"
+          ? blockAttrs.frameBorder
+          : "none",
       setBorder: (kind) =>
         withEdit(() => editor!.chain().focus().setParagraphBorder(kind).run()),
-      shading: typeof blockAttrs.frameShading === "string" ? blockAttrs.frameShading : null,
+      shading:
+        typeof blockAttrs.frameShading === "string"
+          ? blockAttrs.frameShading
+          : null,
       setShading: (color) =>
-        withEdit(() => editor!.chain().focus().setParagraphShading(color).run()),
+        withEdit(() =>
+          editor!.chain().focus().setParagraphShading(color).run(),
+        ),
       quote: {
         active: editor?.isActive("blockquote"),
-        toggle: () => withEdit(() => editor!.chain().focus().toggleBlockquote().run()),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleBlockquote().run()),
       },
       codeBlock: {
         active: editor?.isActive("codeBlock"),
-        toggle: () => withEdit(() => editor!.chain().focus().toggleCodeBlock().run()),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleCodeBlock().run()),
       },
       inlineCode: {
         active: editor?.isActive("code"),
-        toggle: () => withEdit(() => editor!.chain().focus().toggleCode().run()),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleCode().run()),
       },
       inList,
-      ...(Number(blockAttrs.indentLevel) ? { listLevel: Number(blockAttrs.indentLevel) } : {}),
+      ...(Number(blockAttrs.indentLevel)
+        ? { listLevel: Number(blockAttrs.indentLevel) }
+        : {}),
       demote: () => shiftIndent(1),
       promote: () => shiftIndent(-1),
       canPromote: inList
         ? Boolean(editor?.can().liftListItem("listItem"))
         : Number(blockAttrs.indentLevel) > 0,
       moveUp: () => withEdit(() => editor!.chain().focus().moveBlock(-1).run()),
-      moveDown: () => withEdit(() => editor!.chain().focus().moveBlock(1).run()),
+      moveDown: () =>
+        withEdit(() => editor!.chain().focus().moveBlock(1).run()),
     },
     namedStyles: {
-      options: namedStyles.map((style) => ({ value: style.id, label: style.label })),
+      options: namedStyles.map((style) => ({
+        value: style.id,
+        label: style.label,
+      })),
       apply: applyNamedStyle,
       create: () => setStyleDraft(""),
       ...(namedStyles.length
         ? {}
-        : { createHint: "Captures this paragraph's spacing, indent and frame as a style you can reuse" }),
+        : {
+            createHint:
+              "Captures this paragraph's spacing, indent and frame as a style you can reuse",
+          }),
     },
     outline: {
       toggle: () => setOutlineOpen((open) => !open),
@@ -2028,19 +2607,34 @@ export function DocumentStudio({
             .insertContent({ type: "inlineEquation", attrs: { latex: "" } })
             .run(),
         ),
-      callout: (kind) => withEdit(() => editor!.chain().focus().setCallout({ type: kind }).run()),
-      divider: () => withEdit(() => editor!.chain().focus().setHorizontalRule().run()),
-      taskList: () => withEdit(() => editor!.chain().focus().toggleTaskList().run()),
+      callout: (kind) =>
+        withEdit(() =>
+          editor!.chain().focus().setCallout({ type: kind }).run(),
+        ),
+      divider: () =>
+        withEdit(() => editor!.chain().focus().setHorizontalRule().run()),
+      taskList: () =>
+        withEdit(() => editor!.chain().focus().toggleTaskList().run()),
       taskListActive: editor?.isActive("taskList"),
-      reference: () => spectraBus.command("reference.beginPicking", { hostWorkId: artifactId }),
+      reference: () =>
+        spectraBus.command("reference.beginPicking", {
+          hostWorkId: artifactId,
+        }),
       citation: insertCitation,
       ...(sourcesHaveWork
         ? {}
-        : { citationHint: "Cite a source once this document carries one; the Sources rail opens instead" }),
-      footnote: () => withEdit(() => editor!.chain().focus().insertFootnote().run()),
-      endnote: () => withEdit(() => editor!.chain().focus().insertEndnote().run()),
-      pageBreak: () => withEdit(() => editor!.chain().focus().insertPageBreak().run()),
-      sectionBreak: () => withEdit(() => editor!.chain().focus().insertSectionBreak().run()),
+        : {
+            citationHint:
+              "Cite a source once this document carries one; the Sources rail opens instead",
+          }),
+      footnote: () =>
+        withEdit(() => editor!.chain().focus().insertFootnote().run()),
+      endnote: () =>
+        withEdit(() => editor!.chain().focus().insertEndnote().run()),
+      pageBreak: () =>
+        withEdit(() => editor!.chain().focus().insertPageBreak().run()),
+      sectionBreak: () =>
+        withEdit(() => editor!.chain().focus().insertSectionBreak().run()),
       caption: () =>
         withEdit(() =>
           editor!
@@ -2049,7 +2643,9 @@ export function DocumentStudio({
             .insertContent({
               type: "paragraph",
               attrs: { blockStyle: "caption" },
-              content: [{ type: "text", text: "Figure — describe what this shows" }],
+              content: [
+                { type: "text", text: "Figure — describe what this shows" },
+              ],
             })
             .run(),
         ),
@@ -2057,19 +2653,29 @@ export function DocumentStudio({
     },
     table: {
       active: inTable,
-      addRowBefore: () => withEdit(() => editor!.chain().focus().addRowBefore().run()),
-      addRowAfter: () => withEdit(() => editor!.chain().focus().addRowAfter().run()),
-      deleteRow: () => withEdit(() => editor!.chain().focus().deleteRow().run()),
-      addColumnBefore: () => withEdit(() => editor!.chain().focus().addColumnBefore().run()),
-      addColumnAfter: () => withEdit(() => editor!.chain().focus().addColumnAfter().run()),
-      deleteColumn: () => withEdit(() => editor!.chain().focus().deleteColumn().run()),
-      mergeCells: () => withEdit(() => editor!.chain().focus().mergeCells().run()),
-      splitCell: () => withEdit(() => editor!.chain().focus().splitCell().run()),
+      addRowBefore: () =>
+        withEdit(() => editor!.chain().focus().addRowBefore().run()),
+      addRowAfter: () =>
+        withEdit(() => editor!.chain().focus().addRowAfter().run()),
+      deleteRow: () =>
+        withEdit(() => editor!.chain().focus().deleteRow().run()),
+      addColumnBefore: () =>
+        withEdit(() => editor!.chain().focus().addColumnBefore().run()),
+      addColumnAfter: () =>
+        withEdit(() => editor!.chain().focus().addColumnAfter().run()),
+      deleteColumn: () =>
+        withEdit(() => editor!.chain().focus().deleteColumn().run()),
+      mergeCells: () =>
+        withEdit(() => editor!.chain().focus().mergeCells().run()),
+      splitCell: () =>
+        withEdit(() => editor!.chain().focus().splitCell().run()),
       canMerge: Boolean(editor?.can().mergeCells()),
       canSplit: Boolean(editor?.can().splitCell()),
-      toggleHeaderRow: () => withEdit(() => editor!.chain().focus().toggleHeaderRow().run()),
+      toggleHeaderRow: () =>
+        withEdit(() => editor!.chain().focus().toggleHeaderRow().run()),
       headerRowActive: Boolean(editor?.isActive("tableHeader")),
-      deleteTable: () => withEdit(() => editor!.chain().focus().deleteTable().run()),
+      deleteTable: () =>
+        withEdit(() => editor!.chain().focus().deleteTable().run()),
       ...(() => {
         const currentTable = activeNode(["table"]);
         const authoredHere = currentTable?.attrs.spectraAuthored === true;
@@ -2083,46 +2689,75 @@ export function DocumentStudio({
     },
     image: {
       active: Boolean(activeImage),
-      ...(typeof activeImage?.attrs.wrap === "string" ? { wrap: activeImage.attrs.wrap } : {}),
+      ...(typeof activeImage?.attrs.wrap === "string"
+        ? { wrap: activeImage.attrs.wrap }
+        : {}),
       setWrap: (wrap) =>
-        withEdit(() => editor!.chain().focus().updateAttributes("image", { wrap }).run()),
+        withEdit(() =>
+          editor!.chain().focus().updateAttributes("image", { wrap }).run(),
+        ),
       ...(Number(activeImage?.attrs.widthPercent)
         ? { width: Number(activeImage!.attrs.widthPercent) }
         : {}),
       setWidth: (percent) =>
         withEdit(() =>
-          editor!.chain().focus().updateAttributes("image", { widthPercent: percent }).run(),
+          editor!
+            .chain()
+            .focus()
+            .updateAttributes("image", { widthPercent: percent })
+            .run(),
         ),
-      ...(typeof activeImage?.attrs.alt === "string" ? { alt: activeImage.attrs.alt } : {}),
+      ...(typeof activeImage?.attrs.alt === "string"
+        ? { alt: activeImage.attrs.alt }
+        : {}),
       editAlt: () =>
-        setAltDraft(typeof activeImage?.attrs.alt === "string" ? activeImage.attrs.alt : ""),
-      remove: () => withEdit(() => editor!.chain().focus().deleteSelection().run()),
+        setAltDraft(
+          typeof activeImage?.attrs.alt === "string"
+            ? activeImage.attrs.alt
+            : "",
+        ),
+      remove: () =>
+        withEdit(() => editor!.chain().focus().deleteSelection().run()),
     },
     equation: {
       active: Boolean(activeEquation),
       ...(activeEquation
-        ? { display: activeEquation.attrs.display === "inline" ? ("inline" as const) : ("block" as const) }
+        ? {
+            display:
+              activeEquation.attrs.display === "inline"
+                ? ("inline" as const)
+                : ("block" as const),
+          }
         : {}),
       setDisplay: (display) =>
         withEdit(() =>
           editor!
             .chain()
             .focus()
-            .updateAttributes("equation", { display: display === "inline" ? "inline" : "block" })
+            .updateAttributes("equation", {
+              display: display === "inline" ? "inline" : "block",
+            })
             .run(),
         ),
       ...(typeof activeEquation?.attrs.alignment === "string"
         ? { alignment: activeEquation.attrs.alignment }
         : {}),
       setAlignment: (alignment) =>
-        withEdit(() => editor!.chain().focus().updateAttributes("equation", { alignment }).run()),
+        withEdit(() =>
+          editor!
+            .chain()
+            .focus()
+            .updateAttributes("equation", { alignment })
+            .run(),
+        ),
       // Selecting the node is what opens its LaTeX field: the equation is edited
       // where it sits, not in a dialogue at the edge of the screen.
       edit: () => {
         if (!editor || !activeEquation) return;
         editor.chain().focus().setNodeSelection(activeEquation.pos).run();
       },
-      remove: () => withEdit(() => editor!.chain().focus().deleteSelection().run()),
+      remove: () =>
+        withEdit(() => editor!.chain().focus().deleteSelection().run()),
     },
     page: {
       size: pageSetup.size,
@@ -2136,16 +2771,25 @@ export function DocumentStudio({
           },
         }),
       margins: pageSetup.margins,
-      setMargins: (margins) => patchContent({ pageSetup: { ...pageSetup, margins } }),
+      setMargins: (margins) =>
+        patchContent({ pageSetup: { ...pageSetup, margins } }),
       columns: pageSetup.columns,
       setColumns: (columns) =>
-        patchContent({ pageSetup: { ...pageSetup, columns: Math.max(1, Math.min(3, columns)) } }),
-      editHeader: () => setChromeDraft({ slot: "header", text: pageSetup.header }),
+        patchContent({
+          pageSetup: {
+            ...pageSetup,
+            columns: Math.max(1, Math.min(3, columns)),
+          },
+        }),
+      editHeader: () =>
+        setChromeDraft({ slot: "header", text: pageSetup.header }),
       headerText: pageSetup.header,
-      editFooter: () => setChromeDraft({ slot: "footer", text: pageSetup.footer }),
+      editFooter: () =>
+        setChromeDraft({ slot: "footer", text: pageSetup.footer }),
       footerText: pageSetup.footer,
       canvas: pageLayout,
-      setCanvas: (canvas) => setPageLayout(canvas === "page" ? "page" : "continuous"),
+      setCanvas: (canvas) =>
+        setPageLayout(canvas === "page" ? "page" : "continuous"),
       focus: focusMode,
       toggleFocus: () => {
         if (focusMode) {
@@ -2157,14 +2801,18 @@ export function DocumentStudio({
         setSourcesOpen(false);
         setFindOpen(false);
       },
-      ...(canPreviewAsReader ? { previewAsReader: () => setDocMode("read") } : {}),
+      ...(canPreviewAsReader
+        ? { previewAsReader: () => setDocMode("read") }
+        : {}),
       templates: [
         { id: "notes", label: "Study notes" },
         { id: "essay", label: "Essay" },
         { id: "lab", label: "Lab report" },
       ],
       applyTemplate: (id) =>
-        setPendingTemplate(id === "essay" ? "essay" : id === "lab" ? "lab" : "notes"),
+        setPendingTemplate(
+          id === "essay" ? "essay" : id === "lab" ? "lab" : "notes",
+        ),
     },
     references: {
       sources: {
@@ -2177,7 +2825,8 @@ export function DocumentStudio({
       citationStyle: bibliographyStyle,
       setCitationStyle: (style) =>
         patchContent({
-          bibliographyStyle: style === "author_date" ? "author_date" : "numeric",
+          bibliographyStyle:
+            style === "author_date" ? "author_date" : "numeric",
         }),
       addSource: () => setSourcesOpen(true),
       addSourceReason:
@@ -2201,7 +2850,9 @@ export function DocumentStudio({
       run: async (format) => {
         setExportBusy(format);
         try {
-          await exportDocument(format as "docx" | "pdf" | "html" | "md" | "txt");
+          await exportDocument(
+            format as "docx" | "pdf" | "html" | "md" | "txt",
+          );
         } finally {
           setExportBusy(null);
         }
@@ -2310,7 +2961,11 @@ export function DocumentStudio({
         ? ["document.image.wrap", "document.image.width", "document.image.alt"]
         : []),
       ...(activeEquation
-        ? ["document.equation.display", "document.equation.align", "document.equation.edit"]
+        ? [
+            "document.equation.display",
+            "document.equation.align",
+            "document.equation.edit",
+          ]
         : []),
     ] as const
   ).flatMap<DocumentSelectionEntry>((id) => {
@@ -2391,13 +3046,18 @@ export function DocumentStudio({
             // three that have something to offer here open the floating bar.
             if (
               selectedNode &&
-              !["table", "tableRow", "image", "equation", "inlineEquation"].includes(
-                selectedNode.type.name,
-              )
+              ![
+                "table",
+                "tableRow",
+                "image",
+                "equation",
+                "inlineEquation",
+              ].includes(selectedNode.type.name)
             ) {
               return false;
             }
-            if (current.isActive("table") || current.isActive("image")) return true;
+            if (current.isActive("table") || current.isActive("image"))
+              return true;
             return !state.selection.empty;
           }}
           className="spectra-document-selection-toolbar"
@@ -2422,7 +3082,11 @@ export function DocumentStudio({
           reader.onload = () => {
             if (typeof reader.result !== "string") return;
             withEdit(() =>
-              editor.chain().focus().setImage({ src: reader.result as string }).run(),
+              editor
+                .chain()
+                .focus()
+                .setImage({ src: reader.result as string })
+                .run(),
             );
           };
           reader.readAsDataURL(file);
@@ -2560,8 +3224,18 @@ export function DocumentStudio({
               const href = linkDraft.trim();
               withEdit(() =>
                 href
-                  ? editor!.chain().focus().extendMarkRange("link").setLink({ href }).run()
-                  : editor!.chain().focus().extendMarkRange("link").unsetLink().run(),
+                  ? editor!
+                      .chain()
+                      .focus()
+                      .extendMarkRange("link")
+                      .setLink({ href })
+                      .run()
+                  : editor!
+                      .chain()
+                      .focus()
+                      .extendMarkRange("link")
+                      .unsetLink()
+                      .run(),
               );
               setLinkDraft(null);
             }}
@@ -2579,7 +3253,11 @@ export function DocumentStudio({
             onCancel={() => setAltDraft(null)}
             onConfirm={() => {
               withEdit(() =>
-                editor!.chain().focus().updateAttributes("image", { alt: altDraft }).run(),
+                editor!
+                  .chain()
+                  .focus()
+                  .updateAttributes("image", { alt: altDraft })
+                  .run(),
               );
               setAltDraft(null);
             }}
@@ -2587,7 +3265,9 @@ export function DocumentStudio({
         ) : null}
         {chromeDraft ? (
           <DocumentInlinePanel
-            label={chromeDraft.slot === "header" ? "Page header" : "Page footer"}
+            label={
+              chromeDraft.slot === "header" ? "Page header" : "Page footer"
+            }
             detail="Shown on every page of the page canvas and in a printed copy."
             value={chromeDraft.text}
             placeholder={
@@ -2596,11 +3276,16 @@ export function DocumentStudio({
                 : "Class, date, or page note"
             }
             confirmLabel="Save"
-            onChange={(text) => setChromeDraft({ slot: chromeDraft.slot, text })}
+            onChange={(text) =>
+              setChromeDraft({ slot: chromeDraft.slot, text })
+            }
             onCancel={() => setChromeDraft(null)}
             onConfirm={() => {
               patchContent({
-                pageSetup: { ...pageSetup, [chromeDraft.slot]: chromeDraft.text },
+                pageSetup: {
+                  ...pageSetup,
+                  [chromeDraft.slot]: chromeDraft.text,
+                },
               });
               setChromeDraft(null);
             }}
@@ -2797,8 +3482,8 @@ export function DocumentStudio({
                   ))}
                   <p>
                     These marks stay exactly as Word wrote them. Accepting or
-                    rejecting them would rewrite parts Spectra does not model, so
-                    that belongs in Word.
+                    rejecting them would rewrite parts Spectra does not model,
+                    so that belongs in Word.
                   </p>
                 </>
               ) : (

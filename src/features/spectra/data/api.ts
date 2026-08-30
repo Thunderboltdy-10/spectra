@@ -782,19 +782,10 @@ export type SpectraTimetableReminderNotification = {
   readAt?: number;
 };
 
-export type SpectraArtifactEmbed = {
-  embedId: string;
-  containerType: "artifact" | "thread";
-  containerId: string;
-  containerRegionId: string;
-  mode: "compact" | "expanded";
-  interaction: "read" | "interact" | "edit";
+export type SpectraArtifactEmbed =
+  import("../../../../shared/artifact-embed").ArtifactEmbedReference & {
   effectiveInteraction?: "read" | "interact" | "edit";
-  versionPolicy: "live" | "pinned";
-  contextPolicy: "none" | "summary" | "visible_region";
-  displayPreferences?: Record<string, unknown>;
   canConfigure?: boolean;
-  state: "ready" | "no_access" | "deleted" | "archived" | "version_unavailable";
   canRequestAccess?: boolean;
   accessRequest?: { requestId: string; status: "pending"; createdAt: number };
   source?: {
@@ -828,11 +819,8 @@ export type SpectraArtifactEmbed = {
     outputBytes: number;
     payloadBytes?: number;
     publishedAt?: number;
-    storageUrl: string;
   };
   runtimeResources?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
 };
 
 export type SpectraArtifactAccessRequest = {
@@ -2210,20 +2198,6 @@ export async function markSpectraTimetableReminderNotificationsRead(
 export async function getSpectraArtifactLinks(artifactId: string) {
   const qs = new URLSearchParams({ action: "artifactLinks", artifactId });
   return readJson<{ links: SpectraArtifactLink[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
-  );
-}
-
-export async function getSpectraArtifactEmbeds(
-  containerType: "artifact" | "thread",
-  containerId: string,
-) {
-  const qs = new URLSearchParams({
-    action: "artifactEmbeds",
-    containerType,
-    containerId,
-  });
-  return readJson<{ embeds: SpectraArtifactEmbed[]; canConfigure: boolean }>(
     await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }

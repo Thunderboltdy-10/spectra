@@ -126,6 +126,7 @@ function embedOf(input: {
     containerType: "artifact",
     containerId: "work-ecosystems",
     containerRegionId: "region-data",
+    sourceArtifactId: "src-dataset",
     mode: input.mode,
     interaction: "read",
     effectiveInteraction: "read",

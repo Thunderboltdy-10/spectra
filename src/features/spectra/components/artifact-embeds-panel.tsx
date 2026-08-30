@@ -1,25 +1,23 @@
 "use client";
 
-import {
-  Check,
-  Link2,
-  Loader2,
-  Plus,
-  Search,
-  Trash2,
-  X,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Link2, Loader2, Plus, Search, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation } from "convex/react";
+import type { Id } from "../../../../convex/_generated/dataModel";
+import { api } from "../../../../convex/_generated/api";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import {
-  getSpectraArtifactEmbeds,
   getSpectraArtifactVersions,
   postSpectra,
   type SpectraArtifact,
   type SpectraArtifactEmbed,
   type SpectraArtifactVersion,
 } from "../data/api";
+import type { ArtifactTypeKey } from "../artifacts/types";
+import type { CompatibilityProfile } from "../commands/types";
+import type { ReferenceNode } from "../references";
+import type { ArtifactEmbedInteraction } from "../../../../shared/artifact-embed";
 import type { ArtifactCommentRegion } from "./artifact-comments-panel";
 import { ArtifactEmbed } from "./artifact-embed";
 import { workTypeMeta } from "./artifact-card";
@@ -30,14 +28,18 @@ import { spectraBus } from "../events";
 import { useSpectraMotion } from "../motion/motion-level";
 import { transitionFor } from "../motion/grammar";
 import { SelectField } from "@/components/ui/select";
+import { embedCapabilitiesFor } from "../capabilities";
+import { useArtifactEmbedContainer } from "./artifact-embed-host";
 
-type Interaction = "read" | "interact" | "edit";
+type Interaction = ArtifactEmbedInteraction;
 
 export function ArtifactEmbedsPanel({
   open,
   containerType = "artifact",
   containerId,
   containerTitle,
+  containerWorkType,
+  compatibilityProfile = "spectra-native",
   artifacts,
   regions,
   onOpenSource,
@@ -47,14 +49,24 @@ export function ArtifactEmbedsPanel({
   containerType?: "artifact" | "thread";
   containerId: string;
   containerTitle: string;
+  containerWorkType?: ArtifactTypeKey;
+  compatibilityProfile?: CompatibilityProfile;
   artifacts: SpectraArtifact[];
   regions: readonly ArtifactCommentRegion[];
   onOpenSource?: (artifactId: string) => void;
   onClose: () => void;
 }) {
-  const [embeds, setEmbeds] = useState<SpectraArtifactEmbed[]>([]);
-  const [canConfigure, setCanConfigure] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const liveResult = useArtifactEmbedContainer(
+    containerType,
+    containerId,
+    open,
+  );
+  const embeds = liveResult?.embeds ?? [];
+  const canConfigure = liveResult?.canConfigure ?? false;
+  const loading = open && liveResult === undefined;
+  const createReference = useMutation(api.artifactEmbeds.create);
+  const updateReference = useMutation(api.artifactEmbeds.update);
+  const removeReference = useMutation(api.artifactEmbeds.remove);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -66,21 +78,6 @@ export function ArtifactEmbedsPanel({
   const [pinnedVersionId, setPinnedVersionId] = useState("");
   const [referenceView, setReferenceView] = useState("");
   const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await getSpectraArtifactEmbeds(containerType, containerId);
-      setEmbeds(result.embeds);
-      setCanConfigure(result.canConfigure);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Could not load references.",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [containerId, containerType]);
 
   useEffect(() => {
     if (!open) return;
@@ -94,8 +91,7 @@ export function ArtifactEmbedsPanel({
     setPinnedVersionId("");
     setReferenceView("");
     setVersions([]);
-    void refresh();
-  }, [open, refresh, regions]);
+  }, [open, regions]);
 
   useEffect(() => {
     if (!open || !sourceArtifactId || versionPolicy !== "pinned") return;
@@ -144,9 +140,11 @@ export function ArtifactEmbedsPanel({
         ),
       ]
     : [];
-  const supportsInteraction =
-    selectedArtifact?.blueprintKey === "flashcard_deck" ||
-    selectedArtifact?.blueprintKey === "quiz";
+  const supportsInteraction = Boolean(
+    selectedArtifact &&
+    isArtifactTypeKey(selectedArtifact.blueprintKey) &&
+    embedCapabilitiesFor(selectedArtifact.blueprintKey, "interact").length,
+  );
 
   useEffect(() => {
     if (!supportsInteraction && interaction === "interact")
@@ -160,33 +158,62 @@ export function ArtifactEmbedsPanel({
       (versionPolicy === "pinned" && !pinnedVersionId)
     )
       return;
+    if (compatibilityProfile === "strict-native") {
+      toast.error(
+        "This file keeps strict native compatibility. Change it to Enhanced before adding a live reference.",
+      );
+      return;
+    }
     setBusy("create");
+    let createdEmbedId: string | undefined;
     try {
-      await postSpectra({
-        action: "createArtifactEmbed",
+      const result = await createReference({
         containerType,
         containerId,
         containerRegionId,
-        sourceArtifactId,
+        sourceArtifactId: sourceArtifactId as Id<"spectraArtifacts">,
         mode,
         interaction,
         versionPolicy,
         pinnedVersionId:
-          versionPolicy === "pinned" ? pinnedVersionId : undefined,
+          versionPolicy === "pinned"
+            ? (pinnedVersionId as Id<"spectraArtifactVersions">)
+            : undefined,
         contextPolicy: "summary",
         displayPreferences:
           referenceView || referenceViews[0]
             ? { view: referenceView || referenceViews[0] }
             : undefined,
       });
+      createdEmbedId = result.embedId;
       if (
         containerType === "artifact" &&
+        (containerWorkType === "document" ||
+          containerWorkType === "whiteboard") &&
         selectedArtifact &&
         isArtifactTypeKey(selectedArtifact.blueprintKey)
       ) {
+        const reference: ReferenceNode = {
+          embedId: result.embedId,
+          containerType,
+          containerId,
+          containerRegionId,
+          sourceArtifactId,
+          mode,
+          interaction,
+          versionPolicy,
+          ...(versionPolicy === "pinned" ? { pinnedVersionId } : {}),
+          contextPolicy: "summary",
+          displayPreferences:
+            referenceView || referenceViews[0]
+              ? { view: referenceView || referenceViews[0] }
+              : undefined,
+          state: "ready",
+        };
         const definition = getWorkDefinition(selectedArtifact.blueprintKey);
-        spectraBus.command("reference.insert", {
+        await spectraBus.commandAsync("reference.insert", {
           hostWorkId: containerId,
+          reference,
           target: {
             workId: selectedArtifact._id,
             workType: selectedArtifact.blueprintKey,
@@ -201,9 +228,12 @@ export function ArtifactEmbedsPanel({
       setCreating(false);
       setSourceArtifactId("");
       setSearch("");
-      await refresh();
       toast.success("Reference added.");
     } catch (error) {
+      if (createdEmbedId)
+        await removeReference({
+          embedId: createdEmbedId as Id<"artifactEmbeds">,
+        }).catch(() => undefined);
       toast.error(
         error instanceof Error
           ? error.message
@@ -220,18 +250,10 @@ export function ArtifactEmbedsPanel({
   ) {
     setBusy(`mode:${embed.embedId}`);
     try {
-      await postSpectra({
-        action: "updateArtifactEmbed",
-        embedId: embed.embedId,
+      await updateReference({
+        embedId: embed.embedId as Id<"artifactEmbeds">,
         mode: nextMode,
       });
-      setEmbeds((current) =>
-        current.map((entry) =>
-          entry.embedId === embed.embedId
-            ? { ...entry, mode: nextMode }
-            : entry,
-        ),
-      );
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -246,13 +268,18 @@ export function ArtifactEmbedsPanel({
   async function removeEmbed(embed: SpectraArtifactEmbed) {
     setBusy(`remove:${embed.embedId}`);
     try {
-      await postSpectra({
-        action: "removeArtifactEmbed",
-        embedId: embed.embedId,
+      await removeReference({
+        embedId: embed.embedId as Id<"artifactEmbeds">,
       });
-      setEmbeds((current) =>
-        current.filter((entry) => entry.embedId !== embed.embedId),
-      );
+      if (
+        containerType === "artifact" &&
+        (containerWorkType === "document" || containerWorkType === "whiteboard")
+      ) {
+        await spectraBus.commandAsync("reference.remove", {
+          hostWorkId: containerId,
+          embedId: embed.embedId,
+        });
+      }
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -269,17 +296,9 @@ export function ArtifactEmbedsPanel({
     size: { width: number; height: number },
   ) {
     const displayPreferences = { ...embed.displayPreferences, ...size };
-    setEmbeds((current) =>
-      current.map((entry) =>
-        entry.embedId === embed.embedId
-          ? { ...entry, displayPreferences }
-          : entry,
-      ),
-    );
     try {
-      await postSpectra({
-        action: "updateArtifactEmbed",
-        embedId: embed.embedId,
+      await updateReference({
+        embedId: embed.embedId as Id<"artifactEmbeds">,
         displayPreferences,
       });
     } catch (error) {
@@ -288,7 +307,6 @@ export function ArtifactEmbedsPanel({
           ? error.message
           : "Could not save the reference size.",
       );
-      await refresh();
     }
   }
 
@@ -300,7 +318,6 @@ export function ArtifactEmbedsPanel({
         embedId: embed.embedId,
         requestedLevel: "read",
       });
-      await refresh();
       toast.success("Access request sent to the source owner.");
     } catch (error) {
       toast.error(
@@ -317,7 +334,6 @@ export function ArtifactEmbedsPanel({
     setBusy(`request:${embedId}`);
     try {
       await postSpectra({ action: "cancelArtifactAccessRequest", requestId });
-      await refresh();
       toast.success("Access request cancelled.");
     } catch (error) {
       toast.error(
@@ -333,12 +349,10 @@ export function ArtifactEmbedsPanel({
   async function recoverLiveVersion(embed: SpectraArtifactEmbed) {
     setBusy(`version:${embed.embedId}`);
     try {
-      await postSpectra({
-        action: "updateArtifactEmbed",
-        embedId: embed.embedId,
+      await updateReference({
+        embedId: embed.embedId as Id<"artifactEmbeds">,
         versionPolicy: "live",
       });
-      await refresh();
       toast.success("Reference restored to the live source.");
     } catch (error) {
       toast.error(
@@ -366,7 +380,7 @@ export function ArtifactEmbedsPanel({
               ? undefined
               : transitionFor("reveal", motionLevel.level)
           }
-          className="absolute inset-0 z-[72] flex justify-end bg-[color-mix(in_oklab,var(--text-primary)_12%,transparent)] backdrop-blur-[1px]"
+          className="absolute inset-0 z-panel flex justify-end bg-[color-mix(in_oklab,var(--text-primary)_12%,transparent)] backdrop-blur-[1px]"
           onPointerDown={onClose}
         >
           <motion.aside
@@ -382,12 +396,12 @@ export function ArtifactEmbedsPanel({
                 ? undefined
                 : transitionFor("morph", motionLevel.level)
             }
-            className="flex h-full w-full max-w-[520px] flex-col border-l border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[-20px_0_60px_rgba(27,20,12,0.12)]"
+            className="flex h-full w-full max-w-[520px] flex-col border-l border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]"
             onPointerDown={(event) => event.stopPropagation()}
           >
             <header className="flex shrink-0 items-start justify-between border-b border-[var(--border-default)] px-5 py-4">
               <div className="flex min-w-0 items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,#8b6ff0_9%,var(--bg-secondary))] text-[#765bd8]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-secondary))] text-[var(--brand-primary)]">
                   <Link2 className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
@@ -407,8 +421,21 @@ export function ArtifactEmbedsPanel({
                 {canConfigure ? (
                   <button
                     type="button"
-                    onClick={() => setCreating((value) => !value)}
+                    onClick={() => {
+                      if (compatibilityProfile === "strict-native") {
+                        toast.error(
+                          "This file keeps strict native compatibility. Change it to Enhanced before adding a live reference.",
+                        );
+                        return;
+                      }
+                      setCreating((value) => !value);
+                    }}
                     className="flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)]"
+                    title={
+                      compatibilityProfile === "strict-native"
+                        ? "Live references need Enhanced compatibility."
+                        : "Add a live reference"
+                    }
                   >
                     <Plus className="h-3.5 w-3.5" />
                     Add
@@ -424,6 +451,13 @@ export function ArtifactEmbedsPanel({
                 </button>
               </div>
             </header>
+
+            {compatibilityProfile === "strict-native" && canConfigure ? (
+              <div className="shrink-0 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-3 text-micro leading-4 text-[var(--text-secondary)]">
+                This file keeps strict native compatibility. Live references are
+                available after changing compatibility to Enhanced.
+              </div>
+            ) : null}
 
             {creating ? (
               <section className="shrink-0 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-4">
@@ -596,12 +630,11 @@ export function ArtifactEmbedsPanel({
               ) : (
                 <div className="space-y-4">
                   {embeds.map((embed) => (
-                    <div key={embed.embedId} className="group relative">
+                    <div key={embed.embedId}>
                       <ArtifactEmbed
                         embed={embed}
                         busy={busy?.includes(embed.embedId) ?? false}
                         onOpenSource={onOpenSource}
-                        onRetry={() => void refresh()}
                         onModeChange={
                           embed.canConfigure
                             ? (nextMode) => void changeMode(embed, nextMode)
@@ -617,22 +650,12 @@ export function ArtifactEmbedsPanel({
                           void cancelAccessRequest(requestId, embed.embedId)
                         }
                         onUseLiveVersion={() => void recoverLiveVersion(embed)}
+                        onRemove={
+                          embed.canConfigure
+                            ? () => void removeEmbed(embed)
+                            : undefined
+                        }
                       />
-                      {embed.canConfigure ? (
-                        <button
-                          type="button"
-                          disabled={busy === `remove:${embed.embedId}`}
-                          onClick={() => void removeEmbed(embed)}
-                          className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-[6px] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] text-[var(--text-tertiary)] opacity-0 shadow-sm transition hover:text-[var(--danger)] group-hover:opacity-100 focus:opacity-100"
-                          aria-label="Remove reference"
-                        >
-                          {busy === `remove:${embed.embedId}` ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-3 w-3" />
-                          )}
-                        </button>
-                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -644,4 +667,3 @@ export function ArtifactEmbedsPanel({
     </AnimatePresence>
   );
 }
-

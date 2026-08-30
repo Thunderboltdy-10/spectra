@@ -55,3 +55,19 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - CS-9 payload GC (`beginPayloadUpload` refCount) is not this unit. L4 30-client / multi-writer stays P5.V1. Embeds stay P5.I3.
 - Status: IMPLEMENTED. No acceptance claimed.
 
+### P5.I3 implementation log (2026-08-30)
+
+- Canonical `ArtifactEmbedReference` now owns shared validators and client/server identity; legacy document references adopt one stable Convex row.
+- Convex projections stay live and retain honest removed/denied/missing states; update, restore, and bounded bulk removal preserve host placement semantics.
+- Interaction levels derive from capability IR. Quiz practice is interactive only when permitted and published; an unpublished quiz offers `Publish to practice` without a false start action.
+- Document, whiteboard, references panel, composer dock, and shared chat all render through one embed host; thread embeds persist and reload from Convex.
+- Cross-artifact placement uses the same command/host path, including stable 4:3 whiteboard embed nodes.
+- Native export emits an escaped SVG/reference fallback; strict-native files refuse live placement until changed to Enhanced.
+- Private published-code bearer URLs remain server-side behind an authenticated same-origin stream with payload size and SHA-256 verification.
+- Code runtimes unmount off-screen or on hidden pages; non-code live projections remain subscribed.
+- Focused Vitest: 5 files / 43 tests. Scoped ESLint: 0 errors (existing token/style warnings only).
+- Capability IR gate, secret scan, diff-check, Convex schema/typecheck, and the single Impeccable detector pass all passed.
+- Fresh Account A context reloaded the Convex quiz embed; shared chat rendered a live read-only document host; console errors 0. Evidence: `.shots/reformation/P5.I3/manifest.md`.
+- Local collaboration-proxy WebSocket failures kept document body insertion local; gateway was ready and persistent embed projection still passed. Proxy/load composition remains P5.I2/P5.V1.
+- Status: IMPLEMENTED. No acceptance claimed.
+

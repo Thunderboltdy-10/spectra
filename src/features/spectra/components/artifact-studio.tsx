@@ -6235,6 +6235,12 @@ function ArtifactStudioEditor({
         open={embedsOpen}
         containerId={artifact._id}
         containerTitle={title || artifact.title}
+        containerWorkType={
+          isArtifactTypeKey(artifact.blueprintKey)
+            ? artifact.blueprintKey
+            : undefined
+        }
+        compatibilityProfile={studioContract.compatibilityProfile}
         artifacts={artifacts}
         regions={commentRegions}
         onOpenSource={onOpenArtifact}

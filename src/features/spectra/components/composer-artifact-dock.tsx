@@ -1,10 +1,17 @@
 "use client";
 
-import { useMemo, type CSSProperties } from "react";
-import { ExternalLink, FileText, X } from "lucide-react";
+import { useMemo, useState, type CSSProperties } from "react";
+import { Check, ExternalLink, FileText, Link2, Loader2, X } from "lucide-react";
+import { useMutation } from "convex/react";
+import { toast } from "sonner";
+import type { Id } from "../../../../convex/_generated/dataModel";
+import { api } from "../../../../convex/_generated/api";
 import type { ResultCardStreamView } from "../ai/stream-events";
 import type { SpectraArtifact } from "../data/api";
+import { isArtifactTypeKey } from "../artifacts/registry";
+import { suggestedEmbedInteraction } from "../capabilities";
 import { workTypeMeta } from "./artifact-card";
+import { useArtifactEmbedContainer } from "./artifact-embed-host";
 
 function collectMentionedIds(
   content: string | undefined,
@@ -37,6 +44,7 @@ export function ComposerArtifactDock({
   cards,
   explicitIds,
   assistantContent,
+  threadId,
   onOpen,
   onDismiss,
 }: {
@@ -45,9 +53,29 @@ export function ComposerArtifactDock({
   /** Explicit IDs the model asked to surface. */
   explicitIds?: string[];
   assistantContent?: string;
+  threadId?: string;
   onOpen?: (artifactId: string) => void;
   onDismiss?: (artifactId: string) => void;
 }) {
+  const createReference = useMutation(api.artifactEmbeds.create);
+  const existing = useArtifactEmbedContainer(
+    "thread",
+    threadId ?? "",
+    Boolean(threadId),
+  );
+  const [busyArtifactId, setBusyArtifactId] = useState<string | null>(null);
+  const [keptSourceIds, setKeptSourceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const embeddedSourceIds = useMemo(
+    () => {
+      const ids = new Set(keptSourceIds);
+      for (const embed of existing?.embeds ?? [])
+        ids.add(embed.sourceArtifactId);
+      return ids;
+    },
+    [existing?.embeds, keptSourceIds],
+  );
   const rows = useMemo(() => {
     const byId = new Map(artifacts.map((artifact) => [artifact._id, artifact]));
     const ordered: string[] = [];
@@ -63,13 +91,44 @@ export function ComposerArtifactDock({
       }
     }
     for (const id of collectMentionedIds(assistantContent, artifacts)) push(id);
-    return ordered
-      .slice(0, 6)
-      .flatMap((id) => {
-        const artifact = byId.get(id);
-        return artifact ? [artifact] : [];
-      });
+    return ordered.slice(0, 6).flatMap((id) => {
+      const artifact = byId.get(id);
+      return artifact ? [artifact] : [];
+    });
   }, [artifacts, assistantContent, cards, explicitIds]);
+
+  async function keepInThread(artifact: SpectraArtifact) {
+    if (
+      !threadId ||
+      !isArtifactTypeKey(artifact.blueprintKey) ||
+      embeddedSourceIds.has(artifact._id) ||
+      busyArtifactId
+    )
+      return;
+    setBusyArtifactId(artifact._id);
+    try {
+      await createReference({
+        containerType: "thread",
+        containerId: threadId,
+        containerRegionId: `thread:work:${artifact._id}`,
+        sourceArtifactId: artifact._id as Id<"spectraArtifacts">,
+        mode: "compact",
+        interaction: suggestedEmbedInteraction(artifact.blueprintKey),
+        versionPolicy: "live",
+        contextPolicy: "summary",
+        displayPreferences: { sourceWorkType: artifact.blueprintKey },
+      });
+      setKeptSourceIds((current) => new Set(current).add(artifact._id));
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "This work could not be kept in the conversation.",
+      );
+    } finally {
+      setBusyArtifactId(null);
+    }
+  }
 
   if (rows.length === 0) return null;
 
@@ -127,6 +186,32 @@ export function ComposerArtifactDock({
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </button>
+              ) : null}
+              {threadId && isArtifactTypeKey(artifact.blueprintKey) ? (
+                embeddedSourceIds.has(artifact._id) ? (
+                  <span
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--success)]"
+                    aria-label={`${artifact.title} is in this conversation`}
+                    title="In conversation"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void keepInThread(artifact)}
+                    disabled={Boolean(busyArtifactId)}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] disabled:opacity-45"
+                    aria-label={`Keep ${artifact.title} in this conversation`}
+                    title="Keep in conversation"
+                  >
+                    {busyArtifactId === artifact._id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
+                    ) : (
+                      <Link2 className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                )
               ) : null}
               {onDismiss ? (
                 <button

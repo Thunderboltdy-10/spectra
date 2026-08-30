@@ -1,5 +1,12 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import {
+  artifactEmbedContainerTypeValidator,
+  artifactEmbedContextPolicyValidator,
+  artifactEmbedInteractionValidator,
+  artifactEmbedModeValidator,
+  artifactEmbedVersionPolicyValidator,
+} from "../shared/artifact-embed";
 
 export default defineSchema({
   schools: defineTable({
@@ -2745,25 +2752,17 @@ export default defineSchema({
     .index("by_version", ["versionId"]),
 
   artifactEmbeds: defineTable({
-    containerType: v.union(v.literal("artifact"), v.literal("thread")),
+    containerType: artifactEmbedContainerTypeValidator,
     containerId: v.string(),
     containerRegionId: v.string(),
     sourceArtifactId: v.id("spectraArtifacts"),
     schoolId: v.optional(v.id("schools")),
-    mode: v.union(v.literal("compact"), v.literal("expanded")),
-    interaction: v.union(
-      v.literal("read"),
-      v.literal("interact"),
-      v.literal("edit"),
-    ),
-    versionPolicy: v.union(v.literal("live"), v.literal("pinned")),
+    mode: artifactEmbedModeValidator,
+    interaction: artifactEmbedInteractionValidator,
+    versionPolicy: artifactEmbedVersionPolicyValidator,
     pinnedVersionId: v.optional(v.id("spectraArtifactVersions")),
     displayPreferences: v.optional(v.any()),
-    contextPolicy: v.union(
-      v.literal("none"),
-      v.literal("summary"),
-      v.literal("visible_region"),
-    ),
+    contextPolicy: artifactEmbedContextPolicyValidator,
     createdByAccountId: v.id("accounts"),
     createdAt: v.number(),
     updatedAt: v.number(),

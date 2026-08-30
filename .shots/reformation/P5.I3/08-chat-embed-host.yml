@@ -1,0 +1,161 @@
+- generic [active] [ref=e1]:
+  - link "Skip to content" [ref=e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic [ref=e3]:
+    - generic [ref=e1974]:
+      - complementary "Spectra navigation" [ref=e1975]:
+        - generic [ref=e1976]:
+          - button "Collapse sidebar" [ref=e1977] [cursor=pointer]
+          - link "Spectra home" [ref=e1981] [cursor=pointer]:
+            - /url: /workspace?home=1
+            - img "Spectra" [ref=e1982]
+            - generic [ref=e1991]: spectra
+        - generic [ref=e1992]:
+          - textbox "⌘ K" [ref=e1993]:
+            - /placeholder: Search
+          - generic: ⌘ K
+        - navigation "Main destinations" [ref=e1994]:
+          - link "Chat" [ref=e1995] [cursor=pointer]:
+            - /url: /chat
+          - link "Workspace" [ref=e1999] [cursor=pointer]:
+            - /url: /workspace?home=1
+          - link "Library" [ref=e2006] [cursor=pointer]:
+            - /url: /library
+          - link "Calendar" [ref=e2011] [cursor=pointer]:
+            - /url: /calendar
+          - link "Agents" [ref=e2017] [cursor=pointer]:
+            - /url: /agents
+          - link "School" [ref=e2022] [cursor=pointer]:
+            - /url: /school
+          - link "Analytics" [ref=e2029] [cursor=pointer]:
+            - /url: /analytics
+          - link "Admin" [ref=e2033] [cursor=pointer]:
+            - /url: /admin
+          - link "Super Admin" [ref=e2039] [cursor=pointer]:
+            - /url: /superadmin
+        - link "New chat" [ref=e2044] [cursor=pointer]:
+          - /url: /chat
+        - generic [ref=e2048]:
+          - heading "Recents" [level=2] [ref=e2049]
+          - generic [ref=e2050]:
+            - link "Update P4V1 Pendulum Lab 1d ago" [ref=e2051] [cursor=pointer]:
+              - /url: /chat?threadId=qs73562m11mb7d6adjxapnfj4h8dab0f
+              - generic [ref=e2052]: Update P4V1 Pendulum Lab
+              - generic [ref=e2053]: 1d ago
+            - link "P4V1 Finalizer Probe 1d ago" [ref=e2054] [cursor=pointer]:
+              - /url: /chat?threadId=qs7e28g7rnd4w7c7vpt0xbe0w98daegj
+              - generic [ref=e2055]: P4V1 Finalizer Probe
+              - generic [ref=e2056]: 1d ago
+            - link "Pendulum Marker Append 1d ago" [ref=e2057] [cursor=pointer]:
+              - /url: /chat?threadId=qs7e0kd71fmxx0x5chdfefnws98day3r
+              - generic [ref=e2058]: Pendulum Marker Append
+              - generic [ref=e2059]: 1d ago
+            - link "Archive Pendulum Guide 1d ago" [ref=e2060] [cursor=pointer]:
+              - /url: /chat?threadId=qs72ywmtjsfc5725h5rd82nkwd8daw71
+              - generic [ref=e2061]: Archive Pendulum Guide
+              - generic [ref=e2062]: 1d ago
+            - link "Pendulum Draft Marker 1d ago" [ref=e2063] [cursor=pointer]:
+              - /url: /chat?threadId=qs7fsm80nyj0cygrx7eh9k9zf58daj52
+              - generic [ref=e2064]: Pendulum Draft Marker
+              - generic [ref=e2065]: 1d ago
+            - link "P4V1 Pendulum Method Guide 1d ago" [ref=e2066] [cursor=pointer]:
+              - /url: /chat?threadId=qs7bvp9v2bx4k23mxb4f77sx598dbzqg
+              - generic [ref=e2067]: P4V1 Pendulum Method Guide
+              - generic [ref=e2068]: 1d ago
+            - link "New conversation 1d ago" [ref=e2069] [cursor=pointer]:
+              - /url: /chat?threadId=qs7b5mefgrrckrd6gbs4f2rh5d8da2yn
+              - generic [ref=e2070]: New conversation
+              - generic [ref=e2071]: 1d ago
+            - link "P4V1 Experimental Design Deck 1d ago" [ref=e2072] [cursor=pointer]:
+              - /url: /chat?threadId=qs7awh7rfrn5bexwenvdq7abxn8daak2
+              - generic [ref=e2073]: P4V1 Experimental Design Deck
+              - generic [ref=e2074]: 1d ago
+            - link "New conversation 1d ago" [ref=e2075] [cursor=pointer]:
+              - /url: /chat?threadId=qs7b5f0bzv17r0ca72qp6xm3xn8db8ff
+              - generic [ref=e2076]: New conversation
+              - generic [ref=e2077]: 1d ago
+            - link "New conversation 1d ago" [ref=e2078] [cursor=pointer]:
+              - /url: /chat?threadId=qs7a60y6gyh5j2nhz1vshrzjmh8dapp7
+              - generic [ref=e2079]: New conversation
+              - generic [ref=e2080]: 1d ago
+        - generic [ref=e2081]:
+          - generic [ref=e2082]:
+            - button "Share current page" [ref=e2083] [cursor=pointer]
+            - button "Notifications, 1 unread" [ref=e2090] [cursor=pointer]:
+              - generic [ref=e2094]: "1"
+            - button "Settings" [ref=e2095] [cursor=pointer]
+          - button "Manage account" [ref=e2099] [cursor=pointer]:
+            - generic [ref=e2100]: PM
+            - generic [ref=e2101]:
+              - strong [ref=e2102]: P MD
+              - generic [ref=e2103]: school admin
+      - main [ref=e2104]:
+        - generic [ref=e2107]:
+          - generic [ref=e2108]:
+            - generic [ref=e2109]:
+              - generic [ref=e2110]:
+                - generic [ref=e2111]: Update P4V1 Pendulum Lab
+                - generic [ref=e2112]: Thread · Shared Spectra conversation
+              - generic [ref=e2113]:
+                - button "Search work and workspaces" [ref=e2114] [cursor=pointer]
+                - button "Rename thread" [ref=e2118] [cursor=pointer]
+                - button "Pin thread" [ref=e2122] [cursor=pointer]
+                - button "New chat" [ref=e2125] [cursor=pointer]
+                - button "Open runs" [ref=e2127] [cursor=pointer]
+            - generic [ref=e2134]:
+              - article [ref=e2135]:
+                - generic [ref=e2136]:
+                  - generic [ref=e2137]: add some info to this artifact
+                  - generic [ref=e2138]: P MD · 22:24
+              - article [ref=e2139]:
+                - generic [ref=e2140]:
+                  - generic "Spectra progress" [ref=e2151]:
+                    - button "Thought" [ref=e2152] [cursor=pointer]
+                    - paragraph [ref=e2156]: Add a concise pendulum principle to the draft. Updated “P4V1 Pendulum Lab Draft”.
+                  - paragraph [ref=e2436]: Add a concise pendulum principle to the draft. Updated “P4V1 Pendulum Lab Draft”.
+                  - generic [ref=e2160]: Spectra · 22:26
+                  - button "1 actioncompleted" [ref=e2162] [cursor=pointer]
+                  - generic [ref=e2169] [cursor=pointer]:
+                    - generic [ref=e2174]:
+                      - button "P4V1 Pendulum Lab Draft" [ref=e2175]
+                      - generic [ref=e2176]: Draft pendulum report used only for P4.V1 targeting verification.
+                    - button "Open work" [ref=e2177]
+                    - button "Add to workspace" [ref=e2182]
+              - region "Work in this conversation" [ref=e2437]:
+                - generic [ref=e2438]:
+                  - generic [ref=e2439]:
+                    - generic [ref=e2444]:
+                      - generic [ref=e2445]: P4V1 Pendulum Lab Draft
+                      - generic [ref=e2446]:
+                        - generic [ref=e2447]: Document
+                        - generic [ref=e2448]: ·
+                        - generic [ref=e2449]: Compact
+                        - generic [ref=e2450]: ·
+                        - generic [ref=e2451]: Live
+                        - generic [ref=e2452]: ·
+                        - generic [ref=e2453]: Read-only
+                    - button "Expand reference" [ref=e2454] [cursor=pointer]: Expand
+                    - button "Open source" [ref=e2460] [cursor=pointer]
+                    - button "Remove reference" [ref=e2464] [cursor=pointer]
+                  - generic [ref=e2469]:
+                    - paragraph [ref=e2470]: DRAFT-UNCHANGED-4827
+                    - paragraph [ref=e2471]: Empty block
+          - generic [ref=e2185]:
+            - generic "Work from this conversation" [ref=e2412]:
+              - generic [ref=e2414] [cursor=pointer]:
+                - generic [ref=e2419]:
+                  - button "P4V1 Pendulum Lab Draft" [ref=e2420]
+                  - generic [ref=e2421]: Draft pendulum report used only for P4.V1 targeting verification.
+                - button "Open P4V1 Pendulum Lab Draft" [ref=e2422]
+                - generic "P4V1 Pendulum Lab Draft is in this conversation" [ref=e2472]
+            - generic [ref=e2186]:
+              - button "Open actions" [ref=e2244] [cursor=pointer]
+              - generic [ref=e2190]:
+                - generic [ref=e2192]:
+                  - 'button "Choose AI focus: 1 selected · 1 context" [ref=e2431] [cursor=pointer]':
+                    - generic [ref=e2379]: "1"
+                  - generic [ref=e2196]: Continuing Update P4V1 Pendulum Lab. 1 context object included.
+                - textbox "Continue Update P4V1 Pendulum Lab…" [ref=e2246]
+                - button "Send command" [disabled] [ref=e2247]
+    - region "Notifications alt+T"
+  - alert [ref=e232]

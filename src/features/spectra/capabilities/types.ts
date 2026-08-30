@@ -10,6 +10,7 @@ import type {
   FidelityRegionKey,
 } from "../commands/types";
 import type { WorkCapability, WorkType } from "../work/registry";
+import type { ArtifactEmbedInteraction } from "../../../../shared/artifact-embed";
 
 export type CapabilityScope = "artifact" | "application";
 export type AuthorityRisk =
@@ -28,6 +29,11 @@ export type OfficeLensDeltaKind<T extends OfficeWorkType> = T extends "document"
 export type ChoreographyPrimitive = {
   target: string;
   region?: string;
+};
+
+export type EmbedCapability = {
+  /** Embed interaction levels at which this exact operation is available. */
+  levels: readonly ArtifactEmbedInteraction[];
 };
 
 export type NativeCapability<T extends OfficeWorkType = OfficeWorkType> = {
@@ -68,6 +74,7 @@ export type CapabilityDefinition<
     riskClass: AuthorityRisk;
   };
   choreography?: ChoreographyPrimitive;
+  embed?: EmbedCapability;
   requires?: WorkCapability;
   /**
    * The existing artifact-manifest verb this capability specializes. During

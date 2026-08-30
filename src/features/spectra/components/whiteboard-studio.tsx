@@ -48,6 +48,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { createPortal } from "react-dom";
+import { useMutation } from "convex/react";
+import type { Id } from "../../../../convex/_generated/dataModel";
+import { api } from "../../../../convex/_generated/api";
 import {
   useCallback,
   useEffect,
@@ -88,6 +91,10 @@ import {
 import { uniqueToken } from "@/lib/unique-token";
 import { SelectField } from "@/components/ui/select";
 import { getWorkDefinition } from "../work/registry";
+import { isArtifactTypeKey } from "../artifacts/registry";
+import { suggestedEmbedInteraction } from "../capabilities";
+import { spectraBus } from "../events";
+import type { ReferenceNode } from "../references";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { useStudioContract } from "./artifact-studio-shell";
@@ -98,6 +105,7 @@ import {
   type CommandBinding,
 } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
+import { ArtifactEmbedById } from "./artifact-embed-host";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -193,6 +201,12 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 function centerX(node: WhiteboardNode) {
   return node.x + node.width / 2;
 }
@@ -213,7 +227,6 @@ function boundsOf(nodes: readonly WhiteboardNode[]) {
     bottom: Math.max(...nodes.map((node) => node.y + node.height)),
   };
 }
-
 
 function styleValue(
   node: WhiteboardNode,
@@ -242,9 +255,7 @@ function visual(
   const fromContent = contentKeys
     .map((name) => content[name])
     .find((value) => typeof value === typeof fallback) as
-    | string
-    | number
-    | undefined;
+    string | number | undefined;
   return styleValue(node, key, fromContent ?? fallback);
 }
 
@@ -338,10 +349,9 @@ function BoardNode({
     if (readOnly || node.locked || compact) return;
     setEditingText(true);
     window.requestAnimationFrame(() => {
-      const control =
-        nodeElementRef.current?.querySelector<
-          HTMLInputElement | HTMLTextAreaElement
-        >("input, textarea");
+      const control = nodeElementRef.current?.querySelector<
+        HTMLInputElement | HTMLTextAreaElement
+      >("input, textarea");
       if (!control) return;
       control.focus();
       control.setSelectionRange(control.value.length, control.value.length);
@@ -416,6 +426,10 @@ function BoardNode({
         <span className="whiteboard-frame-title">
           {String(content.title ?? "Frame")}
         </span>
+      ) : node.type === "embed" && typeof content.embedId === "string" ? (
+        <div className="h-full w-full overflow-auto rounded-[10px]">
+          <ArtifactEmbedById embedId={content.embedId} />
+        </div>
       ) : node.type === "embed" ? (
         <div
           className="whiteboard-embed-node"
@@ -449,10 +463,11 @@ function BoardNode({
                             currentRowIndex !== rowIndex ||
                             !Array.isArray(currentRow)
                               ? currentRow
-                              : currentRow.map((currentCell, currentCellIndex) =>
-                                  currentCellIndex === cellIndex
-                                    ? event.target.value
-                                    : currentCell,
+                              : currentRow.map(
+                                  (currentCell, currentCellIndex) =>
+                                    currentCellIndex === cellIndex
+                                      ? event.target.value
+                                      : currentCell,
                                 ),
                           );
                           onContentChange({ rows });
@@ -524,18 +539,14 @@ function BoardNode({
             onPointerDown={textPointerDown}
             onDoubleClick={beginTextEditing}
             onFocus={() => onSelect(false)}
-            onChange={(event) =>
-              onContentChange({ body: event.target.value })
-            }
+            onChange={(event) => onContentChange({ body: event.target.value })}
             style={{
               color:
                 typeof content.bodyColor === "string"
                   ? content.bodyColor
                   : "inherit",
               fontSize:
-                typeof content.fontSize === "number"
-                  ? content.fontSize
-                  : 13,
+                typeof content.fontSize === "number" ? content.fontSize : 13,
             }}
           />
         </div>
@@ -572,8 +583,7 @@ function BoardNode({
                     : 500,
               ),
             ),
-            fontStyle:
-              content.fontStyle === "italic" ? "italic" : undefined,
+            fontStyle: content.fontStyle === "italic" ? "italic" : undefined,
             textAlign:
               content.textAlign === "left" ||
               content.textAlign === "right" ||
@@ -661,6 +671,11 @@ export function WhiteboardStudio({
   // is not something reaching the bar implies. The state is gated too, not just
   // the control: an ungranted role must not be able to be in Present at all.
   const canPresent = contract.can("present");
+  const createReference = useMutation(api.artifactEmbeds.create);
+  const updateReference = useMutation(api.artifactEmbeds.update);
+  const removeReference = useMutation(api.artifactEmbeds.remove);
+  const removeReferences = useMutation(api.artifactEmbeds.removeMany);
+  const restoreReference = useMutation(api.artifactEmbeds.restore);
   const tight = contract.density === "tight";
   const board = useMemo(() => normalizeWhiteboardContent(content), [content]);
   // Viewport is personal presence, never shared artifact content. Panning or
@@ -688,6 +703,7 @@ export function WhiteboardStudio({
   const [assetsLoading, setAssetsLoading] = useState(true);
   const [assetError, setAssetError] = useState<string>();
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [linkingEmbed, setLinkingEmbed] = useState(false);
   const [ioNotice, setIoNotice] = useState<string>();
   const [ioBusy, setIoBusy] = useState<string>();
   const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 800 });
@@ -715,10 +731,8 @@ export function WhiteboardStudio({
     const margin = 520 / Math.max(viewport.zoom, 0.05);
     const left = viewport.x - margin;
     const top = viewport.y - margin;
-    const right =
-      viewport.x + canvasSize.width / viewport.zoom + margin;
-    const bottom =
-      viewport.y + canvasSize.height / viewport.zoom + margin;
+    const right = viewport.x + canvasSize.width / viewport.zoom + margin;
+    const bottom = viewport.y + canvasSize.height / viewport.zoom + margin;
     return nodes.filter(
       (node) =>
         node.x + node.width >= left &&
@@ -832,14 +846,232 @@ export function WhiteboardStudio({
     },
     [board, emit],
   );
+
+  useEffect(
+    () =>
+      spectraBus.handle(
+        "reference.insert",
+        async ({ hostWorkId, target, reference: suppliedReference }) => {
+          if (hostWorkId !== artifactId) return;
+          if (readOnly)
+            throw new Error(
+              "This board is read-only, so the reference was not added.",
+            );
+          if (!suppliedReference && !target)
+            throw new Error(
+              "Choose source work before adding a live reference.",
+            );
+          const layer = layers.find(
+            (candidate) => !candidate.locked && candidate.visible,
+          );
+          if (!layer)
+            throw new Error(
+              "Unlock a visible board layer before adding a live reference.",
+            );
+          const center = {
+            x:
+              viewport.x +
+              (canvasRef.current?.clientWidth ?? 800) / viewport.zoom / 2,
+            y:
+              viewport.y +
+              (canvasRef.current?.clientHeight ?? 600) / viewport.zoom / 2,
+          };
+          const gridSize = board.settings?.gridSize ?? 24;
+          const place = (value: number) =>
+            board.settings?.snapToGrid === false
+              ? value
+              : Math.round(value / gridSize) * gridSize;
+          const node = createWhiteboardNode(
+            "embed",
+            page.id,
+            layer.id,
+            place(center.x - 200),
+            place(center.y - 150),
+            board.nodes.length + 1,
+          );
+          let reference = suppliedReference;
+          if (!reference) {
+            const interaction = suggestedEmbedInteraction(target!.workType);
+            const result = await createReference({
+              containerType: "artifact",
+              containerId: artifactId,
+              containerRegionId: node.id,
+              sourceArtifactId: target!.workId as Id<"spectraArtifacts">,
+              mode: "compact",
+              interaction,
+              versionPolicy: "live",
+              contextPolicy: "summary",
+              displayPreferences: {
+                sourceWorkType: target!.workType,
+                anchorKind: target!.kind,
+                sourceAnchor: target,
+              },
+            });
+            reference = {
+              embedId: result.embedId,
+              containerType: "artifact",
+              containerId: artifactId,
+              containerRegionId: node.id,
+              sourceArtifactId: target!.workId,
+              mode: "compact",
+              interaction,
+              versionPolicy: "live",
+              contextPolicy: "summary",
+              displayPreferences: {
+                sourceWorkType: target!.workType,
+                anchorKind: target!.kind,
+                sourceAnchor: target,
+              },
+              state: "ready",
+            };
+          } else if (reference.containerRegionId !== node.id) {
+            await updateReference({
+              embedId: reference.embedId as Id<"artifactEmbeds">,
+              containerRegionId: node.id,
+            });
+            reference = { ...reference, containerRegionId: node.id };
+          }
+          node.content = reference;
+          mutate((draft) => draft.nodes.push(node));
+          setSelectedNodeId(node.id);
+          onActiveRegionChange?.(node.id);
+          setTool("select");
+        },
+      ),
+    [
+      artifactId,
+      board.nodes.length,
+      board.settings?.gridSize,
+      board.settings?.snapToGrid,
+      createReference,
+      layers,
+      mutate,
+      onActiveRegionChange,
+      page.id,
+      readOnly,
+      setSelectedNodeId,
+      updateReference,
+      viewport.x,
+      viewport.y,
+      viewport.zoom,
+    ],
+  );
+
+  useEffect(
+    () =>
+      spectraBus.handle("reference.remove", async ({ hostWorkId, embedId }) => {
+        if (hostWorkId !== artifactId) return;
+        const removedIds = new Set(
+          board.nodes
+            .filter(
+              (node) =>
+                node.type === "embed" &&
+                objectRecord(node.content).embedId === embedId,
+            )
+            .map((node) => node.id),
+        );
+        if (!removedIds.size) return;
+        mutate((draft) => {
+          draft.nodes = draft.nodes.filter((node) => !removedIds.has(node.id));
+          draft.edges = draft.edges.filter(
+            (edge) => !removedIds.has(edge.from) && !removedIds.has(edge.to),
+          );
+        });
+        setSelectedNodeIds((current) =>
+          current.filter((id) =>
+            board.nodes.some(
+              (node) =>
+                node.id === id &&
+                objectRecord(node.content).embedId !== embedId,
+            ),
+          ),
+        );
+      }),
+    [artifactId, board.nodes, mutate],
+  );
+
+  async function linkSelectedEmbed(sourceArtifactId: string) {
+    if (!selectedNode || selectedNode.type !== "embed" || readOnly) return;
+    const current =
+      selectedNode.content &&
+      typeof selectedNode.content === "object" &&
+      !Array.isArray(selectedNode.content)
+        ? (selectedNode.content as Partial<ReferenceNode> & {
+            artifactId?: string;
+          })
+        : {};
+    setLinkingEmbed(true);
+    try {
+      if (sourceArtifactId === "none") {
+        if (current.embedId)
+          await removeReference({
+            embedId: current.embedId as Id<"artifactEmbeds">,
+          });
+        mutate((draft) => {
+          const node = draft.nodes.find(
+            (entry) => entry.id === selectedNode.id,
+          );
+          if (node) node.content = {};
+        });
+        return;
+      }
+      const source = artifactMap.get(sourceArtifactId);
+      if (!source || !isArtifactTypeKey(source.blueprintKey))
+        throw new Error("The selected work is unavailable.");
+      const interaction = suggestedEmbedInteraction(source.blueprintKey);
+      const result = await createReference({
+        containerType: "artifact",
+        containerId: artifactId,
+        containerRegionId: selectedNode.id,
+        sourceArtifactId: sourceArtifactId as Id<"spectraArtifacts">,
+        mode: "compact",
+        interaction,
+        versionPolicy: "live",
+        contextPolicy: "summary",
+      });
+      const reference: ReferenceNode = {
+        embedId: result.embedId,
+        containerType: "artifact",
+        containerId: artifactId,
+        containerRegionId: selectedNode.id,
+        sourceArtifactId,
+        mode: "compact",
+        interaction,
+        versionPolicy: "live",
+        contextPolicy: "summary",
+        state: "ready",
+      };
+      if (current.embedId) {
+        try {
+          await removeReference({
+            embedId: current.embedId as Id<"artifactEmbeds">,
+          });
+        } catch (error) {
+          await removeReference({
+            embedId: result.embedId as Id<"artifactEmbeds">,
+          }).catch(() => undefined);
+          throw error;
+        }
+      }
+      mutate((draft) => {
+        const node = draft.nodes.find((entry) => entry.id === selectedNode.id);
+        if (node) node.content = reference;
+      });
+    } catch (error) {
+      setIoNotice(
+        error instanceof Error
+          ? error.message
+          : "The live reference could not be changed.",
+      );
+    } finally {
+      setLinkingEmbed(false);
+    }
+  }
   const worldPoint = (clientX: number, clientY: number) => {
     const bounds = canvasRef.current?.getBoundingClientRect();
     return {
-      x:
-        (clientX - (bounds?.left ?? 0)) / viewport.zoom +
-        viewport.x,
-      y:
-        (clientY - (bounds?.top ?? 0)) / viewport.zoom + viewport.y,
+      x: (clientX - (bounds?.left ?? 0)) / viewport.zoom + viewport.x,
+      y: (clientY - (bounds?.top ?? 0)) / viewport.zoom + viewport.y,
     };
   };
   const gridSize = board.settings?.gridSize ?? 24;
@@ -930,7 +1162,11 @@ export function WhiteboardStudio({
     });
     const selected = new Set(selectedNodeIds);
     return {
-      view: { ...project(viewport.x, viewport.y), width: width * scale, height: height * scale },
+      view: {
+        ...project(viewport.x, viewport.y),
+        width: width * scale,
+        height: height * scale,
+      },
       toWorld: (x: number, y: number) => ({
         x: left + x / scale,
         y: top + y / scale,
@@ -938,8 +1174,7 @@ export function WhiteboardStudio({
       dots: nodes
         .filter(
           (_node, index) =>
-            nodes.length <= 400 ||
-            index % Math.ceil(nodes.length / 400) === 0,
+            nodes.length <= 400 || index % Math.ceil(nodes.length / 400) === 0,
         )
         .map((node) => ({
           id: node.id,
@@ -1266,12 +1501,8 @@ export function WhiteboardStudio({
     if (drag.mode === "pan")
       setViewport((current) => ({
         ...current,
-        x:
-          drag.startX -
-          (event.clientX - drag.startClientX) / current.zoom,
-        y:
-          drag.startY -
-          (event.clientY - drag.startClientY) / current.zoom,
+        x: drag.startX - (event.clientX - drag.startClientX) / current.zoom,
+        y: drag.startY - (event.clientY - drag.startClientY) / current.zoom,
       }));
     else if (drag.mode === "marquee") {
       const point = worldPoint(event.clientX, event.clientY);
@@ -1377,16 +1608,68 @@ export function WhiteboardStudio({
       y: before.y - (event.clientY - bounds.top) / zoom,
     }));
   }
-  function undoAction() {
+  async function reconcileEmbedRows(next: WhiteboardContent) {
+    const ids = (value: WhiteboardContent) =>
+      new Set(
+        value.nodes.flatMap((node) =>
+          node.type === "embed" &&
+          typeof objectRecord(node.content).embedId === "string"
+            ? [String(objectRecord(node.content).embedId)]
+            : [],
+        ),
+      );
+    const before = ids(board);
+    const after = ids(next);
+    const added = [...after].filter((embedId) => !before.has(embedId));
+    const removed = [...before].filter((embedId) => !after.has(embedId));
+    const restored: Id<"artifactEmbeds">[] = [];
+    try {
+      for (const embedId of added) {
+        const result = await restoreReference({
+          embedId: embedId as Id<"artifactEmbeds">,
+        });
+        if (result.restored) restored.push(embedId as Id<"artifactEmbeds">);
+      }
+      if (removed.length)
+        await removeReferences({
+          embedIds: removed.map((embedId) => embedId as Id<"artifactEmbeds">),
+        });
+    } catch (error) {
+      if (restored.length)
+        await removeReferences({ embedIds: restored }).catch(() => undefined);
+      throw error;
+    }
+  }
+  async function undoAction() {
     const previous = undo.at(-1);
     if (!previous || readOnly) return;
+    try {
+      await reconcileEmbedRows(previous);
+    } catch (error) {
+      setIoNotice(
+        error instanceof Error
+          ? error.message
+          : "The board references could not be restored.",
+      );
+      return;
+    }
     setUndo((stack) => stack.slice(0, -1));
     setRedo((stack) => [...stack.slice(-79), clone(board)]);
     onChange(previous);
   }
-  function redoAction() {
+  async function redoAction() {
     const next = redo.at(-1);
     if (!next || readOnly) return;
+    try {
+      await reconcileEmbedRows(next);
+    } catch (error) {
+      setIoNotice(
+        error instanceof Error
+          ? error.message
+          : "The board references could not be restored.",
+      );
+      return;
+    }
     setRedo((stack) => stack.slice(0, -1));
     setUndo((stack) => [...stack.slice(-79), clone(board)]);
     onChange(next);
@@ -1400,13 +1683,36 @@ export function WhiteboardStudio({
       if (node) recipe(node);
     });
   }
-  function deleteSelected() {
+  async function deleteSelected() {
     if (selectedEdgeId && !selectedNodeIds.length) {
       deleteEdge(selectedEdgeId);
       return;
     }
     if (!selectedNodeIds.length) return;
     const removing = withDescendants(selectedNodeIds);
+    const removedEmbedIds = board.nodes.flatMap((node) =>
+      removing.has(node.id) &&
+      node.type === "embed" &&
+      typeof objectRecord(node.content).embedId === "string"
+        ? [String(objectRecord(node.content).embedId)]
+        : [],
+    );
+    if (removedEmbedIds.length) {
+      try {
+        await removeReferences({
+          embedIds: removedEmbedIds.map(
+            (embedId) => embedId as Id<"artifactEmbeds">,
+          ),
+        });
+      } catch (error) {
+        setIoNotice(
+          error instanceof Error
+            ? error.message
+            : "The linked work could not be removed.",
+        );
+        return;
+      }
+    }
     mutate((draft) => {
       draft.nodes = draft.nodes.filter((node) => !removing.has(node.id));
       draft.edges = draft.edges.filter(
@@ -1566,7 +1872,9 @@ export function WhiteboardStudio({
           y: node.y + offset,
           zIndex: top + index,
           parentId: node.parentId ? idMap.get(node.parentId) : undefined,
-          frameId: node.frameId ? (idMap.get(node.frameId) ?? node.frameId) : undefined,
+          frameId: node.frameId
+            ? (idMap.get(node.frameId) ?? node.frameId)
+            : undefined,
         });
       });
       for (const edge of draft.edges.filter(
@@ -1621,7 +1929,6 @@ export function WhiteboardStudio({
   );
 
   /** Arrow-key move. One pixel for precision, one grid step with Shift. */
-
 
   function nudgeSelected(deltaX: number, deltaY: number) {
     const movable = selectedNodes.filter(
@@ -1707,7 +2014,7 @@ export function WhiteboardStudio({
       (selectedNodeIds.length || selectedEdgeId)
     ) {
       event.preventDefault();
-      deleteSelected();
+      void deleteSelected();
       return;
     }
     // Zoom keys stay off the modifier: Ctrl+Plus, Ctrl+Minus and Ctrl+0 are the
@@ -1741,11 +2048,11 @@ export function WhiteboardStudio({
       setSelectedNodeIds(nodes.map((node) => node.id));
     } else if (letter === "z") {
       event.preventDefault();
-      if (event.shiftKey) redoAction();
-      else undoAction();
+      if (event.shiftKey) void redoAction();
+      else void undoAction();
     } else if (letter === "y") {
       event.preventDefault();
-      redoAction();
+      void redoAction();
     }
   }
 
@@ -2251,21 +2558,21 @@ export function WhiteboardStudio({
               ] as const);
       const created = specs.map(
         ([type, label, x, y, fill, width, height], index) => {
-        const node = createWhiteboardNode(
-          type,
-          page.id,
-          layer.id,
-          snap(baseX + x),
-          snap(baseY + y),
-          draft.nodes.length + index + 1,
-        );
-        node.content = { text: label, title: label };
-        node.semanticLabel = label;
-        node.width = width;
-        node.height = height;
-        node.style = { ...node.style, fill };
-        draft.nodes.push(node);
-        return node;
+          const node = createWhiteboardNode(
+            type,
+            page.id,
+            layer.id,
+            snap(baseX + x),
+            snap(baseY + y),
+            draft.nodes.length + index + 1,
+          );
+          node.content = { text: label, title: label };
+          node.semanticLabel = label;
+          node.width = width;
+          node.height = height;
+          node.style = { ...node.style, fill };
+          draft.nodes.push(node);
+          return node;
         },
       );
       if (kind === "concept") {
@@ -2463,68 +2770,68 @@ export function WhiteboardStudio({
                 (pathTouches(aiChangedPaths, `/nodes/${index}`) ||
                   pathTouches(aiChangedPaths, `/nodes/${node.id}`));
               return (
-                  <BoardNode
-                    key={node.id}
-                    node={node}
-                    artifact={
-                      typeof source.artifactId === "string"
-                        ? artifactMap.get(source.artifactId)
-                        : undefined
+                <BoardNode
+                  key={node.id}
+                  node={node}
+                  artifact={
+                    typeof source.artifactId === "string"
+                      ? artifactMap.get(source.artifactId)
+                      : undefined
+                  }
+                  asset={
+                    typeof source.assetId === "string"
+                      ? assetMap.get(source.assetId)
+                      : undefined
+                  }
+                  assetsLoading={assetsLoading}
+                  selected={
+                    !compact &&
+                    (selectedNodeIds.includes(node.id) ||
+                      connectorFrom === node.id)
+                  }
+                  readOnly={readOnly || compact}
+                  compact={compact}
+                  onSelect={(additive) => {
+                    if (selectionHandledRef.current) {
+                      selectionHandledRef.current = false;
+                      return;
                     }
-                    asset={
-                      typeof source.assetId === "string"
-                        ? assetMap.get(source.assetId)
-                        : undefined
-                    }
-                    assetsLoading={assetsLoading}
-                    selected={
-                      !compact &&
-                      (selectedNodeIds.includes(node.id) ||
-                        connectorFrom === node.id)
-                    }
-                    readOnly={readOnly || compact}
-                    compact={compact}
-                    onSelect={(additive) => {
-                      if (selectionHandledRef.current) {
-                        selectionHandledRef.current = false;
-                        return;
-                      }
-                      if (!compact) selectNode(node, additive);
-                    }}
-                    onPointerDown={(event) => {
-                      if (!compact) beginNodeDrag(node, event);
-                    }}
-                    onResizePointerDown={(event) => beginResize(node, event)}
-                    onTextChange={(value) =>
-                      mutate((draft) => {
-                        const candidate = draft.nodes.find(
-                          (item) => item.id === node.id,
+                    if (!compact) selectNode(node, additive);
+                  }}
+                  onPointerDown={(event) => {
+                    if (!compact) beginNodeDrag(node, event);
+                  }}
+                  onResizePointerDown={(event) => beginResize(node, event)}
+                  onTextChange={(value) =>
+                    mutate((draft) => {
+                      const candidate = draft.nodes.find(
+                        (item) => item.id === node.id,
+                      );
+                      if (candidate)
+                        Object.assign(
+                          candidate,
+                          withWhiteboardNodeText(candidate, value),
                         );
-                        if (candidate)
-                          Object.assign(
-                            candidate,
-                            withWhiteboardNodeText(candidate, value),
-                          );
-                      })
-                    }
-                    aiActive={nodeAiActive}
-                    path={index >= 0 ? `/nodes/${index}` : undefined}
-                    onContentChange={(change) =>
-                      mutate((draft) => {
-                        const candidate = draft.nodes.find(
-                          (item) => item.id === node.id,
-                        );
-                        if (!candidate) return;
-                        const current =
-                          candidate.content &&
-                          typeof candidate.content === "object" &&
-                          !Array.isArray(candidate.content)
-                            ? (candidate.content as Record<string, unknown>)
-                            : {};
-                        candidate.content = { ...current, ...change };
-                      })
-                    }
-                  />
+                    })
+                  }
+                  aiActive={nodeAiActive}
+                  path={index >= 0 ? `/nodes/${index}` : undefined}
+                  onContentChange={(change) =>
+                    mutate((draft) => {
+                      const candidate = draft.nodes.find(
+                        (item) => item.id === node.id,
+                      );
+                      if (!candidate) return;
+                      const current =
+                        candidate.content &&
+                        typeof candidate.content === "object" &&
+                        !Array.isArray(candidate.content)
+                          ? (candidate.content as Record<string, unknown>)
+                          : {};
+                      candidate.content = { ...current, ...change };
+                    })
+                  }
+                />
               );
             })}
         </div>
@@ -2572,9 +2879,7 @@ export function WhiteboardStudio({
                   width: dot.width,
                   height: dot.height,
                   transform: "none",
-                  background: dot.selected
-                    ? "var(--brand-primary)"
-                    : undefined,
+                  background: dot.selected ? "var(--brand-primary)" : undefined,
                 }}
               />
             ))}
@@ -2660,8 +2965,7 @@ export function WhiteboardStudio({
             icon: PanelLeft,
             priority: "essential" as const,
             active: !pageRailCollapsed,
-            onSelect: () =>
-              setPageRailCollapsed((collapsed) => !collapsed),
+            onSelect: () => setPageRailCollapsed((collapsed) => !collapsed),
           },
         ]
       : []),
@@ -2846,9 +3150,7 @@ export function WhiteboardStudio({
               subtitle: `${board.nodes.filter((node) => node.pageId === candidate.id).length} objects`,
               active: candidate.id === page.id,
             }))}
-            onSelect={(pageId) =>
-              setViewport({ pageId, x: 0, y: 0, zoom: 1 })
-            }
+            onSelect={(pageId) => setViewport({ pageId, x: 0, y: 0, zoom: 1 })}
             onAdd={readOnly ? undefined : addPage}
             addLabel="Add page"
             canEdit={!readOnly}
@@ -3271,9 +3573,7 @@ export function WhiteboardStudio({
               </label>
             </div>
           ) : null}
-          {selectedNode &&
-          selectedNodeIds.length === 1 &&
-          inspectorOpen ? (
+          {selectedNode && selectedNodeIds.length === 1 && inspectorOpen ? (
             <div className="whiteboard-inspector">
               <div>
                 <strong>
@@ -3391,11 +3691,14 @@ export function WhiteboardStudio({
                   <SelectField
                     ariaLabel="Linked work"
                     size="sm"
-                    disabled={readOnly}
+                    disabled={readOnly || linkingEmbed}
                     value={
                       String(
                         (selectedNode.content as Record<string, unknown>)
-                          ?.artifactId ?? "",
+                          ?.sourceArtifactId ??
+                          (selectedNode.content as Record<string, unknown>)
+                            ?.artifactId ??
+                          "",
                       ) || "none"
                     }
                     options={[
@@ -3411,12 +3714,7 @@ export function WhiteboardStudio({
                           label: artifact.title,
                         })),
                     ]}
-                    onChange={(value) =>
-                      updateSelected((node) => {
-                        node.content =
-                          value === "none" ? {} : { artifactId: value };
-                      })
-                    }
+                    onChange={(value) => void linkSelectedEmbed(value)}
                   />
                 </label>
               ) : null}
@@ -3431,7 +3729,11 @@ export function WhiteboardStudio({
           // presenter would be trapped inside the pane instead of covering the
           // window. Present is a full-window activity, so it renders to the body.
           createPortal(
-            <div className="whiteboard-presenter" role="dialog" aria-modal="true">
+            <div
+              className="whiteboard-presenter"
+              role="dialog"
+              aria-modal="true"
+            >
               <div className="whiteboard-presenter-bar">
                 <strong>{page.name}</strong>
                 <button type="button" onClick={() => setPresenting(false)}>

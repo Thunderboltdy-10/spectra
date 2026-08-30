@@ -18,7 +18,7 @@ import {
   referenceIdentity,
   resizeReference,
   resolveBoardCapture,
-  setReferenceState,
+  setReferenceMode,
   suggestReferencePlacement,
   validateReferenceView,
   type ReferenceNode,
@@ -67,12 +67,21 @@ function reference(type: ArtifactTypeKey = "document"): ReferenceNode {
   const contract = getWorkReferenceContract(type);
   const target = contract.targets[0]!;
   return {
-    id: "reference-1",
-    protocolVersion: 2,
-    target: { workId: "target-1", workType: type, anchor: { ...rootAnchor(type, "target-1"), kind: target.kind }, view: target.views[0] },
-    state: "collapsed",
+    embedId: "reference-1",
+    containerType: "artifact",
+    containerId: "host-1",
+    containerRegionId: "artifact:structure",
+    sourceArtifactId: "target-1",
+    mode: "compact",
+    interaction: "read",
     versionPolicy: "live",
-    status: "ready",
+    contextPolicy: "summary",
+    displayPreferences: {
+      sourceWorkType: type,
+      anchorKind: target.kind,
+      view: target.views[0],
+    },
+    state: "ready",
   };
 }
 
@@ -107,13 +116,18 @@ describe("Phase 7 semantic identity contracts", () => {
   it("keeps one reference identity while state, view, size, and version policy change", () => {
     const initial = reference();
     const identity = referenceIdentity(initial);
-    const expanded = setReferenceState(initial, "expanded");
+    const expanded = setReferenceMode(initial, "expanded");
     const resized = resizeReference(expanded, 900, 700, { width: 620, height: 480 });
     const viewed = changeReferenceView(resized, "section");
-    const pinned = { ...viewed, versionPolicy: { pinnedVersionId: "version-1" } } satisfies ReferenceNode;
+    const pinned = {
+      ...viewed,
+      versionPolicy: "pinned",
+      pinnedVersionId: "version-1",
+    } satisfies ReferenceNode;
     expect(referenceIdentity(pinned)).toBe(identity);
-    expect(resized).toMatchObject({ width: 620, height: 480 });
-    expect(pinned.target.view).toBe("section");
+    expect(resized.displayPreferences).toMatchObject({ width: 620, height: 480 });
+    expect(pinned.displayPreferences?.view).toBe("section");
+    expect(pinned.pinnedVersionId).toBe("version-1");
   });
 
   it("declares useful targets, views, and native insertion for every work type and origin", () => {

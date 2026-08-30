@@ -737,6 +737,7 @@ export function ChatShell() {
         ) : null}
         <ConversationSurface
           detail={detail}
+          threadId={threadId ?? undefined}
           loading={loading}
           liveExchange={runEngine.liveExchange}
           workspaces={workspaces}
@@ -856,6 +857,8 @@ export function ChatShell() {
           <ComposerArtifactDock
             artifacts={artifacts}
             cards={runEngine.cards}
+            explicitIds={[...selectedContextIds]}
+            threadId={composerThread?.id ?? threadId ?? undefined}
             assistantContent={
               runEngine.liveExchange?.content ?? runEngine.cards[0]?.summary
             }

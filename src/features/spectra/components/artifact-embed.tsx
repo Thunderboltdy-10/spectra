@@ -14,7 +14,7 @@ import {
   Send,
   X,
 } from "lucide-react";
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { motion } from "framer-motion";
 import type { SpectraArtifactEmbed } from "../data/api";
 import { workTypeMeta } from "./artifact-card";
@@ -22,8 +22,11 @@ import { LiveCodeRuntime } from "./live-code-runtime";
 import { PublishedCodeRuntime } from "./published-code-runtime";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { getWorkReferenceContract, validateReferenceView } from "../references";
+import { embedCapabilityEnabled } from "../capabilities";
 import { useSpectraMotion } from "../motion/motion-level";
 import { transitionFor } from "../motion/grammar";
+import { ArtifactEmbedQuiz } from "./artifact-embed-quiz";
+import { shouldMountArtifactEmbedRuntime } from "./artifact-embed-runtime";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -55,10 +58,13 @@ function plainTextFromRichValue(source: string) {
     .replace(/<[^>]+>/g, "")
     .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity: string) => {
       if (entity.startsWith("#")) {
-        const code = entity[1]?.toLowerCase() === "x"
-          ? Number.parseInt(entity.slice(2), 16)
-          : Number.parseInt(entity.slice(1), 10);
-        return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : match;
+        const code =
+          entity[1]?.toLowerCase() === "x"
+            ? Number.parseInt(entity.slice(2), 16)
+            : Number.parseInt(entity.slice(1), 10);
+        return Number.isFinite(code) && code > 0
+          ? String.fromCodePoint(code)
+          : match;
       }
       return HTML_ENTITIES[entity.toLowerCase()] ?? match;
     })
@@ -68,7 +74,9 @@ function plainTextFromRichValue(source: string) {
 
 function textFrom(value: unknown, limit = 360): string {
   if (typeof value === "string")
-    return (/<[a-z!/][^>]*>/i.test(value) ? plainTextFromRichValue(value) : value).slice(0, limit);
+    return (
+      /<[a-z!/][^>]*>/i.test(value) ? plainTextFromRichValue(value) : value
+    ).slice(0, limit);
   if (Array.isArray(value))
     return value
       .map((entry) => textFrom(entry, limit))
@@ -92,10 +100,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   const content = record(embed.source?.snapshot?.content);
   const [activeIndex, setActiveIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
-  const canInteract =
-    embed.effectiveInteraction === "interact" ||
-    embed.effectiveInteraction === "edit";
+  const effectiveInteraction = embed.effectiveInteraction ?? embed.interaction;
   if (!type || !source || !isArtifactTypeKey(type)) return null;
   const contract = getWorkReferenceContract(type);
   const requestedView =
@@ -141,9 +146,19 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   }
 
   if (type === "flashcard_deck") {
+    const canReveal = embedCapabilityEnabled(
+      "flashcard_deck",
+      effectiveInteraction,
+      "study.reveal",
+    );
+    const canNavigate = embedCapabilityEnabled(
+      "flashcard_deck",
+      effectiveInteraction,
+      "study.navigate",
+    );
     const cards = records(content.cards);
     const card = cards[Math.min(activeIndex, Math.max(0, cards.length - 1))];
-    if (embed.mode === "expanded" && !canInteract) {
+    if (embed.mode === "expanded" && !canReveal) {
       return (
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           {cards.slice(0, 4).map((entry, index) => (
@@ -172,7 +187,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
       <div>
         <button
           type="button"
-          disabled={!canInteract}
+          disabled={!canReveal}
           onClick={() => setRevealed((value) => !value)}
           className="flex min-h-[116px] w-full items-center justify-center rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-5 text-center disabled:cursor-default"
         >
@@ -183,7 +198,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
             <span className="mt-2 block text-[15px] font-medium leading-6 text-[var(--text-primary)]">
               {textFrom(revealed ? card?.back : card?.front) || "Empty card"}
             </span>
-            {!canInteract ? (
+            {!canReveal ? (
               <span className="mt-2 block text-micro text-[var(--text-tertiary)]">
                 Read-only preview
               </span>
@@ -198,7 +213,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
                 setActiveIndex((value) => Math.max(0, value - 1));
                 setRevealed(false);
               }}
-              disabled={activeIndex === 0}
+              disabled={!canNavigate || activeIndex === 0}
               className="rounded-[6px] p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -214,7 +229,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
                 );
                 setRevealed(false);
               }}
-              disabled={activeIndex >= cards.length - 1}
+              disabled={!canNavigate || activeIndex >= cards.length - 1}
               className="rounded-[6px] p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
             >
               <ChevronRight className="h-4 w-4" />
@@ -226,67 +241,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   }
 
   if (type === "quiz") {
-    const questions = records(content.questions);
-    const question =
-      questions[Math.min(activeIndex, Math.max(0, questions.length - 1))];
-    const optionIds = Array.isArray(question?.optionIds)
-      ? question.optionIds
-      : [];
-    const options = Array.isArray(question?.options)
-      ? question.options.map((option, index) => ({
-          id:
-            typeof optionIds[index] === "string"
-              ? optionIds[index]
-              : `${String(question?.id ?? activeIndex)}:option:${index + 1}`,
-          text: textFrom(option),
-        }))
-      : [];
-    if (embed.mode === "compact" && !canInteract)
-      return (
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[12px] font-semibold text-[var(--text-primary)]">
-              {questions.length}{" "}
-              {questions.length === 1 ? "question" : "questions"}
-            </div>
-            <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-              Formative practice · responses stay separate
-            </p>
-          </div>
-          <span className="rounded-[6px] border border-[var(--border-default)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]">
-            Preview
-          </span>
-        </div>
-      );
-    return (
-      <div>
-        <p className="text-[13px] font-semibold leading-5 text-[var(--text-primary)]">
-          {textFrom(question?.prompt) || "Empty question"}
-        </p>
-        <div className="mt-3 space-y-1.5">
-          {options.map((option, index) => {
-            const id = option.id;
-            return (
-              <button
-                type="button"
-                disabled={!canInteract}
-                key={id}
-                onClick={() => setSelected(id)}
-                className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[11px] disabled:cursor-default ${selected === id ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-subtle)] text-[var(--text-secondary)] enabled:hover:border-[var(--border-default)]"}`}
-              >
-                <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-micro">
-                  {String.fromCharCode(65 + index)}
-                </span>
-                {option.text}
-              </button>
-            );
-          })}
-        </div>
-        <p className="mt-2 text-micro text-[var(--text-tertiary)]">
-          Practice only · responses are separate from artifact content
-        </p>
-      </div>
-    );
+    return <ArtifactEmbedQuiz embed={embed} />;
   }
 
   if (type === "planner_task") {
@@ -411,9 +366,14 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
         <PublishedCodeRuntime
           title={embed.source?.title ?? "Interactive visualisation"}
           build={embed.runtimeBuild}
+          embedId={embed.embedId}
           compact={embed.mode === "compact"}
           resources={embed.runtimeResources}
-          allowInteraction={canInteract}
+          allowInteraction={embedCapabilityEnabled(
+            "code",
+            effectiveInteraction,
+            "runtime.interact",
+          )}
         />
       );
     }
@@ -423,7 +383,11 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
         title={source.title ?? "Interactive visualisation"}
         content={content}
         compact={embed.mode === "compact"}
-        allowInteraction={canInteract}
+        allowInteraction={embedCapabilityEnabled(
+          "code",
+          effectiveInteraction,
+          "runtime.interact",
+        )}
         resources={embed.runtimeResources}
       />
     );
@@ -540,6 +504,7 @@ export function ArtifactEmbed({
   onRequestAccess,
   onCancelAccessRequest,
   onUseLiveVersion,
+  onRemove,
 }: {
   embed: SpectraArtifactEmbed;
   busy?: boolean;
@@ -550,8 +515,16 @@ export function ArtifactEmbed({
   onRequestAccess?: () => void;
   onCancelAccessRequest?: (requestId: string) => void;
   onUseLiveVersion?: () => void;
+  onRemove?: () => void;
 }) {
   const rootRef = useRef<HTMLElement | null>(null);
+  const [nearViewport, setNearViewport] = useState(
+    () => typeof window !== "undefined" && !("IntersectionObserver" in window),
+  );
+  const [pageVisible, setPageVisible] = useState(
+    () =>
+      typeof document === "undefined" || document.visibilityState !== "hidden",
+  );
   /* A drag on the native resize grip is the only thing that may persist a size.
      Reading the box on any pointer-up would save a size the reader never chose
      — a plain click, a text selection, or a pane resize would silently pin the
@@ -561,6 +534,7 @@ export function ArtifactEmbed({
   const motionLevel = useSpectraMotion();
   const meta = embed.source ? workTypeMeta[embed.source.blueprintKey] : null;
   const Icon = meta?.icon ?? FileQuestion;
+  const interaction = embed.effectiveInteraction ?? embed.interaction;
   const status =
     embed.state === "no_access" && embed.accessRequest
       ? {
@@ -590,7 +564,37 @@ export function ArtifactEmbed({
                 detail:
                   "The retained source version is missing or failed its integrity check.",
               }
-            : null;
+            : embed.state === "removed"
+              ? {
+                  icon: X,
+                  title: "Reference removed",
+                  detail:
+                    "This placement is no longer connected to its source. You can delete it from the surrounding work.",
+                }
+              : null;
+
+  useEffect(() => {
+    if (embed.source?.blueprintKey !== "code") return;
+    const element = rootRef.current;
+    if (!element || typeof IntersectionObserver === "undefined") {
+      setNearViewport(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setNearViewport(Boolean(entry?.isIntersecting)),
+      { rootMargin: "640px 0px", threshold: 0.01 },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [embed.embedId, embed.source?.blueprintKey]);
+
+  useEffect(() => {
+    if (embed.source?.blueprintKey !== "code") return;
+    const update = () => setPageVisible(document.visibilityState !== "hidden");
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, [embed.source?.blueprintKey]);
 
   if (status) {
     const StatusIcon = status.icon;
@@ -714,7 +718,12 @@ export function ArtifactEmbed({
       onPointerUp={() => {
         const origin = dragOriginRef.current;
         dragOriginRef.current = null;
-        if (!onResize || embed.mode !== "expanded" || !rootRef.current || !origin)
+        if (
+          !onResize ||
+          embed.mode !== "expanded" ||
+          !rootRef.current ||
+          !origin
+        )
           return;
         const bounds = rootRef.current.getBoundingClientRect();
         const width = Math.round(bounds.width);
@@ -759,10 +768,16 @@ export function ArtifactEmbed({
                 <span className="text-[var(--warning)]">Archived</span>
               </>
             ) : null}
-            {embed.effectiveInteraction === "read" ? (
+            {interaction ? (
               <>
                 <span>·</span>
-                <span>Read-only</span>
+                <span>
+                  {interaction === "read"
+                    ? "Read-only"
+                    : interaction === "interact"
+                      ? "Interactive"
+                      : "Editable"}
+                </span>
               </>
             ) : null}
           </div>
@@ -804,6 +819,18 @@ export function ArtifactEmbed({
             <ArrowUpRight className="h-3 w-3" />
           </button>
         ) : null}
+        {onRemove ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRemove}
+            className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
+            aria-label="Remove reference"
+            title="Remove"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
       </header>
       <motion.div
         key={embed.mode}
@@ -821,7 +848,22 @@ export function ArtifactEmbed({
         }
         className={embed.mode === "compact" ? "p-3.5" : "p-4 sm:p-5"}
       >
-        <ContentAdapter embed={embed} />
+        {shouldMountArtifactEmbedRuntime({
+          sourceType: embed.source.blueprintKey,
+          nearViewport,
+          pageVisible,
+        }) ? (
+          <ContentAdapter embed={embed} />
+        ) : (
+          <div
+            className={`${embed.mode === "compact" ? "min-h-32" : "min-h-56"} flex items-center justify-center rounded-[8px] border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 text-center`}
+            aria-label="Published runtime paused"
+          >
+            <p className="max-w-sm text-micro leading-4 text-[var(--text-tertiary)]">
+              Preview paused until it is back on screen.
+            </p>
+          </div>
+        )}
       </motion.div>
       {embed.source.summary && embed.mode === "expanded" ? (
         <motion.footer

@@ -1,5 +1,6 @@
 import type { WorkAnchor } from "../work/registry";
 import type { SpectraPreferences } from "../settings/schema";
+import type { ReferenceNode } from "../references";
 
 export type SpectraCommands = {
   "library.organize": {
@@ -16,7 +17,12 @@ export type SpectraCommands = {
   };
   "work.revealAnchor": { anchor: WorkAnchor; focus?: boolean };
   "run.openConversation": { runId: string; threadId?: string };
-  "reference.insert": { hostWorkId: string; target: WorkAnchor };
+  "reference.insert": {
+    hostWorkId: string;
+    target?: WorkAnchor;
+    reference?: ReferenceNode;
+  };
+  "reference.remove": { hostWorkId: string; embedId: string };
   "reference.beginPicking": { hostWorkId: string };
   "context.beginPicking": { source: "quick_chat" | "composer" };
   "settings.manageAccount": Record<string, never>;

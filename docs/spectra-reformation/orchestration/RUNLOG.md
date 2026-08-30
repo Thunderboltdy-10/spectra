@@ -93,3 +93,5 @@ Format: `YYYY-MM-DD HH:MM · EVENT · detail`
 2026-08-30 23:55 · WORKTREE CREATED · reform/P9.I4 at `..\ai-school-worktrees\P9.I4` from `d1b4973`; ownership follows P9.I1 serially on `scripts/local/seed*` and bootstrap runbooks.
 2026-08-30 23:55 · LEASE GRANT · /root/p9_i4_bootstrap holds local-deploy-1 + playwright-a + playwright-b + bridge; clean local stack only, no cloud-dev testing.
 2026-08-30 23:55 · AGENT LAUNCH · P9.I4 implementer/bootstrap operator, Sol high; deterministic seed through the real onboarding saga, then both account sign-ins, TGC school/operator/admin roles, ManageBac configure/sync, Bridge re-pair, and folder re-import. No VU or acceptance claim.
+2026-08-31 00:03 · MERGE COMPLETE · P14.I1 `86eb83f` merged `--no-ff`; main composition recheck passed 38/38 focused tests, TypeScript, and capability ghost gate. STATE records IMPLEMENTED only; P14.V1 remains the phase verifier.
+2026-08-31 00:03 · OWNERSHIP RELEASE · P14.I1 has landed, so the `convex/memory.ts` serialization hold on P14.I3 is cleared. P14.I2 continues independently; shared schema/gather registrations remain merge-queue managed.

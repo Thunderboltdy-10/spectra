@@ -1,11 +1,15 @@
 import { parseDelimited } from "../sheets/model";
 import {
   createWhiteboardNode,
-  normalizeWhiteboardContent,
   whiteboardNodeText,
   type WhiteboardContent,
   type WhiteboardNode,
 } from "./model";
+import { migrateWhiteboardContent } from "../artifacts/schema/whiteboard";
+import {
+  whiteboardConnectorGeometry,
+  type WhiteboardConnectorGeometry,
+} from "./operations";
 
 export type WhiteboardImportResult = {
   content: WhiteboardContent;
@@ -32,7 +36,7 @@ export function buildWhiteboardPackage(content: WhiteboardContent) {
   return JSON.stringify(
     {
       format: "spectra-whiteboard",
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       content,
     },
@@ -59,32 +63,50 @@ export function buildWhiteboardSvg(
       pageNodeIds.has(edge.from) &&
       pageNodeIds.has(edge.to),
   );
-  const bounds = pageNodes.reduce(
+  const measuredBounds = pageNodes.reduce(
     (current, node) => ({
       minimumX: Math.min(current.minimumX, node.x - 40),
       minimumY: Math.min(current.minimumY, node.y - 40),
       maximumX: Math.max(current.maximumX, node.x + node.width + 40),
       maximumY: Math.max(current.maximumY, node.y + node.height + 40),
     }),
-    { minimumX: 0, minimumY: 0, maximumX: 1200, maximumY: 800 },
+    {
+      minimumX: Number.POSITIVE_INFINITY,
+      minimumY: Number.POSITIVE_INFINITY,
+      maximumX: Number.NEGATIVE_INFINITY,
+      maximumY: Number.NEGATIVE_INFINITY,
+    },
   );
+  const bounds = pageNodes.length
+    ? measuredBounds
+    : { minimumX: 0, minimumY: 0, maximumX: 1200, maximumY: 800 };
   const { minimumX, minimumY, maximumX, maximumY } = bounds;
   const byId = new Map(pageNodes.map((node) => [node.id, node]));
   const lines = pageEdges.flatMap((edge) => {
     const from = byId.get(edge.from);
     const to = byId.get(edge.to);
     if (!from || !to) return [];
-    const x1 = from.x + from.width / 2;
-    const y1 = from.y + from.height / 2;
-    const x2 = to.x + to.width / 2;
-    const y2 = to.y + to.height / 2;
+    const geometry: WhiteboardConnectorGeometry = whiteboardConnectorGeometry(
+      edge,
+      from,
+      to,
+    );
+    const stroke = escapeXml(String(edge.style?.stroke ?? "#68736d"));
+    const strokeWidth = Number(edge.style?.strokeWidth) || 2;
+    const startMarker =
+      edge.startCap && edge.startCap !== "none"
+        ? ` marker-start="url(#cap-${edge.startCap}-start)"`
+        : "";
+    const endCap = edge.endCap ?? "arrow";
+    const endMarker =
+      endCap !== "none" ? ` marker-end="url(#cap-${endCap}-end)"` : "";
     return [
-      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#68736d" stroke-width="2" marker-end="url(#arrow)"/>`,
+      `<path d="${geometry.path}" fill="none" stroke="${stroke}" stroke-width="${strokeWidth}"${startMarker}${endMarker}/>`,
       // A concept map's meaning is in its labels. The export drew the lines and
       // dropped every label, so "cause of" and "example of" left the file.
       ...(edge.label
         ? [
-            `<text x="${(x1 + x2) / 2}" y="${(y1 + y2) / 2}" fill="#5d6761" font-family="Inter, system-ui, sans-serif" font-size="12" text-anchor="middle" paint-order="stroke" stroke="#fbfbf8" stroke-width="4">${escapeXml(edge.label)}</text>`,
+            `<text x="${geometry.label.x}" y="${geometry.label.y}" fill="#5d6761" font-family="system-ui, sans-serif" font-size="12" text-anchor="middle" paint-order="stroke" stroke="#fbfbf8" stroke-width="4">${escapeXml(edge.label)}</text>`,
           ]
         : []),
     ];
@@ -119,9 +141,30 @@ export function buildWhiteboardSvg(
             `<tspan x="${node.x + 12}" y="${node.y + 18 + index * fontSize * 1.3}">${line}</tspan>`,
         )
         .join("");
-      return `<g data-spectra-node="${escapeXml(node.id)}" data-spectra-type="${node.type}" transform="rotate(${node.rotation} ${node.x + node.width / 2} ${node.y + node.height / 2})"><rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="${node.type === "note" ? 8 : 12}" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}"/><text font-family="sans-serif" font-size="${fontSize}" font-weight="600" fill="#29352f">${tspans}</text></g>`;
+      const x = node.x;
+      const y = node.y;
+      const width = node.width;
+      const height = node.height;
+      const common = `fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}"`;
+      const shape =
+        node.type !== "shape"
+          ? `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${node.type === "note" ? 8 : node.type === "section" ? 6 : 12}" ${common}/>`
+          : node.shapeKind === "ellipse"
+            ? `<ellipse cx="${x + width / 2}" cy="${y + height / 2}" rx="${width / 2}" ry="${height / 2}" ${common}/>`
+            : node.shapeKind === "diamond"
+              ? `<polygon points="${x + width / 2},${y} ${x + width},${y + height / 2} ${x + width / 2},${y + height} ${x},${y + height / 2}" ${common}/>`
+              : node.shapeKind === "triangle"
+                ? `<polygon points="${x + width / 2},${y} ${x + width},${y + height} ${x},${y + height}" ${common}/>`
+                : node.shapeKind === "hexagon"
+                  ? `<polygon points="${x + width * 0.25},${y} ${x + width * 0.75},${y} ${x + width},${y + height / 2} ${x + width * 0.75},${y + height} ${x + width * 0.25},${y + height} ${x},${y + height / 2}" ${common}/>`
+                  : `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${node.shapeKind === "pill" ? height / 2 : node.shapeKind === "rectangle" ? 0 : 14}" ${common}/>`;
+      const votes =
+        (node.voteCount ?? 0) > 0
+          ? `<g aria-label="${node.voteCount} votes"><circle cx="${x + width - 13}" cy="${y + 13}" r="12" fill="#355f4b"/><text x="${x + width - 13}" y="${y + 17}" fill="#f7fbf8" font-family="system-ui, sans-serif" font-size="11" font-weight="700" text-anchor="middle">${node.voteCount}</text></g>`
+          : "";
+      return `<g data-spectra-node="${escapeXml(node.id)}" data-spectra-type="${node.type}"${node.shapeKind ? ` data-spectra-shape="${node.shapeKind}"` : ""} transform="rotate(${node.rotation} ${x + width / 2} ${y + height / 2})">${shape}<text font-family="sans-serif" font-size="${fontSize}" font-weight="600" fill="#29352f">${tspans}</text>${votes}</g>`;
     });
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minimumX} ${minimumY} ${maximumX - minimumX} ${maximumY - minimumY}" role="img" aria-label="Spectra whiteboard export"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#68736d"/></marker></defs><rect x="${minimumX}" y="${minimumY}" width="${maximumX - minimumX}" height="${maximumY - minimumY}" fill="#fbfbf8"/>${lines.join("")}${objects.join("")}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minimumX} ${minimumY} ${maximumX - minimumX} ${maximumY - minimumY}" role="img" aria-label="Spectra whiteboard export"><defs><marker id="cap-arrow-end" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#68736d"/></marker><marker id="cap-arrow-start" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto"><path d="M8 0 L0 4 L8 8 Z" fill="#68736d"/></marker><marker id="cap-circle-end" markerWidth="8" markerHeight="8" refX="4" refY="4"><circle cx="4" cy="4" r="3" fill="#68736d"/></marker><marker id="cap-circle-start" markerWidth="8" markerHeight="8" refX="4" refY="4"><circle cx="4" cy="4" r="3" fill="#68736d"/></marker><marker id="cap-diamond-end" markerWidth="10" markerHeight="10" refX="8" refY="5"><path d="M1 5 L5 1 L9 5 L5 9 Z" fill="#68736d"/></marker><marker id="cap-diamond-start" markerWidth="10" markerHeight="10" refX="2" refY="5"><path d="M1 5 L5 1 L9 5 L5 9 Z" fill="#68736d"/></marker></defs><rect x="${minimumX}" y="${minimumY}" width="${maximumX - minimumX}" height="${maximumY - minimumY}" fill="#fbfbf8"/>${lines.join("")}${objects.join("")}</svg>`;
 }
 
 function importCsv(
@@ -152,6 +195,7 @@ function importCsv(
     }),
   );
   next.nodes.push(...imported);
+  next.zOrder.push(...imported.map((node) => node.id));
   return {
     content: next,
     format: "csv" as const,
@@ -242,6 +286,22 @@ function importSvg(
     node.content = {
       text: (element.textContent ?? "").trim().slice(0, 20_000),
     };
+    if (type === "shape") {
+      const exportedShape = element.getAttribute("data-spectra-shape");
+      node.shapeKind =
+        exportedShape === "rectangle" ||
+        exportedShape === "rounded-rectangle" ||
+        exportedShape === "ellipse" ||
+        exportedShape === "pill" ||
+        exportedShape === "diamond" ||
+        exportedShape === "triangle" ||
+        exportedShape === "hexagon"
+          ? exportedShape
+          : geometry.tagName.toLowerCase() === "circle" ||
+              geometry.tagName.toLowerCase() === "ellipse"
+            ? "ellipse"
+            : "rectangle";
+    }
     node.style = {
       fill:
         geometry.getAttribute("fill") ||
@@ -254,6 +314,7 @@ function importSvg(
   if (!imported.length)
     throw new Error("No supported SVG shapes or text objects were found.");
   next.nodes.push(...imported);
+  next.zOrder.push(...imported.map((node) => node.id));
   return {
     content: next,
     format: "svg" as const,
@@ -280,9 +341,15 @@ export async function importWhiteboardFile(
       parsed && typeof parsed === "object" && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>)
         : {};
-    if (record.format !== "spectra-whiteboard" || record.version !== 1)
+    if (
+      record.format !== "spectra-whiteboard" ||
+      (record.version !== 1 && record.version !== 2)
+    )
       throw new Error("This is not a supported Spectra whiteboard package.");
-    const normalized = normalizeWhiteboardContent(record.content);
+    const normalized = migrateWhiteboardContent(
+      record.content,
+      Number(record.version),
+    );
     return {
       content: normalized,
       format: "json",

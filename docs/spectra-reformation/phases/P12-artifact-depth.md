@@ -40,6 +40,19 @@ A real SRS scheduler (FSRS-family, parameterized per deck) replacing/upgrading s
 
 Shape library depth + connectors that stay attached, frames/sections, sticky notes + voting, laser/pointer presence polish, alignment/distribution/snapping, locking/grouping depth, templates, minimap/navigation at scale (virtualize past `virtualizeAfter`), export (PNG/SVG per frame).
 
+### P12.I3 implementation log — 2026-08-31
+
+- Status: IMPLEMENTED; no acceptance claimed. P12.V1 remains independent.
+- Inventory closed at 90 IR definitions: 85 ship, 4 refuse honestly, 1 defer to P12.I6.
+- Added schema v2 migration, canonical z-order/Yjs projection, attached connector routes/caps/anchors, shape kinds, sections, groups, voting, snapping, and scale virtualization.
+- Routed whiteboard workbar, keyboard, page/layer, template, selection, connector, inspector, and inline-edit paths through the shared dispatcher.
+- Added lock-aware arrange/group/depth operations, brainwriting, laser presence, narrow selection overflow, and reduced-motion styling.
+- Added frame-scoped SVG/PNG/PDF export, portable packages, CSV/safe-SVG/PDF imports, and fidelity reporting.
+- Focused Vitest passed: 5 files / 43 tests. Root TypeScript, capability ghost gate, secret scan, Prettier, and diff check passed.
+- Scoped ESLint completed with 0 errors / 22 inherited fixture/style-data warnings.
+- Impeccable's single detector pass found only inherited stylesheet warnings and the intentional grid on the actual board canvas.
+- Evidence and independent verification handoff: `orchestration/notes/P12.I3.md`.
+
 ## P12.I4 — Code depth (H) — leaders: VS Code, Replit, Jupyter
 
 Runtime depth (package management story for the Python runtime, honest limits declared), debugging affordances (breakpoint-free stepping or output tracing — inventory decides what is real vs refused), multi-file project polish, notebook-style cell execution mode (inventory decides ship/defer), formatter/linter integration, richer visualization outputs, shareable run results.

@@ -3,6 +3,7 @@ import { documentContentSchema } from "./schema/document";
 import { flashcardDeckContentSchema } from "./schema/flashcard-deck";
 import { plannerTaskContentSchema } from "./schema/planner-task";
 import { quizContentSchema } from "./schema/quiz";
+import { whiteboardContentSchema } from "./schema/whiteboard";
 import {
   inspectCodeNetworkOrigin,
   MAX_CODE_NETWORK_ORIGINS,
@@ -30,6 +31,7 @@ export {
   flashcardDeckContentSchema,
   plannerTaskContentSchema,
   quizContentSchema,
+  whiteboardContentSchema,
 };
 
 export const agentContentSchema = z
@@ -821,7 +823,10 @@ export const codeContentSchema = z
               })
               .strict()
               .optional(),
-            pythonPackages: z.array(z.string().min(1).max(80)).max(6).optional(),
+            pythonPackages: z
+              .array(z.string().min(1).max(80))
+              .max(6)
+              .optional(),
             events: z
               .array(
                 z
@@ -1254,227 +1259,6 @@ export const codeContentSchema = z
             "Runtime dependencies must use a Spectra-curated, pinned React package.",
         });
       }
-    });
-  });
-
-export const whiteboardContentSchema = z
-  .object({
-    zOrder: z.array(id).max(100_000).optional(),
-    viewport: z
-      .object({
-        x: z.number().min(-1_000_000).max(1_000_000),
-        y: z.number().min(-1_000_000).max(1_000_000),
-        zoom: z.number().min(0.05).max(8),
-        pageId: id,
-      })
-      .strict(),
-    pages: z
-      .array(
-        z
-          .object({
-            id,
-            name: z.string().min(1).max(120),
-            background: z.string().max(100).optional(),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(500),
-    nodes: z
-      .array(
-        z
-          .object({
-            id,
-            type: z.enum([
-              "text",
-              "note",
-              "shape",
-              "image",
-              "embed",
-              "frame",
-              "group",
-              "table",
-              "card",
-              "drawing",
-            ]),
-            pageId: id,
-            x: z.number().min(-1_000_000).max(1_000_000),
-            y: z.number().min(-1_000_000).max(1_000_000),
-            width: z.number().min(20).max(100_000),
-            height: z.number().min(20).max(100_000),
-            rotation: z.number().min(-360).max(360),
-            zIndex: z.number().int().min(-100_000).max(100_000),
-            content: z.unknown(),
-            style: z.record(z.string(), z.unknown()).optional(),
-            layerId: id,
-            parentId: id.optional(),
-            frameId: id.optional(),
-            semanticLabel: z.string().max(500).optional(),
-            accessibilityOrder: z.number().int().nonnegative().optional(),
-            provenance: z
-              .object({
-                source: z.string().max(120).optional(),
-                sourceId: z.string().max(500).optional(),
-                createdAt: z.number().optional(),
-              })
-              .strict()
-              .optional(),
-            locked: z.boolean().optional(),
-            hidden: z.boolean().optional(),
-            constraints: z
-              .object({
-                horizontal: z
-                  .enum(["free", "left", "center", "right"])
-                  .optional(),
-                vertical: z
-                  .enum(["free", "top", "center", "bottom"])
-                  .optional(),
-              })
-              .strict()
-              .optional(),
-          })
-          .strict(),
-      )
-      .max(100_000),
-    edges: z
-      .array(
-        z
-          .object({
-            id,
-            pageId: id,
-            layerId: id,
-            from: id,
-            to: id,
-            fromAnchor: z.string().max(100).optional(),
-            toAnchor: z.string().max(100).optional(),
-            label: z.string().max(500).optional(),
-            style: z.record(z.string(), z.unknown()).optional(),
-            locked: z.boolean().optional(),
-            zIndex: z.number().int().optional(),
-          })
-          .strict(),
-      )
-      .max(200_000),
-    layers: z
-      .array(
-        z
-          .object({
-            id,
-            pageId: id,
-            name: z.string().min(1).max(100),
-            visible: z.boolean(),
-            locked: z.boolean(),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(5_000),
-    sources: z
-      .array(
-        z
-          .object({
-            id,
-            label: z.string().min(1).max(500),
-            url: z.string().max(2_000).optional(),
-            artifactId: id.optional(),
-          })
-          .strict(),
-      )
-      .max(5_000)
-      .optional(),
-    settings: z
-      .object({
-        gridSize: z.number().min(4).max(200).optional(),
-        snapToGrid: z.boolean().optional(),
-        showGrid: z.boolean().optional(),
-        canvasColor: z.string().max(100).optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict()
-  .superRefine((board, context) => {
-    const pageIds = new Set<string>();
-    const layerIds = new Set<string>();
-    const nodeIds = new Set<string>();
-    board.pages.forEach((page, index) => {
-      if (pageIds.has(page.id))
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Page IDs must be unique.",
-          path: ["pages", index, "id"],
-        });
-      pageIds.add(page.id);
-    });
-    board.layers.forEach((layer, index) => {
-      if (layerIds.has(layer.id))
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Layer IDs must be unique.",
-          path: ["layers", index, "id"],
-        });
-      if (!pageIds.has(layer.pageId))
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Layer page is unavailable.",
-          path: ["layers", index, "pageId"],
-        });
-      layerIds.add(layer.id);
-    });
-    if (!pageIds.has(board.viewport.pageId))
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Viewport page is unavailable.",
-        path: ["viewport", "pageId"],
-      });
-    board.nodes.forEach((node, index) => {
-      if (nodeIds.has(node.id))
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Node IDs must be unique.",
-          path: ["nodes", index, "id"],
-        });
-      if (!pageIds.has(node.pageId) || !layerIds.has(node.layerId))
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Node page and layer must exist.",
-          path: ["nodes", index],
-        });
-      nodeIds.add(node.id);
-    });
-    const edgeIds = new Set<string>();
-    board.edges.forEach((edge, index) => {
-      if (edgeIds.has(edge.id))
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Connector IDs must be unique.",
-          path: ["edges", index, "id"],
-        });
-      if (
-        !nodeIds.has(edge.from) ||
-        !nodeIds.has(edge.to) ||
-        edge.from === edge.to
-      )
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Connector endpoints must be distinct nodes.",
-          path: ["edges", index],
-        });
-      edgeIds.add(edge.id);
-    });
-    board.nodes.forEach((node, index) => {
-      if (node.parentId && !nodeIds.has(node.parentId))
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Node parent must exist.",
-          path: ["nodes", index, "parentId"],
-        });
-      if (node.frameId && !nodeIds.has(node.frameId))
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Node frame must exist.",
-          path: ["nodes", index, "frameId"],
-        });
     });
   });
 

@@ -171,6 +171,7 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
     visualisation: { enabled: true },
   },
   whiteboard: {
+    zOrder: [],
     viewport: { pageId: "page-1", x: 0, y: 0, zoom: 1 },
     pages: [{ id: "page-1", name: "Page 1" }],
     nodes: [],
@@ -184,6 +185,13 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
         locked: false,
       },
     ],
+    settings: {
+      gridSize: 24,
+      snapToGrid: true,
+      showGrid: true,
+      virtualizeAfter: 300,
+      canvasColor: "#fbfbf8",
+    },
   },
 };
 

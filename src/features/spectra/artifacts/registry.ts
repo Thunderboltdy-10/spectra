@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { artifactContentSchemas } from "./schemas";
 import { CODE_CONTENT_SCHEMA_VERSION } from "./schema/code";
+import { WHITEBOARD_MANIFEST_OPERATIONS } from "../capabilities/studio-whiteboard";
+import { WHITEBOARD_SCHEMA_VERSION } from "./schema/whiteboard";
 import { normalizeSheetsContent } from "../sheets/model";
 import {
   ARTIFACT_TYPE_KEYS,
@@ -1013,7 +1015,7 @@ const imports: Record<ArtifactTypeKey, readonly string[]> = {
   presentation: ["pptx", "odp", "pdf", "keynote-export"],
   sheets: ["xlsx", "xls", "ods", "csv", "tsv"],
   code: ["zip", "github-archive", "html", "ipynb", "py"],
-  whiteboard: ["svg", "pdf", "png", "excalidraw", "drawio"],
+  whiteboard: ["spectra-board", "csv", "svg", "pdf"],
 };
 
 const exports: Record<ArtifactTypeKey, readonly string[]> = {
@@ -1026,7 +1028,7 @@ const exports: Record<ArtifactTypeKey, readonly string[]> = {
   presentation: ["pdf", "pptx", "png"],
   sheets: ["xlsx", "ods", "csv", "pdf"],
   code: ["zip", "html"],
-  whiteboard: ["svg", "pdf", "png"],
+  whiteboard: ["svg", "pdf", "png", "spectra-board"],
 };
 
 const operations: Record<ArtifactTypeKey, readonly string[]> = {
@@ -1228,25 +1230,7 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
     "share_run_result",
     "format_source",
   ],
-  whiteboard: [
-    "inspect_viewport",
-    "inspect_frame",
-    "summarize_topology",
-    "create_node",
-    "rewrite_node",
-    "move_nodes",
-    "connect_nodes",
-    "group",
-    "align",
-    "distribute",
-    "cluster",
-    "label",
-    "convert_text_to_diagram",
-    "organize",
-    "propose_layout",
-    "check_accessibility",
-    "validate",
-  ],
+  whiteboard: WHITEBOARD_MANIFEST_OPERATIONS,
 };
 
 function loadSkill(typeKey: ArtifactTypeKey): Promise<ArtifactSkill> {
@@ -1322,7 +1306,9 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
                 ? 3
                 : typeKey === "code"
                   ? CODE_CONTENT_SCHEMA_VERSION
-                  : 1,
+                  : typeKey === "whiteboard"
+                    ? WHITEBOARD_SCHEMA_VERSION
+                    : 1,
       content: artifactContentSchemas[typeKey],
     },
     renderers: {

@@ -36,6 +36,11 @@ export type EmbedCapability = {
   levels: readonly ArtifactEmbedInteraction[];
 };
 
+export type CapabilityDelivery =
+  | { status: "ship" }
+  | { status: "refuse"; reason: string }
+  | { status: "defer"; reason: string; owner: string };
+
 export type NativeCapability<T extends OfficeWorkType = OfficeWorkType> = {
   /** Regions this operation can change in a linked native package. */
   touches: readonly FidelityRegionKey[];
@@ -87,6 +92,12 @@ export type CapabilityDefinition<
   choreography?: ChoreographyPrimitive;
   embed?: EmbedCapability;
   requires?: WorkCapability;
+  /**
+   * Inventory closure for depth units (CANON R26). Existing capabilities may
+   * omit this while they await their per-type inventory; a depth module must
+   * put every one of its definitions in exactly one honest disposition.
+   */
+  delivery?: CapabilityDelivery;
   /**
    * The existing artifact-manifest verb this capability specializes. During
    * the incremental P3 migration it keeps old plan consumers honest without

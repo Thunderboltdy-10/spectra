@@ -8,4 +8,5 @@ export * from "./office-remaining";
 export * from "./studios";
 export * from "./studio-code";
 export * from "./studio-flashcards";
+export * from "./studio-whiteboard";
 export type * from "./types";

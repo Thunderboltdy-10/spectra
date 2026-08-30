@@ -12,6 +12,15 @@ import { internal } from "./_generated/api";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
 import { memoryEmbedding } from "./memoryEmbedding";
+import {
+  SOUL_TOKEN_CAP,
+  boundSoulText,
+  estimateSoulTokens,
+  normalizeSoulText,
+  soulTextIsWithinCap,
+} from "../src/features/spectra/memory/soul-policy";
+
+export { SOUL_TOKEN_CAP } from "../src/features/spectra/memory/soul-policy";
 
 const DEFAULT_TARGET_TOKENS = 1_000;
 const MAX_TARGET_TOKENS = 4_000;
@@ -148,6 +157,36 @@ function captureRejectionReason(proposition: string) {
   )
     return "transient";
   return null;
+}
+
+function soulCaptureRejectionReason(text: string) {
+  if (!soulTextIsWithinCap(text)) return "too_long";
+  if (forbiddenCapturePatterns.some((pattern) => pattern.test(text)))
+    return "sensitive_or_secret";
+  return null;
+}
+
+function soulAuditSubject(accountId: Id<"accounts">) {
+  return `soul:${accountId}`;
+}
+
+function isSoulAuditClaim(
+  claim: Pick<Doc<"memoryClaims">, "accountId" | "subjectId">,
+) {
+  return claim.subjectId === soulAuditSubject(claim.accountId);
+}
+
+function soulProjection(capsule: Doc<"memoryCapsules"> | null) {
+  const generatedText = boundSoulText(capsule?.generatedText ?? "");
+  const userText = boundSoulText(capsule?.userText ?? "");
+  const text = userText || generatedText || boundSoulText(capsule?.text ?? "");
+  return {
+    text,
+    tokenCount: estimateSoulTokens(text),
+    maxTokens: SOUL_TOKEN_CAP,
+    userEdited: Boolean(userText),
+    updatedAt: capsule?.updatedAt ?? null,
+  };
 }
 
 function categoryForClaim(type: ClaimType): keyof typeof DEFAULT_CATEGORIES {
@@ -723,6 +762,177 @@ async function upsertClaim(
   return { claimId, merged: false };
 }
 
+async function soulCapsuleForAccount(
+  ctx: MemoryCtx,
+  accountId: Id<"accounts">,
+) {
+  return ctx.db
+    .query("memoryCapsules")
+    .withIndex("by_account_kind", (q) =>
+      q.eq("accountId", accountId).eq("kind", "soul"),
+    )
+    .unique();
+}
+
+async function activeSoulAuditClaim(
+  ctx: MemoryCtx,
+  actor: Actor,
+  capsule: Doc<"memoryCapsules"> | null,
+) {
+  if (capsule?.userTextClaimId) {
+    const recorded = await ctx.db.get(capsule.userTextClaimId);
+    if (
+      recorded?.accountId === actor.accountId &&
+      recorded.status === "active" &&
+      isSoulAuditClaim(recorded)
+    )
+      return recorded;
+  }
+  const active = await ctx.db
+    .query("memoryClaims")
+    .withIndex("by_account_status_updated", (q) =>
+      q.eq("accountId", actor.accountId).eq("status", "active"),
+    )
+    .order("desc")
+    .take(500);
+  return active.find((claim) => isSoulAuditClaim(claim)) ?? null;
+}
+
+async function journalSoulEdit(
+  ctx: MutationCtx,
+  actor: Actor,
+  text: string,
+  capsule: Doc<"memoryCapsules"> | null,
+) {
+  const previous = await activeSoulAuditClaim(ctx, actor, capsule);
+  const now = Date.now();
+  if (!text) {
+    if (previous) {
+      await insertEvidence(ctx, actor, previous._id, {
+        sourceType: "user_statement",
+        sourceId: "settings:soul",
+        captureReason:
+          "You removed your direct edit and chose to use what Spectra learned.",
+      });
+      await ctx.db.patch(previous._id, {
+        status: "superseded",
+        updatedAt: now,
+      });
+    }
+    return undefined;
+  }
+
+  const normalized = normalizeProposition(text);
+  const claimId = await ctx.db.insert("memoryClaims", {
+    accountId: actor.accountId,
+    schoolId: actor.schoolId,
+    scope: "private_global",
+    subjectKind: "user",
+    subjectId: soulAuditSubject(actor.accountId),
+    claimType: previous ? "correction" : "declared_fact",
+    proposition: text,
+    normalizedProposition: normalized,
+    propositionHash: hash(`soul:${actor.accountId}:${now}:${normalized}`),
+    embedding: memoryEmbedding(text),
+    assertion: "asserted",
+    confidence: 1,
+    sensitivity: "standard",
+    status: "active",
+    createdBy: "user",
+    validFrom: now,
+    lastConfirmedAt: now,
+    supersedesId: previous?._id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await insertEvidence(ctx, actor, claimId, {
+    sourceType: "user_statement",
+    sourceId: "settings:soul",
+    excerpt: text,
+    captureReason: "You updated how Spectra knows you in Settings.",
+  });
+  if (previous) {
+    await ctx.db.patch(previous._id, {
+      status: "superseded",
+      supersededById: claimId,
+      updatedAt: now,
+    });
+    await ctx.db.insert("memoryRelations", {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      fromClaimId: claimId,
+      toClaimId: previous._id,
+      fromSubject: `claim:${claimId}`,
+      toSubject: `claim:${previous._id}`,
+      relationType: "corrected",
+      confidence: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  return claimId;
+}
+
+export const soul = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireActor(ctx);
+    return soulProjection(await soulCapsuleForAccount(ctx, actor.accountId));
+  },
+});
+
+export const updateSoul = mutation({
+  args: { text: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const text = normalizeSoulText(args.text);
+    const rejection = soulCaptureRejectionReason(text);
+    if (rejection === "too_long")
+      throw new Error(
+        `SOUL_TOO_LONG: Keep this text within ${SOUL_TOKEN_CAP} tokens.`,
+      );
+    if (rejection)
+      throw new Error(
+        "MEMORY_CAPTURE_REJECTED: Remove secrets or sensitive personal information before saving.",
+      );
+
+    const existing = await soulCapsuleForAccount(ctx, actor.accountId);
+    const previousUserText = boundSoulText(existing?.userText ?? "");
+    if (existing && text === previousUserText) return soulProjection(existing);
+
+    const userTextClaimId = await journalSoulEdit(ctx, actor, text, existing);
+    const generatedText = boundSoulText(existing?.generatedText ?? "");
+    const effectiveText = text || generatedText;
+    const now = Date.now();
+    const patch = {
+      kind: "soul" as const,
+      schoolId: actor.schoolId,
+      text: effectiveText,
+      generatedText,
+      userText: text || undefined,
+      userTextClaimId,
+      tokenCount: estimateSoulTokens(effectiveText),
+      generationVersion: (existing?.generationVersion ?? 0) + 1,
+      contentHash: hash(`soul:${generatedText}|user:${text}`),
+      stale: false,
+      updatedAt: now,
+    };
+    if (existing) {
+      await ctx.db.patch(existing._id, patch);
+      return soulProjection((await ctx.db.get(existing._id))!);
+    }
+    const capsuleId = await ctx.db.insert("memoryCapsules", {
+      accountId: actor.accountId,
+      scope: "private_global",
+      workspaceId: undefined,
+      claimIds: [],
+      createdAt: now,
+      ...patch,
+    });
+    return soulProjection((await ctx.db.get(capsuleId))!);
+  },
+});
+
 export const preferences = query({
   args: {},
   handler: async (ctx) => {
@@ -1105,6 +1315,9 @@ export const exportMine = query({
         await preferencesFor(ctx, actor),
         actor,
       ),
+      soul: soulProjection(
+        await soulCapsuleForAccount(ctx, actor.accountId),
+      ),
       claims: visible,
     };
   },
@@ -1220,6 +1433,10 @@ export const contextForRunBase = internalQuery({
       retrievalSignal: number;
     }> = [];
     for (const claim of claims) {
+      // The user-authored soul revision is already injected at the front of
+      // every packet. Do not spend the ordinary retrieval budget on a second
+      // copy of the same text.
+      if (isSoulAuditClaim(claim)) continue;
       if (claim.status !== "active") {
         if (claim.status === "disputed") exclusions.disputed += 1;
         else exclusions.stale += 1;
@@ -1570,6 +1787,64 @@ async function rebuildCapsulesForAccount(
     await preferencesFor(ctx, actor),
     actor,
   );
+  const generatedSoulCandidates = claims
+    .filter(
+      (claim) =>
+        !isSoulAuditClaim(claim) &&
+        (claim.assertion === "asserted" ||
+          claim.claimType === "correction" ||
+          claim.confidence >= 0.72),
+    )
+    .sort(
+      (left, right) =>
+        Number(right.claimType === "correction") -
+          Number(left.claimType === "correction") ||
+        Number(right.assertion === "asserted") -
+          Number(left.assertion === "asserted") ||
+        right.confidence - left.confidence ||
+        right.updatedAt - left.updatedAt,
+    );
+  const generatedSoulClaims: Array<Doc<"memoryClaims">> = [];
+  let generatedSoulText = "";
+  for (const claim of generatedSoulCandidates) {
+    const candidate = [
+      ...generatedSoulClaims.map((item) => `- ${item.proposition}`),
+      `- ${claim.proposition}`,
+    ].join("\n");
+    if (estimateSoulTokens(candidate) > SOUL_TOKEN_CAP) continue;
+    generatedSoulClaims.push(claim);
+    generatedSoulText = candidate;
+  }
+  const existingSoul = await soulCapsuleForAccount(ctx, actor.accountId);
+  const userSoulText = boundSoulText(existingSoul?.userText ?? "");
+  const effectiveSoulText = userSoulText || generatedSoulText;
+  const now = Date.now();
+  const soulFields = {
+    kind: "soul" as const,
+    schoolId: actor.schoolId,
+    scope: "private_global" as const,
+    text: effectiveSoulText,
+    generatedText: generatedSoulText,
+    userText: userSoulText || undefined,
+    claimIds: generatedSoulClaims.map((claim) => claim._id),
+    tokenCount: estimateSoulTokens(effectiveSoulText),
+    generationVersion: (existingSoul?.generationVersion ?? 0) + 1,
+    contentHash: hash(
+      `generated:${generatedSoulClaims.map((claim) => `${claim._id}:${claim.updatedAt}`).join("|")}|user:${userSoulText}`,
+    ),
+    stale: false,
+    updatedAt: now,
+  };
+  if (existingSoul) await ctx.db.patch(existingSoul._id, soulFields);
+  else
+    await ctx.db.insert("memoryCapsules", {
+      accountId: actor.accountId,
+      workspaceId: undefined,
+      userTextClaimId: undefined,
+      createdAt: now,
+      ...soulFields,
+    });
+
   const definitions: Array<{
     scope: Doc<"memoryCapsules">["scope"];
     workspaceId?: Id<"spectraWorkspaces">;
@@ -1613,15 +1888,16 @@ async function rebuildCapsulesForAccount(
       ),
     });
 
-  const now = Date.now();
   for (const definition of definitions) {
-    const ranked = definition.claims.sort(
-      (a, b) =>
-        Number(b.assertion === "asserted") -
-          Number(a.assertion === "asserted") ||
-        b.confidence - a.confidence ||
-        b.updatedAt - a.updatedAt,
-    );
+    const ranked = [...definition.claims]
+      .filter((claim) => !isSoulAuditClaim(claim))
+      .sort(
+        (a, b) =>
+          Number(b.assertion === "asserted") -
+            Number(a.assertion === "asserted") ||
+          b.confidence - a.confidence ||
+          b.updatedAt - a.updatedAt,
+      );
     const selected: Array<Doc<"memoryClaims">> = [];
     let tokens = 0;
     const scopeTarget =
@@ -1662,9 +1938,12 @@ async function rebuildCapsulesForAccount(
               q.eq("accountId", actor.accountId).eq("scope", definition.scope),
             )
             .collect()
-        ).find((capsule) => !capsule.workspaceId);
+        ).find(
+          (capsule) => !capsule.workspaceId && capsule.kind !== "soul",
+        );
     if (existing) {
       await ctx.db.patch(existing._id, {
+        kind: "context",
         text,
         claimIds: selected.map((claim) => claim._id),
         tokenCount: tokenEstimate(text),
@@ -1678,6 +1957,7 @@ async function rebuildCapsulesForAccount(
       await ctx.db.insert("memoryCapsules", {
         accountId: actor.accountId,
         schoolId: actor.schoolId,
+        kind: "context",
         scope: definition.scope,
         workspaceId: definition.workspaceId,
         text,

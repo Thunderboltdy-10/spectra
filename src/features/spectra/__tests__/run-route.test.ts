@@ -110,6 +110,13 @@ function setup(
     if (name.includes("spectraArtifacts:listAgentRoutingDescriptors")) return [];
     if (name.includes("spectraArtifacts:list")) return args?.blueprintKey === "agent" ? [] : catalogArtifacts;
     if (name.includes("spectraWorkspaces:list")) return [{ _id: "workspace-real", title: "Biology" }];
+    if (name.includes("memory:soul"))
+      return {
+        text: "My name is Pablo. I prefer concise explanations.",
+        tokenCount: 12,
+        maxTokens: 350,
+        userEdited: true,
+      };
     if (name.includes("orgTree:listWorkspaceContents")) return { workspace: { _id: "workspace-real", title: "Biology" }, items: [] };
     if (name.includes("spectraThreads:get")) return { threadId: "thread-real", title: "New thread", messages: [], traces: [] };
     if (name.includes("identity:me") || name.includes("identity:get")) {
@@ -967,15 +974,16 @@ describe("Spectra run route", () => {
     ]);
   });
 
-  it("answers a greeting without hydrating context or invoking the mutation planner", async () => {
+  it("answers a greeting from the soul without hydrating workspace context or invoking the mutation planner", async () => {
     const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "unused", operations: [] };
-    const { convexMutation, fetchMock } = setup(answerPlan);
+    const { convexQuery, convexMutation, fetchMock } = setup(answerPlan);
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Hi" }) }));
     expect(response.status).toBe(200);
     await response.text();
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { finalSummary?: string }).finalSummary?.startsWith("Hi!"))).toBe(true);
+    expect(convexQuery.mock.calls.some(([name]) => String(name).includes("memory:soul"))).toBe(true);
+    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { finalSummary?: string }).finalSummary?.startsWith("Hi, Pablo!"))).toBe(true);
   });
 
   it("offers immediate bounded format choices for an underspecified study resource", async () => {

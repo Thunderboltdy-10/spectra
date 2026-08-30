@@ -1137,8 +1137,19 @@ export function describeInvalidPlanShape(text: string) {
   }
 }
 
-export function fastConversationalPlan(prompt: string): SpectraPlan | null {
+function preferredGreetingName(soulText: string) {
+  const match = soulText.match(
+    /\b(?:my name is|call me|i go by)\s+([\p{L}][\p{L}'-]{0,39})\b/iu,
+  );
+  return match?.[1];
+}
+
+export function fastConversationalPlan(
+  prompt: string,
+  soulText = "",
+): SpectraPlan | null {
   const clean = prompt.trim();
+  const greetingName = preferredGreetingName(soulText);
   const arithmetic = clean.match(
     /^(?:what\s+is|calculate|compute)\s+(-?\d+(?:\.\d+)?)\s*(\+|-|[×x*]|[÷/])\s*(-?\d+(?:\.\d+)?)\s*[?.!]*(?:\s+(?:answer|respond|reply)(?:\s+with)?(?:\s+only)?(?:\s+(?:the\s+)?number)?[.!]?)?$/i,
   );
@@ -1216,8 +1227,9 @@ export function fastConversationalPlan(prompt: string): SpectraPlan | null {
       conversationSummary: "A new conversation with Spectra.",
       choices: null,
       operations: [],
-      finalResponse:
-        "Hi! What are you working on? I can explain a topic, help with an open artifact, or create study materials with you.",
+      finalResponse: greetingName
+        ? `Hi, ${greetingName}! What are you working on? I can explain a topic, help with an open artifact, or create study materials with you.`
+        : "Hi! What are you working on? I can explain a topic, help with an open artifact, or create study materials with you.",
     });
   const exact = clean
     .match(/^reply\s+with\s+exactly\s*:\s*([\s\S]{1,4000})$/i)?.[1]
@@ -3725,6 +3737,17 @@ export function buildAgentOrientation(context: unknown, prompt: string) {
       ? (record.selectedAgent as Record<string, unknown>)
       : null;
   return {
+    soul:
+      record.soul &&
+      typeof record.soul === "object" &&
+      !Array.isArray(record.soul)
+        ? record.soul
+        : {
+            text: "",
+            tokenCount: 0,
+            maxTokens: 350,
+            userEdited: false,
+          },
     version: 3,
     effectiveFocus: record.effectiveFocus,
     currentView: record.currentView,

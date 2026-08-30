@@ -2008,6 +2008,7 @@ export default defineSchema({
   memoryCapsules: defineTable({
     accountId: v.id("accounts"),
     schoolId: v.id("schools"),
+    kind: v.optional(v.union(v.literal("context"), v.literal("soul"))),
     scope: v.union(
       v.literal("private_global"),
       v.literal("private_school"),
@@ -2016,6 +2017,9 @@ export default defineSchema({
     ),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     text: v.string(),
+    generatedText: v.optional(v.string()),
+    userText: v.optional(v.string()),
+    userTextClaimId: v.optional(v.id("memoryClaims")),
     claimIds: v.array(v.id("memoryClaims")),
     tokenCount: v.number(),
     generationVersion: v.number(),
@@ -2024,6 +2028,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_account_kind", ["accountId", "kind"])
     .index("by_account_scope", ["accountId", "scope"])
     .index("by_account_workspace", ["accountId", "workspaceId"])
     .index("by_school_updated", ["schoolId", "updatedAt"]),

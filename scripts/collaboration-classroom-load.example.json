@@ -1,0 +1,9 @@
+{
+  "artifactId": "replace-with-a-verifier-owned-document-artifact-id",
+  "token": {
+    "mode": "session",
+    "endpoint": "http://localhost:3000/api/spectra/collaboration/token",
+    "storageState": ".playwright-cli/auth.json"
+  },
+  "reportPath": ".shots/reformation/P5.V1/classroom-load.json"
+}

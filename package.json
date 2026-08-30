@@ -20,7 +20,7 @@
     "lint": "eslint . --max-warnings=0",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:local-harness": "vitest run scripts/local/stack-config.test.mjs src/lib/__tests__/boot-diagnostics.test.ts",
+    "test:local-harness": "vitest run scripts/local/stack-config.test.mjs scripts/local/stack-scaffold.test.mjs src/lib/__tests__/boot-diagnostics.test.ts",
     "inventory:spectra": "node scripts/generate-spectra-inventory.mjs --write docs/spectra-definitive/generated/baseline-inventory.json",
     "check:architecture": "node scripts/check-spectra-architecture.mjs",
     "check:copy": "node scripts/check-user-facing-copy.mjs",

@@ -134,6 +134,32 @@ function requireFlashcardDirection(value: unknown) {
   return candidate;
 }
 
+function requireFlashcardStudyAction(value: unknown) {
+  const candidate = requireString(value, "studyAction");
+  if (
+    ![
+      "undo",
+      "bury",
+      "suspend",
+      "resume",
+      "reschedule",
+      "reset",
+      "leech-clear",
+      "leech-suspend",
+    ].includes(candidate)
+  )
+    throw new Error("Choose a valid private study action.");
+  return candidate as
+    | "undo"
+    | "bury"
+    | "suspend"
+    | "resume"
+    | "reschedule"
+    | "reset"
+    | "leech-clear"
+    | "leech-suspend";
+}
+
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
@@ -1327,6 +1353,30 @@ export async function POST(request: NextRequest) {
         cardId: requireString(body.cardId, "cardId"),
         direction: requireFlashcardDirection(body.direction),
         note: typeof body.note === "string" ? body.note : "",
+      });
+      return ok(result);
+    }
+
+    if (action === "manageFlashcardStudy") {
+      const result = await spectraMutation("flashcardStudy:manage", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+        cardId: requireString(body.cardId, "cardId"),
+        direction: requireFlashcardDirection(body.direction),
+        action: requireFlashcardStudyAction(body.studyAction),
+        nextDueAt:
+          typeof body.nextDueAt === "number" && Number.isFinite(body.nextDueAt)
+            ? body.nextDueAt
+            : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "resetFlashcardStudy") {
+      if (body.confirmation !== "RESET")
+        throw new Error("Confirm reset before clearing private study history.");
+      const result = await spectraMutation("flashcardStudy:resetDeck", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+        confirmation: "RESET" as const,
       });
       return ok(result);
     }

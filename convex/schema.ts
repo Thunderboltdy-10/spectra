@@ -2165,6 +2165,20 @@ export default defineSchema({
     stabilityDays: v.number(),
     difficulty: v.number(),
     lapses: v.number(),
+    memoryState: v.optional(
+      v.union(
+        v.literal("new"),
+        v.literal("learning"),
+        v.literal("review"),
+        v.literal("relearning"),
+      ),
+    ),
+    learningStep: v.optional(v.number()),
+    elapsedDays: v.optional(v.number()),
+    retrievability: v.optional(v.number()),
+    leech: v.optional(v.boolean()),
+    buriedUntil: v.optional(v.number()),
+    suspendedAt: v.optional(v.number()),
     nextDueAt: v.number(),
     lastReviewedAt: v.optional(v.number()),
     createdAt: v.number(),
@@ -2189,9 +2203,11 @@ export default defineSchema({
       v.literal("easy"),
     ),
     previousNextDueAt: v.optional(v.number()),
+    previousState: v.optional(v.any()),
     scheduledDays: v.number(),
     elapsedMs: v.optional(v.number()),
     reviewedAt: v.number(),
+    undoneAt: v.optional(v.number()),
   })
     .index("by_account_client", ["accountId", "clientReviewId"])
     .index("by_account_artifact_created", [

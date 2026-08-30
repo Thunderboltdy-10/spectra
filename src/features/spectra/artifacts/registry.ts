@@ -1058,11 +1058,20 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
     "inspect_cards",
     "add_cards",
     "rewrite_side",
+    "remove_cards",
+    "tag_cards",
     "create_cloze",
     "set_image_occlusion",
     "set_bidirectional",
     "reorder_cards",
     "set_study_metadata",
+    "configure_scheduler",
+    "import_preview",
+    "import_commit",
+    "export_csv",
+    "export_tsv",
+    "export_package",
+    "print",
     "validate",
   ],
   quiz: [
@@ -1307,13 +1316,13 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
           ? 2
           : typeKey === "sheets"
             ? 4
-            : typeKey === "flashcard_deck" ||
-                typeKey === "quiz" ||
-                typeKey === "planner_task"
-              ? 3
-              : typeKey === "code"
-                ? CODE_CONTENT_SCHEMA_VERSION
-                : 1,
+            : typeKey === "flashcard_deck"
+              ? 4
+              : typeKey === "quiz" || typeKey === "planner_task"
+                ? 3
+                : typeKey === "code"
+                  ? CODE_CONTENT_SCHEMA_VERSION
+                  : 1,
       content: artifactContentSchemas[typeKey],
     },
     renderers: {

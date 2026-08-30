@@ -2,6 +2,7 @@ import type { WorkType } from "../work/registry";
 import { APPLICATION_CAPABILITIES } from "./application";
 import { OFFICE_FORMATTING_CAPABILITIES } from "./office-formatting";
 import { OFFICE_REMAINING_CAPABILITIES } from "./office-remaining";
+import { FLASHCARD_CAPABILITIES } from "./studio-flashcards";
 import { STUDIO_CAPABILITIES, stableCapabilityId } from "./studios";
 import { CODE_STUDIO_CAPABILITIES } from "./studio-code";
 import type {
@@ -17,6 +18,7 @@ export const ALL_CAPABILITIES: readonly CapabilityDefinition[] = [
   ...APPLICATION_CAPABILITIES,
   ...STUDIO_CAPABILITIES,
   ...CODE_STUDIO_CAPABILITIES,
+  ...FLASHCARD_CAPABILITIES,
 ];
 
 const BY_ID = new Map<string, CapabilityDefinition>(

@@ -1,5 +1,28 @@
 import { z } from "zod";
 import type { ArtifactBlueprint } from "../../core";
+import {
+  FLASHCARD_DECK_SCHEMA_VERSION,
+  FLASHCARD_PRESETS,
+} from "../../flashcards/model";
+
+const schedulerSchema = z
+  .object({
+    preset: z.enum(["gentle", "balanced", "intensive"]),
+    desiredRetention: z.number().min(0.7).max(0.97),
+    newCardsPerDay: z.number().int().min(0).max(9_999),
+    reviewsPerDay: z.number().int().min(0).max(99_999),
+    learningStepsMinutes: z
+      .array(z.number().int().min(1).max(43_200))
+      .min(1)
+      .max(8),
+    relearningStepsMinutes: z
+      .array(z.number().int().min(1).max(43_200))
+      .min(1)
+      .max(8),
+    maximumIntervalDays: z.number().int().min(1).max(36_500),
+    leechThreshold: z.number().int().min(2).max(64),
+  })
+  .passthrough();
 
 export const flashcardDeckContentSchema = z
   .object({
@@ -18,7 +41,7 @@ export const flashcardDeckContentSchema = z
               .max(50)
               .optional(),
             sourceRefs: z.array(z.string()).optional(),
-            tags: z.array(z.string().trim().min(1).max(48)).max(8).optional(),
+            tags: z.array(z.string().trim().min(1).max(48)).max(50).optional(),
             confidence: z
               .enum(["unknown", "weak", "medium", "strong"])
               .optional(),
@@ -53,18 +76,7 @@ export const flashcardDeckContentSchema = z
               )
               .max(64)
               .optional(),
-            section: z.string().optional(),
-            review: z
-              .object({
-                state: z
-                  .enum(["new", "learning", "review", "mastered"])
-                  .optional(),
-                correctStreak: z.number().int().min(0).optional(),
-                lastReviewedAt: z.number().nullable().optional(),
-                nextReviewAt: z.number().nullable().optional(),
-              })
-              .passthrough()
-              .optional(),
+            section: z.string().trim().min(1).max(656).optional(),
           })
           .passthrough(),
       )
@@ -74,6 +86,7 @@ export const flashcardDeckContentSchema = z
         shuffle: z.boolean().optional(),
         revealMode: z.enum(["click", "type"]).optional(),
         showHints: z.boolean().optional(),
+        scheduler: schedulerSchema.optional(),
       })
       .passthrough()
       .optional(),
@@ -84,7 +97,7 @@ export const flashcardDeckBlueprint: ArtifactBlueprint = {
   key: "flashcard_deck",
   name: "Flashcard Deck",
   description: "A study deck stored as one artifact, regardless of card count.",
-  version: 3,
+  version: FLASHCARD_DECK_SCHEMA_VERSION,
   schema: flashcardDeckContentSchema,
   defaultContent: {
     cards: [
@@ -98,7 +111,12 @@ export const flashcardDeckBlueprint: ArtifactBlueprint = {
         difficulty: "medium",
       },
     ],
-    settings: { shuffle: true, revealMode: "click" },
+    settings: {
+      shuffle: true,
+      revealMode: "click",
+      showHints: true,
+      scheduler: FLASHCARD_PRESETS.balanced,
+    },
   },
   rendererKey: "flashcard_deck",
   operations: [

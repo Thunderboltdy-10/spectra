@@ -1270,6 +1270,15 @@ export async function removeSpectraCalendarPeriodMap(periodMapId: string) {
 }
 
 export type SpectraFlashcardRating = "again" | "hard" | "good" | "easy";
+export type SpectraFlashcardStudyAction =
+  | "undo"
+  | "bury"
+  | "suspend"
+  | "resume"
+  | "reschedule"
+  | "reset"
+  | "leech-clear"
+  | "leech-suspend";
 
 export type SpectraFlashcardStudyState = {
   stateId: string;
@@ -1283,6 +1292,13 @@ export type SpectraFlashcardStudyState = {
   stabilityDays: number;
   difficulty: number;
   lapses: number;
+  memoryState: "new" | "learning" | "review" | "relearning";
+  learningStep: number;
+  elapsedDays: number;
+  retrievability: number;
+  leech: boolean;
+  buriedUntil?: number;
+  suspendedAt?: number;
   nextDueAt: number;
   lastReviewedAt?: number;
   /** The learner's private note on this card. */
@@ -1309,6 +1325,32 @@ export async function getSpectraFlashcardStudy(artifactId: string) {
     states: SpectraFlashcardStudyState[];
     dueCount: number;
     update: SpectraFlashcardStudyUpdate;
+    options: {
+      preset: "gentle" | "balanced" | "intensive";
+      desiredRetention: number;
+      newCardsPerDay: number;
+      reviewsPerDay: number;
+      learningStepsMinutes: number[];
+      relearningStepsMinutes: number[];
+      maximumIntervalDays: number;
+      leechThreshold: number;
+    };
+    statistics: {
+      retention: {
+        reviews: number;
+        remembered: number;
+        rememberedRate: number | null;
+        desiredRetention: number;
+      };
+      forecast: Array<{ date: string; count: number }>;
+      heatmap: Array<{ date: string; count: number }>;
+      leeches: Array<{
+        cardId: string;
+        direction: "forward" | "reverse";
+        lapses: number;
+        suspended: boolean;
+      }>;
+    };
   }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
@@ -1337,6 +1379,27 @@ export async function reviewSpectraFlashcard(input: {
     state: SpectraFlashcardStudyState;
     reused: boolean;
   }>({ action: "reviewFlashcard", ...input });
+}
+
+export async function manageSpectraFlashcardStudy(input: {
+  artifactId: string;
+  cardId: string;
+  direction: "forward" | "reverse";
+  studyAction: SpectraFlashcardStudyAction;
+  nextDueAt?: number;
+}) {
+  return postSpectra<{
+    removed: boolean;
+    state?: SpectraFlashcardStudyState;
+  }>({ action: "manageFlashcardStudy", ...input });
+}
+
+export async function resetSpectraFlashcardStudy(artifactId: string) {
+  return postSpectra<{ reset: true; states: number; reviews: number }>({
+    action: "resetFlashcardStudy",
+    artifactId,
+    confirmation: "RESET",
+  });
 }
 
 export type SpectraQuizPracticeQuestion = {

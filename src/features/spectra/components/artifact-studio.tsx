@@ -211,6 +211,7 @@ import {
   type QuizQuestion,
   type QuizSettings,
 } from "./artifact-content-model";
+import { normalizeFlashcardDeckContent } from "../flashcards/model";
 export { tagsFromDraft } from "./artifact-studio-value-utils";
 import {
   StudioInteractionLayer,
@@ -2255,104 +2256,7 @@ export function documentContentFromJson(json: JSONContent, previous: unknown) {
 }
 
 export function deckCards(content: unknown): DeckCard[] {
-  const cards = arrayOfRecords(record(content).cards).map(
-    (card, index): DeckCard => ({
-      id: typeof card.id === "string" ? card.id : `card-${index + 1}`,
-      variant:
-        card.variant === "cloze" || card.variant === "image_occlusion"
-          ? card.variant
-          : "basic",
-      front: typeof card.front === "string" ? card.front : "",
-      back: typeof card.back === "string" ? card.back : "",
-      hint: typeof card.hint === "string" ? card.hint : "",
-      explanation: typeof card.explanation === "string" ? card.explanation : "",
-      acceptedAlternatives: Array.isArray(card.acceptedAlternatives)
-        ? card.acceptedAlternatives.filter(
-            (item): item is string => typeof item === "string",
-          )
-        : [],
-      section: typeof card.section === "string" ? card.section : "Section 1",
-      confidence: (card.confidence === "weak" ||
-      card.confidence === "medium" ||
-      card.confidence === "strong"
-        ? card.confidence
-        : "unknown") as DeckCard["confidence"],
-      difficulty:
-        card.difficulty === "easy" || card.difficulty === "hard"
-          ? card.difficulty
-          : "medium",
-      learningObjective:
-        typeof card.learningObjective === "string"
-          ? card.learningObjective
-          : "",
-      language: typeof card.language === "string" ? card.language : "",
-      bidirectional: card.bidirectional === true,
-      media:
-        typeof record(card.media).assetId === "string" &&
-        typeof record(card.media).name === "string" &&
-        typeof record(card.media).mediaType === "string"
-          ? {
-              assetId: String(record(card.media).assetId),
-              name: String(record(card.media).name),
-              mediaType: String(record(card.media).mediaType),
-              altText:
-                typeof record(card.media).altText === "string"
-                  ? String(record(card.media).altText)
-                  : "",
-              placement:
-                record(card.media).placement === "back" ? "back" : "front",
-            }
-          : undefined,
-      occlusions: arrayOfRecords(card.occlusions).flatMap((mask, maskIndex) => {
-        const x = Number(mask.x);
-        const y = Number(mask.y);
-        const width = Number(mask.width);
-        const height = Number(mask.height);
-        if (
-          ![x, y, width, height].every(Number.isFinite) ||
-          width <= 0 ||
-          height <= 0
-        )
-          return [];
-        const normalizedX = Math.max(0, Math.min(0.99, x));
-        const normalizedY = Math.max(0, Math.min(0.99, y));
-        return [
-          {
-            id:
-              typeof mask.id === "string"
-                ? mask.id
-                : `mask-${index + 1}-${maskIndex + 1}`,
-            x: normalizedX,
-            y: normalizedY,
-            width: Math.max(0.01, Math.min(1 - normalizedX, width)),
-            height: Math.max(0.01, Math.min(1 - normalizedY, height)),
-            label: typeof mask.label === "string" ? mask.label : "",
-          },
-        ];
-      }),
-      sourceRefs: Array.isArray(card.sourceRefs)
-        ? card.sourceRefs.filter(
-            (item): item is string => typeof item === "string",
-          )
-        : [],
-      tags: Array.isArray(card.tags)
-        ? card.tags.filter((item): item is string => typeof item === "string")
-        : [],
-      review: record(card.review) as DeckCard["review"],
-    }),
-  );
-  return cards.length > 0
-    ? cards
-    : [
-        {
-          id: "card-1",
-          front: "",
-          back: "",
-          hint: "",
-          section: "Section 1",
-          confidence: "unknown",
-        },
-      ];
+  return normalizeFlashcardDeckContent(content).cards;
 }
 
 export function quizQuestions(content: unknown): QuizQuestion[] {

@@ -7,7 +7,7 @@ import { internal } from "./_generated/api";
 import { commitChangeGroup, HUMAN_CHANGE_IDLE_MS } from "./changeGroups";
 import { timetableContentContainsPersonalState } from "./quizPrivacy";
 import { changedArtifactRegionIds } from "../src/features/spectra/collaboration/artifact-yjs-model";
-import { syncSourceNodes } from "./orgTreeShared";
+import { syncArtifactSummary, syncSourceNodes } from "./orgTreeShared";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import { claimAuthorizesGatewayUpdate } from "./collaborationClaimAuthorization";
 import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
@@ -451,6 +451,7 @@ export const recoverNativeSnapshot = internalMutation({
           updatedAt: now,
         }),
       ]);
+      await syncArtifactSummary(ctx, artifact._id);
       return {
         recovered: true,
         previousHeadSequence: headSequence,
@@ -501,6 +502,7 @@ export const recoverNativeSnapshot = internalMutation({
         updatedAt: now,
       }),
     ]);
+    await syncArtifactSummary(ctx, artifact._id);
     return { recovered: true, previousHeadSequence: headSequence };
   },
 });
@@ -1009,6 +1011,7 @@ export const append = internalMutation({
        page against (D42). */
     if (projection)
       await syncSourceNodes(ctx, "work", artifact._id, projection.title);
+    else await syncArtifactSummary(ctx, artifact._id);
     if (projection) {
       // Every open human session must point at a renderable global state, even
       // when another collaborator changed a non-overlapping region afterward.

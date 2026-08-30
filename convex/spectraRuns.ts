@@ -16,12 +16,20 @@ import {
   isTerminalRunStatus,
   requireCurrentExecution,
 } from "./spectraRunLifecycle";
-import { findPrimaryNode, syncSourceNodes } from "./orgTreeShared";
+import {
+  findPrimaryNode,
+  syncArtifactSummary,
+  syncSourceNodes,
+} from "./orgTreeShared";
 import { releaseClaimsForRun } from "./regionClaims";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { recordAgentInvocation, settleAgentInvocation } from "./agents";
 import { recordMeterEvent } from "./metering";
 import { writeAuditEvent } from "./auditShared";
+import {
+  projectRunTabSummary,
+  RUN_TAB_PROJECTION_VERSION,
+} from "./spectraRunProjection";
 
 function usageTokenCounts(usage: unknown) {
   const usageRecord =
@@ -203,6 +211,26 @@ function dockSummaryAfterEvents(
     checkpointSummary: recentSteps.at(-1),
     recentSteps,
   };
+}
+
+function operationTargetIds(
+  operations: readonly Doc<"spectraOperations">[],
+) {
+  const artifactIds = new Set<string>();
+  const workspaceIds = new Set<string>();
+  for (const operation of operations) {
+    if (operation.pendingArtifactId)
+      artifactIds.add(String(operation.pendingArtifactId));
+    if (operation.pendingWorkspaceId)
+      workspaceIds.add(String(operation.pendingWorkspaceId));
+    if (operation.conflict?.artifactId)
+      artifactIds.add(String(operation.conflict.artifactId));
+    for (const affected of operation.affected) {
+      if (affected.type === "artifact") artifactIds.add(affected.id);
+      if (affected.type === "workspace") workspaceIds.add(affected.id);
+    }
+  }
+  return { artifactIds, workspaceIds };
 }
 
 async function requireActor(ctx: Parameters<typeof getAuthenticatedActor>[0]) {
@@ -431,6 +459,9 @@ export const beginRun = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    const createdRun = await ctx.db.get(runId);
+    if (!createdRun) throw new Error("AI run could not be created");
+    const runSummary = projectRunTabSummary(createdRun);
     const resultCardId = await ctx.db.insert("spectraResultCards", {
       runId,
       surface: args.sourceSurface,
@@ -500,6 +531,9 @@ export const beginRun = mutation({
         surface: args.sourceSurface,
         selected: true,
         hiddenAt: undefined,
+        projectionVersion: RUN_TAB_PROJECTION_VERSION,
+        threadTitle: thread?.title ?? title,
+        runSummary,
         updatedAt: now,
       });
       await Promise.all(
@@ -520,6 +554,9 @@ export const beginRun = mutation({
         workspaceId,
         surface: args.sourceSurface,
         selected: true,
+        projectionVersion: RUN_TAB_PROJECTION_VERSION,
+        threadTitle: thread?.title ?? title,
+        runSummary,
         createdAt: now,
         updatedAt: now,
       });
@@ -1061,30 +1098,85 @@ export const listTabs = query({
       if (!existing || tab.updatedAt > existing.updatedAt)
         canonicalByThread.set(tab.threadId, tab);
     }
-    return (
-      await Promise.all(
-        [...canonicalByThread.values()].map(async (tab) => {
-          const [run, thread, cards] = await Promise.all([
-            ctx.db.get(tab.runId),
-            ctx.db.get(tab.threadId),
-            ctx.db
-              .query("spectraResultCards")
-              .withIndex("by_run", (q) => q.eq("runId", tab.runId))
-              .order("desc")
-              .take(1),
-          ]);
-          return {
-            ...tab,
-            run,
-            thread,
-            card: cards[0] ?? null,
-            inputRequest: run?.dockSummary?.inputRequest ?? null,
-            checkpointSummary: run?.dockSummary?.checkpointSummary,
-            recentSteps: run?.dockSummary?.recentSteps ?? [],
-          };
-        }),
+    return Promise.all(
+      [...canonicalByThread.values()].map(async (tab) => {
+        const cards = await ctx.db
+          .query("spectraResultCards")
+          .withIndex("by_run", (q) => q.eq("runId", tab.runId))
+          .order("desc")
+          .take(1);
+        const card = cards[0] ?? null;
+        const runSummary = tab.runSummary ?? {
+          _id: tab.runId,
+          status: card?.status ?? ("completed" as const),
+          sourceSurface: tab.surface,
+          threadId: tab.threadId,
+          workspaceId: tab.workspaceId,
+          artifactId: card?.artifactId,
+          userPrompt: "",
+          createdAt: tab.createdAt,
+          updatedAt: Math.max(tab.updatedAt, card?.updatedAt ?? 0),
+        };
+        const { dockSummary, ...run } = runSummary;
+        const {
+          runSummary: _storedRunSummary,
+          threadTitle,
+          projectionVersion: _projectionVersion,
+          ...publicTab
+        } = tab;
+        return {
+          ...publicTab,
+          run,
+          thread: {
+            _id: tab.threadId,
+            title: threadTitle ?? "Conversation",
+            origin: tab.surface,
+            workspaceId: tab.workspaceId,
+            artifactId: run.artifactId,
+            status: "active" as const,
+            createdAt: tab.createdAt,
+            updatedAt: tab.updatedAt,
+            lastRunId: tab.runId,
+          },
+          card,
+          inputRequest: dockSummary?.inputRequest ?? null,
+          checkpointSummary: dockSummary?.checkpointSummary,
+          recentSteps: dockSummary?.recentSteps ?? [],
+        };
+      }),
+    );
+  },
+});
+
+export const backfillRunTabProjections = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const tabs = await ctx.db
+      .query("spectraRunTabs")
+      .withIndex("by_projection_version", (q) =>
+        q.eq("projectionVersion", undefined),
       )
-    ).filter((tab) => tab.run && tab.thread);
+      .take(100);
+    let updated = 0;
+    let removed = 0;
+    for (const tab of tabs) {
+      const [run, thread] = await Promise.all([
+        ctx.db.get(tab.runId),
+        ctx.db.get(tab.threadId),
+      ]);
+      if (!run || !thread) {
+        await ctx.db.delete(tab._id);
+        removed += 1;
+        continue;
+      }
+      await ctx.db.patch(tab._id, {
+        projectionVersion: RUN_TAB_PROJECTION_VERSION,
+        threadTitle: thread.title.slice(0, 120),
+        runSummary: projectRunTabSummary(run),
+      });
+      updated += 1;
+    }
+    return { scanned: tabs.length, updated, removed };
   },
 });
 
@@ -1223,12 +1315,31 @@ export const reconcileStaleRuns = internalMutation({
         createdAt: now,
       });
       await ctx.db.patch(run._id, { eventSequence: sequence });
-      const artifacts = await ctx.db
+      const operationTargets = operationTargetIds(currentOperations);
+      if (run.artifactId)
+        operationTargets.artifactIds.add(String(run.artifactId));
+      if (run.workspaceId)
+        operationTargets.workspaceIds.add(String(run.workspaceId));
+      const indexedArtifacts = await ctx.db
         .query("spectraArtifacts")
-        .withIndex("by_account_status", (q) =>
-          q.eq("ownerAccountId", run.ownerAccountId).eq("status", "active"),
-        )
+        .withIndex("by_ai_run", (q) => q.eq("aiRunId", run._id))
         .collect();
+      const operationArtifacts = await Promise.all(
+        [...operationTargets.artifactIds].flatMap((rawId) => {
+          const artifactId = ctx.db.normalizeId("spectraArtifacts", rawId);
+          return artifactId ? [ctx.db.get(artifactId)] : [];
+        }),
+      );
+      const artifacts = [
+        ...new Map(
+          [...indexedArtifacts, ...operationArtifacts]
+            .filter(
+              (artifact): artifact is Doc<"spectraArtifacts"> =>
+                Boolean(artifact),
+            )
+            .map((artifact) => [artifact._id, artifact]),
+        ).values(),
+      ];
       await Promise.all(
         artifacts
           .filter(
@@ -1238,12 +1349,12 @@ export const reconcileStaleRuns = internalMutation({
                 (effect) => effect.runId === run._id,
               ),
           )
-          .map((artifact) => {
+          .map(async (artifact) => {
             const remainingEffects = (artifact.aiEffects ?? []).filter(
               (effect) => effect.runId !== run._id,
             );
             const latestEffect = remainingEffects.at(-1);
-            return ctx.db.patch(artifact._id, {
+            await ctx.db.patch(artifact._id, {
               aiState: remainingEffects.length ? "updating" : undefined,
               aiRunId: latestEffect?.runId,
               aiExecutionId: latestEffect?.executionId,
@@ -1260,14 +1371,29 @@ export const reconcileStaleRuns = internalMutation({
                   : artifact.summary,
               updatedAt: now,
             });
+            await syncArtifactSummary(ctx, artifact._id);
           }),
       );
-      const workspaces = await ctx.db
+      const indexedWorkspaces = await ctx.db
         .query("spectraWorkspaces")
-        .withIndex("by_account_activity", (q) =>
-          q.eq("ownerAccountId", run.ownerAccountId),
-        )
+        .withIndex("by_ai_run", (q) => q.eq("aiRunId", run._id))
         .collect();
+      const operationWorkspaces = await Promise.all(
+        [...operationTargets.workspaceIds].flatMap((rawId) => {
+          const workspaceId = ctx.db.normalizeId("spectraWorkspaces", rawId);
+          return workspaceId ? [ctx.db.get(workspaceId)] : [];
+        }),
+      );
+      const workspaces = [
+        ...new Map(
+          [...indexedWorkspaces, ...operationWorkspaces]
+            .filter(
+              (workspace): workspace is Doc<"spectraWorkspaces"> =>
+                Boolean(workspace),
+            )
+            .map((workspace) => [workspace._id, workspace]),
+        ).values(),
+      ];
       await Promise.all(
         workspaces
           .filter(

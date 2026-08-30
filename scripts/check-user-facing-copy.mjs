@@ -6,6 +6,8 @@ const files = [
   "src/features/spectra/pages/spectra-shell.tsx",
   "src/features/spectra/pages/agent-library-shell.tsx",
   "src/features/spectra/components/artifact-studio.tsx",
+  "src/features/spectra/components/code-studio.tsx",
+  "src/features/spectra/settings/ui/soul-settings.tsx",
   "src/components/layout/app-shell.tsx",
   "src/app/layout.tsx",
 ];
@@ -21,6 +23,9 @@ const forbidden = [
   />\s*Timetable\s*</g,
   /\bNo artifacts\b/gi,
   /\bSelect multiple artifacts\b/gi,
+  /\{\s*report\.status\s*\}/g,
+  /\{\s*item\.status\.replaceAll\([^)]*\)\s*\}/g,
+  /\{\s*stored\?\.status\b/g,
 ];
 
 const issues = [];

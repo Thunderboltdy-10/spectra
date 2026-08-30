@@ -38,6 +38,21 @@ P6.I2's convergence discipline applied to every surface the expansion added or t
 - Motion/feedback pass per R16: state shown on the thing itself across new surfaces.
 - Owns: cross-cutting polish diffs; anything structural found here is triaged (R12) to its owning phase, not absorbed.
 
+### P15.I3 implementation log — 2026-08-31
+
+Status: IMPLEMENTED. No acceptance claimed.
+
+- Audited the merged Code-depth surface against the established Spectra reference language: calm, dense, token-led, with capability truth preserved.
+- Replaced all 42 Code-studio design-system escapes with shared radius, type, shadow, and named-layer tokens; the touched surface now has zero scoped ESLint/design warnings.
+- Replaced the bespoke run control and confirmation-modal implementation with the shared Button and Radix-backed Dialog primitives, retaining destructive-state and focus behavior.
+- Humanized run, import, asset, publishing, permission, and empty-state copy; shared work-type metadata now replaces raw blueprint keys in resource labels.
+- Expanded `check:copy` to cover Code and Soul settings and to reject directly rendered internal status enums.
+- Regraded the Code workbar at narrow widths: the existing deterministic overflow contract retains every authored action, order, and compound control, so no capability was removed to make the bar fit.
+- Focused Vitest: 6 files / 51 tests PASS. Root TypeScript, copy, capability, design-token, secret, scoped ESLint, and diff gates PASS.
+- Full design census: 1,902 existing escapes repository-wide; none remain in the touched Code studio. The token gate's 15 warnings are on untouched paths.
+- No structural connector, school, or studio-depth defect was absorbed; those ownership boundaries remain P10/P11, P13, and P12 respectively.
+- No server, browser, Convex process, Bridge, Office, cloud I/O, or live lease was used.
+
 ## P15.V1 — Composed-experience verification (H, max)
 
 Fresh agent, **clean profiles** (new accounts, not the seeded pair), own local instance:

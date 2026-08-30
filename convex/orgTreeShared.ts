@@ -23,6 +23,224 @@ export type OrgWriteCtx = MutationCtx;
 export type OrgNode = Doc<"orgNodes">;
 export type OrgNodeKind = OrgNode["kind"];
 
+const ARTIFACT_SUMMARY_SEARCH_CHARS = 1_400;
+const ARTIFACT_SUMMARY_TITLE_CHARS = 240;
+const ARTIFACT_SUMMARY_DESCRIPTION_CHARS = 600;
+const ARTIFACT_SUMMARY_TAGS = 12;
+const ARTIFACT_SUMMARY_TAG_CHARS = 48;
+const ARTIFACT_SUMMARY_EFFECTS = 4;
+const ARTIFACT_SUMMARY_EFFECT_PATHS = 4;
+const ARTIFACT_SUMMARY_EFFECT_PATH_CHARS = 80;
+const ARTIFACT_SUMMARY_EFFECT_TITLE_CHARS = 120;
+const ARTIFACT_SUMMARY_EFFECT_DETAIL_CHARS = 180;
+const ARTIFACT_SUMMARY_PROVENANCE_ITEMS = 8;
+const ARTIFACT_SUMMARY_PROVENANCE_CHARS = 120;
+const ARTIFACT_SUMMARY_CONTEXT_CHARS = 400;
+
+function boundedSummaryText(value: string | undefined, limit: number) {
+  return value?.slice(0, limit);
+}
+
+function boundedSummaryStrings(
+  values: string[] | undefined,
+  count: number,
+  chars: number,
+) {
+  return values?.slice(0, count).map((value) => value.slice(0, chars));
+}
+
+/**
+ * The only artifact shape Library and board readers may hydrate. Keep this an
+ * explicit allowlist: spreading the source document previously sent content,
+ * protected bases and preview payloads through a supposedly "summary" query.
+ */
+export function artifactSummaryProjection(
+  artifact: Doc<"spectraArtifacts">,
+) {
+  const aiPreview = artifact.aiPreview
+    ? {
+        title: boundedSummaryText(
+          artifact.aiPreview.title,
+          ARTIFACT_SUMMARY_TITLE_CHARS,
+        ),
+        summary: boundedSummaryText(
+          artifact.aiPreview.summary,
+          ARTIFACT_SUMMARY_DESCRIPTION_CHARS,
+        ),
+        tags: boundedSummaryStrings(
+          artifact.aiPreview.tags,
+          ARTIFACT_SUMMARY_TAGS,
+          ARTIFACT_SUMMARY_TAG_CHARS,
+        ),
+        changedPaths: boundedSummaryStrings(
+          artifact.aiPreview.changedPaths,
+          ARTIFACT_SUMMARY_EFFECT_PATHS,
+          ARTIFACT_SUMMARY_EFFECT_PATH_CHARS,
+        ),
+        effectTitle: boundedSummaryText(
+          artifact.aiPreview.effectTitle,
+          ARTIFACT_SUMMARY_EFFECT_TITLE_CHARS,
+        ),
+        effectDetail: boundedSummaryText(
+          artifact.aiPreview.effectDetail,
+          ARTIFACT_SUMMARY_EFFECT_DETAIL_CHARS,
+        ),
+        effectActivity: artifact.aiPreview.effectActivity,
+        effectRegionHint: boundedSummaryText(
+          artifact.aiPreview.effectRegionHint,
+          ARTIFACT_SUMMARY_EFFECT_TITLE_CHARS,
+        ),
+        effectOperationIndex: artifact.aiPreview.effectOperationIndex,
+        startedAt: artifact.aiPreview.startedAt,
+      }
+    : undefined;
+  const aiEffects = artifact.aiEffects
+    ?.slice(-ARTIFACT_SUMMARY_EFFECTS)
+    .map((effect) => ({
+      effectId: effect.effectId,
+      runId: effect.runId,
+      executionId: effect.executionId,
+      operationIndex: effect.operationIndex,
+      title: effect.title.slice(0, ARTIFACT_SUMMARY_EFFECT_TITLE_CHARS),
+      detail: boundedSummaryText(
+        effect.detail,
+        ARTIFACT_SUMMARY_EFFECT_DETAIL_CHARS,
+      ),
+      activity: effect.activity,
+      regionHint: boundedSummaryText(
+        effect.regionHint,
+        ARTIFACT_SUMMARY_EFFECT_TITLE_CHARS,
+      ),
+      regionIds: boundedSummaryStrings(
+        effect.regionIds,
+        ARTIFACT_SUMMARY_EFFECT_PATHS,
+        ARTIFACT_SUMMARY_EFFECT_PATH_CHARS,
+      )!,
+      changedPaths: boundedSummaryStrings(
+        effect.changedPaths,
+        ARTIFACT_SUMMARY_EFFECT_PATHS,
+        ARTIFACT_SUMMARY_EFFECT_PATH_CHARS,
+      )!,
+      state: effect.state,
+      startedAt: effect.startedAt,
+      updatedAt: effect.updatedAt,
+      expiresAt: effect.expiresAt,
+    }));
+  const createdFrom = artifact.createdFrom
+    ? {
+        source: artifact.createdFrom.source,
+        threadId: artifact.createdFrom.threadId,
+        runId: artifact.createdFrom.runId,
+        workspaceId: artifact.createdFrom.workspaceId,
+        sourceArtifactIds: artifact.createdFrom.sourceArtifactIds?.slice(
+          0,
+          ARTIFACT_SUMMARY_PROVENANCE_ITEMS,
+        ),
+        sourceThreadIds: artifact.createdFrom.sourceThreadIds?.slice(
+          0,
+          ARTIFACT_SUMMARY_PROVENANCE_ITEMS,
+        ),
+        sourceAttachmentNames: boundedSummaryStrings(
+          artifact.createdFrom.sourceAttachmentNames,
+          ARTIFACT_SUMMARY_PROVENANCE_ITEMS,
+          ARTIFACT_SUMMARY_PROVENANCE_CHARS,
+        ),
+        contextSummary: boundedSummaryText(
+          artifact.createdFrom.contextSummary,
+          ARTIFACT_SUMMARY_CONTEXT_CHARS,
+        ),
+      }
+    : undefined;
+  return {
+    _id: artifact._id,
+    _creationTime: artifact._creationTime,
+    ownerAccountId: artifact.ownerAccountId,
+    schoolId: artifact.schoolId,
+    resourceClass: artifact.resourceClass,
+    nativeFormat: artifact.nativeFormat,
+    compatibilityProfile: artifact.compatibilityProfile,
+    blueprintKey: artifact.blueprintKey,
+    title: artifact.title.slice(0, ARTIFACT_SUMMARY_TITLE_CHARS),
+    summary: boundedSummaryText(
+      artifact.summary,
+      ARTIFACT_SUMMARY_DESCRIPTION_CHARS,
+    ),
+    tags: boundedSummaryStrings(
+      artifact.tags,
+      ARTIFACT_SUMMARY_TAGS,
+      ARTIFACT_SUMMARY_TAG_CHARS,
+    )!,
+    status: artifact.status,
+    aiState: artifact.aiState,
+    aiRunId: artifact.aiRunId,
+    aiExecutionId: artifact.aiExecutionId,
+    aiProgress: artifact.aiProgress,
+    aiStateExpiresAt: artifact.aiStateExpiresAt,
+    aiPreview,
+    aiEffects,
+    createdFrom,
+    createdAt: artifact.createdAt,
+    updatedAt: artifact.updatedAt,
+  };
+}
+
+export function artifactSummarySearchText(
+  artifact: Doc<"spectraArtifacts">,
+) {
+  return `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.tags.join(" ")}\n${artifact.blueprintKey}\n${artifact.textIndex ?? ""}`
+    .slice(0, ARTIFACT_SUMMARY_SEARCH_CHARS)
+    .toLowerCase();
+}
+
+export async function upsertArtifactSummary(
+  ctx: OrgWriteCtx,
+  artifact: Doc<"spectraArtifacts">,
+) {
+  const existing = await ctx.db
+    .query("spectraArtifactSummaries")
+    .withIndex("by_artifact", (q) => q.eq("artifactId", artifact._id))
+    .unique();
+  const value = {
+    artifactId: artifact._id,
+    ownerAccountId: artifact.ownerAccountId,
+    schoolId: artifact.schoolId,
+    blueprintKey: artifact.blueprintKey,
+    status: artifact.status,
+    updatedAt: artifact.updatedAt,
+    searchText: artifactSummarySearchText(artifact),
+    projection: artifactSummaryProjection(artifact),
+  };
+  if (existing) await ctx.db.patch(existing._id, value);
+  else await ctx.db.insert("spectraArtifactSummaries", value);
+}
+
+export async function syncArtifactSummary(
+  ctx: OrgWriteCtx,
+  artifactId: Id<"spectraArtifacts">,
+) {
+  const artifact = await ctx.db.get(artifactId);
+  if (!artifact) {
+    const existing = await ctx.db
+      .query("spectraArtifactSummaries")
+      .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
+      .unique();
+    if (existing) await ctx.db.delete(existing._id);
+    return null;
+  }
+  await upsertArtifactSummary(ctx, artifact);
+  return artifactSummaryProjection(artifact);
+}
+
+export async function artifactSummaryFor(
+  ctx: OrgCtx,
+  artifactId: Id<"spectraArtifacts">,
+) {
+  return ctx.db
+    .query("spectraArtifactSummaries")
+    .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
+    .unique();
+}
+
 export const ORG_NODE_KINDS = [
   "folder",
   "workspace",
@@ -83,6 +301,36 @@ export async function typeKeyForSource(
 
 export function isContainerKind(kind: OrgNodeKind) {
   return CONTAINER_KINDS.includes(kind);
+}
+
+/**
+ * Maintain the direct-live-child projection after a structural write. Rows
+ * created before P9.I3 have no projection; the first touching write repairs
+ * them from the indexed child set, while migrated rows take the constant-read
+ * delta path.
+ */
+async function adjustChildCount(
+  ctx: OrgWriteCtx,
+  parentId: Id<"orgNodes"> | null,
+  delta: number,
+) {
+  if (!parentId || delta === 0) return;
+  const parent = await ctx.db.get(parentId);
+  if (!parent || !isContainerKind(parent.kind)) return;
+  if (parent.childCount === undefined) {
+    const children = await ctx.db
+      .query("orgNodes")
+      .withIndex("by_parent", (q) => q.eq("parentId", parentId))
+      .collect();
+    await ctx.db.patch(parentId, {
+      childCount: children.filter((child) => child.deletedAt === undefined)
+        .length,
+    });
+    return;
+  }
+  await ctx.db.patch(parentId, {
+    childCount: Math.max(0, parent.childCount + delta),
+  });
 }
 
 /** Names derived from a source title: repaired, never rejected. */
@@ -498,6 +746,7 @@ export async function ensureWorkspaceNode(
     orderKey: await appendOrderKey(ctx, accountId, null),
     workspaceContextId: workspace._id,
     placedByAccountId: accountId,
+    childCount: 0,
     createdAt: now,
     updatedAt: now,
   });
@@ -583,6 +832,16 @@ export type PlaceSourceParams = {
   relocate?: boolean;
 };
 
+async function syncWorkSummaryForSource(
+  ctx: OrgWriteCtx,
+  kind: "work" | "thread",
+  sourceId: string,
+) {
+  if (kind !== "work") return;
+  const artifactId = ctx.db.normalizeId("spectraArtifacts", sourceId);
+  if (artifactId) await syncArtifactSummary(ctx, artifactId);
+}
+
 /**
  * The single creation-time placement entry point (D31). Guarantees exactly one
  * primary node per source (I1): an existing placement is moved or left alone,
@@ -632,6 +891,7 @@ export async function placeSourceNode(
     if (params.placedByAccountId && !existing.placedByAccountId)
       patch.placedByAccountId = params.placedByAccountId;
     await ctx.db.patch(existing._id, patch);
+    await syncWorkSummaryForSource(ctx, params.kind, params.sourceId);
     return (await ctx.db.get(existing._id))!;
   }
 
@@ -649,9 +909,12 @@ export async function placeSourceNode(
     (await typeKeyForSource(ctx, params.kind, params.sourceId));
 
   if (existing) {
+    const oldParentId = existing.parentId;
+    const wasLive = existing.deletedAt === undefined;
+    const nextParentId = parent?._id ?? null;
     await assertNoCycle(ctx, existing._id, parent?._id ?? null);
     await ctx.db.patch(existing._id, {
-      parentId: parent?._id ?? null,
+      parentId: nextParentId,
       name,
       typeKey,
       activityAt: existing.activityAt ?? now,
@@ -669,6 +932,13 @@ export async function placeSourceNode(
       trashedRootId: undefined,
       updatedAt: now,
     });
+    if (wasLive && oldParentId !== nextParentId) {
+      await adjustChildCount(ctx, oldParentId, -1);
+      await adjustChildCount(ctx, nextParentId, 1);
+    } else if (!wasLive) {
+      await adjustChildCount(ctx, nextParentId, 1);
+    }
+    await syncWorkSummaryForSource(ctx, params.kind, params.sourceId);
     return (await ctx.db.get(existing._id))!;
   }
 
@@ -689,6 +959,8 @@ export async function placeSourceNode(
     createdAt: now,
     updatedAt: now,
   });
+  await adjustChildCount(ctx, parent?._id ?? null, 1);
+  await syncWorkSummaryForSource(ctx, params.kind, params.sourceId);
   return (await ctx.db.get(nodeId))!;
 }
 
@@ -732,6 +1004,10 @@ export async function syncSourceNodes(
         activityAt: now,
       });
   }
+  if (kind === "work") {
+    const artifactId = ctx.db.normalizeId("spectraArtifacts", sourceId);
+    if (artifactId) await syncArtifactSummary(ctx, artifactId);
+  }
   return name;
 }
 
@@ -763,9 +1039,11 @@ export async function createFolderNode(
     orderKey: await appendOrderKey(ctx, params.accountId, parent?._id ?? null),
     workspaceContextId: workspaceContextForParent(parent),
     placedByAccountId: params.accountId,
+    childCount: 0,
     createdAt: now,
     updatedAt: now,
   });
+  await adjustChildCount(ctx, parent?._id ?? null, 1);
   return (await ctx.db.get(nodeId))!;
 }
 
@@ -817,6 +1095,7 @@ export async function createLinkNode(
     createdAt: now,
     updatedAt: now,
   });
+  await adjustChildCount(ctx, parent?._id ?? null, 1);
   return (await ctx.db.get(nodeId))!;
 }
 
@@ -839,8 +1118,10 @@ export async function renameNode(
   }
   if (node.kind === "work" && node.sourceId) {
     const artifactId = ctx.db.normalizeId("spectraArtifacts", node.sourceId);
-    if (artifactId)
+    if (artifactId) {
       await ctx.db.patch(artifactId, { title: name, updatedAt: now });
+      await syncArtifactSummary(ctx, artifactId);
+    }
   }
   if (node.kind === "thread" && node.sourceId) {
     const threadId = ctx.db.normalizeId("spectraThreads", node.sourceId);
@@ -930,11 +1211,17 @@ export async function moveNode(
     target,
   );
   const context = workspaceContextForParent(parent);
+  const oldParentId = node.parentId;
+  const nextParentId = parent?._id ?? null;
   await ctx.db.patch(node._id, {
-    parentId: parent?._id ?? null,
+    parentId: nextParentId,
     orderKey,
     updatedAt: Date.now(),
   });
+  if (node.deletedAt === undefined && oldParentId !== nextParentId) {
+    await adjustChildCount(ctx, oldParentId, -1);
+    await adjustChildCount(ctx, nextParentId, 1);
+  }
   const moved = (await ctx.db.get(node._id))!;
   await stampSubtreeContext(ctx, moved, context);
   return (await ctx.db.get(node._id))!;
@@ -963,6 +1250,7 @@ export async function trashNode(ctx: OrgWriteCtx, node: OrgNode) {
           workspaceContextId: workspace._id,
           updatedAt: now,
         });
+        await adjustChildCount(ctx, row.parentId, -1);
         continue;
       }
     }
@@ -972,6 +1260,7 @@ export async function trashNode(ctx: OrgWriteCtx, node: OrgNode) {
       isTrashRoot: row._id === node._id ? true : undefined,
       updatedAt: now,
     });
+    await adjustChildCount(ctx, row.parentId, -1);
     trashed += 1;
   }
   return { trashed, nodeId: node._id };
@@ -999,7 +1288,14 @@ export async function restoreTrashedNode(ctx: OrgWriteCtx, node: OrgNode) {
       patch.parentId = null;
       patch.orderKey = await appendOrderKey(ctx, node.accountId, null);
     }
+    const restoredParentId = Object.prototype.hasOwnProperty.call(
+      patch,
+      "parentId",
+    )
+      ? (patch.parentId as Id<"orgNodes"> | null)
+      : row.parentId;
     await ctx.db.patch(row._id, patch);
+    await adjustChildCount(ctx, restoredParentId, 1);
     restored += 1;
   }
   const refreshed = (await ctx.db.get(node._id))!;
@@ -1084,9 +1380,14 @@ export async function purgeAccountSourceNodes(
   let purged = 0;
   for (const node of nodes) {
     if (options?.keepProjecting && node.accessProjection === true) continue;
-    for (const link of await findNodesForSource(ctx, "link", node._id))
+    for (const link of await findNodesForSource(ctx, "link", node._id)) {
       await ctx.db.delete(link._id);
+      if (link.deletedAt === undefined)
+        await adjustChildCount(ctx, link.parentId, -1);
+    }
     await ctx.db.delete(node._id);
+    if (node.deletedAt === undefined)
+      await adjustChildCount(ctx, node.parentId, -1);
     purged += 1;
   }
   return purged;
@@ -1100,9 +1401,14 @@ export async function purgeSourceNodes(
 ) {
   const nodes = await findNodesForSource(ctx, kind, sourceId);
   for (const node of nodes) {
-    for (const link of await findNodesForSource(ctx, "link", node._id))
+    for (const link of await findNodesForSource(ctx, "link", node._id)) {
       await ctx.db.delete(link._id);
+      if (link.deletedAt === undefined)
+        await adjustChildCount(ctx, link.parentId, -1);
+    }
     await ctx.db.delete(node._id);
+    if (node.deletedAt === undefined)
+      await adjustChildCount(ctx, node.parentId, -1);
   }
   return nodes.length;
 }

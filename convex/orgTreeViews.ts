@@ -1,6 +1,10 @@
 import type { Id } from "./_generated/dataModel";
 import { requireSpectraActor } from "./spectraShared";
-import { isContainerKind, type OrgNode } from "./orgTreeShared";
+import {
+  artifactSummaryFor,
+  isContainerKind,
+  type OrgNode,
+} from "./orgTreeShared";
 
 /**
  * How a tree row is presented — one implementation, used by every read of the
@@ -66,6 +70,7 @@ export type OrgNodeView = {
 };
 
 type ViewCtx = Parameters<typeof requireSpectraActor>[0];
+const SHARED_RESOURCE_BATCH_LIMIT = 1_000;
 
 /**
  * Every resource this account has shared out, in two indexed queries rather than
@@ -84,7 +89,7 @@ export async function sharedByActor(
       .withIndex("by_inviter_status", (q) =>
         q.eq("inviterAccountId", accountId).eq("status", status),
       )
-      .collect();
+      .take(SHARED_RESOURCE_BATCH_LIMIT);
     for (const row of rows)
       if (!row.expiresAt || row.expiresAt > now) shared.add(row.resourceId);
   }
@@ -158,13 +163,7 @@ export async function hydrateNodes(
         : undefined;
     }
     if (options?.withChildCounts && isContainerKind(node.kind)) {
-      const children = await ctx.db
-        .query("orgNodes")
-        .withIndex("by_parent", (q) => q.eq("parentId", node._id))
-        .collect();
-      view.childCount = children.filter(
-        (child) => child.deletedAt === undefined,
-      ).length;
+      view.childCount = node.childCount ?? 0;
     }
     if (options?.withSource && node.sourceId) {
       if (node.kind === "work") {
@@ -172,16 +171,31 @@ export async function hydrateNodes(
           "spectraArtifacts",
           node.sourceId,
         );
-        const artifact = artifactId ? await ctx.db.get(artifactId) : null;
+        const summary = artifactId
+          ? await artifactSummaryFor(ctx, artifactId)
+          : null;
+        const artifact = summary?.projection as
+          | {
+              blueprintKey?: string;
+              title?: string;
+              summary?: string;
+              updatedAt?: number;
+              status?: string;
+              ownerAccountId?: Id<"accounts">;
+              aiState?: string;
+            }
+          | undefined;
         view.source = {
-          blueprintKey: artifact?.blueprintKey,
-          title: artifact?.title,
+          blueprintKey: artifact?.blueprintKey ?? node.typeKey,
+          title: artifact?.title ?? node.name,
           summary: artifact?.summary,
-          updatedAt: artifact?.updatedAt ?? node.updatedAt,
-          available: Boolean(artifact) && artifact?.status !== "deleted",
-          owned: artifact?.ownerAccountId === node.accountId,
+          updatedAt: artifact?.updatedAt ?? node.activityAt ?? node.updatedAt,
+          available: summary ? artifact?.status !== "deleted" : true,
+          owned: summary
+            ? artifact?.ownerAccountId === node.accountId
+            : node.accessProjection !== true,
           shared:
-            (artifact !== null && artifact.ownerAccountId !== node.accountId) ||
+            (summary !== null && artifact?.ownerAccountId !== node.accountId) ||
             sharedOut?.has(node.sourceId) === true,
           aiState: artifact?.aiState,
         };

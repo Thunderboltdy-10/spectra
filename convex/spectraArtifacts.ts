@@ -1,5 +1,5 @@
 import { query } from "./_generated/server";
-import { mutation } from "./orgNodeMutation";
+import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -23,17 +23,19 @@ import {
 } from "./spectraShared";
 import {
   bumpPolicyVersion,
+  capabilitiesForLevel,
   evaluateAccess,
   listDirectlyGrantedResourceIds,
 } from "./authorityShared";
 import {
   findPrimaryNode,
   placementStatusFor,
-  placementsByWorkspaceScan,
   placementsForSource,
   placeSourceNode,
   purgeSourceNodes,
+  syncArtifactSummary,
   syncSourceNodes,
+  upsertArtifactSummary,
 } from "./orgTreeShared";
 import {
   hydrateVersionSafely,
@@ -81,21 +83,6 @@ function currentAiEffects(artifact: Doc<"spectraArtifacts">, now = Date.now()) {
   return (artifact.aiEffects ?? []).filter(
     (effect) => !effect.expiresAt || effect.expiresAt > now,
   );
-}
-
-/** List/search rows carry identity and state only; content is fetched by get. */
-function summaryArtifact(artifact: Record<string, unknown>) {
-  const { content: _content, textIndex: _textIndex, ...summary } = artifact;
-  if (summary.aiPreview && typeof summary.aiPreview === "object") {
-    const { content: _previewContent, ...preview } =
-      summary.aiPreview as Record<string, unknown>;
-    return {
-      ...summary,
-      aiPreview: preview,
-      updatedAt: artifact.updatedAt as number,
-    };
-  }
-  return { ...summary, updatedAt: artifact.updatedAt as number };
 }
 
 function effectsForRun(
@@ -254,6 +241,39 @@ async function listPlacementsForArtifact(
   return placementsForSource(ctx, "work", artifactId, visible);
 }
 
+type DirectGrantLevels = {
+  account: "read" | "modify" | null;
+  school: "read" | "modify" | null;
+};
+
+function strongerLevel(
+  left: "read" | "modify" | null,
+  right: "read" | "modify" | null,
+) {
+  if (left === "modify" || right === "modify") return "modify" as const;
+  return left ?? right;
+}
+
+function activeDirectGrant(grant: Doc<"accessGrants">, now: number) {
+  return (
+    grant.source === "direct" &&
+    !grant.revokedAt &&
+    (!grant.expiresAt || grant.expiresAt > now)
+  );
+}
+
+const ARTIFACT_OWNER_CAPABILITIES = [
+  "read",
+  "modify",
+  "share",
+  "delete",
+  "restore",
+  "use",
+  "comment",
+  "publish",
+] as const;
+const LIBRARY_METADATA_READ_LIMIT = 1_000;
+
 export const list = query({
   args: {
     status: v.optional(vArtifactStatus),
@@ -276,186 +296,355 @@ export const list = query({
     const blueprintKey = args.blueprintKey;
     const owned = blueprintKey
       ? await ctx.db
-          .query("spectraArtifacts")
-          .withIndex("by_account_blueprint", (q) =>
-            q.eq("ownerAccountId", actor._id).eq("blueprintKey", blueprintKey),
+          .query("spectraArtifactSummaries")
+          .withIndex("by_account_blueprint_status_updated", (q) =>
+            q
+              .eq("ownerAccountId", actor._id)
+              .eq("blueprintKey", blueprintKey)
+              .eq("status", baseStatus),
           )
           .order("desc")
           .take(limit * 3)
       : await ctx.db
-          .query("spectraArtifacts")
+          .query("spectraArtifactSummaries")
           .withIndex("by_account_status_updated", (q) =>
             q.eq("ownerAccountId", actor._id).eq("status", baseStatus),
           )
           .order("desc")
           .take(limit * 3);
+    const now = Date.now();
+    const [accountGrants, schoolGrants, ownPlacementNodes, pendingInvites, acceptedInvites] =
+      await Promise.all([
+        ctx.db
+          .query("accessGrants")
+          .withIndex("by_principal", (q) =>
+            q.eq("principalType", "account").eq("principalId", actor.accountId),
+          )
+          .take(LIBRARY_METADATA_READ_LIMIT),
+        ctx.db
+          .query("accessGrants")
+          .withIndex("by_principal", (q) =>
+            q.eq("principalType", "school").eq("principalId", actor.schoolId),
+          )
+          .take(LIBRARY_METADATA_READ_LIMIT),
+        ctx.db
+          .query("orgNodes")
+          .withIndex("by_account_live_kind_activity", (q) =>
+            q
+              .eq("accountId", actor.accountId)
+              .eq("deletedAt", undefined)
+              .eq("kind", "work"),
+          )
+          .order("desc")
+          .take(limit * 3),
+        ctx.db
+          .query("shareInvitations")
+          .withIndex("by_inviter_status", (q) =>
+            q.eq("inviterAccountId", actor.accountId).eq("status", "pending"),
+          )
+          .take(LIBRARY_METADATA_READ_LIMIT),
+        ctx.db
+          .query("shareInvitations")
+          .withIndex("by_inviter_status", (q) =>
+            q.eq("inviterAccountId", actor.accountId).eq("status", "accepted"),
+          )
+          .take(LIBRARY_METADATA_READ_LIMIT),
+      ]);
 
-    const [artifactGrantIds, agentGrantIds] = await Promise.all([
-      listDirectlyGrantedResourceIds(ctx, actor, "artifact"),
-      listDirectlyGrantedResourceIds(ctx, actor, "agent"),
-    ]);
-    const granted = (
+    const grantLevels = new Map<string, DirectGrantLevels>();
+    for (const grant of [...accountGrants, ...schoolGrants]) {
+      if (!activeDirectGrant(grant, now)) continue;
+      const key = `${grant.resourceType}:${grant.resourceId}`;
+      const levels = grantLevels.get(key) ?? { account: null, school: null };
+      const side = grant.principalType === "account" ? "account" : "school";
+      levels[side] = strongerLevel(levels[side], grant.level);
+      grantLevels.set(key, levels);
+    }
+
+    const workspaceEntries = (
       await Promise.all(
-        [...new Set([...artifactGrantIds, ...agentGrantIds])].map(
-          async (resourceId) => {
-            const id = ctx.db.normalizeId("spectraArtifacts", resourceId);
-            if (!id) return null;
-            const candidate = await ctx.db.get(id);
-            if (!candidate) return null;
-            const resourceType =
-              candidate.blueprintKey === "agent" ? "agent" : "artifact";
-            const decision = await evaluateAccess(ctx, resourceType, id);
-            return decision.allowed
-              ? (decision.loaded.resource as Doc<"spectraArtifacts">)
+        [...grantLevels.entries()]
+          .filter(([key]) => key.startsWith("workspace:"))
+          .map(async ([key, levels]) => {
+            const resourceId = key.slice("workspace:".length);
+            const workspaceId = ctx.db.normalizeId(
+              "spectraWorkspaces",
+              resourceId,
+            );
+            const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
+            const level = strongerLevel(levels.account, levels.school);
+            return workspace &&
+              level &&
+              workspace.status === "active" &&
+              workspace.schoolId === actor.schoolId
+              ? ([workspace._id, { workspace, level }] as const)
               : null;
-          },
+          }),
+      )
+    ).filter(
+      (
+        entry,
+      ): entry is readonly [
+        Id<"spectraWorkspaces">,
+        { workspace: Doc<"spectraWorkspaces">; level: "read" | "modify" },
+      ] => Boolean(entry),
+    );
+    const grantedWorkspaces = new Map(workspaceEntries);
+    const grantedPlacementNodes = (
+      await Promise.all(
+        workspaceEntries.map(([workspaceId]) =>
+          ctx.db
+            .query("orgNodes")
+            .withIndex("by_workspace_context_live_kind_activity", (q) =>
+              q
+                .eq("workspaceContextId", workspaceId)
+                .eq("deletedAt", undefined)
+                .eq("kind", "work"),
+            )
+            .order("desc")
+            .take(limit * 3),
         ),
       )
-    ).filter((artifact): artifact is Doc<"spectraArtifacts"> =>
-      Boolean(artifact),
-    );
-    const rows = [
-      ...new Map(
-        [...owned, ...granted].map((artifact) => [artifact._id, artifact]),
-      ).values(),
-    ];
+    ).flat();
 
-    const needle = args.search?.trim().toLowerCase();
-    const ownedWorkspaces = await ctx.db
-      .query("spectraWorkspaces")
-      .withIndex("by_account_status", (q) =>
-        q.eq("ownerAccountId", actor._id).eq("status", "active"),
-      )
-      .collect();
-    const workspaceGrantIds = await listDirectlyGrantedResourceIds(
-      ctx,
-      actor,
-      "workspace",
-    );
-    const grantedWorkspaces = (
+    const candidateIds = new Set<string>(owned.map((row) => row.artifactId));
+    for (const [key] of grantLevels) {
+      const [resourceType, resourceId] = key.split(":", 2);
+      if (resourceType === "artifact" || resourceType === "agent")
+        candidateIds.add(resourceId!);
+    }
+    for (const node of [...ownPlacementNodes, ...grantedPlacementNodes])
+      if (node.sourceId) candidateIds.add(node.sourceId);
+
+    const summaries = (
       await Promise.all(
-        workspaceGrantIds.map(async (resourceId) => {
-          const id = ctx.db.normalizeId("spectraWorkspaces", resourceId);
-          if (!id) return null;
-          const decision = await evaluateAccess(ctx, "workspace", id);
-          const workspace = decision.allowed
-            ? (decision.loaded.resource as Doc<"spectraWorkspaces">)
-            : null;
-          return workspace?.status === "active" ? workspace : null;
+        [...candidateIds].map(async (resourceId) => {
+          const artifactId = ctx.db.normalizeId("spectraArtifacts", resourceId);
+          if (!artifactId) return null;
+          return ctx.db
+            .query("spectraArtifactSummaries")
+            .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
+            .unique();
         }),
       )
-    ).filter((workspace): workspace is Doc<"spectraWorkspaces"> =>
-      Boolean(workspace),
+    ).filter(
+      (row): row is Doc<"spectraArtifactSummaries"> => Boolean(row),
     );
-    const activeWorkspaces = [
+    const rows = [...new Map(summaries.map((row) => [row.artifactId, row])).values()];
+    const rowByArtifact = new Map<string, Doc<"spectraArtifactSummaries">>(
+      rows.map((row) => [String(row.artifactId), row]),
+    );
+
+    const visibleWorkspaceIds = new Set<Id<"spectraWorkspaces">>();
+    for (const node of [...ownPlacementNodes, ...grantedPlacementNodes])
+      if (node.workspaceContextId) visibleWorkspaceIds.add(node.workspaceContextId);
+    const workspaces = new Map(
+      (
+        await Promise.all(
+          [...visibleWorkspaceIds].map(async (workspaceId) => {
+            const workspace =
+              grantedWorkspaces.get(workspaceId)?.workspace ??
+              (await ctx.db.get(workspaceId));
+            return workspace?.status === "active" &&
+              workspace.schoolId === actor.schoolId
+              ? ([workspaceId, workspace] as const)
+              : null;
+          }),
+        )
+      ).filter(
+        (entry): entry is readonly [Id<"spectraWorkspaces">, Doc<"spectraWorkspaces">] =>
+          Boolean(entry),
+      ),
+    );
+    const placementsByArtifact = new Map<string, Array<{
+      workspaceId: Id<"spectraWorkspaces">;
+      workspaceTitle: string;
+      nodeId: Id<"orgNodes">;
+      pinned: boolean;
+    }>>();
+    for (const node of [
       ...new Map(
-        [...ownedWorkspaces, ...grantedWorkspaces].map((workspace) => [
-          workspace._id,
-          workspace,
+        [...ownPlacementNodes, ...grantedPlacementNodes].map((row) => [
+          row._id,
+          row,
         ]),
       ).values(),
-    ];
-    const placementsByArtifact = await placementsByWorkspaceScan(
-      ctx,
-      activeWorkspaces.filter(
-        (workspace) => workspace.schoolId === actor.schoolId,
-      ),
-      "work",
-    );
+    ]) {
+      if (!node.sourceId || !node.workspaceContextId) continue;
+      const workspace = workspaces.get(node.workspaceContextId);
+      if (!workspace) continue;
+      placementsByArtifact.set(node.sourceId, [
+        ...(placementsByArtifact.get(node.sourceId) ?? []),
+        {
+          workspaceId: workspace._id,
+          workspaceTitle: workspace.title,
+          nodeId: node._id,
+          pinned: node.pinned === true,
+        },
+      ]);
+    }
 
-    const candidateArtifacts = rows
-      .filter((artifact) => artifact.schoolId === actor.schoolId)
-      .filter((artifact) => artifact.blueprintKey !== "thread_reference")
-      .filter((artifact) => artifact.status === baseStatus)
-      .filter(
-        (artifact) =>
-          !needle ||
-          `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.blueprintKey}\n${
-            (artifact.blueprintKey === "quiz" &&
-              artifact.ownerAccountId !== actor.accountId) ||
-            artifact.blueprintKey === "timetable"
-              ? ""
-              : (artifact.textIndex ?? "")
-          }\n${(placementsByArtifact.get(artifact._id) ?? []).map((placement) => placement.workspaceTitle).join("\n")}`
-            .toLowerCase()
-            .includes(needle),
+    const inheritedLevels = new Map<string, "read" | "modify">();
+    for (const node of grantedPlacementNodes) {
+      if (!node.sourceId || !node.workspaceContextId) continue;
+      const summary = rowByArtifact.get(node.sourceId);
+      const workspaceAccess = grantedWorkspaces.get(node.workspaceContextId);
+      if (!summary || !workspaceAccess) continue;
+      const projection = summary.projection as { ownerAccountId?: string };
+      const projectsAccess =
+        node.accessProjection === true ||
+        (node.accessProjection === undefined &&
+          projection.ownerAccountId === workspaceAccess.workspace.ownerAccountId);
+      if (!projectsAccess) continue;
+      inheritedLevels.set(
+        node.sourceId,
+        strongerLevel(
+          inheritedLevels.get(node.sourceId) ?? null,
+          workspaceAccess.level,
+        )!,
       );
+    }
 
-    const artifacts = await Promise.all(
-      candidateArtifacts.map(async (artifact) => {
-        const placements = placementsByArtifact.get(artifact._id) ?? [];
-        const ownership =
-          artifact.ownerAccountId === actor.accountId
-            ? ("owned" as const)
-            : ("shared" as const);
-        const resourceType =
-          artifact.blueprintKey === "agent"
-            ? ("agent" as const)
-            : ("artifact" as const);
-        const [decision, invitations] = await Promise.all([
-          evaluateAccess(ctx, resourceType, artifact._id),
-          ctx.db
-            .query("shareInvitations")
-            .withIndex("by_resource", (q) =>
-              q.eq("resourceType", resourceType).eq("resourceId", artifact._id),
-            )
-            .collect(),
-        ]);
-        const activeInvitations = invitations.filter(
-          (invitation) =>
-            (invitation.status === "pending" ||
-              invitation.status === "accepted") &&
-            (!invitation.expiresAt || invitation.expiresAt > Date.now()),
-        );
-        const agentRelease =
-          artifact.blueprintKey === "agent"
-            ? await latestPublishedAgentRelease(ctx, artifact._id)
-            : undefined;
-        const owner =
-          artifact.blueprintKey === "agent"
-            ? await ctx.db.get(artifact.ownerAccountId)
-            : null;
-        const projected = projectArtifactForAccess(
-          artifact,
-          decision.allowed && decision.level ? decision.level : "read",
-        );
-        return {
-          ...summaryArtifact(projected as Record<string, unknown>),
-          placements,
-          ownership,
-          accessLevel: decision.allowed ? decision.level : null,
-          capabilities: decision.allowed ? decision.capabilities : [],
-          accessReason: decision.reason,
-          isShared: ownership === "shared" || activeInvitations.length > 0,
-          sharedWithCount:
-            ownership === "owned"
-              ? new Set(
-                  activeInvitations.map(
-                    (invitation) => invitation.inviteeAccountId,
-                  ),
-                ).size
-              : undefined,
-          ...(artifact.blueprintKey === "agent"
-            ? {
-                owner: owner
-                  ? { name: owner.name, avatarUrl: owner.avatarUrl }
-                  : undefined,
-                agentRelease: agentRelease
-                  ? {
-                      versionId: agentRelease.versionId,
-                      releaseNumber: agentRelease.releaseNumber,
-                      publishedAt: agentRelease.publishedAt,
-                    }
-                  : null,
-              }
-            : {}),
-          // Shared is the recipient's accepted-but-not-yet-organized landing
-          // state. Once placed, it behaves like any normal workspace artifact,
-          // while `ownership` keeps it discoverable in the Shared collection.
-          placementStatus: placementStatusFor(placements, ownership),
-        };
-      }),
+    // Overrides are security-sensitive: never cap an account-wide batch and
+    // accidentally miss a deny. Read the one indexed row for each bounded
+    // summary candidate instead.
+    const overrideByArtifact = new Map(
+      (
+        await Promise.all(
+          rows.map(async (row) => {
+            const override = await ctx.db
+              .query("artifactAccessOverrides")
+              .withIndex("by_artifact_account", (q) =>
+                q
+                  .eq("artifactId", row.artifactId)
+                  .eq("accountId", actor.accountId),
+              )
+              .unique();
+            return override ? ([row.artifactId, override] as const) : null;
+          }),
+        )
+      ).filter(
+        (
+          entry,
+        ): entry is readonly [
+          Id<"spectraArtifacts">,
+          Doc<"artifactAccessOverrides">,
+        ] => Boolean(entry),
+      ),
     );
+    const inviteesByResource = new Map<string, Set<string>>();
+    for (const invitation of [...pendingInvites, ...acceptedInvites]) {
+      if (invitation.expiresAt && invitation.expiresAt <= now) continue;
+      const key = `${invitation.resourceType}:${invitation.resourceId}`;
+      const invitees = inviteesByResource.get(key) ?? new Set<string>();
+      invitees.add(invitation.inviteeAccountId);
+      inviteesByResource.set(key, invitees);
+    }
+
+    const needle = args.search?.trim().toLowerCase();
+    const candidateArtifacts = rows
+      .filter((row) => row.schoolId === actor.schoolId)
+      .filter((row) => row.blueprintKey !== "thread_reference")
+      .filter((row) => row.status === baseStatus)
+      .filter((row) => !blueprintKey || row.blueprintKey === blueprintKey)
+      .filter((row) => {
+        if (!needle) return true;
+        const projection = row.projection as {
+          ownerAccountId?: string;
+          title?: string;
+          summary?: string;
+          tags?: string[];
+        };
+        const maySearchBody =
+          row.blueprintKey !== "timetable" &&
+          (row.blueprintKey !== "quiz" ||
+            projection.ownerAccountId === actor.accountId);
+        return `${projection.title ?? ""}\n${projection.summary ?? ""}\n${row.blueprintKey}\n${(projection.tags ?? []).join(" ")}\n${maySearchBody ? row.searchText : ""}\n${(placementsByArtifact.get(row.artifactId) ?? []).map((placement) => placement.workspaceTitle).join("\n")}`
+          .toLowerCase()
+          .includes(needle);
+      });
+
+    const artifacts = (
+      await Promise.all(
+        candidateArtifacts.map(async (row) => {
+          const projection = row.projection as Record<string, unknown> & {
+            ownerAccountId?: Id<"accounts">;
+            blueprintKey?: string;
+            updatedAt?: number;
+          };
+          const ownership =
+            projection.ownerAccountId === actor.accountId
+              ? ("owned" as const)
+              : ("shared" as const);
+          const resourceType =
+            row.blueprintKey === "agent" ? ("agent" as const) : ("artifact" as const);
+          const direct = grantLevels.get(`${resourceType}:${row.artifactId}`);
+          const directLevel = direct
+            ? strongerLevel(direct.account, direct.school)
+            : null;
+          const override = overrideByArtifact.get(row.artifactId);
+          let inheritedLevel = inheritedLevels.get(row.artifactId) ?? null;
+          if (override?.effect === "deny") inheritedLevel = null;
+          if (
+            override?.effect === "restrict" &&
+            override.maxLevel === "read" &&
+            inheritedLevel
+          )
+            inheritedLevel = "read";
+          const accessLevel =
+            ownership === "owned"
+              ? ("modify" as const)
+              : strongerLevel(directLevel, inheritedLevel);
+          if (!accessLevel) return null;
+          const placements = placementsByArtifact.get(row.artifactId) ?? [];
+          const activeInvitees =
+            inviteesByResource.get(`${resourceType}:${row.artifactId}`) ??
+            new Set<string>();
+          const agentRelease =
+            row.blueprintKey === "agent"
+              ? await latestPublishedAgentRelease(ctx, row.artifactId)
+              : undefined;
+          const owner =
+            row.blueprintKey === "agent" && projection.ownerAccountId
+              ? await ctx.db.get(projection.ownerAccountId)
+              : null;
+          return {
+            ...projection,
+            placements,
+            ownership,
+            accessLevel,
+            capabilities:
+              ownership === "owned"
+                ? [...ARTIFACT_OWNER_CAPABILITIES]
+                : capabilitiesForLevel(accessLevel),
+            accessReason:
+              ownership === "owned"
+                ? "owner"
+                : directLevel
+                  ? "grant"
+                  : "workspace_inheritance",
+            isShared: ownership === "shared" || activeInvitees.size > 0,
+            sharedWithCount:
+              ownership === "owned" ? activeInvitees.size : undefined,
+            ...(row.blueprintKey === "agent"
+              ? {
+                  owner: owner
+                    ? { name: owner.name, avatarUrl: owner.avatarUrl }
+                    : undefined,
+                  agentRelease: agentRelease
+                    ? {
+                        versionId: agentRelease.versionId,
+                        releaseNumber: agentRelease.releaseNumber,
+                        publishedAt: agentRelease.publishedAt,
+                      }
+                    : null,
+                }
+              : {}),
+            placementStatus: placementStatusFor(placements, ownership),
+          };
+        }),
+      )
+    ).filter((artifact) => artifact !== null);
 
     return artifacts
       .filter((artifact) => {
@@ -463,8 +652,29 @@ export const list = query({
         if (args.placement === "shared") return artifact.ownership === "shared";
         return artifact.placementStatus === args.placement;
       })
-      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .sort(
+        (a, b) =>
+          Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0),
+      )
       .slice(0, limit);
+  },
+});
+
+/** One-time, cursor-shaped projection fill for artifacts created before P9.I3. */
+export const backfillSummaries = internalMutation({
+  args: { cursor: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("spectraArtifacts").paginate({
+      cursor: args.cursor,
+      numItems: 100,
+    });
+    for (const artifact of page.page)
+      await upsertArtifactSummary(ctx, artifact);
+    return {
+      processed: page.page.length,
+      cursor: page.isDone ? null : page.continueCursor,
+      done: page.isDone,
+    };
   },
 });
 
@@ -1067,6 +1277,7 @@ export const publishAgent = mutation({
       currentVersionId: versionId,
       updatedAt: now,
     });
+    await syncArtifactSummary(ctx, artifact._id);
     return {
       releaseId,
       versionId,
@@ -1755,6 +1966,7 @@ export const create = mutation({
       createdAt: now,
     });
     await ctx.db.patch(artifactId, { currentVersionId: versionId });
+    await syncArtifactSummary(ctx, artifactId);
     await incrementOperationalCounter(ctx, {
       schoolId: actor.schoolId,
       category: "artifact_created",
@@ -2029,6 +2241,7 @@ export const pausePendingForConflict = mutation({
           : artifact.summary,
       updatedAt: now,
     });
+    await syncArtifactSummary(ctx, artifact._id);
     return { paused: true };
   },
 });
@@ -2087,6 +2300,7 @@ export const patchPendingContent = mutation({
       },
       updatedAt: Date.now(),
     });
+    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId, progress };
   },
 });
@@ -2223,6 +2437,7 @@ export const updateAiEffect = mutation({
       },
       updatedAt: now,
     });
+    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId };
   },
 });
@@ -2323,6 +2538,7 @@ export const stageAiPatch = mutation({
       aiEffects: effects,
       updatedAt: now,
     });
+    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId };
   },
 });
@@ -2357,6 +2573,7 @@ export const discardPendingForRun = mutation({
     for (const artifact of pending) {
       await purgeSourceNodes(ctx, "work", artifact._id);
       await ctx.db.delete(artifact._id);
+      await syncArtifactSummary(ctx, artifact._id);
     }
     return { discarded: pending.length };
   },
@@ -2402,6 +2619,9 @@ export const pausePendingForApproval = mutation({
         }),
       ),
     );
+    await Promise.all(
+      pending.map((artifact) => syncArtifactSummary(ctx, artifact._id)),
+    );
     return { paused: pending.length };
   },
 });
@@ -2446,6 +2666,7 @@ export const failPendingForRun = mutation({
         if ((artifact.aiProgress ?? 0) <= 0.05 || hollowDefaults) {
           await purgeSourceNodes(ctx, "work", artifact._id);
           await ctx.db.delete(artifact._id);
+          await syncArtifactSummary(ctx, artifact._id);
           removed += 1;
           return;
         }
@@ -2462,6 +2683,7 @@ export const failPendingForRun = mutation({
             : artifact.summary,
           updatedAt: Date.now(),
         });
+        await syncArtifactSummary(ctx, artifact._id);
       }),
     );
     return { failed: pending.length - removed, removed };
@@ -2634,6 +2856,9 @@ export const settleStagedForRun = mutation({
         });
       }),
     );
+    await Promise.all(
+      staged.map((artifact) => syncArtifactSummary(ctx, artifact._id)),
+    );
     return { settled: staged.length };
   },
 });
@@ -2736,6 +2961,7 @@ export const markAiState = mutation({
         updatedAt: now,
       });
     }
+    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId };
   },
 });
@@ -2755,6 +2981,7 @@ export const dismissAiEdit = mutation({
       aiEffects: undefined,
       updatedAt: now,
     });
+    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId, dismissed: true as const };
   },
 });
@@ -2854,6 +3081,7 @@ export const archive = mutation({
       status: "archived",
       updatedAt: Date.now(),
     });
+    await syncArtifactSummary(ctx, args.artifactId);
     await bumpPolicyVersion(
       ctx,
       artifact.blueprintKey === "agent" ? "agent" : "artifact",
@@ -3089,6 +3317,7 @@ export const permanentlyDelete = mutation({
     }
 
     await ctx.db.delete(args.artifactId);
+    await syncArtifactSummary(ctx, args.artifactId);
     return {
       artifactId: args.artifactId,
       placementCount: purgedPlacements,
@@ -3137,6 +3366,7 @@ export const ensurePersonalTimetable = mutation({
         tags: [...tags],
         updatedAt: Date.now(),
       });
+      await syncArtifactSummary(ctx, preferred._id);
       return { artifactId: preferred._id, created: false };
     }
     const now = Date.now();
@@ -3167,6 +3397,7 @@ export const ensurePersonalTimetable = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    await syncArtifactSummary(ctx, artifactId);
     return { artifactId, created: true };
   },
 });

@@ -1,6 +1,7 @@
 import { normalizeCodeNetworkOrigins } from "./network-policy";
 import {
   codeRuntimeVersion,
+  normalizePythonPackages,
   type CodeContent,
   type CodeFile,
   type CodeParameter,
@@ -35,6 +36,8 @@ export function runtimeSourceDescriptor(content: CodeContent) {
         left.localeCompare(right),
       ),
     ),
+    pythonPackages: content.pythonPackages ?? [],
+    notebook: content.notebook ?? { enabled: false },
     visualisation: content.visualisation,
     accessibility: content.accessibility ?? null,
     networkPolicy: content.networkPolicy ?? { mode: "none" },
@@ -76,6 +79,8 @@ export type PublishedCodeBuildPayload = {
   runtimeVersion: string;
   entryFileId: string;
   dependencies: Record<string, string>;
+  pythonPackages?: NonNullable<CodeContent["pythonPackages"]>;
+  notebook?: NonNullable<CodeContent["notebook"]>;
   networkPolicy: { mode: "none" | "allowlist"; allowlist?: string[] };
   parameters: CodeParameter[];
   assets: PublishedCodeAsset[];
@@ -120,6 +125,22 @@ export function isPublishedCodeBuildPayload(
   if (row.files.length < 1 || row.files.length > 500) return false;
   if (row.parameters.length > 80) return false;
   if (row.assets.length > 100) return false;
+  if (
+    row.pythonPackages !== undefined &&
+    (!Array.isArray(row.pythonPackages) ||
+      !row.pythonPackages.every((entry) => typeof entry === "string") ||
+      normalizePythonPackages(row.pythonPackages).length !==
+        row.pythonPackages.length)
+  )
+    return false;
+  if (
+    row.notebook !== undefined &&
+    (!row.notebook ||
+      typeof row.notebook !== "object" ||
+      Array.isArray(row.notebook) ||
+      typeof (row.notebook as Record<string, unknown>).enabled !== "boolean")
+  )
+    return false;
   let assetBytes = 0;
   const assetIds = new Set<string>();
   const assetPaths = new Set<string>();

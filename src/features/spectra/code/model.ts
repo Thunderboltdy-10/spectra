@@ -1,7 +1,47 @@
 import { Gunzip, strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { normalizeCodeNetworkOrigins } from "./network-policy";
+import {
+  normalizeCodeRunReports,
+  type CodeRunReport,
+} from "./operations";
 
 export type CodeRuntime = "browser" | "react" | "python" | "none";
+
+export const CURATED_PYTHON_PACKAGES = [
+  {
+    key: "numpy",
+    label: "NumPy",
+    detail: "Arrays and numerical computing",
+  },
+  {
+    key: "pandas",
+    label: "pandas",
+    detail: "Tabular data analysis",
+  },
+  {
+    key: "matplotlib",
+    label: "Matplotlib",
+    detail: "Scientific plotting",
+  },
+  {
+    key: "scipy",
+    label: "SciPy",
+    detail: "Scientific algorithms",
+  },
+  {
+    key: "scikit-learn",
+    label: "scikit-learn",
+    detail: "Classical machine learning",
+  },
+  {
+    key: "sympy",
+    label: "SymPy",
+    detail: "Symbolic mathematics",
+  },
+] as const;
+
+export type CuratedPythonPackage =
+  (typeof CURATED_PYTHON_PACKAGES)[number]["key"];
 
 export const SPECTRA_CODE_RUNTIME_VERSIONS = Object.freeze({
   browser: "spectra-browser-es2022-v2",
@@ -68,6 +108,11 @@ export type CodeContent = {
     aspectRatio?: number;
   };
   dependencies?: Record<string, string>;
+  pythonPackages?: CuratedPythonPackage[];
+  notebook?: {
+    enabled: boolean;
+  };
+  runReports?: CodeRunReport[];
   preview?: {
     orientation?: "horizontal" | "vertical";
     autoRun?: boolean;
@@ -368,6 +413,15 @@ export function normalizeCodeContent(value: unknown): CodeContent {
         : {}),
     },
     dependencies: normalizeDependencies(input.dependencies, runtime),
+    pythonPackages: normalizePythonPackages(input.pythonPackages),
+    notebook: {
+      enabled:
+        input.notebook !== null &&
+        typeof input.notebook === "object" &&
+        !Array.isArray(input.notebook) &&
+        (input.notebook as Record<string, unknown>).enabled === true,
+    },
+    runReports: normalizeCodeRunReports(input.runReports),
     preview: {
       orientation:
         preview.orientation === "vertical" ? "vertical" : "horizontal",
@@ -679,6 +733,21 @@ function normalizeDependencies(value: unknown, runtime: CodeRuntime) {
   );
 }
 
+export function normalizePythonPackages(value: unknown): CuratedPythonPackage[] {
+  if (!Array.isArray(value)) return [];
+  const approved = new Set<string>(
+    CURATED_PYTHON_PACKAGES.map((entry) => entry.key),
+  );
+  return [
+    ...new Set(
+      value.filter(
+        (entry): entry is CuratedPythonPackage =>
+          typeof entry === "string" && approved.has(entry),
+      ),
+    ),
+  ].slice(0, CURATED_PYTHON_PACKAGES.length);
+}
+
 function isStringRecord(value: unknown) {
   return Boolean(
     value &&
@@ -788,6 +857,7 @@ export async function importCodeFiles(selected: readonly File[]) {
   const importedPaths = new Set<string>();
   let totalBytes = 0;
   let totalAssetBytes = 0;
+  let adaptedNotebook = false;
   const append = (
     pathValue: string,
     bytes: Uint8Array,
@@ -983,6 +1053,7 @@ export async function importCodeFiles(selected: readonly File[]) {
         warnings.push(
           `${file.name}: code cells were staged as Python; notebook outputs and rich metadata remain unsupported.`,
         );
+        adaptedNotebook = true;
       } catch {
         skipped.push(`${file.name}: invalid notebook JSON`);
       }
@@ -995,6 +1066,10 @@ export async function importCodeFiles(selected: readonly File[]) {
   let manifestRuntime: CodeRuntime | null = null;
   let manifestEntryPath: string | null = null;
   let manifestParameters: CodeParameter[] = [];
+  let manifestPythonPackages: CuratedPythonPackage[] = [];
+  let manifestNotebook: CodeContent["notebook"] = {
+    enabled: adaptedNotebook,
+  };
   let manifestVisualisation: CodeContent["visualisation"] | undefined;
   const spectraManifestIndex = imported.findIndex(
     (file) => file.path.toLowerCase() === "spectra.manifest.json",
@@ -1017,6 +1092,19 @@ export async function importCodeFiles(selected: readonly File[]) {
         if (typeof manifest.entryFile === "string")
           manifestEntryPath = normalizeCodePath(manifest.entryFile);
         manifestParameters = normalizeParameters(manifest.parameters);
+        manifestPythonPackages = normalizePythonPackages(
+          manifest.pythonPackages,
+        );
+        if (
+          manifest.notebook &&
+          typeof manifest.notebook === "object" &&
+          !Array.isArray(manifest.notebook)
+        ) {
+          manifestNotebook = {
+            enabled:
+              (manifest.notebook as Record<string, unknown>).enabled === true,
+          };
+        }
         if (
           manifest.visualisation &&
           typeof manifest.visualisation === "object" &&
@@ -1114,6 +1202,8 @@ export async function importCodeFiles(selected: readonly File[]) {
     dependencies,
     entryPath: manifestEntryPath,
     parameters: manifestParameters,
+    pythonPackages: manifestPythonPackages,
+    notebook: manifestNotebook,
     visualisation: manifestVisualisation,
     report: {
       imported: imported.length,
@@ -1200,7 +1290,7 @@ export function exportCodeArchive(
     JSON.stringify(
       {
         format: "spectra-code",
-        version: 1,
+        version: 2,
         title,
         runtime: content.runtime,
         runtimeVersion:
@@ -1208,6 +1298,8 @@ export function exportCodeArchive(
         entryFile: content.files.find((file) => file.id === content.entryFileId)
           ?.path,
         dependencies: content.dependencies ?? {},
+        pythonPackages: content.pythonPackages ?? [],
+        notebook: content.notebook ?? { enabled: false },
         networkPolicy: content.networkPolicy ?? { mode: "none" },
         visualisation: content.visualisation,
         parameters: content.parameters ?? [],

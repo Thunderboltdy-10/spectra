@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { artifactContentSchemas } from "./schemas";
+import { CODE_CONTENT_SCHEMA_VERSION } from "./schema/code";
 import { normalizeSheetsContent } from "../sheets/model";
 import {
   ARTIFACT_TYPE_KEYS,
@@ -807,6 +808,15 @@ const regionAdapters: Record<
             ["dependencies", name],
           ),
         ),
+      ...(Array.isArray(root.pythonPackages) ? root.pythonPackages : []).map(
+        (packageName, index) =>
+          region(
+            `code:python-package:${stringValue(packageName, String(index + 1))}`,
+            "code_python_package",
+            `Python package ${stringValue(packageName, String(index + 1))}`,
+            ["pythonPackages", index],
+          ),
+      ),
       ...rows(root.tests).map((test, index) =>
         region(
           stringValue(test.id, `test-${index + 1}`),
@@ -856,6 +866,17 @@ const regionAdapters: Record<
         ["visualisation"],
       ),
       region("code:preview", "code_preview", "Preview settings", ["preview"]),
+      region("code:notebook", "code_notebook", "Python cell settings", [
+        "notebook",
+      ]),
+      ...rows(root.runReports).map((report, index) =>
+        region(
+          stringValue(report.id, `code:run:${index + 1}`),
+          "code_run_report",
+          `Run ${index + 1}`,
+          ["runReports", index],
+        ),
+      ),
       region("code:network", "code_network_policy", "Network policy", [
         "networkPolicy",
       ]),
@@ -1193,6 +1214,10 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
     "check_accessibility",
     "configure_parameters",
     "prepare_publish",
+    "stop",
+    "run_cell",
+    "share_run_result",
+    "format_source",
   ],
   whiteboard: [
     "inspect_viewport",
@@ -1286,7 +1311,9 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
                 typeKey === "quiz" ||
                 typeKey === "planner_task"
               ? 3
-              : 1,
+              : typeKey === "code"
+                ? CODE_CONTENT_SCHEMA_VERSION
+                : 1,
       content: artifactContentSchemas[typeKey],
     },
     renderers: {

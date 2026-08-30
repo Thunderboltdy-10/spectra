@@ -1,4 +1,7 @@
-import type { CodeFile } from "./model";
+import {
+  CURATED_PYTHON_PACKAGES,
+  type CodeFile,
+} from "./model";
 
 export type PythonRuntimeEvent =
   | { type: "status"; status: "loading" | "running" }
@@ -16,14 +19,9 @@ const DEFAULT_TIMEOUT_MS = 12_000;
 const MAX_SOURCE_BYTES = 1_500_000;
 const MAX_PROJECT_FILES = 120;
 const MAX_REUSE_RUNS = 4;
-export const APPROVED_PYODIDE_PACKAGES = new Set([
-  "numpy",
-  "pandas",
-  "matplotlib",
-  "scipy",
-  "scikit-learn",
-  "sympy",
-]);
+export const APPROVED_PYODIDE_PACKAGES = new Set<string>(
+  CURATED_PYTHON_PACKAGES.map((entry) => entry.key),
+);
 
 type RuntimeSlot = {
   worker: Worker;
@@ -168,6 +166,7 @@ export function runPythonInIsolatedWorker({
   onEvent,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   additionalSource = "",
+  sourceOverride,
   resources = {},
   parameters = {},
   assets = [],
@@ -179,6 +178,7 @@ export function runPythonInIsolatedWorker({
   onEvent: (event: PythonRuntimeEvent) => void;
   timeoutMs?: number;
   additionalSource?: string;
+  sourceOverride?: string;
   resources?: Record<string, unknown>;
   parameters?: Record<string, string | number | boolean>;
   assets?: Array<{
@@ -305,7 +305,7 @@ export function runPythonInIsolatedWorker({
     requestId,
     files: files.map((file) => ({ path: file.path, source: file.source })),
     entryPath: entry.path,
-    source: `${entry.source}${additionalSource}`,
+    source: sourceOverride ?? `${entry.source}${additionalSource}`,
     resources: safeResources,
     parameters: safeParameters,
     assets: safeAssets,

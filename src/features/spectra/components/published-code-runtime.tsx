@@ -248,6 +248,7 @@ export function PublishedCodeRuntime({
       workerRef.current = runPythonInIsolatedWorker({
         files: payload.files,
         entryFileId: payload.entryFileId,
+        packages: payload.pythonPackages ?? [],
         resources,
         parameters: codeParameterSnapshot(payload),
         assets: payload.assets,

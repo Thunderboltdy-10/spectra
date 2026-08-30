@@ -1454,6 +1454,38 @@ export default defineSchema({
       filterFields: ["ownerAccountId", "blueprintKey", "status"],
     }),
 
+  // Library/board reads must never hydrate the payload-bearing artifact row.
+  // This bounded projection is maintained transactionally by the artifact and
+  // organization write seams; `projection` is an explicit allowlist assembled
+  // in orgTreeShared rather than a spread of the source document.
+  spectraArtifactSummaries: defineTable({
+    artifactId: v.id("spectraArtifacts"),
+    ownerAccountId: v.id("accounts"),
+    schoolId: v.optional(v.id("schools")),
+    blueprintKey: v.string(),
+    status: v.union(
+      v.literal("active"),
+      v.literal("draft"),
+      v.literal("archived"),
+      v.literal("deleted"),
+    ),
+    updatedAt: v.number(),
+    searchText: v.string(),
+    projection: v.any(),
+  })
+    .index("by_artifact", ["artifactId"])
+    .index("by_account_status_updated", [
+      "ownerAccountId",
+      "status",
+      "updatedAt",
+    ])
+    .index("by_account_blueprint_status_updated", [
+      "ownerAccountId",
+      "blueprintKey",
+      "status",
+      "updatedAt",
+    ]),
+
   bridgeDevices: defineTable({
     accountId: v.id("accounts"),
     installationId: v.optional(v.string()),
@@ -2956,6 +2988,9 @@ export default defineSchema({
     placedByAccountId: v.optional(v.id("accounts")),
     accessProjection: v.optional(v.boolean()),
     pinned: v.optional(v.boolean()),
+    // Direct live children only. Writes maintain this transactionally; old
+    // rows are filled by orgTree.backfillChildCounts before rollout.
+    childCount: v.optional(v.number()),
     // Soft delete: the whole subtree is stamped, `trashedRootId` names the node
     // the user actually deleted so restore is one operation.
     deletedAt: v.optional(v.number()),
@@ -3006,9 +3041,21 @@ export default defineSchema({
     ])
     .index("by_parent", ["parentId"])
     .index("by_account_kind_source", ["accountId", "kind", "sourceId"])
+    .index("by_account_live_kind_activity", [
+      "accountId",
+      "deletedAt",
+      "kind",
+      "activityAt",
+    ])
     .index("by_kind_source", ["kind", "sourceId"])
     .index("by_account_workspace", ["accountId", "workspaceContextId"])
     .index("by_workspace_context", ["workspaceContextId"])
+    .index("by_workspace_context_live_kind_activity", [
+      "workspaceContextId",
+      "deletedAt",
+      "kind",
+      "activityAt",
+    ])
     .index("by_account_deleted", ["accountId", "deletedAt"])
     .index("by_trashed_root", ["trashedRootId"])
     .index("by_account_trash_root", [

@@ -10,6 +10,10 @@ import { personalStateFromLegacyTimetable } from "./artifactUserStates";
 import { bumpPolicyVersion } from "./authorityShared";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { syncArtifactSummary } from "./orgTreeShared";
+
+const RETIRED_ROOM_CLEANUP_BATCH = 128;
 
 async function migrateLegacyTimetableState(
   ctx: MutationCtx,
@@ -57,6 +61,7 @@ async function migrateLegacyTimetableState(
     lastSynchronizedAt: now,
     updatedAt: now,
   });
+  await syncArtifactSummary(ctx, artifact._id);
   return true;
 }
 
@@ -71,6 +76,50 @@ async function getRoom(
       q.eq("artifactId", artifactId).eq("partitionKey", partitionKey),
     )
     .unique();
+}
+
+async function rotateRoomForSchema(
+  ctx: MutationCtx,
+  room: Doc<"collaborationRooms">,
+  artifact: Doc<"spectraArtifacts">,
+  schemaVersion: number,
+  policyVersion: number,
+) {
+  const now = Date.now();
+  const partitionKey = room.partitionKey;
+  await ctx.db.patch(room._id, {
+    partitionKey: `__retired__:${room._id}`,
+    status: "closed",
+    updatedAt: now,
+  });
+  const roomId = await ctx.db.insert("collaborationRooms", {
+    artifactId: artifact._id,
+    schoolId: artifact.schoolId,
+    typeKey: artifact.blueprintKey,
+    provider: "self_hosted_yjs",
+    partitionKey,
+    schemaVersion,
+    policyVersion,
+    status: "active",
+    nextSequence: 1,
+    snapshotSequence: 0,
+    uncompactedBytes: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await ctx.db.patch(artifact._id, { schemaVersion });
+  await ctx.scheduler.runAfter(
+    0,
+    internal.collaboration.compactRetiredRoom,
+    { roomId: room._id },
+  );
+  return {
+    roomId,
+    provider: "self_hosted_yjs" as const,
+    policyVersion,
+    schemaVersion,
+    nextSequence: 1,
+  };
 }
 
 export const ensureRoom = mutation({
@@ -114,73 +163,29 @@ export const ensureRoom = mutation({
         requestedVersion > existing.schemaVersion &&
         capabilities.includes("modify")
       ) {
-        const [updates, snapshots, policyVersion] = await Promise.all([
-          ctx.db
-            .query("collaborationUpdates")
-            .withIndex("by_room_sequence", (q) => q.eq("roomId", existing._id))
-            .collect(),
-          ctx.db
-            .query("collaborationSnapshots")
-            .withIndex("by_room_sequence", (q) => q.eq("roomId", existing._id))
-            .collect(),
-          bumpPolicyVersion(
-            ctx,
-            "artifact",
-            artifact._id,
-            artifact.schoolId,
-            artifact.ownerAccountId,
-          ),
-        ]);
-        await Promise.all([
-          ...updates.map((update) => ctx.db.delete(update._id)),
-          ...snapshots.map((snapshot) => ctx.db.delete(snapshot._id)),
-        ]);
-        await ctx.db.patch(existing._id, {
-          schemaVersion: requestedVersion,
+        const policyVersion = await bumpPolicyVersion(
+          ctx,
+          "artifact",
+          artifact._id,
+          artifact.schoolId,
+          artifact.ownerAccountId,
+        );
+        return rotateRoomForSchema(
+          ctx,
+          existing,
+          artifact,
+          requestedVersion,
           policyVersion,
-          nextSequence: 1,
-          snapshotSequence: 0,
-          uncompactedBytes: 0,
-          updatedAt: Date.now(),
-        });
-        await ctx.db.patch(artifact._id, { schemaVersion: requestedVersion });
-        return {
-          roomId: existing._id,
-          provider: existing.provider,
-          policyVersion,
-          schemaVersion: requestedVersion,
-          nextSequence: 1,
-        };
+        );
       }
       if (migrated) {
-        const [updates, snapshots] = await Promise.all([
-          ctx.db
-            .query("collaborationUpdates")
-            .withIndex("by_room_sequence", (q) => q.eq("roomId", existing._id))
-            .collect(),
-          ctx.db
-            .query("collaborationSnapshots")
-            .withIndex("by_room_sequence", (q) => q.eq("roomId", existing._id))
-            .collect(),
-        ]);
-        await Promise.all([
-          ...updates.map((update) => ctx.db.delete(update._id)),
-          ...snapshots.map((snapshot) => ctx.db.delete(snapshot._id)),
-        ]);
-        await ctx.db.patch(existing._id, {
-          schemaVersion: Math.max(requestedVersion, existing.schemaVersion + 1),
-          nextSequence: 1,
-          snapshotSequence: 0,
-          uncompactedBytes: 0,
-          updatedAt: Date.now(),
-        });
-        return {
-          roomId: existing._id,
-          provider: existing.provider,
-          policyVersion: migrationPolicyVersion ?? existing.policyVersion,
-          schemaVersion: Math.max(requestedVersion, existing.schemaVersion + 1),
-          nextSequence: 1,
-        };
+        return rotateRoomForSchema(
+          ctx,
+          existing,
+          artifact,
+          Math.max(requestedVersion, existing.schemaVersion + 1),
+          migrationPolicyVersion ?? existing.policyVersion,
+        );
       }
       return {
         roomId: existing._id,
@@ -224,6 +229,52 @@ export const ensureRoom = mutation({
       schemaVersion: Math.max(1, Math.floor(args.schemaVersion)),
       nextSequence: 1,
     };
+  },
+});
+
+/** Delete one bounded page of a room generation retired by ensureRoom. */
+export const compactRetiredRoom = internalMutation({
+  args: { roomId: v.id("collaborationRooms") },
+  handler: async (ctx, args) => {
+    const room = await ctx.db.get(args.roomId);
+    if (
+      !room ||
+      room.status !== "closed" ||
+      !room.partitionKey.startsWith("__retired__:")
+    )
+      return { cleaned: 0, done: true };
+    const [updates, snapshots] = await Promise.all([
+      ctx.db
+        .query("collaborationUpdates")
+        .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
+        .take(RETIRED_ROOM_CLEANUP_BATCH),
+      ctx.db
+        .query("collaborationSnapshots")
+        .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
+        .take(RETIRED_ROOM_CLEANUP_BATCH),
+    ]);
+    await Promise.all([
+      ...updates.map((update) => ctx.db.delete(update._id)),
+      ...snapshots.map((snapshot) => ctx.db.delete(snapshot._id)),
+    ]);
+    const done =
+      updates.length < RETIRED_ROOM_CLEANUP_BATCH &&
+      snapshots.length < RETIRED_ROOM_CLEANUP_BATCH;
+    if (done) {
+      await ctx.db.patch(room._id, {
+        nextSequence: 1,
+        snapshotSequence: 0,
+        uncompactedBytes: 0,
+        updatedAt: Date.now(),
+      });
+    } else {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.collaboration.compactRetiredRoom,
+        { roomId: room._id },
+      );
+    }
+    return { cleaned: updates.length + snapshots.length, done };
   },
 });
 

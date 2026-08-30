@@ -72,3 +72,18 @@ Fresh agent, first VU on a `local-deploy` lease:
 ## Exit gate
 
 N≥3 instances documented and startable; both accounts live on the seeded instance with ManageBac connected and folders imported; the five efficiency classes fixed with measured before/after evidence; budget baselines recorded; V1 PASS. From this gate onward **every VU in the program runs on a local instance (CANON R23)** and the cloud dev deployment is retired for testing.
+
+## P9.I3 unit log — 2026-08-30
+
+- Status: IMPLEMENTED; no acceptance or P9.V1 verdict claimed.
+- SYSTEMIC triage: payload-bearing Library rows, mount-time full-history deletion, and query-time derived tree metadata were the three root classes.
+- Added `spectraArtifactSummaries`, an explicit hard-bounded projection; Library list/search now reads it only, batches grants/invitations/placements, and never loads artifact content, text indexes, protected bases, or preview content. Batched access preserves direct-grant and deny-override semantics.
+- Write seams in `spectraArtifacts` and `orgTreeShared` maintain summaries; cursor backfill covers existing rows. Board/tree source hydration uses the indexed projection.
+- Fixture measurement: source artifact >100 KB; summary row <10 KB and <10% of source. P9.V1 owns deployed L4 numbers.
+- `ensureRoom` now atomically rotates to a fresh schema generation; retired updates/snapshots are deleted asynchronously in pages of 128, never on studio mount.
+- `orgNodes.childCount` is transactionally maintained across create/place/move/trash/restore/purge; cursor backfill covers old containers. Hydration is a field read, not a child collect.
+- Anti-theater: the P9 test failed when protected-base payload was injected and again when oversized metadata lacked hard limits; both mutations are reverted and the assertions are green.
+- Focused Convex: 4 files / 45 tests passed (P9, checkpoint, AI lifecycle, replica blast radius).
+- Standing gate: root `tsc --noEmit`, scoped ESLint, `check:capabilities`, secret scan (2,328 tracked files after rebase), and `git diff --check` passed.
+- No fidelity harness required: no lens, Bridge, replica, bridgeSync, or `shared/` path changed.
+- Merge coordination: P9.I2's `spectraRuns` and the concurrently owned ManageBac writer must call exported summary sync after their artifact patches; route as product-logic integration, not a P9.I3 ownership violation.

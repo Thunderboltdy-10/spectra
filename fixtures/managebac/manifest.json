@@ -1,0 +1,74 @@
+{
+  "provider": "managebac",
+  "providerVersion": "v2p2",
+  "auth": {
+    "header": "auth-token",
+    "scheme": "raw",
+    "mode": "read_only"
+  },
+  "provenance": {
+    "contractSource": "existing manual_verified runtime manifest",
+    "liveCaptureDate": null,
+    "livePayloadRetained": false,
+    "fixtureKind": "sanitized_contract_example",
+    "boundary": "Fresh tenant capture and frontier verdicts require the queued P13.I1 read-only approval and cloud-dev lease."
+  },
+  "sanitization": {
+    "identifiers": "deterministic fictional integers",
+    "names": "fictional",
+    "emails": "example.invalid only",
+    "urls": "example.invalid only",
+    "secrets": "never captured"
+  },
+  "fixtures": [
+    {
+      "path": "/v2p2/students",
+      "file": "students.json",
+      "verdict": "verified_from_existing_manifest",
+      "responseSchemaHash": "winYv1fYmRYWD0Jmm4mRX-ZmIQjTRW0XN615SX9c2YA",
+      "expectedProviderRecordIds": ["11001"]
+    },
+    {
+      "path": "/v2p2/memberships?user_ids={student_id}",
+      "file": "memberships.json",
+      "verdict": "verified_from_existing_manifest",
+      "responseSchemaHash": "z0uzSaQ4g4F3X-wAfXnmwlP0rU7LCazHlXMyUEixZMo",
+      "expectedProviderRecordIds": ["12001"]
+    },
+    {
+      "path": "/v2p2/classes/{class_id}",
+      "file": "class.json",
+      "verdict": "verified_from_existing_manifest",
+      "responseSchemaHash": "oq2vP0SO5YEOv__oV_0iGJGAggzVZtAUOD9LaOrlioA",
+      "expectedProviderRecordIds": ["13001"]
+    },
+    {
+      "path": "/v2p2/classes/{class_id}/tasks",
+      "file": "tasks.json",
+      "verdict": "verified_from_existing_manifest",
+      "responseSchemaHash": "4ZRagXISc8M_BFtpZR9boo1TF7hU4fewiLxtHlYgR2w",
+      "expectedProviderRecordIds": ["15001"]
+    },
+    {
+      "path": "/v2p2/classes/{class_id}/timetable",
+      "file": "timetable.json",
+      "verdict": "verified_from_existing_manifest",
+      "responseSchemaHash": "Yu41EH4u0tK0P-Su1rPoj4sCkYEEpDYs8N1oQdd3pNk",
+      "expectedProviderRecordIds": ["16001:1:2"]
+    },
+    {
+      "path": "/v2p2/classes/{class_id}/resources",
+      "file": "resources.json",
+      "verdict": "verified_from_existing_manifest",
+      "responseSchemaHash": "K6vZ7A-5Xi2g9ZcN_GjXp7SJfcUAPzsB91sWpeV7PpE",
+      "expectedProviderRecordIds": ["17001"]
+    },
+    {
+      "path": "/v2p2/year-groups/{year_group_id}/projects/cas/experiences/students?student_ids={student_id}",
+      "file": "cas-experiences.json",
+      "verdict": "verified_from_existing_manifest",
+      "responseSchemaHash": "bQlICAjibL02eSwb9Ymk3uOQEAvcTOP7jXb3ccJEeIQ",
+      "expectedProviderRecordIds": ["18001"]
+    }
+  ]
+}

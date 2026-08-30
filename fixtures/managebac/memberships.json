@@ -1,0 +1,17 @@
+{
+  "memberships": [
+    {
+      "id": 12001,
+      "user_id": 11001,
+      "class_id": 13001,
+      "user_email": "student.one@example.invalid",
+      "class_name": "Sample Physics",
+      "role": "student",
+      "level": "Higher Level",
+      "updated_at": "2026-08-20T09:15:00Z"
+    }
+  ],
+  "meta": {
+    "next_page": null
+  }
+}

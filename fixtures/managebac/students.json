@@ -1,0 +1,13 @@
+{
+  "students": [
+    {
+      "id": 11001,
+      "email": "student.one@example.invalid",
+      "first_name": "Student",
+      "last_name": "One",
+      "role": "student",
+      "program": "IB Diploma",
+      "year_group_id": 14001
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "timetable": {
+    "academic_years": [
+      {
+        "id": 16001,
+        "name": "Sample academic year",
+        "slots": [
+          {
+            "id": 16002,
+            "class_id": 13001,
+            "day": 1,
+            "period": 2,
+            "room": "Lab Sample"
+          }
+        ]
+      }
+    ]
+  }
+}

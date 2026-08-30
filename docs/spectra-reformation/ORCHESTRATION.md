@@ -160,6 +160,8 @@ prompt / later unit by name), and what to launch next.
 
 Verifier prompts must stay clean: no implementer chat context, no file paths from the implementation report — the unit ID, role, docs, and goal cards only (VERIFICATION L3).
 
+**Whole-frame visual bar (Pablo 2026-08-30).** Every screenshot is a product-wide observation, not a crop around the target control. UI implementers and verifiers inspect the entire visible frame for discoverability, hierarchy, spacing, copy, state honesty, density, accessibility, and family resemblance. A target card does not pass while another obvious flaw is visible: fix it if the active unit owns its class, otherwise file it with an owner and evidence. Final verification applies this at every intermediate frame and state, but ordinary UI units use the same standard continuously. An implemented feature that is not evident to a person is incomplete.
+
 **Concurrency caps (Pablo: "not too many simultaneously"):** at most **3** unit agents live at once — at most **1** holding the `dev-server` lease (the single live verifier or a live-checking implementer), at most **2** worktree implementers. Fix/merge agents count toward the cap. Prefer parallelism only where briefs do not share a seam; when unsure, serialize — throughput comes from overlapping the next phase's implementation with the current VU, not from forcing collisions.
 
 ## 6. Worktrees, merges, and resource leases

@@ -136,6 +136,12 @@ export type RunState = {
     currentView?: string;
     requestedAgentId?: string;
     disableAgentRouting?: boolean;
+    skillContexts?: Array<{
+      metadataCharacters: number;
+      activeBodyCharacters: number;
+      estimatedActiveBodyTokens: number;
+      activeSkillIds: string[];
+    }>;
   };
 };
 

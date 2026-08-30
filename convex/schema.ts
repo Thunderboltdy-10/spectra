@@ -1907,6 +1907,38 @@ export default defineSchema({
     .index("by_account", ["accountId"])
     .index("by_school_updated", ["schoolId", "updatedAt"]),
 
+  userSkills: defineTable({
+    accountId: v.id("accounts"),
+    createdInSchoolId: v.id("schools"),
+    skillKey: v.string(),
+    normalizedName: v.string(),
+    name: v.string(),
+    purpose: v.string(),
+    triggerTerms: v.array(v.string()),
+    body: v.string(),
+    version: v.number(),
+    status: v.union(
+      v.literal("active"),
+      v.literal("superseded"),
+      v.literal("deleted"),
+    ),
+    authoredBy: v.literal("model"),
+    previousVersionId: v.optional(v.id("userSkills")),
+    supersededById: v.optional(v.id("userSkills")),
+    deletedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_updated", ["accountId", "updatedAt"])
+    .index("by_account_status_updated", ["accountId", "status", "updatedAt"])
+    .index("by_account_skill_status", ["accountId", "skillKey", "status"])
+    .index("by_account_skill_version", ["accountId", "skillKey", "version"])
+    .index("by_account_name_status", [
+      "accountId",
+      "normalizedName",
+      "status",
+    ]),
+
   memoryClaims: defineTable({
     accountId: v.id("accounts"),
     schoolId: v.id("schools"),

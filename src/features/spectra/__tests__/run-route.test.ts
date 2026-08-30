@@ -129,6 +129,7 @@ function setup(
       };
     }
     if (name.includes("authority:access")) return { level: "modify", canModify: true };
+    if (name.includes("userSkills:listMetadata")) return [];
     if (name.includes("collaboration:ensureRoom")) {
       return {
         roomId: "room-real",
@@ -340,6 +341,52 @@ function setup(
 }
 
 describe("Spectra run route", () => {
+  it("persists a zero-body skill context manifest for an unrelated model run", async () => {
+    const answerPlan = {
+      decision: "answer",
+      intent: {
+        mode: "answer",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+      },
+      finalResponse: "The two arguments rely on different standards of evidence.",
+      operations: [],
+    };
+    const { convexMutation, fetchMock } = setup(answerPlan);
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/spectra/run", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run",
+          surface: "workspace",
+          workspaceId: "workspace-real",
+          prompt:
+            "Compare the methodological limits of two historical arguments and give me a structured answer.",
+        }),
+      }),
+    );
+    await response.text();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const contextWrites = convexMutation.mock.calls.filter(([name]) =>
+      String(name).includes("spectraRuns:setContextSnapshot"),
+    );
+    expect(contextWrites.at(-1)?.[1]).toMatchObject({
+      contextSnapshot: {
+        skillContexts: [
+          {
+            activeBodyCharacters: 0,
+            estimatedActiveBodyTokens: 0,
+            activeSkillIds: [],
+          },
+        ],
+      },
+    });
+  });
+
   it("fans independent multi-output study packs into typed parallel workers", async () => {
     const { fetchMock } = setup({});
     fetchMock.mockImplementation(async (_url, init) => {

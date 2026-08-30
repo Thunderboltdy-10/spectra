@@ -329,6 +329,24 @@ export async function executeApplicationCommand(
     });
     return { ok: true, memory };
   }
+  if (command === "write_skill") {
+    const skill = await mutate("userSkills:write", parsed);
+    const record =
+      skill && typeof skill === "object" && !Array.isArray(skill)
+        ? (skill as Record<string, unknown>)
+        : {};
+    onUiEvent?.({
+      key: "skill_written",
+      payload: {
+        targetId: String(record.id ?? "skills"),
+        note:
+          parsed.action === "update"
+            ? "Updated an AI skill"
+            : "Created an AI skill",
+      },
+    });
+    return { ok: true, skill };
+  }
   if (command === "change_sharing") {
     const resourceType = String(parsed.resourceType ?? "artifact");
     const resourceId = String(parsed.resourceId ?? "");

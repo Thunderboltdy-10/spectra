@@ -2,7 +2,10 @@ import {
   evaluateApplicationAuthority,
   type ApplicationAuthorityEvaluation,
 } from "@/features/spectra/ai/authority-execution";
-import type { AiTargetClass } from "@/features/spectra/ai/authority-policy";
+import {
+  skillWriteAuthority,
+  type AiTargetClass,
+} from "@/features/spectra/ai/authority-policy";
 import { mutate, query } from "./io";
 
 function stringIds(value: unknown) {
@@ -57,12 +60,21 @@ export async function evaluateCommandAuthority(input: {
     stringIds(input.args.targetIds).length > 0
   )
     input.args.localFileCount = localFileCount;
-  return evaluateApplicationAuthority({
+  const authority = evaluateApplicationAuthority({
     command: input.command,
     args: input.args,
     localFileCount,
     authorityTarget: input.authorityTarget,
   });
+  if (input.command !== "write_skill") return authority;
+  const state = await query<Record<string, never>, { hasWrittenSkill: boolean }>(
+    "userSkills:authorityState",
+    {},
+  );
+  return {
+    ...skillWriteAuthority(state.hasWrittenSkill),
+    target: "skill",
+  };
 }
 
 export async function hydrateApplicationLocalFileCounts(

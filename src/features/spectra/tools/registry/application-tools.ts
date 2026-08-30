@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type { RegisteredToolDefinition, ToolExecutionContext } from "./registry";
 import { spectraToolRegistry } from "./registry";
+import {
+  USER_SKILL_AGENT_TOOL_IDS,
+  registerUserSkillTools,
+} from "./user-skill-tools";
 
 const jsonObject = z.record(z.string(), z.unknown());
 const jsonOutput = z.unknown();
@@ -49,6 +53,7 @@ function define(input: DefinitionInput) {
 }
 
 export function registerApplicationTools() {
+  registerUserSkillTools();
   const readDefaults = {
     capability: "read_work",
     category: "read" as const,
@@ -197,5 +202,5 @@ export function registerApplicationTools() {
 registerApplicationTools();
 
 export const APPLICATION_AGENT_TOOL_IDS = [
-  "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", "change_sharing", "trigger_managebac_sync", "change_managebac_mapping", "insert_reference", "pair_bridge", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "ask_user_choice", "request_context_target", "propose_operation", "submit_plan",
+  "search_objects", "search_library", "read_artifact", "read_workspace", "read_thread", "retrieve_memory", "get_school_data", "read_calendar", "read_embeds", "schedule_calendar_task", "move_calendar_block", "resize_calendar_block", "web_search", "navigate_spectra", "organize_library", "delete_library_items", "change_spectra_settings", "change_sync_policy", "write_memory", ...USER_SKILL_AGENT_TOOL_IDS, "change_sharing", "trigger_managebac_sync", "change_managebac_mapping", "insert_reference", "pair_bridge", "change_credentials", "change_ai_authority_mode", "delete_account", "connect_future_provider", "ask_user_choice", "request_context_target", "propose_operation", "submit_plan",
 ] as const;

@@ -1,5 +1,6 @@
 import {
   Brain,
+  BookOpenText,
   CalendarDays,
   Crosshair,
   DatabaseZap,
@@ -163,6 +164,23 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     risk: "safe",
     undo: "operation-inverse",
     choreography: { target: "settings-control", region: "memory" },
+    aiAuthority: "allowed",
+  }),
+  appCommand({
+    id: "app.skill.write",
+    title: "Write AI skill",
+    icon: BookOpenText,
+    description:
+      "Create or revise a capped account skill with approval, safety checks, and retained versions.",
+    presentation: {
+      kind: "button",
+      compact: { iconOnly: true },
+      medium: { label: "Write skill" },
+    },
+    defaultPlacement: { tab: "Settings", group: "AI skills", order: 1 },
+    risk: "always-confirm",
+    undo: "none(explain)",
+    choreography: { target: "settings-control", region: "skills" },
     aiAuthority: "allowed",
   }),
   appCommand({
@@ -417,6 +435,7 @@ export const APPLICATION_TOOL_COMMAND_MAP = {
   change_spectra_settings: "app.settings.change",
   change_sync_policy: "app.sync.policy.change",
   write_memory: "app.memory.write",
+  write_skill: "app.skill.write",
   change_sharing: "app.sharing.change",
   trigger_managebac_sync: "app.managebac.sync",
   change_managebac_mapping: "app.managebac.mapping",

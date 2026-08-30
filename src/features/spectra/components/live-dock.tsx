@@ -33,6 +33,7 @@ import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { LAYER_CLASS } from "@/components/ui/layers";
 import { PrismRunMark } from "@/components/spectra-prism-optic";
 import { SurfaceField, type FieldInfluence } from "../field/surface-field";
+import { spectraBus } from "../events";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { confirmationDiffSummary } from "../ai/authority-execution";
@@ -491,10 +492,10 @@ export function LiveDock({
     listeners.add(setFetchedTabs);
     void refresh();
     const changed = () => void refresh(true);
-    window.addEventListener("spectra:threads-changed", changed);
+    const removeChanged = spectraBus.on("threads.changed", changed);
     return () => {
       listeners.delete(setFetchedTabs);
-      window.removeEventListener("spectra:threads-changed", changed);
+      removeChanged();
     };
   }, [refresh, story]);
 

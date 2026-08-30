@@ -29,6 +29,17 @@ Not Medium-simple: census codemods sit next to a11y and consolidation taste. Gro
 
 Tier-2/3 god-file splits (content adapters, history, chrome, readonly viewers); shadow window-CustomEvent bus folded into `spectraBus` (dead listeners/emitters deleted); dead barrels, orphan tables documented or dropped (ORG-4), schema tombstones cleaned; `wire-or-delete` sweep across flagged dead affordances not already handled.
 
+### P6.I3 implementation log — 2026-08-30
+
+- TRIAGE · SYSTEMIC: semantic navigation/state used a second untyped window bus; migrated every production `spectra:*` window listener/emitter to typed `spectraBus`, deleted unmatched routes, and made the architecture gate reject recurrence.
+- TRIAGE · LOCAL: `logging.ts` called the already-deleted `errorEvents:log`; removed the zombie Convex sink and kept structured stdout/stderr as the one owned logger path.
+- TRIAGE · LOCAL: `check:copy` opened two deleted shells; retargeted it to the mounted Spectra, Library, and studio surfaces.
+- ORG-4: current workspace views are only Cards/Library; legacy Canvas/Timeline values normalize to Library and cannot be written/imported. `spectraFocusSpaces` is documented read-only until an explicit destructive migration owns its live rows.
+- Split shared deck/quiz types, normalizers, and helpers from `artifact-studio.tsx` into `artifact-content-model.ts`; removed the dead synchronized-snapshot chrome path and three zero-consumer barrels.
+- Evidence: focused Vitest 6 files / 54 tests; `check:architecture`; `check:copy`; scoped ESLint on new/shared/gate files; `git diff --check`; secret scan.
+- Root `tsc --noEmit` names no P6.I3-owned path; recorded cross-unit lens, embed, capability, collaboration-test, and presentation-test blockers remain. The stale Agent Library import blocker was repaired in-scope.
+- Status: IMPLEMENTED; independent P6.V1 verification remains required. No acceptance claimed.
+
 ## P6.V1 — Whole-product convergence audit (MT)
 
 The absorbed N10: an audit sweep (AS) plus journey verification at realistic density (10k-node Library, large artifacts) across every primary surface — reuse audit (D41: one control, one name, one shape), bounded-read audit (D42, Network panel), viewport framing (D44), both color schemes, keyboard-only pass, fresh-user cards for every major flow. Findings triaged; LOCAL fixed in-phase; SYSTEMIC escalate.

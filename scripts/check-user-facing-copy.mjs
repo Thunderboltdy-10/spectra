@@ -3,8 +3,9 @@ import path from "node:path";
 
 const root = process.cwd();
 const files = [
-  "src/features/spectra/pages/artifacts-shell.tsx",
-  "src/features/spectra/pages/workspace-shell.tsx",
+  "src/features/spectra/pages/spectra-shell.tsx",
+  "src/features/spectra/pages/agent-library-shell.tsx",
+  "src/features/spectra/components/artifact-studio.tsx",
   "src/components/layout/app-shell.tsx",
   "src/app/layout.tsx",
 ];

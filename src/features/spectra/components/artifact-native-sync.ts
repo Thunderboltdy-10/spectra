@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { ArtifactLiveValue } from "../collaboration/artifact-yjs-model";
 import type { ReplicaTruth } from "../bridge/status";
+import { spectraBus } from "../events";
 import {
   nativeMaterializationStale,
   nativeMaterializationVerified,
@@ -205,11 +206,7 @@ export function useArtifactNativeSync({
             setNativeLensProjection(projection);
             setNativeProjectionReady(true);
           }
-          window.dispatchEvent(
-            new CustomEvent("spectra:artifact-lens-activated", {
-              detail: { artifactId, projection },
-            }),
-          );
+          spectraBus.emit("artifact.lensActivated", { artifactId, projection });
         }
       })
       .catch((error: unknown) => {
@@ -344,11 +341,11 @@ export function useArtifactNativeSync({
   }, [live.liveValue.content]);
 
   useEffect(() => {
-    const onLensActivated = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{ artifactId?: string; projection?: unknown }>
-      ).detail;
-      if (detail?.artifactId !== artifactId || !detail.projection || dirty)
+    const onLensActivated = (detail: {
+      artifactId: string;
+      projection?: unknown;
+    }) => {
+      if (detail.artifactId !== artifactId || !detail.projection || dirty)
         return;
       if (
         !live.modelSnapshot.initialized ||
@@ -369,12 +366,7 @@ export function useArtifactNativeSync({
         );
       });
     };
-    window.addEventListener("spectra:artifact-lens-activated", onLensActivated);
-    return () =>
-      window.removeEventListener(
-        "spectra:artifact-lens-activated",
-        onLensActivated,
-      );
+    return spectraBus.on("artifact.lensActivated", onLensActivated);
   }, [
     applyExternalProjection,
     artifactId,

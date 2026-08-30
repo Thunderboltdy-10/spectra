@@ -28,8 +28,8 @@ import {
   type WorkType,
 } from "../work/registry";
 import { projectLegacyWorkSession } from "../work/session/session-controller";
+import { spectraBus } from "../events";
 import { workTypeMeta } from "./artifact-card";
-import { tagsFromDraft } from "./artifact-studio-value-utils";
 
 export type StudioMode = "closed" | "split" | "tab";
 export type StudioTab = { artifactId: string; openedAt: number };
@@ -292,61 +292,6 @@ export function useArtifactStudioState(
   _storageKey: string,
   artifacts: SpectraArtifact[],
 ) {
-  const [synchronizedSnapshots, setSynchronizedSnapshots] = useState(
-    () =>
-      new Map<
-        string,
-        {
-          syncedAt: number;
-          title: string;
-          summary: string;
-          tagDraft: string;
-          content: unknown;
-        }
-      >(),
-  );
-  useEffect(() => {
-    const receiveSynchronizedArtifact = (event: Event) => {
-      const detail = (event as CustomEvent).detail as
-        | {
-            artifactId?: unknown;
-            snapshot?: {
-              title?: unknown;
-              summary?: unknown;
-              tagDraft?: unknown;
-              content?: unknown;
-            };
-          }
-        | undefined;
-      if (
-        typeof detail?.artifactId !== "string" ||
-        typeof detail.snapshot?.title !== "string" ||
-        typeof detail.snapshot.summary !== "string" ||
-        typeof detail.snapshot.tagDraft !== "string"
-      )
-        return;
-      setSynchronizedSnapshots((current) => {
-        const next = new Map(current);
-        next.set(detail.artifactId as string, {
-          syncedAt: Date.now(),
-          title: detail.snapshot!.title as string,
-          summary: detail.snapshot!.summary as string,
-          tagDraft: detail.snapshot!.tagDraft as string,
-          content: detail.snapshot!.content,
-        });
-        return next;
-      });
-    };
-    window.addEventListener(
-      "spectra:artifact-synchronized",
-      receiveSynchronizedArtifact,
-    );
-    return () =>
-      window.removeEventListener(
-        "spectra:artifact-synchronized",
-        receiveSynchronizedArtifact,
-      );
-  }, []);
   const openObjects = useSpectraContextStore((state) => state.openObjects);
   const activeOpenObjectKey = useSpectraContextStore(
     (state) => state.activeOpenObjectKey,
@@ -364,26 +309,8 @@ export function useArtifactStudioState(
     (state) => state.setArtifactDirty,
   );
   const artifactById = useMemo(
-    () =>
-      new Map(
-        artifacts.map((artifact) => {
-          const synchronized = synchronizedSnapshots.get(artifact._id);
-          if (!synchronized || artifact.updatedAt >= synchronized.syncedAt)
-            return [artifact._id, artifact] as const;
-          return [
-            artifact._id,
-            {
-              ...artifact,
-              title: synchronized.title,
-              summary: synchronized.summary || undefined,
-              tags: tagsFromDraft(synchronized.tagDraft),
-              content: synchronized.content,
-              updatedAt: synchronized.syncedAt,
-            },
-          ] as const;
-        }),
-      ),
-    [artifacts, synchronizedSnapshots],
+    () => new Map(artifacts.map((artifact) => [artifact._id, artifact] as const)),
+    [artifacts],
   );
   const session = useMemo(
     () =>
@@ -868,11 +795,9 @@ export function StudioTabRail({
                   if (dirtyIds.has(artifact._id)) {
                     onActivateTab(artifact._id);
                     requestAnimationFrame(() =>
-                      window.dispatchEvent(
-                        new CustomEvent("spectra:request-artifact-close", {
-                          detail: { artifactId: artifact._id },
-                        }),
-                      ),
+                      void spectraBus.command("work.requestClose", {
+                        workId: artifact._id,
+                      }),
                     );
                   } else onCloseTab(artifact._id);
                 }}
@@ -883,11 +808,9 @@ export function StudioTabRail({
                     if (dirtyIds.has(artifact._id)) {
                       onActivateTab(artifact._id);
                       requestAnimationFrame(() =>
-                        window.dispatchEvent(
-                          new CustomEvent("spectra:request-artifact-close", {
-                            detail: { artifactId: artifact._id },
-                          }),
-                        ),
+                        void spectraBus.command("work.requestClose", {
+                          workId: artifact._id,
+                        }),
                       );
                     } else onCloseTab(artifact._id);
                   }

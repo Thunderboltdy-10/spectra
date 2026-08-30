@@ -8,6 +8,7 @@ import {
   Loader2,
 } from "lucide-react";
 import type { SpectraArtifact } from "../data/api";
+import { spectraBus } from "../events";
 import { humanizePublicFailure } from "./humanize";
 import { locationLabel } from "./status";
 import { useSyncPresentation } from "./use-sync-presentation";
@@ -181,11 +182,7 @@ export function ResourceSurface({
       // replace its cached overview copy immediately so the open surface can
       // switch from ResourceSurface to DocumentStudio without a remount or a
       // duplicate work item.
-      window.dispatchEvent(
-        new CustomEvent("spectra:artifact-lens-activated", {
-          detail: { artifactId: artifact._id },
-        }),
-      );
+      spectraBus.emit("artifact.lensActivated", { artifactId: artifact._id });
     } catch (error) {
       setOpenError(
         error instanceof Error

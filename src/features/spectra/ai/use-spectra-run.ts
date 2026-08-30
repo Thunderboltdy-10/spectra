@@ -20,6 +20,7 @@ import { noteAiLocation } from "../collaboration/follow-ai";
 import { handleSpectraAiUiEvent } from "../collaboration/ai-ui-events";
 import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
 import { useSpectraPreferences } from "../settings/preference-store";
+import { spectraBus } from "../events";
 
 /**
  * Artifact ids the run feed has published coarse activity for, per run, so a
@@ -711,7 +712,7 @@ export function useSpectraRun({
             requestRunId = event.runId;
             activeRequests.current.set(controller, event.runId);
             onAcknowledged?.(event.runId);
-            window.dispatchEvent(new Event("spectra:threads-changed"));
+            spectraBus.emit("threads.changed", {});
           }
           if (event.type === "thread_ready") {
             durableThreadId.current = event.threadId;
@@ -916,7 +917,7 @@ export function useSpectraRun({
                   }
                 : current,
             );
-            window.dispatchEvent(new Event("spectra:threads-changed"));
+            spectraBus.emit("threads.changed", {});
             void onFinal?.({
               runId: event.runId,
               summary: event.summary,
@@ -1111,7 +1112,7 @@ export function useSpectraRun({
               (await response.text().catch(() => "")) ||
                 "This run could not be stopped safely.",
             );
-          window.dispatchEvent(new Event("spectra:threads-changed"));
+          spectraBus.emit("threads.changed", {});
           queuedSteering.current.delete(runId);
           return true;
         }
@@ -1131,7 +1132,7 @@ export function useSpectraRun({
             (await stopResponse.text().catch(() => "")) ||
               "This run could not be redirected safely.",
           );
-        window.dispatchEvent(new Event("spectra:threads-changed"));
+        spectraBus.emit("threads.changed", {});
         const steerPrompt =
           mode === "replace_goal"
             ? clean
@@ -1246,7 +1247,7 @@ export function useSpectraRun({
                 "Could not undo this run.",
             );
           toast.success("Restored the earlier copy of this work.");
-          window.dispatchEvent(new Event("spectra:threads-changed"));
+          spectraBus.emit("threads.changed", {});
           await onDataChanged?.();
         } catch (error) {
           toast.error(
@@ -1389,7 +1390,7 @@ export function useSpectraRun({
           // cancel remotely; do not let that obsolete request mask the durable
           // terminal state forever.
           if (response.status === 409) {
-            window.dispatchEvent(new Event("spectra:threads-changed"));
+            spectraBus.emit("threads.changed", {});
             await onDataChanged?.();
             return;
           }
@@ -1398,7 +1399,7 @@ export function useSpectraRun({
               "This run can no longer be stopped safely.",
           );
         }
-        window.dispatchEvent(new Event("spectra:threads-changed"));
+        spectraBus.emit("threads.changed", {});
         await onDataChanged?.();
       } catch (error) {
         setStopSuppressed(false);

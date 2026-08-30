@@ -139,10 +139,6 @@ import {
   presentationObjectText,
   type PresentationObject,
 } from "../presentation/model";
-import {
-  normalizeQuizExperience,
-  type QuizExperience,
-} from "../quiz/experience";
 import { normalizeSheetsContent, parseAddress } from "../sheets/model";
 import { sharedTimetableContent } from "../timetable/model";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
@@ -197,6 +193,20 @@ import {
   reconciliationSnapshotKey,
   tagsFromDraft,
 } from "./artifact-studio-value-utils";
+import {
+  arrayOfRecords,
+  clozeAnswer,
+  clozeParts,
+  clozePrompt,
+  deckStudyKey,
+  id,
+  quizSettingsFromContent,
+  record,
+  type DeckCard,
+  type DeckStudyItem,
+  type QuizQuestion,
+  type QuizSettings,
+} from "./artifact-content-model";
 export { tagsFromDraft } from "./artifact-studio-value-utils";
 import {
   StudioInteractionLayer,
@@ -359,178 +369,6 @@ function waveCIdentityStats(
 }
 
 
-export type DeckCard = {
-  id: string;
-  variant?: "basic" | "cloze" | "image_occlusion";
-  front: string;
-  back: string;
-  hint?: string;
-  explanation?: string;
-  acceptedAlternatives?: string[];
-  section?: string;
-  confidence?: "unknown" | "weak" | "medium" | "strong";
-  difficulty?: "easy" | "medium" | "hard";
-  learningObjective?: string;
-  language?: string;
-  bidirectional?: boolean;
-  media?: {
-    assetId: string;
-    name: string;
-    mediaType: string;
-    altText?: string;
-    placement?: "front" | "back";
-  };
-  occlusions?: Array<{
-    id: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    label?: string;
-  }>;
-  sourceRefs?: string[];
-  tags?: string[];
-  review?: {
-    state?: "new" | "learning" | "review" | "mastered";
-    correctStreak?: number;
-    lastReviewedAt?: number | null;
-    nextReviewAt?: number | null;
-  };
-};
-
-export type DeckStudyDirection = "forward" | "reverse";
-export type DeckStudyItem = {
-  cardId: string;
-  direction: DeckStudyDirection;
-};
-
-export function deckStudyKey(cardId: string, direction: DeckStudyDirection) {
-  return `${cardId}:${direction}`;
-}
-
-export function clozeParts(value: string) {
-  return [...value.matchAll(/\{\{c(\d+)::([\s\S]*?)(?:::(.*?))?\}\}/gi)].map(
-    (match) => ({
-      index: Number(match[1]),
-      answer: match[2] ?? "",
-      hint: match[3] ?? "",
-      source: match[0],
-    }),
-  );
-}
-
-export function clozePrompt(value: string) {
-  return value.replace(
-    /\{\{c\d+::([\s\S]*?)(?:::(.*?))?\}\}/gi,
-    (_source, _answer: string, hint: string | undefined) =>
-      hint?.trim() ? `[${hint.trim()}]` : "[…]",
-  );
-}
-
-export function clozeAnswer(value: string) {
-  return value.replace(
-    /\{\{c\d+::([\s\S]*?)(?:::(.*?))?\}\}/gi,
-    (_source, answer: string) => answer,
-  );
-}
-
-export type QuizQuestion = {
-  id: string;
-  prompt: string;
-  type:
-    | "multiple_choice"
-    | "short_answer"
-    | "true_false"
-    | "select_all"
-    | "ordering"
-    | "numeric"
-    | "fill_blank"
-    | "long_response"
-    | "matching";
-  options: string[];
-  optionIds: string[];
-  correctAnswer?: string;
-  correctAnswers?: string[];
-  numericTolerance?: number;
-  rubric?: string;
-  matchingPairs?: Array<{ id: string; left: string; right?: string }>;
-  matchingChoices?: string[];
-  explanation?: string;
-  difficulty?: "easy" | "medium" | "hard";
-  points?: number;
-  timeLimitSeconds?: number;
-  sourceRefs?: string[];
-  feedback?: string;
-  bloomLevel?:
-    "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
-  standards?: string[];
-  tags?: string[];
-  poolId?: string;
-  poolDrawCount?: number;
-  section?: string;
-  media?: {
-    assetId: string;
-    name: string;
-    mediaType: string;
-    altText?: string;
-  };
-};
-
-export type QuizSettings = {
-  instructions: string;
-  showAnswersImmediately: boolean;
-  feedbackRelease: "after_submission" | "on_each_response";
-  timed: boolean;
-  shuffleQuestions: boolean;
-  shuffleOptions: boolean;
-  targetScore: number;
-  maxAttempts?: number;
-  allowResume: boolean;
-  defaultTimeMultiplier: number;
-  /** How this quiz is used (§11C). Presets set all of it at once. */
-  experience: QuizExperience;
-};
-
-export function quizSettingsFromContent(content: unknown): QuizSettings {
-  const settings = record(record(content).settings);
-  const experience = normalizeQuizExperience(settings);
-  const feedbackRelease =
-    experience.revealAnswers === "immediate"
-      ? "on_each_response"
-      : "after_submission";
-  return {
-    instructions:
-      typeof settings.instructions === "string" ? settings.instructions : "",
-    // The legacy booleans stay in sync with the contract so anything still
-    // reading them sees the same answer the contract gives.
-    showAnswersImmediately: experience.revealAnswers === "immediate",
-    feedbackRelease,
-    timed: experience.timing !== "untimed",
-    shuffleQuestions: settings.shuffleQuestions === true,
-    shuffleOptions: settings.shuffleOptions === true,
-    targetScore:
-      typeof settings.targetScore === "number"
-        ? settings.targetScore
-        : typeof settings.passingScore === "number"
-          ? settings.passingScore
-          : 70,
-    maxAttempts:
-      experience.attempts === "unlimited" ? undefined : experience.attempts,
-    allowResume: settings.allowResume !== false,
-    defaultTimeMultiplier:
-      typeof settings.defaultTimeMultiplier === "number"
-        ? Math.max(1, Math.min(3, settings.defaultTimeMultiplier))
-        : 1,
-    experience,
-  };
-}
-
-export function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object"
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
 function pointerSegments(path: string) {
   return path === "/"
     ? []
@@ -638,19 +476,6 @@ function _aiPreviewSections(artifact: SpectraArtifact) {
     ].find((value) => typeof value === "string" && value.trim());
     return typeof label === "string" ? [label.trim().slice(0, 90)] : [];
   });
-}
-
-export function arrayOfRecords(value: unknown): Array<Record<string, unknown>> {
-  return Array.isArray(value)
-    ? value.filter(
-        (item): item is Record<string, unknown> =>
-          item !== null && typeof item === "object",
-      )
-    : [];
-}
-
-export function id(prefix: string) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 type ArtifactSnapshot = {
@@ -3307,22 +3132,9 @@ function ArtifactStudioEditor({
 
   useEffect(() => {
     if (mode !== "tab") return;
-    window.dispatchEvent(
-      new CustomEvent("spectra:page-context", {
-        detail: {
-          source: sourceLabel,
-          kind: meta.label,
-          title: artifact.title,
-        },
-      }),
-    );
     const shareFromShell = () => onShare?.();
-    window.addEventListener("spectra:page-share", shareFromShell);
-    return () => {
-      window.removeEventListener("spectra:page-share", shareFromShell);
-      window.dispatchEvent(new Event("spectra:clear-page-context"));
-    };
-  }, [artifact._id, artifact.title, meta.label, mode, onShare, sourceLabel]);
+    return spectraBus.handle("surface.share", shareFromShell);
+  }, [mode, onShare]);
   // Updating the four editor fields and their baseline is intentionally a
   // single logical reconciliation, but React commits those state updates
   // independently. Without this guard the intermediate render (new baseline,
@@ -4307,11 +4119,10 @@ function ArtifactStudioEditor({
     const target = aiInteractionState?.target;
     if (!target || lastRevealedPathRef.current === target.path) return;
     lastRevealedPathRef.current = target.path;
-    window.dispatchEvent(
-      new CustomEvent("spectra:reveal-target", {
-        detail: { artifactId: artifact._id, path: target.path },
-      }),
-    );
+    void spectraBus.command("work.reveal", {
+      workId: artifact._id,
+      path: target.path,
+    });
     return scheduleRevealTarget(
       () => presenceSurfaceRef.current,
       target,
@@ -4899,10 +4710,8 @@ function ArtifactStudioEditor({
   );
 
   useEffect(() => {
-    function requestClose(event: Event) {
-      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail
-        ?.artifactId;
-      if (artifactId === artifact._id) requestStudioClose();
+    function requestClose({ workId }: { workId: string }) {
+      if (workId === artifact._id) requestStudioClose();
     }
     function beforeUnload(event: BeforeUnloadEvent) {
       if (!dirty) return;
@@ -4944,14 +4753,11 @@ function ArtifactStudioEditor({
       event.preventDefault();
       requestStudioClose();
     }
-    window.addEventListener("spectra:request-artifact-close", requestClose);
+    const removeRequestClose = spectraBus.handle("work.requestClose", requestClose);
     window.addEventListener("beforeunload", beforeUnload);
     window.addEventListener("keydown", onKeyDown, true);
     return () => {
-      window.removeEventListener(
-        "spectra:request-artifact-close",
-        requestClose,
-      );
+      removeRequestClose();
       window.removeEventListener("beforeunload", beforeUnload);
       window.removeEventListener("keydown", onKeyDown, true);
     };
@@ -6805,7 +6611,7 @@ function StudioDetails({
         tags: artifact.tags,
         workspaceId: placements[0]?.workspaceId,
       });
-      window.dispatchEvent(new Event("spectra:refresh"));
+      spectraBus.emit("workspace.refreshRequested", {});
       onOpenArtifact(result.artifactId);
     } finally {
       setDuplicating(false);
@@ -7154,11 +6960,9 @@ function StudioDetails({
                     type="button"
                     className="spectra-inspector-action"
                     onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent("spectra:study-deck", {
-                          detail: { artifactId: artifact._id },
-                        }),
-                      )
+                      void spectraBus.command("deck.study", {
+                        workId: artifact._id,
+                      })
                     }
                   >
                     <BookOpen className="h-3.5 w-3.5" />
@@ -7169,11 +6973,9 @@ function StudioDetails({
                     type="button"
                     className="spectra-inspector-action"
                     onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent("spectra:preview-quiz", {
-                          detail: { artifactId: artifact._id },
-                        }),
-                      )
+                      void spectraBus.command("quiz.preview", {
+                        workId: artifact._id,
+                      })
                     }
                   >
                     <Eye className="h-3.5 w-3.5" />

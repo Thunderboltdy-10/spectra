@@ -127,6 +127,7 @@ import {
   type SpectraRuntimeStatus,
 } from "./sandboxed-artifact-runtime";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { spectraBus } from "../events";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
@@ -825,18 +826,14 @@ export function CodeStudio({
   // Follow AI: a reveal request names a file path; open that file so the
   // scroll-reveal that follows lands on the exact line.
   useEffect(() => {
-    function onReveal(event: Event) {
-      const detail = (
-        event as CustomEvent<{ artifactId?: string; path?: string }>
-      ).detail;
-      if (detail?.artifactId !== artifactId || !detail.path) return;
+    function onReveal(detail: { workId: string; path?: string }) {
+      if (detail.workId !== artifactId || !detail.path) return;
       const match = /^\/files\/(\d+)/.exec(detail.path);
       if (!match) return;
       const file = workbook.files[Number(match[1])];
       if (file && file.id !== activeFileId) setActiveFileId(file.id);
     }
-    window.addEventListener("spectra:reveal-target", onReveal);
-    return () => window.removeEventListener("spectra:reveal-target", onReveal);
+    return spectraBus.handle("work.reveal", onReveal);
   }, [artifactId, activeFileId, workbook.files]);
 
   useEffect(() => {

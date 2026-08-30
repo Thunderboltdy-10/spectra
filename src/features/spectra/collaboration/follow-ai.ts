@@ -18,6 +18,7 @@
  */
 
 import { useSyncExternalStore } from "react";
+import { spectraBus } from "../events";
 
 export type AiLocation = {
   actorId?: string;
@@ -68,7 +69,6 @@ function emit(): void {
 }
 
 function dispatchOpen(artifactId: string): void {
-  if (typeof window === "undefined") return;
   if (
     lastDispatchedArtifactId === artifactId &&
     Date.now() - programmaticOpenAt < PROGRAMMATIC_OPEN_MS
@@ -77,17 +77,14 @@ function dispatchOpen(artifactId: string): void {
   }
   lastDispatchedArtifactId = artifactId;
   programmaticOpenAt = Date.now();
-  window.dispatchEvent(
-    new CustomEvent("spectra:open-artifact", { detail: { artifactId } }),
-  );
+  void spectraBus.command("work.open", { workId: artifactId, surface: "panel" });
 }
 
 function dispatchSurface(location: AiSurfaceLocation): void {
-  if (typeof window === "undefined") return;
   const key = `${location.route}|${location.target ?? ""}`;
   if (lastDispatchedSurfaceKey === key) return;
   lastDispatchedSurfaceKey = key;
-  window.dispatchEvent(new CustomEvent("spectra:ai-navigate", { detail: location }));
+  void spectraBus.command("navigation.show", location);
 }
 
 function visibleLocation(): AiLocation | null {

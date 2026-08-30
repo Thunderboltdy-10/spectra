@@ -14,6 +14,7 @@ import {
   noteAiSurface,
   setFollowingAi,
 } from "../collaboration/follow-ai";
+import { spectraBus } from "../events";
 
 describe("follow AI", () => {
   beforeEach(() => {
@@ -22,10 +23,8 @@ describe("follow AI", () => {
 
   function openEvents(): string[] {
     const opened: string[] = [];
-    window.addEventListener("spectra:open-artifact", (event) => {
-      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail
-        ?.artifactId;
-      if (artifactId) opened.push(artifactId);
+    spectraBus.handle("work.open", ({ workId }) => {
+      opened.push(workId);
     });
     return opened;
   }
@@ -39,8 +38,8 @@ describe("follow AI", () => {
 
   it("carries a followed actor across app routes without moving a non-followed viewport", () => {
     const navigated: string[] = [];
-    window.addEventListener("spectra:ai-navigate", (event) => {
-      navigated.push((event as CustomEvent<{ route: string }>).detail.route);
+    spectraBus.handle("navigation.show", ({ route }) => {
+      navigated.push(route);
     });
     noteAiSurface({
       route: "settings",
@@ -56,8 +55,8 @@ describe("follow AI", () => {
 
   it("follows exactly one actor while another continues silently", () => {
     const navigated: string[] = [];
-    window.addEventListener("spectra:ai-navigate", (event) => {
-      navigated.push((event as CustomEvent<{ route: string }>).detail.route);
+    spectraBus.handle("navigation.show", ({ route }) => {
+      navigated.push(route);
     });
     noteAiSurface({ actorId: "run-a", route: "library", note: "Organizing" });
     noteAiSurface({ actorId: "run-b", route: "settings", note: "Configuring" });
@@ -72,8 +71,8 @@ describe("follow AI", () => {
 
   it("does not redispatch an unchanged followed surface", () => {
     const navigated: string[] = [];
-    window.addEventListener("spectra:ai-navigate", (event) => {
-      navigated.push((event as CustomEvent<{ route: string }>).detail.route);
+    spectraBus.handle("navigation.show", ({ route }) => {
+      navigated.push(route);
     });
     noteAiSurface({ route: "settings", target: "toolbar", note: "Editing" });
     setFollowingAi(true);

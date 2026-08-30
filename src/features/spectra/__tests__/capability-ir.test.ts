@@ -62,11 +62,15 @@ describe("Office formatting capability IR", () => {
   it("projects every definition into the existing workbar exactly once", () => {
     for (const { type, bindings } of SETS) {
       expect(bindings.every((binding) => binding.capabilityId)).toBe(true);
-      const formatting = formattingCapabilitiesFor(type).map((definition) => definition.id);
-      const projected = bindings.filter((binding) =>
-        formatting.includes(binding.capabilityId!),
+      const formatting = new Set<string>(
+        formattingCapabilitiesFor(type).map((definition) => definition.id),
       );
-      expect(projected.map((binding) => binding.capabilityId)).toEqual(formatting);
+      const projected = bindings.filter((binding) =>
+        formatting.has(binding.capabilityId!),
+      );
+      expect(projected.map((binding) => binding.capabilityId)).toEqual([
+        ...formatting,
+      ]);
       expect(new Set(projected.map((binding) => binding.id)).size).toBe(
         projected.length,
       );

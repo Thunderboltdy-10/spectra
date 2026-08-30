@@ -17,10 +17,10 @@ If two documents disagree, the higher one wins. If a Reformation document seems 
 
 | File | What it is | Read when |
 |---|---|---|
-| `CANON.md` | Binding decisions: Nova D1–D44 inherited + Reformation R1–R19 | Every session, first |
+| `CANON.md` | Binding decisions: Nova D1–D44 inherited + Reformation R1–R20 | Every session, first |
 | `STATE.md` | The living ledger: unit statuses, verifier verdicts, field notes | Every session, second |
 | `PROCESS.md` | Roles, unit lifecycle, launch prompt template, difficulty routing, sub-agent policy | Every session, third |
-| `ORCHESTRATION.md` | Orchestrated mode: the orchestrator's manual — board, model tiers, worktrees, leases, real-corpus gate | The orchestrator, every session; unit agents skim §5–§6 |
+| `ORCHESTRATION.md` | Historical record of the retired parallel campaign; §8 still documents the real-corpus protocol | Reference only; never use it to launch worktrees or parallel agents |
 | `VERIFICATION.md` | The verification methodology: layers, journey protocol, contract tests, budgets | Every verifier session; implementers skim §1–§2 |
 | `PRODUCT.md` | What Spectra is, who it is for, the experience laws (toggles, plain words, invisible Bridge) | Any unit touching UX |
 | `ARCHITECTURE-TRUTH.md` | Truth hierarchy, replica machine, Bridge engine, status system | P0, P1, P2, P8 |
@@ -32,7 +32,7 @@ If two documents disagree, the higher one wins. If a Reformation document seems 
 
 ## The phases
 
-Dependency order. Within a phase, units marked parallel-safe may run concurrently; verification units are executed by **different agents** than the implementation they verify (PROCESS §2).
+Dependency order. Units now run serially in the primary checkout; verification units are executed by **different agents** than the implementation they verify (PROCESS §2).
 
 ```
 P0  Stop the Bleed & Build the Rails   contained critical fixes, Convex I/O P0,
@@ -64,17 +64,15 @@ P8  The Release Gate                   chaos + multiplayer finale, release verdi
 - **Additional connectors** (Google, Notion, Quizlet) — the IR and lens architecture must be built so a connector is an adapter, but no connector beyond Office/ManageBac is implemented in this program.
 - **Local-model autocomplete** — cut from launch scope. The UX shell stays; the settings copy must stop implying a local model exists (finding AI-14).
 
-## How this runs now (orchestrated mode, since 2026-08-30)
+## How this runs now (serial single-checkout mode)
 
-Pablo pastes the single orchestrator launch prompt (ORCHESTRATION §1) into one GPT 5.6 Sol xhigh session and leaves. The orchestrator routes, launches, merges, and records delegated acceptance for everything remaining (CANON R18), following the board in ORCHESTRATION §3 and the Sol high/xhigh/max tiering in ORCHESTRATION §4. Pablo is touched exactly three times: the one-time second-account sign-in (ORCHESTRATION §9), anything hitting the R18 carve-outs (secrets, production deploys, destructive actions, gate-weakening), and the P8.V2 go/no-go signature. His L5 ten-minute passes are welcome any time but no longer block phases.
-
-The manual procedure below remains valid as fallback if orchestrated mode is suspended:
+The temporary orchestrated campaign is retired (CANON R20). Work only in this checkout on `main`, one implementation or verification unit at a time. Do not create `reform/*` worktrees or launch parallel implementation lanes unless Pablo explicitly changes this rule.
 
 1. Open `STATE.md` §0, find the lowest OPEN unit whose prerequisites are ACCEPTED.
-2. Check its **difficulty tag** and route it per PROCESS §4.2 (GPT 5.6 Sol high / xhigh / max since 2026-08-30).
-3. Paste the launch prompt template (PROCESS §5) filled in with the unit ID.
+2. Read its phase brief and difficulty tag; use PROCESS §4.2 to choose the appropriate effort.
+3. Execute that unit completely in the primary checkout and commit a coherent result.
 4. When the implementer reports done, launch the paired **verification unit with a different agent** — never the same session, never the same context. The verifier starts as a person-shaped walk (VERIFICATION L3). On fail they repair a holdable class in-session and retest to PASS (PROCESS §2 / R17). If the class is too complex to hold, they stop and leave a paste-ready prompt. Close-out is PROCESS §5.1.
-5. Accept only when the verifier's verdict is recorded in STATE (PASS after retest, or a REJECTED handoff you route).
+5. Accept only when the verifier's verdict is recorded in STATE and Pablo accepts it.
 6. Answer stop-and-ask items before relaunching. A pending question blocks the next unit. Relevant tests belong to their owning unit; the entire repository sweep waits until paired verification has run.
 
-Between units: commit. Never change branch in the main checkout (worktrees carry `reform/*` branches — ORCHESTRATION §6). Keys rotation (STATE §5) is Pablo's and blocks nothing except public exposure risk. Never two live-product verifiers at once; Hard units are serial.
+Between units: commit and leave `main` clean. Keys rotation (STATE §5) is Pablo's and blocks nothing except public exposure risk. Never two live-product verifiers at once; all units are serial.

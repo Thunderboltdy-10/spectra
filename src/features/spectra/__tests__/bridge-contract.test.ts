@@ -60,14 +60,18 @@ describe("N3 Bridge contract", () => {
     expect(source).toContain("decideMissingResourceAction(policy.structure");
     expect(source).toContain("actorKind: \"restore\"");
     expect(source).toContain("unavailableReason: \"restoring-from-cloud\"");
-    expect(source).toContain("idempotencyKey = `restore:${replica._id}:${cloud.contentHash}`");
+    expect(source).toContain("const idempotencyKey = await deriveSyncIdempotencyKey({");
+    expect(source).toContain('direction: "cloud-to-local"');
+    expect(source).toContain("targetRevision: cloud.contentHash");
   });
 
   it("keeps recovery payloads until F6 local verification completes", () => {
     const replicas = fs.readFileSync(path.join(process.cwd(), "convex/replicas.ts"), "utf8");
     const completeWrite = fs.readFileSync(path.join(process.cwd(), "convex/bridgeSync.ts"), "utf8");
     expect(replicas).not.toContain("if (!createdLocal) await ctx.db.patch(cloud._id, { payloadRef: undefined");
-    expect(completeWrite).toContain("if (strategyTransition.toPreset === \"device\")");
+    expect(completeWrite).toContain(
+      'if (strategyTransition.toPreset === "device" || strategyTransition.toPreset === "linked")',
+    );
     expect(completeWrite).toContain("payloadRef: undefined");
   });
 

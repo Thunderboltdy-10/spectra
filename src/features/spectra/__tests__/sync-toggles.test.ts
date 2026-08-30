@@ -268,8 +268,8 @@ describe("sync toggles (P1.I4)", () => {
     expect(humanizePublicFailure("strategy-transition-failed")).toBe(
       "The last storage change did not finish. The file on this computer was not removed.",
     );
-    expect(resource).toContain(
-      'humanizePublicFailure(strategyTransition.errorCode ?? "strategy-transition-failed")',
+    expect(resource).toMatch(
+      /humanizePublicFailure\(\s*strategyTransition\.errorCode\s*\?\?\s*"strategy-transition-failed",?\s*\)/,
     );
     expect(resource).not.toContain("The last storage change did not finish. {humanizePublicFailure");
   });

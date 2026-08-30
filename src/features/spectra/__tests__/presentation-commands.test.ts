@@ -256,8 +256,12 @@ describe("presentation command set", () => {
     const index = withoutNotesPage.findIndex((binding) => binding.id === "notes.set");
     expect(index).toBeGreaterThanOrEqual(0);
     const command = commandForBinding("presentation", withoutNotesPage[index]!, index);
-    expect(command.availability(fullContext()).state).toBe("disabled");
-    expect(command.availability(fullContext()).reason).toContain("no notes page");
+    const availability = command.availability(fullContext());
+    expect(availability.state).toBe("disabled");
+    if (availability.state !== "disabled") {
+      throw new Error("Speaker notes must be refused without a notes page.");
+    }
+    expect(availability.reason).toContain("no notes page");
   });
 
   it("enables adding a slide to a linked PowerPoint deck because the lens writes add-slide", () => {

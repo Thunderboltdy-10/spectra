@@ -28,6 +28,7 @@ import {
 } from "../references";
 import { referenceFallbackSvg } from "../references/export/reference-fallback";
 import { createWhiteboardNode } from "../whiteboard/model";
+import type { SpectraArtifactEmbed } from "../data/api";
 
 function reference(): ReferenceNode {
   return {
@@ -108,7 +109,7 @@ describe("P5.I3 embed convergence", () => {
   });
 
   it("does not offer a private attempt for an unpublished live quiz", () => {
-    const embed = {
+    const embed: SpectraArtifactEmbed = {
       ...reference(),
       source: {
         artifactId: "quiz-1",
@@ -122,7 +123,7 @@ describe("P5.I3 embed convergence", () => {
       embeddedQuizIsPublished({
         ...embed,
         source: {
-          ...embed.source,
+          ...embed.source!,
           snapshot: { content: { published: true, questions: [] } },
         },
       }),

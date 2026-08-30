@@ -149,7 +149,7 @@ function definitionsFor<T extends OfficeWorkType>(
   type: T,
   ids: readonly FormattingCapabilityLocalId[],
 ): readonly CapabilityDefinition<T>[] {
-  return ids.map((localId) => {
+  const definitions = ids.map((localId) => {
     const id = `${type}.${localId}` as const;
     const native = nativeFor(type, localId);
     return {
@@ -183,8 +183,13 @@ function definitionsFor<T extends OfficeWorkType>(
         : type === "sheets"
           ? { manifestOperation: "format_range" }
           : {}),
-    } satisfies CapabilityDefinition<T>;
+    };
   });
+  // TypeScript does not reduce a conditional property through a generic even
+  // though T is constrained to OfficeWorkType. This generator creates `id`
+  // and `native` from the same T, so preserve that correlation at this one
+  // construction boundary instead of widening CapabilityDefinition globally.
+  return definitions as unknown as readonly CapabilityDefinition<T>[];
 }
 
 export const DOCUMENT_FORMATTING_CAPABILITIES = definitionsFor(

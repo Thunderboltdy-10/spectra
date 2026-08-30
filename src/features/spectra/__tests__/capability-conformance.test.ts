@@ -81,7 +81,7 @@ describe("P3.V1 protocol conformance", () => {
       for (const definition of officeCapabilitiesFor(type)) {
         const delta = definition.native?.delta;
         if (!delta) continue;
-        expect(LENS_KINDS[type].has(delta)).toBe(true);
+        expect((LENS_KINDS[type] as ReadonlySet<string>).has(delta)).toBe(true);
       }
     }
     expect(DOCX_LENS_DELTA_KINDS).not.toContain("format-fiction");

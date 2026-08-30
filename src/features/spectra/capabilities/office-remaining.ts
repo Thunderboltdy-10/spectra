@@ -49,7 +49,7 @@ function defineRemaining<T extends OfficeWorkType>(
   type: T,
   specs: readonly Spec<T>[],
 ): CapabilityDefinition<T>[] {
-  return specs.map(([localId, description, options = {}]) => {
+  const definitions = specs.map(([localId, description, options = {}]) => {
     const requires =
       options.requires === false ? undefined : (options.requires ?? "edit");
     let native: NativeCapability<T> | undefined;
@@ -84,8 +84,12 @@ function defineRemaining<T extends OfficeWorkType>(
       },
       ...(requires ? { requires } : {}),
       ...(options.manifest ? { manifestOperation: options.manifest } : {}),
-    } satisfies CapabilityDefinition<T>;
+    };
   });
+  // `type`, the capability id, and the native delta are produced together.
+  // Keep the assertion local because TypeScript cannot simplify the generic
+  // conditional `CapabilityDefinition<T>["native"]` at this boundary.
+  return definitions as unknown as CapabilityDefinition<T>[];
 }
 
 function sharedFamily<T extends OfficeWorkType>(

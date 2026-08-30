@@ -1,4 +1,6 @@
-# ORCHESTRATION — running the Reformation without Pablo in the loop
+# ORCHESTRATION — retired campaign record
+
+> **RETIRED 2026-08-30 by CANON R20.** This file preserves the historical board, real-corpus protocol, and evidence trail. It is not an active launch manual. Do not create worktrees, parallelize units, grant leases, or record new delegated acceptances from these instructions.
 
 **Adopted 2026-08-30 (Pablo).** From here to the release verdict, the program runs in **orchestrated mode**: one long-lived orchestrator agent replaces Pablo as router, launcher, merger, and (delegated) acceptor. Pablo's standing instruction: *"apart from any issues it has, I can just leave it running and it will finish everything."* Everything in README/CANON/STATE/PROCESS/VERIFICATION remains binding; this document adds the machinery. Where this document assigns something to "the orchestrator" that older documents assign to "Pablo", this document wins (CANON R18).
 

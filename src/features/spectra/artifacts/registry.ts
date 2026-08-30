@@ -1393,15 +1393,23 @@ export function requireArtifactTypeManifest(typeKey: string) {
 
 export function validateArtifactContent(typeKey: string, content: unknown) {
   const manifest = requireArtifactTypeManifest(typeKey);
+  const canNormalizeSheets =
+    content !== null && typeof content === "object" && !Array.isArray(content);
   return manifest.schemas.content.safeParse(
-    typeKey === "sheets" ? normalizeSheetsContent(content) : content,
+    typeKey === "sheets" && canNormalizeSheets
+      ? normalizeSheetsContent(content)
+      : content,
   );
 }
 
 export function enumerateArtifactRegions(typeKey: string, content: unknown) {
   const manifest = requireArtifactTypeManifest(typeKey);
+  const canNormalizeSheets =
+    content !== null && typeof content === "object" && !Array.isArray(content);
   const parsed = manifest.schemas.content.parse(
-    typeKey === "sheets" ? normalizeSheetsContent(content) : content,
+    typeKey === "sheets" && canNormalizeSheets
+      ? normalizeSheetsContent(content)
+      : content,
   );
   const regions = manifest.regions(parsed);
   const ids = new Set<string>();

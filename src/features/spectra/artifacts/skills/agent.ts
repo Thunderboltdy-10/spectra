@@ -30,11 +30,12 @@ export const agentSkill = defineArtifactSkill({
     "release notes",
   ],
   operations: [
-    "Inspect configuration, resource coverage, routing evidence, evals, release health, and privacy-safe aggregate weaknesses.",
-    "Rewrite purpose or instructions, refine scope and behavior, bind permissioned resources, define typed skills, configure tool approvals, and add representative routing examples.",
-    "Generate quality, regression, adversarial, privacy, citation, and resource-leak evaluations with explicit success criteria.",
-    "Test a draft, explain failures, propose a reviewable improvement, compare against the current release, prepare release notes, and publish only after gates pass.",
-    "Recommend or evaluate automatic routing without interrupting the user; a low-confidence decision must retain ordinary Spectra.",
+    "Inspect the adaptive mission, reviewed sources, competence gaps, compiled operating brief, and skill versions.",
+    "Add, review, or remove quarantined source bindings; compile, approve, reject, edit, duplicate, or remove a typed skill.",
+    "Inspect the generated layered suite; run it against the exact draft; filter case results; inspect judge, score, latency, tokens, response excerpt, and limitations; compare durable runs.",
+    "Compare immutable release snapshots and linked evaluations; release to the creator, on request, or published; promote, roll back, suspend, or deprecate with the declared authority gate.",
+    "Edit positive and negative routing evidence, enable or disable automatic routing, and preview the production routing decision; low confidence retains ordinary Spectra.",
+    "Inspect privacy-safe aggregate usage and consented feedback only. Private prompts, responses, threads, memory, and provider-private traces are unavailable.",
   ],
   preservationRules: [
     "Never broaden resource access beyond the invoking actor, copy inaccessible resource content, expose private invocation data, or weaken creator-only deletion.",
@@ -46,6 +47,8 @@ export const agentSkill = defineArtifactSkill({
     "Run schema, instruction, audience, tool, resource-permission, routing, privacy, regression, jailbreak, citation, usefulness, and source-leak gates before publishing.",
     "Verify every enabled tool is allowlisted with least privilege and an appropriate approval mode, every resource remains accessible for its declared audience, and every required eval passes.",
     "Verify the portable manifest contains no secrets, prompts, threads, memory, private outputs, or copied resource content.",
+    "Verify edited skills increment their version, duplicated skills start at version one with a new identity, and published releases remain immutable.",
+    "Verify run and release comparisons say when a snapshot, judge, limitation record, or regression baseline is unavailable rather than substituting zero or success.",
   ],
   approvals: [
     "Require confirmation for consequential tools, broader sharing or publication, sensitive resource bindings, audience expansion, model-policy changes, or destructive configuration rewrites.",

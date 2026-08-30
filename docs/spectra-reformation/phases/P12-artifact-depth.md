@@ -69,3 +69,15 @@ Same protocol for code/planner/agent/timetable + the Office re-audit closures. B
 ## Exit gate
 
 All seven inventories exist and are closed (ship/refuse/defer-with-owner — zero silent gaps); ghost gate green across the grown catalog; both VUs PASS; Pablo pass. The IR census in each inventory header records the new per-type capability counts as the standing baseline.
+
+## P12.I6 implementation log — 2026-08-31
+
+- Status: IMPLEMENTED. No acceptance claimed; P12.V2 remains the independent verifier.
+- Inventoried Agent Foundry against OpenAI Agent Builder/Evals, LangSmith, and Anthropic skill workflows; inventoried Timetable against Google Calendar, Outlook Calendar, and Fantastical.
+- Split Agent and Timetable out of `studios.ts` into per-type capability registries while retaining all stable P3 ids.
+- Agent IR grew from 7 to 42 definitions; Foundry now covers detailed/limited evaluation evidence, run/release comparison, versioned skill editing, staged release controls, production routing preview, and explicit privacy/trace/export refusals.
+- Timetable IR grew from 8 to 47 definitions; the studio now covers owned layers, private source overlays, editable recurrence/occurrence exceptions, CSV/ICS export, and Print / save PDF with source-authority refusals.
+- Agent and Timetable manifests now use version 2 schemas with explicit idempotent v1-to-v2 migrations; both artifact skills gained matching AI-plane operations.
+- P13.I3 ownership held: no `calendar/domain/*` or `calendarItems` temporal-projection code changed.
+- Verification: 9 focused Vitest files / 90 tests, TypeScript, capability ghost gate, scoped ESLint with zero warnings, copy, design-token, architecture, and diff checks pass.
+- No live leases, servers, browser, cloud Convex, Office/Bridge, primary checkout, STATE, or verdicts were touched.

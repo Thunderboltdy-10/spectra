@@ -3,6 +3,14 @@ import { artifactContentSchemas } from "./schemas";
 import { CODE_CONTENT_SCHEMA_VERSION } from "./schema/code";
 import { normalizeSheetsContent } from "../sheets/model";
 import {
+  migrateAgentContentV1ToV2,
+  normalizeAgentArtifactContent,
+} from "./schema/agent";
+import {
+  migrateTimetableContentV1ToV2,
+  normalizeTimetableArtifactContent,
+} from "./schema/timetable";
+import {
   ARTIFACT_TYPE_KEYS,
   type ArtifactSkill,
   type ArtifactTypeKey,
@@ -1307,6 +1315,8 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
           ? 2
           : typeKey === "sheets"
             ? 4
+            : typeKey === "agent" || typeKey === "timetable"
+              ? 2
             : typeKey === "flashcard_deck" ||
                 typeKey === "quiz" ||
                 typeKey === "planner_task"
@@ -1315,6 +1325,17 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
                 ? CODE_CONTENT_SCHEMA_VERSION
                 : 1,
       content: artifactContentSchemas[typeKey],
+      ...(typeKey === "agent"
+        ? {
+            normalize: normalizeAgentArtifactContent,
+            migrations: { 1: migrateAgentContentV1ToV2 },
+          }
+        : typeKey === "timetable"
+          ? {
+              normalize: normalizeTimetableArtifactContent,
+              migrations: { 1: migrateTimetableContentV1ToV2 },
+            }
+          : {}),
     },
     renderers: {
       full: `${typeKey}:full`,
@@ -1422,10 +1443,13 @@ export function validateArtifactContent(typeKey: string, content: unknown) {
   const manifest = requireArtifactTypeManifest(typeKey);
   const canNormalizeSheets =
     content !== null && typeof content === "object" && !Array.isArray(content);
-  return manifest.schemas.content.safeParse(
-    typeKey === "sheets" && canNormalizeSheets
+  const normalized = manifest.schemas.normalize
+    ? manifest.schemas.normalize(content)
+    : typeKey === "sheets" && canNormalizeSheets
       ? normalizeSheetsContent(content)
-      : content,
+      : content;
+  return manifest.schemas.content.safeParse(
+    normalized,
   );
 }
 
@@ -1433,10 +1457,13 @@ export function enumerateArtifactRegions(typeKey: string, content: unknown) {
   const manifest = requireArtifactTypeManifest(typeKey);
   const canNormalizeSheets =
     content !== null && typeof content === "object" && !Array.isArray(content);
-  const parsed = manifest.schemas.content.parse(
-    typeKey === "sheets" && canNormalizeSheets
+  const normalized = manifest.schemas.normalize
+    ? manifest.schemas.normalize(content)
+    : typeKey === "sheets" && canNormalizeSheets
       ? normalizeSheetsContent(content)
-      : content,
+      : content;
+  const parsed = manifest.schemas.content.parse(
+    normalized,
   );
   const regions = manifest.regions(parsed);
   const ids = new Set<string>();

@@ -279,3 +279,39 @@ export function exportTimetableIcs(
   lines.push("END:VCALENDAR");
   return lines.join("\r\n");
 }
+
+function escapeCsv(value: string | number | boolean | undefined) {
+  const text = value === undefined ? "" : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+/** Spreadsheet-friendly export of the same visible event set as ICS. Source
+ * authority stays explicit and personal overlay times are exported as the
+ * viewer currently sees them without pretending to change provider truth. */
+export function exportTimetableCsv(events: readonly TimetableEvent[]) {
+  const rows = [
+    [
+      "Title",
+      "Start",
+      "End",
+      "All day",
+      "Timezone",
+      "Location",
+      "Recurrence",
+      "Source",
+      "Notes",
+    ],
+    ...events.map((event) => [
+      event.title,
+      event.overlay?.alternativeStart ?? event.start,
+      event.overlay?.alternativeEnd ?? event.end,
+      event.allDay,
+      event.timezone ?? "",
+      event.location ?? "",
+      event.recurrence ?? "",
+      event.sourceRef ?? event.provenance?.source ?? "Spectra",
+      event.overlay?.note ?? event.notes ?? "",
+    ]),
+  ];
+  return `${rows.map((row) => row.map(escapeCsv).join(",")).join("\r\n")}\r\n`;
+}

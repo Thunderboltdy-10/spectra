@@ -82,6 +82,7 @@ export type TimetableEventOverlay = NonNullable<TimetableEvent["overlay"]>;
 export type TimetablePersonalState = {
   view: NonNullable<TimetableContent["view"]>;
   layerVisibility: Record<string, boolean>;
+  layerColors: Record<string, string>;
   privateLayers: TimetableLayer[];
   privateEvents: TimetableEvent[];
   eventOverlays: Record<string, TimetableEventOverlay>;
@@ -103,6 +104,12 @@ const layerKinds = new Set<TimetableLayerKind>([
   "study",
 ]);
 const layerColors = ["#26a879", "#7865ea", "#f2ad2e", "#f07157", "#4a91de"];
+export const TIMETABLE_DEFAULT_LAYER_COLORS = {
+  shared: layerColors[0]!,
+  study: layerColors[1]!,
+  tasks: layerColors[2]!,
+  personal: layerColors[4]!,
+} as const;
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -234,6 +241,114 @@ function recurrenceParts(value: string) {
       )
       .map(([key, setting]) => [key.toUpperCase(), setting.toUpperCase()]),
   );
+}
+
+export const TIMETABLE_WEEKDAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"] as const;
+export type TimetableWeekday = (typeof TIMETABLE_WEEKDAYS)[number];
+export type TimetableRecurrenceDraft = {
+  frequency: "none" | "daily" | "weekly" | "monthly" | "custom";
+  interval: number;
+  weekdays: TimetableWeekday[];
+  end:
+    | { kind: "never" }
+    | { kind: "date"; until: string }
+    | { kind: "count"; count: number };
+  editable: boolean;
+};
+
+/** Parses the safe editable RRULE subset. Unknown keys and unsupported
+ * frequencies remain custom so the UI preserves them instead of flattening
+ * provider recurrence into a plausible but false preset. */
+export function parseTimetableRecurrence(value?: string): TimetableRecurrenceDraft {
+  if (!value) {
+    return { frequency: "none", interval: 1, weekdays: [], end: { kind: "never" }, editable: true };
+  }
+  const rule = recurrenceParts(value);
+  const allowed = new Set(["FREQ", "INTERVAL", "BYDAY", "COUNT", "UNTIL"]);
+  const keys = value
+    .split(";")
+    .map((part) => part.split("=", 1)[0]?.toUpperCase() ?? "");
+  const malformed = value
+    .split(";")
+    .some((part) => !/^[A-Za-z]+=[^=;]+$/.test(part));
+  const unknown = keys.some((key) => !allowed.has(key));
+  const duplicate = new Set(keys).size !== keys.length;
+  const frequency =
+    rule.FREQ === "DAILY"
+      ? "daily"
+      : rule.FREQ === "WEEKLY"
+        ? "weekly"
+        : rule.FREQ === "MONTHLY"
+          ? "monthly"
+          : "custom";
+  const parsedInterval = Number.parseInt(rule.INTERVAL ?? "1", 10);
+  const validInterval =
+    rule.INTERVAL === undefined ||
+    (/^\d+$/.test(rule.INTERVAL) && parsedInterval >= 1 && parsedInterval <= 365);
+  const interval = validInterval ? parsedInterval : 1;
+  const weekdayValues = rule.BYDAY?.split(",") ?? [];
+  const validWeekdays =
+    rule.BYDAY === undefined ||
+    (frequency === "weekly" &&
+      weekdayValues.length > 0 &&
+      weekdayValues.every((entry) =>
+        (TIMETABLE_WEEKDAYS as readonly string[]).includes(entry),
+      ));
+  const weekdays = weekdayValues.filter((entry): entry is TimetableWeekday =>
+    (TIMETABLE_WEEKDAYS as readonly string[]).includes(entry),
+  );
+  const parsedCount = Number.parseInt(rule.COUNT ?? "1", 10);
+  const validCount =
+    rule.COUNT === undefined ||
+    (/^\d+$/.test(rule.COUNT) && parsedCount >= 1 && parsedCount <= 500);
+  const untilMatch = rule.UNTIL?.match(/^(\d{4})(\d{2})(\d{2})T235959Z$/);
+  const untilDate = untilMatch?.slice(1).join("-") ?? "";
+  const parsedUntil = Date.parse(`${untilDate}T00:00:00.000Z`);
+  const validUntil =
+    rule.UNTIL === undefined ||
+    (Boolean(untilMatch) &&
+      Number.isFinite(parsedUntil) &&
+      new Date(parsedUntil).toISOString().slice(0, 10) === untilDate);
+  const conflictingEnd = rule.COUNT !== undefined && rule.UNTIL !== undefined;
+  const end: TimetableRecurrenceDraft["end"] = rule.COUNT
+    ? { kind: "count", count: validCount ? parsedCount : 1 }
+    : rule.UNTIL
+      ? {
+          kind: "date",
+          until: untilDate,
+        }
+      : { kind: "never" };
+  return {
+    frequency,
+    interval,
+    weekdays,
+    end,
+    editable:
+      !malformed &&
+      !unknown &&
+      !duplicate &&
+      frequency !== "custom" &&
+      validInterval &&
+      validWeekdays &&
+      validCount &&
+      validUntil &&
+      !conflictingEnd,
+  };
+}
+
+export function serializeTimetableRecurrence(draft: TimetableRecurrenceDraft) {
+  if (draft.frequency === "none") return undefined;
+  if (draft.frequency === "custom" || !draft.editable)
+    throw new Error("Imported custom recurrence must be changed in its source.");
+  const parts = [`FREQ=${draft.frequency.toUpperCase()}`];
+  if (draft.interval > 1) parts.push(`INTERVAL=${Math.max(1, Math.min(365, Math.round(draft.interval)))}`);
+  if (draft.frequency === "weekly" && draft.weekdays.length)
+    parts.push(`BYDAY=${[...new Set(draft.weekdays)].join(",")}`);
+  if (draft.end.kind === "count")
+    parts.push(`COUNT=${Math.max(1, Math.min(500, Math.round(draft.end.count)))}`);
+  if (draft.end.kind === "date")
+    parts.push(`UNTIL=${draft.end.until.replaceAll("-", "")}T235959Z`);
+  return parts.join(";");
 }
 
 function localCalendarDate(value: string, timezone: string) {
@@ -481,7 +596,7 @@ export function normalizeTimetableContent(value: unknown): TimetableContent {
         name: "Classes",
         kind: "class",
         visible: true,
-        color: "#26a879",
+        color: TIMETABLE_DEFAULT_LAYER_COLORS.shared,
         authority: "school",
       },
       {
@@ -489,7 +604,7 @@ export function normalizeTimetableContent(value: unknown): TimetableContent {
         name: "Study blocks",
         kind: "study",
         visible: true,
-        color: "#7865ea",
+        color: TIMETABLE_DEFAULT_LAYER_COLORS.study,
         authority: "user",
       },
       {
@@ -497,7 +612,7 @@ export function normalizeTimetableContent(value: unknown): TimetableContent {
         name: "Tasks & deadlines",
         kind: "tasks",
         visible: true,
-        color: "#f2ad2e",
+        color: TIMETABLE_DEFAULT_LAYER_COLORS.tasks,
         authority: "workspace",
       },
     );
@@ -834,7 +949,7 @@ function defaultPersonalLayers(): TimetableLayer[] {
       name: "Personal",
       kind: "personal",
       visible: true,
-      color: "#4a91de",
+      color: TIMETABLE_DEFAULT_LAYER_COLORS.personal,
       authority: "user",
       private: true,
     },
@@ -843,7 +958,7 @@ function defaultPersonalLayers(): TimetableLayer[] {
       name: "Study blocks",
       kind: "study",
       visible: true,
-      color: "#7865ea",
+      color: TIMETABLE_DEFAULT_LAYER_COLORS.study,
       authority: "user",
       private: true,
     },
@@ -908,6 +1023,17 @@ export function normalizeTimetablePersonalState(
       })
       .slice(0, 1_000),
   );
+  const layerColors = Object.fromEntries(
+    Object.entries(record(input.layerColors))
+      .filter(
+        (entry): entry is [string, string] =>
+          entry[0].trim().length > 0 &&
+          entry[0].length <= 180 &&
+          typeof entry[1] === "string" &&
+          /^#[0-9a-fA-F]{6}$/.test(entry[1]),
+      )
+      .slice(0, 1_000),
+  );
   const eventOverlays = Object.fromEntries(
     Object.entries(record(input.eventOverlays))
       .filter(([eventId]) => eventId.trim().length > 0 && eventId.length <= 180)
@@ -918,6 +1044,7 @@ export function normalizeTimetablePersonalState(
   return {
     view: normalized.view!,
     layerVisibility,
+    layerColors,
     privateLayers,
     privateEvents: normalized.events
       .filter((event) => privateLayerIds.has(event.layerId))
@@ -943,10 +1070,12 @@ export function mergeTimetableState(
       ...shared.layers.map((layer) => ({
         ...layer,
         visible: personal.layerVisibility[layer.id] ?? layer.visible,
+        color: personal.layerColors[layer.id] ?? layer.color,
       })),
       ...personal.privateLayers.map((layer) => ({
         ...layer,
         visible: personal.layerVisibility[layer.id] ?? layer.visible,
+        color: personal.layerColors[layer.id] ?? layer.color,
       })),
     ],
     events: [
@@ -985,6 +1114,7 @@ export function partitionTimetableState(value: unknown) {
         layerVisibility: Object.fromEntries(
           normalized.layers.map((layer) => [layer.id, layer.visible]),
         ),
+        layerColors: {},
         privateLayers,
         privateEvents: normalized.events.filter((event) =>
           privateLayerIds.has(event.layerId),

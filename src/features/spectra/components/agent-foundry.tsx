@@ -56,6 +56,8 @@ import {
   compileRuntimePackage,
   compilerProgress,
   compilerStatusLabel,
+  createSkill,
+  decideRouting,
   detectSkillOverlap,
   dismissSection,
   isEmptyValue,
@@ -63,6 +65,7 @@ import {
   planFacetWeights,
   projectFoundryToLegacy,
   restoreSection,
+  reviseSkill,
   skillIssues,
   summarizeEvidence,
   type AgentFoundryContent,
@@ -83,6 +86,7 @@ import {
   getSpectraAgentAnalytics,
   getSpectraAgentEvalRuns,
   getSpectraAgentReleases,
+  getSpectraArtifactVersions,
   getSpectraFoundryCompilerJob,
   manageSpectraAgentRelease,
   nextSpectraFoundrySection,
@@ -90,6 +94,7 @@ import {
   type SpectraAgentAnalytics,
   type SpectraAgentEvalRun,
   type SpectraAgentRelease,
+  type SpectraArtifactVersion,
   type SpectraArtifact,
   type SpectraFoundryCompilerJob,
 } from "../data/api";
@@ -829,9 +834,13 @@ function ChecksView({
   loading: boolean;
 }) {
   const [openRunId, setOpenRunId] = useState<string | null>(null);
-  const [showPassed, setShowPassed] = useState(false);
+  const [caseFilter, setCaseFilter] = useState<"failures" | "required" | "all">("failures");
+  const [comparisonRunId, setComparisonRunId] = useState<string | null>(null);
   const activeId = openRunId ?? runs[0]?._id ?? null;
   const active = runs.find((run) => run._id === activeId) ?? null;
+  const comparison =
+    runs.find((run) => run._id === comparisonRunId && run._id !== activeId) ??
+    null;
 
   const layers = useMemo(() => {
     const counts = new Map<string, number>();
@@ -844,7 +853,35 @@ function ChecksView({
 
   const cases = active?.results ?? [];
   const failed = cases.filter((entry) => !entry.passed);
-  const shown = showPassed ? cases : failed;
+  const shown =
+    caseFilter === "all"
+      ? cases
+      : caseFilter === "required"
+        ? cases.filter((entry) => entry.required)
+        : failed;
+  const comparisonSummary = (() => {
+    if (!active || !comparison) return null;
+    const baseline = new Map(comparison.results.map((entry) => [entry.caseId, entry]));
+    const candidate = new Map(active.results.map((entry) => [entry.caseId, entry]));
+    let gains = 0;
+    let regressions = 0;
+    let added = 0;
+    for (const [caseId, result] of candidate) {
+      const previous = baseline.get(caseId);
+      if (!previous) added += 1;
+      else if (!previous.passed && result.passed) gains += 1;
+      else if (previous.passed && !result.passed) regressions += 1;
+    }
+    const removed = [...baseline.keys()].filter((caseId) => !candidate.has(caseId)).length;
+    const totals = (run: SpectraAgentEvalRun) => ({
+      latency: run.results.reduce((total, result) => total + (result.latencyMs ?? 0), 0),
+      tokens: run.results.reduce(
+        (total, result) => total + (result.inputTokens ?? 0) + (result.outputTokens ?? 0),
+        0,
+      ),
+    });
+    return { gains, regressions, added, removed, active: totals(active), baseline: totals(comparison) };
+  })();
 
   return (
     <>
@@ -930,6 +967,20 @@ function ChecksView({
                   >
                     {run._id === activeId ? "Hide" : "Open"}
                   </button>
+                  {run._id !== activeId ? (
+                    <button
+                      type="button"
+                      className="foundry-text-button"
+                      aria-pressed={run._id === comparisonRunId}
+                      onClick={() =>
+                        setComparisonRunId((current) =>
+                          current === run._id ? null : run._id,
+                        )
+                      }
+                    >
+                      {run._id === comparisonRunId ? "Stop comparing" : "Compare"}
+                    </button>
+                  ) : null}
                 </li>
               );
             })}
@@ -943,6 +994,46 @@ function ChecksView({
                 ? `Every check passed. Average score ${active.averageScore.toFixed(2)} against a ${active.threshold.toFixed(2)} threshold.`
                 : `${failed.length} of ${active.caseCount} check${active.caseCount === 1 ? "" : "s"} failed. Average score ${active.averageScore.toFixed(2)} against a ${active.threshold.toFixed(2)} threshold.`}
             </p>
+            <p className="foundry-ledger-note">
+              Verdict strength: {active.verificationStrength ?? "not recorded"}.{" "}
+              {active.provider} · {active.modelId}.
+            </p>
+            {comparison && comparisonSummary ? (
+              <section className="foundry-run-comparison" aria-label="Run comparison">
+                <div className="foundry-block-head">
+                  <h4>Compared with {whenText(comparison.completedAt ?? comparison.startedAt)}</h4>
+                  <span className="foundry-block-count">
+                    {comparison.passedCount}/{comparison.caseCount} passed
+                  </span>
+                </div>
+                <dl className="foundry-ledger-stats">
+                  <div><dt>Gains</dt><dd>{comparisonSummary.gains}</dd></div>
+                  <div><dt>Regressions</dt><dd>{comparisonSummary.regressions}</dd></div>
+                  <div><dt>Added / removed</dt><dd>{comparisonSummary.added} / {comparisonSummary.removed}</dd></div>
+                  <div>
+                    <dt>Latency</dt>
+                    <dd>{(comparisonSummary.active.latency / 1_000).toFixed(1)}s <small>vs {(comparisonSummary.baseline.latency / 1_000).toFixed(1)}s</small></dd>
+                  </div>
+                  <div>
+                    <dt>Tokens</dt>
+                    <dd>{comparisonSummary.active.tokens} <small>vs {comparisonSummary.baseline.tokens}</small></dd>
+                  </div>
+                </dl>
+              </section>
+            ) : null}
+            <div className="foundry-case-filters" role="group" aria-label="Filter run cases">
+              {(["failures", "required", "all"] as const).map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  className={`foundry-chip${caseFilter === filter ? " is-active" : ""}`}
+                  aria-pressed={caseFilter === filter}
+                  onClick={() => setCaseFilter(filter)}
+                >
+                  {filter === "failures" ? `Failures (${failed.length})` : filter === "required" ? "Required" : "All cases"}
+                </button>
+              ))}
+            </div>
             <ul className="foundry-skill-list">
               {shown.map((entry) => (
                 <li
@@ -951,8 +1042,7 @@ function ChecksView({
                 >
                   <div className="foundry-skill-head">
                     <span className="foundry-skill-name">
-                      {LAYER_LABEL[entry.category as EvaluationLayer] ??
-                        entry.category}
+                      {LAYER_LABEL[(entry.layer ?? entry.category) as EvaluationLayer] ?? entry.category}
                     </span>
                     <span className="foundry-skill-state">
                       {entry.passed ? "passed" : "failed"} ·{" "}
@@ -969,24 +1059,31 @@ function ChecksView({
                       {entry.responseExcerpt.length > 320 ? "…" : ""}
                     </p>
                   )}
+                  <p className="foundry-ledger-note">
+                    Judge: {entry.judgedBy?.replaceAll("_", " ") ?? "not recorded"} ·{" "}
+                    {(entry.latencyMs / 1_000).toFixed(2)}s ·{" "}
+                    {(entry.inputTokens ?? 0) + (entry.outputTokens ?? 0)} tokens
+                  </p>
                 </li>
               ))}
             </ul>
-            {cases.length > failed.length && (
-              <button
-                type="button"
-                className="foundry-text-button"
-                onClick={() => setShowPassed((value) => !value)}
-              >
-                {showPassed
-                  ? "Failures only"
-                  : `Show the ${cases.length - failed.length} that passed`}
-              </button>
-            )}
-            <p className="foundry-ledger-note">
-              Spectra also records how each answer was judged and what the run
-              could not establish. This screen does not read those yet.
-            </p>
+            {shown.length === 0 ? (
+              <p className="foundry-empty">No cases match this filter.</p>
+            ) : null}
+            <section className="foundry-evaluation-limitations">
+              <h4>What this run could not establish</h4>
+              {active.limitations?.length ? (
+                <ul className="foundry-gap-list">
+                  {active.limitations.map((limitation, index) => (
+                    <li key={`${limitation.kind}-${index}`}>{limitation.detail}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="foundry-ledger-note">
+                  No limitation record was returned for this run. That is missing evidence, not proof that the run had no limitations.
+                </p>
+              )}
+            </section>
           </>
         )}
       </section>
@@ -1042,6 +1139,8 @@ export function AgentFoundry({
     useState<EvidenceBinding["kind"]>("rubric");
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [releases, setReleases] = useState<SpectraAgentRelease[]>([]);
+  const [artifactVersions, setArtifactVersions] = useState<SpectraArtifactVersion[]>([]);
+  const [releaseComparison, setReleaseComparison] = useState<[string, string]>(["", ""]);
   const [evalRuns, setEvalRuns] = useState<SpectraAgentEvalRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(!readOnly);
   const [currentHash, setCurrentHash] = useState("");
@@ -1055,6 +1154,16 @@ export function AgentFoundry({
   >("idle");
   const [compilerJob, setCompilerJob] =
     useState<SpectraFoundryCompilerJob | null>(null);
+  const [routingPreviewRequest, setRoutingPreviewRequest] = useState("");
+  const [skillEditor, setSkillEditor] = useState<{
+    skillId: string;
+    name: string;
+    purpose: string;
+    triggers: string;
+    procedure: string;
+    output: string;
+    evaluationInputs: string;
+  } | null>(null);
   const streamEnd = useRef<HTMLDivElement>(null);
   const reconciled = useRef<string | null>(null);
 
@@ -1135,7 +1244,10 @@ export function AgentFoundry({
   useEffect(() => {
     if (view !== "releases" || readOnly) return;
     void reloadRuns();
-  }, [readOnly, reloadRuns, view]);
+    void getSpectraArtifactVersions(artifactId, 50)
+      .then((response) => setArtifactVersions(response.versions))
+      .catch(() => undefined);
+  }, [artifactId, readOnly, reloadRuns, view]);
 
   const commit = useCallback(
     (next: AgentFoundryContent) => {
@@ -1401,6 +1513,101 @@ export function AgentFoundry({
     setProposed((current) => current.filter((entry) => entry.id !== skillId));
   }
 
+  function editSkill(skill: SpectraSkill) {
+    const triggerLines = skill.triggers.flatMap((trigger) => {
+      if (trigger.kind === "intent") return [trigger.description, ...trigger.examples];
+      if (trigger.kind === "keyword") return trigger.terms;
+      if (trigger.kind === "input_type") return trigger.types;
+      if (trigger.kind === "work_type") return trigger.workTypes;
+      return ["Always use this skill"];
+    });
+    setSkillEditor({
+      skillId: skill.id,
+      name: skill.name,
+      purpose: skill.purpose,
+      triggers: [...new Set(triggerLines)].join("\n"),
+      procedure: skill.procedure
+        .slice()
+        .sort((left, right) => left.order - right.order)
+        .map((step) => step.action)
+        .join("\n"),
+      output: skill.outputContract.shape,
+      evaluationInputs: skill.evaluationCases.map((entry) => entry.input).join("\n"),
+    });
+  }
+
+  function saveSkillEdit() {
+    if (!skillEditor) return;
+    const current = foundry.skills.find((entry) => entry.id === skillEditor.skillId);
+    if (!current) return;
+    const lines = (value: string) =>
+      value.split("\n").map((entry) => entry.trim()).filter(Boolean);
+    const triggerLines = lines(skillEditor.triggers);
+    const procedureLines = lines(skillEditor.procedure);
+    const evaluationLines = lines(skillEditor.evaluationInputs);
+    const now = Date.now();
+    const revised = reviseSkill(
+      current,
+      {
+        name: skillEditor.name.trim(),
+        purpose: skillEditor.purpose.trim(),
+        triggers: triggerLines.length
+          ? [{ kind: "intent", description: triggerLines[0]!, examples: triggerLines.slice(1) }]
+          : [],
+        procedure: procedureLines.map((action, index) => ({ order: index + 1, action })),
+        outputContract: { ...current.outputContract, shape: skillEditor.output.trim() },
+        evaluationCases: evaluationLines.map((input, index) =>
+          current.evaluationCases[index]
+            ? { ...current.evaluationCases[index]!, input }
+            : {
+                id: identifier("skill-check"),
+                layer: "held_out" as const,
+                input,
+                expectation: {
+                  kind: "judged" as const,
+                  criteria: `The response follows ${skillEditor.output.trim() || "the skill output contract"}.`,
+                  externalTruth: false,
+                },
+                required: true,
+              },
+        ),
+        status: "verified",
+      },
+      now,
+    );
+    const issues = skillIssues(revised);
+    if (issues.length) {
+      setNotice(issues[0]);
+      return;
+    }
+    patchFoundry({
+      skills: foundry.skills.map((entry) =>
+        entry.id === revised.id ? revised : entry,
+      ),
+    });
+    setSkillEditor(null);
+    setNotice(`${revised.name} is now version ${revised.version}.`);
+  }
+
+  function duplicateSkill(skill: SpectraSkill) {
+    const now = Date.now();
+    const copy = createSkill(
+      {
+        ...skill,
+        id: identifier("skill"),
+        name: `${skill.name} copy`.slice(0, 100),
+        version: 1,
+        supersedesVersion: undefined,
+        status: "draft",
+        createdAt: now,
+        updatedAt: now,
+      },
+      now,
+    );
+    patchFoundry({ skills: [...foundry.skills, copy] });
+    editSkill(copy);
+  }
+
   /* -------------------- release -------------------- */
 
   const runtimePackage = useMemo(
@@ -1480,6 +1687,27 @@ export function AgentFoundry({
   const routingDescription = agent.routing.description.trim();
   const routingRequired =
     agent.routing.enabled && routingDescription.length < ROUTING_MINIMUM;
+  const routingPreview = useMemo(() => {
+    if (!agent.routing.enabled || !routingPreviewRequest.trim()) return null;
+    return decideRouting({
+      agent: {
+        id: artifactId,
+        mission: foundry.mission,
+        skills: foundry.skills,
+        routingDescription: agent.routing.description,
+        routingExamples: agent.routing.examples,
+        negativeExamples: agent.routing.negativeExamples,
+      },
+      evidence: summarizeEvidence(foundry.evidenceBindings),
+      context: {
+        request: routingPreviewRequest.trim(),
+        availableTools: agent.tools.filter((tool) => tool.enabled).map((tool) => tool.key),
+        availableEvidence: foundry.evidenceBindings
+          .filter((binding) => binding.confirmed)
+          .map((binding) => binding.id),
+      },
+    });
+  }, [agent.routing, agent.tools, artifactId, foundry.evidenceBindings, foundry.mission, foundry.skills, routingPreviewRequest]);
 
   /* Everything the server will refuse, in the server's own order, phrased as the
      thing to do about it. Two lists because the gates differ: `publishAgent`
@@ -1562,12 +1790,14 @@ export function AgentFoundry({
     );
   }
 
-  async function publish(rollout: "internal_test" | "published") {
+  async function publish(rollout: "internal_test" | "limited" | "published") {
     const result = await run(
       rollout === "internal_test" ? "release-private" : "publish",
       rollout === "internal_test"
         ? "The private release was not created. Nothing changed for anyone else."
-        : "The release was not published and the current release is untouched. If you have changed the draft since the last passing run, run the checks again first.",
+        : rollout === "limited"
+          ? "The on-request release was not created. The current release is untouched."
+          : "The release was not published and the current release is untouched. If you have changed the draft since the last passing run, run the checks again first.",
       () =>
         publishSpectraAgent(
           artifactId,
@@ -1589,19 +1819,25 @@ export function AgentFoundry({
     setNotice(
       rollout === "internal_test"
         ? `Release ${result.releaseNumber} is available to you only. Use it in a conversation, then run the checks and publish when it holds up.`
-        : `Release ${result.releaseNumber} published.`,
+        : rollout === "limited"
+          ? `Release ${result.releaseNumber} is available on request.`
+          : `Release ${result.releaseNumber} published.`,
     );
   }
 
   async function manageRelease(
     releaseId: string,
-    action: "promote" | "rollback",
+    action: "promote" | "rollback" | "suspend" | "deprecate",
   ) {
     const result = await run(
       action,
       action === "promote"
         ? "The release was not promoted. It still reaches the same people as before."
-        : "The rollback did not happen. The current release is still the live one.",
+        : action === "rollback"
+          ? "The rollback did not happen. The current release is still the live one."
+          : action === "suspend"
+            ? "The release was not suspended and routing is unchanged."
+            : "The release was not deprecated and remains restorable.",
       () => manageSpectraAgentRelease(releaseId, action),
     );
     if (!result) return;
@@ -1610,7 +1846,11 @@ export function AgentFoundry({
     setNotice(
       action === "promote"
         ? "Promoted. Everyone who can use this agent now reaches this release."
-        : "Rolled back to the previous release.",
+        : action === "rollback"
+          ? "Rolled back to the previous release."
+          : action === "suspend"
+            ? "Suspended. New requests will not route to this release."
+            : "Deprecated. This old release can no longer be restored.",
     );
   }
 
@@ -1684,6 +1924,38 @@ export function AgentFoundry({
   const serving = highest(
     published.filter((release) => release.rollout !== "internal_test"),
   );
+  const comparedReleases = useMemo(() => {
+    const read = (releaseId: string) => {
+      const release = releases.find((entry) => entry.releaseId === releaseId);
+      if (!release) return null;
+      const version = artifactVersions.find((entry) => entry._id === release.versionId);
+      const evaluation = evalRuns.find((entry) => entry._id === release.evalRunId);
+      const snapshot = version?.after?.content
+        ? normalizeFoundryContent(version.after.content)
+        : null;
+      return {
+        release,
+        version,
+        evaluation,
+        counts: snapshot
+          ? {
+              skills: snapshot.foundry.skills.length,
+              sources: snapshot.foundry.evidenceBindings.length,
+              tools: snapshot.tools.filter((tool) => tool.enabled).length,
+              checks: snapshot.foundry.skills.reduce(
+                (total, skill) => total + skill.evaluationCases.length,
+                0,
+              ),
+            }
+          : null,
+      };
+    };
+    const baseline = read(releaseComparison[0]);
+    const candidate = read(releaseComparison[1]);
+    return baseline && candidate && baseline.release.releaseId !== candidate.release.releaseId
+      ? { baseline, candidate }
+      : null;
+  }, [artifactVersions, evalRuns, releaseComparison, releases]);
 
   /* Usage under the S8 rule: a number is drawn only where a measurement exists.
      `completionRate` and `averageLatencyMs` come back null when there is nothing
@@ -2431,7 +2703,103 @@ export function AgentFoundry({
                   <span className="foundry-skill-state">v{skill.version}</span>
                 </div>
                 <p className="foundry-skill-purpose">{skill.purpose}</p>
+                {skillEditor?.skillId === skill.id ? (
+                  <div className="foundry-skill-editor">
+                    <label>
+                      Name
+                      <input
+                        className="foundry-input"
+                        value={skillEditor.name}
+                        onChange={(event) =>
+                          setSkillEditor({ ...skillEditor, name: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Purpose
+                      <textarea
+                        className="foundry-input"
+                        rows={3}
+                        value={skillEditor.purpose}
+                        onChange={(event) =>
+                          setSkillEditor({ ...skillEditor, purpose: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Trigger requests · one per line
+                      <textarea
+                        className="foundry-input"
+                        rows={3}
+                        value={skillEditor.triggers}
+                        onChange={(event) =>
+                          setSkillEditor({ ...skillEditor, triggers: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Procedure · one step per line
+                      <textarea
+                        className="foundry-input"
+                        rows={5}
+                        value={skillEditor.procedure}
+                        onChange={(event) =>
+                          setSkillEditor({ ...skillEditor, procedure: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Output contract
+                      <input
+                        className="foundry-input"
+                        value={skillEditor.output}
+                        onChange={(event) =>
+                          setSkillEditor({ ...skillEditor, output: event.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Evaluation requests · one per line
+                      <textarea
+                        className="foundry-input"
+                        rows={4}
+                        value={skillEditor.evaluationInputs}
+                        onChange={(event) =>
+                          setSkillEditor({ ...skillEditor, evaluationInputs: event.target.value })
+                        }
+                      />
+                    </label>
+                    <div className="foundry-skill-actions">
+                      <Button variant="primary" size="sm" onClick={saveSkillEdit}>
+                        Save new version
+                      </Button>
+                      <button
+                        type="button"
+                        className="foundry-text-button"
+                        onClick={() => setSkillEditor(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="foundry-skill-actions">
+                  <button
+                    type="button"
+                    className="foundry-text-button"
+                    disabled={!canEdit}
+                    onClick={() => editSkill(skill)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="foundry-text-button"
+                    disabled={!canEdit}
+                    onClick={() => duplicateSkill(skill)}
+                  >
+                    Duplicate
+                  </button>
                   <button
                     type="button"
                     className="foundry-text-button"
@@ -2511,6 +2879,115 @@ export function AgentFoundry({
                   : "Automatic routing is off, so this agent is only used when someone asks for it by name."}
               </p>
 
+              <section className="foundry-routing-editor" aria-label="Automatic routing">
+                <label className="foundry-choice is-compact">
+                  <input
+                    type="checkbox"
+                    checked={agent.routing.enabled}
+                    disabled={!canEdit}
+                    onChange={(event) =>
+                      commit({
+                        ...agent,
+                        routing: { ...agent.routing, enabled: event.target.checked },
+                      })
+                    }
+                  />
+                  <span>
+                    <strong>Choose this agent automatically</strong>
+                    <small>Low-confidence requests keep ordinary Spectra.</small>
+                  </span>
+                </label>
+                <label>
+                  When this specialist is substantially better
+                  <textarea
+                    className="foundry-input"
+                    rows={3}
+                    value={agent.routing.description}
+                    disabled={!canEdit || !agent.routing.enabled}
+                    onChange={(event) =>
+                      commit({
+                        ...agent,
+                        routing: { ...agent.routing, description: event.target.value },
+                      })
+                    }
+                  />
+                </label>
+                <div className="foundry-routing-examples">
+                  <label>
+                    Should choose this agent · one request per line
+                    <textarea
+                      className="foundry-input"
+                      rows={4}
+                      value={agent.routing.examples.join("\n")}
+                      disabled={!canEdit || !agent.routing.enabled}
+                      onChange={(event) =>
+                        commit({
+                          ...agent,
+                          routing: {
+                            ...agent.routing,
+                            examples: event.target.value.split("\n").map((entry) => entry.trim()).filter(Boolean).slice(0, 50),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Must keep ordinary Spectra · one request per line
+                    <textarea
+                      className="foundry-input"
+                      rows={4}
+                      value={agent.routing.negativeExamples.join("\n")}
+                      disabled={!canEdit || !agent.routing.enabled}
+                      onChange={(event) =>
+                        commit({
+                          ...agent,
+                          routing: {
+                            ...agent.routing,
+                            negativeExamples: event.target.value.split("\n").map((entry) => entry.trim()).filter(Boolean).slice(0, 50),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+                <label>
+                  Preview why this agent would be chosen
+                  <input
+                    className="foundry-input"
+                    value={routingPreviewRequest}
+                    onChange={(event) => setRoutingPreviewRequest(event.target.value)}
+                    placeholder="Paste a realistic request"
+                  />
+                </label>
+                {routingPreviewRequest.trim() ? (
+                  routingPreview ? (
+                    <div className="foundry-routing-preview" role="status">
+                      <div className="foundry-block-head">
+                        <strong>{routingPreview.confidence} confidence · {routingPreview.score}</strong>
+                        <span className="foundry-block-count">
+                          {routingPreview.activeSkills.length} active skills
+                        </span>
+                      </div>
+                      <ul className="foundry-gap-list">
+                        {routingPreview.signals.map((signal, index) => (
+                          <li key={`${signal.reason}-${index}`}>+{signal.weight} · {signal.reason}</li>
+                        ))}
+                        {routingPreview.exclusions.map((reason, index) => (
+                          <li key={`${reason}-${index}`}>Fallback: {reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="foundry-ledger-note" role="status">
+                      Ordinary Spectra would handle this request. It matches a negative example, automatic routing is off, or the score is below the safe threshold.
+                    </p>
+                  )
+                ) : null}
+                <p className="foundry-ledger-note">
+                  Percentage traffic splitting and provider-private traces are not available. Releases move through you-only, on-request, and published stages.
+                </p>
+              </section>
+
               {/* The Foundry binds sources as evidence and never writes
                   `content.resources`, but an agent converted from the old
                   editor can still carry them, and publish refuses if one is no
@@ -2566,6 +3043,92 @@ export function AgentFoundry({
                 </ul>
               )}
 
+              <div className="foundry-release-tools">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!canEdit || !canPublish || busy !== null || publishBlockers.length > 0}
+                  onClick={() => void publish("limited")}
+                >
+                  Release on request
+                </Button>
+                {releases.length > 1 ? (
+                  <div className="foundry-release-compare-controls">
+                    <label>
+                      Compare
+                      <select
+                        value={releaseComparison[0]}
+                        onChange={(event) =>
+                          setReleaseComparison([event.target.value, releaseComparison[1]])
+                        }
+                      >
+                        <option value="">Choose earlier release</option>
+                        {releases.map((release) => (
+                          <option key={release.releaseId} value={release.releaseId}>
+                            v{release.releaseNumber} · {releaseLabel(release)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      With
+                      <select
+                        value={releaseComparison[1]}
+                        onChange={(event) =>
+                          setReleaseComparison([releaseComparison[0], event.target.value])
+                        }
+                      >
+                        <option value="">Choose later release</option>
+                        {releases.map((release) => (
+                          <option key={release.releaseId} value={release.releaseId}>
+                            v{release.releaseNumber} · {releaseLabel(release)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+
+              {comparedReleases ? (
+                <section className="foundry-release-comparison" aria-label="Release comparison">
+                  <div className="foundry-block-head">
+                    <h4>
+                      v{comparedReleases.baseline.release.releaseNumber} → v{comparedReleases.candidate.release.releaseNumber}
+                    </h4>
+                    <span className="foundry-block-count">immutable snapshots</span>
+                  </div>
+                  <dl className="foundry-ledger-stats">
+                    {(["skills", "sources", "tools", "checks"] as const).map((key) => (
+                      <div key={key}>
+                        <dt>{key}</dt>
+                        <dd>
+                          {comparedReleases.baseline.counts?.[key] ?? "?"} →{" "}
+                          {comparedReleases.candidate.counts?.[key] ?? "?"}
+                        </dd>
+                      </div>
+                    ))}
+                    <div>
+                      <dt>Checks passed</dt>
+                      <dd>
+                        {comparedReleases.baseline.evaluation
+                          ? `${comparedReleases.baseline.evaluation.passedCount}/${comparedReleases.baseline.evaluation.caseCount}`
+                          : "not linked"}
+                        {" → "}
+                        {comparedReleases.candidate.evaluation
+                          ? `${comparedReleases.candidate.evaluation.passedCount}/${comparedReleases.candidate.evaluation.caseCount}`
+                          : "not linked"}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="foundry-ledger-note">
+                    {comparedReleases.baseline.version && comparedReleases.candidate.version
+                      ? "Both release records resolve to retained artifact versions."
+                      : "One snapshot is unavailable, so configuration counts cannot be established."}
+                  </p>
+                </section>
+              ) : null}
+
               {releases.length > 0 ? (
                 <ul className="foundry-releases">
                   {releases.slice(0, 6).map((release) => {
@@ -2595,31 +3158,54 @@ export function AgentFoundry({
                         <span className="foundry-release-notes">
                           {release.releaseNotes || "No notes"}
                         </span>
-                        {promotable ? (
-                          <button
-                            type="button"
-                            className="foundry-text-button"
-                            disabled={!canEdit || !canPublish || busy !== null}
-                            onClick={() =>
-                              void manageRelease(release.releaseId, "promote")
-                            }
-                          >
-                            Promote
-                          </button>
-                        ) : restorable ? (
-                          <button
-                            type="button"
-                            className="foundry-text-button"
-                            disabled={!canEdit || !canPublish || busy !== null}
-                            onClick={() =>
-                              void manageRelease(release.releaseId, "rollback")
-                            }
-                          >
-                            Roll back
-                          </button>
-                        ) : (
-                          <span />
-                        )}
+                        <div className="foundry-skill-actions">
+                          {promotable ? (
+                            <button
+                              type="button"
+                              className="foundry-text-button"
+                              disabled={!canEdit || !canPublish || busy !== null}
+                              onClick={() => void manageRelease(release.releaseId, "promote")}
+                            >
+                              Promote
+                            </button>
+                          ) : null}
+                          {restorable ? (
+                            <button
+                              type="button"
+                              className="foundry-text-button"
+                              disabled={!canEdit || !canPublish || busy !== null}
+                              onClick={() => void manageRelease(release.releaseId, "rollback")}
+                            >
+                              Roll back
+                            </button>
+                          ) : null}
+                          {release.releaseId === serving?.releaseId && release.status === "published" ? (
+                            <button
+                              type="button"
+                              className="foundry-text-button"
+                              disabled={!canEdit || !canPublish || busy !== null}
+                              onClick={() => {
+                                if (window.confirm("Suspend this release? New requests will stop routing to it, but its evidence will remain."))
+                                  void manageRelease(release.releaseId, "suspend");
+                              }}
+                            >
+                              Suspend
+                            </button>
+                          ) : null}
+                          {release.releaseId !== serving?.releaseId && release.status !== "deprecated" ? (
+                            <button
+                              type="button"
+                              className="foundry-text-button is-destructive"
+                              disabled={!canEdit || !canPublish || busy !== null}
+                              onClick={() => {
+                                if (window.confirm("Deprecate this old release? It will stay in history but cannot be restored."))
+                                  void manageRelease(release.releaseId, "deprecate");
+                              }}
+                            >
+                              Deprecate
+                            </button>
+                          ) : null}
+                        </div>
                       </li>
                     );
                   })}
@@ -2699,8 +3285,9 @@ export function AgentFoundry({
                       "Aggregates never include what anyone asked or what the agent answered."}
                   </p>
                   <p className="foundry-ledger-note">
-                    Runs that did not finish are counted, not listed. Spectra
-                    keeps no per-run record a creator can open yet.
+                    Private prompts, responses, threads, and memory are never
+                    available here. Runs that did not finish contribute only to
+                    the aggregate count; consented ratings are the only comments shown.
                   </p>
                 </>
               )}

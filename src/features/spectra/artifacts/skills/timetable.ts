@@ -25,12 +25,17 @@ export const timetableSkill = defineArtifactSkill({
     "personal overlay",
   ],
   operations: [
-    "Add, move, resize, recur, layer, import, reconcile, link, and validate events.",
+    "Navigate today and adjacent ranges; change day, week, month, or agenda view; show, hide, add, rename, recolour, reorder, lock, unlock, or delete-empty owned layers.",
+    "Add personal, shared, or study time; move, resize, or delete editable events; keep provider-owned base fields read-only.",
+    "Set or reset private colour, alternative-time, reminder, note, and visibility overlays without writing provider truth.",
+    "Edit recurrence frequency, interval, weekdays, end date/count, and occurrence exceptions inside the supported subset; preserve unsupported imported rules unchanged.",
+    "Import retained ICS/CSV originals with duplicate and adaptation reporting; export visible ICS/CSV; print the current range through the browser's Print / save PDF flow.",
     "Propose study blocks, replan around deadlines, preserve locked commitments, and explain scheduling tradeoffs.",
   ],
   preservationRules: [
     "Preserve personal overlays and local links; tombstone removed source events instead of deleting related work.",
     "Never rewrite source-owned class/deadline fields, expose private layers, or move locked events, sleep, accommodations, or hard constraints.",
+    "Provider calendar identity, attendees, organizer responses, permissions, and custom recurrence remain owned by their source; direct PDF generation is never claimed.",
   ],
   validation: [
     "Check IANA timezone and DST intent, recurrence/exceptions, end-after-start, overlaps, source authority, inaccessible links, duplicate feeds, and notification timing.",

@@ -1697,6 +1697,14 @@ export type SpectraAgentRelease = {
 export type SpectraAgentEvalResult = {
   caseId: string;
   category: string;
+  layer?:
+    | "contract"
+    | "held_out"
+    | "mission_truth"
+    | "tool_sandbox"
+    | "adversarial"
+    | "regression"
+    | "independent_judge";
   required: boolean;
   score: number;
   passed: boolean;
@@ -1705,6 +1713,7 @@ export type SpectraAgentEvalResult = {
   latencyMs: number;
   inputTokens?: number;
   outputTokens?: number;
+  judgedBy?: "self" | "independent_model" | "human";
 };
 
 export type SpectraAgentEvalRun = {
@@ -1718,6 +1727,11 @@ export type SpectraAgentEvalRun = {
   passedCount: number;
   averageScore: number;
   results: SpectraAgentEvalResult[];
+  limitations?: Array<
+    | { kind: "no_external_truth" | "self_judged_only" | "no_regression_baseline"; detail: string }
+    | { kind: "layer_not_run" | "insufficient_cases"; layer: string; detail: string }
+  >;
+  verificationStrength?: "strong" | "moderate" | "weak" | "unverified";
   startedAt: number;
   completedAt?: number;
 };

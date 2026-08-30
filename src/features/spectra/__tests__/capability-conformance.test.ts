@@ -40,6 +40,7 @@ const STUDIOS = [
   "whiteboard",
   "planner_task",
   "agent",
+  "timetable",
 ] as const;
 
 const OFFICE_BINDINGS = {

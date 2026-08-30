@@ -10,9 +10,7 @@ type StudioType =
   | "flashcard_deck"
   | "code"
   | "whiteboard"
-  | "planner_task"
-  | "agent"
-  | "timetable";
+  | "planner_task";
 
 type StudioSpec = {
   type: StudioType;
@@ -148,32 +146,6 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   { type: "planner_task", localId: "export-ics", description: "Export this plan as calendar to-dos." },
   { type: "planner_task", localId: "export-json", description: "Export the full plan." },
 
-  { type: "timetable", localId: "today", description: "Return the calendar to today." },
-  { type: "timetable", localId: "previous", description: "Show the previous calendar range." },
-  { type: "timetable", localId: "next", description: "Show the next calendar range." },
-  {
-    type: "timetable",
-    localId: "view",
-    description: "Change the calendar view.",
-    params: z.enum(["week", "day", "month", "agenda"]),
-  },
-  { type: "timetable", localId: "calendars", description: "Choose which calendars are visible." },
-  { type: "timetable", localId: "add", description: "Add time to the calendar." },
-  {
-    type: "timetable",
-    localId: "import",
-    description: "Import an ICS or CSV calendar.",
-    requires: "edit",
-  },
-  { type: "timetable", localId: "export-ics", description: "Export the visible calendar as ICS." },
-
-  { type: "agent", localId: "next", description: "Ask the next question this mission needs.", requires: "edit" },
-  { type: "agent", localId: "source", description: "Add a source.", requires: "edit" },
-  { type: "agent", localId: "dismissed", description: "Show dismissed suggestions." },
-  { type: "agent", localId: "competence", description: "Show or hide competence." },
-  { type: "agent", localId: "refresh", description: "Refresh evaluation runs.", requires: "edit" },
-  { type: "agent", localId: "brief", description: "Show the operating brief." },
-  { type: "agent", localId: "private", description: "Release this agent to yourself.", requires: "edit" },
 ];
 
 /** Field format chrome (quiz / cards / planner) resolves these IR ids. They are not workbar actions. */
@@ -211,7 +183,7 @@ export function stableCapabilityId(type: WorkType | "app", localId: string) {
     : `${type}.${localId.replaceAll(/[^a-zA-Z0-9]+/g, ".")}`;
 }
 
-export const STUDIO_CAPABILITIES: readonly CapabilityDefinition[] =
+export const BASE_STUDIO_CAPABILITIES: readonly CapabilityDefinition[] =
   [...STUDIO_SPECS, ...FIELD_FORMAT_SPECS].map((spec) => {
     const id = stableCapabilityId(spec.type, spec.localId);
     return {

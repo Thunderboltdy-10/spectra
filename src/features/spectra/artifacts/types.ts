@@ -75,6 +75,10 @@ export type ArtifactTypeManifest<TSchema extends z.ZodType = z.ZodType> = {
   schemas: {
     currentVersion: number;
     content: TSchema;
+    /** Idempotent normalization applied before validation at the current version. */
+    normalize?: (content: unknown) => unknown;
+    /** Explicit one-version-at-a-time migrations keyed by their source version. */
+    migrations?: Readonly<Record<number, (content: unknown) => unknown>>;
   };
   renderers: {
     full: string;

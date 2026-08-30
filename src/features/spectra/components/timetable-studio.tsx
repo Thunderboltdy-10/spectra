@@ -16,7 +16,9 @@ import {
   Lock,
   MapPin,
   Plus,
+  Printer,
   Repeat2,
+  RotateCcw,
   Trash2,
   X,
 } from "lucide-react";
@@ -46,9 +48,13 @@ import {
   localDateInput,
   mergeTimetableState,
   normalizeTimetablePersonalState,
+  parseTimetableRecurrence,
   partitionTimetableState,
   pickTimetableAnchorDate,
   sharedTimetableContent,
+  serializeTimetableRecurrence,
+  TIMETABLE_DEFAULT_LAYER_COLORS,
+  TIMETABLE_WEEKDAYS,
   timetableFocusMinutes,
   type TimetableContent,
   type TimetableEvent,
@@ -57,6 +63,7 @@ import {
   type TimetableView,
 } from "../timetable/model";
 import {
+  exportTimetableCsv,
   exportTimetableIcs,
   importTimetableFile,
   type TimetableImportReport,
@@ -352,7 +359,9 @@ export function TimetableStudio({
   const view = timetable.view!;
   const anchor = parseDateKey(view.anchorDate);
   const [selectedEventId, setSelectedEventId] = useState<string>();
+  const [selectedOccurrenceStart, setSelectedOccurrenceStart] = useState<string>();
   const [layersOpen, setLayersOpen] = useState(false);
+  const [layerProblem, setLayerProblem] = useState<string>();
   const [addOpen, setAddOpen] = useState(false);
   const [importReport, setImportReport] = useState<TimetableImportReport>();
   const [importError, setImportError] = useState<string>();
@@ -477,6 +486,10 @@ export function TimetableStudio({
     selectedEvent && personalReady && !selectedIsPersonal,
   );
   const selectedCanPersonalize = Boolean(selectedEvent && personalReady);
+  const selectedRecurrence = useMemo(
+    () => parseTimetableRecurrence(selectedEvent?.recurrence),
+    [selectedEvent?.recurrence],
+  );
 
   const days = useMemo(() => {
     if (view.kind === "day") return [anchor];
@@ -580,6 +593,7 @@ export function TimetableStudio({
     const next = clone(timetable);
     recipe(next);
     const partitioned = partitionTimetableState(next);
+    partitioned.personal.layerColors = personalState.layerColors;
     if (JSON.stringify(partitioned.personal) !== JSON.stringify(personalState))
       savePersonalState(partitioned.personal);
     if (
@@ -621,6 +635,7 @@ export function TimetableStudio({
 
   function selectEvent(event: TimetableEvent) {
     setSelectedEventId(event.id);
+    setSelectedOccurrenceStart(event.start);
     onActiveRegionChange?.(event.id);
   }
 
@@ -631,6 +646,69 @@ export function TimetableStudio({
         (candidate) => candidate.id === selectedEventId,
       );
       if (event) recipe(event);
+    });
+  }
+
+  function updateSelectedRecurrence(
+    patch: Partial<ReturnType<typeof parseTimetableRecurrence>>,
+  ) {
+    if (!selectedRecurrence.editable) return;
+    const next = { ...selectedRecurrence, ...patch };
+    updateSelected((event) => {
+      event.recurrence = serializeTimetableRecurrence(next);
+      if (!event.recurrence) event.recurrenceExceptions = [];
+    });
+  }
+
+  function layerIsPersonal(layerId: string) {
+    return privateLayerIds.has(layerId);
+  }
+
+  function layerIsProviderOwned(layerId: string) {
+    const layer = timetable.layers.find((entry) => entry.id === layerId);
+    return Boolean(
+      layer &&
+        (layer.sourceId || layer.authority === "external" || layer.authority === "school"),
+    );
+  }
+
+  function layerCanManage(layerId: string) {
+    const layer = timetable.layers.find((entry) => entry.id === layerId);
+    if (!layer || layerIsProviderOwned(layerId)) return false;
+    return layerIsPersonal(layerId) || (!readOnly && layer.authority === "workspace");
+  }
+
+  function moveLayer(layerId: string, direction: -1 | 1) {
+    if (!layerCanManage(layerId)) return;
+    emit((draft) => {
+      const index = draft.layers.findIndex((layer) => layer.id === layerId);
+      const personal = layerIsPersonal(layerId);
+      const peers = draft.layers
+        .map((layer, peerIndex) => ({ layer, peerIndex }))
+        .filter((entry) => layerIsPersonal(entry.layer.id) === personal);
+      const peerPosition = peers.findIndex((entry) => entry.layer.id === layerId);
+      const target = peers[peerPosition + direction]?.peerIndex;
+      if (index < 0 || target === undefined) return;
+      const [layer] = draft.layers.splice(index, 1);
+      draft.layers.splice(target, 0, layer!);
+    });
+  }
+
+  function deleteLayer(layerId: string) {
+    setLayerProblem(undefined);
+    const layer = timetable.layers.find((entry) => entry.id === layerId);
+    if (!layer) return;
+    if (layerIsProviderOwned(layerId)) {
+      setLayerProblem(`${layer.name} is managed by its provider. Delete it there, then refresh Spectra.`);
+      return;
+    }
+    if (!layerCanManage(layerId)) return;
+    if (timetable.events.some((event) => event.layerId === layerId)) {
+      setLayerProblem(`${layer.name} still contains events. Move or delete them before removing the calendar.`);
+      return;
+    }
+    emit((draft) => {
+      draft.layers = draft.layers.filter((entry) => entry.id !== layerId);
     });
   }
 
@@ -1273,7 +1351,7 @@ path={eventPath(event.id)}
     },
     {
       id: "export-ics",
-      label: "Export visible calendar",
+      label: "Export visible ICS",
       icon: Download,
       tab: "Schedule",
       priority: "advanced",
@@ -1283,6 +1361,28 @@ path={eventPath(event.id)}
           "text/calendar;charset=utf-8",
           exportTimetableIcs(baseVisibleEvents, "Spectra timetable"),
         ),
+    },
+    {
+      id: "export.csv",
+      label: "Export visible CSV",
+      icon: Download,
+      tab: "Schedule",
+      priority: "advanced",
+      onSelect: () =>
+        downloadText(
+          "spectra-timetable.csv",
+          "text/csv;charset=utf-8",
+          exportTimetableCsv(baseVisibleEvents),
+        ),
+    },
+    {
+      id: "print.current",
+      label: "Print / save PDF",
+      icon: Printer,
+      tab: "Schedule",
+      priority: "advanced",
+      hint: "Uses your browser print dialog; Spectra does not claim a separate PDF renderer",
+      onSelect: () => window.print(),
     },
   ]);
 
@@ -1336,34 +1436,148 @@ path={eventPath(event.id)}
               <X className="h-4 w-4" />
             </button>
           </header>
-          {timetable.layers.map((layer) => (
-            <label key={layer.id}>
-              <input
-                type="checkbox"
-                checked={layer.visible}
-                onChange={() =>
-                  emit((draft) => {
-                    const found = draft.layers.find(
-                      (candidate) => candidate.id === layer.id,
+          <div className="timetable-layer-set-actions">
+            <button
+              type="button"
+              data-capability-id="timetable.layer.showAll"
+              onClick={() =>
+                emit((draft) => {
+                  draft.layers.forEach((layer) => { layer.visible = true; });
+                })
+              }
+            >
+              Show all
+            </button>
+            <button
+              type="button"
+              data-capability-id="timetable.layer.hideOptional"
+              onClick={() =>
+                emit((draft) => {
+                  draft.layers.forEach((layer) => {
+                    layer.visible = Boolean(
+                      layer.locked || layer.authority === "school" || layer.kind === "class" || layer.kind === "tasks",
                     );
-                    if (found) found.visible = !found.visible;
-                  })
-                }
-              />
-              <i style={{ background: layer.color }} />
-              <span>
-                <strong>{layer.name}</strong>
-                <small>
-                  {layer.authority || layer.kind}
-                  {layer.private ? " · private" : ""}
-                </small>
-              </span>
-              {layer.locked ? <Lock className="h-3.5 w-3.5" /> : null}
-            </label>
-          ))}
+                  });
+                })
+              }
+            >
+              Hide optional
+            </button>
+          </div>
+          {layerProblem ? (
+            <p className="timetable-layer-problem" role="alert">{layerProblem}</p>
+          ) : null}
+          <div className="timetable-layer-list">
+            {timetable.layers.map((layer, index) => {
+              const providerOwned = layerIsProviderOwned(layer.id);
+              const manageable = layerCanManage(layer.id);
+              const personal = layerIsPersonal(layer.id);
+              const eventCount = timetable.events.filter((event) => event.layerId === layer.id).length;
+              return (
+                <section key={layer.id} className="timetable-layer-row">
+                  <label className="timetable-layer-visibility">
+                    <input
+                      type="checkbox"
+                      checked={layer.visible}
+                      data-capability-id="timetable.layer.toggleVisibility"
+                      onChange={() =>
+                        emit((draft) => {
+                          const found = draft.layers.find((candidate) => candidate.id === layer.id);
+                          if (found) found.visible = !found.visible;
+                        })
+                      }
+                    />
+                    <i style={{ background: layer.color }} />
+                  </label>
+                  <div className="timetable-layer-fields">
+                    <input
+                      value={layer.name}
+                      aria-label={`Calendar name for ${layer.name}`}
+                      disabled={!manageable}
+                      data-capability-id="timetable.layer.rename"
+                      onChange={(event) =>
+                        emit((draft) => {
+                          const found = draft.layers.find((candidate) => candidate.id === layer.id);
+                          if (found) found.name = event.target.value.slice(0, 120);
+                        })
+                      }
+                    />
+                    <small>
+                      {providerOwned ? "provider managed" : personal ? "private to you" : "shared workspace"} · {eventCount} event{eventCount === 1 ? "" : "s"}
+                    </small>
+                  </div>
+                  <input
+                    type="color"
+                    aria-label={`Colour for ${layer.name}`}
+                    value={layer.color}
+                    data-capability-id="timetable.layer.setColor"
+                    onChange={(event) => {
+                      const color = event.target.value;
+                      if (providerOwned) {
+                        savePersonalState({
+                          ...personalState,
+                          layerColors: { ...personalState.layerColors, [layer.id]: color },
+                        });
+                      } else if (manageable) {
+                        emit((draft) => {
+                          const found = draft.layers.find((candidate) => candidate.id === layer.id);
+                          if (found) found.color = color;
+                        });
+                      }
+                    }}
+                  />
+                  <div className="timetable-layer-row-actions">
+                    <button
+                      type="button"
+                      aria-label={`Move ${layer.name} earlier`}
+                      disabled={!manageable || index === 0}
+                      data-capability-id="timetable.layer.moveEarlier"
+                      onClick={() => moveLayer(layer.id, -1)}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Move ${layer.name} later`}
+                      disabled={!manageable || index === timetable.layers.length - 1}
+                      data-capability-id="timetable.layer.moveLater"
+                      onClick={() => moveLayer(layer.id, 1)}
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`${layer.locked ? "Unlock" : "Lock"} ${layer.name}`}
+                      disabled={!manageable}
+                      data-capability-id="timetable.layer.toggleLock"
+                      onClick={() =>
+                        emit((draft) => {
+                          const found = draft.layers.find((candidate) => candidate.id === layer.id);
+                          if (found) found.locked = !found.locked;
+                        })
+                      }
+                    >
+                      <Lock className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${layer.name}`}
+                      className="is-destructive"
+                      disabled={!manageable || eventCount > 0}
+                      data-capability-id="timetable.layer.deleteEmpty"
+                      onClick={() => deleteLayer(layer.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </section>
+              );
+            })}
+          </div>
           <button
             type="button"
             disabled={!personalReady}
+            data-capability-id="timetable.layer.addPersonal"
             onClick={() =>
               emit((draft) =>
                 draft.layers.push({
@@ -1371,7 +1585,7 @@ path={eventPath(event.id)}
                   name: `Calendar ${draft.layers.length + 1}`,
                   kind: "personal",
                   visible: true,
-                  color: "#4a91de",
+                  color: TIMETABLE_DEFAULT_LAYER_COLORS.personal,
                   authority: "user",
                   private: true,
                 }),
@@ -1383,6 +1597,7 @@ path={eventPath(event.id)}
           {!readOnly ? (
             <button
               type="button"
+              data-capability-id="timetable.layer.addShared"
               onClick={() =>
                 emit((draft) =>
                   draft.layers.push({
@@ -1390,7 +1605,7 @@ path={eventPath(event.id)}
                     name: `Shared calendar ${draft.layers.filter((layer) => !privateLayerIds.has(layer.id)).length + 1}`,
                     kind: "class",
                     visible: true,
-                    color: "#26a879",
+                    color: TIMETABLE_DEFAULT_LAYER_COLORS.shared,
                     authority: "workspace",
                   }),
                 )
@@ -1404,7 +1619,7 @@ path={eventPath(event.id)}
 
       {addOpen ? (
         <aside className="timetable-add-popover">
-          <button type="button" onClick={() => addEvent(new Date())}>
+          <button type="button" data-capability-id="timetable.event.addPersonal" onClick={() => addEvent(new Date())}>
             <CalendarDays className="h-4 w-4" />
             <span>
               <strong>Event</strong>
@@ -1412,7 +1627,7 @@ path={eventPath(event.id)}
             </span>
           </button>
           {!readOnly ? (
-            <button type="button" onClick={() => addSharedEvent(new Date())}>
+            <button type="button" data-capability-id="timetable.event.addShared" onClick={() => addSharedEvent(new Date())}>
               <CalendarDays className="h-4 w-4" />
               <span>
                 <strong>Shared event</strong>
@@ -1422,6 +1637,7 @@ path={eventPath(event.id)}
           ) : null}
           <button
             type="button"
+            data-capability-id="timetable.event.addStudy"
             onClick={() => {
               const start = new Date();
               start.setMinutes(0, 0, 0);
@@ -1631,6 +1847,14 @@ path={eventPath(event.id)}
               preserved.
             </div>
           ) : null}
+          {selectedEvent.sourceRef ? (
+            <div className="timetable-source-boundary">
+              <Lock className="h-3.5 w-3.5" />
+              <p>
+                Title, source time, location, attendees, and permissions are managed by the source. Your colour, alternative time, reminder, note, and visibility stay private and never write back.
+              </p>
+            </div>
+          ) : null}
           <label>
             Title
             <input
@@ -1650,6 +1874,7 @@ path={eventPath(event.id)}
                 type="datetime-local"
                 value={localDateInput(selectedEvent.start, timetable.timezone)}
                 disabled={!selectedCanEditBase}
+                data-capability-id="timetable.event.move"
                 onInput={(event) =>
                   updateSelected((candidate) => {
                     const duration =
@@ -1672,6 +1897,7 @@ path={eventPath(event.id)}
                 value={localDateInput(selectedEvent.end, timetable.timezone)}
                 disabled={!selectedCanEditBase}
                 min={localDateInput(selectedEvent.start, timetable.timezone)}
+                data-capability-id="timetable.event.resize"
                 onInput={(event) =>
                   updateSelected((candidate) => {
                     const next = inputToIso(
@@ -1728,23 +1954,164 @@ path={eventPath(event.id)}
               }
             />
           </label>
-          <label>
-            Recurrence
-            <select
-              value={selectedEvent.recurrence ?? ""}
-              disabled={!selectedCanEditBase}
-              onChange={(event) =>
-                updateSelected((candidate) => {
-                  candidate.recurrence = event.target.value || undefined;
-                })
-              }
-            >
-              <option value="">Does not repeat</option>
-              <option value="FREQ=DAILY">Daily</option>
-              <option value="FREQ=WEEKLY">Weekly</option>
-              <option value="FREQ=MONTHLY">Monthly</option>
-            </select>
-          </label>
+          <section className="timetable-recurrence-editor">
+            <label>
+              Repeats
+              <select
+                value={selectedRecurrence.frequency}
+                disabled={!selectedCanEditBase || !selectedRecurrence.editable}
+                data-capability-id="timetable.recurrence.setFrequency"
+                onChange={(event) => {
+                  const frequency = event.target.value as "none" | "daily" | "weekly" | "monthly";
+                  const weekday = TIMETABLE_WEEKDAYS[
+                    parseDateKey(localDateInput(selectedEvent.start, timetable.timezone).slice(0, 10)).getDay()
+                  ] ?? "MO";
+                  updateSelectedRecurrence({
+                    frequency,
+                    weekdays:
+                      frequency === "weekly" && selectedRecurrence.weekdays.length === 0
+                        ? [weekday]
+                        : selectedRecurrence.weekdays,
+                  });
+                }}
+              >
+                <option value="none">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                {selectedRecurrence.frequency === "custom" ? (
+                  <option value="custom">Imported custom rule</option>
+                ) : null}
+              </select>
+            </label>
+            {!selectedRecurrence.editable ? (
+              <p>
+                This imported rule is preserved exactly. Change it in its source; Spectra will not flatten it to a false preset.
+              </p>
+            ) : selectedRecurrence.frequency !== "none" ? (
+              <>
+                <label>
+                  Every
+                  <span className="timetable-recurrence-interval">
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={selectedRecurrence.interval}
+                      disabled={!selectedCanEditBase}
+                      data-capability-id="timetable.recurrence.setInterval"
+                      onChange={(event) =>
+                        updateSelectedRecurrence({
+                          interval: Math.max(1, Math.min(365, Number(event.target.value) || 1)),
+                        })
+                      }
+                    />
+                    <span>{selectedRecurrence.frequency === "daily" ? "day(s)" : selectedRecurrence.frequency === "weekly" ? "week(s)" : "month(s)"}</span>
+                  </span>
+                </label>
+                {selectedRecurrence.frequency === "weekly" ? (
+                  <fieldset data-capability-id="timetable.recurrence.setWeekdays">
+                    <legend>On weekdays</legend>
+                    <div className="timetable-weekday-picker">
+                      {TIMETABLE_WEEKDAYS.map((weekday) => {
+                        const active = selectedRecurrence.weekdays.includes(weekday);
+                        return (
+                          <button
+                            key={weekday}
+                            type="button"
+                            className={active ? "is-active" : ""}
+                            aria-pressed={active}
+                            disabled={!selectedCanEditBase || (active && selectedRecurrence.weekdays.length === 1)}
+                            onClick={() =>
+                              updateSelectedRecurrence({
+                                weekdays: active
+                                  ? selectedRecurrence.weekdays.filter((entry) => entry !== weekday)
+                                  : [...selectedRecurrence.weekdays, weekday],
+                              })
+                            }
+                          >
+                            {weekday.slice(0, 1)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                ) : null}
+                <label>
+                  Ends
+                  <select
+                    value={selectedRecurrence.end.kind}
+                    disabled={!selectedCanEditBase}
+                    data-capability-id="timetable.recurrence.setEnd"
+                    onChange={(event) => {
+                      const kind = event.target.value;
+                      updateSelectedRecurrence({
+                        end:
+                          kind === "date"
+                            ? { kind: "date", until: dateKey(addDays(new Date(selectedEvent.start), 30)) }
+                            : kind === "count"
+                              ? { kind: "count", count: 10 }
+                              : { kind: "never" },
+                      });
+                    }}
+                  >
+                    <option value="never">Never</option>
+                    <option value="date">On a date</option>
+                    <option value="count">After a number</option>
+                  </select>
+                </label>
+                {selectedRecurrence.end.kind === "date" ? (
+                  <label>
+                    Last date
+                    <input
+                      type="date"
+                      value={selectedRecurrence.end.until}
+                      min={localDateInput(selectedEvent.start, timetable.timezone).slice(0, 10)}
+                      disabled={!selectedCanEditBase}
+                      onChange={(event) =>
+                        updateSelectedRecurrence({ end: { kind: "date", until: event.target.value } })
+                      }
+                    />
+                  </label>
+                ) : null}
+                {selectedRecurrence.end.kind === "count" ? (
+                  <label>
+                    Occurrences
+                    <input
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={selectedRecurrence.end.count}
+                      disabled={!selectedCanEditBase}
+                      onChange={(event) =>
+                        updateSelectedRecurrence({
+                          end: { kind: "count", count: Math.max(1, Math.min(500, Number(event.target.value) || 1)) },
+                        })
+                      }
+                    />
+                  </label>
+                ) : null}
+                {selectedOccurrenceStart && selectedEvent.recurrence ? (
+                  <button
+                    type="button"
+                    className="timetable-skip-occurrence"
+                    disabled={!selectedCanEditBase}
+                    data-capability-id="timetable.recurrence.skipOccurrence"
+                    onClick={() => {
+                      updateSelected((candidate) => {
+                        candidate.recurrenceExceptions = Array.from(
+                          new Set([...(candidate.recurrenceExceptions ?? []), selectedOccurrenceStart]),
+                        );
+                      });
+                      setSelectedEventId(undefined);
+                    }}
+                  >
+                    Skip this occurrence
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+          </section>
           <div className="timetable-event-date-fields">
             <label>
               Show as
@@ -1771,6 +2138,7 @@ path={eventPath(event.id)}
                     : (selectedEvent.overlay?.reminderMinutes ?? -1)
                 }
                 disabled={!selectedCanPersonalize}
+                data-capability-id="timetable.overlay.setReminder"
                 onChange={(event) => {
                   const minutes = Number(event.target.value);
                   updateSelected((candidate) => {
@@ -1815,9 +2183,10 @@ path={eventPath(event.id)}
                 value={
                   selectedEvent.overlay?.color ||
                   layerMap.get(selectedEvent.layerId)?.color ||
-                  "#4a91de"
+                  TIMETABLE_DEFAULT_LAYER_COLORS.personal
                 }
                 disabled={!selectedCanPersonalize}
+                data-capability-id="timetable.overlay.setColor"
                 onChange={(event) =>
                   updateSelected((candidate) => {
                     candidate.overlay = {
@@ -1848,6 +2217,7 @@ path={eventPath(event.id)}
               type="checkbox"
               checked={selectedEvent.overlay?.hidden === true}
               disabled={!selectedCanPersonalize}
+              data-capability-id="timetable.overlay.setHidden"
               onChange={() =>
                 updateSelected((candidate) => {
                   candidate.overlay = {
@@ -1866,6 +2236,7 @@ path={eventPath(event.id)}
                   type="checkbox"
                   checked={Boolean(selectedEvent.overlay?.alternativeStart)}
                   disabled={!selectedCanEditOverlay}
+                  data-capability-id="timetable.overlay.setTime"
                   onChange={() =>
                     updateSelected((candidate) => {
                       const enabled = Boolean(
@@ -1970,6 +2341,7 @@ path={eventPath(event.id)}
                   : (selectedEvent.overlay?.note ?? "")
               }
               disabled={!selectedCanPersonalize}
+              data-capability-id="timetable.overlay.setNote"
               onChange={(event) =>
                 updateSelected((candidate) => {
                   if (!selectedIsPersonal) {
@@ -2034,10 +2406,26 @@ path={eventPath(event.id)}
               ))}
             </div>
           ) : null}
+          {selectedEvent.sourceRef ? (
+            <button
+              type="button"
+              className="timetable-reset-overlay"
+              disabled={!selectedCanPersonalize || !selectedEvent.overlay}
+              data-capability-id="timetable.overlay.reset"
+              onClick={() =>
+                updateSelected((candidate) => {
+                  candidate.overlay = undefined;
+                })
+              }
+            >
+              <RotateCcw className="h-4 w-4" /> Reset personal changes
+            </button>
+          ) : null}
           {selectedCanEditBase ? (
             <button
               type="button"
               className="timetable-delete-event"
+              data-capability-id="timetable.event.delete"
               onClick={() => {
                 emit((draft) => {
                   draft.events = draft.events.filter(

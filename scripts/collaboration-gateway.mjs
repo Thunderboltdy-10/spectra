@@ -1,7 +1,5 @@
 import { Server } from "@hocuspocus/server";
-import { ConvexHttpClient } from "convex/browser";
-import { makeFunctionReference } from "convex/server";
-import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { jwtVerify } from "jose";
 import * as Y from "yjs";
 import * as decoding from "lib0/decoding";
@@ -25,6 +23,7 @@ import {
   MAX_REALTIME_MESSAGE_BYTES,
   canonicalDurableUpdate,
 } from "./collaboration-update-envelope.mjs";
+import { createCollaborationGatewayBridgeClient } from "./collaboration-gateway-bridge-client.mjs";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
 const tokenSecret = process.env.SPECTRA_COLLAB_TOKEN_SECRET;
@@ -35,8 +34,10 @@ if (!tokenSecret || tokenSecret.length < 32)
 if (!bridgeKey || bridgeKey.length < 32)
   throw new Error("COLLABORATION_BRIDGE_CONFIG_MISSING");
 
-const convex = new ConvexHttpClient(convexUrl, { logger: false });
-const exchange = makeFunctionReference("collaborationGatewayBridge:exchange");
+const bridge = createCollaborationGatewayBridgeClient({
+  convexUrl,
+  bridgeKey,
+});
 const jwtKey = new TextEncoder().encode(tokenSecret);
 const META_MAP = "spectra:artifact-meta";
 const REGION_MAP = "spectra:artifact-regions";
@@ -329,23 +330,6 @@ function schedulePersistence(document, entry) {
       .catch(() => undefined);
   }, PERSISTENCE_DEBOUNCE_MS);
   queue.timer.unref?.();
-}
-
-function bridge(operation, payload) {
-  const payloadJson = JSON.stringify(payload);
-  const timestamp = Date.now();
-  const nonce = randomBytes(24).toString("base64url");
-  const digest = createHash("sha256").update(payloadJson).digest("base64url");
-  const signature = createHmac("sha256", bridgeKey)
-    .update([operation, timestamp, nonce, digest].join("|"))
-    .digest("base64url");
-  return convex.action(exchange, {
-    operation,
-    payloadJson,
-    timestamp,
-    nonce,
-    signature,
-  });
 }
 
 function sessionClaims(payload, documentName) {

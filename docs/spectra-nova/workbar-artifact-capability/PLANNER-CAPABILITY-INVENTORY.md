@@ -1,10 +1,14 @@
 # Planner Capability Inventory
 
-**Unit:** P12.I5  
-**Leaders used for the gap analysis:** Todoist, Notion databases, Linear  
-**Artifact:** `planner_task` (the Plan studio)  
-**Pre-unit IR census:** 17 planner definitions (6 workbar actions and 11 field-format actions)  
-**Post-unit IR census:** 40 typed planner definitions  
+**Unit:** P12.I5
+
+**Leaders used for the gap analysis:** Todoist, Notion databases, Linear
+
+**Artifact:** `planner_task` (the Plan studio)
+
+**Pre-unit IR census:** 17 planner definitions (6 workbar actions and 11 field-format actions)
+
+**Post-unit IR census:** 40 typed planner definitions
 **Contract:** every row below is `SHIP`, `REFUSE HONESTLY`, or `DEFER - <owner>` under CANON R6, R7, and R26.
 
 The Plan studio is one shared task graph. List, Board, Timeline, saved views, AI operations, imports, exports, and Workload are projections of the same `PlanContent`; none may keep a second task or scheduling store. Workload reads `/api/spectra/calendar` and derives scheduled effort only from returned `calendarItems`.

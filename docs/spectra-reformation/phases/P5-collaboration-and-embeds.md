@@ -22,7 +22,7 @@ One embed model: the server contract (`artifactEmbeds`) and client `ReferenceNod
 
 The composition matrix, adversarially: two humans + one AI editing one artifact; external Word save mid-session; offline peer reconverging; AI editing while a human types in the same region (claims honored); revocation mid-session. Classroom load: 30 real browser clients (scripted) in one document — typing latency p95 < 100 ms, gateway stable > 1 h, budgets held. Embed journeys: embed a quiz in a document, take it, edit the source, watch the embed update; export with fallbacks and verify in Word.
 
-**Model: GPT 5.6 Sol xhigh.** Never concurrent with another live-product verifier.
+**Model: GPT 5.6 Sol max** (retiered 2026-08-30, ORCHESTRATION §4). Never concurrent with another live-product verifier. The two-human legs use both signed-in Playwright profiles (account A and account B — STATE §2; account B is created once via ORCHESTRATION §9 and must exist before this VU starts). RC.V1 (ORCHESTRATION §8) runs before this unit and may share its corpus copies.
 
 ## Exit gate
 
@@ -51,6 +51,7 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - Gateway `/_spectra/health` reports `ready` or `degraded` with connections/uptime. Dev supervisor backoff on child exit; client `HocuspocusProviderWebsocket` uses the same 400ms×2 band, cap 12s, jitter.
 - Restart reload: `onLoadDocument` applies Convex snapshot + later updates. Compaction when uncompacted ≥256KB, ≥200 updates, first snapshot, or 60s idle; `verifySnapshot` deletes compacted updates and superseded snapshots.
 - Focused Vitest: 3 files / 25 tests (`collaboration-checkpoint`, `collaboration-gateway`, `collaboration-native-projection`). Scoped ESLint: 0 errors. Secret scan 2195 files; `git diff --check` passed.
+- Gate repair 2026-08-30 (`570e326`): five checkpoint-test buffer sites now copy bytes into guaranteed `ArrayBuffer`s; focused Vitest 2/2, secret scan across 2,220 tracked files, path diff-check, and mandatory `npx convex dev --once --typecheck=enable` all passed. No P5.I3 file changed.
 - CS-9 payload GC (`beginPayloadUpload` refCount) is not this unit. L4 30-client / multi-writer stays P5.V1. Embeds stay P5.I3.
 - Status: IMPLEMENTED. No acceptance claimed.
 

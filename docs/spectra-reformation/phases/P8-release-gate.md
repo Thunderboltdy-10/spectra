@@ -15,9 +15,10 @@ The full composition matrix, sustained:
 - **Endurance**: hours-long sessions with realistic activity; memory/handle leak census; idle budgets still met after uptime; IndexedDB growth bounded.
 - **Scale**: 10k-node Library; 40-page/200k-cell/120-slide fixtures under collaboration; 30-client classroom re-run from P5 on the production host.
 - **Full flow matrix fresh**: every P-flow and F-flow equivalent (the goal-card library accumulated across P1–P7) re-run from clean profiles on the production build (`next build`, deployed gateway, real Bridge install — not dev mode).
+- **Real-corpus re-run (CANON R19, added 2026-08-30)**: the full RC.V1 corpus protocol (ORCHESTRATION §8) — Pablo's Extended Essay, the complex real presentation, the Physics IA workbook — re-executed on the **production build**: render fidelity element-by-element (equations, tables, images, footnotes, TOC, charts, masters, notes), every offered capability working or refusing honestly, Office round-trips with untouched-byte checks. RC.V1's earlier dev-mode PASS does not substitute; both runs are cited in V2.
 - **Connector paper test** (PRODUCT §8): the Google Docs adapter exercise against the IR + lens contracts; gaps become Field Notes for the next program.
 
-**Model: GPT 5.6 Sol xhigh.** Never concurrent with another live-product verifier.
+**Model: GPT 5.6 Sol max** (retiered 2026-08-30, ORCHESTRATION §4). Never concurrent with another live-product verifier. Multiplayer legs use both signed-in profiles (STATE §2).
 
 ## P8.I1 — Finale fix window (MT)
 
@@ -27,9 +28,9 @@ Escalate a finding to Sol if the fix is itself Hard.
 
 ## P8.V2 — Release verdict (MT)
 
-A written verdict against PRODUCT §6's disqualifiers, item by item, with evidence links: corruption, silent loss, false sync claims, unpersisted-success reports, Bridge recovery, collaboration truth, AI usefulness, performance on modest hardware, backend cost per active user (measured), security posture (keys rotated — confirm with Pablo, holes closed). Plus: the open-risk register, the deferred-scope register (school assessment slice, mobile, connectors, autocomplete), and operational runbooks (gateway deploy/restart, Bridge release, Convex deploy, incident basics). **Go / no-go is Pablo's call on this document.**
+A written verdict against PRODUCT §6's disqualifiers, item by item, with evidence links: corruption, silent loss, false sync claims, unpersisted-success reports, Bridge recovery, collaboration truth, AI usefulness, performance on modest hardware, backend cost per active user (measured), security posture (keys rotated — confirm with Pablo, holes closed). The verdict must additionally cite both real-corpus runs (RC.V1 and the P8.V1 production re-run) and address R19 explicitly — a verdict that cannot show the Extended Essay, the presentation, and the Physics IA surviving faithfully is a no-go by definition. Plus: the open-risk register, the deferred-scope register (school assessment slice, mobile, connectors, autocomplete), and operational runbooks (gateway deploy/restart, Bridge release, Convex deploy, incident basics). **Go / no-go is Pablo's call on this document.**
 
-**Model: Grok 4.6 High** (or Sol). Pablo signs.
+**Model: GPT 5.6 Sol max** (retiered 2026-08-30). Pablo signs.
 
 ## Exit gate
 

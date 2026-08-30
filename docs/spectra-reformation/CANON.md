@@ -11,7 +11,7 @@ Decisions **D1–D44** (`docs/spectra-nova/CANON.md`, incorporating HQ D1–D23)
 - **D26 (extended by R2).** Truthful states are now a mechanical property, not a discipline: no state may exist without a compensating exit.
 - **D42 (extended by R10).** Bounded reads now carry numeric budgets checked by the owning unit and at phase gates.
 
-## 1. New binding decisions (R1–R17)
+## 1. New binding decisions (R1–R19)
 
 ### Truth
 
@@ -44,6 +44,11 @@ Decisions **D1–D44** (`docs/spectra-nova/CANON.md`, incorporating HQ D1–D23)
 ### Process (amended 2026-08-26)
 
 - **R17. A verifier may repair product code during a VU, class-wide.** After triage (R12), the verifier inspects blast radius and applies the class everywhere it lives, then retests the remaining journey or contract. They do **not** apply the smallest local patch that greens the current card. They **do** stop and leave a paste-ready prompt for another agent when the finding is genuinely too complex to hold in this session — spanning multiple independent architectural seams they cannot close together, or a class they do not yet understand well enough to patch safely. Touching more than one file is not, by itself, a handoff. A later unit's owned class is a Field Note, not a start of that unit. Pablo 2026-08-26.
+
+### Process (amended 2026-08-30 — orchestrated mode)
+
+- **R18. Orchestrated execution.** A standing orchestrator agent holds Pablo's delegation for routing, launching, merging, and acceptance (`ORCHESTRATION.md` is its binding manual). Where an older document says "Pablo routes/accepts/arbitrates", read "the orchestrator", with these carve-outs that remain Pablo's alone: the P8.V2 go/no-go signature, production deploys and secrets, destructive actions on real user files, and any gate-weakening arbitration. The orchestrator never writes product code or tests; role separation (R8) is unchanged — acceptance still requires an independent VU PASS with real evidence, which the orchestrator records but cannot substitute for. Unit agents route stop-and-ask to the orchestrator; only the carve-outs above reach Pablo.
+- **R19. The real-corpus bar.** The product is not release-ready until Pablo's actual documents — the Extended Essay (equations, tables, images, footnotes, TOC), a complex real presentation, and the Physics IA data-collection workbook — render faithfully, survive editing, and round-trip through real Office without loss, with every offered capability either working or refusing honestly. Fixture suites passing while the real corpus fails is the definition of theater. "It opened" is not the bar; the corpus gate (ORCHESTRATION §8) runs on copies, never the originals, and re-runs on the production build inside P8. Known red at adoption (finding RC-1: EE equations missing, tables broken).
 
 ## 2. How Spectra must feel (unchanged, plus one line)
 

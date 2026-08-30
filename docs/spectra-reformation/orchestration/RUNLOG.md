@@ -70,3 +70,18 @@ Format: `YYYY-MM-DD HH:MM · EVENT · detail`
 2026-08-30 23:04 · WORKTREES CREATED · Wave 0 branches/trees created from expansion base 8531b5f for P9.I1/I2/I3, P10.I1/I3, P12.I1–I6, P14.I1–I3, and P13.I1. Existing reform/P5.V1-load-harness preserved separately.
 2026-08-30 23:04 · AGENT LAUNCH · /root/p5_v1_load_harness2 resumed the preserved supporting harness at Sol xhigh; /root/p9_i1 launched P9.I1 at Sol xhigh. RC.V1 remains /root/rc_v1_resume2 at Sol max. All three child slots are saturated; remaining Wave 0 units launch fire-and-forget as slots free in P9→P10→P12/P14/P13 priority order.
 2026-08-30 23:04 · OWNERSHIP SERIALIZATION · P14.I3 worktree is prepared but its agent waits for P14.I1 to land because both own `convex/memory.ts`; this pair is serialized under EXPANSION §3.1/§5 while every disjoint Wave 0 unit remains queued.
+2026-08-30 23:23 · EXECUTION MODE EXPANDED · Pablo explicitly authorized separate user-visible Codex worktree tasks to bypass the four-agent team-tree limit while the root orchestrator retains the serial merge queue. Three interrupted lanes resumed from preserved diffs: RC.V1 max, P5.V1 load-harness xhigh, P9.I1 xhigh.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P9.I2 Sol xhigh, client `7b77cec6-f29c-42e1-b790-826d12ab9bf9`, isolated worktree from main, no live leases.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P9.I3 Sol xhigh, client `3eaeb962-08cd-4802-ac7f-223b5f3adf7c`, isolated worktree from main, no live leases.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P10.I1 Sol xhigh, client `12cf967d-5f55-4c0f-8b83-6a785e358cf9`, isolated worktree from main; merge waits RC.V1 PASS.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P10.I3 Sol xhigh, client `9c2656c3-36b5-4107-9b44-8ec629fe9c93`, isolated worktree from main; merge waits RC.V1 PASS.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P12.I1 Sol xhigh, client `c42b3461-0cb9-455c-8c19-7446e4262134`, isolated worktree, quiz depth.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P12.I2 Sol xhigh, client `fe393b81-8fff-4f8d-95fe-9a3406f81191`, isolated worktree, flashcards depth.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P12.I3 Sol xhigh, client `033643d3-71da-40b9-8dc5-0ac82bd5ff2a`, isolated worktree, whiteboard depth.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P12.I4 Sol xhigh, client `bae3fd94-13a1-4e28-8d53-eb4b59b1a3bc`, isolated worktree, code depth.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P12.I5 Sol xhigh, client `019f1074-1824-4de1-9ac6-1d72a8b687b5`, isolated worktree, planner depth.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P12.I6 Sol xhigh, client `f84c7920-7385-42c8-a257-25bb56c5ba95`, isolated worktree, Foundry + timetable/calendar studio depth.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P14.I1 Sol xhigh, client `f23efc75-2c12-4271-b1ab-070305a74b0d`, isolated worktree, soul capsule.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P14.I2 Sol xhigh, client `e3467934-db12-467c-b2fa-9e38b1ba330a`, isolated worktree, self-authored skills.
+2026-08-30 23:23 · EXTERNAL TASK LAUNCH · P13.I1 Sol xhigh, client `7c0b694d-8971-4d4b-8b0f-19d2c012b2cd`, isolated worktree; unverified live probes remain behind queued approval/lease.
+2026-08-30 23:23 · OWNERSHIP HOLD · P14.I3 remains queued until P14.I1 merges because both own `convex/memory.ts`; no amount of parallelism overrides EXPANSION §3.1.

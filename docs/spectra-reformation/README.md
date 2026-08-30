@@ -17,10 +17,11 @@ If two documents disagree, the higher one wins. If a Reformation document seems 
 
 | File | What it is | Read when |
 |---|---|---|
-| `CANON.md` | Binding decisions: Nova D1–D44 inherited + Reformation R1–R20 | Every session, first |
+| `CANON.md` | Binding decisions: Nova D1–D44 inherited + Reformation R1–R27 | Every session, first |
 | `STATE.md` | The living ledger: unit statuses, verifier verdicts, field notes | Every session, second |
 | `PROCESS.md` | Roles, unit lifecycle, launch prompt template, difficulty routing, sub-agent policy | Every session, third |
-| `ORCHESTRATION.md` | Historical record of the retired parallel campaign; §8 still documents the real-corpus protocol | Reference only; never use it to launch worktrees or parallel agents |
+| `EXPANSION.md` | The expansion program (P9–P15): connector matrix, orchestration v2, the board, ownership matrix | Every orchestrator session; any P9–P15 unit |
+| `ORCHESTRATION.md` | Retired campaign record; §8 still documents the real-corpus protocol; its §5–§6 caps are superseded by EXPANSION §3 | §8 for corpus gates; otherwise archive |
 | `VERIFICATION.md` | The verification methodology: layers, journey protocol, contract tests, budgets | Every verifier session; implementers skim §1–§2 |
 | `PRODUCT.md` | What Spectra is, who it is for, the experience laws (toggles, plain words, invisible Bridge) | Any unit touching UX |
 | `ARCHITECTURE-TRUTH.md` | Truth hierarchy, replica machine, Bridge engine, status system | P0, P1, P2, P8 |
@@ -51,28 +52,43 @@ P5  Collaboration & Embeds             render architecture, gateway productioniz
 P6  Coherence                          UX debt closure, design-system adoption sweep,
                                        whole-product convergence audit (N10 absorbed)
 P7  Identity & Landing                 field, motion grammar, landing reveal (N11 absorbed)
-P8  The Release Gate                   chaos + multiplayer finale, release verdict
-                                       (N12 absorbed)
+
+—— Expansion (CANON R21; briefs + board in EXPANSION.md) ——
+P9  Local Foundation & Convex Efficiency  local-first deployments, bandwidth classes
+                                          fixed, seeded superadmin + TGC admin
+P10 The Connector Protocol                connections model, three families, replica
+                                          generalization, lens registry, refit gate
+P11 The Connector Fleet                   Google Workspace, calendars, Notion,
+                                          Quizlet/Anki, Markdown/CSV/PDF
+P12 Artifact Depth                        every type to Office-trio depth, by
+                                          named-leader inventory
+P13 School Intelligence                   ManageBac API capture, class selection,
+                                          homework→plan pipeline, CAS
+P14 Memory & Soul                         soul capsule, self-authored skills, capture
+P15 Experience                            onboarding journey, Connections hub, UX sweep
+
+P8  The Release Gate                   runs LAST for the expanded program: chaos +
+                                       multiplayer finale, RC.V2 corpus, release
+                                       verdict (N12 absorbed; see brief addendum)
 ```
 
-**Why this order.** Truth before fidelity (a correct merge over a lying replica machine is still a lie). Fidelity before protocol (the IR maps to lens deltas; those must be real first). Protocol before AI (AI tools derive from the IR). AI before embeds (embeds consume the unified model). Coherence and identity after correctness. The finale is a gate, not a hope — and this time it cannot be postponed, because P8 *is* the release.
+**Why this order.** Truth before fidelity (a correct merge over a lying replica machine is still a lie). Fidelity before protocol (the IR maps to lens deltas; those must be real first). Protocol before AI (AI tools derive from the IR). AI before embeds (embeds consume the unified model). Coherence and identity after correctness. For the expansion: foundation before fan-out (testing must be free and parallel before agents multiply), connector protocol before connectors (an adapter on ungeneralized seams is a fork), and depth/school/memory as independent parallel tracks (EXPANSION §4 is the dependency truth). The finale is a gate, not a hope — and this time it cannot be postponed, because P8 *is* the release.
 
 ## Explicitly out of scope (deferred, not forgotten)
 
-- **School assessment slice** — class-scoped quiz assignment, teacher grading queues, timetable→calendar retirement, ManageBac onboarding UX. Pablo's decision 2026-08-25. A future program owns it; do not let its absence rot (the calendar/planner/sharing surfaces this program *does* touch must not regress it).
+- **School assessment slice** — class-scoped quiz assignment and teacher grading queues remain deferred (Pablo 2026-08-25). **P13 explicitly absorbs** the ManageBac onboarding UX and the timetable→calendar unification pieces (CANON R21); the rest stays a future program's and must not rot.
 - **Mobile** — sub-`md` layouts remain unsupported. Do not spend effort there; do not break desktop to pretend otherwise.
-- **Additional connectors** (Google, Notion, Quizlet) — the IR and lens architecture must be built so a connector is an adapter, but no connector beyond Office/ManageBac is implemented in this program.
+- **Tier-2 connectors** — OneDrive/SharePoint Graph, Todoist, Google Tasks, GitHub, Google Classroom, Canvas/Moodle/PowerSchool, Kahoot, Excalidraw/Miro (EXPANSION §2). Tier-1 connectors are **in scope** via P10/P11 (CANON R21 lifted the old clause).
 - **Local-model autocomplete** — cut from launch scope. The UX shell stays; the settings copy must stop implying a local model exists (finding AI-14).
 
-## How this runs now (serial single-checkout mode)
+## How this runs now (orchestrated v2 — CANON R22)
 
-The temporary orchestrated campaign is retired (CANON R20). Work only in this checkout on `main`, one implementation or verification unit at a time. Do not create `reform/*` worktrees or launch parallel implementation lanes unless Pablo explicitly changes this rule.
+A standing orchestrator routes, launches, merges, and records delegated acceptances; Pablo answers only QUESTIONS.md items and signs the release. The operating manual for concurrency, leases, the merge queue, verifier cadence, and the dependency board is **EXPANSION §3–§4**. The essentials:
 
-1. Open `STATE.md` §0, find the lowest OPEN unit whose prerequisites are ACCEPTED.
-2. Read its phase brief and difficulty tag; use PROCESS §4.2 to choose the appropriate effort.
-3. Execute that unit completely in the primary checkout and commit a coherent result.
-4. When the implementer reports done, launch the paired **verification unit with a different agent** — never the same session, never the same context. The verifier starts as a person-shaped walk (VERIFICATION L3). On fail they repair a holdable class in-session and retest to PASS (PROCESS §2 / R17). If the class is too complex to hold, they stop and leave a paste-ready prompt. Close-out is PROCESS §5.1.
-5. Accept only when the verifier's verdict is recorded in STATE and Pablo accepts it.
-6. Answer stop-and-ask items before relaunching. A pending question blocks the next unit. Relevant tests belong to their owning unit; the entire repository sweep waits until paired verification has run.
+1. The current track (RC.V1 → P5.V1 → P6.V1 → P7) continues under its existing briefs and remains the most senior work.
+2. Implementation units run as **parallel fire-and-forget worktree agents** — no numeric cap; bounded by the ownership matrix (EXPANSION §5), leases (EXPANSION §3.3), and the serial merge queue with its standing merge gate (EXPANSION §3.2).
+3. Verification is phase-scoped per the briefs. Every VU is a fresh agent with no implementer context (R8). From P9.V1 onward, VUs run on isolated **local deployments** (R23) and may run concurrently on separate instances — and in parallel with builds in other worktrees.
+4. Acceptance: VU PASS + recorded evidence → `ACCEPTED (orchestrator, delegated)` (R18/R22). Pablo's L5 passes are requested per phase gate, non-blocking.
+5. Stop-and-ask goes to `orchestration/QUESTIONS.md` under the R18 carve-outs; a queued question never blocks other tracks.
 
-Between units: commit and leave `main` clean. Keys rotation (STATE §5) is Pablo's and blocks nothing except public exposure risk. Never two live-product verifiers at once; all units are serial.
+Between merges: `main` stays clean and green on the merge gate. Keys rotation (STATE §5) is Pablo's and blocks nothing except public exposure risk.

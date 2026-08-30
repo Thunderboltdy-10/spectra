@@ -35,3 +35,17 @@ A written verdict against PRODUCT §6's disqualifiers, item by item, with eviden
 ## Exit gate
 
 The verdict exists, is honest, and Pablo signs it. If the verdict is no-go, its findings define the next program's P0 — the ledger stays truthful either way.
+
+## Expansion addendum (2026-08-30, CANON R21)
+
+P8 runs **last for the expanded program**. Changes to the sections above:
+
+- **Prerequisites:** P1–P7 **and P9–P15** accepted.
+- **V1 matrix extends** to the expansion surfaces:
+  - **RC.V2 corpus (extends R19):** alongside the original three real documents — a real Google Doc round-tripped through the Drive connector, a real Notion page imported/refreshed/exported, a real Anki deck imported and studied, a Quizlet export ingested, and the live TGC ManageBac tenant journey (P13.V1's script) — all on the production build.
+  - **Connector chaos:** token revocation mid-sync, provider 429/5xx storms, connection removal with pending writes, two connectors watching the same content — compensating exits (R2) and honest labels (R13) throughout.
+  - **Depth spot-matrix:** for each artifact type, a sample of P12 inventory "ship" rows re-demonstrated and "refuse" rows re-read on the production build.
+  - **Budgets:** the P9.V1 baselines re-measured on production; connector idle cost near-zero.
+  - The **"Connector paper test"** row above is superseded — the connectors are real now; P11.V1's evidence is cited instead.
+- **V1 runs on a local-deploy production build** (`next build` against a local instance) plus the deployed gateway; the multi-instance harness (P9.I1) allows the endurance and scale legs to run in parallel where they do not share `office-com`/`bridge`/profile leases (R23).
+- **V2 verdict** additionally cites: RC.V2, the connector fleet's honesty matrix (R25 sentences vs actual behavior), the depth inventories' closure state, memory cap proofs (R27), and the measured backend cost per active user after the P9 efficiency work. The deferred-scope register now reads: school assessment remainder (grading queues, class-scoped assignment), mobile, Tier-2 connectors, local-model autocomplete.

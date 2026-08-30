@@ -413,6 +413,8 @@ export async function POST(request: NextRequest) {
             ? "spectra-build-document"
             : content.entryFileId,
         dependencies: lockedDependencies,
+        pythonPackages: content.pythonPackages ?? [],
+        notebook: content.notebook ?? { enabled: false },
         networkPolicy: content.networkPolicy ?? { mode: "none" },
         parameters: content.parameters ?? [],
         assets: publishedAssets,

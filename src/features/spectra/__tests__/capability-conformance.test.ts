@@ -5,8 +5,8 @@ import {
   DOCUMENT_EXPORT_COPIES,
   PRESENTATION_EXPORT_COPIES,
   SHEETS_EXPORT_COPIES,
-  STUDIO_CAPABILITIES,
   capabilityGhostIssues,
+  capabilitiesFor,
   officeCapabilitiesFor,
   projectBindingsFromIr,
   proposeOperationJsonSchemaFor,
@@ -228,9 +228,7 @@ describe("P3.V1 protocol conformance", () => {
 
   it("lets every non-Office studio definition project through the same binding helper", () => {
     for (const type of STUDIOS) {
-      const definitions = STUDIO_CAPABILITIES.filter((definition) =>
-        definition.id.startsWith(`${type}.`),
-      );
+      const definitions = capabilitiesFor(type);
       expect(definitions.length).toBeGreaterThan(0);
       const projected = projectBindingsFromIr(
         type as WorkType,

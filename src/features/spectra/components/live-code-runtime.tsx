@@ -220,6 +220,7 @@ export function LiveCodeRuntime({
       workerRef.current = runPythonInIsolatedWorker({
         files: content.files,
         entryFileId: content.entryFileId,
+        packages: content.pythonPackages ?? [],
         resources,
         parameters: codeParameterSnapshot(content),
         assets,

@@ -209,10 +209,14 @@ const keyboardOperations = {
   ],
   code: [
     "move between files",
+    "search project source",
     "jump to a line",
     "open find and replace",
     "run the project",
-    "read diagnostics",
+    "run the current Python cell",
+    "run declared checks",
+    "format supported source",
+    "read problems, console, and run history",
   ],
   // All five are real in `whiteboard-studio.tsx`: Tab walks the objects in
   // reading order and reveals each one, the outline panel lists objects and

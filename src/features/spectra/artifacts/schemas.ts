@@ -777,6 +777,92 @@ export const codeContentSchema = z
       })
       .strict(),
     dependencies: z.record(z.string(), z.string()).optional(),
+    pythonPackages: z
+      .array(
+        z.enum([
+          "numpy",
+          "pandas",
+          "matplotlib",
+          "scipy",
+          "scikit-learn",
+          "sympy",
+        ]),
+      )
+      .max(6)
+      .refine((packages) => new Set(packages).size === packages.length, {
+        message: "Approved Python packages must be unique.",
+      })
+      .optional(),
+    notebook: z
+      .object({
+        enabled: z.boolean(),
+      })
+      .strict()
+      .optional(),
+    runReports: z
+      .array(
+        z
+          .object({
+            id,
+            createdAt: z.number().int().nonnegative(),
+            runtime: z.enum(["browser", "react", "python"]),
+            runtimeVersion: z.string().min(1).max(80),
+            scope: z.enum(["project", "cell", "tests"]),
+            status: z.enum(["ready", "error", "limited", "cancelled"]),
+            durationMs: z.number().int().min(0).max(120_000),
+            sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+            entryPath: z.string().min(1).max(500),
+            cell: z
+              .object({
+                index: z.number().int().nonnegative(),
+                title: z.string().min(1).max(160),
+                startLine: z.number().int().positive(),
+                endLine: z.number().int().positive(),
+              })
+              .strict()
+              .optional(),
+            pythonPackages: z.array(z.string().min(1).max(80)).max(6).optional(),
+            events: z
+              .array(
+                z
+                  .object({
+                    atMs: z.number().int().min(0).max(120_000),
+                    state: z.string().min(1).max(40),
+                    message: z.string().max(500).optional(),
+                  })
+                  .strict(),
+              )
+              .max(40),
+            outputExcerpt: z.string().max(12_012),
+            problems: z
+              .array(
+                z
+                  .object({
+                    severity: z.enum(["error", "warning", "info"]),
+                    message: z.string().min(1).max(800),
+                    file: z.string().max(500).optional(),
+                    line: z.number().int().positive().optional(),
+                    column: z.number().int().nonnegative().optional(),
+                  })
+                  .strict(),
+              )
+              .max(50),
+            tests: z
+              .array(
+                z
+                  .object({
+                    name: z.string().min(1).max(200),
+                    status: z.enum(["passed", "failed"]),
+                    message: z.string().max(800).optional(),
+                  })
+                  .strict(),
+              )
+              .max(100),
+          })
+          .strict(),
+      )
+      .max(20)
+      .optional(),
     preview: z
       .object({
         orientation: z.enum(["horizontal", "vertical"]).optional(),
@@ -980,6 +1066,24 @@ export const codeContentSchema = z
         message: "Executable checks exceed the 300 KB artifact limit.",
       });
     }
+    const runReportIds = new Set<string>();
+    (value.runReports ?? []).forEach((report, index) => {
+      if (runReportIds.has(report.id)) {
+        context.addIssue({
+          code: "custom",
+          path: ["runReports", index, "id"],
+          message: "Run report identities must be unique.",
+        });
+      }
+      runReportIds.add(report.id);
+      if (report.scope === "cell" && !report.cell) {
+        context.addIssue({
+          code: "custom",
+          path: ["runReports", index, "cell"],
+          message: "A cell run report must name its source cell.",
+        });
+      }
+    });
     const environmentKeys = new Set<string>();
     (value.environmentSchema ?? []).forEach((variable, index) => {
       if (environmentKeys.has(variable.key)) {

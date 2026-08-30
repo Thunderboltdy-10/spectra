@@ -35,6 +35,7 @@ import {
   Flag,
   FlaskConical,
   FolderOpen,
+  History,
   Import,
   Loader2,
   Maximize2,
@@ -62,12 +63,16 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
-import { type OverflowItem } from "@/components/ui/dropdown-menu";
+import {
+  OverflowMenu,
+  type OverflowItem,
+} from "@/components/ui/dropdown-menu";
 import { SelectField } from "@/components/ui/select";
 import {
   codeRuntimeVersion,
   codeContentKey,
   codeParameterSnapshot,
+  CURATED_PYTHON_PACKAGES,
   createCodeImportRecoveryAsset,
   exportCodeArchive,
   importCodeFiles,
@@ -84,9 +89,22 @@ import {
   type CodeTest,
 } from "../code/model";
 import {
+  runtimeSourceString,
   runtimeSourceHash,
   type PublishedCodeBuildProjection,
 } from "../code/published-build";
+import {
+  appendCodeRunReport,
+  codeRunReportJson,
+  codeRunReportMarkdown,
+  codeShortcutOperation,
+  discoverPythonCells,
+  pythonCellAtLine,
+  pythonCellExecutionSource,
+  type CodeRunReport,
+  type CodeStudioOperation,
+  type PythonCell,
+} from "../code/operations";
 import {
   inspectCodeNetworkOrigin,
   MAX_CODE_NETWORK_ORIGINS,
@@ -173,6 +191,17 @@ type TestResult = {
 };
 
 type CodeSurface = "preview" | "code" | "split";
+
+type ActiveRunCapture = {
+  id: string;
+  startedAt: number;
+  sourceFingerprint: string;
+  scope: CodeRunReport["scope"];
+  entryPath: string;
+  cell?: PythonCell;
+  events: CodeRunReport["events"];
+  record: boolean;
+};
 
 /**
  * The registry owns which views exist and who may enter them, so the studio
@@ -468,7 +497,7 @@ export function CodeStudio({
   );
   const [sourceMode, setSourceMode] = useState<"code" | "parameters">("code");
   const [fileQuery, setFileQuery] = useState("");
-  const [fileSearchMode, _setFileSearchMode] = useState<"paths" | "content">(
+  const [fileSearchMode, setFileSearchMode] = useState<"paths" | "content">(
     "paths",
   );
   const [pendingSearchTarget, setPendingSearchTarget] = useState<{
@@ -485,14 +514,14 @@ export function CodeStudio({
       ? contract.density !== "tight"
       : fileRailPreference === "open");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [_newFileOpen, setNewFileOpen] = useState(false);
+  const [newFileOpen, setNewFileOpen] = useState(false);
   const [newFilePath, setNewFilePath] = useState("");
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
-  const [renameDraft, _setRenameDraft] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
   const [deleteFileId, setDeleteFileId] = useState<string | null>(null);
-  const [panel, setPanel] = useState<"console" | "problems" | "tests" | null>(
-    null,
-  );
+  const [panel, setPanel] = useState<
+    "console" | "problems" | "tests" | "runs" | null
+  >(null);
   const [runState, setRunState] = useState<RunState>("idle");
   const [runMessage, setRunMessage] = useState("");
   const [previewFiles, setPreviewFiles] = useState<CodeFile[] | null>(null);
@@ -543,9 +572,12 @@ export function CodeStudio({
   } | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const folderImportRef = useRef<HTMLInputElement>(null);
+  const fileSearchInputRef = useRef<HTMLInputElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
   const pythonRunRef = useRef<{ cancel: () => void } | null>(null);
   const runSequenceRef = useRef(0);
+  const activeRunRef = useRef<ActiveRunCapture | null>(null);
+  const skipNextAutoRunRef = useRef(false);
   const draggingRef = useRef(false);
   const importReconciliationStartedRef = useRef(false);
 
@@ -572,7 +604,7 @@ export function CodeStudio({
   const filteredFiles = workbook.files.filter((file) =>
     file.path.toLowerCase().includes(fileQuery.trim().toLowerCase()),
   );
-  const _projectSearchResults = useMemo(() => {
+  const projectSearchResults = useMemo(() => {
     const query = fileQuery.trim().toLocaleLowerCase();
     if (fileSearchMode !== "content" || !query) return [];
     const matches: Array<{
@@ -610,6 +642,34 @@ export function CodeStudio({
     }
     return matches;
   }, [fileQuery, fileSearchMode, workbook.files]);
+  const fileRailItems = useMemo(
+    () =>
+      fileSearchMode === "content"
+        ? projectSearchResults.map((result) => ({
+            id: `search:${result.id}`,
+            title: result.path,
+            subtitle: `${result.line}:${result.column + 1} ${result.snippet}`,
+          }))
+        : filteredFiles.map((file) => ({
+            id: file.id,
+            title: file.path.split("/").pop() || file.path,
+            subtitle: file.path.includes("/")
+              ? file.path.slice(0, file.path.lastIndexOf("/"))
+              : file.language || undefined,
+            active: file.id === activeFileId,
+          })),
+    [activeFileId, fileSearchMode, filteredFiles, projectSearchResults],
+  );
+  const entryFile =
+    workbook.files.find((file) => file.id === workbook.entryFileId) ??
+    workbook.files[0]!;
+  const pythonCells = useMemo(
+    () =>
+      workbook.runtime === "python"
+        ? discoverPythonCells(entryFile.source)
+        : [],
+    [entryFile.source, workbook.runtime],
+  );
   const activeIndex = workbook.files.findIndex(
     (file) => file.id === activeFile.id,
   );
@@ -652,9 +712,9 @@ export function CodeStudio({
       asset.path,
     ]),
   );
-  const currentContentKey = codeContentKey(workbook);
+  const currentRuntimeSourceKey = runtimeSourceString(workbook);
   const publishedStale = Boolean(
-    publishedBuild && publishedContentKey !== currentContentKey,
+    publishedBuild && publishedContentKey !== currentRuntimeSourceKey,
   );
 
   useEffect(() => {
@@ -837,7 +897,7 @@ export function CodeStudio({
         setPublishedBuild(result.build);
         setPublishedContentKey(
           result.build && result.sourceMatchesCurrent
-            ? codeContentKey(incomingRef.current)
+            ? runtimeSourceString(incomingRef.current)
             : null,
         );
       })
@@ -937,10 +997,10 @@ export function CodeStudio({
     });
   }
 
-  function _createFile() {
-    if (!newFilePath.trim()) return;
+  function createFile(pathValue = newFilePath) {
+    if (!pathValue.trim()) return;
     try {
-      const path = normalizeCodePath(newFilePath);
+      const path = normalizeCodePath(pathValue);
       if (
         workbook.files.some(
           (file) => file.path.toLowerCase() === path.toLowerCase(),
@@ -969,11 +1029,11 @@ export function CodeStudio({
     }
   }
 
-  function _renameFile() {
-    const id = renamingFileId;
+  function renameFile(pathValue = renameDraft, fileId = renamingFileId) {
+    const id = fileId;
     if (!id) return;
     try {
-      const path = normalizeCodePath(renameDraft);
+      const path = normalizeCodePath(pathValue);
       if (
         workbook.files.some(
           (file) =>
@@ -1012,7 +1072,7 @@ export function CodeStudio({
     setDeleteFileId(null);
   }
 
-  function _duplicateFile(id: string) {
+  function duplicateFile(id: string) {
     const source = workbook.files.find((file) => file.id === id);
     if (!source || readOnly) return;
     const dot = source.path.lastIndexOf(".");
@@ -1042,7 +1102,7 @@ export function CodeStudio({
     setActiveFileId(nextId);
   }
 
-  function _setEntryFile(id: string) {
+  function setEntryFile(id: string) {
     if (readOnly || workbook.entryFileId === id) return;
     mutate((draft) => {
       draft.entryFileId = id;
@@ -1054,7 +1114,7 @@ export function CodeStudio({
    * a menu rather than a hover-only glyph is what makes them available to the
    * keyboard and to touch.
    */
-  function _fileRowActions(file: CodeFile) {
+  function fileRowActions(file: CodeFile) {
     const isEntry = workbook.entryFileId === file.id;
     return [
       { key: "rename" as const, label: "Rename", icon: Pencil },
@@ -1242,7 +1302,14 @@ export function CodeStudio({
   );
 
   const run = useCallback(
-    async (includeTests = false) => {
+    async (
+      includeTests = false,
+      options?: {
+        cell?: PythonCell;
+        record?: boolean;
+        sourceOverride?: string;
+      },
+    ) => {
       const enabledTests = (workbook.tests ?? []).filter(
         (test) => test.enabled !== false,
       );
@@ -1262,6 +1329,18 @@ export function CodeStudio({
       runSequenceRef.current = sequence;
       pythonRunRef.current?.cancel();
       pythonRunRef.current = null;
+      const sourceFingerprint = await runtimeSourceHash(workbook);
+      if (sequence !== runSequenceRef.current) return;
+      activeRunRef.current = {
+        id: uid("run-report"),
+        startedAt: Date.now(),
+        sourceFingerprint,
+        scope: includeTests ? "tests" : options?.cell ? "cell" : "project",
+        entryPath: entryFile.path,
+        ...(options?.cell ? { cell: options.cell } : {}),
+        events: [],
+        record: options?.record !== false,
+      };
       setProblems(
         assetDiagnostics.map((message, index) => ({
           id: `asset:${index}`,
@@ -1381,9 +1460,11 @@ export function CodeStudio({
           pythonRunRef.current = runPythonInIsolatedWorker({
             files: workbook.files,
             entryFileId: workbook.entryFileId,
+            packages: workbook.pythonPackages ?? [],
             resources: runtimeResources,
             parameters: runtimeParameters,
             assets: runtimeAssets,
+            sourceOverride: options?.sourceOverride,
             additionalSource: includeTests
               ? pythonTestSource(enabledTests)
               : "",
@@ -1535,9 +1616,87 @@ export function CodeStudio({
       runtimeParameters,
       runtimeResources,
       runtimeAssets,
+      entryFile.path,
       workbook,
     ],
   );
+
+  useEffect(() => {
+    const capture = activeRunRef.current;
+    if (!capture) return;
+    const atMs = Math.max(0, Date.now() - capture.startedAt);
+    const lastEvent = capture.events.at(-1);
+    if (lastEvent?.state !== runState || lastEvent.message !== runMessage) {
+      capture.events.push({
+        atMs,
+        state: runState,
+        ...(runMessage ? { message: runMessage } : {}),
+      });
+      capture.events = capture.events.slice(-40);
+    }
+    if (
+      runState !== "ready" &&
+      runState !== "error" &&
+      runState !== "limited" &&
+      runState !== "cancelled"
+    )
+      return;
+    activeRunRef.current = null;
+    if (!capture.record || workbook.runtime === "none") return;
+    const report = appendCodeRunReport([], {
+      id: capture.id,
+      createdAt: capture.startedAt,
+      runtime: workbook.runtime,
+      runtimeVersion: codeRuntimeVersion(workbook.runtime),
+      scope: capture.scope,
+      status: runState,
+      durationMs: atMs,
+      sourceFingerprint: capture.sourceFingerprint,
+      entryPath: capture.entryPath,
+      ...(capture.cell
+        ? {
+            cell: {
+              index: capture.cell.index,
+              title: capture.cell.title,
+              startLine: capture.cell.startLine,
+              endLine: capture.cell.endLine,
+            },
+          }
+        : {}),
+      ...(workbook.runtime === "python"
+        ? { pythonPackages: workbook.pythonPackages ?? [] }
+        : {}),
+      events: capture.events,
+      outputExcerpt: consoleEntries
+        .map((entry) => `[${entry.level}] ${entry.text}`)
+        .join("\n"),
+      problems,
+      tests: testResults.flatMap((test) =>
+        test.status === "running"
+          ? []
+          : [
+              {
+                name: test.name,
+                status: test.status,
+                ...(test.message ? { message: test.message } : {}),
+              },
+            ],
+      ),
+    })[0];
+    if (!report) return;
+    const next = structuredClone(workbook);
+    next.runReports = appendCodeRunReport(next.runReports, report);
+    skipNextAutoRunRef.current = true;
+    emit(next);
+  }, [
+    consoleEntries,
+    emit,
+    problems,
+    runMessage,
+    runState,
+    testResults,
+    workbook,
+  ]);
 
   useEffect(() => {
     if (
@@ -1547,9 +1706,22 @@ export function CodeStudio({
       workbook.runtime === "none"
     )
       return;
-    const timer = window.setTimeout(() => void run(), 850);
+    if (skipNextAutoRunRef.current) {
+      skipNextAutoRunRef.current = false;
+      return;
+    }
+    const timer = window.setTimeout(
+      () => void run(false, { record: false }),
+      850,
+    );
     return () => window.clearTimeout(timer);
-  }, [canExecute, run, workbook.preview?.autoRun, workbook.runtime]);
+  }, [
+    canExecute,
+    currentRuntimeSourceKey,
+    run,
+    workbook.preview?.autoRun,
+    workbook.runtime,
+  ]);
 
   async function handleSandboxEvent(event: SpectraSandboxFrameMessage) {
     if (event.type === "spectra:console") {
@@ -1865,6 +2037,8 @@ export function CodeStudio({
         entryFileId: entry.id,
         files: result.files,
         dependencies: result.dependencies,
+        pythonPackages: result.pythonPackages,
+        notebook: result.notebook,
         parameters: result.parameters,
         assets: importedAssetReferences,
         visualisation: result.visualisation ?? workbook.visualisation,
@@ -2038,6 +2212,34 @@ export function CodeStudio({
     }
   }
 
+  async function copyRunReport(reportId: string) {
+    const report = (workbook.runReports ?? []).find(
+      (candidate) => candidate.id === reportId,
+    );
+    if (!report) return;
+    try {
+      await navigator.clipboard.writeText(codeRunReportMarkdown(report));
+      appendConsole("system", "Copied the sanitized run report as Markdown.");
+    } catch {
+      setRunMessage(
+        "The run report could not be copied. Download its JSON file instead.",
+      );
+    }
+  }
+
+  function downloadRunReport(reportId: string) {
+    const report = (workbook.runReports ?? []).find(
+      (candidate) => candidate.id === reportId,
+    );
+    if (!report) return;
+    downloadBlob(
+      new Blob([codeRunReportJson(report)], {
+        type: "application/json;charset=utf-8",
+      }),
+      `${safeFilename(title)}-run-${report.createdAt}.json`,
+    );
+  }
+
   async function publishRuntime() {
     if (readOnly || publishState !== "idle") return;
     if (!synchronizationReady) {
@@ -2090,7 +2292,7 @@ export function CodeStudio({
       const expectedSourceHash = await runtimeSourceHash(workbook);
       const result = await publishCodeBuild(artifactId, expectedSourceHash);
       setPublishedBuild(result.build);
-      setPublishedContentKey(codeContentKey(workbook));
+      setPublishedContentKey(runtimeSourceString(workbook));
       appendConsole(
         "system",
         result.reused
@@ -2338,7 +2540,7 @@ export function CodeStudio({
             runState === "running" ? (
               <button
                 type="button"
-                onClick={() => stopRun()}
+                onClick={() => dispatchCodeOperation("runtime.stop")}
                 className="code-icon-action"
                 aria-label="Stop run"
                 title="Stop run"
@@ -2348,7 +2550,7 @@ export function CodeStudio({
             ) : (
               <button
                 type="button"
-                onClick={() => void run()}
+                onClick={() => dispatchCodeOperation("runtime.run")}
                 className="code-icon-action"
                 aria-label="Run preview again"
                 title="Run preview again"
@@ -2424,7 +2626,7 @@ export function CodeStudio({
             <button
               type="button"
               className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-45"
-              onClick={() => void run()}
+              onClick={() => dispatchCodeOperation("runtime.run")}
               disabled={!canExecute || workbook.runtime === "none"}
             >
               <Play className="h-3.5 w-3.5" />
@@ -2485,6 +2687,133 @@ export function CodeStudio({
       </div>
     </div>
   );
+
+  function dispatchCodeOperation(
+    operation: CodeStudioOperation,
+    payload: { fileId?: string; path?: string; reportId?: string } = {},
+  ) {
+    if (operation === "runtime.run" || operation === "notebook.runAll") {
+      void run();
+      return;
+    }
+    if (operation === "runtime.stop") {
+      stopRun();
+      return;
+    }
+    if (operation === "notebook.runCell") {
+      if (
+        workbook.runtime !== "python" ||
+        workbook.notebook?.enabled !== true ||
+        activeFile.id !== workbook.entryFileId
+      ) {
+        setRunMessage(
+          "Run current cell is available in the active Python entry file when cell mode is on.",
+        );
+        return;
+      }
+      const cursorLine = editorViewRef.current
+        ? editorViewRef.current.state.doc.lineAt(
+            editorViewRef.current.state.selection.main.head,
+          ).number
+        : 1;
+      const cell = pythonCellAtLine(pythonCells, cursorLine);
+      if (!cell) return;
+      void run(false, {
+        cell,
+        sourceOverride: pythonCellExecutionSource(cell),
+      });
+      return;
+    }
+    if (operation === "tests.run") {
+      void run(true);
+      return;
+    }
+    if (operation === "format") {
+      void formatActiveFile();
+      return;
+    }
+    if (operation === "diagnostics.problems") {
+      setPanel((current) => (current === "problems" ? null : "problems"));
+      return;
+    }
+    if (operation === "output.console") {
+      setPanel((current) => (current === "console" ? null : "console"));
+      return;
+    }
+    if (operation === "runs.history") {
+      setPanel((current) => (current === "runs" ? null : "runs"));
+      return;
+    }
+    if (operation === "output.clear") {
+      if (panel === "problems") setProblems([]);
+      else if (panel === "console") setConsoleEntries([]);
+      return;
+    }
+    if (operation === "settings") {
+      setSettingsOpen((open) => !open);
+      return;
+    }
+    if (operation === "files.searchProject") {
+      setSurface("code");
+      setSourceMode("code");
+      setFileRailPreference("open");
+      setFileSearchMode("content");
+      window.requestAnimationFrame(() => fileSearchInputRef.current?.focus());
+      return;
+    }
+    if (operation === "files.create") {
+      if (payload.path) createFile(payload.path);
+      else setNewFileOpen(true);
+      return;
+    }
+    if (operation === "files.rename") {
+      const fileId = payload.fileId ?? activeFile.id;
+      const file = workbook.files.find((candidate) => candidate.id === fileId);
+      if (!file) return;
+      if (payload.path) renameFile(payload.path, fileId);
+      else {
+        setRenamingFileId(fileId);
+        setRenameDraft(file.path);
+      }
+      return;
+    }
+    if (operation === "files.duplicate") {
+      duplicateFile(payload.fileId ?? activeFile.id);
+      return;
+    }
+    if (operation === "files.setEntry") {
+      setEntryFile(payload.fileId ?? activeFile.id);
+      return;
+    }
+    if (operation === "files.delete") {
+      setDeleteFileId(payload.fileId ?? activeFile.id);
+      return;
+    }
+    if (operation === "runs.copyReport" && payload.reportId) {
+      void copyRunReport(payload.reportId);
+      return;
+    }
+    if (operation === "runs.downloadReport" && payload.reportId)
+      downloadRunReport(payload.reportId);
+  }
+
+  function handleStudioKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const operation = codeShortcutOperation(event);
+    if (!operation) return;
+    const target = event.target as HTMLElement;
+    const inEditor = Boolean(target.closest(".cm-editor"));
+    if (
+      !inEditor &&
+      (target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement)
+    )
+      return;
+    if (operation === "notebook.runCell" && !inEditor) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dispatchCodeOperation(operation);
+  }
 
   const sourcePaneVisible = surface === "code" || surface === "split";
   const isFullscreen = contract.surface === "full";
@@ -2554,6 +2883,26 @@ export function CodeStudio({
                   onSelect: () =>
                     setFileRailPreference(fileRailOpen ? "closed" : "open"),
                 },
+                {
+                  id: "files.create",
+                  label: "New file",
+                  icon: FilePlus2,
+                  tab: "Files",
+                  priority: "advanced" as const,
+                  requires: "edit" as const,
+                  disabled: readOnly,
+                  onSelect: () => dispatchCodeOperation("files.create"),
+                },
+                {
+                  id: "files.searchProject",
+                  label: "Search project",
+                  icon: Search,
+                  tab: "Files",
+                  priority: "secondary" as const,
+                  shortcut: "Mod+Shift+F",
+                  onSelect: () =>
+                    dispatchCodeOperation("files.searchProject"),
+                },
               ]
             : []),
           {
@@ -2577,12 +2926,41 @@ export function CodeStudio({
                   priority: "secondary" as const,
                   disabled: readOnly || formatting,
                   requires: "edit" as const,
-                  onSelect: () => void formatActiveFile(),
+                  shortcut: "Mod+Alt+F",
+                  onSelect: () => dispatchCodeOperation("format"),
                 },
               ]
             : []),
         ]
       : []),
+    ...(workbook.runtime === "python" && workbook.notebook?.enabled === true
+      ? [
+          {
+            id: "notebook.runCell",
+            label: `Run cell (${pythonCells.length})`,
+            icon: Play,
+            tab: "Notebook",
+            priority: "essential" as const,
+            requires: "execute" as const,
+            shortcut: "Shift+Enter",
+            disabled: activeFile.id !== workbook.entryFileId,
+            hint:
+              activeFile.id === workbook.entryFileId
+                ? "Run the Python cell containing the cursor"
+                : "Open the Python entry file to run a cell",
+            onSelect: () => dispatchCodeOperation("notebook.runCell"),
+          },
+        ]
+      : []),
+    {
+      id: "runs.history",
+      label: "Run history",
+      icon: History,
+      tab: "Results",
+      priority: "secondary" as const,
+      active: panel === "runs",
+      onSelect: () => dispatchCodeOperation("runs.history"),
+    },
     {
       id: "settings",
       label: "Settings",
@@ -2590,7 +2968,7 @@ export function CodeStudio({
       priority: "secondary" as const,
       active: settingsOpen,
       hint: "Runtime, access, and connections",
-      onSelect: () => setSettingsOpen((open) => !open),
+      onSelect: () => dispatchCodeOperation("settings"),
     },
     {
       id: "publish",
@@ -2721,7 +3099,10 @@ export function CodeStudio({
   ]);
 
   return (
-    <div className="code-studio flex h-full min-h-0 w-full min-w-0 flex-col">
+    <div
+      className="code-studio flex h-full min-h-0 w-full min-w-0 flex-col"
+      onKeyDownCapture={handleStudioKeyDown}
+    >
       {/* The legacy `code-workbar` hook is deliberately not passed: it carried
           the transitional `overflow-x: auto` rail, and the shared bar must not
           scroll. */}
@@ -2766,7 +3147,8 @@ export function CodeStudio({
           icon: running ? CircleStop : Play,
           requires: "execute",
           disabled: !running && workbook.runtime === "none",
-          onSelect: () => (running ? stopRun() : void run()),
+          onSelect: () =>
+            dispatchCodeOperation(running ? "runtime.stop" : "runtime.run"),
         }}
       />
       <input
@@ -2917,41 +3299,192 @@ export function CodeStudio({
                   >
                     {contract.surface === "full" ? (
                       <StudioItemRail
-                        label="Files"
-                        count={workbook.files.length}
+                        label={
+                          fileSearchMode === "content"
+                            ? "Search results"
+                            : "Files"
+                        }
+                        count={fileRailItems.length}
                         collapsed={!fileRailOpen}
                         onToggleCollapsed={() =>
                           setFileRailPreference(
                             fileRailOpen ? "closed" : "open",
                           )
                         }
-                        items={filteredFiles.map((file) => ({
-                          id: file.id,
-                          title: file.path.split("/").pop() || file.path,
-                          subtitle: file.path.includes("/")
-                            ? file.path.slice(0, file.path.lastIndexOf("/"))
-                            : file.language || undefined,
-                          active: file.id === activeFile.id,
-                        }))}
-                        onSelect={setActiveFileId}
+                        items={fileRailItems}
+                        showIndex={false}
+                        onSelect={(id) => {
+                          if (!id.startsWith("search:")) {
+                            setActiveFileId(id);
+                            return;
+                          }
+                          const result = projectSearchResults.find(
+                            (candidate) => `search:${candidate.id}` === id,
+                          );
+                          if (!result) return;
+                          setActiveFileId(result.fileId);
+                          setPendingSearchTarget({
+                            fileId: result.fileId,
+                            line: result.line,
+                            column: result.column,
+                          });
+                        }}
                         onAdd={
-                          readOnly ? undefined : () => setNewFileOpen(true)
+                          readOnly
+                            ? undefined
+                            : () => dispatchCodeOperation("files.create")
                         }
                         addLabel="Add file"
                         canEdit={!readOnly}
                         tools={
-                          <label className="mt-2 flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)]">
-                            <Search className="size-3.5 shrink-0" />
-                            <input
-                              value={fileQuery}
-                              onChange={(event) =>
-                                setFileQuery(event.target.value)
-                              }
-                              placeholder="Filter files"
-                              aria-label="Filter files by path"
-                              className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none"
-                            />
-                          </label>
+                          <div className="mt-2 space-y-2">
+                            <div className="grid grid-cols-2 gap-1 px-0.5">
+                              {(["paths", "content"] as const).map((mode) => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  className={`h-7 rounded-control text-micro font-semibold ${fileSearchMode === mode ? "bg-[var(--bg-hover)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}
+                                  aria-pressed={fileSearchMode === mode}
+                                  onClick={() => setFileSearchMode(mode)}
+                                >
+                                  {mode === "paths" ? "Paths" : "Source"}
+                                </button>
+                              ))}
+                            </div>
+                            <label className="flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)]">
+                              <Search className="size-3.5 shrink-0" />
+                              <input
+                                ref={fileSearchInputRef}
+                                value={fileQuery}
+                                onChange={(event) =>
+                                  setFileQuery(event.target.value)
+                                }
+                                placeholder={
+                                  fileSearchMode === "content"
+                                    ? "Search project source"
+                                    : "Filter file paths"
+                                }
+                                aria-label={
+                                  fileSearchMode === "content"
+                                    ? "Search source across the project"
+                                    : "Filter files by path"
+                                }
+                                className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none"
+                              />
+                            </label>
+                            <div className="flex min-w-0 items-center justify-between gap-2 px-1">
+                              <span className="min-w-0 truncate text-micro text-[var(--text-tertiary)]">
+                                {activeFile.path}
+                              </span>
+                              {!readOnly ? (
+                                <OverflowMenu
+                                  label={`Actions for ${activeFile.path}`}
+                                  items={fileRowActions(activeFile)}
+                                  size={28}
+                                  onSelect={(action) => {
+                                    if (action === "rename")
+                                      dispatchCodeOperation("files.rename", {
+                                        fileId: activeFile.id,
+                                      });
+                                    else if (action === "entry")
+                                      dispatchCodeOperation(
+                                        "files.setEntry",
+                                        { fileId: activeFile.id },
+                                      );
+                                    else if (action === "duplicate")
+                                      dispatchCodeOperation(
+                                        "files.duplicate",
+                                        { fileId: activeFile.id },
+                                      );
+                                    else
+                                      dispatchCodeOperation("files.delete", {
+                                        fileId: activeFile.id,
+                                      });
+                                  }}
+                                />
+                              ) : null}
+                            </div>
+                            {newFileOpen ? (
+                              <form
+                                className="space-y-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2"
+                                onSubmit={(event) => {
+                                  event.preventDefault();
+                                  dispatchCodeOperation("files.create", {
+                                    path: newFilePath,
+                                  });
+                                }}
+                              >
+                                <label className="text-micro font-semibold text-[var(--text-secondary)]">
+                                  New file path
+                                  <input
+                                    autoFocus
+                                    value={newFilePath}
+                                    className="code-field-control mt-1"
+                                    placeholder="src/example.ts"
+                                    onChange={(event) =>
+                                      setNewFilePath(event.target.value)
+                                    }
+                                  />
+                                </label>
+                                <div className="flex justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    className="code-small-action"
+                                    onClick={() => setNewFileOpen(false)}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    className="code-small-action border border-[var(--border-default)]"
+                                    disabled={!newFilePath.trim()}
+                                  >
+                                    Create
+                                  </button>
+                                </div>
+                              </form>
+                            ) : null}
+                            {renamingFileId ? (
+                              <form
+                                className="space-y-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2"
+                                onSubmit={(event) => {
+                                  event.preventDefault();
+                                  dispatchCodeOperation("files.rename", {
+                                    fileId: renamingFileId,
+                                    path: renameDraft,
+                                  });
+                                }}
+                              >
+                                <label className="text-micro font-semibold text-[var(--text-secondary)]">
+                                  Rename file path
+                                  <input
+                                    autoFocus
+                                    value={renameDraft}
+                                    className="code-field-control mt-1"
+                                    onChange={(event) =>
+                                      setRenameDraft(event.target.value)
+                                    }
+                                  />
+                                </label>
+                                <div className="flex justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    className="code-small-action"
+                                    onClick={() => setRenamingFileId(null)}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    className="code-small-action border border-[var(--border-default)]"
+                                    disabled={!renameDraft.trim()}
+                                  >
+                                    Rename
+                                  </button>
+                                </div>
+                              </form>
+                            ) : null}
+                          </div>
                         }
                       />
                     ) : null}
@@ -3037,9 +3570,7 @@ export function CodeStudio({
                 <button
                   type="button"
                   onClick={() =>
-                    setPanel((current) =>
-                      current === "problems" ? null : "problems",
-                    )
+                    dispatchCodeOperation("diagnostics.problems")
                   }
                   className={`code-panel-tab ${panel === "problems" ? "is-active" : ""}`}
                 >
@@ -3049,11 +3580,7 @@ export function CodeStudio({
                 </button>
                 <button
                   type="button"
-                  onClick={() =>
-                    setPanel((current) =>
-                      current === "console" ? null : "console",
-                    )
-                  }
+                  onClick={() => dispatchCodeOperation("output.console")}
                   className={`code-panel-tab ${panel === "console" ? "is-active" : ""}`}
                 >
                   <TerminalSquare className="h-3 w-3" />
@@ -3065,7 +3592,9 @@ export function CodeStudio({
                 <button
                   type="button"
                   onClick={() =>
-                    panel === "tests" ? setPanel(null) : void run(true)
+                    panel === "tests"
+                      ? setPanel(null)
+                      : dispatchCodeOperation("tests.run")
                   }
                   className={`code-panel-tab ${panel === "tests" ? "is-active" : ""}`}
                   title={
@@ -3086,13 +3615,24 @@ export function CodeStudio({
                     <span>{workbook.tests.length}</span>
                   ) : null}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => dispatchCodeOperation("runs.history")}
+                  className={`code-panel-tab ${panel === "runs" ? "is-active" : ""}`}
+                >
+                  <History className="h-3 w-3" />
+                  Runs
+                  {workbook.runReports?.length ? (
+                    <span>{workbook.runReports.length}</span>
+                  ) : null}
+                </button>
                 <span className="ml-auto truncate text-micro text-[var(--text-tertiary)]">
                   {runtimeLabel(workbook.runtime)} · {runStateLabel(runState)}
                 </span>
                 {panel === "problems" && problems.length ? (
                   <button
                     type="button"
-                    onClick={() => setProblems([])}
+                    onClick={() => dispatchCodeOperation("output.clear")}
                     className="code-small-action shrink-0"
                   >
                     <Eraser className="h-3 w-3" />
@@ -3102,7 +3642,7 @@ export function CodeStudio({
                 {panel === "console" && consoleEntries.length ? (
                   <button
                     type="button"
-                    onClick={() => setConsoleEntries([])}
+                    onClick={() => dispatchCodeOperation("output.clear")}
                     className="code-small-action shrink-0"
                   >
                     <Eraser className="h-3 w-3" />
@@ -3208,6 +3748,63 @@ export function CodeStudio({
                       ))
                     ) : (
                       <EmptyOutput text="Add executable tests in Settings, then run them here." />
+                    )
+                  ) : panel === "runs" ? (
+                    workbook.runReports?.length ? (
+                      workbook.runReports.map((report) => (
+                        <article
+                          key={report.id}
+                          className="flex items-start gap-3 border-b border-[var(--border-subtle)] px-2 py-2 last:border-0"
+                        >
+                          <span
+                            className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${report.status === "ready" ? "bg-[var(--success)]" : report.status === "cancelled" ? "bg-[var(--text-tertiary)]" : "bg-[var(--danger)]"}`}
+                            aria-hidden="true"
+                          />
+                          <span className="min-w-0 flex-1 text-[var(--text-secondary)]">
+                            <strong className="block truncate font-semibold text-[var(--text-primary)]">
+                              {report.scope === "cell" && report.cell
+                                ? report.cell.title
+                                : report.scope === "tests"
+                                  ? "Project checks"
+                                  : "Project run"}
+                            </strong>
+                            <span className="mt-0.5 block truncate text-[var(--text-tertiary)]">
+                              {report.status} · {report.durationMs} ms · {report.entryPath}
+                            </span>
+                            <span className="mt-0.5 block truncate text-[var(--text-tertiary)]">
+                              {new Date(report.createdAt).toLocaleString()} · {report.sourceFingerprint.slice(0, 12)}
+                            </span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              className="code-icon-action h-7 w-7"
+                              aria-label="Copy run report as Markdown"
+                              onClick={() =>
+                                dispatchCodeOperation("runs.copyReport", {
+                                  reportId: report.id,
+                                })
+                              }
+                            >
+                              <Copy className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              className="code-icon-action h-7 w-7"
+                              aria-label="Download run report as JSON"
+                              onClick={() =>
+                                dispatchCodeOperation("runs.downloadReport", {
+                                  reportId: report.id,
+                                })
+                              }
+                            >
+                              <Download className="h-3 w-3" />
+                            </button>
+                          </span>
+                        </article>
+                      ))
+                    ) : (
+                      <EmptyOutput text="Run the project, a cell, or the declared checks to keep a bounded result report." />
                     )
                   ) : consoleEntries.length ? (
                     consoleEntries.map((entry) => (
@@ -4375,6 +4972,74 @@ function CodeSettings({
               </>
             ) : null}
           </div>
+        </section>
+        <section
+          hidden={settingsSection !== "access"}
+          className={`code-settings-card lg:col-span-2 ${content.runtime !== "python" ? "opacity-70" : ""}`}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="max-w-2xl">
+              <h3>Python packages and cells</h3>
+              <p>
+                Python may load only the pinned packages below in its local,
+                network-free worker. Cell mode treats # %% sections as source
+                cells without creating a second notebook document.
+              </p>
+            </div>
+            <label className="inline-flex items-center gap-2 text-micro font-semibold text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                checked={content.notebook?.enabled === true}
+                disabled={readOnly || content.runtime !== "python"}
+                onChange={(event) =>
+                  onChange((draft) => {
+                    draft.notebook = { enabled: event.target.checked };
+                  })
+                }
+              />
+              Python cell mode
+            </label>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {CURATED_PYTHON_PACKAGES.map((packageEntry) => {
+              const selected = (content.pythonPackages ?? []).includes(
+                packageEntry.key,
+              );
+              return (
+                <div
+                  key={packageEntry.key}
+                  className="flex items-center justify-between gap-3 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5"
+                >
+                  <span className="min-w-0 text-micro font-semibold text-[var(--text-primary)]">
+                    {packageEntry.label}
+                    <span className="mt-0.5 block truncate font-normal text-[var(--text-tertiary)]">
+                      {packageEntry.detail}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={readOnly || content.runtime !== "python"}
+                    className={`rounded-chip px-2 py-1 text-micro font-semibold ${selected ? "bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]" : "border border-[var(--border-default)] text-[var(--text-secondary)]"}`}
+                    onClick={() =>
+                      onChange((draft) => {
+                        const packages = new Set(draft.pythonPackages ?? []);
+                        if (packages.has(packageEntry.key))
+                          packages.delete(packageEntry.key);
+                        else packages.add(packageEntry.key);
+                        draft.pythonPackages = [...packages];
+                      })
+                    }
+                  >
+                    {selected ? "Selected" : "Select"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-micro leading-4 text-[var(--text-secondary)]">
+            Spectra does not install arbitrary packages or run package scripts.
+            Choose an approved local package or export the project.
+          </p>
         </section>
         <section
           hidden={settingsSection !== "access"}

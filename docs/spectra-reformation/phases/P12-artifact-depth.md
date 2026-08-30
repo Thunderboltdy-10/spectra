@@ -31,6 +31,21 @@ Shape library depth + connectors that stay attached, frames/sections, sticky not
 
 Runtime depth (package management story for the Python runtime, honest limits declared), debugging affordances (breakpoint-free stepping or output tracing — inventory decides what is real vs refused), multi-file project polish, notebook-style cell execution mode (inventory decides ship/defer), formatter/linter integration, richer visualization outputs, shareable run results.
 
+### P12.I4 implementation log — 2026-08-31
+
+- Inventory closed against VS Code, Replit, and JupyterLab: 54 Code IR definitions, up from 17; every row ships, refuses with exact guidance, or names the GitHub connector owner.
+- Code capabilities now live in `capabilities/studio-code.ts`; the legacy multi-studio catalog no longer owns Code definitions.
+- Shipped safe multi-file create, rename, duplicate, entry selection, delete, and bounded path/source search through one shared studio dispatcher.
+- Shipped explicit local Python package selection for the six pinned Pyodide packages; arbitrary installs, scripts, terminals, servers, and remote kernels refuse honestly.
+- Shipped source-native `# %%` cell discovery and current-cell execution with line-preserving traceback source; rich Jupyter state and fidelity export remain explicit refusals.
+- Shipped bounded, redacted run reports with lifecycle, fingerprint, output, problems, and checks; reports copy as Markdown or download as JSON and never enter published source payloads.
+- Code schema is v2 with a source-preserving v1 migration for package, notebook, and report fields; collaboration regions include each new durable surface.
+- Live and published Python execution receive approved package declarations; published payload validation rejects unknown packages and invalid notebook settings.
+- Human workbar, chrome, panel tabs, and scoped keyboard entry points converge on the same Code operation dispatcher; shared narrow overflow retains every action.
+- Focused Vitest: 6 files / 46 tests PASS. Root TypeScript PASS. Scoped ESLint: 0 errors; pre-existing Code/design-token warning census unchanged.
+- `check:capabilities`, `check:secrets`, and `git diff --check` PASS. No browser, dev server, Convex, Bridge, Office, cloud resource, or primary checkout was used.
+- Independent verifier: run P12.V2; grade the inventory walk, exact refusals, source-cell behavior, package containment, report privacy, AI symmetry, and narrow-width reachability.
+
 ## P12.I5 — Planner depth (MT) — leaders: Todoist, Notion, Linear
 
 Recurring tasks, subtasks/checklists, natural-language due entry, priorities/labels, filters + saved views (list/board/timeline parity), workload view over calendar integration (single temporal truth — reads `calendarItems`, never a second store), reminders leveraging the P9.I2 schedule-at-write machinery, bulk operations.

@@ -88,11 +88,7 @@ describe("formula reference offsetting", () => {
 
 describe("fill", () => {
   it("carries a formula down with shifted references", () => {
-    const result = fillRange(
-      { C2: live("=A2*B2", 6) },
-      range("C2:C4"),
-      "down",
-    );
+    const result = fillRange({ C2: live("=A2*B2", 6) }, range("C2:C4"), "down");
     expect(result.cells.C3?.formula).toBe("=A3*B3");
     expect(result.cells.C4?.formula).toBe("=A4*B4");
     expect(result.written).toBe(2);
@@ -110,7 +106,11 @@ describe("fill", () => {
   });
 
   it("clears cells under an empty seed instead of leaving stale values", () => {
-    const result = fillRange({ B3: { value: "stale" } }, range("B2:B3"), "down");
+    const result = fillRange(
+      { B3: { value: "stale" } },
+      range("B2:B3"),
+      "down",
+    );
     expect(result.cells.B3).toBeUndefined();
   });
 
@@ -174,7 +174,11 @@ describe("fill series", () => {
 
   it("never writes over a preserved formula", () => {
     const result = fillSeries(
-      { A1: { value: 1 }, A2: { value: 2 }, A3: cached("=SUBTOTAL(9,A1:A2)", 3) },
+      {
+        A1: { value: 1 },
+        A2: { value: 2 },
+        A3: cached("=SUBTOTAL(9,A1:A2)", 3),
+      },
       range("A1:A3"),
       "linear",
     );
@@ -235,7 +239,7 @@ describe("paste", () => {
 
   it("skips a target cell that holds a preserved formula", () => {
     const result = pasteBlock(
-      { A5: cached("=INDIRECT(\"A1\")", 5) },
+      { A5: cached('=INDIRECT("A1")', 5) },
       block,
       { row: 4, column: 0 },
       "all",
@@ -307,12 +311,17 @@ describe("find and replace", () => {
   const cells: Record<string, SheetCell> = {
     A1: { value: "Control group" },
     A2: { value: "control" },
-    A3: live("=A1&\" control\"", 0),
-    A4: cached("=TEXTBEFORE(A1,\" control\")", 0),
+    A3: live('=A1&" control"', 0),
+    A4: cached('=TEXTBEFORE(A1," control")', 0),
   };
 
   it("replaces values and leaves quoted formula literals alone", () => {
-    const result = replaceInCells(cells, ["A1", "A2", "A3"], "control", "trial");
+    const result = replaceInCells(
+      cells,
+      ["A1", "A2", "A3"],
+      "control",
+      "trial",
+    );
     expect(result.cells.A1?.value).toBe("trial group");
     expect(result.cells.A2?.value).toBe("trial");
     expect(result.cells.A3?.formula).toBe('=A1&" control"');
@@ -461,6 +470,33 @@ describe("calculation at workbook scale", () => {
     });
   }
 
+  it("normalizes a versioned bounded cell store beyond Convex's object-field limit", () => {
+    const entries = Array.from(
+      { length: 1_322 },
+      (_, index) => [`A${index + 1}`, { value: index + 1 }] as const,
+    );
+    const workbook = normalizeSheetsContent({
+      activeSheetId: "sheet-1",
+      sheets: [
+        {
+          id: "sheet-1",
+          name: "Bounded",
+          cells: {
+            encoding: "spectra-sheet-cells-v1",
+            chunks: Array.from(
+              { length: Math.ceil(entries.length / 256) },
+              (_, index) => entries.slice(index * 256, (index + 1) * 256),
+            ),
+          },
+        },
+      ],
+    });
+
+    expect(Object.keys(workbook.sheets[0]!.cells)).toHaveLength(entries.length);
+    expect(workbook.sheets[0]!.cells.A1?.value).toBe(1);
+    expect(workbook.sheets[0]!.cells.A1322?.value).toBe(1_322);
+  });
+
   it("costs a viewport, not a workbook, to read cells from a 200k-cell sheet", () => {
     const rows = 10_000;
     const columns = 20;
@@ -510,7 +546,10 @@ describe("calculation at workbook scale", () => {
   });
 });
 
-function sheetOf(cells: Record<string, SheetCell>, extras: Record<string, unknown> = {}) {
+function sheetOf(
+  cells: Record<string, SheetCell>,
+  extras: Record<string, unknown> = {},
+) {
   return normalizeSheetsContent({
     activeSheetId: "s1",
     sheets: [{ id: "s1", name: "Sheet1", cells, ...extras }],
@@ -528,12 +567,19 @@ function evaluated(
 describe("sheets engine correctness", () => {
   it("uses Excel serials for DATE and arithmetic on dates", () => {
     const start = dateToSerial(new Date(Date.UTC(2024, 0, 1)));
-    expect(evaluated({ A1: { formula: "=DATE(2024,1,1)" } })?.value).toBe(start);
+    expect(evaluated({ A1: { formula: "=DATE(2024,1,1)" } })?.value).toBe(
+      start,
+    );
     expect(evaluated({ A1: { formula: "=DATE(2024,1,1)+1" } })?.value).toBe(
       start + 1,
     );
-    expect(evaluated({ A1: { formula: "=DAYS(DATE(2024,1,2),DATE(2024,1,1))" } })?.value).toBe(1);
-    expect(evaluated({ A1: { formula: "=YEAR(DATE(2024,1,15))" } })?.value).toBe(2024);
+    expect(
+      evaluated({ A1: { formula: "=DAYS(DATE(2024,1,2),DATE(2024,1,1))" } })
+        ?.value,
+    ).toBe(1);
+    expect(
+      evaluated({ A1: { formula: "=YEAR(DATE(2024,1,15))" } })?.value,
+    ).toBe(2024);
     expect(
       formatCalculatedCell(
         { value: start, format: { numberFormat: "date" } },
@@ -667,7 +713,12 @@ describe("sheets engine correctness", () => {
         {
           id: "s1",
           name: "Sheet1",
-          cells: { A1: { value: "2024-01-15T00:00:00.000Z", format: { numberFormat: "date" } } },
+          cells: {
+            A1: {
+              value: "2024-01-15T00:00:00.000Z",
+              format: { numberFormat: "date" },
+            },
+          },
         },
       ],
     });

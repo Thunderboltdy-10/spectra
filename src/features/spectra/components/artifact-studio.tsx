@@ -159,7 +159,10 @@ import {
   updatingHighlightFallbackPaths,
 } from "./ai-region-path";
 import { useArtifactNativeSync } from "./artifact-native-sync";
-import { nativeOfficeDraftPending, writeStudioDirty } from "./native-office-draft";
+import {
+  nativeOfficeDraftPending,
+  writeStudioDirty,
+} from "./native-office-draft";
 import {
   UnsavedCloseDialog,
   decideClose,
@@ -358,7 +361,6 @@ function waveCIdentityStats(
       return null;
   }
 }
-
 
 export type DeckCard = {
   id: string;
@@ -996,7 +998,11 @@ function ReadonlyArtifactSnapshot({
   blueprintKey: SpectraArtifact["blueprintKey"];
   snapshot: ArtifactSnapshot;
 }) {
-  const body = record(snapshot.content);
+  const body = record(
+    blueprintKey === "sheets"
+      ? normalizeSheetsContent(snapshot.content)
+      : snapshot.content,
+  );
   const cards =
     blueprintKey === "flashcard_deck" ? deckCards(snapshot.content) : [];
   const questions =
@@ -4318,11 +4324,9 @@ function ArtifactStudioEditor({
         detail: { artifactId: artifact._id, path: target.path },
       }),
     );
-    return scheduleRevealTarget(
-      () => presenceSurfaceRef.current,
-      target,
-      { reducedMotion: getSpectraMotionSnapshot().reduced },
-    );
+    return scheduleRevealTarget(() => presenceSurfaceRef.current, target, {
+      reducedMotion: getSpectraMotionSnapshot().reduced,
+    });
   }, [followAi.following, aiInteractionState, artifact._id]);
 
   /* ---------------------------------------------------------------- *
@@ -5628,9 +5632,9 @@ function ArtifactStudioEditor({
           </div>
           <div className="spectra-artifact-header-actions flex shrink-0 items-center gap-1">
             {(presentation.state === "saving" ||
-            presentation.state === "pending" ||
-            live.state === "connecting" ||
-            live.state === "synchronizing") &&
+              presentation.state === "pending" ||
+              live.state === "connecting" ||
+              live.state === "synchronizing") &&
             presentation.state !== "offline" &&
             presentation.state !== "error" ? (
               <span
@@ -5705,9 +5709,7 @@ function ArtifactStudioEditor({
                         }"]`,
                       )
                     : null) ??
-                  studio.querySelector<HTMLElement>(
-                    '[data-ai-region="true"]',
-                  );
+                  studio.querySelector<HTMLElement>('[data-ai-region="true"]');
                 if (!target) return;
                 let focus: HTMLElement = target;
                 if (
@@ -5719,9 +5721,8 @@ function ArtifactStudioEditor({
                   const items =
                     target.querySelectorAll<HTMLElement>(":scope > li");
                   focus =
-                    items[
-                      Math.min(lineIndex, Math.max(0, items.length - 1))
-                    ] ?? target;
+                    items[Math.min(lineIndex, Math.max(0, items.length - 1))] ??
+                    target;
                 }
                 focus.scrollIntoView({
                   block: "nearest",
@@ -5908,11 +5909,15 @@ function ArtifactStudioEditor({
                       className="grid gap-x-3 rounded-control border border-[color-mix(in_oklab,var(--warning)_18%,var(--border-default))] bg-[var(--bg-primary)] px-2 py-1 sm:grid-cols-2"
                     >
                       <span className="min-w-0 truncate">
-                        <span className="font-medium text-[var(--text-secondary)]">Spectra:</span>{" "}
+                        <span className="font-medium text-[var(--text-secondary)]">
+                          Spectra:
+                        </span>{" "}
                         {preview.spectra}
                       </span>
                       <span className="min-w-0 truncate">
-                        <span className="font-medium text-[var(--text-secondary)]">{nativeOfficeApplication}:</span>{" "}
+                        <span className="font-medium text-[var(--text-secondary)]">
+                          {nativeOfficeApplication}:
+                        </span>{" "}
                         {preview.external}
                       </span>
                     </div>

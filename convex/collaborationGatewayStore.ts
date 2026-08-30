@@ -10,8 +10,10 @@ import { changedArtifactRegionIds } from "../src/features/spectra/collaboration/
 import { syncSourceNodes } from "./orgTreeShared";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import { claimAuthorizesGatewayUpdate } from "./collaborationClaimAuthorization";
+import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
 
 const NATIVE_PROJECTION_REGION = "$spectra:native-projection";
+const MAX_GATEWAY_UPDATE_BYTES = 760 * 1024;
 
 type GatewayProjection = {
   title: string;
@@ -22,6 +24,19 @@ type GatewayProjection = {
   content: unknown;
 };
 
+function canonicalJson(value: unknown): string {
+  const normalize = (candidate: unknown): unknown => {
+    if (Array.isArray(candidate)) return candidate.map(normalize);
+    if (!candidate || typeof candidate !== "object") return candidate;
+    return Object.fromEntries(
+      Object.entries(candidate as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, normalize(entry)]),
+    );
+  };
+  return JSON.stringify(normalize(value));
+}
+
 function artifactProjectionPatch(
   projection: GatewayProjection,
   projectionHash: string,
@@ -30,7 +45,10 @@ function artifactProjectionPatch(
     title: projection.title,
     summary: projection.summary,
     tags: projection.tags,
-    content: projection.content,
+    content: encodeArtifactContentForStorage(
+      projection.typeKey,
+      projection.content,
+    ),
     schemaVersion: projection.schemaVersion,
     validity: "valid" as const,
     validityIssues: [] as [],
@@ -260,6 +278,8 @@ export const load = internalQuery({
         updates[updates.length - 1]!.sequence < room.nextSequence - 1,
       uncompactedBytes: room.uncompactedBytes,
       lastSnapshotAt: room.lastSnapshotAt ?? null,
+      lastProjectionSequence: room.lastProjectionSequence ?? null,
+      liveStateVectorHash: artifact.liveStateVectorHash ?? null,
       initialProjection:
         args.afterSequence === 0
           ? {
@@ -273,6 +293,215 @@ export const load = internalQuery({
             }
           : null,
     };
+  },
+});
+
+export const recoverNativeSnapshot = internalMutation({
+  args: {
+    accountId: v.id("accounts"),
+    artifactId: v.id("spectraArtifacts"),
+    partitionKey: v.string(),
+    clientId: v.string(),
+    policyVersion: v.number(),
+    expectedNextSequence: v.number(),
+    expectedStateVectorHash: v.string(),
+    observedStateVectorHash: v.string(),
+    observedProjectionJson: v.string(),
+    observedProjectionHash: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const [actor, artifact, room] = await Promise.all([
+      getActorForAccountId(ctx, args.accountId),
+      ctx.db.get(args.artifactId),
+      ctx.db
+        .query("collaborationRooms")
+        .withIndex("by_artifact_partition", (q) =>
+          q
+            .eq("artifactId", args.artifactId)
+            .eq("partitionKey", args.partitionKey),
+        )
+        .unique(),
+    ]);
+    if (
+      !actor ||
+      !artifact ||
+      !room ||
+      room.status === "closed" ||
+      (artifact.status !== "active" && artifact.status !== "draft") ||
+      artifact.schoolId !== actor.schoolId ||
+      !isArtifactTypeKey(artifact.blueprintKey)
+    )
+      throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
+    const resourceType =
+      artifact.blueprintKey === "agent"
+        ? ("agent" as const)
+        : ("artifact" as const);
+    const [decision, policy, snapshots, updates] = await Promise.all([
+      evaluateAccessForActor(ctx, actor, resourceType, artifact._id),
+      ctx.db
+        .query("resourcePolicies")
+        .withIndex("by_resource", (q) =>
+          q.eq("resourceType", resourceType).eq("resourceId", artifact._id),
+        )
+        .unique(),
+      ctx.db
+        .query("collaborationSnapshots")
+        .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
+        .collect(),
+      ctx.db
+        .query("collaborationUpdates")
+        .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
+        .collect(),
+    ]);
+    const currentPolicyVersion = policy?.version ?? 0;
+    const canModify =
+      artifact.ownerAccountId === actor.accountId ||
+      decision.capabilities.includes("modify");
+    if (
+      !decision.allowed ||
+      !canModify ||
+      currentPolicyVersion !== args.policyVersion ||
+      room.policyVersion !== currentPolicyVersion
+    )
+      throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
+    const clientId = args.clientId.trim().slice(0, 180);
+    const observedProjection = parseGatewayProjection(
+      args.observedProjectionJson,
+      args.observedProjectionHash,
+      artifact,
+    );
+    const observedProjectionDigest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(args.observedProjectionJson),
+    );
+    const observedProjectionHash = btoa(
+      String.fromCharCode(...new Uint8Array(observedProjectionDigest)),
+    )
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/, "");
+    // The gateway derives this projection from the stored Y.Doc. Exact equality
+    // with the current artifact proves a reset can be rebuilt without losing
+    // semantic edits, even when compaction removed bootstrap idempotency data.
+    const projectionMatchesArtifact =
+      observedProjection !== null &&
+      observedProjectionHash === args.observedProjectionHash &&
+      observedProjection.title === artifact.title &&
+      (observedProjection.summary ?? "") === (artifact.summary ?? "") &&
+      observedProjection.schemaVersion === room.schemaVersion &&
+      canonicalJson(observedProjection.tags) === canonicalJson(artifact.tags) &&
+      canonicalJson(
+        encodeArtifactContentForStorage(
+          observedProjection.typeKey,
+          observedProjection.content,
+        ),
+      ) === canonicalJson(artifact.content);
+    if (
+      !clientId ||
+      !Number.isSafeInteger(args.expectedNextSequence) ||
+      args.expectedNextSequence < 2 ||
+      args.expectedStateVectorHash.length < 16 ||
+      args.observedStateVectorHash.length < 16 ||
+      args.observedProjectionHash.length < 16 ||
+      !projectionMatchesArtifact ||
+      artifact.liveStateVectorHash !== args.expectedStateVectorHash ||
+      room.nextSequence !== args.expectedNextSequence
+    )
+      throw new Error("COLLABORATION_DURABLE_RECOVERY_STALE");
+    const headSequence = room.nextSequence - 1;
+    // Two gateway instances can race while creating the first native room. If
+    // both bootstrap snapshots land, their Yjs client clocks differ even though
+    // both represent the unchanged artifact projection. That makes the merged
+    // state vector disagree with the last bootstrap hash. These records contain
+    // no authored change, so resetting only a contiguous bootstrap-only log is
+    // lossless; any human/AI update still requires the stricter snapshot path.
+    const orderedUpdates = [...updates].sort(
+      (left, right) => left.sequence - right.sequence,
+    );
+    const bootstrapOnly =
+      snapshots.length === 0 &&
+      orderedUpdates.length === headSequence &&
+      orderedUpdates.every(
+        (update, index) =>
+          update.sequence === index + 1 &&
+          update.idempotencyKey.startsWith("bootstrap:") &&
+          update.regionIds.length === 1 &&
+          update.regionIds[0] === "artifact:structure",
+      );
+    if (bootstrapOnly) {
+      const now = Date.now();
+      await Promise.all(
+        orderedUpdates.map((update) => ctx.db.delete(update._id)),
+      );
+      await Promise.all([
+        ctx.db.patch(room._id, {
+          status: "active",
+          nextSequence: 1,
+          snapshotSequence: 0,
+          uncompactedBytes: 0,
+          lastSnapshotAt: undefined,
+          lastProjectionSequence: undefined,
+          lastProjectionAt: undefined,
+          updatedAt: now,
+        }),
+        ctx.db.patch(artifact._id, {
+          liveStateVectorHash: undefined,
+          syncState: "synchronized",
+          lastSynchronizedAt: now,
+          updatedAt: now,
+        }),
+      ]);
+      return {
+        recovered: true,
+        previousHeadSequence: headSequence,
+        bootstrapReset: true,
+      };
+    }
+    const verifiedSnapshots = snapshots
+      .filter((snapshot) => snapshot.status === "verified")
+      .sort((left, right) => right.throughSequence - left.throughSequence);
+    const headSnapshot = verifiedSnapshots[0];
+    if (
+      !headSnapshot ||
+      headSnapshot.throughSequence !== headSequence ||
+      room.snapshotSequence !== headSequence ||
+      updates.length !== 0
+    )
+      throw new Error("COLLABORATION_DURABLE_RECOVERY_UNSAFE");
+    const observedDigest = await crypto.subtle.digest(
+      "SHA-256",
+      headSnapshot.stateVector,
+    );
+    const observedHash = btoa(
+      String.fromCharCode(...new Uint8Array(observedDigest)),
+    )
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/, "");
+    if (observedHash !== args.observedStateVectorHash)
+      throw new Error("COLLABORATION_DURABLE_RECOVERY_STALE");
+
+    const now = Date.now();
+    await Promise.all(snapshots.map((snapshot) => ctx.db.delete(snapshot._id)));
+    await Promise.all([
+      ctx.db.patch(room._id, {
+        status: "active",
+        nextSequence: 1,
+        snapshotSequence: 0,
+        uncompactedBytes: 0,
+        lastSnapshotAt: undefined,
+        lastProjectionSequence: undefined,
+        lastProjectionAt: undefined,
+        updatedAt: now,
+      }),
+      ctx.db.patch(artifact._id, {
+        liveStateVectorHash: undefined,
+        syncState: "synchronized",
+        lastSynchronizedAt: now,
+        updatedAt: now,
+      }),
+    ]);
+    return { recovered: true, previousHeadSequence: headSequence };
   },
 });
 
@@ -340,7 +569,7 @@ export const bootstrapNative = internalMutation({
       args.expectedNextSequence < 1 ||
       artifact.updatedAt !== args.artifactUpdatedAt ||
       args.update.byteLength <= 0 ||
-      args.update.byteLength > 760 * 1024 ||
+      args.update.byteLength > MAX_GATEWAY_UPDATE_BYTES ||
       args.stateVectorHash.length < 16
     )
       throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
@@ -460,7 +689,10 @@ export const append = internalMutation({
       room.policyVersion !== currentPolicyVersion
     )
       throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
-    if (args.update.byteLength <= 0 || args.update.byteLength > 256 * 1024)
+    if (
+      args.update.byteLength <= 0 ||
+      args.update.byteLength > MAX_GATEWAY_UPDATE_BYTES
+    )
       throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
     const clientId = args.clientId.trim().slice(0, 180);
     const idempotencyKey = args.idempotencyKey.trim().slice(0, 180);
@@ -471,18 +703,31 @@ export const append = internalMutation({
       args.stateVectorHash.length < 16
     )
       throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
-    if (
-      artifact.liveStateVectorHash &&
-      artifact.liveStateVectorHash !== args.baseStateVectorHash
-    )
-      throw new Error("COLLABORATION_BASE_STATE_STALE");
     const duplicate = await ctx.db
       .query("collaborationUpdates")
       .withIndex("by_room_idempotency", (q) =>
         q.eq("roomId", room._id).eq("idempotencyKey", idempotencyKey),
       )
       .unique();
-    if (duplicate) return { sequence: duplicate.sequence, duplicate: true, projected: false };
+    if (duplicate) {
+      if (
+        duplicate.actorAccountId !== actor.accountId ||
+        duplicate.clientId !== clientId ||
+        duplicate.stateVectorHash !== args.stateVectorHash ||
+        duplicate.byteLength !== args.update.byteLength
+      )
+        throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
+      return {
+        sequence: duplicate.sequence,
+        duplicate: true,
+        projected: false,
+      };
+    }
+    if (
+      artifact.liveStateVectorHash &&
+      artifact.liveStateVectorHash !== args.baseStateVectorHash
+    )
+      throw new Error("COLLABORATION_BASE_STATE_STALE");
     const projection = parseGatewayProjection(
       args.projectionJson,
       args.projectionHash,
@@ -533,7 +778,9 @@ export const append = internalMutation({
                 artifact.content,
                 projection.content,
               ),
-              ...(artifact.title !== projection.title ? ["metadata:title"] : []),
+              ...(artifact.title !== projection.title
+                ? ["metadata:title"]
+                : []),
               ...((artifact.summary ?? "") !== (projection.summary ?? "")
                 ? ["metadata:summary"]
                 : []),
@@ -652,7 +899,10 @@ export const append = internalMutation({
       ? {
           title: projection.title,
           summary: projection.summary,
-          content: projection.content,
+          content: encodeArtifactContentForStorage(
+            projection.typeKey,
+            projection.content,
+          ),
           tags: projection.tags,
         }
       : beforeSnapshot;
@@ -757,7 +1007,8 @@ export const append = internalMutation({
        the same transaction, not on the next full read (D40). The same write
        records that the work was touched, which is what recency-ordered columns
        page against (D42). */
-    if (projection) await syncSourceNodes(ctx, "work", artifact._id, projection.title);
+    if (projection)
+      await syncSourceNodes(ctx, "work", artifact._id, projection.title);
     if (projection) {
       // Every open human session must point at a renderable global state, even
       // when another collaborator changed a non-overlapping region afterward.
@@ -791,7 +1042,12 @@ export const append = internalMutation({
           { groupId: changeGroup._id, expectedLastActivityAt: now },
         );
     }
-    return { sequence, duplicate: false, regionIds, projected: Boolean(projection) };
+    return {
+      sequence,
+      duplicate: false,
+      regionIds,
+      projected: Boolean(projection),
+    };
   },
 });
 
@@ -883,11 +1139,15 @@ export const checkpoint = internalMutation({
       ),
     );
     const now = Date.now();
-    if (!args.clientId.trim()) throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
+    if (!args.clientId.trim())
+      throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
     const finalSnapshot = {
       title: projection.title,
       summary: projection.summary,
-      content: projection.content,
+      content: encodeArtifactContentForStorage(
+        projection.typeKey,
+        projection.content,
+      ),
       tags: projection.tags,
     };
     await ctx.db.patch(artifact._id, {

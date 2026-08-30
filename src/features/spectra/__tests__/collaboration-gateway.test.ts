@@ -2,18 +2,49 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { COLLAB_RECONNECT } from "../collaboration/reconnect-backoff";
 import { createCheckpointScheduler } from "../../../../scripts/collaboration-checkpoint.mjs";
-import { gatewayHealthPayload, isGatewayHealthBody } from "../../../../scripts/collaboration-health.mjs";
+import {
+  gatewayHealthPayload,
+  isGatewayHealthBody,
+} from "../../../../scripts/collaboration-health.mjs";
 import { collaborationPath } from "../../../../scripts/collaboration-proxy-path.mjs";
+import {
+  MAX_DURABLE_UPDATE_BYTES,
+  MAX_REALTIME_MESSAGE_BYTES,
+  canonicalDurableUpdate,
+} from "../../../../scripts/collaboration-update-envelope.mjs";
+import { MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS } from "../../../../shared/collaboration-bridge";
 import {
   COLLAB_RECONNECT as gatewayReconnect,
   reconnectDelayMs,
 } from "../../../../scripts/collaboration-reconnect.mjs";
 import {
   applyStoredRoomUpdates,
+  encodeStoredRoomSnapshot,
   shouldCompactRoom,
 } from "../../../../scripts/collaboration-room-state.mjs";
 
 describe("P5.I2 gateway production helpers", () => {
+  it("admits a bounded native bootstrap snapshot and projection in one signed envelope", () => {
+    const payloadJson = JSON.stringify({
+      update: "u".repeat(986_604),
+      projectionJson: "p".repeat(515_290),
+      artifactId: "artifact-1",
+      partitionKey: "root",
+      accountId: "account-1",
+      clientId: "client-1",
+      policyVersion: 0,
+      artifactUpdatedAt: 1,
+      expectedNextSequence: 1,
+      stateVectorHash: "s".repeat(43),
+      projectionHash: "p".repeat(43),
+    });
+
+    expect(payloadJson.length).toBeGreaterThan(1_500_000);
+    expect(payloadJson.length).toBeLessThanOrEqual(
+      MAX_COLLABORATION_BRIDGE_PAYLOAD_CHARACTERS,
+    );
+  });
+
   it("keeps a leading slash on every proxied WebSocket upgrade target", () => {
     expect(collaborationPath("/_spectra/realtime")).toBe("/");
     expect(collaborationPath("/_spectra/realtime?token=abc&foo=1")).toBe(
@@ -87,7 +118,11 @@ describe("P5.I2 gateway production helpers", () => {
     const degraded = gatewayHealthPayload({
       protocolVersion: 1,
       connections: 3,
-      lastPersistenceFailure: { code: "COLLABORATION_APPEND_FAILED", at: 1, attempt: 2 },
+      lastPersistenceFailure: {
+        code: "COLLABORATION_APPEND_FAILED",
+        at: 1,
+        attempt: 2,
+      },
       startedAt: 10,
       now: 25,
     });
@@ -115,6 +150,93 @@ describe("P5.I2 gateway production helpers", () => {
       "after",
     );
     restored.destroy();
+  });
+
+  it("builds compaction snapshots from durable storage, not live-ahead state", () => {
+    const durable = new Y.Doc();
+    durable.getText("body").insert(0, "durable");
+    const durableUpdate = Y.encodeStateAsUpdate(durable);
+    const durableVector = Y.encodeStateVector(durable);
+    const live = new Y.Doc();
+    Y.applyUpdate(live, durableUpdate);
+    live.getText("body").insert(live.getText("body").length, " pending");
+
+    const encoded = encodeStoredRoomSnapshot(Y, {
+      updates: [{ update: Buffer.from(durableUpdate).toString("base64") }],
+    });
+    const compacted = new Y.Doc();
+    Y.applyUpdate(compacted, encoded.update);
+
+    expect(compacted.getText("body").toString()).toBe("durable");
+    expect(encoded.stateVector).toEqual(durableVector);
+    expect(encoded.stateVector).not.toEqual(Y.encodeStateVector(live));
+
+    durable.destroy();
+    live.destroy();
+    compacted.destroy();
+  });
+
+  it("accepts a bounded rich-document sync frame but persists only its canonical delta", () => {
+    const canonical = new Y.Doc();
+    canonical.getText("body").insert(0, "x".repeat(900_000));
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(canonical));
+    peer.getText("body").insert(peer.getText("body").length, " edited");
+    const fullPeerState = Y.encodeStateAsUpdate(peer);
+
+    expect(fullPeerState.byteLength).toBeGreaterThan(MAX_DURABLE_UPDATE_BYTES);
+    expect(fullPeerState.byteLength).toBeLessThan(MAX_REALTIME_MESSAGE_BYTES);
+    expect(MAX_REALTIME_MESSAGE_BYTES).toBeGreaterThan(
+      MAX_DURABLE_UPDATE_BYTES,
+    );
+    const durableDelta = canonicalDurableUpdate(Y, canonical, fullPeerState);
+    expect(durableDelta).not.toBeNull();
+    expect(durableDelta!.byteLength).toBeLessThan(MAX_DURABLE_UPDATE_BYTES);
+    Y.applyUpdate(canonical, durableDelta!);
+    expect(canonical.getText("body").toString()).toBe(
+      peer.getText("body").toString(),
+    );
+
+    const oversizedPeer = new Y.Doc();
+    Y.applyUpdate(oversizedPeer, Y.encodeStateAsUpdate(canonical));
+    oversizedPeer.getText("new-body").insert(0, "y".repeat(800_000));
+    const oversizedDelta = canonicalDurableUpdate(
+      Y,
+      canonical,
+      Y.encodeStateAsUpdate(oversizedPeer),
+    );
+    expect(oversizedDelta!.byteLength).toBeGreaterThan(
+      MAX_DURABLE_UPDATE_BYTES,
+    );
+
+    canonical.destroy();
+    peer.destroy();
+    oversizedPeer.destroy();
+  });
+
+  it("keeps a delete-only update in the durable envelope", () => {
+    const canonical = new Y.Doc();
+    canonical.getText("body").insert(0, "abcdef");
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(canonical));
+    peer.getText("body").delete(1, 2);
+
+    const deleteOnlyUpdate = Y.encodeStateAsUpdate(
+      peer,
+      Y.encodeStateVector(canonical),
+    );
+    expect(Y.encodeStateVector(peer)).toEqual(Y.encodeStateVector(canonical));
+    const durableDelta = canonicalDurableUpdate(Y, canonical, deleteOnlyUpdate);
+
+    expect(durableDelta).not.toBeNull();
+    expect(durableDelta!.byteLength).toBeLessThanOrEqual(
+      deleteOnlyUpdate.byteLength,
+    );
+    Y.applyUpdate(canonical, durableDelta!);
+    expect(canonical.getText("body").toString()).toBe("adef");
+
+    canonical.destroy();
+    peer.destroy();
   });
 
   it("compacts when the update log crosses size, count, or idle", () => {

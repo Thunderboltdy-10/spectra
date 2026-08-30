@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PublishedCodeRuntime } from "../components/published-code-runtime";
+import { sheetCellEntries } from "../../../../shared/sheet-cells";
 
 type PublicArtifact = {
   artifactId: string;
@@ -292,8 +293,7 @@ function ArtifactContent({
         {artifact.blueprintKey === "sheets" ? (
           <div className="space-y-5">
             {sheets.map((sheet, index) => {
-              const cells = record(sheet.cells);
-              const entries = Object.entries(cells).slice(0, 60);
+              const entries = sheetCellEntries(sheet.cells, 60);
               return (
                 <section key={String(sheet.id ?? index)}>
                   <h2 className="mb-3 font-display text-[18px] font-semibold">

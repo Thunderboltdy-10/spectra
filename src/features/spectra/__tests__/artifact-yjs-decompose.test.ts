@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canonicalJsonEqual,
   changedArtifactRegionIds,
   decomposeArtifactContent,
   overlayLiveArtifactRecord,
@@ -106,6 +107,13 @@ describe("decomposeArtifactContent", () => {
     expect(
       changedArtifactRegionIds("document", stored, nativeProjection),
     ).toEqual([]);
+    expect(canonicalJsonEqual(stored, nativeProjection)).toBe(true);
+    expect(
+      canonicalJsonEqual(stored, {
+        ...nativeProjection,
+        blocks: [{ id: "intro", type: "paragraph", text: "changed" }],
+      }),
+    ).toBe(false);
   });
 
   it("attributes native Tiptap text changes to their stable document block", () => {

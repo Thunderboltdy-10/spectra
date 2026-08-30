@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { sheetCellEntries } from "../shared/sheet-cells";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireCapability, type Capability } from "./authorityShared";
@@ -479,10 +480,8 @@ export function isHollowDefaultContent(
       return sheets.every((sheet) => {
         if (!sheet || typeof sheet !== "object" || Array.isArray(sheet))
           return true;
-        const cells = (sheet as { cells?: unknown }).cells;
-        if (!cells || typeof cells !== "object" || Array.isArray(cells))
-          return true;
-        return !Object.values(cells as Record<string, unknown>).some((cell) => {
+        const cells = sheetCellEntries((sheet as { cells?: unknown }).cells);
+        return !cells.some(([, cell]) => {
           if (cell == null) return false;
           if (typeof cell === "string" || typeof cell === "number")
             return String(cell).trim().length > 0;
@@ -497,7 +496,8 @@ export function isHollowDefaultContent(
       const files = Array.isArray(record.files) ? record.files : [];
       if (files.length === 0) return true;
       return files.every((file) => {
-        if (!file || typeof file !== "object" || Array.isArray(file)) return true;
+        if (!file || typeof file !== "object" || Array.isArray(file))
+          return true;
         const source =
           typeof (file as { source?: unknown }).source === "string"
             ? String((file as { source: string }).source).trim()
@@ -527,7 +527,8 @@ export function isHollowDefaultContent(
     case "flashcard_deck": {
       const cards = Array.isArray(record.cards) ? record.cards : [];
       return !cards.some((card) => {
-        if (!card || typeof card !== "object" || Array.isArray(card)) return false;
+        if (!card || typeof card !== "object" || Array.isArray(card))
+          return false;
         const row = card as Record<string, unknown>;
         return (
           typeof row.front === "string" &&
@@ -540,7 +541,11 @@ export function isHollowDefaultContent(
     case "quiz": {
       const questions = Array.isArray(record.questions) ? record.questions : [];
       return !questions.some((question) => {
-        if (!question || typeof question !== "object" || Array.isArray(question))
+        if (
+          !question ||
+          typeof question !== "object" ||
+          Array.isArray(question)
+        )
           return false;
         const prompt = (question as Record<string, unknown>).prompt;
         const stem = (question as Record<string, unknown>).stem;
@@ -552,9 +557,7 @@ export function isHollowDefaultContent(
     }
     case "planner_task": {
       const description =
-        typeof record.description === "string"
-          ? record.description.trim()
-          : "";
+        typeof record.description === "string" ? record.description.trim() : "";
       const subtasks = Array.isArray(record.subtasks) ? record.subtasks : [];
       const titled = subtasks.filter(
         (item) =>
@@ -572,7 +575,9 @@ export function isHollowDefaultContent(
       return !slides.some((slide) => {
         if (!slide || typeof slide !== "object" || Array.isArray(slide))
           return false;
-        const objects = Array.isArray((slide as Record<string, unknown>).objects)
+        const objects = Array.isArray(
+          (slide as Record<string, unknown>).objects,
+        )
           ? ((slide as Record<string, unknown>).objects as unknown[])
           : [];
         return objects.some((object) => {
@@ -603,7 +608,9 @@ export function isHollowDefaultContent(
   }
 }
 
-export function hollowFinalizeFailureMessage(blueprintKey: BlueprintKey | string) {
+export function hollowFinalizeFailureMessage(
+  blueprintKey: BlueprintKey | string,
+) {
   switch (blueprintKey) {
     case "sheets":
       return "The generated workbook is hollow/incomplete — sheets have no cell values.";
@@ -636,10 +643,7 @@ export function finalizeArtifactSummary(params: {
   summary?: string | null;
   content: unknown;
 }) {
-  if (
-    params.summary?.trim() &&
-    !isPlaceholderBuildingSummary(params.summary)
-  )
+  if (params.summary?.trim() && !isPlaceholderBuildingSummary(params.summary))
     return params.summary.trim().slice(0, 320);
   const record = asContentRecord(params.content);
   const topic = params.title.trim() || "this topic";
@@ -649,15 +653,18 @@ export function finalizeArtifactSummary(params: {
       const cells = sheets.reduce((total, sheet) => {
         if (!sheet || typeof sheet !== "object" || Array.isArray(sheet))
           return total;
-        const cells = asContentRecord((sheet as { cells?: unknown }).cells);
-        return total + Object.keys(cells).length;
+        return (
+          total + sheetCellEntries((sheet as { cells?: unknown }).cells).length
+        );
       }, 0);
       return cells > 0
         ? `Workbook with ${cells} filled cell${cells === 1 ? "" : "s"} about ${topic}.`
         : fallbackArtifactSummary("sheets");
     }
     case "quiz": {
-      const count = Array.isArray(record.questions) ? record.questions.length : 0;
+      const count = Array.isArray(record.questions)
+        ? record.questions.length
+        : 0;
       return count
         ? `${count}-question quiz about ${topic}.`
         : fallbackArtifactSummary("quiz");

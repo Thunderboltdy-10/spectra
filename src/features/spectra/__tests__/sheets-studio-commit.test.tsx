@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SheetsStudio } from "../components/sheets-studio";
@@ -36,6 +42,25 @@ afterEach(() => {
 });
 
 describe("SheetsStudio commits", () => {
+  it("cancels a formula-bar draft without committing it", () => {
+    const changes: unknown[] = [];
+    render(
+      <SheetsStudio
+        artifactId="workbook-1"
+        content={initialWorkbook}
+        onChange={(next) => changes.push(next)}
+      />,
+    );
+
+    const formulaBar = screen.getByLabelText("Formula for A1");
+    formulaBar.focus();
+    fireEvent.change(formulaBar, { target: { value: "Discard this draft" } });
+    fireEvent.keyDown(formulaBar, { key: "Escape" });
+
+    expect(changes).toHaveLength(0);
+    expect((formulaBar as HTMLInputElement).value).toBe("Input");
+  });
+
   it("notifies a stateful parent outside React's state-updater render phase", async () => {
     const changes: unknown[] = [];
     const consoleError = vi

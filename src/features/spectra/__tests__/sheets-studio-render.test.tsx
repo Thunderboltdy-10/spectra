@@ -20,25 +20,27 @@ function workbook(overrides?: {
   return {
     workbook: { calculationMode: "automatic", locale: "en-US" },
     activeSheetId: "sheet-1",
-    sheets:
-      overrides?.sheets ??
-      [
-        {
-          id: "sheet-1",
-          name: "Sheet1",
-          rowCount: 20,
-          columnCount: 8,
-          tables: [],
-          cells: { A1: { value: "Input" }, A2: { value: 4 } },
-          ...overrides?.sheet,
-        },
-      ],
+    sheets: overrides?.sheets ?? [
+      {
+        id: "sheet-1",
+        name: "Sheet1",
+        rowCount: 20,
+        columnCount: 8,
+        tables: [],
+        cells: { A1: { value: "Input" }, A2: { value: 4 } },
+        ...overrides?.sheet,
+      },
+    ],
   };
 }
 
 function mount(content: unknown) {
   return render(
-    <SheetsStudio artifactId="workbook-1" content={content} onChange={() => {}} />,
+    <SheetsStudio
+      artifactId="workbook-1"
+      content={content}
+      onChange={() => {}}
+    />,
   );
 }
 
@@ -66,9 +68,9 @@ describe("grid view state", () => {
     expect(frame?.getAttribute("data-headings")).toBe("off");
     // Hiding the headers gives their track back to the grid rather than leaving
     // an empty gutter behind.
-    expect((frame as HTMLElement).style.getPropertyValue("--sheet-row-header")).toBe(
-      "0px",
-    );
+    expect(
+      (frame as HTMLElement).style.getPropertyValue("--sheet-row-header"),
+    ).toBe("0px");
   });
 
   it("leaves the frame unmarked by default", () => {
@@ -145,6 +147,9 @@ describe("formula bar", () => {
     formulaBar.focus();
     fireEvent.change(formulaBar, { target: { value: "P2V1R-A1" } });
     expect((formulaBar as HTMLInputElement).value).toBe("P2V1R-A1");
+    const activeElement = vi
+      .spyOn(document, "activeElement", "get")
+      .mockReturnValue(document.body);
     rerender(
       <SheetsStudio
         artifactId="workbook-1"
@@ -160,9 +165,10 @@ describe("formula bar", () => {
         onChange={() => {}}
       />,
     );
-    expect((screen.getByLabelText("Formula for A1") as HTMLInputElement).value).toBe(
-      "P2V1R-A1",
-    );
+    activeElement.mockRestore();
+    expect(
+      (screen.getByLabelText("Formula for A1") as HTMLInputElement).value,
+    ).toBe("P2V1R-A1");
   });
 });
 

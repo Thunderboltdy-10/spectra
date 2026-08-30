@@ -13,6 +13,7 @@ import {
   type ArtifactTypeKey,
 } from "@/features/spectra/artifacts/types";
 import { parseModelOperation } from "@/features/spectra/operations/schema";
+import { encodeArtifactContentForStorage } from "../../../../shared/sheet-cells";
 
 const BLUEPRINTS = new Set([
   "document",
@@ -1183,6 +1184,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "createArtifact") {
+      const blueprintKey = requireBlueprint(body.blueprintKey);
       const requestedSource = optionalString(body.source);
       const source =
         requestedSource &&
@@ -1194,10 +1196,10 @@ export async function POST(request: NextRequest) {
             ? "workspace"
             : "manual";
       const result = await spectraMutation("spectraArtifacts:create", {
-        blueprintKey: requireBlueprint(body.blueprintKey),
+        blueprintKey,
         title: requireString(body.title, "title"),
         summary: optionalString(body.summary),
-        content: body.content,
+        content: encodeArtifactContentForStorage(blueprintKey, body.content),
         tags: Array.isArray(body.tags)
           ? body.tags.filter((tag): tag is string => typeof tag === "string")
           : undefined,

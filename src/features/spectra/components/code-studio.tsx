@@ -62,9 +62,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
-import {
-  type OverflowItem,
-} from "@/components/ui/dropdown-menu";
+import { type OverflowItem } from "@/components/ui/dropdown-menu";
 import { SelectField } from "@/components/ui/select";
 import {
   codeRuntimeVersion,
@@ -117,6 +115,7 @@ import {
   type SpectraArtifactImport,
   type SpectraArtifactAsset,
 } from "../data/api";
+import { sheetCellEntries } from "../../../../shared/sheet-cells";
 import {
   buildSpectraSandboxDocument,
   type SpectraSandboxAsset,
@@ -373,16 +372,9 @@ function codeResourceSnapshot(
     const endText = bounds[1] || startText;
     const start = cellCoordinates(startText);
     const end = cellCoordinates(endText);
-    const cells =
-      sheet &&
-      sheet.cells &&
-      typeof sheet.cells === "object" &&
-      !Array.isArray(sheet.cells)
-        ? (sheet.cells as Record<string, unknown>)
-        : {};
     const selected: Record<string, unknown> = {};
     if (start && end) {
-      for (const [address, cell] of Object.entries(cells)) {
+      for (const [address, cell] of sheetCellEntries(sheet?.cells)) {
         const point = cellCoordinates(address);
         if (
           !point ||
@@ -452,8 +444,7 @@ export function CodeStudio({
   const readOnly = readOnlyProp || contract.readOnly;
   const incoming = useMemo(() => normalizeCodeContent(content), [content]);
   const collaborationAwareness = useMemo(
-    () =>
-      collaborationDocument ? new Awareness(collaborationDocument) : null,
+    () => (collaborationDocument ? new Awareness(collaborationDocument) : null),
     [collaborationDocument],
   );
   useEffect(
@@ -2802,436 +2793,447 @@ export function CodeStudio({
       />
 
       <div className="spectra-editor-body relative min-h-0">
-      {importing ? (
-        <div
-          role="status"
-          className="flex items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-4 py-2.5 text-micro text-[var(--text-secondary)]"
-        >
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
-          Retaining the exact original, then staging safe source into the live
-          artifact…
-        </div>
-      ) : null}
-      {importError ? (
-        <Notice tone="error" onClose={() => setImportError(null)}>
-          {importError}
-        </Notice>
-      ) : null}
-      {publishError ? (
-        <Notice tone="error" onClose={() => setPublishError(null)}>
-          {publishError} Source and the last valid published build remain
-          unchanged.
-        </Notice>
-      ) : null}
-      {exportJob ? (
-        <div
-          role="status"
-          className="flex items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-violet)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-violet)_5%,var(--bg-primary))] px-4 py-2.5 text-micro text-[var(--text-secondary)]"
-        >
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-violet)] motion-reduce:animate-none" />
-          Preparing a sanitized {exportJob.target.toUpperCase()} from the
-          running SVG…
-        </div>
-      ) : null}
-      {exportError ? (
-        <Notice tone="error" onClose={() => setExportError(null)}>
-          {exportError}
-        </Notice>
-      ) : null}
-      {importReport ? (
-        <Notice
-          tone={importReport.skipped.length ? "warning" : "success"}
-          onClose={() => setImportReport(null)}
-        >
-          Imported {importReport.imported} source file
-          {importReport.imported === 1 ? "" : "s"} from{" "}
-          {importReport.sourceLabel}. Runtime:{" "}
-          {runtimeLabel(importReport.runtime)}.
-          {importReport.skipped.length
-            ? ` ${importReport.skipped.length} item(s) were quarantined or skipped.`
-            : ""}
-          {importReport.warnings[0] ? ` ${importReport.warnings[0]}` : ""}
-          {importReport.skipped.length > 0 ||
-          importReport.warnings.length > 1 ? (
-            <details className="mt-1.5">
-              <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
-                Import fidelity details
-              </summary>
-              <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                {importReport.skipped.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-                {importReport.warnings.slice(1).map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-        </Notice>
-      ) : null}
-
-      {settingsOpen ? (
-        <CodeSettings
-          overlay
-          artifactId={artifactId}
-          artifacts={artifacts}
-          content={workbook}
-          readOnly={readOnly}
-          onRuntimeChange={setRuntime}
-          onChange={mutate}
-          onClose={() => setSettingsOpen(false)}
-        />
-      ) : null}
-      {surface === "preview" ? (
-        <div
-          className={`flex min-h-0 flex-1 flex-col p-3 ${
-            isFullscreen ? "min-h-[650px]" : ""
-          }`}
-        >
-          {preview}
-        </div>
-      ) : null}
-      {surface === "code" || surface === "split" ? (
-        <>
+        {importing ? (
           <div
-            className={`code-editor-grid min-w-0 ${
-              splitPreviewOpen ? "" : "is-code-only"
-            }`}
-            data-code-split={splitPreviewOpen ? "true" : "false"}
-            style={
-              { "--code-split": `${splitPercent}%` } as React.CSSProperties
-            }
-            onPointerMove={moveResize}
-            onPointerUp={() => {
-              draggingRef.current = false;
-            }}
-            onPointerCancel={() => {
-              draggingRef.current = false;
-            }}
+            role="status"
+            className="flex items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-4 py-2.5 text-micro text-[var(--text-secondary)]"
           >
-            {/* Both panes are always present and always editable (D4). Below
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
+            Retaining the exact original, then staging safe source into the live
+            artifact…
+          </div>
+        ) : null}
+        {importError ? (
+          <Notice tone="error" onClose={() => setImportError(null)}>
+            {importError}
+          </Notice>
+        ) : null}
+        {publishError ? (
+          <Notice tone="error" onClose={() => setPublishError(null)}>
+            {publishError} Source and the last valid published build remain
+            unchanged.
+          </Notice>
+        ) : null}
+        {exportJob ? (
+          <div
+            role="status"
+            className="flex items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-violet)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-violet)_5%,var(--bg-primary))] px-4 py-2.5 text-micro text-[var(--text-secondary)]"
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-violet)] motion-reduce:animate-none" />
+            Preparing a sanitized {exportJob.target.toUpperCase()} from the
+            running SVG…
+          </div>
+        ) : null}
+        {exportError ? (
+          <Notice tone="error" onClose={() => setExportError(null)}>
+            {exportError}
+          </Notice>
+        ) : null}
+        {importReport ? (
+          <Notice
+            tone={importReport.skipped.length ? "warning" : "success"}
+            onClose={() => setImportReport(null)}
+          >
+            Imported {importReport.imported} source file
+            {importReport.imported === 1 ? "" : "s"} from{" "}
+            {importReport.sourceLabel}. Runtime:{" "}
+            {runtimeLabel(importReport.runtime)}.
+            {importReport.skipped.length
+              ? ` ${importReport.skipped.length} item(s) were quarantined or skipped.`
+              : ""}
+            {importReport.warnings[0] ? ` ${importReport.warnings[0]}` : ""}
+            {importReport.skipped.length > 0 ||
+            importReport.warnings.length > 1 ? (
+              <details className="mt-1.5">
+                <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
+                  Import fidelity details
+                </summary>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {importReport.skipped.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                  {importReport.warnings.slice(1).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </Notice>
+        ) : null}
+
+        {settingsOpen ? (
+          <CodeSettings
+            overlay
+            artifactId={artifactId}
+            artifacts={artifacts}
+            content={workbook}
+            readOnly={readOnly}
+            onRuntimeChange={setRuntime}
+            onChange={mutate}
+            onClose={() => setSettingsOpen(false)}
+          />
+        ) : null}
+        {surface === "preview" ? (
+          <div
+            className={`flex min-h-0 flex-1 flex-col p-3 ${
+              isFullscreen ? "min-h-[650px]" : ""
+            }`}
+          >
+            {preview}
+          </div>
+        ) : null}
+        {surface === "code" || surface === "split" ? (
+          <>
+            <div
+              className={`code-editor-grid min-w-0 ${
+                splitPreviewOpen ? "" : "is-code-only"
+              }`}
+              data-code-split={splitPreviewOpen ? "true" : "false"}
+              style={
+                { "--code-split": `${splitPercent}%` } as React.CSSProperties
+              }
+              onPointerMove={moveResize}
+              onPointerUp={() => {
+                draggingRef.current = false;
+              }}
+              onPointerCancel={() => {
+                draggingRef.current = false;
+              }}
+            >
+              {/* Both panes are always present and always editable (D4). Below
                 the container's split threshold the grid becomes a block and
                 stacks them; `data-code-pane-active` is what the container query
                 keeps visible, so it now means "this pane is rendered" rather
                 than "this pane won a tab switch". There is no second bar. */}
-            <section
-              data-code-pane="source"
-              data-code-pane-active
-              className="flex min-h-0 min-w-0 flex-col"
-            >
-              {sourceMode === "code" ? (
-                <div
-                  className={`code-source-body grid min-h-0 flex-1 ${
-                    contract.surface === "full" && fileRailOpen
-                      ? "is-files-open"
-                      : ""
-                  }`}
-                >
-                  {contract.surface === "full" ? (
-                    <StudioItemRail
-                      label="Files"
-                      count={workbook.files.length}
-                      collapsed={!fileRailOpen}
-                      onToggleCollapsed={() =>
-                        setFileRailPreference(fileRailOpen ? "closed" : "open")
-                      }
-                      items={filteredFiles.map((file) => ({
-                        id: file.id,
-                        title: file.path.split("/").pop() || file.path,
-                        subtitle: file.path.includes("/")
-                          ? file.path.slice(0, file.path.lastIndexOf("/"))
-                          : file.language || undefined,
-                        active: file.id === activeFile.id,
-                      }))}
-                      onSelect={setActiveFileId}
-                      onAdd={readOnly ? undefined : () => setNewFileOpen(true)}
-                      addLabel="Add file"
-                      canEdit={!readOnly}
-                      tools={
-                        <label className="mt-2 flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)]">
-                          <Search className="size-3.5 shrink-0" />
-                          <input
-                            value={fileQuery}
-                            onChange={(event) => setFileQuery(event.target.value)}
-                            placeholder="Filter files"
-                            aria-label="Filter files by path"
-                            className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none"
-                          />
-                        </label>
-                      }
-                    />
-                  ) : null}
+              <section
+                data-code-pane="source"
+                data-code-pane-active
+                className="flex min-h-0 min-w-0 flex-col"
+              >
+                {sourceMode === "code" ? (
                   <div
-                    className="relative min-h-[520px] min-w-0 overflow-hidden bg-[var(--bg-primary)]"
-                    data-ai-region={aiRegionAttr(activeAiEffect)}
-                    {...(activeIndex >= 0
-                      ? targetAttrs(`/files/${activeIndex}/source`)
-                      : {})}
+                    className={`code-source-body grid min-h-0 flex-1 ${
+                      contract.surface === "full" && fileRailOpen
+                        ? "is-files-open"
+                        : ""
+                    }`}
                   >
-                    <CodeMirror
-                      key={`${activeFile.id}:${collaborationDocument?.clientID ?? "local"}`}
-                      value={activeFile.source}
-                      height="100%"
-                      editable={!readOnly}
-                      extensions={[
-                        languageExtension(activeFile),
-                        editorTheme,
-                        keyboardExtension,
-                        diagnosticsExtension,
-                        presenceExtension,
-                        aiLineExtension,
-                        ...(activeSharedText && collaborationAwareness
-                          ? [yCollab(activeSharedText, collaborationAwareness)]
-                          : []),
-                        EditorView.lineWrapping,
-                      ]}
-                      basicSetup={{
-                        lineNumbers: true,
-                        highlightActiveLine: true,
-                        highlightActiveLineGutter: true,
-                        foldGutter: true,
-                        autocompletion: true,
-                        closeBrackets: true,
-                        bracketMatching: true,
-                        searchKeymap: true,
-                      }}
-                      onCreateEditor={(view) => {
-                        editorViewRef.current = view;
-                      }}
-                      onChange={updateActiveSource}
-                      aria-label={`${activeFile.path} source editor`}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <CodeParameterPanel
-                  content={workbook}
-                  readOnly={readOnly}
-                  aiChangedPaths={aiChangedPaths}
-                  onActiveRegionChange={onActiveRegionChange}
-                  onChange={mutate}
-                />
-              )}
-            </section>
-            {splitPreviewOpen ? (
-              <>
-                <button
-                  type="button"
-                  className="code-split-handle flex"
-                  onPointerDown={pointerResize}
-                  aria-label="Resize source and preview panes"
-                >
-                  <span />
-                </button>
-                <section
-                  data-code-pane="preview"
-                  data-code-pane-active
-                  className="flex min-h-0 min-w-0"
-                >
-                  {preview}
-                </section>
-              </>
-            ) : null}
-          </div>
-          <div className="border-t border-[var(--border-default)] bg-[var(--bg-secondary)]">
-            <div className="flex h-9 items-center gap-1 px-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setPanel((current) =>
-                    current === "problems" ? null : "problems",
-                  )
-                }
-                className={`code-panel-tab ${panel === "problems" ? "is-active" : ""}`}
-              >
-                <AlertTriangle className="h-3 w-3" />
-                Problems
-                {problems.length ? <span>{problems.length}</span> : null}
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setPanel((current) =>
-                    current === "console" ? null : "console",
-                  )
-                }
-                className={`code-panel-tab ${panel === "console" ? "is-active" : ""}`}
-              >
-                <TerminalSquare className="h-3 w-3" />
-                Console
-                {consoleEntries.length ? (
-                  <span>{consoleEntries.length}</span>
-                ) : null}
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  panel === "tests" ? setPanel(null) : void run(true)
-                }
-                className={`code-panel-tab ${panel === "tests" ? "is-active" : ""}`}
-                title={
-                  canExecute
-                    ? "Run the declared tests"
-                    : "Running tests needs the execute capability"
-                }
-                disabled={
-                  !canExecute ||
-                  runState === "building" ||
-                  runState === "loading" ||
-                  runState === "running"
-                }
-              >
-                <FlaskConical className="h-3 w-3" />
-                Tests
-                {workbook.tests?.length ? (
-                  <span>{workbook.tests.length}</span>
-                ) : null}
-              </button>
-              <span className="ml-auto truncate text-micro text-[var(--text-tertiary)]">
-                {runtimeLabel(workbook.runtime)} · {runStateLabel(runState)}
-              </span>
-              {panel === "problems" && problems.length ? (
-                <button
-                  type="button"
-                  onClick={() => setProblems([])}
-                  className="code-small-action shrink-0"
-                >
-                  <Eraser className="h-3 w-3" />
-                  Clear
-                </button>
-              ) : null}
-              {panel === "console" && consoleEntries.length ? (
-                <button
-                  type="button"
-                  onClick={() => setConsoleEntries([])}
-                  className="code-small-action shrink-0"
-                >
-                  <Eraser className="h-3 w-3" />
-                  Clear
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setPanel(null)}
-                className="code-icon-action h-6 w-6 shrink-0"
-                aria-label="Close output panel"
-              >
-                <PanelBottom className="h-3 w-3" />
-              </button>
-            </div>
-            {panel ? (
-              <div className="max-h-44 overflow-auto border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 font-mono text-micro leading-4">
-                {panel === "problems" ? (
-                  problems.length ? (
-                    problems.map((problem) => (
-                      <button
-                        type="button"
-                        key={problem.id}
-                        className="flex w-full items-start gap-2 rounded px-2 py-1 text-left hover:bg-[var(--bg-hover)]"
-                        onClick={() => {
-                          const file =
-                            problem.file &&
-                            workbook.files.find(
-                              (candidate) => candidate.path === problem.file,
-                            );
-                          if (!file) {
-                            editorViewRef.current?.focus();
-                            return;
-                          }
-                          // Land on the reported position, not merely in the
-                          // right file: a problem you have to hunt for is a
-                          // problem the panel only half reported.
-                          setSourceMode("code");
-                          setActiveFileId(file.id);
-                          if (problem.line)
-                            setPendingSearchTarget({
-                              fileId: file.id,
-                              line: problem.line,
-                              column: problem.column ?? 0,
-                            });
-                          else editorViewRef.current?.focus();
+                    {contract.surface === "full" ? (
+                      <StudioItemRail
+                        label="Files"
+                        count={workbook.files.length}
+                        collapsed={!fileRailOpen}
+                        onToggleCollapsed={() =>
+                          setFileRailPreference(
+                            fileRailOpen ? "closed" : "open",
+                          )
+                        }
+                        items={filteredFiles.map((file) => ({
+                          id: file.id,
+                          title: file.path.split("/").pop() || file.path,
+                          subtitle: file.path.includes("/")
+                            ? file.path.slice(0, file.path.lastIndexOf("/"))
+                            : file.language || undefined,
+                          active: file.id === activeFile.id,
+                        }))}
+                        onSelect={setActiveFileId}
+                        onAdd={
+                          readOnly ? undefined : () => setNewFileOpen(true)
+                        }
+                        addLabel="Add file"
+                        canEdit={!readOnly}
+                        tools={
+                          <label className="mt-2 flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)]">
+                            <Search className="size-3.5 shrink-0" />
+                            <input
+                              value={fileQuery}
+                              onChange={(event) =>
+                                setFileQuery(event.target.value)
+                              }
+                              placeholder="Filter files"
+                              aria-label="Filter files by path"
+                              className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none"
+                            />
+                          </label>
+                        }
+                      />
+                    ) : null}
+                    <div
+                      className="relative min-h-[520px] min-w-0 overflow-hidden bg-[var(--bg-primary)]"
+                      data-ai-region={aiRegionAttr(activeAiEffect)}
+                      {...(activeIndex >= 0
+                        ? targetAttrs(`/files/${activeIndex}/source`)
+                        : {})}
+                    >
+                      <CodeMirror
+                        key={`${activeFile.id}:${collaborationDocument?.clientID ?? "local"}`}
+                        value={activeFile.source}
+                        height="100%"
+                        editable={!readOnly}
+                        extensions={[
+                          languageExtension(activeFile),
+                          editorTheme,
+                          keyboardExtension,
+                          diagnosticsExtension,
+                          presenceExtension,
+                          aiLineExtension,
+                          ...(activeSharedText && collaborationAwareness
+                            ? [
+                                yCollab(
+                                  activeSharedText,
+                                  collaborationAwareness,
+                                ),
+                              ]
+                            : []),
+                          EditorView.lineWrapping,
+                        ]}
+                        basicSetup={{
+                          lineNumbers: true,
+                          highlightActiveLine: true,
+                          highlightActiveLineGutter: true,
+                          foldGutter: true,
+                          autocompletion: true,
+                          closeBrackets: true,
+                          bracketMatching: true,
+                          searchKeymap: true,
                         }}
-                      >
-                        <span
-                          className={
-                            problem.severity === "error"
-                              ? "text-[var(--danger)]"
-                              : problem.severity === "warning"
-                                ? "text-[var(--warning)]"
-                                : "text-[var(--accent-cyan)]"
-                          }
+                        onCreateEditor={(view) => {
+                          editorViewRef.current = view;
+                        }}
+                        onChange={updateActiveSource}
+                        aria-label={`${activeFile.path} source editor`}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <CodeParameterPanel
+                    content={workbook}
+                    readOnly={readOnly}
+                    aiChangedPaths={aiChangedPaths}
+                    onActiveRegionChange={onActiveRegionChange}
+                    onChange={mutate}
+                  />
+                )}
+              </section>
+              {splitPreviewOpen ? (
+                <>
+                  <button
+                    type="button"
+                    className="code-split-handle flex"
+                    onPointerDown={pointerResize}
+                    aria-label="Resize source and preview panes"
+                  >
+                    <span />
+                  </button>
+                  <section
+                    data-code-pane="preview"
+                    data-code-pane-active
+                    className="flex min-h-0 min-w-0"
+                  >
+                    {preview}
+                  </section>
+                </>
+              ) : null}
+            </div>
+            <div className="border-t border-[var(--border-default)] bg-[var(--bg-secondary)]">
+              <div className="flex h-9 items-center gap-1 px-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPanel((current) =>
+                      current === "problems" ? null : "problems",
+                    )
+                  }
+                  className={`code-panel-tab ${panel === "problems" ? "is-active" : ""}`}
+                >
+                  <AlertTriangle className="h-3 w-3" />
+                  Problems
+                  {problems.length ? <span>{problems.length}</span> : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPanel((current) =>
+                      current === "console" ? null : "console",
+                    )
+                  }
+                  className={`code-panel-tab ${panel === "console" ? "is-active" : ""}`}
+                >
+                  <TerminalSquare className="h-3 w-3" />
+                  Console
+                  {consoleEntries.length ? (
+                    <span>{consoleEntries.length}</span>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    panel === "tests" ? setPanel(null) : void run(true)
+                  }
+                  className={`code-panel-tab ${panel === "tests" ? "is-active" : ""}`}
+                  title={
+                    canExecute
+                      ? "Run the declared tests"
+                      : "Running tests needs the execute capability"
+                  }
+                  disabled={
+                    !canExecute ||
+                    runState === "building" ||
+                    runState === "loading" ||
+                    runState === "running"
+                  }
+                >
+                  <FlaskConical className="h-3 w-3" />
+                  Tests
+                  {workbook.tests?.length ? (
+                    <span>{workbook.tests.length}</span>
+                  ) : null}
+                </button>
+                <span className="ml-auto truncate text-micro text-[var(--text-tertiary)]">
+                  {runtimeLabel(workbook.runtime)} · {runStateLabel(runState)}
+                </span>
+                {panel === "problems" && problems.length ? (
+                  <button
+                    type="button"
+                    onClick={() => setProblems([])}
+                    className="code-small-action shrink-0"
+                  >
+                    <Eraser className="h-3 w-3" />
+                    Clear
+                  </button>
+                ) : null}
+                {panel === "console" && consoleEntries.length ? (
+                  <button
+                    type="button"
+                    onClick={() => setConsoleEntries([])}
+                    className="code-small-action shrink-0"
+                  >
+                    <Eraser className="h-3 w-3" />
+                    Clear
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setPanel(null)}
+                  className="code-icon-action h-6 w-6 shrink-0"
+                  aria-label="Close output panel"
+                >
+                  <PanelBottom className="h-3 w-3" />
+                </button>
+              </div>
+              {panel ? (
+                <div className="max-h-44 overflow-auto border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 font-mono text-micro leading-4">
+                  {panel === "problems" ? (
+                    problems.length ? (
+                      problems.map((problem) => (
+                        <button
+                          type="button"
+                          key={problem.id}
+                          className="flex w-full items-start gap-2 rounded px-2 py-1 text-left hover:bg-[var(--bg-hover)]"
+                          onClick={() => {
+                            const file =
+                              problem.file &&
+                              workbook.files.find(
+                                (candidate) => candidate.path === problem.file,
+                              );
+                            if (!file) {
+                              editorViewRef.current?.focus();
+                              return;
+                            }
+                            // Land on the reported position, not merely in the
+                            // right file: a problem you have to hunt for is a
+                            // problem the panel only half reported.
+                            setSourceMode("code");
+                            setActiveFileId(file.id);
+                            if (problem.line)
+                              setPendingSearchTarget({
+                                fileId: file.id,
+                                line: problem.line,
+                                column: problem.column ?? 0,
+                              });
+                            else editorViewRef.current?.focus();
+                          }}
                         >
-                          {problem.severity === "error"
-                            ? "×"
-                            : problem.severity === "warning"
-                              ? "!"
-                              : "i"}
-                        </span>
-                        <span className="min-w-0 flex-1 break-words text-[var(--text-secondary)]">
-                          {problem.message}
-                        </span>
-                        <span className="shrink-0 text-[var(--text-tertiary)]">
-                          {problem.file}
-                          {problem.line
-                            ? `:${problem.line}${problem.column !== undefined ? `:${problem.column + 1}` : ""}`
-                            : ""}
-                        </span>
-                      </button>
-                    ))
-                  ) : (
-                    <EmptyOutput text="No current problems." />
-                  )
-                ) : panel === "tests" ? (
-                  testResults.length ? (
-                    testResults.map((result) => (
+                          <span
+                            className={
+                              problem.severity === "error"
+                                ? "text-[var(--danger)]"
+                                : problem.severity === "warning"
+                                  ? "text-[var(--warning)]"
+                                  : "text-[var(--accent-cyan)]"
+                            }
+                          >
+                            {problem.severity === "error"
+                              ? "×"
+                              : problem.severity === "warning"
+                                ? "!"
+                                : "i"}
+                          </span>
+                          <span className="min-w-0 flex-1 break-words text-[var(--text-secondary)]">
+                            {problem.message}
+                          </span>
+                          <span className="shrink-0 text-[var(--text-tertiary)]">
+                            {problem.file}
+                            {problem.line
+                              ? `:${problem.line}${problem.column !== undefined ? `:${problem.column + 1}` : ""}`
+                              : ""}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <EmptyOutput text="No current problems." />
+                    )
+                  ) : panel === "tests" ? (
+                    testResults.length ? (
+                      testResults.map((result) => (
+                        <div
+                          key={result.id}
+                          className="flex items-start gap-2 border-b border-[var(--border-subtle)] px-2 py-1.5 last:border-0"
+                        >
+                          {result.status === "running" ? (
+                            <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
+                          ) : result.status === "passed" ? (
+                            <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-[var(--success)]" />
+                          ) : (
+                            <X className="mt-0.5 h-3 w-3 shrink-0 text-[var(--danger)]" />
+                          )}
+                          <span className="min-w-0 flex-1 text-[var(--text-secondary)]">
+                            <strong className="font-semibold text-[var(--text-primary)]">
+                              {result.name}
+                            </strong>
+                            {result.message ? (
+                              <span className="mt-0.5 block whitespace-pre-wrap text-[var(--danger)]">
+                                {result.message}
+                              </span>
+                            ) : null}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <EmptyOutput text="Add executable tests in Settings, then run them here." />
+                    )
+                  ) : consoleEntries.length ? (
+                    consoleEntries.map((entry) => (
                       <div
-                        key={result.id}
-                        className="flex items-start gap-2 border-b border-[var(--border-subtle)] px-2 py-1.5 last:border-0"
+                        key={entry.id}
+                        className={`flex gap-2 border-b border-[var(--border-subtle)] px-2 py-1 last:border-0 ${entry.level === "error" ? "text-[var(--danger)]" : entry.level === "warn" ? "text-[var(--warning)]" : "text-[var(--text-secondary)]"}`}
                       >
-                        {result.status === "running" ? (
-                          <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
-                        ) : result.status === "passed" ? (
-                          <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-[var(--success)]" />
-                        ) : (
-                          <X className="mt-0.5 h-3 w-3 shrink-0 text-[var(--danger)]" />
-                        )}
-                        <span className="min-w-0 flex-1 text-[var(--text-secondary)]">
-                          <strong className="font-semibold text-[var(--text-primary)]">
-                            {result.name}
-                          </strong>
-                          {result.message ? (
-                            <span className="mt-0.5 block whitespace-pre-wrap text-[var(--danger)]">
-                              {result.message}
-                            </span>
-                          ) : null}
+                        <span className="shrink-0 uppercase text-micro tracking-wide text-[var(--text-tertiary)]">
+                          {entry.level}
+                        </span>
+                        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+                          {entry.text}
                         </span>
                       </div>
                     ))
                   ) : (
-                    <EmptyOutput text="Add executable tests in Settings, then run them here." />
-                  )
-                ) : consoleEntries.length ? (
-                  consoleEntries.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className={`flex gap-2 border-b border-[var(--border-subtle)] px-2 py-1 last:border-0 ${entry.level === "error" ? "text-[var(--danger)]" : entry.level === "warn" ? "text-[var(--warning)]" : "text-[var(--text-secondary)]"}`}
-                    >
-                      <span className="shrink-0 uppercase text-micro tracking-wide text-[var(--text-tertiary)]">
-                        {entry.level}
-                      </span>
-                      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-                        {entry.text}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <EmptyOutput text="Run the artifact to inspect console output." />
-                )}
-              </div>
-            ) : null}
-          </div>
-        </>
-      ) : null}
+                    <EmptyOutput text="Run the artifact to inspect console output." />
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </>
+        ) : null}
       </div>
 
       {deleteFileId ? (
@@ -3255,25 +3257,25 @@ export function CodeStudio({
       {fullPreview
         ? createPortal(
             <div className="fixed inset-0 z-[90] flex flex-col bg-[var(--bg-primary)]">
-          <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-default)] px-5">
-            <div>
-              <p className="text-[11px] font-semibold text-[var(--text-primary)]">
-                {workbook.visualisation.title || title}
-              </p>
-              <p className="text-micro text-[var(--text-tertiary)]">
-                Isolated preview · {runtimeLabel(workbook.runtime)}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="code-icon-action"
-              onClick={() => setFullPreview(false)}
-              aria-label="Close full preview"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </header>
-          <div className="min-h-0 flex-1 overflow-auto p-4">{preview}</div>
+              <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-default)] px-5">
+                <div>
+                  <p className="text-[11px] font-semibold text-[var(--text-primary)]">
+                    {workbook.visualisation.title || title}
+                  </p>
+                  <p className="text-micro text-[var(--text-tertiary)]">
+                    Isolated preview · {runtimeLabel(workbook.runtime)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="code-icon-action"
+                  onClick={() => setFullPreview(false)}
+                  aria-label="Close full preview"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </header>
+              <div className="min-h-0 flex-1 overflow-auto p-4">{preview}</div>
             </div>,
             document.body,
           )
@@ -3927,10 +3929,7 @@ function CodeSettings({
     },
   ];
   return (
-    <div
-      className="code-settings-shell"
-      data-overlay={overlay || undefined}
-    >
+    <div className="code-settings-shell" data-overlay={overlay || undefined}>
       <nav className="code-settings-nav" aria-label="Code settings sections">
         <div className="code-settings-nav-heading">
           <span>Configuration</span>
@@ -4149,9 +4148,7 @@ function CodeSettings({
                 onChange={(next) =>
                   onChange((draft) => {
                     draft.visualisation.openMode = next as
-                      | "source"
-                      | "preview"
-                      | "split";
+                      "source" | "preview" | "split";
                   })
                 }
               />

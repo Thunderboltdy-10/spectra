@@ -7,7 +7,10 @@ import {
   useState,
   type MutableRefObject,
 } from "react";
-import type { ArtifactLiveValue } from "../collaboration/artifact-yjs-model";
+import {
+  canonicalJsonEqual,
+  type ArtifactLiveValue,
+} from "../collaboration/artifact-yjs-model";
 import type { ReplicaTruth } from "../bridge/status";
 import {
   nativeMaterializationStale,
@@ -15,8 +18,7 @@ import {
 } from "../bridge/native-materialization-exit";
 
 export type NativeMaterialization =
-  | { state: "queueing" }
-  | { state: "pending"; hash: string };
+  { state: "queueing" } | { state: "pending"; hash: string };
 
 export type NativeConflict = {
   regionIds: string[];
@@ -42,9 +44,9 @@ type NativeLive = {
 function syncRejected(result: unknown): boolean {
   return Boolean(
     result &&
-      typeof result === "object" &&
-      "applied" in result &&
-      (result as { applied?: boolean }).applied === false,
+    typeof result === "object" &&
+    "applied" in result &&
+    (result as { applied?: boolean }).applied === false,
   );
 }
 
@@ -95,11 +97,13 @@ export function useArtifactNativeSync({
   live: NativeLive;
   initialLiveValue: ArtifactLiveValue;
   replicas: readonly ReplicaRow[] | undefined;
-  conflicts: readonly {
-    regionIds: string[];
-    partNames: string[];
-    previews?: NativeConflict["previews"];
-  }[] | undefined;
+  conflicts:
+    | readonly {
+        regionIds: string[];
+        partNames: string[];
+        previews?: NativeConflict["previews"];
+      }[]
+    | undefined;
   setContent: (content: unknown) => void;
   setBaseline: (snapshot: EditorSnapshot) => void;
   setDirty: (dirty: boolean) => void;
@@ -248,10 +252,7 @@ export function useArtifactNativeSync({
     if (nativeProjectionArtifactRef.current === artifactId) return;
     nativeProjectionArtifactRef.current = artifactId;
     const refreshedContent = initialLiveValue.content;
-    if (
-      JSON.stringify(live.modelSnapshot.value.content) ===
-      JSON.stringify(refreshedContent)
-    )
+    if (canonicalJsonEqual(live.modelSnapshot.value.content, refreshedContent))
       return;
     void live
       .synchronize({ ...initialLiveValue, content: refreshedContent })
@@ -330,14 +331,21 @@ export function useArtifactNativeSync({
         );
       }
     },
-    [artifactId, nativeOfficeApplication, nativeOfficeDocument, nativeWordDocument],
+    [
+      artifactId,
+      nativeOfficeApplication,
+      nativeOfficeDocument,
+      nativeWordDocument,
+    ],
   );
 
   useEffect(() => {
     if (
       nativeProjectionOverrideRef.current !== undefined &&
-      JSON.stringify(live.liveValue.content) ===
-        JSON.stringify(nativeProjectionOverrideRef.current)
+      canonicalJsonEqual(
+        live.liveValue.content,
+        nativeProjectionOverrideRef.current,
+      )
     ) {
       nativeProjectionOverrideRef.current = undefined;
     }
@@ -525,7 +533,9 @@ export function useArtifactNativeSync({
           (replica) =>
             replica.kind === "local" && replica.state !== "unavailable",
         )
-        .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))[0]
+        .sort(
+          (left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0),
+        )[0]
     : undefined;
   const nativeCloudReplica = nativeOfficeDocument
     ? replicas?.find((replica) => replica.kind === "cloud")
@@ -536,8 +546,8 @@ export function useArtifactNativeSync({
     const previousRevision = nativeLocalRevisionRef.current;
     const localChangedSinceCloud = Boolean(
       nativeLocalReplica.contentHash &&
-        nativeCloudReplica?.contentHash &&
-        nativeLocalReplica.contentHash !== nativeCloudReplica.contentHash,
+      nativeCloudReplica?.contentHash &&
+      nativeLocalReplica.contentHash !== nativeCloudReplica.contentHash,
     );
     nativeLocalRevisionRef.current = nativeLocalReplica.revision;
     if (
@@ -573,10 +583,14 @@ export function useArtifactNativeSync({
 
   useEffect(() => {
     if (!nativeMaterialization || !nativeLocalReplica) return;
-    if (nativeMaterializationVerified(nativeMaterialization, nativeLocalReplica)) {
+    if (
+      nativeMaterializationVerified(nativeMaterialization, nativeLocalReplica)
+    ) {
       setNativeMaterialization(undefined);
       setNativeAttribution("Saved locally");
-    } else if (nativeMaterializationStale(nativeMaterialization, nativeLocalReplica)) {
+    } else if (
+      nativeMaterializationStale(nativeMaterialization, nativeLocalReplica)
+    ) {
       setNativeMaterialization(undefined);
     }
   }, [nativeLocalReplica, nativeMaterialization]);
@@ -598,32 +612,37 @@ export function useArtifactNativeSync({
     }
     const regionCount = persistedNativeConflict.regionIds.length;
     const preservedPartCount = persistedNativeConflict.partNames.length;
-    setNativeConflict(
-      (current) =>
-        current
-          ? {
-              ...current,
-              regionIds: persistedNativeConflict.regionIds,
-              previews: persistedNativeConflict.previews ?? current.previews,
-            }
-          : {
-              regionIds: persistedNativeConflict.regionIds,
-              previews: persistedNativeConflict.previews,
-              message: regionCount
-                ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same work region" : `${regionCount} overlapping work regions`}. Choose which version to keep.`
-                : preservedPartCount
-                  ? `${nativeOfficeApplication} and Spectra changed the same preserved native content. Choose which version to keep.`
-                  : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
-            },
+    setNativeConflict((current) =>
+      current
+        ? {
+            ...current,
+            regionIds: persistedNativeConflict.regionIds,
+            previews: persistedNativeConflict.previews ?? current.previews,
+          }
+        : {
+            regionIds: persistedNativeConflict.regionIds,
+            previews: persistedNativeConflict.previews,
+            message: regionCount
+              ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same work region" : `${regionCount} overlapping work regions`}. Choose which version to keep.`
+              : preservedPartCount
+                ? `${nativeOfficeApplication} and Spectra changed the same preserved native content. Choose which version to keep.`
+                : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
+          },
     );
-  }, [conflicts, nativeOfficeApplication, nativeOfficeDocument, persistedNativeConflict]);
+  }, [
+    conflicts,
+    nativeOfficeApplication,
+    nativeOfficeDocument,
+    persistedNativeConflict,
+  ]);
 
   useEffect(() => {
     if (
       !nativeOfficeDocument ||
       !reconcilableLocalRevision ||
       (dirty && nativeLocalReplica?.state !== "ahead") ||
-      (live.unsynchronizedChanges > 0 && nativeLocalReplica?.state !== "ahead") ||
+      (live.unsynchronizedChanges > 0 &&
+        nativeLocalReplica?.state !== "ahead") ||
       nativeReconciliationRevisionRef.current === reconcilableLocalRevision
     )
       return;

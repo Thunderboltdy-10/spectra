@@ -5,6 +5,10 @@ import { convexTest } from "convex-test";
 import * as Y from "yjs";
 import schema from "./schema";
 import { internal } from "./_generated/api";
+import {
+  encodeArtifactContentForStorage,
+  sheetCellEntries,
+} from "../shared/sheet-cells";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -25,6 +29,17 @@ function yjsUpdate(text: string) {
   const stateVector = Y.encodeStateVector(document);
   document.destroy();
   return { update, stateVector, hash: hashBytes(stateVector) };
+}
+
+function initialProjection() {
+  const json = JSON.stringify({
+    title: "Essay",
+    tags: [],
+    typeKey: "document",
+    schemaVersion: 2,
+    content: { blocks: [{ id: "intro", type: "paragraph", text: "start" }] },
+  });
+  return { json, hash: createHash("sha256").update(json).digest("base64url") };
 }
 
 async function seedRoom(t: ReturnType<typeof convexTest>) {
@@ -91,6 +106,72 @@ async function seedRoom(t: ReturnType<typeof convexTest>) {
 }
 
 describe("P5.I2 checkpoint projection and compaction", () => {
+  it("stores a large sheet projection in bounded chunks at checkpoint", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const content = {
+      workbook: { calculationMode: "automatic", locale: "en-US" },
+      sheets: [
+        {
+          id: "sheet-1",
+          name: "Data",
+          cells: Object.fromEntries(
+            Array.from({ length: 1_322 }, (_, index) => [
+              `A${index + 1}`,
+              { value: index + 1 },
+            ]),
+          ),
+          tables: [],
+          charts: [],
+        },
+      ],
+      activeSheetId: "sheet-1",
+    };
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seed.artifactId, {
+        blueprintKey: "sheets",
+        schemaVersion: 4,
+        content: encodeArtifactContentForStorage("sheets", {
+          ...content,
+          sheets: [{ ...content.sheets[0], cells: {} }],
+        }),
+      });
+      await ctx.db.patch(seed.roomId, { typeKey: "sheets", schemaVersion: 4 });
+    });
+    const projection = {
+      title: "Large workbook",
+      tags: [],
+      typeKey: "sheets",
+      schemaVersion: 4,
+      content,
+    };
+    const projectionJson = JSON.stringify(projection);
+    const projectionHash = createHash("sha256")
+      .update(projectionJson)
+      .digest("base64url");
+
+    await t.mutation(internal.collaborationGatewayStore.checkpoint, {
+      accountId: seed.accountId,
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "sheet-client",
+      policyVersion: 0,
+      stateVectorHash: "sheet-state-vector",
+      projectionJson,
+      projectionHash,
+      throughSequence: 0,
+    });
+
+    const artifact = await t.run(async (ctx) => ctx.db.get(seed.artifactId));
+    const storedSheet = (
+      artifact?.content as { sheets?: Array<{ cells?: unknown }> }
+    )?.sheets?.[0];
+    expect(sheetCellEntries(storedSheet?.cells)).toHaveLength(1_322);
+    expect(storedSheet?.cells).toMatchObject({
+      encoding: "spectra-sheet-cells-v1",
+    });
+  });
+
   it("appends a durable Yjs update without rewriting artifact.content", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedRoom(t);
@@ -121,12 +202,32 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     expect(afterAppend.artifact?.contentHash).toBe("initial-content-hash");
     expect(afterAppend.artifact?.liveStateVectorHash).toBe(first.hash);
 
+    const duplicate = await t.mutation(
+      internal.collaborationGatewayStore.append,
+      {
+        accountId: seed.accountId,
+        actorKind: "human",
+        artifactId: seed.artifactId,
+        partitionKey: "root",
+        clientId: "client-1",
+        policyVersion: 0,
+        idempotencyKey: "human:one",
+        update: arrayBufferCopy(first.update),
+        baseStateVectorHash: "initial-state-vector",
+        stateVectorHash: first.hash,
+        regionIds: ["intro"],
+      },
+    );
+    expect(duplicate).toMatchObject({ sequence: 1, duplicate: true });
+
     const projection = {
       title: "Typed essay",
       tags: [],
       typeKey: "document",
       schemaVersion: 2,
-      content: { blocks: [{ id: "intro", type: "paragraph", text: "typed more" }] },
+      content: {
+        blocks: [{ id: "intro", type: "paragraph", text: "typed more" }],
+      },
     };
     const projectionJson = JSON.stringify(projection);
     const projectionHash = createHash("sha256")
@@ -182,7 +283,7 @@ describe("P5.I2 checkpoint projection and compaction", () => {
           sequence,
           update,
           byteLength: encoded.update.byteLength,
-          stateVectorHash: `${encoded.hash}:${sequence}`.slice(0, 48),
+          stateVectorHash: encoded.hash,
           actorAccountId: seed.accountId,
           clientId: "client-1",
           idempotencyKey: `load:${sequence}`,
@@ -219,5 +320,219 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     expect(leftover.snapshots[0]?.status).toBe("verified");
     expect(leftover.room?.uncompactedBytes).toBe(0);
     expect(leftover.room?.snapshotSequence).toBe(12);
+  });
+
+  it("rejects a snapshot whose state is ahead of its durable sequence", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const durable = yjsUpdate("durable");
+    await t.mutation(internal.collaborationGatewayStore.append, {
+      accountId: seed.accountId,
+      actorKind: "human",
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "client-1",
+      policyVersion: 0,
+      idempotencyKey: "human:durable",
+      update: arrayBufferCopy(durable.update),
+      baseStateVectorHash: "initial-state-vector",
+      stateVectorHash: durable.hash,
+      regionIds: ["intro"],
+    });
+
+    const liveDocument = new Y.Doc();
+    Y.applyUpdate(liveDocument, durable.update);
+    liveDocument
+      .getMap("spectra:work-v2:live-meta")
+      .set("title", "not durable yet");
+    const aheadUpdate = Y.encodeStateAsUpdate(liveDocument);
+    const aheadStateVector = Y.encodeStateVector(liveDocument);
+
+    await expect(
+      t.mutation(internal.collaboration.storeSnapshot, {
+        roomId: seed.roomId,
+        throughSequence: 1,
+        update: arrayBufferCopy(aheadUpdate),
+        stateVector: arrayBufferCopy(aheadStateVector),
+        contentHash: hashBytes(aheadUpdate),
+        schemaVersion: 2,
+        createdBy: "compactor",
+      }),
+    ).rejects.toThrow("COLLABORATION_SNAPSHOT_HEAD_MISMATCH");
+
+    liveDocument.destroy();
+  });
+
+  it("resets only a contiguous bootstrap-only log after a native room race", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const first = yjsUpdate("bootstrap one");
+    const second = yjsUpdate("bootstrap two");
+    const merged = new Y.Doc();
+    Y.applyUpdate(merged, first.update);
+    Y.applyUpdate(merged, second.update);
+    const observedHash = hashBytes(Y.encodeStateVector(merged));
+    const projection = initialProjection();
+
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      for (const [index, encoded] of [first, second].entries()) {
+        await ctx.db.insert("collaborationUpdates", {
+          roomId: seed.roomId,
+          schoolId: seed.schoolId,
+          sequence: index + 1,
+          update: arrayBufferCopy(encoded.update),
+          byteLength: encoded.update.byteLength,
+          stateVectorHash: encoded.hash,
+          actorAccountId: seed.accountId,
+          clientId: `bootstrap-${index + 1}`,
+          idempotencyKey: `bootstrap:${index + 1}:${encoded.hash}`,
+          regionIds: ["artifact:structure"],
+          createdAt: now,
+        });
+      }
+      await ctx.db.patch(seed.roomId, {
+        nextSequence: 3,
+        uncompactedBytes: first.update.byteLength + second.update.byteLength,
+      });
+      await ctx.db.patch(seed.artifactId, {
+        liveStateVectorHash: second.hash,
+        syncState: "synchronized",
+      });
+    });
+
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.recoverNativeSnapshot, {
+        accountId: seed.accountId,
+        artifactId: seed.artifactId,
+        partitionKey: "root",
+        clientId: "client-1",
+        policyVersion: 0,
+        expectedNextSequence: 3,
+        expectedStateVectorHash: second.hash,
+        observedStateVectorHash: observedHash,
+        observedProjectionJson: projection.json,
+        observedProjectionHash: projection.hash,
+      }),
+    ).resolves.toMatchObject({
+      recovered: true,
+      previousHeadSequence: 2,
+      bootstrapReset: true,
+    });
+
+    const recovered = await t.run(async (ctx) => ({
+      artifact: await ctx.db.get(seed.artifactId),
+      room: await ctx.db.get(seed.roomId),
+      updates: await ctx.db.query("collaborationUpdates").collect(),
+    }));
+    expect(recovered.artifact?.liveStateVectorHash).toBeUndefined();
+    expect(recovered.room).toMatchObject({
+      status: "active",
+      nextSequence: 1,
+      snapshotSequence: 0,
+      uncompactedBytes: 0,
+    });
+    expect(recovered.updates).toHaveLength(0);
+
+    merged.destroy();
+  });
+
+  it("recovers an already-compacted native snapshot only from a current projection", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const durable = yjsUpdate("durable");
+    await t.mutation(internal.collaborationGatewayStore.append, {
+      accountId: seed.accountId,
+      actorKind: "human",
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "client-1",
+      policyVersion: 0,
+      idempotencyKey: "human:durable",
+      update: arrayBufferCopy(durable.update),
+      baseStateVectorHash: "initial-state-vector",
+      stateVectorHash: durable.hash,
+      regionIds: ["intro"],
+    });
+    const observedHash = durable.hash;
+    const projection = initialProjection();
+    const staleProjectionJson = JSON.stringify({
+      ...JSON.parse(projection.json),
+      title: "Unprojected title",
+    });
+
+    await t.run(async (ctx) => {
+      const updates = await ctx.db
+        .query("collaborationUpdates")
+        .withIndex("by_room_sequence", (q) => q.eq("roomId", seed.roomId))
+        .collect();
+      await Promise.all(updates.map((update) => ctx.db.delete(update._id)));
+      const now = Date.now();
+      await ctx.db.insert("collaborationSnapshots", {
+        roomId: seed.roomId,
+        artifactId: seed.artifactId,
+        schoolId: seed.schoolId,
+        throughSequence: 1,
+        update: arrayBufferCopy(durable.update),
+        stateVector: arrayBufferCopy(durable.stateVector),
+        contentHash: hashBytes(durable.update),
+        schemaVersion: 2,
+        status: "verified",
+        createdBy: "compactor",
+        createdAt: now,
+        verifiedAt: now,
+      });
+      await ctx.db.patch(seed.roomId, {
+        snapshotSequence: 1,
+        uncompactedBytes: 0,
+      });
+    });
+
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.recoverNativeSnapshot, {
+        accountId: seed.accountId,
+        artifactId: seed.artifactId,
+        partitionKey: "root",
+        clientId: "client-1",
+        policyVersion: 0,
+        expectedNextSequence: 2,
+        expectedStateVectorHash: durable.hash,
+        observedStateVectorHash: observedHash,
+        observedProjectionJson: staleProjectionJson,
+        observedProjectionHash: createHash("sha256")
+          .update(staleProjectionJson)
+          .digest("base64url"),
+      }),
+    ).rejects.toThrow("COLLABORATION_DURABLE_RECOVERY_STALE");
+
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.recoverNativeSnapshot, {
+        accountId: seed.accountId,
+        artifactId: seed.artifactId,
+        partitionKey: "root",
+        clientId: "client-1",
+        policyVersion: 0,
+        expectedNextSequence: 2,
+        expectedStateVectorHash: durable.hash,
+        observedStateVectorHash: observedHash,
+        observedProjectionJson: projection.json,
+        observedProjectionHash: projection.hash,
+      }),
+    ).resolves.toMatchObject({ recovered: true, previousHeadSequence: 1 });
+
+    const recovered = await t.run(async (ctx) => ({
+      artifact: await ctx.db.get(seed.artifactId),
+      room: await ctx.db.get(seed.roomId),
+      snapshots: await ctx.db.query("collaborationSnapshots").collect(),
+    }));
+    expect(recovered.artifact?.liveStateVectorHash).toBeUndefined();
+    expect(recovered.room).toMatchObject({
+      status: "active",
+      nextSequence: 1,
+      snapshotSequence: 0,
+      uncompactedBytes: 0,
+    });
+    expect(recovered.room?.lastProjectionSequence).toBeUndefined();
+    expect(recovered.snapshots).toHaveLength(0);
   });
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { artifactContentSchemas } from "./schemas";
+import { normalizeSheetsContent } from "../sheets/model";
 import {
   ARTIFACT_TYPE_KEYS,
   type ArtifactSkill,
@@ -1281,11 +1282,11 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
           ? 2
           : typeKey === "sheets"
             ? 4
-          : typeKey === "flashcard_deck" ||
-              typeKey === "quiz" ||
-              typeKey === "planner_task"
-            ? 3
-            : 1,
+            : typeKey === "flashcard_deck" ||
+                typeKey === "quiz" ||
+                typeKey === "planner_task"
+              ? 3
+              : 1,
       content: artifactContentSchemas[typeKey],
     },
     renderers: {
@@ -1304,8 +1305,8 @@ function manifest(typeKey: ArtifactTypeKey): ArtifactTypeManifest {
       validity: "continuous",
       minimumPanelWidth: 320,
     },
-    operations: operations[typeKey].map((operation) =>
-      `${typeKey}.${operation.replaceAll("_", ".")}`,
+    operations: operations[typeKey].map(
+      (operation) => `${typeKey}.${operation.replaceAll("_", ".")}`,
     ),
     regions: regionAdapters[typeKey],
     loadSkill: () => loadSkill(typeKey),
@@ -1392,12 +1393,16 @@ export function requireArtifactTypeManifest(typeKey: string) {
 
 export function validateArtifactContent(typeKey: string, content: unknown) {
   const manifest = requireArtifactTypeManifest(typeKey);
-  return manifest.schemas.content.safeParse(content);
+  return manifest.schemas.content.safeParse(
+    typeKey === "sheets" ? normalizeSheetsContent(content) : content,
+  );
 }
 
 export function enumerateArtifactRegions(typeKey: string, content: unknown) {
   const manifest = requireArtifactTypeManifest(typeKey);
-  const parsed = manifest.schemas.content.parse(content);
+  const parsed = manifest.schemas.content.parse(
+    typeKey === "sheets" ? normalizeSheetsContent(content) : content,
+  );
   const regions = manifest.regions(parsed);
   const ids = new Set<string>();
   for (const candidate of regions) {

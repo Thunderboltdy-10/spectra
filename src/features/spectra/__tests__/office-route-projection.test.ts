@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contentToPptx } from "@/app/api/spectra/lenses/office/route";
+import { POST, contentToPptx } from "@/app/api/spectra/lenses/office/route";
 import {
   pptxProjectionUpdateFromContent,
   xlsxProjectionUpdateFromContent,
@@ -7,6 +7,21 @@ import {
 import { hasUnreconciledExternalRevision } from "../lenses/native-reconciliation";
 
 describe("Office lens route projection boundary", () => {
+  it("returns the Office error envelope when parsing fails before format detection", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/spectra/lenses/office", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "OFFICE_LENS_FAILED",
+    });
+  });
+
   it("does not reconcile an external operation after it is verified", () => {
     const operation = {
       direction: "external",
@@ -61,27 +76,31 @@ describe("Office lens route projection boundary", () => {
 
   it("keeps native presentation objects when content returns from Spectra", () => {
     const base = {
-      slides: [{
-        id: "slide-1",
-        index: 0,
-        title: "Native title",
-        text: ["Native title", "Native body"],
-        speakerNotes: "Native notes",
-        notesPartName: "/ppt/notesSlides/notesSlide1.xml",
-        objects: [{
-          id: "slide-1:shape:3",
-          type: "text" as const,
-          x: 120,
-          y: 280,
-          width: 760,
-          height: 130,
-          rotation: 0,
-          content: { text: "Native body", nativeShapeId: "3" },
-          locked: false,
-        }],
-        hasTransition: true,
-        hasTiming: false,
-      }],
+      slides: [
+        {
+          id: "slide-1",
+          index: 0,
+          title: "Native title",
+          text: ["Native title", "Native body"],
+          speakerNotes: "Native notes",
+          notesPartName: "/ppt/notesSlides/notesSlide1.xml",
+          objects: [
+            {
+              id: "slide-1:shape:3",
+              type: "text" as const,
+              x: 120,
+              y: 280,
+              width: 760,
+              height: 130,
+              rotation: 0,
+              content: { text: "Native body", nativeShapeId: "3" },
+              locked: false,
+            },
+          ],
+          hasTransition: true,
+          hasTiming: false,
+        },
+      ],
       nativeBinding: {
         version: 1 as const,
         format: "pptx" as const,
@@ -90,17 +109,24 @@ describe("Office lens route projection boundary", () => {
         semanticDigest: "0".repeat(64),
       },
     };
-    const result = contentToPptx({
-      slides: [{
-        id: "slide-1",
-        title: "Native title",
-        objects: [{
-          id: "slide-1:shape:3",
-          type: "text",
-          content: { text: "Edited body", nativeShapeId: "3" },
-        }],
-      }],
-    }, base);
+    const result = contentToPptx(
+      {
+        slides: [
+          {
+            id: "slide-1",
+            title: "Native title",
+            objects: [
+              {
+                id: "slide-1:shape:3",
+                type: "text",
+                content: { text: "Edited body", nativeShapeId: "3" },
+              },
+            ],
+          },
+        ],
+      },
+      base,
+    );
     expect(result.slides[0]!.objects[0]!.content).toMatchObject({
       text: "Edited body",
       nativeShapeId: "3",
@@ -110,17 +136,19 @@ describe("Office lens route projection boundary", () => {
 
   it("carries an edited speaker note across the boundary and keeps the old one otherwise", () => {
     const base = {
-      slides: [{
-        id: "slide-1",
-        index: 0,
-        title: "Native title",
-        text: ["Native title"],
-        speakerNotes: "Native notes",
-        notesPartName: "/ppt/notesSlides/notesSlide1.xml",
-        objects: [],
-        hasTransition: false,
-        hasTiming: false,
-      }],
+      slides: [
+        {
+          id: "slide-1",
+          index: 0,
+          title: "Native title",
+          text: ["Native title"],
+          speakerNotes: "Native notes",
+          notesPartName: "/ppt/notesSlides/notesSlide1.xml",
+          objects: [],
+          hasTransition: false,
+          hasTiming: false,
+        },
+      ],
       nativeBinding: {
         version: 1 as const,
         format: "pptx" as const,
@@ -142,16 +170,18 @@ describe("Office lens route projection boundary", () => {
 
   it("keeps a new object on an existing slide instead of rebuilding from native objects", () => {
     const base = {
-      slides: [{
-        id: "slide-1",
-        index: 0,
-        title: "Native title",
-        text: ["Native title"],
-        speakerNotes: "",
-        objects: [],
-        hasTransition: false,
-        hasTiming: false,
-      }],
+      slides: [
+        {
+          id: "slide-1",
+          index: 0,
+          title: "Native title",
+          text: ["Native title"],
+          speakerNotes: "",
+          objects: [],
+          hasTransition: false,
+          hasTiming: false,
+        },
+      ],
       nativeBinding: {
         version: 1 as const,
         format: "pptx" as const,
@@ -160,21 +190,28 @@ describe("Office lens route projection boundary", () => {
         semanticDigest: "0".repeat(64),
       },
     };
-    const result = contentToPptx({
-      slides: [{
-        id: "slide-1",
-        objects: [{
-          id: "spectra-added",
-          type: "text",
-          x: 210,
-          y: 120,
-          width: 400,
-          height: 90,
-          rotation: 0,
-          content: { text: "New object" },
-        }],
-      }],
-    }, base);
+    const result = contentToPptx(
+      {
+        slides: [
+          {
+            id: "slide-1",
+            objects: [
+              {
+                id: "spectra-added",
+                type: "text",
+                x: 210,
+                y: 120,
+                width: 400,
+                height: 90,
+                rotation: 0,
+                content: { text: "New object" },
+              },
+            ],
+          },
+        ],
+      },
+      base,
+    );
     expect(result.slides[0]!.objects).toHaveLength(1);
     expect(result.slides[0]!.objects[0]).toMatchObject({
       id: "spectra-added",
@@ -185,12 +222,14 @@ describe("Office lens route projection boundary", () => {
 
   it("derives typed native operations at the route boundary", () => {
     const xlsxBase = {
-      sheets: [{
-        id: "xlsx:sheet:1",
-        name: "Sheet1",
-        cells: [{ id: "xlsx:1:A1", ref: "A1", value: "Delete me" }],
-        merges: [] as string[],
-      }],
+      sheets: [
+        {
+          id: "xlsx:sheet:1",
+          name: "Sheet1",
+          cells: [{ id: "xlsx:1:A1", ref: "A1", value: "Delete me" }],
+          merges: [] as string[],
+        },
+      ],
       definedNames: [],
       nativeBinding: {
         version: 1 as const,
@@ -206,21 +245,21 @@ describe("Office lens route projection boundary", () => {
         { sheets: [{ id: "xlsx:sheet:1", cells: {} }] },
         xlsxBase,
       ).operations,
-    ).toEqual([
-      { kind: "clear-cell", sheetId: "xlsx:sheet:1", ref: "A1" },
-    ]);
+    ).toEqual([{ kind: "clear-cell", sheetId: "xlsx:sheet:1", ref: "A1" }]);
 
     const pptxBase = {
-      slides: [{
-        id: "slide-1",
-        index: 0,
-        title: "One",
-        text: ["One"],
-        objects: [],
-        hasTransition: false,
-        hasTiming: false,
-        speakerNotes: "",
-      }],
+      slides: [
+        {
+          id: "slide-1",
+          index: 0,
+          title: "One",
+          text: ["One"],
+          objects: [],
+          hasTransition: false,
+          hasTiming: false,
+          speakerNotes: "",
+        },
+      ],
       nativeBinding: {
         version: 1 as const,
         format: "pptx" as const,
@@ -232,23 +271,78 @@ describe("Office lens route projection boundary", () => {
     expect(
       pptxProjectionUpdateFromContent(
         {
-          slides: [{
-            id: "slide-1",
-            objects: [{
-              id: "new-text",
-              type: "text",
-              x: 100,
-              y: 100,
-              width: 300,
-              height: 80,
-              rotation: 0,
-              content: { text: "Added" },
-            }],
-          }],
+          slides: [
+            {
+              id: "slide-1",
+              objects: [
+                {
+                  id: "new-text",
+                  type: "text",
+                  x: 100,
+                  y: 100,
+                  width: 300,
+                  height: 80,
+                  rotation: 0,
+                  content: { text: "Added" },
+                },
+              ],
+            },
+          ],
         },
         pptxBase,
       ).operations,
     ).toEqual([{ kind: "add-text-box", slideId: "slide-1", text: "Added" }]);
+  });
+
+  it("treats absent and explicit zero freeze panes as the same native state", () => {
+    const base = {
+      sheets: [
+        {
+          id: "xlsx:sheet:1",
+          name: "Sheet1",
+          cells: [],
+          merges: [] as string[],
+        },
+      ],
+      definedNames: [],
+      nativeBinding: {
+        version: 1 as const,
+        format: "xlsx" as const,
+        profile: "strict-native" as const,
+        macroEnabled: false,
+        semanticDigest: "0".repeat(64),
+        recognizedFormulaFunctions: [],
+      },
+    };
+    const editor = {
+      sheets: [
+        {
+          id: "xlsx:sheet:1",
+          cells: {},
+          frozenRows: 0,
+          frozenColumns: 0,
+        },
+      ],
+    };
+
+    expect(xlsxProjectionUpdateFromContent(editor, base).operations).toEqual(
+      [],
+    );
+    expect(
+      xlsxProjectionUpdateFromContent(editor, {
+        ...base,
+        sheets: [
+          { ...base.sheets[0]!, frozenRows: 2, frozenColumns: 1 },
+        ],
+      }).operations,
+    ).toEqual([
+      {
+        kind: "set-freeze-panes",
+        sheetId: "xlsx:sheet:1",
+        rows: 0,
+        columns: 0,
+      },
+    ]);
   });
 
   /**
@@ -267,7 +361,11 @@ describe("Office lens route projection boundary", () => {
       semanticDigest: "0".repeat(64),
     };
 
-    const slide = (id: string, title: string, extra: Record<string, unknown> = {}) => ({
+    const slide = (
+      id: string,
+      title: string,
+      extra: Record<string, unknown> = {},
+    ) => ({
       id,
       index: 0,
       title,
@@ -299,7 +397,11 @@ describe("Office lens route projection boundary", () => {
         {
           slides: [
             { id: "pptx:slide:/ppt/slides/slide1.xml" },
-            { id: "spectra-new-1", title: "Fresh", objects: [{ type: "text", content: { text: "Body" } }] },
+            {
+              id: "spectra-new-1",
+              title: "Fresh",
+              objects: [{ type: "text", content: { text: "Body" } }],
+            },
             { id: "pptx:slide:/ppt/slides/slide2.xml" },
             { id: "pptx:slide:/ppt/slides/slide3.xml" },
           ],
@@ -318,8 +420,12 @@ describe("Office lens route projection boundary", () => {
       expect(born.notesPartName).toBeUndefined();
       // The existing slide beside it keeps everything the file had on it.
       expect(result.slides[0]!.hasTransition).toBe(true);
-      expect(result.slides[0]!.notesPartName).toBe("/ppt/notesSlides/notesSlide1.xml");
-      expect(result.slides[0]!.layoutPartName).toBe("/ppt/slideLayouts/slideLayout2.xml");
+      expect(result.slides[0]!.notesPartName).toBe(
+        "/ppt/notesSlides/notesSlide1.xml",
+      );
+      expect(result.slides[0]!.layoutPartName).toBe(
+        "/ppt/slideLayouts/slideLayout2.xml",
+      );
       // Index follows the new position, so the lens reorders to match.
       expect(result.slides.map((row) => row.index)).toEqual([0, 1, 2, 3]);
     });

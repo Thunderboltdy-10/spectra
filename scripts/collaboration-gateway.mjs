@@ -17,8 +17,14 @@ import { createCheckpointScheduler } from "./collaboration-checkpoint.mjs";
 import { gatewayHealthPayload } from "./collaboration-health.mjs";
 import {
   applyStoredRoomUpdates,
+  encodeStoredRoomSnapshot,
   shouldCompactRoom,
 } from "./collaboration-room-state.mjs";
+import {
+  MAX_DURABLE_UPDATE_BYTES,
+  MAX_REALTIME_MESSAGE_BYTES,
+  canonicalDurableUpdate,
+} from "./collaboration-update-envelope.mjs";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
 const tokenSecret = process.env.SPECTRA_COLLAB_TOKEN_SECRET;
@@ -188,7 +194,9 @@ async function appendWithRetry(payload, entries) {
       };
       if (permanentPersistenceFailure(error)) {
         const reason =
-          error instanceof Error ? error.message : "COLLABORATION_UPDATE_REJECTED";
+          error instanceof Error
+            ? error.message
+            : "COLLABORATION_UPDATE_REJECTED";
         process.stderr.write(`[durable append] ${reason}\n`);
         forceCanonicalReconnect(entries[0].context, reason);
         throw error;
@@ -315,7 +323,9 @@ function schedulePersistence(document, entry) {
     const snapshotAfterFirst = queue.snapshotAfterFirst;
     queue.snapshotAfterFirst = null;
     queue.tail = queue.tail
-      .then(() => persistAcceptedMessages(document, entries, snapshotAfterFirst))
+      .then(() =>
+        persistAcceptedMessages(document, entries, snapshotAfterFirst),
+      )
       .catch(() => undefined);
   }, PERSISTENCE_DEBOUNCE_MS);
   queue.timer.unref?.();
@@ -400,29 +410,27 @@ function interactionPresence(value, context, actorKind) {
   // with its payload: preserve the causal v2 body and omit only oversized
   // speculation. Legacy previewPatches are bounded independently below.
   const boundedWhole = boundedPresence(source, 28_000);
-  const state =
-    boundedWhole ??
-    {
-      v: source.v,
-      actor: source.actor,
-      act: source.act,
-      lifecycle: source.lifecycle,
-      target: source.target,
-      dropTarget: source.dropTarget,
-      menu: boundedPresence(source.menu, 4_000),
-      speculation: boundedPresence(source.speculation, 20_000),
-      note:
-        typeof source.note === "string" ? source.note.slice(0, 160) : undefined,
-      heldRegionIds: Array.isArray(source.heldRegionIds)
-        ? source.heldRegionIds
-            .filter((id) => typeof id === "string")
-            .slice(0, 64)
-        : undefined,
-      at: source.at,
-    };
+  const state = boundedWhole ?? {
+    v: source.v,
+    actor: source.actor,
+    act: source.act,
+    lifecycle: source.lifecycle,
+    target: source.target,
+    dropTarget: source.dropTarget,
+    menu: boundedPresence(source.menu, 4_000),
+    speculation: boundedPresence(source.speculation, 20_000),
+    note:
+      typeof source.note === "string" ? source.note.slice(0, 160) : undefined,
+    heldRegionIds: Array.isArray(source.heldRegionIds)
+      ? source.heldRegionIds.filter((id) => typeof id === "string").slice(0, 64)
+      : undefined,
+    at: source.at,
+  };
   if (state.v !== 2) return undefined;
   const actor =
-    state.actor && typeof state.actor === "object" && !Array.isArray(state.actor)
+    state.actor &&
+    typeof state.actor === "object" &&
+    !Array.isArray(state.actor)
       ? state.actor
       : {};
   // Identity is gateway-authenticated. The client may describe the action and
@@ -685,8 +693,8 @@ const server = new Server({
   debounce: 2_000,
   maxDebounce: 10_000,
   quiet: true,
-  websocketOptions: { maxPayload: 256 * 1024 },
-  maxUnauthenticatedQueueSize: 256 * 1024,
+  websocketOptions: { maxPayload: MAX_REALTIME_MESSAGE_BYTES },
+  maxUnauthenticatedQueueSize: MAX_REALTIME_MESSAGE_BYTES,
   maxUnauthenticatedQueueMessages: 64,
   maxPendingDocuments: 4,
 
@@ -739,7 +747,9 @@ const server = new Server({
       return context;
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Unknown authentication failure";
+        error instanceof Error
+          ? error.message
+          : "Unknown authentication failure";
       process.stderr.write(
         `Spectra collaboration authentication failed: ${message}\n`,
       );
@@ -760,8 +770,8 @@ const server = new Server({
     connection,
   }) {
     await reauthorize(context);
-    const documentUpdate = extractYjsUpdate(frame);
-    if (!documentUpdate || documentUpdate.byteLength === 0) return;
+    const incomingUpdate = extractYjsUpdate(frame);
+    if (!incomingUpdate || incomingUpdate.byteLength === 0) return;
     // Hocuspocus can run hooks from different sockets concurrently. Hold a
     // per-document gate through `afterHandleMessage`, when the accepted update
     // has actually been applied to the shared Y.Doc. Without this, two valid
@@ -769,8 +779,6 @@ const server = new Server({
     // even when the collaborators changed independent regions.
     await acquireDocumentMessage(document, socketId);
     try {
-      if (documentUpdate.byteLength > 256 * 1024)
-        throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
       const before = artifactModelState(document);
       const nativeBefore = isNativeArtifactDocument(document);
       if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
@@ -778,22 +786,24 @@ const server = new Server({
       const nativeProjectionBefore = nativeBefore
         ? nativeArtifactProjection(document, context.schemaVersion)
         : null;
-      const probe = new Y.Doc();
-      try {
-        Y.applyUpdate(probe, Y.encodeStateAsUpdate(document));
-        Y.applyUpdate(probe, documentUpdate);
-        // Sync step 2 often contains the complete client state on room join.
-        // It must still be accepted, but if it adds nothing to the canonical
-        // room it does not enter the durable queue. Keeping a queued record for
-        // that no-op made `afterHandleMessage` consume the next real update,
-        // so the provider never received its SyncStatus acknowledgement and
-        // authoring surfaces stayed on “Waiting to sync”.
-        if (documentStateVectorHash(probe) === baseStateVectorHash) {
-          releaseDocumentMessage(socketId);
-          return;
-        }
-      } finally {
-        probe.destroy();
+      // Sync step 2 often contains the complete client state on room join.
+      // Accept the bounded realtime frame, but persist only the canonical
+      // room delta so a rich document does not inflate one small edit past the
+      // Convex append envelope. A genuinely large new delta still fails closed.
+      const documentUpdate = canonicalDurableUpdate(
+        Y,
+        document,
+        incomingUpdate,
+      );
+      if (!documentUpdate) {
+        releaseDocumentMessage(socketId);
+        return;
+      }
+      if (documentUpdate.byteLength > MAX_DURABLE_UPDATE_BYTES) {
+        process.stderr.write(
+          `[beforeHandleMessage] oversized canonical delta incoming=${incomingUpdate.byteLength} durable=${documentUpdate.byteLength} canonical=${Y.encodeStateAsUpdate(document).byteLength} native=${nativeBefore}\n`,
+        );
+        throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
       }
       const updateHash = createHash("sha256")
         .update(documentUpdate)
@@ -814,7 +824,9 @@ const server = new Server({
     } catch (error) {
       releaseDocumentMessage(socketId);
       const reason =
-        error instanceof Error ? error.message : "COLLABORATION_UPDATE_REJECTED";
+        error instanceof Error
+          ? error.message
+          : "COLLABORATION_UPDATE_REJECTED";
       process.stderr.write(`[beforeHandleMessage] ${reason}\n`);
       // A rejected update leaves this peer's local Y.Doc ahead of the canonical
       // room. Force a canonical reconnect instead of letting it advertise a
@@ -849,7 +861,9 @@ const server = new Server({
       });
     } catch (error) {
       const reason =
-        error instanceof Error ? error.message : "COLLABORATION_UPDATE_REJECTED";
+        error instanceof Error
+          ? error.message
+          : "COLLABORATION_UPDATE_REJECTED";
       process.stderr.write(`[afterHandleMessage] ${reason}\n`);
       forceCanonicalReconnect(accepted?.context ?? {}, reason);
       throw error;
@@ -929,9 +943,7 @@ const server = new Server({
           // Dropping it forces clients to reconstruct choreography from the
           // legacy cursor/preview fields, visually separating the "fake human"
           // performance from the real mutation.
-          ...(interactionState
-            ? { interactionState }
-            : {}),
+          ...(interactionState ? { interactionState } : {}),
           ...(boundedPresence(supplied.cursor) !== undefined
             ? { cursor: boundedPresence(supplied.cursor) }
             : {}),
@@ -948,11 +960,49 @@ const server = new Server({
 
   async onLoadDocument({ context }) {
     await reauthorize(context);
-    const stored = await bridge("load", {
+    let stored = await bridge("load", {
       artifactId: context.artifactId,
       partitionKey: context.partitionKey,
     });
-    const storedDocument = applyStoredRoomUpdates(Y, stored);
+    let storedDocument = applyStoredRoomUpdates(Y, stored);
+    if (isNativeArtifactDocument(storedDocument)) {
+      const observedStateVectorHash = documentStateVectorHash(storedDocument);
+      const unprojectedMultiHead =
+        (stored?.nextSequence ?? 1) > 2 &&
+        stored?.lastProjectionSequence === null;
+      if (
+        stored?.liveStateVectorHash &&
+        (observedStateVectorHash !== stored.liveStateVectorHash ||
+          unprojectedMultiHead)
+      ) {
+        const observedProjectionJson = artifactProjection(
+          storedDocument,
+          context.schemaVersion,
+        );
+        if (!observedProjectionJson)
+          throw new Error("COLLABORATION_NATIVE_RECOVERY_PROJECTION_MISSING");
+        storedDocument.destroy();
+        await bridge("recover", {
+          artifactId: context.artifactId,
+          partitionKey: context.partitionKey,
+          accountId: context.accountId,
+          clientId: context.clientId,
+          policyVersion: context.policyVersion,
+          expectedNextSequence: stored.nextSequence,
+          expectedStateVectorHash: stored.liveStateVectorHash,
+          observedStateVectorHash,
+          observedProjectionJson,
+          observedProjectionHash: createHash("sha256")
+            .update(observedProjectionJson)
+            .digest("base64url"),
+        });
+        stored = await bridge("load", {
+          artifactId: context.artifactId,
+          partitionKey: context.partitionKey,
+        });
+        storedDocument = applyStoredRoomUpdates(Y, stored);
+      }
+    }
     if (isNativeArtifactDocument(storedDocument)) {
       const encoded = Y.encodeStateAsUpdate(storedDocument);
       storedDocument.destroy();
@@ -992,7 +1042,7 @@ const server = new Server({
     return document;
   },
 
-  async onStoreDocument({ document, lastContext }) {
+  async onStoreDocument({ lastContext }) {
     if (!lastContext) return;
     await reauthorize(lastContext);
     const stored = await bridge("load", {
@@ -1015,8 +1065,12 @@ const server = new Server({
       })
     )
       return;
-    const update = Y.encodeStateAsUpdate(document);
-    const stateVector = Y.encodeStateVector(document);
+    // The live Hocuspocus document can contain an accepted update whose
+    // durable append is still in flight (or ultimately rejected). Compaction
+    // must be derived only from the snapshot/update log loaded from Convex;
+    // otherwise an ahead-of-log snapshot can erase the authoritative history
+    // and poison every post-restart base hash.
+    const { update, stateVector } = encodeStoredRoomSnapshot(Y, stored);
     if (update.byteLength > 760 * 1024 || stateVector.byteLength > 128 * 1024)
       return;
     await bridge("snapshot", {

@@ -1,11 +1,13 @@
 import * as Y from "yjs";
 import { yXmlFragmentToProsemirrorJSON } from "y-prosemirror";
-import { enumerateArtifactRegions, validateArtifactContent } from "../../../artifacts/registry";
+import {
+  enumerateArtifactRegions,
+  validateArtifactContent,
+} from "../../../artifacts/registry";
 import type { SemanticRegion } from "../../../artifacts/types";
 import {
   documentBlocksFromJson,
-  documentNodeText,
-  docxRichBlockToJson,
+  documentContentToProseMirrorJson as projectDocumentContentToProseMirrorJson,
   type DocumentJsonNode,
 } from "../../../lenses/document-projection";
 import type {
@@ -45,186 +47,23 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function inlineText(value: string): ProseMirrorJson[] | undefined {
-  return value ? [{ type: "text", text: value }] : undefined;
-}
-
-function blockToJson(
-  block: Record<string, unknown>,
-  index: number,
-  nativeBinding?: unknown,
-): ProseMirrorJson {
-  const id =
-    typeof block.id === "string" && block.id.trim()
-      ? block.id
-      : `block-${index + 1}`;
-  const value = typeof block.text === "string" ? block.text : "";
-  const attrs = record(block.attrs);
-  const richNode = docxRichBlockToJson(block, nativeBinding);
-  if (richNode) return richNode;
-  if (block.type === "heading")
-    return {
-      type: "heading",
-      attrs: {
-        blockId: id,
-        level: [1, 2, 3].includes(Number(attrs.level))
-          ? Number(attrs.level)
-          : Number(String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1] ?? 2),
-      },
-      content: inlineText(value),
-    };
-  if (block.type === "quote")
-    return {
-      type: "blockquote",
-      attrs: { blockId: id },
-      content: [{ type: "paragraph", content: inlineText(value) }],
-    };
-  if (block.type === "list")
-    return {
-      type: "bulletList",
-      attrs: { blockId: id },
-      content: (value.split(/\r?\n/).filter(Boolean).length
-        ? value.split(/\r?\n/).filter(Boolean)
-        : [""]
-      ).map((entry) => ({
-        type: "listItem",
-        content: [{ type: "paragraph", content: inlineText(entry) }],
-      })),
-    };
-  if (block.type === "callout")
-    return {
-      type: "callout",
-      attrs: { blockId: id, type: attrs.tone ?? "info" },
-      content: [{ type: "paragraph", content: inlineText(value) }],
-    };
-  if (block.type === "math" || block.type === "equation")
-    return {
-      type: "equation",
-      attrs: {
-        blockId: id,
-        latex: typeof block.latex === "string" ? block.latex : value,
-        display: attrs.display ?? "block",
-        alignment: attrs.alignment ?? "center",
-      },
-    };
-  if (block.type === "code")
-    return {
-      type: "codeBlock",
-      attrs: { blockId: id, language: attrs.language ?? null },
-      content: inlineText(value),
-    };
-  if (block.type === "table") {
-    const rows = Array.isArray(block.rows)
-      ? block.rows.flatMap((row) =>
-          Array.isArray(row)
-            ? [row.map((cell) => String(cell ?? ""))]
-            : [],
-        )
-      : value.split(/\r?\n/).map((row) => row.split("|").map((cell) => cell.trim()));
-    return {
-      type: "table",
-      attrs: {
-        blockId: id,
-        ...(attrs.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
-      },
-      content: (rows.length ? rows : [[""]]).map((row, rowIndex) => ({
-        type: "tableRow",
-        content: row.map((cell) => ({
-          type: rowIndex === 0 ? "tableHeader" : "tableCell",
-          content: [{ type: "paragraph", content: inlineText(cell) }],
-        })),
-      })),
-    };
-  }
-  return {
-    type: "paragraph",
-    attrs: { blockId: id },
-    content: inlineText(value),
-  };
-}
-
 export function documentContentToProseMirrorJson(
   content: DocumentWorkContent,
 ): ProseMirrorJson {
-  const existing = record(content.tiptap);
-  const blocks = Array.isArray(content.blocks)
-    ? content.blocks.filter(
-        (entry): entry is Record<string, unknown> =>
-          Boolean(entry && typeof entry === "object" && !Array.isArray(entry)),
-      )
-    : [];
-  if (existing.type === "doc") {
-    const byId = new Map(
-      blocks.flatMap((block) =>
-        typeof block.id === "string" && block.id
-          ? [[block.id, block] as const]
-          : [],
-      ),
-    );
-    const existingContent = Array.isArray(existing.content)
-      ? (existing.content as ProseMirrorJson[])
-      : [];
-    return {
-      ...(existing as ProseMirrorJson),
-      content: existingContent.map((node) => {
-        const blockId = node.attrs?.blockId;
-        const block = typeof blockId === "string" ? byId.get(blockId) : undefined;
-        const attrs = record(block?.attrs);
-        const richNode = block
-          ? docxRichBlockToJson(block, content.nativeBinding)
-          : null;
-        if (richNode)
-          return {
-            ...richNode,
-            attrs: { ...node.attrs, ...richNode.attrs },
-          };
-        if (attrs.nativeReadOnly === true)
-          return {
-            ...node,
-            attrs: { ...node.attrs, nativeReadOnly: true },
-          };
-        if (block?.type === "table") {
-          const rebuilt = blockToJson(block, 0, content.nativeBinding);
-          return { ...rebuilt, attrs: { ...node.attrs, ...rebuilt.attrs } };
-        }
-        if (
-          typeof block?.text === "string" &&
-          block.text !== documentNodeText(node as DocumentJsonNode).trimEnd()
-        ) {
-          const rebuilt = blockToJson(block, 0, content.nativeBinding);
-          return { ...rebuilt, attrs: { ...node.attrs, ...rebuilt.attrs } };
-        }
-        const styleId = typeof attrs.styleId === "string" ? attrs.styleId : "";
-        const headingLevel = Number(styleId.match(/^Heading([1-3])$/i)?.[1] ?? 0);
-        if (headingLevel && (node.type === "paragraph" || node.type === "heading"))
-          return {
-            ...node,
-            type: "heading",
-            attrs: {
-              ...node.attrs,
-              level: headingLevel,
-              ...(attrs.nativeReadOnly === true ? { nativeReadOnly: true } : {}),
-            },
-          };
-        return node;
-      }),
-    };
-  }
-  return {
-    type: "doc",
-    content: (blocks.length
-      ? blocks
-      : [{ id: "intro", type: "paragraph", text: "" }]
-    ).map((block, index) => blockToJson(block, index, content.nativeBinding)),
-  };
+  return projectDocumentContentToProseMirrorJson(content);
 }
 
-function appendJsonNode(parent: Y.XmlFragment | Y.XmlElement, node: ProseMirrorJson) {
+function appendJsonNode(
+  parent: Y.XmlFragment | Y.XmlElement,
+  node: ProseMirrorJson,
+) {
   if (node.type === "text") {
     const text = new Y.XmlText();
     parent.push([text]);
     text.insert(0, node.text ?? "", {
-      ...Object.fromEntries((node.marks ?? []).map((mark) => [mark.type, mark.attrs ?? {}])),
+      ...Object.fromEntries(
+        (node.marks ?? []).map((mark) => [mark.type, mark.attrs ?? {}]),
+      ),
     });
     return;
   }
@@ -254,7 +93,9 @@ function documentProjection(doc: Y.Doc): DocumentWorkContent {
   return {
     ...record(extras),
     tiptap,
-    blocks: blocks.length ? blocks : [{ id: "intro", type: "paragraph", text: "" }],
+    blocks: blocks.length
+      ? blocks
+      : [{ id: "intro", type: "paragraph", text: "" }],
     ...(record(extras).nativeBinding
       ? { nativeProjectionComplete: true as const }
       : {}),
@@ -338,11 +179,16 @@ export class DocumentYjsAdapter implements WorkYjsAdapter<DocumentWorkContent> {
       const result = validateArtifactContent("document", this.project(doc));
       return result.success
         ? { valid: true }
-        : { valid: false, issues: result.error.issues.map((issue) => issue.message) };
+        : {
+            valid: false,
+            issues: result.error.issues.map((issue) => issue.message),
+          };
     } catch (error) {
       return {
         valid: false,
-        issues: [error instanceof Error ? error.message : "Document model is invalid."],
+        issues: [
+          error instanceof Error ? error.message : "Document model is invalid.",
+        ],
       };
     }
   }
@@ -354,9 +200,15 @@ export class DocumentYjsAdapter implements WorkYjsAdapter<DocumentWorkContent> {
     const document = this.createDocument(snapshot.content);
     const projected = this.project(document);
     const validation = this.validate(document);
-    if (!validation.valid) throw new Error(`DOCUMENT_YJS_MIGRATION_INVALID: ${validation.issues.join("; ")}`);
+    if (!validation.valid)
+      throw new Error(
+        `DOCUMENT_YJS_MIGRATION_INVALID: ${validation.issues.join("; ")}`,
+      );
     const meta = document.getMap<unknown>(DOCUMENT_ROLLBACK_MAP);
-    meta.set("migrationId", `document:${snapshot.schemaVersion ?? 1}:v${this.modelVersion}`);
+    meta.set(
+      "migrationId",
+      `document:${snapshot.schemaVersion ?? 1}:v${this.modelVersion}`,
+    );
     meta.set("rollbackUpdate", rollback);
     return {
       document,

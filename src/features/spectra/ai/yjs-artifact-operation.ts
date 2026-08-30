@@ -53,12 +53,11 @@ import {
 } from "@/features/spectra/work/models/yjs/native-artifact-model";
 import { workYjsAdapter } from "@/features/spectra/work/models/yjs/registry";
 import { workYjsOrigins } from "@/features/spectra/work/models/yjs/origins";
+import { encodeArtifactContentForStorage } from "../../../../shared/sheet-cells";
 import { CloudflareRealtimeProvider } from "@/features/spectra/realtime/providers";
 import { realtimeProviderForWorkType } from "@/features/spectra/realtime/providers/provider-factory";
 import type { CollaborationPresence } from "@/features/spectra/collaboration/types";
-import {
-  gateAiArtifactMutation,
-} from "@/features/spectra/commands/office/operation-gate";
+import { gateAiArtifactMutation } from "@/features/spectra/commands/office/operation-gate";
 import { fidelityRegionMap } from "@/features/spectra/commands/office/fidelity-regions";
 import type { CompatibilityProfile } from "@/features/spectra/commands/types";
 import type { WorkType } from "@/features/spectra/work/registry";
@@ -1399,7 +1398,10 @@ async function synchronizeMutation(params: {
             ...(streamValue.summary !== undefined
               ? { summary: streamValue.summary }
               : {}),
-            content: streamValue.content,
+            content: encodeArtifactContentForStorage(
+              params.session.artifact.blueprintKey,
+              streamValue.content,
+            ),
             tags: streamValue.tags,
             changedPaths: stagedPaths,
           }).catch(() => undefined);
@@ -1423,7 +1425,8 @@ async function synchronizeMutation(params: {
         "AI_ARTIFACT_CONNECTION_STALLED: The collaboration room did not confirm the live edit.",
       );
     } catch (error) {
-      const connection = abortError(params.signal) ?? params.getConnectionError();
+      const connection =
+        abortError(params.signal) ?? params.getConnectionError();
       if (connection) throw connection;
       if (params.provider.synced) {
         logPhase("room-synced-after-flush", {
@@ -1596,11 +1599,11 @@ export async function applyAiArtifactMutation(params: {
     ? `:${params.collaborationClientId.trim().slice(0, 36)}`
     : "";
   const claimActorKind = params.claimActorKind ?? "ai";
-  const clientId =
-    (claimActorKind === "human"
+  const clientId = (
+    claimActorKind === "human"
       ? `restore:${params.runId}:${randomUUID()}`
       : `ai:${params.runId}:${params.operationId}${ownerClientHint}:${randomUUID()}`
-    ).slice(0, 180);
+  ).slice(0, 180);
   const session = await createCollaborationSession(params.artifactId, clientId);
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
   if (!params.replacePendingCreate) {

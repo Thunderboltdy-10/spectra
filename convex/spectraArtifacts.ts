@@ -52,9 +52,13 @@ import {
   projectTimetableSnapshot,
 } from "./quizPrivacy";
 import { validateArtifactContent } from "../src/features/spectra/artifacts/registry";
+import { normalizeSheetsContent } from "../src/features/spectra/sheets/model";
+import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
 
 function contentForArtifactStorage(typeKey: string, content: unknown) {
-  const validated = validateArtifactContent(typeKey, content);
+  const canonical =
+    typeKey === "sheets" ? normalizeSheetsContent(content) : content;
+  const validated = validateArtifactContent(typeKey, canonical);
   if (!validated.success) {
     throw new Error(
       `ARTIFACT_CONTENT_INVALID: ${validated.error.issues
@@ -63,9 +67,11 @@ function contentForArtifactStorage(typeKey: string, content: unknown) {
         .join("; ")}`,
     );
   }
-  return typeKey === "timetable"
-    ? projectTimetableSharedContent(validated.data)
-    : validated.data;
+  const stored =
+    typeKey === "timetable"
+      ? projectTimetableSharedContent(validated.data)
+      : validated.data;
+  return encodeArtifactContentForStorage(typeKey, stored);
 }
 
 // Keep editorial ink visible long enough for peers to notice (15 minutes).
@@ -83,7 +89,11 @@ function summaryArtifact(artifact: Record<string, unknown>) {
   if (summary.aiPreview && typeof summary.aiPreview === "object") {
     const { content: _previewContent, ...preview } =
       summary.aiPreview as Record<string, unknown>;
-    return { ...summary, aiPreview: preview, updatedAt: artifact.updatedAt as number };
+    return {
+      ...summary,
+      aiPreview: preview,
+      updatedAt: artifact.updatedAt as number,
+    };
   }
   return { ...summary, updatedAt: artifact.updatedAt as number };
 }

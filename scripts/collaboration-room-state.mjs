@@ -2,6 +2,14 @@ export const COMPACTION_UNCOMPACTED_BYTES = 256 * 1024;
 export const COMPACTION_UPDATE_COUNT = 200;
 export const COMPACTION_IDLE_MS = 60_000;
 
+/**
+ * @param {{
+ *   uncompactedBytes?: number,
+ *   updateCount?: number,
+ *   lastSnapshotAt?: number | null,
+ *   now?: number,
+ * }} options
+ */
 export function shouldCompactRoom({
   uncompactedBytes = 0,
   updateCount = 0,
@@ -38,4 +46,16 @@ export function applyStoredRoomUpdates(Y, stored) {
   const document = new Y.Doc();
   if (encoded.length > 0) Y.applyUpdate(document, Y.mergeUpdates(encoded));
   return document;
+}
+
+export function encodeStoredRoomSnapshot(Y, stored) {
+  const document = applyStoredRoomUpdates(Y, stored);
+  try {
+    return {
+      update: Y.encodeStateAsUpdate(document),
+      stateVector: Y.encodeStateVector(document),
+    };
+  } finally {
+    document.destroy();
+  }
 }

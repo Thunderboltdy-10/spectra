@@ -9,10 +9,7 @@ import {
   authorityPublicMessage,
   authorityRequiresNotice,
 } from "@/features/spectra/ai/authority-execution";
-import {
-  evaluateCommandAuthority,
-  recordAuthorityDecision,
-} from "./authority";
+import { evaluateCommandAuthority, recordAuthorityDecision } from "./authority";
 import { applyResolvedContentPatch } from "@/features/spectra/ai/document-content-patch";
 import { resolveLibraryDestinationId } from "@/features/spectra/ai/library-operation-context";
 import {
@@ -31,6 +28,7 @@ import {
 import { assertCreateContentNotHollow } from "@/features/spectra/operations/hollow-content";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
 import { spectraToolRegistry } from "@/features/spectra/tools/registry";
+import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 
 export async function executeApplicationCommand(
   actorClerkId: string,
@@ -880,7 +878,10 @@ export async function executeOperation(
           executionId: context.executionId,
           title: live.title,
           ...(live.summary !== undefined ? { summary: live.summary } : {}),
-          content: live.content,
+          content: encodeArtifactContentForStorage(
+            artifact.blueprintKey,
+            live.content,
+          ),
           tags: live.tags,
           changedPaths: effectChangedPathsForUpdate(operation),
           ...(context.operationIndex !== undefined

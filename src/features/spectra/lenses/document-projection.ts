@@ -1,5 +1,14 @@
 import { z } from "zod";
 import {
+  documentBlocksFromJson as sharedDocumentBlocksFromJson,
+  documentContentToProseMirrorJson as sharedDocumentContentToProseMirrorJson,
+  documentNodeText as sharedDocumentNodeText,
+  documentRichInlineFromJson as sharedDocumentRichInlineFromJson,
+  docxNativeMediaUrl as sharedDocxNativeMediaUrl,
+  docxRichBlockToJson as sharedDocxRichBlockToJson,
+  docxRichInlineToJson as sharedDocxRichInlineToJson,
+} from "../../../../shared/document-projection.mjs";
+import {
   docxProjectionBlockSchema,
   docxProjectionSchema,
   docxRichInlineSchema,
@@ -30,26 +39,6 @@ export type DocumentSemanticBlock = {
   citation?: Record<string, unknown>;
 };
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function richInlineText(content: readonly DocxRichInline[]) {
-  return content
-    .map((item) => {
-      if (item.kind === "text") return item.text;
-      if (item.kind === "equation") return item.latex;
-      return item.altText;
-    })
-    .join("");
-}
-
-function richInlineHasObject(content: readonly DocxRichInline[]) {
-  return content.some((item) => item.kind !== "text");
-}
-
 export function bindDocxProjectionSource(
   projection: DocxProjection,
   artifactId: string,
@@ -69,22 +58,7 @@ export function docxNativeMediaUrl(
   binding: unknown,
   image: Extract<DocxRichInline, { kind: "image" }>,
 ) {
-  const source = record(binding);
-  const artifactId =
-    typeof source.sourceArtifactId === "string"
-      ? source.sourceArtifactId
-      : "";
-  const payloadHash =
-    typeof source.sourcePayloadHash === "string"
-      ? source.sourcePayloadHash
-      : "";
-  if (!artifactId || !/^[a-f0-9]{64}$/.test(payloadHash)) return "";
-  const query = new URLSearchParams({
-    artifactId,
-    payloadHash,
-    partName: image.partName,
-  });
-  return `/api/spectra/lenses/docx/media?${query.toString()}`;
+  return sharedDocxNativeMediaUrl(binding, image) as string;
 }
 
 export function docxRichInlineToJson(
@@ -92,70 +66,8 @@ export function docxRichInlineToJson(
   binding: unknown,
   nativeReadOnly = false,
 ): DocumentJsonNode[] | undefined {
-  const nodes = content.flatMap((item): DocumentJsonNode[] => {
-    if (item.kind === "text")
-      return item.text ? [{ type: "text", text: item.text }] : [];
-    if (item.kind === "equation")
-      return [
-        {
-          type: "inlineEquation",
-          attrs: {
-            latex: item.latex,
-            ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
-          },
-        },
-      ];
-    return [
-      {
-        type: "nativeDocxImage",
-        attrs: {
-          src: docxNativeMediaUrl(binding, item),
-          partName: item.partName,
-          mediaType: item.mediaType,
-          alt: item.altText,
-          ...(item.widthEmu ? { widthEmu: item.widthEmu } : {}),
-          ...(item.heightEmu ? { heightEmu: item.heightEmu } : {}),
-          placement: item.placement,
-          nativeReadOnly: true,
-        },
-      },
-    ];
-  });
-  return nodes.length ? nodes : undefined;
-}
-
-function cellJsonFromRichContent(
-  content: readonly DocxRichInline[],
-  binding: unknown,
-  nativeReadOnly: boolean,
-) {
-  const meaningful = content.filter(
-    (item) => item.kind !== "text" || Boolean(item.text.trim()),
-  );
-  const displayEquation =
-    meaningful.length === 1 &&
-    meaningful[0]?.kind === "equation" &&
-    meaningful[0].display === "block"
-      ? meaningful[0]
-      : null;
-  if (displayEquation)
-    return [
-      {
-        type: "equation",
-        attrs: {
-          latex: displayEquation.latex,
-          display: "block",
-          alignment: "center",
-          ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
-        },
-      },
-    ];
-  return [
-    {
-      type: "paragraph",
-      content: docxRichInlineToJson(content, binding, nativeReadOnly),
-    },
-  ];
+  return sharedDocxRichInlineToJson(content, binding, nativeReadOnly) as
+    DocumentJsonNode[] | undefined;
 }
 
 /**
@@ -168,162 +80,24 @@ export function docxRichBlockToJson(
 ): DocumentJsonNode | null {
   const parsed = docxProjectionBlockSchema.safeParse(value);
   if (!parsed.success) return null;
-  const block = parsed.data;
-  const attrs = record(block.attrs);
-  const nativeReadOnly = attrs.nativeReadOnly === true;
-  const nativeAttrs = {
-    blockId: block.id,
-    ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
-  };
-
-  if (block.type === "equation") {
-    const equation = block.inlineContent?.find(
-      (item): item is Extract<DocxRichInline, { kind: "equation" }> =>
-        item.kind === "equation",
-    );
-    return {
-      type: "equation",
-      attrs: {
-        ...nativeAttrs,
-        latex: equation?.latex ?? block.text,
-        display: "block",
-        alignment: attrs.alignment ?? "center",
-      },
-    };
-  }
-
-  if (block.type === "table" && block.richRows) {
-    return {
-      type: "table",
-      attrs: nativeAttrs,
-      content: block.richRows.map((row, rowIndex) => ({
-        type: "tableRow",
-        content: row.map((cell) => ({
-          type: rowIndex === 0 ? "tableHeader" : "tableCell",
-          content: cellJsonFromRichContent(cell, binding, nativeReadOnly),
-        })),
-      })),
-    };
-  }
-
-  const inlineContent = block.inlineContent ?? [];
-  if (!richInlineHasObject(inlineContent)) return null;
-  const content = docxRichInlineToJson(
-    inlineContent,
+  return sharedDocxRichBlockToJson(
+    parsed.data,
     binding,
-    nativeReadOnly,
-  );
-  if (block.type === "heading")
-    return {
-      type: "heading",
-      attrs: {
-        ...nativeAttrs,
-        level:
-          Number(String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1]) ||
-          Number(attrs.level) ||
-          2,
-      },
-      content,
-    };
-  if (block.type === "list")
-    return {
-      type: "bulletList",
-      attrs: nativeAttrs,
-      content: [
-        {
-          type: "listItem",
-          content: [{ type: "paragraph", content }],
-        },
-      ],
-    };
-  return { type: "paragraph", attrs: nativeAttrs, content };
+  ) as DocumentJsonNode | null;
 }
 
 export function documentNodeText(node?: DocumentJsonNode): string {
-  if (!node) return "";
-  if (typeof node.text === "string") return node.text;
-  if (node.type === "inlineEquation" || node.type === "equation")
-    return String(node.attrs?.latex ?? "");
-  if (node.type === "nativeDocxImage")
-    return String(node.attrs?.alt ?? "");
-  const separator = node.type === "listItem" ? "" : "\n";
-  return (node.content ?? []).map(documentNodeText).join(separator);
-}
-
-function appendRichInline(
-  output: DocxRichInline[],
-  item: DocxRichInline,
-) {
-  const previous = output.at(-1);
-  if (item.kind === "text" && previous?.kind === "text") {
-    previous.text += item.text;
-    return;
-  }
-  output.push(item);
+  return sharedDocumentNodeText(node) as string;
 }
 
 export function documentRichInlineFromJson(
   node: DocumentJsonNode,
 ): DocxRichInline[] {
-  const output: DocxRichInline[] = [];
-  const visit = (current: DocumentJsonNode) => {
-    if (typeof current.text === "string") {
-      if (current.text)
-        appendRichInline(output, { kind: "text", text: current.text });
-      return;
-    }
-    if (current.type === "inlineEquation" || current.type === "equation") {
-      appendRichInline(output, {
-        kind: "equation",
-        latex: String(current.attrs?.latex ?? ""),
-        display: current.type === "equation" ? "block" : "inline",
-      });
-      return;
-    }
-    if (current.type === "nativeDocxImage") {
-      const widthEmu = Number(current.attrs?.widthEmu);
-      const heightEmu = Number(current.attrs?.heightEmu);
-      const parsed = docxRichInlineSchema.safeParse({
-        kind: "image",
-        partName: current.attrs?.partName,
-        mediaType: current.attrs?.mediaType,
-        altText: String(current.attrs?.alt ?? "Word image"),
-        ...(Number.isSafeInteger(widthEmu) && widthEmu > 0
-          ? { widthEmu }
-          : {}),
-        ...(Number.isSafeInteger(heightEmu) && heightEmu > 0
-          ? { heightEmu }
-          : {}),
-        placement:
-          current.attrs?.placement === "anchored" ? "anchored" : "inline",
-      });
-      if (parsed.success) appendRichInline(output, parsed.data);
-      return;
-    }
-    const children = current.content ?? [];
-    children.forEach((child, index) => {
-      if (
-        index > 0 &&
-        ["paragraph", "heading"].includes(child.type ?? "") &&
-        output.length
-      )
-        appendRichInline(output, { kind: "text", text: "\n" });
-      visit(child);
-    });
-  };
-  visit(node);
-  return output;
-}
-
-function tableRows(node: DocumentJsonNode) {
-  return (node.content ?? []).map((row) =>
-    (row.content ?? []).map((cell) => documentNodeText(cell).trim()),
-  );
-}
-
-function tableRichRows(node: DocumentJsonNode) {
-  return (node.content ?? []).map((row) =>
-    (row.content ?? []).map((cell) => documentRichInlineFromJson(cell)),
+  return (sharedDocumentRichInlineFromJson(node) as unknown[]).flatMap(
+    (item) => {
+      const parsed = docxRichInlineSchema.safeParse(item);
+      return parsed.success ? [parsed.data] : [];
+    },
   );
 }
 
@@ -337,133 +111,13 @@ function tableRichRows(node: DocumentJsonNode) {
 export function documentBlocksFromJson(
   json: DocumentJsonNode,
 ): DocumentSemanticBlock[] {
-  const seen = new Set<string>();
-  return (json.content ?? [])
-    .map((node, index): DocumentSemanticBlock => {
-      let id =
-        typeof node.attrs?.blockId === "string" && node.attrs.blockId
-          ? node.attrs.blockId
-          : `block-${index + 1}`;
-      if (seen.has(id)) {
-        const base = id;
-        let suffix = 2;
-        while (seen.has(`${base}~${suffix}`)) suffix += 1;
-        id = `${base}~${suffix}`;
-      }
-      seen.add(id);
+  return sharedDocumentBlocksFromJson(json) as DocumentSemanticBlock[];
+}
 
-      if (node.type === "table") {
-        const rows = tableRows(node);
-        const richRows = tableRichRows(node);
-        return {
-          id,
-          type: "table",
-          text: rows.map((row) => row.join(" | ")).join("\n"),
-          rows,
-          ...(richRows.some((row) => row.some(richInlineHasObject))
-            ? { richRows }
-            : {}),
-          ...(node.attrs?.nativeReadOnly === true
-            ? { attrs: { nativeReadOnly: true } }
-            : {}),
-        };
-      }
-
-      const inlineContent = documentRichInlineFromJson(node);
-      const hasRichContent = richInlineHasObject(inlineContent);
-      const text = (
-        hasRichContent ? richInlineText(inlineContent) : documentNodeText(node)
-      ).trimEnd();
-      if (node.type === "heading") {
-        const level = Number(node.attrs?.level) || 2;
-        return {
-          id,
-          type: "heading",
-          text,
-          ...(hasRichContent ? { inlineContent } : {}),
-          attrs: {
-            level,
-            styleId: `Heading${level}`,
-            ...(node.attrs?.nativeReadOnly === true
-              ? { nativeReadOnly: true }
-              : {}),
-          },
-        };
-      }
-      if (node.type === "blockquote")
-        return {
-          id,
-          type: "quote",
-          text,
-          ...(hasRichContent ? { inlineContent } : {}),
-        };
-      if (node.type === "bulletList" || node.type === "orderedList")
-        return {
-          id,
-          type: "list",
-          text,
-          ...(hasRichContent ? { inlineContent } : {}),
-          ...(node.attrs?.nativeReadOnly === true
-            ? { attrs: { nativeReadOnly: true } }
-            : {}),
-        };
-      if (node.type === "callout")
-        return {
-          id,
-          type: "callout",
-          text,
-          attrs: { tone: node.attrs?.type ?? node.attrs?.tone ?? "info" },
-        };
-      if (node.type === "equation") {
-        const latex = String(node.attrs?.latex ?? "");
-        return {
-          id,
-          type: "equation",
-          text: latex,
-          latex,
-          inlineContent: [
-            { kind: "equation", latex, display: "block" },
-          ],
-          attrs: {
-            display: node.attrs?.display ?? "block",
-            alignment: node.attrs?.alignment ?? "center",
-            ...(node.attrs?.nativeReadOnly === true
-              ? { nativeReadOnly: true }
-              : {}),
-          },
-        };
-      }
-      if (node.type === "codeBlock")
-        return {
-          id,
-          type: "code",
-          text,
-          attrs: { language: node.attrs?.language ?? undefined },
-        };
-      if (node.type === "spectraReference")
-        return {
-          id,
-          type: "paragraph",
-          text: String(node.attrs?.label ?? "Referenced work"),
-          reference: node.attrs,
-        };
-      if (node.type === "spectraCitation")
-        return {
-          id,
-          type: "paragraph",
-          text: String(node.attrs?.label ?? "Citation"),
-          citation: node.attrs,
-        };
-      return {
-        id,
-        type: "paragraph",
-        text,
-        ...(hasRichContent ? { inlineContent } : {}),
-        ...(node.attrs?.nativeReadOnly === true
-          ? { attrs: { nativeReadOnly: true } }
-          : {}),
-      };
-    });
+export function documentContentToProseMirrorJson(
+  content: Record<string, unknown>,
+): DocumentJsonNode {
+  return sharedDocumentContentToProseMirrorJson(content) as DocumentJsonNode;
 }
 
 const documentContentSchema = docxProjectionSchema
@@ -475,13 +129,20 @@ const documentContentSchema = docxProjectionSchema
   })
   .passthrough();
 
+function nativeTrailingWhitespaceEquivalent(left: string, right: string) {
+  return left.trimEnd() === right.trimEnd();
+}
+
 function rowsFor(block: DocxProjection["blocks"][number]) {
-  return block.rows ?? block.text.split(/\r?\n/).map((row) =>
-    row
-      .replace(/^\s*\|/, "")
-      .replace(/\|\s*$/, "")
-      .split("|")
-      .map((cell) => cell.trim()),
+  return (
+    block.rows ??
+    block.text.split(/\r?\n/).map((row) =>
+      row
+        .replace(/^\s*\|/, "")
+        .replace(/\|\s*$/, "")
+        .split("|")
+        .map((cell) => cell.trim()),
+    )
   );
 }
 
@@ -550,9 +211,12 @@ export function docxIntentFromDocumentBlocks(
   before: unknown,
   after: readonly DocumentSemanticBlock[],
 ) {
-  if (!before || typeof before !== "object" || Array.isArray(before)) return undefined;
+  if (!before || typeof before !== "object" || Array.isArray(before))
+    return undefined;
   const source = before as Record<string, unknown>;
-  const binding = docxProjectionSchema.shape.nativeBinding.safeParse(source.nativeBinding);
+  const binding = docxProjectionSchema.shape.nativeBinding.safeParse(
+    source.nativeBinding,
+  );
   if (!binding.success) return undefined;
   const oldBlocks = Array.isArray(source.blocks)
     ? source.blocks.flatMap((block) => {
@@ -586,9 +250,21 @@ export function docxProjectionFromContent(
   const baseById = new Map(base.blocks.map((block) => [block.id, block]));
   const mergeBlock = (incoming: DocxProjection["blocks"][number]) => {
     const previous = baseById.get(incoming.id);
+    // ProseMirror does not retain Word's invisible trailing run whitespace in
+    // its DOM/Yjs projection. Treating that normalization as authored content
+    // made an otherwise safe edit also emit replacements for protected native
+    // paragraphs. Retain the exact Word text when only its trailing whitespace
+    // differs; a material edit (including one in a read-only region) still
+    // flows through to the lens and is rejected by its native safety gate.
+    const text =
+      previous &&
+      nativeTrailingWhitespaceEquivalent(previous.text, incoming.text)
+        ? previous.text
+        : incoming.text;
     return docxProjectionBlockSchema.parse({
       ...(previous ?? {}),
       ...incoming,
+      text,
       ...(previous?.attrs || incoming.attrs
         ? {
             attrs: {

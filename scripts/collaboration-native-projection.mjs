@@ -1,5 +1,9 @@
 import { yXmlFragmentToProsemirrorJSON } from "y-prosemirror";
 import * as Y from "yjs";
+import {
+  documentBlocksFromJson as canonicalDocumentBlocksFromJson,
+  documentContentToProseMirrorJson,
+} from "../shared/document-projection.mjs";
 
 export const NATIVE_PROJECTION_REGION = "$spectra:native-projection";
 
@@ -14,25 +18,84 @@ const VALUE_MARKER = "$spectraValue";
 const WORK_MODEL_VERSION = 2;
 
 const ATOMIC_STRING_FIELDS = new Set([
-  "id", "type", "variant", "kind", "status", "priority", "difficulty",
-  "language", "runtime", "runtimeVersion", "entryFileId", "pageId",
-  "layerId", "parentId", "frameId", "sectionId", "layoutId", "masterId",
-  "componentId", "sourceRange", "range", "formula", "mediaType", "assetId",
-  "artifactId", "accountId", "provider", "externalId", "timezone", "url",
-  "mode", "approval", "tone", "responseLength", "clarification",
-  "versionPolicy", "pinnedVersionId",
+  "id",
+  "type",
+  "variant",
+  "kind",
+  "status",
+  "priority",
+  "difficulty",
+  "language",
+  "runtime",
+  "runtimeVersion",
+  "entryFileId",
+  "pageId",
+  "layerId",
+  "parentId",
+  "frameId",
+  "sectionId",
+  "layoutId",
+  "masterId",
+  "componentId",
+  "sourceRange",
+  "range",
+  "formula",
+  "mediaType",
+  "assetId",
+  "artifactId",
+  "accountId",
+  "provider",
+  "externalId",
+  "timezone",
+  "url",
+  "mode",
+  "approval",
+  "tone",
+  "responseLength",
+  "clarification",
+  "versionPolicy",
+  "pinnedVersionId",
 ]);
 const TEXT_STRING_FIELDS = new Set([
-  "text", "title", "name", "description", "prompt", "front", "back",
-  "hint", "explanation", "correctAnswer", "rubric", "feedback",
-  "instructions", "purpose", "audienceIntent", "releaseNotes",
-  "speakerNotes", "label", "note", "taskTitle", "progressNote", "expected",
-  "objective", "question", "answer", "criteria", "procedure",
+  "text",
+  "title",
+  "name",
+  "description",
+  "prompt",
+  "front",
+  "back",
+  "hint",
+  "explanation",
+  "correctAnswer",
+  "rubric",
+  "feedback",
+  "instructions",
+  "purpose",
+  "audienceIntent",
+  "releaseNotes",
+  "speakerNotes",
+  "label",
+  "note",
+  "taskTitle",
+  "progressNote",
+  "expected",
+  "objective",
+  "question",
+  "answer",
+  "criteria",
+  "procedure",
   "releaseSummary",
 ]);
 const TEXT_ARRAY_FIELDS = new Set([
-  "options", "correctAnswers", "acceptedAlternatives", "outcomes", "examples",
-  "negativeExamples", "inScope", "outOfScope", "boundaries",
+  "options",
+  "correctAnswers",
+  "acceptedAlternatives",
+  "outcomes",
+  "examples",
+  "negativeExamples",
+  "inScope",
+  "outOfScope",
+  "boundaries",
 ]);
 
 function record(value) {
@@ -61,7 +124,8 @@ function plainToY(value) {
   }
   if (value && typeof value === "object") {
     const map = new Y.Map();
-    for (const [key, entry] of Object.entries(value)) map.set(key, plainToY(entry));
+    for (const [key, entry] of Object.entries(value))
+      map.set(key, plainToY(entry));
     return map;
   }
   return value;
@@ -70,12 +134,18 @@ function plainToY(value) {
 function stringIsText(path) {
   const key = path.at(-1) ?? "";
   if (ATOMIC_STRING_FIELDS.has(key)) return false;
-  return TEXT_STRING_FIELDS.has(key) || /(?:Text|Notes|Description|Prompt|Content)$/i.test(key);
+  return (
+    TEXT_STRING_FIELDS.has(key) ||
+    /(?:Text|Notes|Description|Prompt|Content)$/i.test(key)
+  );
 }
 
 function stableId(value, index) {
-  return value && typeof value === "object" && !Array.isArray(value) &&
-    typeof value.id === "string" && value.id.trim()
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof value.id === "string" &&
+    value.id.trim()
     ? value.id
     : `item-${index + 1}`;
 }
@@ -99,24 +169,37 @@ function syncCollection(collection, values, path) {
       item = new Y.Map();
       items.set(id, item);
     }
-    syncRecord(item, record(entry)[VALUE_MARKER] === undefined &&
-      entry && typeof entry === "object" && !Array.isArray(entry)
-      ? entry
-      : { [VALUE_MARKER]: entry }, [...path, id]);
+    syncRecord(
+      item,
+      record(entry)[VALUE_MARKER] === undefined &&
+        entry &&
+        typeof entry === "object" &&
+        !Array.isArray(entry)
+        ? entry
+        : { [VALUE_MARKER]: entry },
+      [...path, id],
+    );
   });
   replaceYArray(order, ids);
 }
 
 function syncArray(existing, values, path) {
-  const keyed = values.length > 0 && values.every((entry) =>
-    entry && typeof entry === "object" && !Array.isArray(entry) &&
-    typeof entry.id === "string");
+  const keyed =
+    values.length > 0 &&
+    values.every(
+      (entry) =>
+        entry &&
+        typeof entry === "object" &&
+        !Array.isArray(entry) &&
+        typeof entry.id === "string",
+    );
   if (keyed) {
     syncCollection(existing, values, path);
     return existing;
   }
   const array = existing instanceof Y.Array ? existing : new Y.Array();
-  const textArray = TEXT_ARRAY_FIELDS.has(path.at(-1) ?? "") &&
+  const textArray =
+    TEXT_ARRAY_FIELDS.has(path.at(-1) ?? "") &&
     values.every((entry) => typeof entry === "string");
   if (array.length) array.delete(0, array.length);
   if (textArray) {
@@ -149,11 +232,20 @@ function syncRecord(map, value, path) {
       if (text !== existing) map.set(key, text);
       replaceYText(text, entry);
     } else if (Array.isArray(entry)) {
-      const keyed = entry.length > 0 && entry.every((candidate) =>
-        candidate && typeof candidate === "object" && !Array.isArray(candidate) &&
-        typeof candidate.id === "string");
+      const keyed =
+        entry.length > 0 &&
+        entry.every(
+          (candidate) =>
+            candidate &&
+            typeof candidate === "object" &&
+            !Array.isArray(candidate) &&
+            typeof candidate.id === "string",
+        );
       let attached = existing;
-      if (keyed && !(existing instanceof Y.Map && existing.get(COLLECTION_MARKER) === true)) {
+      if (
+        keyed &&
+        !(existing instanceof Y.Map && existing.get(COLLECTION_MARKER) === true)
+      ) {
         attached = new Y.Map();
         map.set(key, attached);
         initializeCollection(attached);
@@ -163,145 +255,14 @@ function syncRecord(map, value, path) {
       }
       syncArray(attached, entry, nextPath);
     } else if (entry && typeof entry === "object") {
-      const child = existing instanceof Y.Map && existing.get(COLLECTION_MARKER) !== true
-        ? existing
-        : new Y.Map();
+      const child =
+        existing instanceof Y.Map && existing.get(COLLECTION_MARKER) !== true
+          ? existing
+          : new Y.Map();
       if (child !== existing) map.set(key, child);
       syncRecord(child, entry, nextPath);
     } else map.set(key, entry);
   }
-}
-
-function textContent(node) {
-  if (typeof node?.text === "string") return node.text;
-  return (node?.content ?? [])
-    .map(textContent)
-    .join(node?.type === "listItem" ? "" : "\n");
-}
-
-function blocksFromJson(json) {
-  const seen = new Set();
-  return (json?.content ?? []).map((node, index) => {
-    let id =
-      typeof node?.attrs?.blockId === "string" && node.attrs.blockId
-        ? node.attrs.blockId
-        : `block-${index + 1}`;
-    if (seen.has(id)) {
-      let suffix = 2;
-      while (seen.has(`${id}~${suffix}`)) suffix += 1;
-      id = `${id}~${suffix}`;
-    }
-    seen.add(id);
-    const text = textContent(node).trimEnd();
-    if (node?.type === "heading")
-      return {
-        id,
-        type: "heading",
-        text,
-        attrs: {
-          level: Number(node.attrs?.level) || 2,
-          styleId: `Heading${Number(node.attrs?.level) || 2}`,
-        },
-      };
-    if (node?.type === "blockquote") return { id, type: "quote", text };
-    if (node?.type === "bulletList" || node?.type === "orderedList")
-      return { id, type: "list", text };
-    if (node?.type === "callout")
-      return {
-        id,
-        type: "callout",
-        text,
-        attrs: { tone: node.attrs?.type ?? "info" },
-      };
-    if (node?.type === "equation")
-      return {
-        id,
-        type: "equation",
-        text: String(node.attrs?.latex ?? ""),
-        latex: String(node.attrs?.latex ?? ""),
-        attrs: {
-          display: node.attrs?.display ?? "block",
-          alignment: node.attrs?.alignment ?? "center",
-        },
-      };
-    if (node?.type === "codeBlock")
-      return {
-        id,
-        type: "code",
-        text,
-        attrs: { language: node.attrs?.language ?? undefined },
-      };
-    if (node?.type === "spectraReference")
-      return {
-        id,
-        type: "paragraph",
-        text: String(node.attrs?.label ?? "Referenced work"),
-        reference: node.attrs,
-      };
-    if (node?.type === "spectraCitation")
-      return {
-        id,
-        type: "paragraph",
-        text: String(node.attrs?.label ?? "Citation"),
-        citation: node.attrs,
-      };
-    return { id, type: "paragraph", text };
-  });
-}
-
-function inlineText(value) {
-  return value ? [{ type: "text", text: value }] : undefined;
-}
-
-function blockToJson(block, index) {
-  const id = typeof block?.id === "string" && block.id.trim()
-    ? block.id
-    : `block-${index + 1}`;
-  const value = typeof block?.text === "string" ? block.text : "";
-  const attrs = record(block?.attrs);
-  if (block?.type === "heading")
-    return {
-      type: "heading",
-      attrs: { blockId: id, level: [1, 2, 3].includes(Number(attrs.level)) ? Number(attrs.level) : 2 },
-      content: inlineText(value),
-    };
-  if (block?.type === "quote")
-    return { type: "blockquote", attrs: { blockId: id }, content: [{ type: "paragraph", content: inlineText(value) }] };
-  if (block?.type === "list")
-    return {
-      type: "bulletList",
-      attrs: { blockId: id },
-      content: (value.split(/\r?\n/).filter(Boolean).length ? value.split(/\r?\n/).filter(Boolean) : [""])
-        .map((entry) => ({ type: "listItem", content: [{ type: "paragraph", content: inlineText(entry) }] })),
-    };
-  if (block?.type === "callout")
-    return { type: "callout", attrs: { blockId: id, type: attrs.tone ?? "info" }, content: [{ type: "paragraph", content: inlineText(value) }] };
-  if (block?.type === "math" || block?.type === "equation")
-    return {
-      type: "equation",
-      attrs: {
-        blockId: id,
-        latex: typeof block?.latex === "string" ? block.latex : value,
-        display: attrs.display ?? "block",
-        alignment: attrs.alignment ?? "center",
-      },
-    };
-  if (block?.type === "code")
-    return { type: "codeBlock", attrs: { blockId: id, language: attrs.language ?? null }, content: inlineText(value) };
-  return { type: "paragraph", attrs: { blockId: id }, content: inlineText(value) };
-}
-
-function documentContentToJson(content) {
-  const existing = record(content?.tiptap);
-  if (existing.type === "doc") return existing;
-  const blocks = Array.isArray(content?.blocks)
-    ? content.blocks.filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry))
-    : [];
-  return {
-    type: "doc",
-    content: (blocks.length ? blocks : [{ id: "intro", type: "paragraph", text: "" }])
-      .map(blockToJson),
-  };
 }
 
 function appendJsonNode(parent, node) {
@@ -309,7 +270,9 @@ function appendJsonNode(parent, node) {
     const text = new Y.XmlText();
     parent.push([text]);
     text.insert(0, node.text ?? "", {
-      ...Object.fromEntries((node.marks ?? []).map((mark) => [mark.type, mark.attrs ?? {}])),
+      ...Object.fromEntries(
+        (node.marks ?? []).map((mark) => [mark.type, mark.attrs ?? {}]),
+      ),
     });
     return;
   }
@@ -337,9 +300,17 @@ function setNativeEnvelope(document, projection) {
 
 function initializeDocument(document, content) {
   const value = record(content);
-  const { blocks: _blocks, tiptap: _tiptap, outline: _outline, ...extras } = value;
+  const {
+    blocks: _blocks,
+    tiptap: _tiptap,
+    outline: _outline,
+    ...extras
+  } = value;
   document.getMap(WORK_ROOT_MAP).set("extras", plainToY(extras));
-  appendJsonNode(document.getXmlFragment(DOCUMENT_FRAGMENT), documentContentToJson(value));
+  appendJsonNode(
+    document.getXmlFragment(DOCUMENT_FRAGMENT),
+    documentContentToProseMirrorJson(value),
+  );
 }
 
 function initializeCode(document, content) {
@@ -358,7 +329,12 @@ function initializeCode(document, content) {
     map.set("language", String(file.language ?? "text"));
     map.set("mediaType", String(file.mediaType ?? "text/plain"));
     map.set("generated", file.generated === true);
-    map.set("lineIds", Array.isArray(file.lineIds) ? file.lineIds.filter((item) => typeof item === "string") : []);
+    map.set(
+      "lineIds",
+      Array.isArray(file.lineIds)
+        ? file.lineIds.filter((item) => typeof item === "string")
+        : [],
+    );
     fileMap.set(id, map);
     order.push([id]);
   }
@@ -368,7 +344,11 @@ function initializeCode(document, content) {
 
 export function initializeNativeArtifactDocument(document, projection) {
   if (isNativeArtifactDocument(document)) return false;
-  if (!projection || typeof projection !== "object" || Array.isArray(projection))
+  if (
+    !projection ||
+    typeof projection !== "object" ||
+    Array.isArray(projection)
+  )
     throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_INVALID");
   if (
     typeof projection.typeKey !== "string" ||
@@ -381,9 +361,14 @@ export function initializeNativeArtifactDocument(document, projection) {
   )
     throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_INVALID");
   document.transact(() => {
-    if (projection.typeKey === "document") initializeDocument(document, projection.content);
-    else if (projection.typeKey === "code") initializeCode(document, projection.content);
-    else syncRecord(document.getMap(WORK_ROOT_MAP), projection.content, [projection.typeKey]);
+    if (projection.typeKey === "document")
+      initializeDocument(document, projection.content);
+    else if (projection.typeKey === "code")
+      initializeCode(document, projection.content);
+    else
+      syncRecord(document.getMap(WORK_ROOT_MAP), projection.content, [
+        projection.typeKey,
+      ]);
     setNativeEnvelope(document, projection);
   }, "gateway-bootstrap");
   return true;
@@ -426,13 +411,17 @@ function projectDocument(document) {
   const tiptap = yXmlFragmentToProsemirrorJSON(
     document.getXmlFragment(DOCUMENT_FRAGMENT),
   );
-  const blocks = blocksFromJson(tiptap);
+  const blocks = canonicalDocumentBlocksFromJson(tiptap);
+  const projectedExtras = record(extras);
   return {
-    ...record(extras),
+    ...projectedExtras,
     tiptap,
     blocks: blocks.length
       ? blocks
       : [{ id: "intro", type: "paragraph", text: "" }],
+    ...(projectedExtras.nativeBinding
+      ? { nativeProjectionComplete: true }
+      : {}),
     outline: blocks
       .filter((block) => block.type === "heading")
       .map((block) => ({
@@ -505,7 +494,10 @@ export function nativeChangedRegionIds(beforeProjection, afterProjection) {
     changed.push("metadata:title");
   if ((beforeProjection.summary ?? "") !== (afterProjection.summary ?? ""))
     changed.push("metadata:summary");
-  if (JSON.stringify(beforeProjection.tags) !== JSON.stringify(afterProjection.tags))
+  if (
+    JSON.stringify(beforeProjection.tags) !==
+    JSON.stringify(afterProjection.tags)
+  )
     changed.push("metadata:tags");
   const beforeContent = JSON.stringify(beforeProjection.content);
   const afterContent = JSON.stringify(afterProjection.content);
@@ -522,7 +514,9 @@ export function nativeChangedRegionIds(beforeProjection, afterProjection) {
     return ["artifact:structure", ...changed];
   for (const [id, signature] of afterIds)
     if (beforeIds.get(id) !== signature) changed.push(id);
-  return changed.length > 0 ? [...new Set(changed)] : [NATIVE_PROJECTION_REGION];
+  return changed.length > 0
+    ? [...new Set(changed)]
+    : [NATIVE_PROJECTION_REGION];
 }
 
 export function nativeArtifactProjection(document, schemaVersion) {

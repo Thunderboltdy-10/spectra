@@ -27,6 +27,7 @@ import { useSpectraMotion } from "../motion/motion-level";
 import { transitionFor } from "../motion/grammar";
 import { ArtifactEmbedQuiz } from "./artifact-embed-quiz";
 import { shouldMountArtifactEmbedRuntime } from "./artifact-embed-runtime";
+import { sheetCellEntries } from "../../../../shared/sheet-cells";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -326,9 +327,8 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
 
   if (type === "sheets") {
     const sheet = records(content.sheets)[0];
-    const cells = record(sheet?.cells);
-    const entries = Object.entries(cells).slice(
-      0,
+    const entries = sheetCellEntries(
+      sheet?.cells,
       embed.mode === "compact" ? 12 : 40,
     );
     return (

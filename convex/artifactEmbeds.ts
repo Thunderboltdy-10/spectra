@@ -19,6 +19,7 @@ import {
   artifactEmbedVersionPolicyValidator,
   type ArtifactEmbedReference,
 } from "../shared/artifact-embed";
+import { sheetCellEntries } from "../shared/sheet-cells";
 
 type EmbedCtx = QueryCtx | MutationCtx;
 type EmbedActor = NonNullable<
@@ -112,16 +113,9 @@ function sheetsRangeProjection(content: unknown, rangeValue?: string) {
   const bounds = (boundsText || "A1:J30").split(":", 2);
   const start = sheetPoint(bounds[0] || "A1");
   const end = sheetPoint(bounds[1] || bounds[0] || "J30");
-  const cells =
-    sheet &&
-    sheet.cells &&
-    typeof sheet.cells === "object" &&
-    !Array.isArray(sheet.cells)
-      ? (sheet.cells as Record<string, unknown>)
-      : {};
   const selected: Record<string, unknown> = {};
   if (start && end)
-    for (const [address, value] of Object.entries(cells)) {
+    for (const [address, value] of sheetCellEntries(sheet?.cells)) {
       const point = sheetPoint(address);
       if (
         !point ||
@@ -132,7 +126,7 @@ function sheetsRangeProjection(content: unknown, rangeValue?: string) {
       )
         continue;
       selected[address] = value;
-      if (Object.keys(selected).length >= 2_000) break;
+      if (Object.keys(selected).length >= 1_000) break;
     }
   return {
     sheetId: sheet?.id,

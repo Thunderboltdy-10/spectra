@@ -514,13 +514,21 @@ function descriptorSignature(value: DecomposedArtifact) {
   );
 }
 
-function canonicalJsonValue(value: unknown): unknown {
+export function canonicalJsonValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalJsonValue);
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, entry]) => [key, canonicalJsonValue(entry)]),
+  );
+}
+
+export function canonicalJsonEqual(left: unknown, right: unknown) {
+  if (left === right) return true;
+  return (
+    JSON.stringify(canonicalJsonValue(left)) ===
+    JSON.stringify(canonicalJsonValue(right))
   );
 }
 

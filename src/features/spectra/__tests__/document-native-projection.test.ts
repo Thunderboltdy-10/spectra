@@ -30,10 +30,12 @@ describe("native document projection", () => {
       ],
     };
     const json = documentJsonFromContent(content, "fixture");
-    expect(json.content?.map((node) => [node.type, node.attrs?.level])).toEqual([
-      ["heading", 1],
-      ["heading", 2],
-    ]);
+    expect(json.content?.map((node) => [node.type, node.attrs?.level])).toEqual(
+      [
+        ["heading", 1],
+        ["heading", 2],
+      ],
+    );
   });
 
   it("repairs stale persisted TipTap paragraphs from native Word styles", () => {
@@ -174,11 +176,21 @@ describe("native document projection", () => {
                 content: [
                   {
                     type: "tableHeader",
-                    content: [{ type: "paragraph", content: [{ type: "text", text: "Old" }] }],
+                    content: [
+                      {
+                        type: "paragraph",
+                        content: [{ type: "text", text: "Old" }],
+                      },
+                    ],
                   },
                   {
                     type: "tableHeader",
-                    content: [{ type: "paragraph", content: [{ type: "text", text: "B" }] }],
+                    content: [
+                      {
+                        type: "paragraph",
+                        content: [{ type: "text", text: "B" }],
+                      },
+                    ],
                   },
                 ],
               },
@@ -193,7 +205,12 @@ describe("native document projection", () => {
     });
     expect(json.content?.[1]?.content?.[0]?.content?.[0]).toMatchObject({
       type: "tableHeader",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "Spectra cell" }] }],
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "Spectra cell" }],
+        },
+      ],
     });
   });
 
@@ -257,9 +274,7 @@ describe("native document projection", () => {
       "nativeDocxImage",
     ]);
     const image = direct.content?.[0]?.content?.[3];
-    expect(image?.attrs?.src).toContain(
-      "/api/spectra/lenses/docx/media?",
-    );
+    expect(image?.attrs?.src).toContain("/api/spectra/lenses/docx/media?");
     expect(image?.attrs?.src).toContain("artifactId=artifact-rich-docx");
     expect(image?.attrs?.src).not.toContain("base64");
     expect(
@@ -341,6 +356,55 @@ describe("native document projection", () => {
     });
   });
 
+  it("retains invisible native trailing whitespace while deriving a real prose edit", () => {
+    const base: DocxProjection = {
+      blocks: [
+        {
+          id: "docx:paragraph:editable",
+          type: "paragraph",
+          text: "Editable paragraph ",
+        },
+        {
+          id: "docx:paragraph:protected",
+          type: "paragraph",
+          text: "Protected equation context \n  ",
+          attrs: { nativeReadOnly: true },
+        },
+      ],
+      outline: [],
+      nativeBinding: {
+        version: 1,
+        format: "docx",
+        profile: "strict-native",
+        macroEnabled: false,
+        semanticDigest: "a".repeat(64),
+        nativePlaceholders: [],
+      },
+    };
+
+    const update = docxProjectionFromContent(
+      {
+        blocks: [
+          { ...base.blocks[0], text: "Edited paragraph" },
+          { ...base.blocks[1], text: "Protected equation context" },
+        ],
+        nativeProjectionComplete: true,
+      },
+      base,
+    );
+
+    expect(update.projection.blocks[1]?.text).toBe(
+      "Protected equation context \n  ",
+    );
+    expect(update.operations).toEqual([
+      {
+        kind: "replace-paragraph",
+        regionId: "docx:paragraph:editable",
+        text: "Edited paragraph",
+      },
+    ]);
+  });
+
   it("does not retain an earlier native intent inside collaborative state", () => {
     const document = documentYjsAdapter.createDocument({
       blocks: [{ id: "docx:paragraph:a", type: "paragraph", text: "A" }],
@@ -359,7 +423,9 @@ describe("native document projection", () => {
       },
     });
 
-    expect(documentYjsAdapter.project(document)).not.toHaveProperty("nativeIntent");
+    expect(documentYjsAdapter.project(document)).not.toHaveProperty(
+      "nativeIntent",
+    );
   });
 
   it("opens an unactivated native document from its freshly read projection", () => {

@@ -81,9 +81,13 @@ import {
   getSpectraAttachmentStrategy,
   getSpectraModelId,
 } from "@/features/spectra/ai/model-config";
-import { AiArtifactRegionConflictError, applyAiArtifactMutation } from "@/features/spectra/ai/yjs-artifact-operation";
+import {
+  AiArtifactRegionConflictError,
+  applyAiArtifactMutation,
+} from "@/features/spectra/ai/yjs-artifact-operation";
 import { confirmationDiffSummary } from "@/features/spectra/ai/authority-execution";
 import { interruptionRecovery } from "../../../../../shared/spectra-run-recovery";
+import { encodeArtifactContentForStorage } from "../../../../../shared/sheet-cells";
 import { prepareAttachments as prepareRunAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
 import { promptLooksLikeFocusedStructuralEdit } from "@/features/spectra/operations/intent-alignment";
 import { isQuietRetryableApplyFailure } from "@/features/spectra/operations/plan-diagnostics";
@@ -678,9 +682,7 @@ async function runAttempt(
     let provenance = {
       artifactIds: context.selectedArtifactIds,
       artifactTitles: context.packet.selectedObjects.flatMap((item) =>
-        typeof item.title === "string" && item.title.trim()
-          ? [item.title]
-          : [],
+        typeof item.title === "string" && item.title.trim() ? [item.title] : [],
       ),
       threadId: params.threadId,
       workspaceId: params.workspaceId,
@@ -989,7 +991,10 @@ async function runAttempt(
                     artifactId: pendingArtifactId,
                     runId: params.runId,
                     executionId: params.executionId,
-                    content: frame.content,
+                    content: encodeArtifactContentForStorage(
+                      operation.input.blueprintKey,
+                      frame.content,
+                    ),
                     progress: frame.progress,
                     title: operation.input.title,
                     // Progress belongs to aiProgress/the live trace. Never
@@ -1138,7 +1143,7 @@ async function runAttempt(
                 artifactId: pendingArtifactId,
                 runId: params.runId,
                 executionId: params.executionId,
-                content,
+                content: encodeArtifactContentForStorage(blueprintKey, content),
                 progress,
                 title,
                 summary: normalizeCreationSummary(
@@ -1219,7 +1224,9 @@ async function runAttempt(
         ),
       );
       if (
-        resolvedTargetIds.some((artifactId) => !gatheredTargetIds.has(artifactId))
+        resolvedTargetIds.some(
+          (artifactId) => !gatheredTargetIds.has(artifactId),
+        )
       )
         throw new Error(
           "The resolved artifactId context could not be loaded safely before mutation.",
@@ -1618,10 +1625,11 @@ async function runAttempt(
         resultTitle: codeProposal
           ? "Review Code proposal"
           : "Confirmation required",
-        resultSummary: confirmationDiffSummary({
-          targetTitles: provenance.artifactTitles ?? [],
-          reasons: policy.reasons,
-        }) || policy.reasons.join(" · "),
+        resultSummary:
+          confirmationDiffSummary({
+            targetTitles: provenance.artifactTitles ?? [],
+            reasons: policy.reasons,
+          }) || policy.reasons.join(" · "),
         resultVariant: "operation",
         resultActions: actions,
         provenance,
@@ -2234,7 +2242,9 @@ async function runAttempt(
         targetType: "artifact" as const,
         targetId,
       })),
-      ...(plan.operations.some((operation) => operation.type === "artifact.update")
+      ...(plan.operations.some(
+        (operation) => operation.type === "artifact.update",
+      )
         ? [
             {
               key: "revert" as const,
@@ -2422,9 +2432,7 @@ async function runAttempt(
       affected.some((item) => item.id),
     );
     const recovery = interruptionRecovery(
-      commitStarted
-        ? [preservedOutcome ? "executed" : "executing"]
-        : [],
+      commitStarted ? [preservedOutcome ? "executed" : "executing"] : [],
       Boolean(publicText.trim()),
     );
     advanceProtocolState(
@@ -2432,8 +2440,8 @@ async function runAttempt(
       recovery.retryable
         ? "run_paused_after_recovery"
         : preservedOutcome
-        ? "unrecoverable_run_failure"
-        : "run_failed_after_commit_boundary",
+          ? "unrecoverable_run_failure"
+          : "run_failed_after_commit_boundary",
     );
     const message = publicError(error);
     await mutate("spectraOperations:cancelPending", {
@@ -3682,9 +3690,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
           runId,
           operationId: `revert:${runId}:${item.artifactId}`,
           executionId:
-            expectedExecutionId ??
-            state.run.executionId ??
-            `revert:${runId}`,
+            expectedExecutionId ?? state.run.executionId ?? `revert:${runId}`,
           checkpointBeforeAi: false,
           claimActorKind: "human",
           resolveDesired: (current) => ({

@@ -1,6 +1,14 @@
 export const CHECKPOINT_IDLE_MS = 2_000;
 export const CHECKPOINT_MAX_MS = 15_000;
 
+/**
+ * @param {{
+ *   idleMs?: number,
+ *   maxMs?: number,
+ *   persist?: (payload: any) => any,
+ *   now?: () => number,
+ * }} options
+ */
 export function createCheckpointScheduler({
   idleMs = CHECKPOINT_IDLE_MS,
   maxMs = CHECKPOINT_MAX_MS,

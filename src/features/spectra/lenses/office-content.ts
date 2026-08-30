@@ -1,5 +1,6 @@
 import type { PresentationContent } from "../presentation/model";
-import type { SheetCellFormat, SheetsContent } from "../sheets/model";
+import { type SheetCellFormat, type SheetsContent } from "../sheets/model";
+import { decodeSheetsContentFromStorage } from "../../../../shared/sheet-cells";
 import { dateToSerial } from "../sheets/excel-serial";
 import { z } from "zod";
 import {
@@ -64,7 +65,9 @@ function normalizedFontFamily(value: unknown) {
   return "sans" as const;
 }
 
-export function normalizedCellFormat(format: Record<string, unknown> | undefined): SheetCellFormat | undefined {
+export function normalizedCellFormat(
+  format: Record<string, unknown> | undefined,
+): SheetCellFormat | undefined {
   if (!format) return undefined;
   const font = record(format.font);
   const alignment = record(format.alignment);
@@ -75,22 +78,33 @@ export function normalizedCellFormat(format: Record<string, unknown> | undefined
   const decimals = decimalPlaces(format.numberFormat);
   const underline = font.underline;
   const numberFormatRecord = record(format.numberFormat);
-  const nativeCode = typeof numberFormatRecord.code === "string" ? numberFormatRecord.code : undefined;
+  const nativeCode =
+    typeof numberFormatRecord.code === "string"
+      ? numberFormatRecord.code
+      : undefined;
   const borders = Object.fromEntries(
     (["top", "right", "bottom", "left"] as const).flatMap((edge) => {
       const native = record(nativeBorders[edge]);
       if (typeof native.style !== "string") return [];
-      return [[edge, {
-        style: native.style,
-        ...(normalizedColor(native.color) ? { color: normalizedColor(native.color) } : {}),
-      }]];
+      return [
+        [
+          edge,
+          {
+            style: native.style,
+            ...(normalizedColor(native.color)
+              ? { color: normalizedColor(native.color) }
+              : {}),
+          },
+        ],
+      ];
     }),
   );
-  const rotation = typeof alignment.textRotation === "number"
-    ? alignment.textRotation > 90
-      ? 90 - alignment.textRotation
-      : alignment.textRotation
-    : undefined;
+  const rotation =
+    typeof alignment.textRotation === "number"
+      ? alignment.textRotation > 90
+        ? 90 - alignment.textRotation
+        : alignment.textRotation
+      : undefined;
   return {
     ...(typeof font.bold === "boolean" ? { bold: font.bold } : {}),
     ...(typeof font.italic === "boolean" ? { italic: font.italic } : {}),
@@ -98,13 +112,19 @@ export function normalizedCellFormat(format: Record<string, unknown> | undefined
       ? { underline: underline !== false && underline !== "none" }
       : {}),
     ...(typeof font.strike === "boolean" ? { strike: font.strike } : {}),
-    ...(normalizedFontFamily(font.name) ? { fontFamily: normalizedFontFamily(font.name) } : {}),
-    ...(normalizedColor(font.color) ? { textColor: normalizedColor(font.color) } : {}),
+    ...(normalizedFontFamily(font.name)
+      ? { fontFamily: normalizedFontFamily(font.name) }
+      : {}),
+    ...(normalizedColor(font.color)
+      ? { textColor: normalizedColor(font.color) }
+      : {}),
     ...(fill.pattern === "solid" && normalizedColor(fill.color)
       ? { fillColor: normalizedColor(fill.color) }
       : {}),
-    ...(horizontal === "left" || horizontal === "center" || horizontal === "right"
-      || horizontal === "justify"
+    ...(horizontal === "left" ||
+    horizontal === "center" ||
+    horizontal === "right" ||
+    horizontal === "justify"
       ? { align: horizontal as "left" | "center" | "right" | "justify" }
       : {}),
     ...(vertical === "top" || vertical === "bottom"
@@ -112,11 +132,17 @@ export function normalizedCellFormat(format: Record<string, unknown> | undefined
       : vertical === "center"
         ? { verticalAlign: "middle" as const }
         : {}),
-    ...(typeof alignment.wrapText === "boolean" ? { wrap: alignment.wrapText } : {}),
+    ...(typeof alignment.wrapText === "boolean"
+      ? { wrap: alignment.wrapText }
+      : {}),
     ...(rotation !== undefined ? { rotation } : {}),
-    ...(typeof alignment.indent === "number" ? { indent: alignment.indent } : {}),
+    ...(typeof alignment.indent === "number"
+      ? { indent: alignment.indent }
+      : {}),
     numberFormat: normalizedNumberFormat(format.numberFormat),
-    ...(nativeCode && nativeCode !== "General" ? { customFormat: nativeCode } : {}),
+    ...(nativeCode && nativeCode !== "General"
+      ? { customFormat: nativeCode }
+      : {}),
     ...(decimals !== undefined ? { decimals } : {}),
     ...(typeof font.size === "number" && font.size >= 6 && font.size <= 72
       ? { fontSize: font.size }
@@ -156,7 +182,8 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
                     nativeFormulaSupport: cell.formulaSupport,
                   }
                 : {}),
-              ...(cell.format ?? (cell.style ? normalizedCellFormat(cell.style) : undefined)
+              ...((cell.format ??
+              (cell.style ? normalizedCellFormat(cell.style) : undefined))
                 ? { format: cell.format ?? normalizedCellFormat(cell.style) }
                 : {}),
             },
@@ -181,8 +208,11 @@ export function pptxArtifactContent(
     theme: { id: "native-pptx", name: "PowerPoint theme" },
     settings: {
       aspectRatio:
-        projection.nativeBinding.canvasWidthEmu && projection.nativeBinding.canvasHeightEmu &&
-        projection.nativeBinding.canvasWidthEmu / projection.nativeBinding.canvasHeightEmu < 1.55
+        projection.nativeBinding.canvasWidthEmu &&
+        projection.nativeBinding.canvasHeightEmu &&
+        projection.nativeBinding.canvasWidthEmu /
+          projection.nativeBinding.canvasHeightEmu <
+          1.55
           ? "4:3"
           : "16:9",
       showSlideNumbers: true,
@@ -204,7 +234,9 @@ export function pptxArtifactContent(
                 ...(slide.hasTransition
                   ? { transition: "preserved" as const }
                   : {}),
-                ...(slide.hasTiming ? { animations: "preserved" as const } : {}),
+                ...(slide.hasTiming
+                  ? { animations: "preserved" as const }
+                  : {}),
               },
             }
           : {}),
@@ -245,18 +277,23 @@ export function xlsxProjectionFromContent(
   base: XlsxProjection,
 ): XlsxProjection {
   if (content == null) return base;
-  const raw = xlsxEditorContentSchema.parse(content);
+  const raw = xlsxEditorContentSchema.parse(
+    decodeSheetsContentFromStorage(content),
+  );
   const byId = new Map(raw.sheets.map((sheet) => [sheet.id, sheet]));
   const projection = xlsxProjectionSchema.parse({
     ...base,
     sheets: base.sheets.map((sheet) => {
       const next = byId.get(sheet.id);
       if (!next) return sheet;
-      const previousByRef = new Map(sheet.cells.map((cell) => [cell.ref, cell]));
+      const previousByRef = new Map(
+        sheet.cells.map((cell) => [cell.ref, cell]),
+      );
       const cells = Object.entries(next.cells).map(([rawRef, value]) => {
         const ref = rawRef.toUpperCase();
         const previous = previousByRef.get(ref);
-        const nextValue = value.value === undefined ? previous?.value ?? null : value.value;
+        const nextValue =
+          value.value === undefined ? (previous?.value ?? null) : value.value;
         if (
           previous?.formula &&
           !value.formula &&
@@ -321,8 +358,18 @@ export function xlsxOperationsBetween(
       if (!old) {
         operations.push(
           cell.formula
-            ? { kind: "set-formula", sheetId: sheet.id, ref: cell.ref, formula: cell.formula }
-            : { kind: "set-cell", sheetId: sheet.id, ref: cell.ref, value: cell.value },
+            ? {
+                kind: "set-formula",
+                sheetId: sheet.id,
+                ref: cell.ref,
+                formula: cell.formula,
+              }
+            : {
+                kind: "set-cell",
+                sheetId: sheet.id,
+                ref: cell.ref,
+                value: cell.value,
+              },
         );
         if (cell.format)
           operations.push({
@@ -355,7 +402,9 @@ export function xlsxOperationsBetween(
           value: cell.value,
         });
       }
-      if (JSON.stringify(cell.format ?? {}) !== JSON.stringify(old.format ?? {})) {
+      if (
+        JSON.stringify(cell.format ?? {}) !== JSON.stringify(old.format ?? {})
+      ) {
         const oldFormat = old.format ?? {};
         const nextFormat = cell.format ?? {};
         const patch = Object.fromEntries(
@@ -364,7 +413,7 @@ export function xlsxOperationsBetween(
               key,
               JSON.stringify(oldFormat[key]) === JSON.stringify(nextFormat[key])
                 ? undefined
-                : nextFormat[key] ?? null,
+                : (nextFormat[key] ?? null),
             ])
             .filter((entry) => entry[1] !== undefined),
         );
@@ -372,7 +421,9 @@ export function xlsxOperationsBetween(
           kind: "set-cell-format",
           sheetId: sheet.id,
           ref: cell.ref,
-          format: Object.keys(nextFormat).length ? { ...patch, __full: nextFormat } : {},
+          format: Object.keys(nextFormat).length
+            ? { ...patch, __full: nextFormat }
+            : {},
         });
       }
     }
@@ -381,20 +432,26 @@ export function xlsxOperationsBetween(
     const oldMerges = new Set(previous.merges);
     const newMerges = new Set(sheet.merges);
     for (const range of oldMerges) {
-      if (!newMerges.has(range)) operations.push({ kind: "unmerge-cells", sheetId: sheet.id, range });
+      if (!newMerges.has(range))
+        operations.push({ kind: "unmerge-cells", sheetId: sheet.id, range });
     }
     for (const range of newMerges) {
-      if (!oldMerges.has(range)) operations.push({ kind: "merge-cells", sheetId: sheet.id, range });
+      if (!oldMerges.has(range))
+        operations.push({ kind: "merge-cells", sheetId: sheet.id, range });
     }
+    const previousFrozenRows = previous.frozenRows ?? 0;
+    const previousFrozenColumns = previous.frozenColumns ?? 0;
+    const nextFrozenRows = sheet.frozenRows ?? 0;
+    const nextFrozenColumns = sheet.frozenColumns ?? 0;
     if (
-      sheet.frozenRows !== previous.frozenRows ||
-      sheet.frozenColumns !== previous.frozenColumns
+      nextFrozenRows !== previousFrozenRows ||
+      nextFrozenColumns !== previousFrozenColumns
     )
       operations.push({
         kind: "set-freeze-panes",
         sheetId: sheet.id,
-        rows: sheet.frozenRows ?? 0,
-        columns: sheet.frozenColumns ?? 0,
+        rows: nextFrozenRows,
+        columns: nextFrozenColumns,
       });
   }
   return operations;
@@ -433,10 +490,7 @@ const pptxEditorContentSchema = z
   })
   .passthrough();
 
-function editorObject(
-  value: Record<string, unknown>,
-  fallbackId: string,
-) {
+function editorObject(value: Record<string, unknown>, fallbackId: string) {
   return {
     id: typeof value.id === "string" && value.id ? value.id : fallbackId,
     type: value.type as PptxProjection["slides"][number]["objects"][number]["type"],
@@ -463,13 +517,16 @@ export function pptxProjectionFromContent(
     ...base,
     slides: raw.slides.map((next, index) => {
       const slide = baseById.get(next.id);
-      const incomingRawObjects = (next.objects ?? []).map((object) => object as Record<string, unknown>);
-      const incomingObjects = (slide ? incomingRawObjects : incomingRawObjects.map((object, objectIndex) =>
-        editorObject(
-          object,
-          `${next.id}:spectra:${objectIndex + 1}`,
-        ),
-      )) as Array<PptxProjection["slides"][number]["objects"][number]>;
+      const incomingRawObjects = (next.objects ?? []).map(
+        (object) => object as Record<string, unknown>,
+      );
+      const incomingObjects = (
+        slide
+          ? incomingRawObjects
+          : incomingRawObjects.map((object, objectIndex) =>
+              editorObject(object, `${next.id}:spectra:${objectIndex + 1}`),
+            )
+      ) as Array<PptxProjection["slides"][number]["objects"][number]>;
       const text = incomingObjects
         .filter((object) => object.type === "text")
         .map((object) => {
@@ -498,7 +555,11 @@ export function pptxProjectionFromContent(
         const incoming = incomingById.get(object.id);
         incomingById.delete(object.id);
         return incoming
-          ? { ...object, ...incoming, content: incoming.content ?? object.content }
+          ? {
+              ...object,
+              ...incoming,
+              content: incoming.content ?? object.content,
+            }
           : object;
       });
       objects.push(
@@ -554,30 +615,50 @@ export function pptxOperationsBetween(
         ...(text.length ? { text } : {}),
       });
       if (slide.speakerNotes)
-        operations.push({ kind: "set-notes", slideId: slide.id, text: slide.speakerNotes });
+        operations.push({
+          kind: "set-notes",
+          slideId: slide.id,
+          text: slide.speakerNotes,
+        });
       return;
     }
     if (slide.title !== old.title)
-      operations.push({ kind: "set-title", slideId: slide.id, text: slide.title });
+      operations.push({
+        kind: "set-title",
+        slideId: slide.id,
+        text: slide.title,
+      });
     if (slide.speakerNotes !== old.speakerNotes)
-      operations.push({ kind: "set-notes", slideId: slide.id, text: slide.speakerNotes });
-    const oldObjects = new Map(old.objects.map((object) => [object.id, object]));
+      operations.push({
+        kind: "set-notes",
+        slideId: slide.id,
+        text: slide.speakerNotes,
+      });
+    const oldObjects = new Map(
+      old.objects.map((object) => [object.id, object]),
+    );
     for (const object of slide.objects) {
       const previousObject = oldObjects.get(object.id);
       const value = object.content as
-        | { text?: unknown; nativeShapeId?: unknown }
-        | undefined;
+        { text?: unknown; nativeShapeId?: unknown } | undefined;
       const nextText = typeof value?.text === "string" ? value.text : "";
       if (!previousObject) {
         if (object.type === "text" && nextText)
-          operations.push({ kind: "add-text-box", slideId: slide.id, text: nextText });
+          operations.push({
+            kind: "add-text-box",
+            slideId: slide.id,
+            text: nextText,
+          });
         continue;
       }
-      const previousValue = previousObject.content as { text?: unknown } | undefined;
+      const previousValue = previousObject.content as
+        { text?: unknown } | undefined;
       const previousText =
         typeof previousValue?.text === "string" ? previousValue.text : "";
       const nativeShapeId =
-        typeof value?.nativeShapeId === "string" ? value.nativeShapeId : undefined;
+        typeof value?.nativeShapeId === "string"
+          ? value.nativeShapeId
+          : undefined;
       if (nativeShapeId && nextText !== previousText && !object.locked)
         operations.push({
           kind: "set-text",

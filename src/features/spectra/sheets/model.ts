@@ -9,6 +9,7 @@ import {
   rewriteSheetNameInFormula,
   rewriteStructuralReferences,
 } from "./formula-refs";
+import { sheetCellEntries } from "../../../../shared/sheet-cells";
 
 export type SheetScalar = string | number | boolean | null;
 
@@ -35,14 +36,7 @@ export type SheetValidation =
  * at export time.
  */
 export type SheetBorderEdge = {
-  style:
-    | "thin"
-    | "medium"
-    | "thick"
-    | "dashed"
-    | "dotted"
-    | "double"
-    | "hair";
+  style: "thin" | "medium" | "thick" | "dashed" | "dotted" | "double" | "hair";
   color?: string;
 };
 
@@ -466,9 +460,8 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
   const rawSheets = Array.isArray(source.sheets) ? source.sheets : [];
   const sheets = rawSheets.map((raw, index): WorkbookSheet => {
     const sheet = record(raw);
-    const rawCells = record(sheet.cells);
     const cells = Object.fromEntries(
-      Object.entries(rawCells).flatMap(([address, rawCell]) => {
+      sheetCellEntries(sheet.cells).flatMap(([address, rawCell]) => {
         if (!addressPattern.test(address.toUpperCase())) return [];
         // Models sometimes patch a bare scalar; lift it into a SheetCell so
         // column appends and imports are not silently emptied.
@@ -619,26 +612,28 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                   : {}),
                 ...(Array.isArray(table.sortKeys)
                   ? {
-                      sortKeys: table.sortKeys.flatMap((candidate) => {
-                        const key = record(candidate);
-                        if (
-                          key.direction !== "asc" &&
-                          key.direction !== "desc"
-                        )
-                          return [];
-                        return [
-                          {
-                            column: Math.max(
-                              0,
-                              Math.min(
-                                16_383,
-                                Math.round(Number(key.column) || 0),
+                      sortKeys: table.sortKeys
+                        .flatMap((candidate) => {
+                          const key = record(candidate);
+                          if (
+                            key.direction !== "asc" &&
+                            key.direction !== "desc"
+                          )
+                            return [];
+                          return [
+                            {
+                              column: Math.max(
+                                0,
+                                Math.min(
+                                  16_383,
+                                  Math.round(Number(key.column) || 0),
+                                ),
                               ),
-                            ),
-                            direction: key.direction as "asc" | "desc",
-                          },
-                        ];
-                      }).slice(0, 8),
+                              direction: key.direction as "asc" | "desc",
+                            },
+                          ];
+                        })
+                        .slice(0, 8),
                     }
                   : {}),
               },
@@ -804,7 +799,8 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
             },
           )
         : [],
-      ...(typeof sheet.tabColor === "string" && /^#[0-9a-fA-F]{6}$/.test(sheet.tabColor)
+      ...(typeof sheet.tabColor === "string" &&
+      /^#[0-9a-fA-F]{6}$/.test(sheet.tabColor)
         ? { tabColor: sheet.tabColor }
         : {}),
       ...(sheet.hidden === true ? { hidden: true } : {}),
@@ -1276,8 +1272,7 @@ class FormulaParser {
       this.rangeShape = referenceShape(upper);
       return this.resolveRange(upper);
     }
-    if (!addressPattern.test(local))
-      return this.resolveName(upper);
+    if (!addressPattern.test(local)) return this.resolveName(upper);
     if (this.current()?.type === "colon") {
       this.consume();
       const end = this.consume();
@@ -1310,8 +1305,10 @@ class FormulaParser {
     if (name === "ISERROR" || name === "ISERR")
       return isFormulaError(args[0] ?? null);
     if (name === "ISNA")
-      return isFormulaError(args[0] ?? null) &&
-        (args[0] as FormulaErrorValue).code === "#N/A";
+      return (
+        isFormulaError(args[0] ?? null) &&
+        (args[0] as FormulaErrorValue).code === "#N/A"
+      );
     if (name === "ISBLANK") {
       const first = args[0];
       if (first === undefined || isFormulaError(first)) return false;
@@ -1334,7 +1331,8 @@ class FormulaParser {
       const condition = args[0] ?? false;
       if (isFormulaError(condition)) throw new Error(condition.code);
       const branch = Boolean(scalar(condition)) ? args[1] : args[2];
-      if (branch === undefined) return Boolean(scalar(condition)) ? true : false;
+      if (branch === undefined)
+        return Boolean(scalar(condition)) ? true : false;
       if (isFormulaError(branch)) throw new Error(branch.code);
       return branch;
     }
@@ -1662,7 +1660,8 @@ class FormulaParser {
         let product = 1;
         for (const range of ranges) {
           const item = range[index] ?? null;
-          product *= typeof item === "number" && Number.isFinite(item) ? item : 0;
+          product *=
+            typeof item === "number" && Number.isFinite(item) ? item : 0;
         }
         total += product;
       }
@@ -1724,11 +1723,16 @@ class FormulaParser {
         (word) => word[0]!.toUpperCase() + word.slice(1).toLowerCase(),
       );
     if (name === "REPT") {
-      const count = Math.max(0, Math.min(4096, Math.round(numeric(args[1] ?? 0))));
+      const count = Math.max(
+        0,
+        Math.min(4096, Math.round(numeric(args[1] ?? 0))),
+      );
       return String(scalar(args[0] ?? "") ?? "").repeat(count);
     }
     if (name === "VALUE") {
-      const parsed = Number(String(scalar(args[0] ?? "") ?? "").replace(/[,\s]/g, ""));
+      const parsed = Number(
+        String(scalar(args[0] ?? "") ?? "").replace(/[,\s]/g, ""),
+      );
       if (!Number.isFinite(parsed)) throw new Error("#VALUE!");
       return parsed;
     }
@@ -2280,10 +2284,16 @@ export function mutateSheetAxis(
       ...cell,
       ...(cell.formula
         ? {
-            formula: rewriteStructuralReferences(cell.formula, axis, at, delta, {
-              sheetName: sheet.name,
-              unqualified: true,
-            }),
+            formula: rewriteStructuralReferences(
+              cell.formula,
+              axis,
+              at,
+              delta,
+              {
+                sheetName: sheet.name,
+                unqualified: true,
+              },
+            ),
           }
         : {}),
     };
@@ -2428,15 +2438,17 @@ export function mutateWorkbookAxis(
     workbook: {
       ...content.workbook,
       namedRanges: Object.fromEntries(
-        Object.entries(content.workbook.namedRanges ?? {}).map(([name, ref]) => [
-          name,
-          rewriteNamedRangeRef(ref, (formula) =>
-            rewriteStructuralReferences(formula, axis, at, delta, {
-              sheetName,
-              unqualified: false,
-            }),
-          ),
-        ]),
+        Object.entries(content.workbook.namedRanges ?? {}).map(
+          ([name, ref]) => [
+            name,
+            rewriteNamedRangeRef(ref, (formula) =>
+              rewriteStructuralReferences(formula, axis, at, delta, {
+                sheetName,
+                unqualified: false,
+              }),
+            ),
+          ],
+        ),
       ),
     },
   };
@@ -2454,7 +2466,8 @@ export function renameWorkbookSheet(
   return {
     ...content,
     sheets: content.sheets.map((sheet) => {
-      const renamed = sheet.id === sheetId ? { ...sheet, name: newName } : sheet;
+      const renamed =
+        sheet.id === sheetId ? { ...sheet, name: newName } : sheet;
       const cells: Record<string, SheetCell> = {};
       for (const [address, cell] of Object.entries(renamed.cells)) {
         cells[address] = cell.formula
@@ -2473,12 +2486,14 @@ export function renameWorkbookSheet(
     workbook: {
       ...content.workbook,
       namedRanges: Object.fromEntries(
-        Object.entries(content.workbook.namedRanges ?? {}).map(([name, ref]) => [
-          name,
-          rewriteNamedRangeRef(ref, (formula) =>
-            rewriteSheetNameInFormula(formula, oldName, newName),
-          ),
-        ]),
+        Object.entries(content.workbook.namedRanges ?? {}).map(
+          ([name, ref]) => [
+            name,
+            rewriteNamedRangeRef(ref, (formula) =>
+              rewriteSheetNameInFormula(formula, oldName, newName),
+            ),
+          ],
+        ),
       ),
     },
   };

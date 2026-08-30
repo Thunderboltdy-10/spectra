@@ -1,3 +1,12 @@
+/**
+ * @param {{
+ *   protocolVersion?: number,
+ *   connections?: number,
+ *   lastPersistenceFailure?: null | { code: string, at: number, attempt: number },
+ *   startedAt?: number,
+ *   now?: number,
+ * }} options
+ */
 export function gatewayHealthPayload({
   protocolVersion,
   connections = 0,

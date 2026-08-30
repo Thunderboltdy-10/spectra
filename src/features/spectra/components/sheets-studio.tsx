@@ -1314,8 +1314,11 @@ export function SheetsStudio({
   const [clipboardBlock, setClipboardBlock] = useState<
     (ClipboardBlock & { cut?: boolean }) | null
   >(null);
-  const [copiedFormat, setCopiedFormat] = useState<SheetCellFormat | null>(null);
-  const [borderStyle, setBorderStyle] = useState<SheetBorderEdge["style"]>("thin");
+  const [copiedFormat, setCopiedFormat] = useState<SheetCellFormat | null>(
+    null,
+  );
+  const [borderStyle, setBorderStyle] =
+    useState<SheetBorderEdge["style"]>("thin");
   const [borderColor, setBorderColor] = useState<string | null>(null);
   const [showFormulas, setShowFormulas] = useState(false);
   const [traceReferences, setTraceReferences] = useState(false);
@@ -1328,6 +1331,12 @@ export function SheetsStudio({
   const [customFormatDraft, setCustomFormatDraft] = useState("");
   /** The formula bar, so the Formula command focuses the field a person types in. */
   const formulaInputRef = useRef<HTMLInputElement>(null);
+  // Focus is an editing state, not a DOM query. Collaboration refreshes can run
+  // effects while the browser briefly reports a different active element; a ref
+  // stays true until the input's own blur event and keeps those refreshes from
+  // replacing characters that have not been committed yet.
+  const formulaEditingRef = useRef(false);
+  const cancelFormulaCommitRef = useRef(false);
   /**
    * The live command set, read by `runCommand`. Every inspector control and grid
    * gesture dispatches through that one function, so a verb cannot exist twice.
@@ -1475,13 +1484,13 @@ export function SheetsStudio({
       !workbook.nativeBinding
         ? 0
         : workbook.sheets.reduce(
-        (count, sheet) =>
-          count +
-          Object.values(sheet.cells).filter(
-            (cell) => cell.nativeFormulaSupport === "cached-only",
-          ).length,
-        0,
-      ),
+            (count, sheet) =>
+              count +
+              Object.values(sheet.cells).filter(
+                (cell) => cell.nativeFormulaSupport === "cached-only",
+              ).length,
+            0,
+          ),
     [workbook.nativeBinding, workbook.sheets],
   );
   const staleCachedFormulaCount = useMemo(
@@ -1693,9 +1702,11 @@ export function SheetsStudio({
     const formula = activeCell?.formula;
     if (!formula) return [];
     const names = new Set(
-      [...formula.toUpperCase().matchAll(/(?:_XLFN\.)?([A-Z][A-Z0-9_.]*)\s*\(/g)].map(
-        (match) => match[1]!,
-      ),
+      [
+        ...formula
+          .toUpperCase()
+          .matchAll(/(?:_XLFN\.)?([A-Z][A-Z0-9_.]*)\s*\(/g),
+      ].map((match) => match[1]!),
     );
     return [...names].slice(0, 12).map((name) => {
       const spec = SHEETS_FUNCTION_LIBRARY.find((entry) => entry.name === name);
@@ -1722,7 +1733,8 @@ export function SheetsStudio({
     if (!traceReferences) return traced;
     const formula = activeCell?.formula;
     if (!formula) return traced;
-    const pattern = /\$?([A-Z]{1,3})\$?([1-9][0-9]*)(?::\$?([A-Z]{1,3})\$?([1-9][0-9]*))?/g;
+    const pattern =
+      /\$?([A-Z]{1,3})\$?([1-9][0-9]*)(?::\$?([A-Z]{1,3})\$?([1-9][0-9]*))?/g;
     for (const match of formula.toUpperCase().matchAll(pattern)) {
       if (traced.size > 4_000) break;
       const start = `${match[1]}${match[2]}`;
@@ -1779,7 +1791,7 @@ export function SheetsStudio({
     const nextName = selectionLabel;
     const addressChanged = syncedFormulaAddressRef.current !== activeAddress;
     syncedFormulaAddressRef.current = activeAddress;
-    const formulaFocused = document.activeElement === formulaInputRef.current;
+    const formulaFocused = formulaEditingRef.current;
     const nameFocused =
       document.activeElement?.getAttribute("aria-label") === "Name box";
     // Native/Yjs identity refreshes reconstruct `activeCell`. Re-copying the
@@ -1821,7 +1833,11 @@ export function SheetsStudio({
   }, []);
 
   const commit = useCallback(
-    (next: SheetsContent, remember = true, scope: "cells" | "state" = "cells") => {
+    (
+      next: SheetsContent,
+      remember = true,
+      scope: "cells" | "state" = "cells",
+    ) => {
       // One gate for every write in this file. A capability that is not granted
       // stops the change here rather than at each of forty call sites. Sheet
       // protection blocks cell writes but not view state, and not the toggle
@@ -3494,7 +3510,9 @@ export function SheetsStudio({
    */
   function runCommand(id: string, value?: CommandParam) {
     if (!contract) {
-      const binding = actionsRef.current.find((candidate) => candidate.id === id);
+      const binding = actionsRef.current.find(
+        (candidate) => candidate.id === id,
+      );
       if (!binding || binding.disabled) return false;
       binding.onSelect(value);
       return true;
@@ -3557,7 +3575,8 @@ export function SheetsStudio({
     let cells = result.cells;
     if (clipboardBlock.cut && mode !== "formats") {
       cells = { ...cells };
-      for (const address of Object.keys(clipboardBlock.cells)) delete cells[address];
+      for (const address of Object.keys(clipboardBlock.cells))
+        delete cells[address];
     }
     applyCells({ ...result, cells }, "Paste");
     if (clipboardBlock.cut) setClipboardBlock(null);
@@ -3616,11 +3635,20 @@ export function SheetsStudio({
   function hideSelected(axis: "row" | "column") {
     updateActiveSheet((sheet) => {
       const key = axis === "row" ? "hiddenRows" : "hiddenColumns";
-      const start = axis === "row" ? normalizedSelection.start.row : normalizedSelection.start.column;
-      const end = axis === "row" ? normalizedSelection.end.row : normalizedSelection.end.column;
+      const start =
+        axis === "row"
+          ? normalizedSelection.start.row
+          : normalizedSelection.start.column;
+      const end =
+        axis === "row"
+          ? normalizedSelection.end.row
+          : normalizedSelection.end.column;
       const hidden = new Set(sheet[key] ?? []);
       for (let index = start; index <= end; index += 1) hidden.add(index);
-      return { ...sheet, [key]: [...hidden].sort((left, right) => left - right) };
+      return {
+        ...sheet,
+        [key]: [...hidden].sort((left, right) => left - right),
+      };
     });
   }
 
@@ -3632,7 +3660,10 @@ export function SheetsStudio({
     const selection = selectionCopy();
     const header = chartFirstRowIsHeader(activeSheet, selection, calculated);
     const first = header ? selection.start.row + 1 : selection.start.row;
-    const rows: Array<{ row: number; values: Record<number, SheetCell | undefined> }> = [];
+    const rows: Array<{
+      row: number;
+      values: Record<number, SheetCell | undefined>;
+    }> = [];
     for (let row = first; row <= selection.end.row; row += 1) {
       const values: Record<number, SheetCell | undefined> = {};
       for (
@@ -3640,7 +3671,8 @@ export function SheetsStudio({
         column <= selection.end.column;
         column += 1
       )
-        values[column] = activeSheet.cells[coordinateToAddress({ row, column })];
+        values[column] =
+          activeSheet.cells[coordinateToAddress({ row, column })];
       rows.push({ row, values });
     }
     const valueAt = (entry: (typeof rows)[number], column: number) =>
@@ -3711,7 +3743,9 @@ export function SheetsStudio({
     const { rows, delimiter } = splitColumn(values);
     const widest = Math.max(...rows.map((parts) => parts.length), 1);
     if (widest < 2) {
-      setImportNotice("Nothing in that column has a comma or a tab to split on.");
+      setImportNotice(
+        "Nothing in that column has a comma or a tab to split on.",
+      );
       return;
     }
     updateActiveSheet((sheet) => {
@@ -3723,7 +3757,11 @@ export function SheetsStudio({
             column: column + index,
           });
           if (index === 0 && isPreservedFormula(cells[address])) return;
-          cells[address] = { ...cells[address], value: part, formula: undefined };
+          cells[address] = {
+            ...cells[address],
+            value: part,
+            formula: undefined,
+          };
         });
       });
       return { ...sheet, cells };
@@ -3736,7 +3774,8 @@ export function SheetsStudio({
   function insertFunctionTemplate(name: string) {
     const spec = SHEETS_FUNCTION_LIBRARY.find((entry) => entry.name === name);
     if (!spec) return;
-    const rangeText = selectedAddresses.length > 1 ? selectionLabel : `${activeAddress}`;
+    const rangeText =
+      selectedAddresses.length > 1 ? selectionLabel : `${activeAddress}`;
     const template = spec.template
       .replaceAll("{range}", rangeText)
       .replaceAll("{cell}", activeAddress);
@@ -3770,8 +3809,15 @@ export function SheetsStudio({
       return;
     }
     const addresses =
-      scope === "selection" ? selectedAddresses : Object.keys(activeSheet.cells);
-    const result = replaceInCells(activeSheet.cells, addresses, query, replaceDraft);
+      scope === "selection"
+        ? selectedAddresses
+        : Object.keys(activeSheet.cells);
+    const result = replaceInCells(
+      activeSheet.cells,
+      addresses,
+      query,
+      replaceDraft,
+    );
     applyCells(result, "Replace");
     if (result.written)
       setImportNotice(
@@ -3788,10 +3834,15 @@ export function SheetsStudio({
   }
 
   function patchActiveTable(patch: Partial<SheetTable>) {
-    const table = activeSheet.tables.find((candidate) =>
-      candidate.range === selectionLabel ||
-      Boolean(parseRange(candidate.range)) &&
-        selected(normalizeRange(parseRange(candidate.range)!), range.end.row, range.end.column),
+    const table = activeSheet.tables.find(
+      (candidate) =>
+        candidate.range === selectionLabel ||
+        (Boolean(parseRange(candidate.range)) &&
+          selected(
+            normalizeRange(parseRange(candidate.range)!),
+            range.end.row,
+            range.end.column,
+          )),
     );
     if (!table) return;
     updateActiveSheet((sheet) => ({
@@ -3808,7 +3859,9 @@ export function SheetsStudio({
       ? selected(normalizeRange(parsed), range.end.row, range.end.column)
       : false;
   });
-  const selectedChart = activeSheet.charts.find((chart) => chart.id === selectedChartId);
+  const selectedChart = activeSheet.charts.find(
+    (chart) => chart.id === selectedChartId,
+  );
   const mergedHere = (activeSheet.mergedRanges ?? []).some((label) => {
     const parsed = parseRange(label);
     return parsed
@@ -3816,8 +3869,11 @@ export function SheetsStudio({
       : false;
   });
   const hiddenTrackCount =
-    (activeSheet.hiddenRows?.length ?? 0) + (activeSheet.hiddenColumns?.length ?? 0);
-  const hiddenSheetCount = workbook.sheets.filter((sheet) => sheet.hidden).length;
+    (activeSheet.hiddenRows?.length ?? 0) +
+    (activeSheet.hiddenColumns?.length ?? 0);
+  const hiddenSheetCount = workbook.sheets.filter(
+    (sheet) => sheet.hidden,
+  ).length;
   const mountedNative = Boolean(workbook.nativeBinding);
   const sheetAddBlockedReason = mountedNative
     ? "This workbook is linked to an Excel file, and Spectra keeps its sheet list exactly as Excel wrote it. Import a copy to restructure it."
@@ -3859,7 +3915,8 @@ export function SheetsStudio({
       },
       underline: {
         active: activeCell?.format?.underline,
-        toggle: () => formatSelection({ underline: !activeCell?.format?.underline }),
+        toggle: () =>
+          formatSelection({ underline: !activeCell?.format?.underline }),
       },
       strike: {
         active: activeCell?.format?.strike,
@@ -3872,7 +3929,9 @@ export function SheetsStudio({
       alignment: {
         value: activeCell?.format?.align ?? "left",
         set: (value) =>
-          formatSelection({ align: value as NonNullable<SheetCellFormat["align"]> }),
+          formatSelection({
+            align: value as NonNullable<SheetCellFormat["align"]>,
+          }),
       },
       clear: () => clearSelectionScope("formats"),
     },
@@ -3942,7 +4001,9 @@ export function SheetsStudio({
         value: activeCell?.format?.verticalAlign ?? "bottom",
         set: (value) =>
           formatSelection({
-            verticalAlign: value as NonNullable<SheetCellFormat["verticalAlign"]>,
+            verticalAlign: value as NonNullable<
+              SheetCellFormat["verticalAlign"]
+            >,
           }),
       },
       rotation: {
@@ -3951,9 +4012,13 @@ export function SheetsStudio({
       },
       indent: {
         increase: () =>
-          formatSelection({ indent: Math.min(8, (activeCell?.format?.indent ?? 0) + 1) }),
+          formatSelection({
+            indent: Math.min(8, (activeCell?.format?.indent ?? 0) + 1),
+          }),
         decrease: () =>
-          formatSelection({ indent: Math.max(0, (activeCell?.format?.indent ?? 0) - 1) }),
+          formatSelection({
+            indent: Math.max(0, (activeCell?.format?.indent ?? 0) - 1),
+          }),
         canDecrease: (activeCell?.format?.indent ?? 0) > 0,
       },
       merge: mergeSelection,
@@ -4023,38 +4088,57 @@ export function SheetsStudio({
       ),
       setColumnWidth: resizeSelectedColumns,
       rowHeight: Math.round(
-        activeSheet.rowHeights?.[String(normalizedSelection.start.row)] ?? ROW_HEIGHT,
+        activeSheet.rowHeights?.[String(normalizedSelection.start.row)] ??
+          ROW_HEIGHT,
       ),
       setRowHeight: resizeSelectedRows,
-      autofitColumn: () => fitTrackSize("column", normalizedSelection.start.column),
+      autofitColumn: () =>
+        fitTrackSize("column", normalizedSelection.start.column),
       hideRow: () => hideSelected("row"),
       hideColumn: () => hideSelected("column"),
       unhideAll: () =>
-        updateActiveSheet((sheet) => ({ ...sheet, hiddenRows: [], hiddenColumns: [] })),
+        updateActiveSheet((sheet) => ({
+          ...sheet,
+          hiddenRows: [],
+          hiddenColumns: [],
+        })),
       hiddenCount: hiddenTrackCount,
     },
     view: {
       freezeRows: () =>
         updateActiveSheet((sheet) => ({
           ...sheet,
-          frozenRows: (sheet.frozenRows ?? 0) > 0 ? 0 : Math.min(100, freezeRowTarget),
+          frozenRows:
+            (sheet.frozenRows ?? 0) > 0 ? 0 : Math.min(100, freezeRowTarget),
         })),
       freezeColumns: () =>
         updateActiveSheet((sheet) => ({
           ...sheet,
           frozenColumns:
-            (sheet.frozenColumns ?? 0) > 0 ? 0 : Math.min(50, freezeColumnTarget),
+            (sheet.frozenColumns ?? 0) > 0
+              ? 0
+              : Math.min(50, freezeColumnTarget),
         })),
       clearFreeze: () =>
-        updateActiveSheet((sheet) => ({ ...sheet, frozenRows: 0, frozenColumns: 0 })),
+        updateActiveSheet((sheet) => ({
+          ...sheet,
+          frozenRows: 0,
+          frozenColumns: 0,
+        })),
       frozenRows: frozenRowCount,
       frozenColumns: frozenColumnCount,
-      showFormulas: { active: showFormulas, toggle: () => setShowFormulas((on) => !on) },
+      showFormulas: {
+        active: showFormulas,
+        toggle: () => setShowFormulas((on) => !on),
+      },
       gridlines: {
         active: activeSheet.showGridlines !== false,
         toggle: () =>
           updateActiveSheet(
-            (sheet) => ({ ...sheet, showGridlines: sheet.showGridlines === false }),
+            (sheet) => ({
+              ...sheet,
+              showGridlines: sheet.showGridlines === false,
+            }),
             false,
             "state",
           ),
@@ -4063,7 +4147,10 @@ export function SheetsStudio({
         active: activeSheet.showHeadings !== false,
         toggle: () =>
           updateActiveSheet(
-            (sheet) => ({ ...sheet, showHeadings: sheet.showHeadings === false }),
+            (sheet) => ({
+              ...sheet,
+              showHeadings: sheet.showHeadings === false,
+            }),
             false,
             "state",
           ),
@@ -4086,7 +4173,8 @@ export function SheetsStudio({
       hasTable: Boolean(activeTable),
       tableStyle: {
         value: activeTable?.style ?? "striped",
-        set: (style) => patchActiveTable({ style: style as SheetTable["style"] }),
+        set: (style) =>
+          patchActiveTable({ style: style as SheetTable["style"] }),
       },
       toggleTotals: {
         active: activeTable?.totalsRow ?? false,
@@ -4192,7 +4280,9 @@ export function SheetsStudio({
     sheet: {
       add: addSheet,
       canAdd: !mountedNative,
-      ...(sheetAddBlockedReason ? { addBlockedReason: sheetAddBlockedReason } : {}),
+      ...(sheetAddBlockedReason
+        ? { addBlockedReason: sheetAddBlockedReason }
+        : {}),
       rename: () => {
         setRenameDraft(activeSheet.name);
         toggleInspector("sheet");
@@ -4222,15 +4312,20 @@ export function SheetsStudio({
       tabColor: {
         value: activeSheet.tabColor ?? null,
         set: (color) =>
-          updateActiveSheet((sheet) => ({ ...sheet, tabColor: color ?? undefined })),
+          updateActiveSheet((sheet) => ({
+            ...sheet,
+            tabColor: color ?? undefined,
+          })),
       },
-      hide: () =>
-        updateActiveSheet((sheet) => ({ ...sheet, hidden: true })),
+      hide: () => updateActiveSheet((sheet) => ({ ...sheet, hidden: true })),
       canHide: workbook.sheets.filter((sheet) => !sheet.hidden).length > 1,
       showHidden: () =>
         commit({
           ...workbook,
-          sheets: workbook.sheets.map((sheet) => ({ ...sheet, hidden: undefined })),
+          sheets: workbook.sheets.map((sheet) => ({
+            ...sheet,
+            hidden: undefined,
+          })),
         }),
       hiddenSheetCount,
     },
@@ -4266,8 +4361,7 @@ export function SheetsStudio({
       open: contract?.inspector.open === "comments",
       ...(mountedNative
         ? {
-            preservedNote:
-              "Comments",
+            preservedNote: "Comments",
           }
         : {}),
     },
@@ -4353,10 +4447,14 @@ export function SheetsStudio({
                      somehow the active one, which would otherwise leave the
                      control showing a value it does not list. */
                   items={workbook.sheets
-                    .filter((sheet) => !sheet.hidden || sheet.id === activeSheet.id)
+                    .filter(
+                      (sheet) => !sheet.hidden || sheet.id === activeSheet.id,
+                    )
                     .map((sheet) => ({
                       value: sheet.id,
-                      label: sheet.hidden ? `${sheet.name} (hidden)` : sheet.name,
+                      label: sheet.hidden
+                        ? `${sheet.name} (hidden)`
+                        : sheet.name,
                     }))}
                   value={activeSheet.id}
                   onChange={showSheet}
@@ -4396,7 +4494,11 @@ export function SheetsStudio({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (!locked) commitInput(activeAddress, formulaInputRef.current?.value ?? formulaDraft);
+            if (!locked)
+              commitInput(
+                activeAddress,
+                formulaInputRef.current?.value ?? formulaDraft,
+              );
           }}
           className="contents"
         >
@@ -4451,16 +4553,28 @@ export function SheetsStudio({
                   : "value"
               }`,
             )}
+            onFocus={() => {
+              formulaEditingRef.current = true;
+              cancelFormulaCommitRef.current = false;
+            }}
             onChange={(event) => setFormulaDraft(event.target.value)}
-            onBlur={() => {
-              if (!locked) commitInput(activeAddress, formulaInputRef.current?.value ?? formulaDraft);
+            onBlur={(event) => {
+              formulaEditingRef.current = false;
+              if (cancelFormulaCommitRef.current) {
+                cancelFormulaCommitRef.current = false;
+                return;
+              }
+              if (!locked)
+                commitInput(activeAddress, event.currentTarget.value);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
-                if (!locked) commitInput(activeAddress, event.currentTarget.value);
+                if (!locked)
+                  commitInput(activeAddress, event.currentTarget.value);
               }
               if (event.key === "Escape") {
+                cancelFormulaCommitRef.current = true;
                 setFormulaDraft(cellInput(activeCell));
                 event.currentTarget.blur();
               }
@@ -4510,7 +4624,9 @@ export function SheetsStudio({
             // Hiding the headers gives their space back to the grid rather
             // than leaving two empty gutters, which is what "hide" means.
             "--sheet-row-header":
-              activeSheet.showHeadings === false ? "0px" : `${ROW_HEADER_WIDTH}px`,
+              activeSheet.showHeadings === false
+                ? "0px"
+                : `${ROW_HEADER_WIDTH}px`,
             "--sheet-column-header":
               activeSheet.showHeadings === false
                 ? "0px"
@@ -4895,7 +5011,9 @@ export function SheetsStudio({
                         onChange={(event) =>
                           setEditingValue(event.target.value)
                         }
-                        onBlur={(event) => commitInput(address, event.currentTarget.value)}
+                        onBlur={(event) =>
+                          commitInput(address, event.currentTarget.value)
+                        }
                         onKeyDown={(event) => {
                           if (event.key === "Enter") {
                             event.preventDefault();
@@ -5200,9 +5318,12 @@ export function SheetsStudio({
                     <span className={PANEL_LABEL}>Format code</span>
                     <input
                       value={
-                        customFormatDraft || (activeCell?.format?.customFormat ?? "")
+                        customFormatDraft ||
+                        (activeCell?.format?.customFormat ?? "")
                       }
-                      onChange={(event) => setCustomFormatDraft(event.target.value)}
+                      onChange={(event) =>
+                        setCustomFormatDraft(event.target.value)
+                      }
                       onBlur={() =>
                         runCommand("format.number.custom", customFormatDraft)
                       }
@@ -5273,7 +5394,9 @@ export function SheetsStudio({
                   label="Size"
                   size="sm"
                   value={String(activeCell?.format?.fontSize ?? 11)}
-                  onChange={(next) => runCommand("format.fontSize", Number(next))}
+                  onChange={(next) =>
+                    runCommand("format.fontSize", Number(next))
+                  }
                   options={["9", "10", "11", "12", "14", "16"].map((size) => ({
                     value: size,
                     label: `${size} px`,
@@ -5293,7 +5416,9 @@ export function SheetsStudio({
                         value={activeCell?.format?.[key] ?? fallback}
                         onChange={(event) =>
                           runCommand(
-                            key === "textColor" ? "format.color" : "format.fill",
+                            key === "textColor"
+                              ? "format.color"
+                              : "format.fill",
                             event.target.value,
                           )
                         }
@@ -5788,7 +5913,10 @@ export function SheetsStudio({
                   key ties on, which is what a single sort could never do.
                 </p>
                 {sortKeys.map((key, index) => (
-                  <div key={`${key.column}-${index}`} className="flex items-end gap-1.5">
+                  <div
+                    key={`${key.column}-${index}`}
+                    className="flex items-end gap-1.5"
+                  >
                     <SelectField
                       label={index === 0 ? "Then by" : ""}
                       size="sm"
@@ -5889,7 +6017,8 @@ export function SheetsStudio({
                   />
                 </label>
                 <p className="text-caption text-[var(--text-secondary)]">
-                  A note shows on hover and travels with the cell inside Spectra.
+                  A note shows on hover and travels with the cell inside
+                  Spectra.
                   {mountedNative
                     ? " This workbook keeps its Excel comments exactly as they were saved; a Spectra note is not written into that file."
                     : ""}
@@ -5981,7 +6110,9 @@ export function SheetsStudio({
                         className="sheets-function-entry"
                         onClick={() => runCommand("formula.insert", spec.name)}
                       >
-                        <span className="sheets-function-name">{spec.name}</span>
+                        <span className="sheets-function-name">
+                          {spec.name}
+                        </span>
                         <span className="sheets-function-summary">
                           {spec.summary}
                         </span>

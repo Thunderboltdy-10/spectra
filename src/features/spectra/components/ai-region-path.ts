@@ -1,5 +1,7 @@
 /** Bidirectional JSON Pointer matching for AI collaborator region highlights. */
 
+import { sheetCellEntries } from "../../../../shared/sheet-cells";
+
 const COLLECTION_KEYS: Record<string, readonly string[]> = {
   document: ["blocks"],
   flashcard_deck: ["cards"],
@@ -129,12 +131,9 @@ export function sheetsCellHighlightPaths(
 
     const sheet = sheets[sheetIndex];
     if (!sheet || typeof sheet !== "object") continue;
-    const cells = (sheet as { cells?: unknown }).cells;
-    if (!cells || typeof cells !== "object" || Array.isArray(cells)) continue;
-
-    for (const address of Object.keys(
-      cells as Record<string, unknown>,
-    ).sort()) {
+    for (const [address] of sheetCellEntries(
+      (sheet as { cells?: unknown }).cells,
+    ).sort(([left], [right]) => left.localeCompare(right))) {
       const normalizedAddress = address.trim().toUpperCase() || address;
       paths.push(
         `/sheets/${sheetIndex}/cells/${encodePointerSegment(normalizedAddress)}`,
@@ -456,10 +455,9 @@ function primaryCollectionSize(blueprintKey: string, content: unknown): number {
     if (!Array.isArray(sheets)) return 0;
     return sheets.reduce((total, sheet) => {
       if (!sheet || typeof sheet !== "object") return total;
-      const cells = (sheet as { cells?: unknown }).cells;
-      if (!cells || typeof cells !== "object" || Array.isArray(cells))
-        return total;
-      return total + Object.keys(cells as Record<string, unknown>).length;
+      return (
+        total + sheetCellEntries((sheet as { cells?: unknown }).cells).length
+      );
     }, 0);
   }
   const keys = COLLECTION_KEYS[blueprintKey];

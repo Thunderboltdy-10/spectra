@@ -45,9 +45,13 @@ describe("native collaboration gateway projection", () => {
         content: canonicalContent,
       };
 
-      expect(initializeNativeArtifactDocument(gatewayDocument, envelope)).toBe(true);
+      expect(initializeNativeArtifactDocument(gatewayDocument, envelope)).toBe(
+        true,
+      );
       expect(nativeArtifactProjection(gatewayDocument, 2)).toEqual(envelope);
-      expect(initializeNativeArtifactDocument(gatewayDocument, envelope)).toBe(false);
+      expect(initializeNativeArtifactDocument(gatewayDocument, envelope)).toBe(
+        false,
+      );
     },
   );
 
@@ -88,13 +92,94 @@ describe("native collaboration gateway projection", () => {
       schemaVersion: 2,
       content: documentYjsAdapter.project(
         documentYjsAdapter.createDocument({
-          blocks: [{ id: "canonical", type: "paragraph", text: "Canonical content" }],
+          blocks: [
+            { id: "canonical", type: "paragraph", text: "Canonical content" },
+          ],
         }),
       ),
     };
 
     expect(initializeNativeArtifactDocument(document, envelope)).toBe(true);
     expect(nativeArtifactProjection(document, 2)).toEqual(envelope);
+  });
+
+  it("preserves the canonical rich DOCX projection across gateway bootstrap", () => {
+    const canonicalDocument = documentYjsAdapter.createDocument({
+      blocks: [
+        {
+          id: "cover",
+          type: "paragraph",
+          text: "Essay coverx = 1",
+          inlineContent: [
+            { kind: "text", text: "Essay cover" },
+            {
+              kind: "image",
+              partName: "/word/media/image1.png",
+              mediaType: "image/png",
+              altText: "School crest",
+              widthEmu: 1_200_000,
+              heightEmu: 900_000,
+              placement: "inline",
+            },
+            { kind: "equation", latex: "x = 1", display: "inline" },
+          ],
+          attrs: { nativeReadOnly: true },
+        },
+        {
+          id: "results-table",
+          type: "table",
+          text: "Quantity | Value\nEnergy | E = mc^2",
+          rows: [
+            ["Quantity", "Value"],
+            ["Energy", "E = mc^2"],
+          ],
+          richRows: [
+            [
+              [{ kind: "text", text: "Quantity" }],
+              [{ kind: "text", text: "Value" }],
+            ],
+            [
+              [{ kind: "text", text: "Energy" }],
+              [{ kind: "equation", latex: "E = mc^2", display: "block" }],
+            ],
+          ],
+          attrs: { nativeReadOnly: true },
+        },
+      ],
+      outline: [],
+      nativeBinding: {
+        version: 1,
+        profile: "strict-native",
+        macroEnabled: false,
+        semanticDigest: "a".repeat(64),
+        format: "docx",
+        identityStable: true,
+        sourceArtifactId: "artifact-rich-docx",
+        sourcePayloadHash: "b".repeat(64),
+      },
+    });
+    const canonicalContent = documentYjsAdapter.project(canonicalDocument);
+    const gatewayDocument = new Y.Doc();
+    const envelope = {
+      title: "Rich essay",
+      summary: "Equations, images, and tables stay ordered",
+      tags: ["real-corpus"],
+      typeKey: "document",
+      schemaVersion: 2,
+      content: canonicalContent,
+    };
+
+    expect(initializeNativeArtifactDocument(gatewayDocument, envelope)).toBe(
+      true,
+    );
+    const projected = nativeArtifactProjection(gatewayDocument, 2);
+    expect(projected).toEqual(envelope);
+    expect(nativeChangedRegionIds(envelope, projected)).toEqual([
+      "$spectra:native-projection",
+    ]);
+
+    canonicalDocument.destroy();
+    gatewayDocument.destroy();
   });
 
   it("projects the same semantic regions that the native AI plan claimed", () => {

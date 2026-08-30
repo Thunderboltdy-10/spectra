@@ -251,6 +251,26 @@ export const storeSnapshot = internalMutation({
       throw new Error(
         "COLLABORATION_SNAPSHOT_BOUNDARY: Snapshot boundary is invalid.",
       );
+    const durableHead = await ctx.db
+      .query("collaborationUpdates")
+      .withIndex("by_room_sequence", (q) =>
+        q.eq("roomId", room._id).eq("sequence", args.throughSequence),
+      )
+      .unique();
+    const stateVectorDigest = await crypto.subtle.digest(
+      "SHA-256",
+      args.stateVector,
+    );
+    const stateVectorHash = btoa(
+      String.fromCharCode(...new Uint8Array(stateVectorDigest)),
+    )
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/, "");
+    if (!durableHead || durableHead.stateVectorHash !== stateVectorHash)
+      throw new Error(
+        "COLLABORATION_SNAPSHOT_HEAD_MISMATCH: Snapshot state is not the durable sequence head.",
+      );
     const now = Date.now();
     const snapshotId = await ctx.db.insert("collaborationSnapshots", {
       roomId: room._id,

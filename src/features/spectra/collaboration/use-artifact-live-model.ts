@@ -14,6 +14,7 @@ import {
 } from "../artifacts/registry";
 import { ArtifactRegionController } from "./region-controller";
 import {
+  canonicalJsonEqual,
   type ArtifactLiveModelSnapshot,
   type ArtifactLiveValue,
 } from "./artifact-yjs-model";
@@ -89,11 +90,7 @@ export function useArtifactLiveModel(
         );
     }, 3_000);
     return () => window.clearTimeout(timer);
-  }, [
-    collaboration.state,
-    model,
-    modelSnapshot.initialized,
-  ]);
+  }, [collaboration.state, model, modelSnapshot.initialized]);
 
   useEffect(() => {
     if (
@@ -106,9 +103,7 @@ export function useArtifactLiveModel(
       !collaboration.transport
     )
       return;
-    const liveKey = JSON.stringify(modelSnapshot.value);
-    const authoritativeKey = JSON.stringify(initialValue);
-    if (liveKey === authoritativeKey) {
+    if (canonicalJsonEqual(modelSnapshot.value, initialValue)) {
       reconciledRevisionRef.current = authoritativeRevision;
       return;
     }

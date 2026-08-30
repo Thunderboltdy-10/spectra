@@ -3,6 +3,7 @@ import {
   quizAiBoundaryNote,
   redactQuizQuestionForAI,
 } from "../quiz/experience";
+import { sheetCellEntries } from "../../../../shared/sheet-cells";
 
 export const CONTEXT_LIMITS = {
   packetCharacters: 28_000,
@@ -306,13 +307,7 @@ export function typedArtifactStructure(
   if (artifact.blueprintKey === "sheets" && Array.isArray(content.sheets)) {
     const sheets = content.sheets.slice(0, 4).map((value) => {
       const sheet = value as Record<string, unknown>;
-      const cells =
-        sheet.cells &&
-        typeof sheet.cells === "object" &&
-        !Array.isArray(sheet.cells)
-          ? (sheet.cells as Record<string, unknown>)
-          : {};
-      const entries = Object.entries(cells).slice(0, 80);
+      const entries = sheetCellEntries(sheet.cells, 80);
       return {
         id: sheet.id,
         name: text(sheet.name, 120),
@@ -703,9 +698,7 @@ export function buildBoundedContextPacket(input: {
   );
   const catalog = ranked.slice(0, CONTEXT_LIMITS.catalogArtifactCount);
   const includeCatalog = input.focusMode === "global" || broadPrompt;
-  const workspaceIndex = [
-    ...(input.workspaceIndexArtifacts ?? input.artifacts),
-  ]
+  const workspaceIndex = [...(input.workspaceIndexArtifacts ?? input.artifacts)]
     .sort(
       (left, right) =>
         (typeof right.updatedAt === "number" ? right.updatedAt : 0) -

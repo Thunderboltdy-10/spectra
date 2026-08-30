@@ -4,7 +4,7 @@ import { assertPreservationKept } from "@/features/spectra/commands/office/prese
 import { z } from "zod";
 import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
-import { sha256Payload } from "@/features/spectra/lenses/docx-lens";
+import { sha256Payload } from "@/features/spectra/lenses/payload-hash";
 import {
   fetchVerifiedNativePayload,
   fetchStoredNativeBase,
@@ -15,13 +15,17 @@ import {
   type RecentNativeOperation,
 } from "@/features/spectra/lenses/native-reconciliation";
 import {
-  xlsxLens,
   type XlsxProjection,
+  type XlsxSemanticDelta,
 } from "@/features/spectra/lenses/xlsx-lens";
 import {
-  pptxLens,
   type PptxProjection,
+  type PptxSemanticDelta,
 } from "@/features/spectra/lenses/pptx-lens";
+import {
+  registeredLens,
+  requireLensRegistration,
+} from "@/features/spectra/lenses/registry";
 import type {
   PptxOperation,
   XlsxOperation,
@@ -52,6 +56,9 @@ export {
 
 export const runtime = "nodejs";
 
+const xlsxLens = registeredLens<XlsxProjection, XlsxSemanticDelta>("xlsx");
+const pptxLens = registeredLens<PptxProjection, PptxSemanticDelta>("pptx");
+
 const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("open"), artifactId: z.string().min(1) }),
   z.object({
@@ -78,7 +85,6 @@ type WorkTruth = {
 type ArtifactTruth = { content: unknown };
 type OfficeProjection = XlsxProjection | PptxProjection;
 
-const spreadsheetFormats = new Set(["xlsx", "xlsm", "xltx", "xltm", "xlam"]);
 /* native media types are supplied by the retained payload; the route never rewrites them */
 const _mediaTypes: Record<string, string> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -97,6 +103,15 @@ const _mediaTypes: Record<string, string> = {
 
 function id(value: string) {
   return value as Id<"spectraArtifacts">;
+}
+function isSpreadsheetFormat(nativeFormat: string) {
+  const row = requireLensRegistration(nativeFormat);
+  if (row.canonicalFormat !== "xlsx" && row.canonicalFormat !== "pptx") {
+    throw new Error(
+      `The Office route cannot open ${nativeFormat}; its registered lens belongs to ${row.workType}.`,
+    );
+  }
+  return row.workType === "sheets";
 }
 function contentFor(projection: OfficeProjection, isSheet: boolean) {
   return isSheet
@@ -141,7 +156,7 @@ async function materializeOfficeArtifactAttempt(
         { workId },
       ),
     ]);
-  const isSheet = spreadsheetFormats.has(cloudTruth.nativeFormat);
+  const isSheet = isSpreadsheetFormat(cloudTruth.nativeFormat);
   let materializationTruth = cloudTruth;
   let materializationPayload = cloudPayload;
   let baseOpened = isSheet
@@ -360,7 +375,7 @@ export async function POST(request: Request) {
     const input = schema.parse(await request.json());
     const workId = id(input.artifactId);
     let cloud = await fetchVerifiedNativePayload(workId, "cloud");
-    const isSheet = spreadsheetFormats.has(cloud.truth.nativeFormat);
+    const isSheet = isSpreadsheetFormat(cloud.truth.nativeFormat);
     application = isSheet ? "Excel" : "PowerPoint";
     let baseOpened = isSheet
       ? await xlsxLens.open(cloud.payload)

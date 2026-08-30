@@ -3,7 +3,7 @@ import { resolveRelationshipTarget } from "@ariadng/office/opc";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
 import type { PresentationObject } from "../presentation/model";
-import { sha256Payload } from "./docx-lens";
+import { sha256Payload } from "./payload-hash";
 import { pptxOperationsBetween } from "./office-content";
 import type { LensCapabilitySet, LensCompatibilityProfile, LensExternalDiff, LensFidelityEntry, LensFidelityMap, LensOpenResult, LensPreservedCarry, SpectraLens } from "./types";
 import { pptxProjectionSchema, type PptxProjection, type PptxSemanticDelta } from "./projection-contracts";

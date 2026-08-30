@@ -11,6 +11,7 @@ import {
   type XlsxOperation,
   type XlsxProjection,
 } from "./projection-contracts";
+import { XlsxLensError } from "./xlsx-errors";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -299,7 +300,8 @@ export function xlsxProjectionFromContent(
           !value.formula &&
           JSON.stringify(nextValue) !== JSON.stringify(previous.value)
         )
-          throw new Error(
+          throw new XlsxLensError(
+            "XLSX_FORMULA_LITERALIZATION_BLOCKED",
             `Formula ${sheet.name}!${ref} cannot be replaced by a literal through a value edit. Edit its formula text instead.`,
           );
         return {
@@ -348,7 +350,8 @@ export function xlsxOperationsBetween(
   for (const sheet of after.sheets) {
     const previous = beforeSheets.get(sheet.id);
     if (!previous)
-      throw new Error(
+      throw new XlsxLensError(
+        "XLSX_SHEET_STRUCTURE_UNSUPPORTED",
         "Adding worksheets to a mounted Excel file is not available in strict native mode yet.",
       );
     const oldCells = new Map(previous.cells.map((cell) => [cell.ref, cell]));
@@ -382,7 +385,8 @@ export function xlsxOperationsBetween(
       }
       if (cell.formula !== old.formula) {
         if (!cell.formula)
-          throw new Error(
+          throw new XlsxLensError(
+            "XLSX_FORMULA_LITERALIZATION_BLOCKED",
             `Formula ${sheet.name}!${cell.ref} cannot be silently rewritten as a literal.`,
           );
         operations.push({

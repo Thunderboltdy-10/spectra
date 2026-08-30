@@ -38,6 +38,18 @@
 - Harness generalization: `scripts/fidelity-harness/` gains a shared contract runner; corpus layout `fixtures/<provider-or-format>/` with sidecar assertions, mirroring the Office pattern. Ghost gate (`check:capabilities`) extended: a capability claiming a connector-backed native write with no registered delta fails the build (R6).
 - Owns: `src/features/spectra/lenses/` (registry, md, csv), `scripts/fidelity-harness/`, fixtures. Does not own: provider auth or workers.
 
+### P10.I3 implementation log — 2026-08-30
+
+- Added one alias-aware `nativeFormat → SpectraLens` registry for OOXML, Markdown, and CSV; Office routes now resolve their concrete lenses through it.
+- Added a provider interchange contract that requires a provider revision, validates read/write direction, and overlays an explicit non-native conversion boundary before capability gating.
+- Added strict UTF-8 Markdown and CSV proof lenses: Markdown preserves frontmatter/wiki-links without interpreting them; CSV uses stable cell addresses and declares its single-table/no-formatting boundary.
+- Extended the build-time ghost gate so connector-native write claims must name a registered format, matching artifact family, and implemented delta kind.
+- Added the shared fixture contract runner plus asserted Markdown/CSV source, fidelity, no-op byte identity, mutation, reopen, and diff-visibility sidecars.
+- Mandatory Office runs found and repaired two pre-existing classes without changing tests: DOCX insert/delete no longer implies a full protected-wrapper reorder, and XLSX strict-native refusals retain `XlsxLensError` typing.
+- Green on the final local rerun: registry 8/8; Markdown/CSV contracts; focused Office/capability 7 files/88 tests; seam 13/13; Office fidelity; TypeScript; scoped ESLint; capability gate; secret scan.
+- `fidelity:docx` exits 1 on an unchanged harness contradiction: it forces `Heading2` on every editable fixture while the product contract correctly refuses when that native style is absent. The safe refusal and existing test remain unchanged; the known exception is recorded separately from product regressions.
+- Status: IMPLEMENTED; no verification or acceptance claimed. Ready for the serial merge queue under Pablo's removal of RC.V1 as a P10 implementation blocker; P10.V1 later re-proves Office/local and the real corpus.
+
 ## P10.V1 — Office refit regression gate (H, max)
 
 Fresh agent, local instance, `office-com` + `bridge` leases. The single question: **did the refit change anything for the proven core?**

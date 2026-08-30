@@ -6,10 +6,11 @@ import type { Id } from "../../../../../../convex/_generated/dataModel";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
   DocxLensError,
-  docxLens,
   sha256Payload,
   type DocxProjection,
+  type DocxSemanticDelta,
 } from "@/features/spectra/lenses/docx-lens";
+import { registeredLens } from "@/features/spectra/lenses/registry";
 import {
   bindDocxProjectionSource,
   docxProjectionFromContent,
@@ -27,6 +28,8 @@ import { mergeThreeWay, type MergeConflict } from "@/features/spectra/lenses/thr
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 
 export const runtime = "nodejs";
+
+const docxLens = registeredLens<DocxProjection, DocxSemanticDelta>("docx");
 
 const requestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("open"), artifactId: z.string().min(1) }),

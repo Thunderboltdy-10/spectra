@@ -1,6 +1,6 @@
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
-import { sha256Payload } from "./docx-lens";
+import { sha256Payload } from "./payload-hash";
 
 export const nativeMediaTypes: Record<string, string> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

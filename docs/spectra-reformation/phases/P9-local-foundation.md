@@ -135,3 +135,18 @@ N≥3 instances documented and startable; both accounts live on the seeded insta
 - A bounded writer audit also closed no-projection collaboration activity/recovery, legacy thread-reference deletion, and deleted-workspace provenance. Projection-bearing gateway commits continue through `syncSourceNodes`, which already synchronizes the summary.
 - Red-first parity coverage failed 5/5 before integration and passes 6/6 after it; the P9 Library/run/collaboration blast-radius suite passes 4 files / 22 tests.
 - `convex/replicas.ts` and `convex/bridgeSync.ts` remain untouched under the binding P10.I2 ownership split. No fidelity trigger path changed.
+
+### P9.I4 implementation log — 2026-08-31
+
+- Status: **IMPLEMENTED**; no verification, acceptance, or P9.V1 verdict claimed.
+- Added a local-only deterministic seed that refuses cloud/mismatched targets, requires account B in `SUPER_ADMIN_EMAILS`, invokes real `schools:create`, and verifies the full saga projection.
+- The seed writes only private runtime invitation/summary files, is idempotent for the same instance/TGC/admin tuple, and supports a non-mutating `--verify-only` pass.
+- Added the single Pablo checklist for localhost A/B sign-ins, invitation acceptance, ManageBac identity/bootstrap, Bridge pairing/import, expected screens, and state-preserving shutdown.
+- Live instance 1 reached TGC saga `ready`; account A is active `school_admin`; membershipless account B reached platform administration after composing the operator-auth repair.
+- B started and ended a labeled read-only TGC operator session; its school/mode/expiry banner was visible and no membership was created.
+- ManageBac verified all seven official personal capabilities readable and completed identity resolution, while honestly remaining `degraded`/partial with four open quarantine rows.
+- The four rows are two repeated `INTEGRATION_ROUTE_FAILED` failures for class details and class resources; SYSTEMIC class-sync coverage routes to P13.I2, with live retest in P13.V1, not P13.I4.
+- A current-source Bridge resumed the isolated journal after exposing a stale-binary protocol mismatch; `IBDP1 - Copy` reached active/Ready at 444/444 files and 419 resources, with zero op/queue rows.
+- The original `IBDP1` was never mounted or modified; local Convex data, bootstrap artifacts, Bridge journal, and saved profiles are preserved.
+- Focused tests passed 3 files / 12 tests; scoped ESLint, root TypeScript, capability ghost gate, secret scan (2,384 tracked files), release Bridge build, and diff check passed.
+- Profiles A/B, Next, Bridge, and local Convex were stopped; ports 3000–3003 and 47615 were released for P9.V1.

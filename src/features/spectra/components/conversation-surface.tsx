@@ -32,6 +32,7 @@ import { toast } from "sonner";
 import { SpectraMark } from "@/components/spectra-mark";
 import { SpectraRichContent } from "./spectra-rich-content";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
+import { spectraBus } from "../events";
 import { cn } from "@/lib/utils";
 import { SelectField } from "@/components/ui/select";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
@@ -475,8 +476,7 @@ function ArtifactConflictResolution({
         resolution,
         mergedInput,
       );
-      window.dispatchEvent(new CustomEvent("spectra:threads-changed"));
-      window.dispatchEvent(new CustomEvent("spectra:runs-changed"));
+      spectraBus.emit("threads.changed", {});
       toast.success(
         resolution === "apply"
           ? "Spectra's proposal is queued to apply."
@@ -1328,7 +1328,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
     try {
       await clearSpectraRunAgent(trace.run._id);
       setOrdinaryNext(true);
-      window.dispatchEvent(new Event("spectra:threads-changed"));
+      spectraBus.emit("threads.changed", {});
       toast.success("This thread will use ordinary Spectra next.");
     } catch (error) {
       toast.error(
@@ -1949,9 +1949,7 @@ export function ConversationSurface({
                             choiceKey,
                             choiceTitle,
                           });
-                          window.dispatchEvent(
-                            new CustomEvent("spectra:threads-changed"),
-                          );
+                          spectraBus.emit("threads.changed", {});
                           await onChoice?.({ title: choiceTitle });
                         };
                         if ("questions" in choices && choices.questions) {
@@ -2296,12 +2294,7 @@ export function ThreadConversation({
   }, [refresh, threadId]);
   useEffect(() => {
     const refreshVisibleThread = () => void refresh().catch(() => undefined);
-    window.addEventListener("spectra:threads-changed", refreshVisibleThread);
-    return () =>
-      window.removeEventListener(
-        "spectra:threads-changed",
-        refreshVisibleThread,
-      );
+    return spectraBus.on("threads.changed", refreshVisibleThread);
   }, [refresh]);
   useEffect(() => {
     const active = detail?.traces.some(

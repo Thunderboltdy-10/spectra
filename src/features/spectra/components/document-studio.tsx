@@ -124,8 +124,8 @@ import {
   blocksFromJson,
   documentContentFromJson,
   documentJsonFromContent,
-  record,
 } from "./artifact-studio";
+import { record } from "./artifact-content-model";
 import {
   artifactBlobSha256,
   downloadDocumentText,

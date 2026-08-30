@@ -15,6 +15,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { spectraBus } from "../events";
 import {
   ConversationSurface,
   ThreadConversation,
@@ -152,7 +153,7 @@ export function RunDetailPanel({
         placeInWorkspace,
         createReference,
       });
-      window.dispatchEvent(new Event("spectra:threads-changed"));
+      spectraBus.emit("threads.changed", {});
       if (navigate)
         router.push(`/chat?threadId=${encodeURIComponent(result.threadId)}`);
       else

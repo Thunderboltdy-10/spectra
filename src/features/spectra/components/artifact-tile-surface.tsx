@@ -22,6 +22,7 @@ import type { SpectraArtifact } from "../data/api";
 import type { ApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { getWorkDefinition } from "../work/registry";
 import { isArtifactTypeKey } from "../artifacts/registry";
+import { spectraBus } from "../events";
 import {
   createAutomaticWorkbenchLayout,
   collectWorkbenchTabs,
@@ -186,11 +187,7 @@ export function ArtifactTileSurface({
 
   function safeClose(artifactId: string) {
     if (dirtyIds.has(artifactId)) {
-      window.dispatchEvent(
-        new CustomEvent("spectra:request-artifact-close", {
-          detail: { artifactId },
-        }),
-      );
+      void spectraBus.command("work.requestClose", { workId: artifactId });
       return;
     }
     onCloseArtifact(artifactId);
@@ -201,11 +198,7 @@ export function ArtifactTileSurface({
       dirtyIds.has(artifact._id),
     );
     if (dirty) {
-      window.dispatchEvent(
-        new CustomEvent("spectra:request-artifact-close", {
-          detail: { artifactId: dirty._id },
-        }),
-      );
+      void spectraBus.command("work.requestClose", { workId: dirty._id });
       return;
     }
     onCloseAll();

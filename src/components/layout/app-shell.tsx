@@ -76,6 +76,7 @@ import { GlobalRouteWorkbench } from "@/features/spectra/components/global-route
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
+import { spectraBus } from "@/features/spectra/events";
 
 type AppShellProps = {
   children: ReactNode;
@@ -194,11 +195,7 @@ function ShellNavigation() {
       if (next)
         document.documentElement.dataset.spectraSidebarCollapsed = "true";
       else delete document.documentElement.dataset.spectraSidebarCollapsed;
-      window.dispatchEvent(
-        new CustomEvent("spectra:sidebar-layout", {
-          detail: { collapsed: next },
-        }),
-      );
+      spectraBus.emit("shell.sidebarLayout", { collapsed: next });
       return next;
     });
   }, []);
@@ -235,10 +232,10 @@ function ShellNavigation() {
   useEffect(() => {
     void refreshWorkspaces();
     const refresh = () => void refreshWorkspaces(true);
-    window.addEventListener("spectra:workspaces-changed", refresh);
+    const removeChanged = spectraBus.on("workspaces.changed", refresh);
     window.addEventListener("focus", refresh);
     return () => {
-      window.removeEventListener("spectra:workspaces-changed", refresh);
+      removeChanged();
       window.removeEventListener("focus", refresh);
     };
   }, [refreshWorkspaces]);
@@ -254,10 +251,10 @@ function ShellNavigation() {
         .catch(() => undefined);
     };
     refresh();
-    window.addEventListener("spectra:threads-changed", refresh);
+    const removeChanged = spectraBus.on("threads.changed", refresh);
     return () => {
       active = false;
-      window.removeEventListener("spectra:threads-changed", refresh);
+      removeChanged();
     };
   }, []);
 
@@ -317,15 +314,12 @@ function ShellNavigation() {
       if (document.visibilityState === "visible") void refreshNotifications();
     };
     window.addEventListener("focus", refreshVisible);
-    window.addEventListener("spectra:notifications-changed", refreshVisible);
+    const removeChanged = spectraBus.on("notifications.changed", refreshVisible);
     document.addEventListener("visibilitychange", refreshVisible);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshVisible);
-      window.removeEventListener(
-        "spectra:notifications-changed",
-        refreshVisible,
-      );
+      removeChanged();
       document.removeEventListener("visibilitychange", refreshVisible);
     };
   }, [refreshNotifications]);
@@ -558,9 +552,7 @@ function ShellNavigation() {
                     pathname.startsWith("/workspace")
                   ) {
                     event.preventDefault();
-                    window.dispatchEvent(
-                      new Event("spectra:navigate-workspace-home"),
-                    );
+                    void spectraBus.command("navigation.home", {});
                   }
                 }}
                 onMouseEnter={(event) => placeRailMarker(event.currentTarget)}
@@ -667,9 +659,7 @@ function ShellNavigation() {
             <button
               type="button"
               aria-label="Share current page"
-              onClick={() =>
-                window.dispatchEvent(new CustomEvent("spectra:page-share"))
-              }
+              onClick={() => void spectraBus.command("surface.share", {})}
               className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
             >
               <Share2 size={15} />
@@ -1047,13 +1037,9 @@ export function AppShell({
     setShellSidebarCollapsed(
       window.localStorage.getItem("spectra:sidebar-collapsed") === "true",
     );
-    const update = (event: Event) => {
-      const collapsed = (event as CustomEvent<{ collapsed?: boolean }>).detail
-        ?.collapsed;
-      if (typeof collapsed === "boolean") setShellSidebarCollapsed(collapsed);
-    };
-    window.addEventListener("spectra:sidebar-layout", update);
-    return () => window.removeEventListener("spectra:sidebar-layout", update);
+    return spectraBus.on("shell.sidebarLayout", ({ collapsed }) => {
+      setShellSidebarCollapsed(collapsed);
+    });
   }, []);
 
   return (
@@ -1069,9 +1055,6 @@ export function AppShell({
       )}
     >
       <KeyboardShortcutsRegistrar
-        onEscape={() => {
-          window.dispatchEvent(new CustomEvent("spectra:escape"));
-        }}
         onNewChat={() => {
           window.location.assign("/chat");
         }}

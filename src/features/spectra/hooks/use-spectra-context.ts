@@ -25,6 +25,7 @@ import {
   type SpectraThread,
   type SpectraWorkspace,
 } from "../data/api";
+import { spectraBus } from "../events";
 
 export function useSpectraContext(
   artifacts: SpectraArtifact[],
@@ -253,10 +254,10 @@ export function useSpectraContext(
           }
         })
         .catch(() => undefined);
-    window.addEventListener("spectra:threads-changed", refresh);
+    const removeChanged = spectraBus.on("threads.changed", refresh);
     return () => {
       disposed = true;
-      window.removeEventListener("spectra:threads-changed", refresh);
+      removeChanged();
     };
   }, []);
 

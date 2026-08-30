@@ -19,6 +19,7 @@ import {
   planCatchUp,
   resumeFollow,
 } from "../collaboration/follow";
+import { spectraBus } from "../events";
 
 describe("follow (collaborator/presenter/AI)", () => {
   beforeEach(() => {
@@ -30,20 +31,16 @@ describe("follow (collaborator/presenter/AI)", () => {
 
   function openEvents(): string[] {
     const opened: string[] = [];
-    window.addEventListener("spectra:open-artifact", (event) => {
-      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail
-        ?.artifactId;
-      if (artifactId) opened.push(artifactId);
+    spectraBus.handle("work.open", ({ workId }) => {
+      opened.push(workId);
     });
     return opened;
   }
 
-  function revealEvents(): Array<{ artifactId?: string; path?: string }> {
-    const revealed: Array<{ artifactId?: string; path?: string }> = [];
-    window.addEventListener("spectra:reveal-target", (event) => {
-      revealed.push(
-        (event as CustomEvent<{ artifactId?: string; path?: string }>).detail,
-      );
+  function revealEvents(): Array<{ workId: string; path?: string }> {
+    const revealed: Array<{ workId: string; path?: string }> = [];
+    spectraBus.handle("work.reveal", (detail) => {
+      revealed.push(detail);
     });
     return revealed;
   }
@@ -179,7 +176,7 @@ describe("follow (collaborator/presenter/AI)", () => {
   it("peek reveals once without engaging follow", () => {
     const revealed = revealEvents();
     expect(peekOnce({ artifactId: "art-3", path: "/cards/2" })).toBe(true);
-    expect(revealed).toEqual([{ artifactId: "art-3", path: "/cards/2" }]);
+    expect(revealed).toEqual([{ workId: "art-3", path: "/cards/2" }]);
     expect(getFollowSnapshot().target).toBeNull();
     expect(peekOnce({ artifactId: "" })).toBe(false);
   });

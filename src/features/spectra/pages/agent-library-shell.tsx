@@ -47,6 +47,7 @@ import { ProductPageHeader } from "../components/product-page-header";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import {
   addSpectraPublicAgent,
+  getSpectraArtifact,
   getSpectraArtifacts,
   getSpectraPublicAgents,
   getSpectraWorkspaces,
@@ -490,12 +491,10 @@ export function AgentLibraryShell({
     };
     const interval = window.setInterval(refreshVisible, 8_000);
     window.addEventListener("focus", refreshVisible);
-    window.addEventListener("spectra:artifacts-changed", refreshVisible);
     document.addEventListener("visibilitychange", refreshVisible);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshVisible);
-      window.removeEventListener("spectra:artifacts-changed", refreshVisible);
       document.removeEventListener("visibilitychange", refreshVisible);
     };
   }, [load]);

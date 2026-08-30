@@ -1427,18 +1427,6 @@ export function SpectraShell({
   const workspacePlacement = useTreePlacement("workspace", workspace?._id);
   const workspaceNodeId = workspacePlacement?.node.nodeId ?? null;
 
-  useEffect(() => {
-    if (!workspace) return;
-    window.dispatchEvent(
-      new CustomEvent("spectra:page-context", {
-        detail: { source: "Workspaces", title: workspace.title },
-      }),
-    );
-    return () => {
-      window.dispatchEvent(new Event("spectra:clear-page-context"));
-    };
-  }, [workspace]);
-
   /**
    * One surface, two scopes. With no workspace open the scope is the whole
    * account — that is what "Workspace" means at the root — and with one open it
@@ -1659,11 +1647,8 @@ export function SpectraShell({
     });
     const removeManageBac = spectraBus.handle(
       "managebac.sync",
-      async ({ purpose }) => {
+      async () => {
         await syncSpectraManageBac("manual");
-        window.dispatchEvent(
-          new CustomEvent("spectra:managebac-ai-sync", { detail: { purpose } }),
-        );
       },
     );
     return () => {
@@ -2371,7 +2356,7 @@ export function SpectraShell({
             },
       );
       setActiveRunPanelId(null);
-      window.dispatchEvent(new Event("spectra:threads-changed"));
+      spectraBus.emit("threads.changed", {});
     },
     onContinuationConflict: startFreshComposerThread,
     onDataChanged: refreshRunData,
@@ -2440,29 +2425,19 @@ export function SpectraShell({
   ]);
 
   useEffect(() => {
-    function onOpenArtifact(event: Event) {
-      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail
-        ?.artifactId;
+    function onOpenArtifact({ workId: artifactId }: { workId: string }) {
       const artifact = artifactId
         ? allArtifacts.find((item) => item._id === artifactId)
         : null;
       if (artifact) openArtifactPanel(artifact);
     }
-    function onOpenWorkspace(event: Event) {
-      const workspaceId = (event as CustomEvent<{ workspaceId?: string }>)
-        .detail?.workspaceId;
-      if (workspaceId) goToWorkspaceHub(workspaceId);
-    }
-    function onAiNavigate(event: Event) {
+    function onAiNavigate(detail: {
+      actorId?: string;
+      route: "library" | "calendar" | "settings" | "workspace" | "artifact";
+      target?: string;
+    }) {
       if (!isFollowingAi()) return;
       const followed = getFollowedAiActorId();
-      const detail = (
-        event as CustomEvent<{
-          route?: string;
-          target?: string;
-          actorId?: string;
-        }>
-      ).detail;
       if (followed && detail?.actorId && detail.actorId !== followed) return;
       if (followed && !detail?.actorId) return;
       if (!detail?.route) return;
@@ -2479,24 +2454,10 @@ export function SpectraShell({
         router.push("/calendar");
       }
     }
-    function onAsk(event: Event) {
-      const prompt = (
-        event as CustomEvent<{ prompt?: string }>
-      ).detail?.prompt?.trim();
-      if (prompt) void runEngine.run(prompt);
-    }
-    const tile = () => openSelectedArtifactsInTiles();
-    const focusSet = () => {
-      openSelectedArtifactsInTiles();
-      setWorkSetIsolated(true);
-    };
-    const clear = () => clearSelection();
     const refresh = () => {
       void loadOverview(selectedWorkspaceId, true);
     };
-    const refreshActivatedArtifact = (event: Event) => {
-      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail
-        ?.artifactId;
+    const refreshActivatedArtifact = ({ artifactId }: { artifactId: string }) => {
       if (!artifactId) return;
       void getSpectraArtifact(artifactId)
         .then(({ artifact }) => {
@@ -2526,56 +2487,31 @@ export function SpectraShell({
           void loadOverview(selectedWorkspaceId, true);
         });
     };
-    const createWorkspaceFromShell = () => setWorkspaceCreateOpen(true);
     const navigateWorkspaceHome = () => goToHomeHub();
     const shareFromShell = () => {
       if (studio.activeArtifact) return;
       if (selectedWorkspaceId && workspaceHeader) setWorkspaceShareOpen(true);
       else toast.info("Open a workspace to share it with school members.");
     };
-    window.addEventListener("spectra:open-artifact", onOpenArtifact);
-    window.addEventListener("spectra:open-workspace", onOpenWorkspace);
-    window.addEventListener("spectra:ai-navigate", onAiNavigate);
-    window.addEventListener("spectra:ask", onAsk);
-    window.addEventListener("spectra:tile-selected", tile);
-    window.addEventListener("spectra:focus-set", focusSet);
-    window.addEventListener("spectra:clear-selection", clear);
-    window.addEventListener("spectra:refresh", refresh);
-    window.addEventListener(
-      "spectra:artifact-lens-activated",
+    const removeOpenArtifact = spectraBus.handle("work.open", onOpenArtifact);
+    const removeAiNavigate = spectraBus.handle("navigation.show", onAiNavigate);
+    const removeLensActivated = spectraBus.on(
+      "artifact.lensActivated",
       refreshActivatedArtifact,
     );
-    window.addEventListener(
-      "spectra:create-workspace",
-      createWorkspaceFromShell,
-    );
-    window.addEventListener(
-      "spectra:navigate-workspace-home",
+    const removeRefresh = spectraBus.on("workspace.refreshRequested", refresh);
+    const removeNavigateHome = spectraBus.handle(
+      "navigation.home",
       navigateWorkspaceHome,
     );
-    window.addEventListener("spectra:page-share", shareFromShell);
+    const removeShare = spectraBus.handle("surface.share", shareFromShell);
     return () => {
-      window.removeEventListener("spectra:open-artifact", onOpenArtifact);
-      window.removeEventListener("spectra:open-workspace", onOpenWorkspace);
-      window.removeEventListener("spectra:ai-navigate", onAiNavigate);
-      window.removeEventListener("spectra:ask", onAsk);
-      window.removeEventListener("spectra:tile-selected", tile);
-      window.removeEventListener("spectra:focus-set", focusSet);
-      window.removeEventListener("spectra:clear-selection", clear);
-      window.removeEventListener("spectra:refresh", refresh);
-      window.removeEventListener(
-        "spectra:artifact-lens-activated",
-        refreshActivatedArtifact,
-      );
-      window.removeEventListener(
-        "spectra:create-workspace",
-        createWorkspaceFromShell,
-      );
-      window.removeEventListener(
-        "spectra:navigate-workspace-home",
-        navigateWorkspaceHome,
-      );
-      window.removeEventListener("spectra:page-share", shareFromShell);
+      removeOpenArtifact();
+      removeAiNavigate();
+      removeLensActivated();
+      removeRefresh();
+      removeNavigateHome();
+      removeShare();
     };
     // Event handlers intentionally read the current shell closures after each render.
   });
@@ -3109,7 +3045,7 @@ export function SpectraShell({
             : "declineShareInvitation",
         invitationId,
       });
-      window.dispatchEvent(new Event("spectra:notifications-changed"));
+      spectraBus.emit("notifications.changed", {});
       toast.success(
         response === "accept"
           ? "Shared work added to your Library."
@@ -4210,7 +4146,7 @@ export function SpectraShell({
                       runId: result.runId,
                       workspaceId: selectedWorkspaceId,
                     });
-                    window.dispatchEvent(new Event("spectra:threads-changed"));
+                    spectraBus.emit("threads.changed", {});
                   } catch (error) {
                     toast.message(
                       describeFailure(error, {

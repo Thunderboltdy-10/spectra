@@ -30,6 +30,7 @@ import {
   type DragEvent,
 } from "react";
 import { useNow } from "@/hooks/use-now";
+import { spectraBus } from "../events";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -1491,11 +1492,10 @@ path={eventPath(event.id)}
                     key={artifact._id}
                     type="button"
                     onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent("spectra:open-artifact", {
-                          detail: { artifactId: artifact._id },
-                        }),
-                      )
+                      void spectraBus.command("work.open", {
+                        workId: artifact._id,
+                        surface: "panel",
+                      })
                     }
                   >
                     <Link2 className="h-4 w-4" />

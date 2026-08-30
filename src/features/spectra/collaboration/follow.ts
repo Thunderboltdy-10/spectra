@@ -20,6 +20,7 @@
  */
 
 import { useSyncExternalStore } from "react";
+import { spectraBus } from "../events";
 
 import {
   disengageFollowAi,
@@ -103,18 +104,15 @@ function dispatchOpen(artifactId: string): void {
   }
   lastDispatchedArtifactId = artifactId;
   programmaticOpenAt = Date.now();
-  window.dispatchEvent(
-    new CustomEvent("spectra:open-artifact", { detail: { artifactId } }),
-  );
+  void spectraBus.command("work.open", { workId: artifactId, surface: "panel" });
 }
 
 function dispatchReveal(artifactId: string, path?: string): void {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent("spectra:reveal-target", {
-      detail: { artifactId, ...(path ? { path } : {}) },
-    }),
-  );
+  void spectraBus.command("work.reveal", {
+    workId: artifactId,
+    ...(path ? { path } : {}),
+  });
 }
 
 /**

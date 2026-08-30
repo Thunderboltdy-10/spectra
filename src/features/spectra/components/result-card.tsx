@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { IconAction, type SpectraCardState } from "./card-system";
 import type { ResultCardStreamView } from "../ai/stream-events";
 import { clearSpectraRunAgent, postSpectra } from "../data/api";
+import { spectraBus } from "../events";
 
 export type ResultCardView = ResultCardStreamView;
 
@@ -49,7 +50,7 @@ function ProvenanceLine({ card }: { card: ResultCardView }) {
     try {
       await clearSpectraRunAgent(card.runId);
       setOrdinaryNext(true);
-      window.dispatchEvent(new Event("spectra:threads-changed"));
+      spectraBus.emit("threads.changed", {});
       toast.success("This thread will use ordinary Spectra next.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not change the thread agent.");

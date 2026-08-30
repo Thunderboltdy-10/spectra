@@ -105,6 +105,7 @@ import {
   importPresentationFile,
 } from "../presentation/io";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { spectraBus } from "../events";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { ArtifactWorkbar, WorkbarItemSelector } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
@@ -1503,18 +1504,14 @@ export function PresentationStudio({
   // Follow AI: a reveal request names a slide path; switch to that slide so
   // the studio's own scroll-reveal can find the exact target afterwards.
   useEffect(() => {
-    function onReveal(event: Event) {
-      const detail = (
-        event as CustomEvent<{ artifactId?: string; path?: string }>
-      ).detail;
-      if (detail?.artifactId !== artifactId || !detail.path) return;
+    function onReveal(detail: { workId: string; path?: string }) {
+      if (detail.workId !== artifactId || !detail.path) return;
       const match = /^\/slides\/(\d+)/.exec(detail.path);
       if (!match) return;
       const slide = deck.slides[Number(match[1])];
       if (slide && slide.id !== activeSlideId) setActiveSlideId(slide.id);
     }
-    window.addEventListener("spectra:reveal-target", onReveal);
-    return () => window.removeEventListener("spectra:reveal-target", onReveal);
+    return spectraBus.handle("work.reveal", onReveal);
   }, [artifactId, activeSlideId, deck.slides]);
   useEffect(() => {
     let active = true;

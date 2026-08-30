@@ -29,6 +29,7 @@ import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { SpectraMark } from "@/components/spectra-mark";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
+import { spectraBus } from "../events";
 import { ConversationSurface } from "../components/conversation-surface";
 import { CommandBar } from "../components/command-bar";
 import { ComposerArtifactDock } from "../components/composer-artifact-dock";
@@ -169,7 +170,7 @@ export function ChatShell() {
       return [...next.values()];
     });
     if (nextThreadId === activeThreadRef.current) setDetail(selected);
-    window.dispatchEvent(new Event("spectra:threads-changed"));
+    spectraBus.emit("threads.changed", {});
     return { threadFound: !nextThreadId || Boolean(selected) };
   }, []);
 
@@ -404,43 +405,8 @@ export function ChatShell() {
   });
 
   useEffect(() => {
-    function onOpenArtifact(event: Event) {
-      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail
-        ?.artifactId;
-      if (artifactId) openArtifact(artifactId);
-    }
-    function onOpenWorkspace(event: Event) {
-      const workspaceId = (event as CustomEvent<{ workspaceId?: string }>)
-        .detail?.workspaceId;
-      if (workspaceId) setChatWorkspaceId(workspaceId);
-    }
-    function onClearSelection() {
-      clearExplicitContext();
-      setFocusModeOverride(null);
-    }
-    function onAsk(event: Event) {
-      const prompt = (
-        event as CustomEvent<{ prompt?: string }>
-      ).detail?.prompt?.trim();
-      if (prompt) void runEngine.run(prompt);
-    }
-    function onContinueThread(event: Event) {
-      const id = (event as CustomEvent<{ threadId?: string }>).detail?.threadId;
-      if (id) selectThread(id);
-    }
-    window.addEventListener("spectra:open-artifact", onOpenArtifact);
-    window.addEventListener("spectra:open-workspace", onOpenWorkspace);
-    window.addEventListener("spectra:ask", onAsk);
-    window.addEventListener("spectra:clear-selection", onClearSelection);
-    window.addEventListener("spectra:continue-thread", onContinueThread);
-    return () => {
-      window.removeEventListener("spectra:open-artifact", onOpenArtifact);
-      window.removeEventListener("spectra:open-workspace", onOpenWorkspace);
-      window.removeEventListener("spectra:ask", onAsk);
-      window.removeEventListener("spectra:clear-selection", onClearSelection);
-      window.removeEventListener("spectra:continue-thread", onContinueThread);
-    };
-  });
+    return spectraBus.handle("work.open", ({ workId }) => openArtifact(workId));
+  }, [openArtifact]);
 
   useEffect(() => {
     const prompt = requestedPrompt?.trim();

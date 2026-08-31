@@ -12,6 +12,7 @@ import {
   findPrimaryNode,
   placeSourceNode,
   purgeSourceNodes,
+  syncArtifactSummary,
   syncSourceNodes,
 } from "./orgTreeShared";
 import { incrementOperationalCounter } from "./operationalCounters";
@@ -693,6 +694,7 @@ export const migrateLegacyThreadReferences = internalMutation({
         ...links.map((link) => ctx.db.delete(link._id)),
       ]);
       await ctx.db.delete(artifact._id);
+      await syncArtifactSummary(ctx, artifact._id);
       removed += 1;
     }
     return {

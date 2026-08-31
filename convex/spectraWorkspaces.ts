@@ -24,6 +24,7 @@ import {
   moveNode,
   placeSourceNode,
   relativeFolderPath,
+  syncArtifactSummary,
   syncSourceNodes,
   workspaceContextNodes,
 } from "./orgTreeShared";
@@ -655,6 +656,7 @@ export const permanentlyDelete = mutation({
           await ctx.db.patch(artifact, {
             createdFrom: { ...document.createdFrom, workspaceId: undefined },
           });
+          await syncArtifactSummary(ctx, artifact);
         }
       }
     }

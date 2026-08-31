@@ -260,12 +260,12 @@ async function terminatePid(pid) {
   }
 }
 
-async function portIsFree(port) {
+async function portIsFree(port, host = "127.0.0.1") {
   return new Promise((resolveProbe) => {
     const server = createServer();
     server.unref();
     server.once("error", () => resolveProbe(false));
-    server.listen({ host: "127.0.0.1", port }, () => {
+    server.listen({ host, port }, () => {
       server.close(() => resolveProbe(true));
     });
   });
@@ -274,7 +274,8 @@ async function portIsFree(port) {
 async function assertPortsFree(ports) {
   for (const [name, port] of Object.entries(ports)) {
     if (name === "blockStart") continue;
-    if (!(await portIsFree(port))) {
+    const host = name === "web" ? "localhost" : "127.0.0.1";
+    if (!(await portIsFree(port, host))) {
       throw new Error(`Instance port ${port} (${name}) is already in use.`);
     }
   }
@@ -468,9 +469,9 @@ async function addInstance(instanceId, options, environment) {
   );
   process.stdout.write(
     `Local instance ${instanceId} is ready to configure.\n` +
-      `  Web:   http://127.0.0.1:${ports.web}\n` +
+      `  Web:   http://localhost:${ports.web}\n` +
       `  Convex: http://127.0.0.1:${ports.convexCloud}\n` +
-      `  Collab: ws://127.0.0.1:${ports.web}/_spectra/realtime\n` +
+      `  Collab: ws://localhost:${ports.web}/_spectra/realtime\n` +
       `  Env:    ${paths.appEnv}\n` +
       `  Data:   ${paths.convexState}\n`,
   );
@@ -612,7 +613,7 @@ async function startInstance(instanceId, options, environment) {
         "Next.js server",
         async () => {
           const text = await fetchText(
-            `http://127.0.0.1:${ports.web}/api/health`,
+          `http://localhost:${ports.web}/api/health`,
           );
           if (!text) return false;
           try {
@@ -631,7 +632,7 @@ async function startInstance(instanceId, options, environment) {
 
   process.stdout.write(
     `\nSpectra local instance ${instanceId} is ready.\n` +
-      `  App:       http://127.0.0.1:${ports.web}\n` +
+      `  App:       http://localhost:${ports.web}\n` +
       `  Convex:    http://127.0.0.1:${ports.convexCloud}\n` +
       `  Dashboard: http://127.0.0.1:${ports.convexCloud}/_system/frontend\n` +
       `  Bridge:    SPECTRA_CONVEX_URL=http://127.0.0.1:${ports.convexCloud}\n` +
@@ -690,7 +691,7 @@ async function statusInstance(instanceId, environment) {
   );
   process.stdout.write(
     `Local instance ${instanceId}: ${running ? "running" : "stopped"}\n` +
-      `  App:    http://127.0.0.1:${manifest.ports.web}\n` +
+      `  App:    http://localhost:${manifest.ports.web}\n` +
       `  Convex: http://127.0.0.1:${manifest.ports.convexCloud}\n` +
       `  Env:    ${paths.appEnv}\n` +
       `  Data:   ${paths.convexState}\n`,

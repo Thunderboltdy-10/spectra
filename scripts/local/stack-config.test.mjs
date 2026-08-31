@@ -69,11 +69,14 @@ describe("local stack instance configuration", () => {
   it("derives every local-facing URL from the instance block", () => {
     const env = derivedInstanceEnv(2, portsForInstance(2));
 
-    expect(env.NEXT_PUBLIC_APP_URL).toBe("http://127.0.0.1:3020");
+    expect(env.SPECTRA_WEB_HOST).toBe("localhost");
+    expect(env.NEXT_PUBLIC_APP_URL).toBe("http://localhost:3020");
+    expect(env.SPECTRA_APP_URL).toBe("http://localhost:3020");
+    expect(env.SPECTRA_APP_ORIGIN).toBe("http://localhost:3020");
     expect(env.NEXT_PUBLIC_CONVEX_URL).toBe("http://127.0.0.1:3022");
     expect(env.NEXT_PUBLIC_CONVEX_SITE_URL).toBe("http://127.0.0.1:3023");
     expect(env.NEXT_PUBLIC_SPECTRA_COLLAB_URL).toBe(
-      "ws://127.0.0.1:3020/_spectra/realtime",
+      "ws://localhost:3020/_spectra/realtime",
     );
     expect(env.SPECTRA_CONVEX_URL).toBe(env.NEXT_PUBLIC_CONVEX_URL);
   });

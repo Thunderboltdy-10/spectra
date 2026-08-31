@@ -145,11 +145,11 @@ export function upsertEnv(text, updates) {
 
 export function derivedInstanceEnv(instanceId, ports) {
   const id = normalizeInstanceId(instanceId);
-  const appUrl = `http://127.0.0.1:${ports.web}`;
+  const appUrl = `http://localhost:${ports.web}`;
   const convexUrl = `http://127.0.0.1:${ports.convexCloud}`;
   return {
     SPECTRA_LOCAL_INSTANCE: String(id),
-    SPECTRA_WEB_HOST: "127.0.0.1",
+    SPECTRA_WEB_HOST: "localhost",
     SPECTRA_WEB_PORT: String(ports.web),
     SPECTRA_COLLAB_HOST: "127.0.0.1",
     SPECTRA_COLLAB_PORT: String(ports.collaboration),
@@ -158,7 +158,7 @@ export function derivedInstanceEnv(instanceId, ports) {
     SPECTRA_APP_ORIGIN: appUrl,
     NEXT_PUBLIC_CONVEX_URL: convexUrl,
     NEXT_PUBLIC_CONVEX_SITE_URL: `http://127.0.0.1:${ports.convexSite}`,
-    NEXT_PUBLIC_SPECTRA_COLLAB_URL: `ws://127.0.0.1:${ports.web}/_spectra/realtime`,
+    NEXT_PUBLIC_SPECTRA_COLLAB_URL: `ws://localhost:${ports.web}/_spectra/realtime`,
     SPECTRA_CONVEX_URL: convexUrl,
   };
 }

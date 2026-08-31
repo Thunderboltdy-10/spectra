@@ -74,7 +74,9 @@ The harness derives and overwrites `CONVEX_DEPLOYMENT`,
 `NEXT_PUBLIC_APP_URL`, `SPECTRA_APP_URL`, `SPECTRA_APP_ORIGIN`,
 `NEXT_PUBLIC_SPECTRA_COLLAB_URL`, `SPECTRA_CONVEX_URL`, and the web/collab
 ports. `SPECTRA_APP_URL` is the loopback Next.js URL so local Convex scheduler
-callbacks stay on the same instance.
+callbacks stay on the same instance. The browser-facing app/origin and proxied
+collaboration URLs use `localhost` (required for the configured Clerk callback);
+the Convex API/site and internal collaboration listener stay on `127.0.0.1`.
 
 Before the final `convex dev` starts, the harness copies the backend allowlist
 from `env.local` into that instance with `convex env set --from-file`: the Clerk

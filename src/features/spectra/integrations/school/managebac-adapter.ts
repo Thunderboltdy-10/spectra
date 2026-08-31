@@ -38,6 +38,8 @@ const kindMap: Record<string, SchoolEntityKind> = {
   timetable_event: "timetable_event",
   cas: "cas_experience",
   cas_experience: "cas_experience",
+  cas_reflection: "cas_reflection",
+  cas_evidence: "cas_evidence",
   attendance: "attendance",
   message: "message",
 };
@@ -54,9 +56,7 @@ function timestamp(value: unknown) {
 }
 
 /** ManageBac is the first provider behind the neutral school-source contract. */
-export class ManageBacSchoolSourceAdapter
-  implements SchoolSourceAdapter<ManageBacRecord>
-{
+export class ManageBacSchoolSourceAdapter implements SchoolSourceAdapter<ManageBacRecord> {
   readonly provider = "managebac";
 
   constructor(

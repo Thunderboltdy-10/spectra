@@ -14,14 +14,16 @@ import {
   GraduationCap,
   LoaderCircle,
   MessageSquareText,
+  PenLine,
   RefreshCw,
   School,
   ShieldCheck,
   Sparkles,
   Users,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { useSpectraRun } from "../ai/use-spectra-run";
 import {
   AuxiliaryRail,
   AuxiliaryRailTrigger,
@@ -34,6 +36,7 @@ import {
   CapabilityTruthState,
 } from "../integrations/status/capability-truth";
 import { syncSpectraManageBac } from "../data/api";
+import { spectraBus } from "../events";
 
 type Capability = {
   _id: string;
@@ -85,6 +88,46 @@ type ClassCandidate = {
   workspaceId: string | null;
 };
 
+type CasStrand = "creativity" | "activity" | "service";
+
+type CasExperience = {
+  recordId: string;
+  providerRecordId: string;
+  title: string;
+  description: string;
+  status: string;
+  startAt?: number;
+  endAt?: number;
+  strands: Record<CasStrand, boolean>;
+  hours: Partial<Record<CasStrand, number>>;
+  targetHours?: Partial<Record<CasStrand | "total", number>>;
+  linkedReflections: Array<{
+    artifactId: string;
+    title: string;
+    summary?: string;
+    status: string;
+    updatedAt: number;
+  }>;
+  fetchedAt: number;
+  sourceModifiedAt?: number;
+  provenanceUrl?: string;
+};
+
+type CasPayload = {
+  connected: boolean;
+  identityRequired: boolean;
+  stale: boolean;
+  experiences: CasExperience[];
+  lastSyncAt?: number;
+  boundary: {
+    experiences: { sync: string };
+    reflections: { sync: string; providerPath: null };
+    evidence: { sync: string; providerPath: null };
+  };
+};
+
+type CasDraftTarget = { artifactId: string; prompt: string };
+
 type SchoolPayload = {
   admin: boolean;
   integration: null | {
@@ -99,6 +142,7 @@ type SchoolPayload = {
   records: RecordRow[];
   conflicts: unknown[];
   classes: ClassCandidate[];
+  cas: CasPayload;
 };
 
 type SectionKey =
@@ -213,6 +257,22 @@ function formatDate(value?: number) {
   }).format(value);
 }
 
+function formatDay(value?: number) {
+  if (!value) return "Not supplied";
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(value);
+}
+
+function humanize(value: string) {
+  if (!value || value === "status_not_supplied") return "Status not supplied";
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 async function manageBacPost(body: Record<string, unknown>) {
   const response = await fetch("/api/spectra/managebac", {
     method: "POST",
@@ -223,6 +283,39 @@ async function manageBacPost(body: Record<string, unknown>) {
   if (!response.ok)
     throw new Error(payload?.error?.message ?? "School refresh failed.");
   return payload.data ?? payload;
+}
+
+function CasDraftRunner({
+  target,
+  onFailure,
+}: {
+  target: CasDraftTarget;
+  onFailure: (message: string) => void;
+}) {
+  const started = useRef(false);
+  const runEngine = useSpectraRun({
+    surface: "artifact",
+    artifactId: target.artifactId,
+    focusMode: "artifact",
+    currentView: "school-data",
+    observeDurableRuns: false,
+    onOpenArtifact: async (workId) => {
+      await spectraBus.command("work.open", { workId, surface: "panel" });
+    },
+  });
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void runEngine.run(target.prompt).then((accepted) => {
+      if (!accepted)
+        onFailure(
+          "The reflection document was created, but Spectra could not start the drafting run.",
+        );
+    });
+  }, [onFailure, runEngine, target.prompt]);
+
+  return null;
 }
 
 function stateFor(
@@ -312,19 +405,29 @@ export function SchoolDataShell() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [casDraftTarget, setCasDraftTarget] = useState<CasDraftTarget | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [overviewResponse, classesResponse] = await Promise.all([
-        fetch("/api/spectra/managebac"),
-        fetch("/api/spectra/managebac?action=myClasses"),
-      ]);
+      const [overviewResponse, classesResponse, casResponse] =
+        await Promise.all([
+          fetch("/api/spectra/managebac"),
+          fetch("/api/spectra/managebac?action=myClasses"),
+          fetch("/api/spectra/managebac?action=cas"),
+        ]);
       const overview = await overviewResponse.json();
       const classes = await classesResponse.json();
+      const cas = await casResponse.json();
       if (!overviewResponse.ok)
         throw new Error(overview?.error?.message ?? "Could not load School.");
+      if (!casResponse.ok)
+        throw new Error(
+          cas?.error?.message ?? "Could not load CAS experiences.",
+        );
       const data = overview.data ?? {};
       setPayload({
         admin: overview.admin === true,
@@ -337,6 +440,23 @@ export function SchoolDataShell() {
         classes: Array.isArray(classes?.data?.classes)
           ? classes.data.classes
           : [],
+        cas: {
+          connected: cas?.data?.connected === true,
+          identityRequired: cas?.data?.identityRequired === true,
+          stale: cas?.data?.stale !== false,
+          experiences: Array.isArray(cas?.data?.experiences)
+            ? cas.data.experiences
+            : [],
+          lastSyncAt: cas?.data?.lastSyncAt,
+          boundary: cas?.data?.boundary ?? {
+            experiences: { sync: "verified" },
+            reflections: {
+              sync: "spectra_native_only",
+              providerPath: null,
+            },
+            evidence: { sync: "not_available", providerPath: null },
+          },
+        },
       });
     } catch (nextError) {
       setError(
@@ -370,6 +490,43 @@ export function SchoolDataShell() {
     }
   }
 
+  async function createCasReflection(recordId: string, draftWithAi: boolean) {
+    const key = `cas:${recordId}:${draftWithAi ? "ai" : "manual"}`;
+    setBusy(key);
+    setError("");
+    try {
+      const result = (await manageBacPost({
+        action: "createCasReflection",
+        recordId,
+      })) as { artifactId?: string; prompt?: string };
+      if (!result.artifactId)
+        throw new Error("The reflection document could not be created.");
+      await spectraBus.command("work.open", {
+        workId: result.artifactId,
+        surface: "panel",
+      });
+      if (draftWithAi) {
+        if (!result.prompt)
+          throw new Error(
+            "The reflection was created, but its drafting context is unavailable.",
+          );
+        setCasDraftTarget({
+          artifactId: result.artifactId,
+          prompt: result.prompt,
+        });
+      }
+      await load();
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "The CAS reflection could not be created.",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
   const liveRecords = useMemo(
     () => (payload?.records ?? []).filter((record) => !record.tombstone),
     [payload?.records],
@@ -386,6 +543,13 @@ export function SchoolDataShell() {
 
   return (
     <main className="spectra-wave-y h-full min-h-0 overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)]">
+      {casDraftTarget ? (
+        <CasDraftRunner
+          key={casDraftTarget.artifactId}
+          target={casDraftTarget}
+          onFailure={setError}
+        />
+      ) : null}
       <div className="w-full px-4 py-6 sm:px-6 lg:px-8 xl:px-10">
         <ProductPageHeader
           title="School"
@@ -405,9 +569,9 @@ export function SchoolDataShell() {
           <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate font-display text-[20px] font-semibold tracking-[-0.02em]">
-                {activeSection.label}
-              </h2>
+                <h2 className="truncate font-display text-[20px] font-semibold tracking-[-0.02em]">
+                  {activeSection.label}
+                </h2>
               </div>
               <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
                 {payload?.integration
@@ -493,6 +657,13 @@ export function SchoolDataShell() {
                   <Classes payload={payload} busy={busy} run={run} />
                 ) : active === "sync" ? (
                   <SyncStatus payload={payload} />
+                ) : active === "cas" ? (
+                  <CasSection
+                    overview={payload.cas}
+                    state={activeState}
+                    busy={busy}
+                    onCreate={createCasReflection}
+                  />
                 ) : (
                   <RecordSection
                     section={activeSection}
@@ -600,8 +771,8 @@ function Overview({
             <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
               {payload.classes.length} verified{" "}
               {payload.classes.length === 1 ? "class" : "classes"} arrived from
-              school. None of them currently have a deadline or an upcoming
-              item attached.
+              school. None of them currently have a deadline or an upcoming item
+              attached.
             </p>
             <button
               type="button"
@@ -735,6 +906,279 @@ function Classes({
   );
 }
 
+function CasSection({
+  overview,
+  state,
+  busy,
+  onCreate,
+}: {
+  overview: CasPayload;
+  state: CapabilityState;
+  busy: string;
+  onCreate: (recordId: string, draftWithAi: boolean) => Promise<void>;
+}) {
+  const [strand, setStrand] = useState<"all" | CasStrand>("all");
+  const experiences = useMemo(
+    () =>
+      strand === "all"
+        ? overview.experiences
+        : overview.experiences.filter(
+            (experience) => experience.strands[strand],
+          ),
+    [overview.experiences, strand],
+  );
+  const filters: Array<{ key: "all" | CasStrand; label: string }> = [
+    { key: "all", label: "All experiences" },
+    { key: "creativity", label: "Creativity" },
+    { key: "activity", label: "Activity" },
+    { key: "service", label: "Service" },
+  ];
+
+  return (
+    <section className="mt-5">
+      <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
+          <div>
+            <strong className="block text-[11px]">Where CAS data lives</strong>
+            <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--text-secondary)]">
+              ManageBac supplies the experiences shown here. Its reflection and
+              evidence routes are not verified, so reflections created here stay
+              in Spectra and attachments are not synced back.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {overview.identityRequired ? (
+        <div className="mt-4 rounded-[10px] bg-[var(--bg-secondary)] px-5 py-7">
+          <p className="text-[13px] font-medium">
+            Connect your student identity
+          </p>
+          <p className="mt-1 max-w-xl text-[11px] text-[var(--text-secondary)]">
+            CAS experiences are personal school records. Verify your ManageBac
+            identity before viewing or linking reflections.
+          </p>
+        </div>
+      ) : null}
+
+      {!overview.identityRequired &&
+      overview.experiences.length === 0 &&
+      state.kind === "available" ? (
+        <div className="mt-4 rounded-[10px] bg-[var(--bg-secondary)] px-5 py-7">
+          <p className="text-[13px] font-medium">
+            No CAS experiences in the latest sync
+          </p>
+          <p className="mt-1 max-w-xl text-[11px] text-[var(--text-secondary)]">
+            The verified experience route completed and returned no current
+            experiences for this student.
+          </p>
+        </div>
+      ) : null}
+
+      {overview.experiences.length ? (
+        <>
+          <div
+            className="mt-5 flex flex-wrap gap-2"
+            role="group"
+            aria-label="Filter CAS experiences by strand"
+          >
+            {filters.map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                aria-pressed={strand === filter.key}
+                onClick={() => setStrand(filter.key)}
+                className={cn(
+                  "h-8 rounded-lg border px-3 text-[11px] font-medium transition-colors active:translate-y-px",
+                  strand === filter.key
+                    ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]"
+                    : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                )}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="mt-4 px-1 text-[11px] text-[var(--text-secondary)]">
+            {experiences.length} experience{experiences.length === 1 ? "" : "s"}
+            {strand === "all" ? "" : ` in ${humanize(strand)}`}
+          </p>
+
+          {experiences.length ? (
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              {experiences.map((experience) => {
+                const manualKey = `cas:${experience.recordId}:manual`;
+                const aiKey = `cas:${experience.recordId}:ai`;
+                const strands: Array<{ key: CasStrand; label: string }> = [
+                  { key: "creativity", label: "Creativity" },
+                  { key: "activity", label: "Activity" },
+                  { key: "service", label: "Service" },
+                ];
+                return (
+                  <article
+                    key={experience.recordId}
+                    className="flex min-w-0 flex-col rounded-[10px] bg-[var(--bg-secondary)] p-4"
+                  >
+                    <header className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <h3 className="font-display text-[15px] font-semibold tracking-[-0.01em]">
+                          {experience.title}
+                        </h3>
+                        <p className="mt-1 text-micro font-medium text-[var(--text-tertiary)]">
+                          {humanize(experience.status)}
+                        </p>
+                      </div>
+                      {experience.provenanceUrl ? (
+                        <a
+                          href={experience.provenanceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`Open the ManageBac source for ${experience.title}`}
+                          className="grid size-8 shrink-0 place-items-center rounded-[8px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        >
+                          <ExternalLink className="size-3.5" />
+                        </a>
+                      ) : null}
+                    </header>
+
+                    {experience.description ? (
+                      <p className="mt-3 line-clamp-3 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+                        {experience.description}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      {strands.map((item) => {
+                        const hours = experience.hours[item.key];
+                        const target = experience.targetHours?.[item.key];
+                        return (
+                          <div
+                            key={item.key}
+                            className={cn(
+                              "min-w-0 rounded-[8px] border px-2.5 py-2",
+                              experience.strands[item.key]
+                                ? "border-[var(--border-default)]"
+                                : "border-transparent opacity-55",
+                            )}
+                          >
+                            <span className="block truncate text-micro text-[var(--text-tertiary)]">
+                              {item.label}
+                            </span>
+                            <strong className="mt-0.5 block text-[12px]">
+                              {hours === undefined
+                                ? "Not supplied"
+                                : `${hours}h`}
+                            </strong>
+                            {target !== undefined ? (
+                              <span className="block text-micro text-[var(--text-tertiary)]">
+                                Target {target}h
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <dl className="mt-4 grid grid-cols-2 gap-3 text-[11px]">
+                      <div>
+                        <dt className="text-micro text-[var(--text-tertiary)]">
+                          Started
+                        </dt>
+                        <dd className="mt-0.5 font-medium">
+                          {formatDay(experience.startAt)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-micro text-[var(--text-tertiary)]">
+                          Target date
+                        </dt>
+                        <dd className="mt-0.5 font-medium">
+                          {formatDay(experience.endAt)}
+                        </dd>
+                      </div>
+                    </dl>
+
+                    {experience.linkedReflections.length ? (
+                      <div className="mt-4 border-t border-[var(--border-default)] pt-3">
+                        <p className="text-micro font-semibold text-[var(--text-tertiary)]">
+                          Reflections in Spectra
+                        </p>
+                        <div className="mt-2 space-y-1">
+                          {experience.linkedReflections.map((reflection) => (
+                            <button
+                              key={reflection.artifactId}
+                              type="button"
+                              onClick={() =>
+                                void spectraBus.command("work.open", {
+                                  workId: reflection.artifactId,
+                                  surface: "panel",
+                                })
+                              }
+                              className="flex w-full items-center gap-2 rounded-[8px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
+                            >
+                              <FileText className="size-3.5 shrink-0 text-[var(--text-tertiary)]" />
+                              <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+                                {reflection.title}
+                              </span>
+                              <ChevronRight className="size-3.5 shrink-0 text-[var(--text-tertiary)]" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="mt-auto flex flex-wrap gap-2 pt-4">
+                      <button
+                        type="button"
+                        disabled={Boolean(busy)}
+                        onClick={() =>
+                          void onCreate(experience.recordId, false)
+                        }
+                        className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] active:translate-y-px disabled:opacity-45"
+                      >
+                        {busy === manualKey ? (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        ) : (
+                          <PenLine className="size-3.5" />
+                        )}
+                        Create reflection
+                      </button>
+                      <button
+                        type="button"
+                        disabled={Boolean(busy)}
+                        onClick={() => void onCreate(experience.recordId, true)}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-3 text-[11px] font-semibold text-[var(--bg-primary)] active:translate-y-px disabled:opacity-45"
+                      >
+                        {busy === aiKey ? (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="size-3.5" />
+                        )}
+                        Draft with Spectra
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-3 rounded-[10px] bg-[var(--bg-secondary)] px-5 py-7">
+              <p className="text-[13px] font-medium">
+                No experiences match this strand
+              </p>
+              <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                Choose another strand to see the rest of your CAS experiences.
+              </p>
+            </div>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function RecordSection({
   section,
   records,
@@ -764,7 +1208,8 @@ function RecordSection({
             No {section.label.toLowerCase()} in the latest sync
           </p>
           <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-            The provider route completed successfully and returned no current records.
+            The provider route completed successfully and returned no current
+            records.
           </p>
         </div>
       )}

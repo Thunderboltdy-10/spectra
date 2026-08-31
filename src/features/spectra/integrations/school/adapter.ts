@@ -12,6 +12,8 @@ export const SCHOOL_ENTITY_KINDS = [
   "resource",
   "timetable_event",
   "cas_experience",
+  "cas_reflection",
+  "cas_evidence",
   "attendance",
   "message",
 ] as const;

@@ -5,6 +5,7 @@ import {
   officialPersonalCapabilities,
   unverifiedPersonalCapabilityFrontier,
 } from "@/app/api/spectra/managebac/contracts";
+import { ManageBacSchoolSourceAdapter } from "../integrations/school/managebac-adapter";
 
 type FixtureManifest = {
   auth: { header: string; scheme: string; mode: string };
@@ -179,6 +180,40 @@ describe("ManageBac API capture contracts", () => {
     expect(
       frontier.every((item) => item.verdict === "live_probe_required"),
     ).toBe(true);
+  });
+
+  it("normalizes CAS reflection and evidence kinds without promoting provider routes", () => {
+    const adapter = new ManageBacSchoolSourceAdapter({
+      discover: async () => ({
+        provider: "managebac",
+        version: "test",
+        discoveredAt: 0,
+        capabilities: [],
+      }),
+      async *batches() {
+        return;
+      },
+    });
+    expect(
+      adapter.normalize({
+        id: "reflection-1",
+        recordType: "cas_reflection",
+        normalized: { title: "Reflection" },
+      }).kind,
+    ).toBe("cas_reflection");
+    expect(
+      adapter.normalize({
+        id: "evidence-1",
+        recordType: "cas_evidence",
+        normalized: { title: "Evidence" },
+      }).kind,
+    ).toBe("cas_evidence");
+    expect(officialPersonalCapabilities()).toHaveLength(7);
+    expect(
+      unverifiedPersonalCapabilityFrontier().find(
+        (item) => item.category === "CAS reflections",
+      )?.providerPath,
+    ).toBeNull();
   });
 
   it("contains only fictional personal data and no credential-shaped fields", () => {

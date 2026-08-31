@@ -268,19 +268,23 @@ function atPath(value: unknown, path: string | undefined) {
       return Array.isArray(current)
         ? current.flatMap((item) => {
             const result = visit(item, index + 1);
-            return Array.isArray(result) ? result : result === undefined ? [] : [result];
+            return Array.isArray(result)
+              ? result
+              : result === undefined
+                ? []
+                : [result];
           })
         : undefined;
-      if (current === null || current === undefined) return undefined;
-      const indexMatch = segment.match(/^(.+)\[(\d+)]$/);
-      if (indexMatch) {
-        const parent = object(current)[indexMatch[1]!];
-        const next = Array.isArray(parent)
-          ? parent[Number(indexMatch[2])]
-          : undefined;
-        return visit(next, index + 1);
-      }
-      return visit(object(current)[segment], index + 1);
+    if (current === null || current === undefined) return undefined;
+    const indexMatch = segment.match(/^(.+)\[(\d+)]$/);
+    if (indexMatch) {
+      const parent = object(current)[indexMatch[1]!];
+      const next = Array.isArray(parent)
+        ? parent[Number(indexMatch[2])]
+        : undefined;
+      return visit(next, index + 1);
+    }
+    return visit(object(current)[segment], index + 1);
   };
   return visit(value, 0);
 }
@@ -594,13 +598,8 @@ function capabilityUrl(
       encodeURIComponent(input.providerUserId),
     );
   }
-  for (const [parameter, value] of Object.entries(
-    input.routeParameters ?? {},
-  ))
-    path = path.replaceAll(
-      `{${parameter}}`,
-      encodeURIComponent(value),
-    );
+  for (const [parameter, value] of Object.entries(input.routeParameters ?? {}))
+    path = path.replaceAll(`{${parameter}}`, encodeURIComponent(value));
   if (/\{[^}]+}/.test(path))
     throw new Error(
       `INTEGRATION_ROUTE_PARAMETERS_UNRESOLVED: ${capability.name} needs a verified route binding.`,
@@ -857,7 +856,7 @@ async function runSync(
         ? 0
         : item.recordType === "class"
           ? 1
-        : ["assignment", "deadline", "assessment"].includes(item.recordType)
+          : ["assignment", "deadline", "assessment"].includes(item.recordType)
             ? 2
             : 3;
     };
@@ -944,10 +943,7 @@ async function runSync(
         });
         continue;
       }
-      const fanOutParameter = string(
-        capabilityConfig.fanOutParameter,
-        120,
-      );
+      const fanOutParameter = string(capabilityConfig.fanOutParameter, 120);
       const fanOutSource = string(capabilityConfig.fanOutSource, 120);
       const fanOutIds =
         fanOutSource === "year_group"
@@ -1263,6 +1259,11 @@ export async function GET(request: NextRequest) {
         data: await convexQuery("managebac:listMyClassCandidates", {}),
       });
     }
+    if (action === "cas") {
+      return ok({
+        data: await convexQuery("managebac:casOverview", {}),
+      });
+    }
     if (action !== "overview")
       return badRequest("That ManageBac action is unavailable.");
     const admin = actor.schoolRole === "school_admin";
@@ -1287,7 +1288,7 @@ export async function GET(request: NextRequest) {
                 ) || undefined,
               envTokenAvailable: Boolean(
                 process.env.MANAGEBAC_API_KEY?.trim() &&
-                  (process.env.MANAGEBAC_API_KEY?.trim().length ?? 0) >= 16,
+                (process.env.MANAGEBAC_API_KEY?.trim().length ?? 0) >= 16,
               ),
             }
           : {}),
@@ -1315,9 +1316,21 @@ export async function POST(request: NextRequest) {
     }
     const actor = await requireActor();
 
+    // Reflection drafts are local Spectra writes. Keep this action before any
+    // connector context or provider-secret load so it cannot contact ManageBac.
+    if (action === "createCasReflection") {
+      return ok(
+        await convexMutation("managebac:createCasReflectionDraft", {
+          recordId: string(body.recordId, 200),
+        }),
+      );
+    }
+
     if (action === "upsertPeriodMap") {
       if (actor.schoolRole !== "school_admin")
-        throw new Error("AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.");
+        throw new Error(
+          "AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.",
+        );
       return ok(
         await convexMutation("managebac:upsertCalendarPeriodMap", {
           periodKey: string(body.periodKey, 120),
@@ -1326,14 +1339,18 @@ export async function POST(request: NextRequest) {
           endMinutes: Number(body.endMinutes),
           timezone: string(body.timezone, 100),
           weekdays: Array.isArray(body.weekdays)
-            ? body.weekdays.filter((value): value is number => typeof value === "number")
+            ? body.weekdays.filter(
+                (value): value is number => typeof value === "number",
+              )
             : [],
         }),
       );
     }
     if (action === "removePeriodMap") {
       if (actor.schoolRole !== "school_admin")
-        throw new Error("AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.");
+        throw new Error(
+          "AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.",
+        );
       return ok(
         await convexMutation("managebac:removeCalendarPeriodMap", {
           periodMapId: string(body.periodMapId, 200),
@@ -1543,7 +1560,8 @@ export async function POST(request: NextRequest) {
     if (action === "materializeClasses") {
       const recordIds = Array.isArray(body.recordIds)
         ? body.recordIds.filter(
-            (item): item is string => typeof item === "string" && item.length > 0,
+            (item): item is string =>
+              typeof item === "string" && item.length > 0,
           )
         : [];
       return ok(

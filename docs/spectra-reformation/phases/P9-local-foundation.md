@@ -85,3 +85,56 @@ Fresh agent, first VU on a `local-deploy` lease:
 ## Exit gate
 
 N≥3 instances documented and startable; both accounts live on the seeded instance with ManageBac connected and folders imported; the five efficiency classes fixed with measured before/after evidence; budget baselines recorded; V1 PASS. From this gate onward **every VU in the program runs on a local instance (CANON R23)** and the cloud dev deployment is retired for testing.
+<<<<<<< HEAD
+=======
+
+### P9.I2 implementation log — 2026-08-31
+
+- Status: **IMPLEMENTED**; no acceptance claimed. No live deployment, Bridge, Office, or cloud resource was used.
+- `listTabs` now reads the tab projection plus latest result card; the former full run + full thread reads (two full documents per tab poll) are gone. A bounded 100-row backfill repairs legacy tabs.
+- Stale-run recovery replaced two owner-wide collections per stale run with `by_ai_run` equality queries plus direct ids already named by run operations; every repaired AI-card write also synchronizes P9.I3's bounded Library summary.
+- Planner and timetable reminders reconcile at source mutation time, retain scheduler handles, rearm failed/cancelled occurrences, validate source + access at delivery, and chain recurrence.
+- The two minute crons formerly admitted up to 60,000 planner documents and 300,000 timetable user-state documents per hour before nested reads. Idle safety is now hourly: two indexed overdue/missing-handle windows per family, empty when no work is pending (bounded at 300 candidate rows per family/run).
+- Red-first source contracts failed 3/3 before the repair; final focused contracts/behavior pass 9/9. AI lifecycle + Live Dock + P9.I3 projection regressions pass 28/28.
+- Root `tsc --noEmit`, scoped ESLint (0 warnings), capability ghost gate, secret scan (2,341 tracked files), and `git diff --check` pass.
+- Convex dry-run codegen was not available without `CONVEX_DEPLOYMENT`; it stopped before generation or deployment. P9.V1 owns local-instance delivery and measured dashboard budgets.
+- Merge-queue rebase: shell Convex settings were unset and `.env.local` classified local-only; no Convex CLI, server, browser, or cloud resource was used.
+
+## P9.I3 unit log — 2026-08-30
+
+- Status: IMPLEMENTED; no acceptance or P9.V1 verdict claimed.
+- SYSTEMIC triage: payload-bearing Library rows, mount-time full-history deletion, and query-time derived tree metadata were the three root classes.
+- Added `spectraArtifactSummaries`, an explicit hard-bounded projection; Library list/search now reads it only, batches grants/invitations/placements, and never loads artifact content, text indexes, protected bases, or preview content. Batched access preserves direct-grant and deny-override semantics.
+- Write seams in `spectraArtifacts` and `orgTreeShared` maintain summaries; cursor backfill covers existing rows. Board/tree source hydration uses the indexed projection.
+- Fixture measurement: source artifact >100 KB; summary row <10 KB and <10% of source. P9.V1 owns deployed L4 numbers.
+- `ensureRoom` now atomically rotates to a fresh schema generation; retired updates/snapshots are deleted asynchronously in pages of 128, never on studio mount.
+- `orgNodes.childCount` is transactionally maintained across create/place/move/trash/restore/purge; cursor backfill covers old containers. Hydration is a field read, not a child collect.
+- Anti-theater: the P9 test failed when protected-base payload was injected and again when oversized metadata lacked hard limits; both mutations are reverted and the assertions are green.
+- Focused Convex: 4 files / 45 tests passed (P9, checkpoint, AI lifecycle, replica blast radius).
+- Standing gate: root `tsc --noEmit`, scoped ESLint, `check:capabilities`, secret scan (2,328 tracked files after rebase), and `git diff --check` passed.
+- No fidelity harness required: no lens, Bridge, replica, bridgeSync, or `shared/` path changed.
+- Merge coordination: P9.I2's `spectraRuns` and the concurrently owned ManageBac writer must call exported summary sync after their artifact patches; route as product-logic integration, not a P9.I3 ownership violation.
+
+### P9.I3 summary-writer integration addendum — 2026-08-31
+
+- SYSTEMIC triage: write-maintained summaries were correct inside P9.I3, but later and cross-track artifact writers could leave the bounded Library row stale after changing its projection inputs.
+- The existing `syncArtifactSummary` seam now follows ManageBac planner/timetable refresh and source removal, the direct Agent improvement editor, and calendar migration tagging. P9.I2's stale-run repair already used the seam and was left unchanged.
+- A bounded writer audit also closed no-projection collaboration activity/recovery, legacy thread-reference deletion, and deleted-workspace provenance. Projection-bearing gateway commits continue through `syncSourceNodes`, which already synchronizes the summary.
+- Red-first parity coverage failed 5/5 before integration and passes 6/6 after it; the P9 Library/run/collaboration blast-radius suite passes 4 files / 22 tests.
+- `convex/replicas.ts` and `convex/bridgeSync.ts` remain untouched under the binding P10.I2 ownership split. No fidelity trigger path changed.
+
+### P9.I4 implementation log — 2026-08-31
+
+- Status: **IMPLEMENTED**; no verification, acceptance, or P9.V1 verdict claimed.
+- Added a local-only deterministic seed that refuses cloud/mismatched targets, requires account B in `SUPER_ADMIN_EMAILS`, invokes real `schools:create`, and verifies the full saga projection.
+- The seed writes only private runtime invitation/summary files, is idempotent for the same instance/TGC/admin tuple, and supports a non-mutating `--verify-only` pass.
+- Added the single Pablo checklist for localhost A/B sign-ins, invitation acceptance, ManageBac identity/bootstrap, Bridge pairing/import, expected screens, and state-preserving shutdown.
+- Live instance 1 reached TGC saga `ready`; account A is active `school_admin`; membershipless account B reached platform administration after composing the operator-auth repair.
+- B started and ended a labeled read-only TGC operator session; its school/mode/expiry banner was visible and no membership was created.
+- ManageBac verified all seven official personal capabilities readable and completed identity resolution, while honestly remaining `degraded`/partial with four open quarantine rows.
+- The four rows are two repeated `INTEGRATION_ROUTE_FAILED` failures for class details and class resources; SYSTEMIC class-sync coverage routes to P13.I2, with live retest in P13.V1, not P13.I4.
+- A current-source Bridge resumed the isolated journal after exposing a stale-binary protocol mismatch; `IBDP1 - Copy` reached active/Ready at 444/444 files and 419 resources, with zero op/queue rows.
+- The original `IBDP1` was never mounted or modified; local Convex data, bootstrap artifacts, Bridge journal, and saved profiles are preserved.
+- Focused tests passed 3 files / 12 tests; scoped ESLint, root TypeScript, capability ghost gate, secret scan (2,384 tracked files), release Bridge build, and diff check passed.
+- Profiles A/B, Next, Bridge, and local Convex were stopped; ports 3000–3003 and 47615 were released for P9.V1.
+>>>>>>> 85cc715 (feat(spectra): add deterministic local bootstrap)

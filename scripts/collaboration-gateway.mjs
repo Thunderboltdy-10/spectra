@@ -17,6 +17,7 @@ import {
   applyStoredRoomUpdates,
   encodeStoredRoomSnapshot,
   shouldCompactRoom,
+  shouldRecoverNativeRoom,
 } from "./collaboration-room-state.mjs";
 import {
   MAX_DURABLE_UPDATE_BYTES,
@@ -951,13 +952,11 @@ const server = new Server({
     let storedDocument = applyStoredRoomUpdates(Y, stored);
     if (isNativeArtifactDocument(storedDocument)) {
       const observedStateVectorHash = documentStateVectorHash(storedDocument);
-      const unprojectedMultiHead =
-        (stored?.nextSequence ?? 1) > 2 &&
-        stored?.lastProjectionSequence === null;
       if (
-        stored?.liveStateVectorHash &&
-        (observedStateVectorHash !== stored.liveStateVectorHash ||
-          unprojectedMultiHead)
+        shouldRecoverNativeRoom({
+          liveStateVectorHash: stored?.liveStateVectorHash,
+          observedStateVectorHash,
+        })
       ) {
         const observedProjectionJson = artifactProjection(
           storedDocument,

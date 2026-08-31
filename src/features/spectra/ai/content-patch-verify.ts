@@ -32,7 +32,10 @@ function stringishMatch(authored: string, saved: string) {
     authoredDate === savedDate
   )
     return true;
-  return s === a || s.includes(a) || a.includes(s);
+  // Saved may contain concurrent inserts around the authored span. Authored
+  // containing saved is the stale-projection / phantom-success case: the
+  // unique write never landed.
+  return s === a || s.includes(a);
 }
 
 /** Authored object fields must appear on saved (normalize may add ids/defaults). */
@@ -124,15 +127,15 @@ function documentAuthoredTextLanded(
     .join("\n");
   if (!body) return false;
   if (body.includes(authoredNorm)) return true;
-  // Concurrent human/AI inserts can sit inside the authored span. Accept when
-  // distinctive tokens from the authored value are present in the body.
+  // Concurrent human/AI inserts can sit inside the authored span. Every
+  // distinctive authored token must still be present — a 70% hit rate let a
+  // second same-region AI report Updated while its unique token never landed.
   const tokens = authoredNorm
     .split(/[^A-Za-z0-9_-]+/)
     .map((token) => token.trim())
     .filter((token) => token.length >= 10);
-  if (tokens.length === 0) return body.includes(authoredNorm);
-  const hits = tokens.filter((token) => body.includes(token)).length;
-  return hits >= Math.max(1, Math.ceil(tokens.length * 0.7));
+  if (tokens.length === 0) return false;
+  return tokens.every((token) => body.includes(token));
 }
 
 /** True when authored text (or block.text) is observably present in content. */

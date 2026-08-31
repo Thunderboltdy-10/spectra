@@ -9,7 +9,7 @@ import {
   activeReplicaWriteTarget,
   latestActiveWriteForReplica,
 } from "./bridgeIdentity";
-import { bumpPolicyVersion } from "./authorityShared";
+import { bumpPolicyVersion, evaluateAccessForActor } from "./authorityShared";
 import { computeEffectivePolicy } from "./syncPolicy";
 import { POLICY_PRESETS, type SyncPolicyPreset } from "../shared/sync-policy";
 import { planStorageStrategyTransition } from "../shared/storage-strategy";
@@ -277,7 +277,8 @@ export const forWork = query({
   args: { workId: v.id("spectraArtifacts") },
   handler: async (ctx, { workId }) => {
     const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    const work = await ctx.db.get(workId); if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    const access = await evaluateAccessForActor(ctx, actor, "artifact", workId);
+    if (!access.allowed || !access.capabilities.includes("read")) throw new Error("WORK_NOT_FOUND");
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
     const openConflicts = await ctx.db.query("syncConflicts").withIndex("by_work_state", (q) => q.eq("workId", workId).eq("state", "open")).take(20);
     const pending = await ctx.db.query("syncOperations").withIndex("by_work_created", (q) => q.eq("workId", workId)).order("desc").take(50);

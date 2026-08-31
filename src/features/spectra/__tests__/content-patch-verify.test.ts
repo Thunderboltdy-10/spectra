@@ -121,4 +121,40 @@ describe("content patch verification", () => {
       ),
     ).toBe(true);
   });
+
+  it("rejects a same-region AI patch whose unique token never landed", () => {
+    const saved =
+      "P5V1-SAME-REGION P5V1-A-SAME P5V1-B-SAME P5V1-AI1-SAME";
+    expect(
+      contentPatchChangeMatchesSaved(
+        "/blocks/8/text",
+        "P5V1-SAME-REGION P5V1-A-SAME P5V1-B-SAME P5V1-AI2-SAME",
+        saved,
+        {
+          blueprintKey: "document",
+          artifactContent: {
+            blocks: [{ id: "b8", type: "paragraph", text: saved }],
+          },
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts a same-region AI patch when the unique token survived a concurrent peer token", () => {
+    const saved =
+      "P5V1-SAME-REGION P5V1-A-SAME P5V1-B-SAME P5V1-AI1-SAME P5V1-AI2-SAME";
+    expect(
+      contentPatchChangeMatchesSaved(
+        "/blocks/8/text",
+        "P5V1-SAME-REGION P5V1-A-SAME P5V1-B-SAME P5V1-AI2-SAME",
+        saved,
+        {
+          blueprintKey: "document",
+          artifactContent: {
+            blocks: [{ id: "b8", type: "paragraph", text: saved }],
+          },
+        },
+      ),
+    ).toBe(true);
+  });
 });

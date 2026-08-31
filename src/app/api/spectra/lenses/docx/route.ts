@@ -87,14 +87,16 @@ export function changedRegions(before: DocxProjection, after: DocxProjection) {
 export async function materializeDocxArtifact(
   workId: Id<"spectraArtifacts">,
   content: unknown,
+  options?: { promotionMode?: "verified-first" },
 ) {
-  return materializeDocxArtifactAttempt(workId, content, 0);
+  return materializeDocxArtifactAttempt(workId, content, 0, options);
 }
 
 async function materializeDocxArtifactAttempt(
   workId: Id<"spectraArtifacts">,
   content: unknown,
   attempt: number,
+  options?: { promotionMode?: "verified-first" },
 ) {
   const [cloud, workTruth] = await Promise.all([
     fetchVerifiedNativePayload(workId, "cloud"),
@@ -188,6 +190,7 @@ async function materializeDocxArtifactAttempt(
       projectionContent?: unknown;
       projectionContentHash?: string;
       projectionTextIndex?: string;
+      promotionMode?: "verified-first";
     },
     { requestId: string; state: string }
     >("replicas:queueMaterialization", {
@@ -213,10 +216,13 @@ async function materializeDocxArtifactAttempt(
         .map((block) => block.text)
         .join("\n")
         .slice(0, 200_000),
+      ...(options?.promotionMode
+        ? { promotionMode: options.promotionMode }
+        : {}),
     });
   } catch (error) {
     if (attempt === 0 && error instanceof Error && error.message.includes("MATERIALIZATION_BASE_STALE"))
-      return materializeDocxArtifactAttempt(workId, content, attempt + 1);
+      return materializeDocxArtifactAttempt(workId, content, attempt + 1, options);
     throw error;
   }
   return {

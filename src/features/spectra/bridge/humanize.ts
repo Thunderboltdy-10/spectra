@@ -10,6 +10,24 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
       "That action is not something Spectra can do on your behalf.",
   },
   {
+    test: /NATIVE_PROMOTION_CONFLICT/i,
+    message: () => "Both copies changed. Nothing overwritten.",
+  },
+  {
+    test: /NATIVE_PROMOTION_PROTECTED/i,
+    message: () => "Spectra can read this original but will not change it.",
+  },
+  {
+    test: /NATIVE_PROMOTION_CLOUD_ONLY/i,
+    message: () =>
+      "This file lives on your PC. Open Spectra Bridge on that computer to apply the change to the original.",
+  },
+  {
+    test: /NATIVE_PROMOTION_UNCHANGED|NATIVE_PROMOTION_REFUSED|NATIVE_PROMOTION_FAILED/i,
+    message: (app) =>
+      `The ${app} file did not receive that change, so Spectra did not keep it in the live document.`,
+  },
+  {
     test: /NATIVE_MATERIALIZE_SKIPPED|NATIVE_VERIFY_FAILED/i,
     message: (app) =>
       `Spectra saved the edit. The ${app} file on this computer was not updated.`,

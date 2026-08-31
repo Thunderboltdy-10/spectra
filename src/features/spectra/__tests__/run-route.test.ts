@@ -122,6 +122,20 @@ function setup(
       };
     }
     if (name.includes("authority:access")) return { level: "modify", canModify: true };
+    if (name.includes("replicas:forWork")) {
+      const format =
+        typeof savedArtifact.nativeFormat === "string"
+          ? savedArtifact.nativeFormat
+          : undefined;
+      return {
+        replicas: format
+          ? [{ kind: "local", state: "current", nativeFormat: format }]
+          : [],
+      };
+    }
+    if (name.includes("replicas:materializationStatus")) {
+      return { requestId: args?.requestId ?? "req-native", state: "verified" };
+    }
     if (name.includes("collaboration:ensureRoom")) {
       return {
         roomId: "room-real",
@@ -251,6 +265,8 @@ function setup(
     if (name.includes("spectraArtifacts:setAiEffects") || name.includes("spectraArtifacts:clearAiEffects") || name.includes("spectraArtifacts:queueAiEffect")) return {};
     if (name.includes("orgTree:setPinned") || name.includes("orgTree:removeFromWorkspace") || name.includes("orgTree:placeWork")) return {};
     if (name.includes("spectraArtifactLinks:create") || name.includes("spectraArtifactLinks:remove")) return {};
+    if (name.includes("replicas:cancelMaterialization")) return { cancelled: true, state: "failed" };
+    if (name.includes("replicas:queueMaterialization")) return { requestId: "req-native", state: "pending" };
     if (name.includes("metering:") || name.includes("operationalCounters:") || name.includes("audit:")) return {};
     if (name.includes("memory:")) return {};
     throw new Error(`Unexpected mutation: ${name}`);
@@ -258,6 +274,20 @@ function setup(
 
   vi.doMock("@/lib/auth-server", () => ({ requireActor }));
   vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+  const materializeDocxArtifact = vi.fn(async () => ({
+    state: "conflicted" as const,
+    conflict: { message: "Both copies changed. Nothing overwritten." },
+  }));
+  const materializeOfficeArtifact = vi.fn(async () => ({
+    state: "conflicted" as const,
+    conflict: { message: "Both copies changed. Nothing overwritten." },
+  }));
+  vi.doMock("@/app/api/spectra/lenses/docx/route", () => ({
+    materializeDocxArtifact,
+  }));
+  vi.doMock("@/app/api/spectra/lenses/office/route", () => ({
+    materializeOfficeArtifact,
+  }));
   vi.doMock("@/features/spectra/ai/yjs-artifact-operation", () => {
     class AiArtifactRegionConflictError extends Error {
       artifactId: string;
@@ -292,6 +322,15 @@ function setup(
       readLiveArtifactValue: vi.fn(async () => null),
       applyAiArtifactMutation: vi.fn(async (params: {
         artifactId: string;
+        beforeCommit?: (info: {
+          desired: {
+            title: string;
+            summary?: string;
+            content: unknown;
+            tags: string[];
+          };
+          changedRegionIds: string[];
+        }) => Promise<void>;
         resolveDesired: (current: {
           title: string;
           summary?: string;
@@ -310,6 +349,10 @@ function setup(
           content: savedArtifact.content,
           tags: (savedArtifact.tags as string[]) ?? [],
         });
+        await params.beforeCommit?.({
+          desired,
+          changedRegionIds: ["docx:paragraph:unique"],
+        });
         savedArtifact = {
           ...savedArtifact,
           _id: params.artifactId,
@@ -321,7 +364,7 @@ function setup(
           currentVersionId: "version-ai",
           liveStateVectorHash: "hash-ai",
         };
-        return { artifactId: params.artifactId, changedRegionIds: ["artifact:structure"] };
+        return { artifactId: params.artifactId, changedRegionIds: ["docx:paragraph:unique"] };
       }),
     };
   });
@@ -329,7 +372,14 @@ function setup(
   process.env.SPECTRA_TEST_INLINE_RUNS = "1";
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
-  return { convexQuery, convexMutation, fetchMock, getSavedArtifact: () => savedArtifact };
+  return {
+    convexQuery,
+    convexMutation,
+    fetchMock,
+    getSavedArtifact: () => savedArtifact,
+    materializeDocxArtifact,
+    materializeOfficeArtifact,
+  };
 }
 
 describe("Spectra run route", () => {
@@ -2106,5 +2156,158 @@ describe("Spectra run route", () => {
       ],
     });
     expect(events.some((event) => event.type === "final")).toBe(true);
+  });
+
+  it("leaves a native document unchanged when pre-commit promotion conflicts", async () => {
+    const original = {
+      blocks: [{ id: "p1", type: "paragraph", text: "Variable: new_name Scope: Local" }],
+    };
+    const { convexMutation, getSavedArtifact, materializeDocxArtifact } = setup(
+      {
+        decision: "operate",
+        intent: {
+          mode: "update",
+          requestedArtifactTypes: ["document"],
+          requestedVisibleArtifactCount: 0,
+          targetArtifactId: "artifact-real",
+          targetWorkspaceId: "workspace-real",
+        },
+        finalResponse: "Updated the paragraph.",
+        operations: [
+          {
+            type: "artifact.update",
+            input: {
+              artifactId: "artifact-real",
+              blueprintKey: "document",
+              title: "Exercises",
+              summary: null,
+              content: {
+                blocks: [
+                  {
+                    id: "p1",
+                    type: "paragraph",
+                    text: "Variable: new_name Scope: Local P5V1-NATIVE-AI-2301",
+                  },
+                ],
+              },
+              tags: null,
+            },
+          },
+        ],
+      },
+      "queued",
+      {
+        blueprintKey: "document",
+        nativeFormat: "docx",
+        title: "Exercises",
+        content: original,
+      },
+    );
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/spectra/run", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run",
+          surface: "artifact",
+          workspaceId: "workspace-real",
+          artifactId: "artifact-real",
+          prompt: "Update this document. Append P5V1-NATIVE-AI-2301 to the paragraph.",
+        }),
+      }),
+    );
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; message?: string });
+    expect(materializeDocxArtifact).toHaveBeenCalled();
+    expect(getSavedArtifact().content).toEqual(original);
+    expect(
+      convexMutation.mock.calls.some(
+        ([name, args]) =>
+          String(name).includes("spectraArtifacts:stageAiPatch") &&
+          (args as { commit?: boolean }).commit === true,
+      ),
+    ).toBe(false);
+    expect(
+      convexMutation.mock.calls.filter(([name]) =>
+        String(name).includes("spectraOperations:markExecuted"),
+      ),
+    ).toHaveLength(0);
+    expect(events.some((event) => event.type === "error" || event.type === "final")).toBe(true);
+  });
+
+  it("applies a native document update once after verified promotion", async () => {
+    const original = {
+      blocks: [{ id: "p1", type: "paragraph", text: "Variable: new_name Scope: Local" }],
+    };
+    const next = {
+      blocks: [
+        {
+          id: "p1",
+          type: "paragraph",
+          text: "Variable: new_name Scope: Local P5V1-NATIVE-AI-2301",
+        },
+      ],
+    };
+    const { convexMutation, getSavedArtifact, materializeDocxArtifact } = setup(
+      {
+        decision: "operate",
+        intent: {
+          mode: "update",
+          requestedArtifactTypes: ["document"],
+          requestedVisibleArtifactCount: 0,
+          targetArtifactId: "artifact-real",
+          targetWorkspaceId: "workspace-real",
+        },
+        finalResponse: "Updated the paragraph.",
+        operations: [
+          {
+            type: "artifact.update",
+            input: {
+              artifactId: "artifact-real",
+              blueprintKey: "document",
+              title: "Exercises",
+              summary: null,
+              content: next,
+              tags: null,
+            },
+          },
+        ],
+      },
+      "queued",
+      {
+        blueprintKey: "document",
+        nativeFormat: "docx",
+        title: "Exercises",
+        content: original,
+      },
+    );
+    materializeDocxArtifact.mockResolvedValue({
+      state: "pending",
+      requestId: "req-native",
+      hash: "ee",
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/spectra/run", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run",
+          surface: "artifact",
+          workspaceId: "workspace-real",
+          artifactId: "artifact-real",
+          prompt: "Update this document. Append P5V1-NATIVE-AI-2301 to the paragraph.",
+        }),
+      }),
+    );
+    await response.text();
+    expect(materializeDocxArtifact).toHaveBeenCalledTimes(1);
+    expect(getSavedArtifact().content).toEqual(next);
+    expect(
+      convexMutation.mock.calls.filter(([name]) =>
+        String(name).includes("spectraOperations:markExecuted"),
+      ),
+    ).toHaveLength(1);
   });
 });

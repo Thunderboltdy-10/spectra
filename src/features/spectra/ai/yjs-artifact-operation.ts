@@ -5,6 +5,8 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import WebSocket from "ws";
 import * as Y from "yjs";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { AiDurableAckGate } from "@/features/spectra/ai/ai-durable-ack";
+import { commitAiYjsAfterNativePromotion } from "@/features/spectra/ai/native-ai-promotion";
 import {
   collaborationDocumentName,
   collaborationProtocolVersion,
@@ -100,6 +102,7 @@ type AiRealtimeProvider = {
   readonly synced: boolean;
   readonly isAuthenticated: boolean;
   readonly hasUnsyncedChanges: boolean;
+  beginDurableTransaction?(): void;
   awareness?: {
     getLocalState(): { user?: unknown } | null;
     getStates(): Map<unknown, { user?: unknown }>;
@@ -142,6 +145,11 @@ class CloudflareAiRealtimeProvider implements AiRealtimeProvider {
     return this.transport.getSnapshot().unsynchronizedChanges > 0;
   }
 
+  beginDurableTransaction() {
+    // Cloudflare rooms do not emit spectra.durable_ack; transport cleanliness
+    // remains the completion signal on that path.
+  }
+
   setAwarenessField(field: string, value: unknown) {
     if (field !== "user") return;
     this.localUser = value;
@@ -168,7 +176,7 @@ class CloudflareAiRealtimeProvider implements AiRealtimeProvider {
 }
 
 class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
-  private readonly durablePendingUpdateIds = new Set<string>();
+  private readonly durableAck = new AiDurableAckGate();
 
   constructor(readonly transport: HocuspocusProvider) {}
 
@@ -185,9 +193,11 @@ class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
   }
 
   get hasUnsyncedChanges() {
-    // Room sync is Yjs/Hocuspocus truth. Convex projection acks are persistence
-    // telemetry — waiting on them made landed edits look like failures.
-    return this.transport.hasUnsyncedChanges;
+    return this.transport.hasUnsyncedChanges || this.durableAck.isDirty;
+  }
+
+  beginDurableTransaction() {
+    this.durableAck.beginTransaction();
   }
 
   handleStateless(payload: string) {
@@ -202,16 +212,11 @@ class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
               typeof value === "string" && value.length <= 400,
           )
         : [];
-      if (message.type === "spectra.durable_pending") {
-        for (const updateId of updateIds)
-          this.durablePendingUpdateIds.add(updateId);
-      } else if (message.type === "spectra.durable_ack") {
-        for (const updateId of updateIds)
-          this.durablePendingUpdateIds.delete(updateId);
-      }
+      if (typeof message.type === "string")
+        this.durableAck.handleGatewayMessage(message.type, updateIds);
     } catch {
-      // Ignore malformed gateway metadata. The provider's native sync status
-      // still prevents a false clean state while its update is in flight.
+      // Ignore malformed gateway metadata. The captured durability epoch still
+      // prevents a false clean state before pending/ack arrive.
     }
   }
 
@@ -906,6 +911,7 @@ async function synchronizeMutation(params: {
   operationId: string;
   claimActorKind?: "ai" | "human";
   plan: ArtifactYjsMutationPlan;
+  desired: ArtifactLiveValue;
   streamBase?: ArtifactLiveValue;
   streamValues?: readonly ArtifactLiveValue[];
   streamBeats?: readonly AiStreamBeat[];
@@ -919,6 +925,10 @@ async function synchronizeMutation(params: {
   onConflictResolved?: () => void | Promise<void>;
   baseSnapshot?: ArtifactRegionSnapshot;
   proposedSnapshot?: ArtifactRegionSnapshot;
+  beforeCommit?: (info: {
+    desired: ArtifactLiveValue;
+    changedRegionIds: string[];
+  }) => Promise<void>;
   /**
    * Re-read the live model after a human-held target becomes free. A queued
    * operation may have waited through several collaborator transactions; its
@@ -927,6 +937,7 @@ async function synchronizeMutation(params: {
    */
   rebaseAfterHumanWait?: () => {
     plan: ArtifactYjsMutationPlan;
+    desired: ArtifactLiveValue;
     streamBase: ArtifactLiveValue;
     streamBeats: readonly AiStreamBeat[];
     baseSnapshot: ArtifactRegionSnapshot;
@@ -944,6 +955,7 @@ async function synchronizeMutation(params: {
       ...detail,
     });
   let plan = params.plan;
+  let desired = params.desired;
   let streamBase = params.streamBase;
   let streamBeats = params.streamBeats;
   let baseSnapshot = params.baseSnapshot;
@@ -1009,6 +1021,7 @@ async function synchronizeMutation(params: {
   const rebased = params.rebaseAfterHumanWait?.();
   if (rebased) {
     plan = rebased.plan;
+    desired = rebased.desired;
     streamBase = rebased.streamBase;
     streamBeats = rebased.streamBeats;
     baseSnapshot = rebased.baseSnapshot;
@@ -1034,6 +1047,7 @@ async function synchronizeMutation(params: {
   const afterClaimWait = params.rebaseAfterHumanWait?.();
   if (afterClaimWait) {
     plan = afterClaimWait.plan;
+    desired = afterClaimWait.desired;
     streamBase = afterClaimWait.streamBase;
     streamBeats = afterClaimWait.streamBeats;
     baseSnapshot = afterClaimWait.baseSnapshot;
@@ -1431,10 +1445,20 @@ async function synchronizeMutation(params: {
       }
     }
     logPhase("choreography-complete", { beatCount: beats.length });
-    params.document.transact(plan.apply, {
-      kind: "spectra-ai-operation",
-      runId: params.runId,
-      operationId: params.operationId,
+    await commitAiYjsAfterNativePromotion({
+      document: params.document,
+      apply: plan.apply,
+      origin: {
+        kind: "spectra-ai-operation",
+        runId: params.runId,
+        operationId: params.operationId,
+      },
+      desired,
+      changedRegionIds: plan.regions.map((region) => region.regionId),
+      beforeCommit: async (info) => {
+        await params.beforeCommit?.(info);
+        params.provider.beginDurableTransaction?.();
+      },
     });
     logPhase("transaction-applied");
     params.provider.flushPendingUpdates();
@@ -1450,7 +1474,7 @@ async function synchronizeMutation(params: {
       const connection =
         abortError(params.signal) ?? params.getConnectionError();
       if (connection) throw connection;
-      if (params.provider.synced) {
+      if (params.provider.synced && !params.provider.hasUnsyncedChanges) {
         logPhase("room-synced-after-flush", {
           hasUnsyncedChanges: params.provider.hasUnsyncedChanges,
         });
@@ -1610,6 +1634,10 @@ export async function applyAiArtifactMutation(params: {
   checkpointBeforeAi?: boolean;
   replacePendingCreate?: boolean;
   operations?: string[];
+  beforeCommit?: (info: {
+    desired: ArtifactLiveValue;
+    changedRegionIds: string[];
+  }) => Promise<void>;
 }) {
   // The browser client id identifies the owner/viewer, not the AI body. Reusing
   // it for the worker makes every observer with that id discard the AI cursor
@@ -1770,6 +1798,7 @@ export async function applyAiArtifactMutation(params: {
         operationId: params.operationId,
         claimActorKind,
         plan: baselinePlan,
+        desired: baseline,
         getConnectionError: () => connectionError,
         signal: params.signal,
         onConflict: params.onConflict,
@@ -1906,12 +1935,14 @@ export async function applyAiArtifactMutation(params: {
       operationId: params.operationId,
       claimActorKind,
       plan: refreshedPlan,
+      desired: refreshedValue,
       streamBase: refreshed,
       streamBeats,
       getConnectionError: () => connectionError,
       signal: params.signal,
       onConflict: params.onConflict,
       onConflictResolved: params.onConflictResolved,
+      beforeCommit: params.beforeCommit,
       baseSnapshot: snapshotArtifactRegions(
         typeKey,
         refreshed,
@@ -1928,6 +1959,7 @@ export async function applyAiArtifactMutation(params: {
         if (pendingCreate) {
           return {
             plan: refreshedPlan,
+            desired: normalizedDesired,
             streamBase: liveBase,
             streamBeats: buildArtifactLivePreviewBeats(
               liveBase,
@@ -1949,6 +1981,7 @@ export async function applyAiArtifactMutation(params: {
         const liveRegionIds = livePlan.regions.map((region) => region.regionId);
         return {
           plan: livePlan,
+          desired: liveDesired,
           streamBase: liveBase,
           streamBeats: buildArtifactLivePreviewBeats(
             liveBase,

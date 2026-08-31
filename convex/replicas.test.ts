@@ -1729,4 +1729,181 @@ describe("replica truth machine", () => {
     );
     expect(conflict).toMatchObject({ state: "resolved-merged" });
   });
+
+  it("leaves work content unchanged while a verified-first materialization is pending", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+      projectionContent: { blocks: [{ id: "body", text: "P5V1-NATIVE-AI-2301" }] },
+      projectionContentHash: nextHash,
+      promotionMode: "verified-first",
+    });
+    const truth = await t.run(async (ctx) => ({
+      work: await ctx.db.get(fixture.workId),
+      request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
+      local: await ctx.db.get(fixture.localId),
+    }));
+    expect(queued.state).toBe("pending");
+    expect(truth.work?.content).toEqual({ blocks: [] });
+    expect(truth.request).toMatchObject({
+      state: "pending",
+      projectionBaseContent: { blocks: [{ id: "body", text: "P5V1-NATIVE-AI-2301" }] },
+    });
+    expect(truth.local?.state).toBe("pending");
+  });
+
+  it("advances replica byte and projection bases on verified-first without rewriting work content", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const projection = { blocks: [{ id: "body", text: "P5V1-NATIVE-AI-2301" }] };
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+      projectionContent: projection,
+      projectionContentHash: nextHash,
+      promotionMode: "verified-first",
+    });
+    await t.mutation(api.bridgeSync.completeWrite, {
+      credential: bridgeCredential,
+      requestId: requireWriteRequestId(queued.requestId),
+      outcome: "verified",
+      actualRevision: nextHash,
+    });
+    const truth = await t.run(async (ctx) => ({
+      work: await ctx.db.get(fixture.workId),
+      cloud: await ctx.db.get(fixture.cloudId),
+      local: await ctx.db.get(fixture.localId),
+      request: await ctx.db.get(requireWriteRequestId(queued.requestId)),
+    }));
+    expect(truth.work?.content).toEqual({ blocks: [] });
+    expect(truth.request?.state).toBe("verified");
+    expect(truth.local).toMatchObject({
+      revision: nextHash,
+      projectionBaseContent: projection,
+      state: "current",
+    });
+    expect(truth.cloud).toMatchObject({
+      projectionBaseContent: projection,
+      projectionBaseRevision: nextHash,
+    });
+  });
+
+  it("reports authorized materialization status and hides requests from strangers", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+      promotionMode: "verified-first",
+    });
+    const requestId = requireWriteRequestId(queued.requestId);
+    const status = await asUser.query(api.replicas.materializationStatus, {
+      requestId,
+    });
+    expect(status).toMatchObject({ requestId, state: "pending" });
+    const strangerIdentity = {
+      subject: "clerk_materialization_stranger",
+      email: "materialization-stranger@example.test",
+      emailVerified: true,
+    };
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const strangerAccountId = await ctx.db.insert("accounts", {
+        clerkId: strangerIdentity.subject,
+        email: strangerIdentity.email,
+        emailVerified: true,
+        name: "Stranger",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("schoolMemberships", {
+        accountId: strangerAccountId,
+        schoolId: fixture.schoolId,
+        role: "student",
+        status: "active",
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    await expect(
+      t.withIdentity(strangerIdentity).query(api.replicas.materializationStatus, {
+        requestId,
+      }),
+    ).rejects.toThrow(/WRITE_REQUEST_NOT_FOUND/);
+  });
+
+  it("cancels pending verified-first writes without overwriting a newer projection", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+      projectionContent: { blocks: [{ id: "body", text: "AI phantom" }] },
+      projectionContentHash: nextHash,
+      promotionMode: "verified-first",
+    });
+    const requestId = requireWriteRequestId(queued.requestId);
+    const newer = { blocks: [{ id: "body", text: "human later" }] };
+    await t.run(async (ctx) => {
+      await ctx.db.patch(fixture.workId, { content: newer, updatedAt: Date.now() });
+    });
+    const cancelled = await asUser.mutation(api.replicas.cancelMaterialization, {
+      requestId,
+    });
+    expect(cancelled).toMatchObject({ cancelled: true, state: "failed" });
+    const truth = await t.run(async (ctx) => ({
+      work: await ctx.db.get(fixture.workId),
+      request: await ctx.db.get(requestId),
+      local: await ctx.db.get(fixture.localId),
+    }));
+    expect(truth.work?.content).toEqual(newer);
+    expect(truth.request).toMatchObject({
+      state: "failed",
+      errorCode: "cancelled-before-claim",
+    });
+    expect(truth.local).toMatchObject({ state: "current" });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(requestId, {
+        state: "claimed",
+        claimedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    });
+    const refused = await asUser.mutation(api.replicas.cancelMaterialization, {
+      requestId,
+    });
+    expect(refused).toMatchObject({
+      cancelled: false,
+      state: "claimed",
+      mustConverge: true,
+    });
+  });
 });

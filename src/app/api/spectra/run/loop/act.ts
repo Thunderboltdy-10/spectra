@@ -1,10 +1,7 @@
-import type { Id } from "../../../../../../convex/_generated/dataModel";
 import type { NativeProgressUpdate, Surface } from "./contract";
 import { rows } from "./gather";
 import { mutate, query } from "./io";
 import { normalizeCreationSummary, operationLabel } from "./plan";
-import { materializeDocxArtifact } from "@/app/api/spectra/lenses/docx/route";
-import { materializeOfficeArtifact } from "@/app/api/spectra/lenses/office/route";
 import {
   authorityPublicMessage,
   authorityRequiresNotice,
@@ -12,6 +9,11 @@ import {
 import { evaluateCommandAuthority, recordAuthorityDecision } from "./authority";
 import { applyResolvedContentPatch } from "@/features/spectra/ai/document-content-patch";
 import { resolveLibraryDestinationId } from "@/features/spectra/ai/library-operation-context";
+import {
+  isNativeContentRegion,
+  linkedOfficeKind,
+  promoteNativeAiContent,
+} from "@/features/spectra/ai/native-ai-promotion";
 import {
   applyAiArtifactMutation,
   readLiveArtifactValue,
@@ -820,6 +822,26 @@ export async function executeOperation(
       throw new Error(
         "The artifact update blueprint does not match the live artifact.",
       );
+    const replicaTruth = await query<
+      { workId: string },
+      {
+        replicas: Array<{
+          kind?: string;
+          state?: string;
+          nativeFormat?: string;
+        }>;
+      }
+    >("replicas:forWork", { workId: input.artifactId }).catch(() => null);
+    const localNative = replicaTruth?.replicas.find(
+      (replica) =>
+        replica.kind === "local" &&
+        replica.state !== "unavailable" &&
+        replica.nativeFormat,
+    );
+    const nativeFormat = (
+      artifact.nativeFormat ?? localNative?.nativeFormat
+    )?.toLowerCase();
+    const officeKind = localNative ? linkedOfficeKind(nativeFormat) : null;
     const mutationResult = await applyAiArtifactMutation({
       artifactId: input.artifactId,
       runId,
@@ -829,6 +851,18 @@ export async function executeOperation(
       onConflict: context.onRegionConflict,
       onConflictResolved: context.onRegionConflictResolved,
       collaborationClientId: context.collaborationClientId,
+      beforeCommit: officeKind
+        ? async ({ desired, changedRegionIds }) => {
+            if (!changedRegionIds.some(isNativeContentRegion)) return;
+            await promoteNativeAiContent({
+              workId: input.artifactId,
+              blueprintKey: artifact.blueprintKey,
+              nativeFormat: nativeFormat!,
+              content: desired.content,
+              signal: context.signal,
+            });
+          }
+        : undefined,
       resolveDesired: (current) => ({
         title: input.title ?? current.title,
         ...(input.summary !== null
@@ -851,25 +885,6 @@ export async function executeOperation(
         artifactId: input.artifactId,
         timeoutMs: 5_000,
       }).catch(() => null);
-      const replicaTruth = await query<
-        { workId: string },
-        {
-          replicas: Array<{
-            kind?: string;
-            state?: string;
-            nativeFormat?: string;
-          }>;
-        }
-      >("replicas:forWork", { workId: input.artifactId }).catch(() => null);
-      const localNative = replicaTruth?.replicas.find(
-        (replica) =>
-          replica.kind === "local" &&
-          replica.state !== "unavailable" &&
-          replica.nativeFormat,
-      );
-      const nativeFormat = (
-        artifact.nativeFormat ?? localNative?.nativeFormat
-      )?.toLowerCase();
       if (live) {
         await mutate("spectraArtifacts:stageAiPatch", {
           actorClerkId,
@@ -889,36 +904,6 @@ export async function executeOperation(
             : {}),
           commit: true,
         }).catch(() => null);
-      } else if (localNative) {
-        throw new Error(
-          "NATIVE_MATERIALIZE_SKIPPED: Spectra could not read the live document after the edit, so the Office file on this PC was not updated.",
-        );
-      }
-
-      // AI edits use the same native lens/materialization pipeline as human
-      // edits. A committed Spectra projection without this queue step would
-      // look successful in the browser while leaving the mounted Office
-      // file stale, which is an unacceptable false-sync state.
-      if (live) {
-        if (
-          artifact.blueprintKey === "document" &&
-          ["docx", "docm", "dotx", "dotm"].includes(nativeFormat ?? "")
-        ) {
-          await materializeDocxArtifact(
-            input.artifactId as Id<"spectraArtifacts">,
-            live.content,
-          );
-        } else if (
-          (artifact.blueprintKey === "sheets" ||
-            artifact.blueprintKey === "presentation") &&
-          nativeFormat &&
-          !["docx", "docm", "dotx", "dotm"].includes(nativeFormat)
-        ) {
-          await materializeOfficeArtifact(
-            input.artifactId as Id<"spectraArtifacts">,
-            live.content,
-          );
-        }
       }
     }
     const effectProgress = operationEffectProgress(

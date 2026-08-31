@@ -288,6 +288,70 @@ export const forWork = query({
   },
 });
 
+export const materializationStatus = query({
+  args: { requestId: v.id("bridgeWriteRequests") },
+  handler: async (ctx, { requestId }) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const request = await ctx.db.get(requestId);
+    if (!request) throw new Error("WRITE_REQUEST_NOT_FOUND");
+    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    if (!access.allowed || !access.capabilities.includes("read"))
+      throw new Error("WRITE_REQUEST_NOT_FOUND");
+    return {
+      requestId: request._id,
+      workId: request.workId,
+      state: request.state,
+      errorCode: request.errorCode,
+      errorMessage: request.errorMessage,
+      targetRevision: request.targetRevision,
+    };
+  },
+});
+
+export const cancelMaterialization = mutation({
+  args: { requestId: v.id("bridgeWriteRequests") },
+  handler: async (ctx, { requestId }) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const request = await ctx.db.get(requestId);
+    if (!request) throw new Error("WRITE_REQUEST_NOT_FOUND");
+    const access = await evaluateAccessForActor(ctx, actor, "artifact", request.workId);
+    if (!access.allowed || !access.capabilities.includes("modify"))
+      throw new Error("WRITE_REQUEST_NOT_FOUND");
+    const now = Date.now();
+    if (request.state === "claimed" || request.state === "verified") {
+      return { cancelled: false, state: request.state, mustConverge: true as const };
+    }
+    if (request.state !== "pending") {
+      return { cancelled: false, state: request.state };
+    }
+    await ctx.db.patch(request._id, {
+      state: "failed",
+      errorCode: "cancelled-before-claim",
+      errorMessage: "The save was cancelled before the original file was written.",
+      claimedAt: undefined,
+      updatedAt: now,
+    });
+    const operation = await ctx.db.query("syncOperations")
+      .withIndex("by_account_key", (q) => q.eq("accountId", request.accountId).eq("idempotencyKey", request.idempotencyKey))
+      .unique();
+    if (operation && (operation.state === "pending" || operation.state === "applied"))
+      await ctx.db.patch(operation._id, { state: "failed", errorCode: "cancelled-before-claim", updatedAt: now });
+    const replica = await ctx.db.get(request.replicaId);
+    if (replica?.state === "pending") {
+      await ctx.db.patch(replica._id, {
+        state: "current",
+        errorCode: undefined,
+        errorMessage: undefined,
+        errorAt: undefined,
+        updatedAt: now,
+      });
+    }
+    return { cancelled: true, state: "failed" as const };
+  },
+});
+
 /** Summary replica truth for Library rows. Indexed, no content (ARCHITECTURE-PLATFORM §2). */
 export const presentationsForAccount = query({
   args: {},
@@ -628,6 +692,9 @@ export const queueMaterialization = mutation({
     projectionContent: v.optional(v.any()),
     projectionContentHash: v.optional(v.string()),
     projectionTextIndex: v.optional(v.string()),
+    promotionMode: v.optional(
+      v.union(v.literal("verified-first"), v.literal("immediate-projection")),
+    ),
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -642,6 +709,7 @@ export const queueMaterialization = mutation({
       baseTextIndex: z.string().max(200_000).optional(),
       projectionContentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
       projectionTextIndex: z.string().max(200_000).optional(),
+      promotionMode: z.enum(["verified-first", "immediate-projection"]).optional(),
     }).parse(args);
     const work = await ctx.db.get(args.workId);
     if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
@@ -773,7 +841,11 @@ export const queueMaterialization = mutation({
     // proves the write. Stamping the target hash here made every overlapping
     // Word save look like a blob conflict with no region previews.
     await ctx.db.patch(local._id, { state: "pending", updatedAt: now });
-    if (args.projectionContent !== undefined && input.projectionContentHash) {
+    if (
+      input.promotionMode !== "verified-first" &&
+      args.projectionContent !== undefined &&
+      input.projectionContentHash
+    ) {
       await ctx.db.patch(args.workId, {
         content: args.projectionContent,
         contentHash: input.projectionContentHash,

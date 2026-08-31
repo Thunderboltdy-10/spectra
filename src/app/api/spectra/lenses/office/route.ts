@@ -124,14 +124,16 @@ export function projectionFor(
 export async function materializeOfficeArtifact(
   workId: Id<"spectraArtifacts">,
   content: unknown,
+  options?: { promotionMode?: "verified-first" },
 ) {
-  return materializeOfficeArtifactAttempt(workId, content, 0);
+  return materializeOfficeArtifactAttempt(workId, content, 0, options);
 }
 
 async function materializeOfficeArtifactAttempt(
   workId: Id<"spectraArtifacts">,
   content: unknown,
   attempt: number,
+  options?: { promotionMode?: "verified-first" },
 ) {
   const [{ truth: cloudTruth, payload: cloudPayload }, workTruth] =
     await Promise.all([
@@ -295,6 +297,9 @@ async function materializeOfficeArtifactAttempt(
       ),
       projectionContentHash: (next.projection as OfficeProjection).nativeBinding
         .semanticDigest,
+      ...(options?.promotionMode
+        ? { promotionMode: options.promotionMode }
+        : {}),
     });
   } catch (error) {
     if (
@@ -302,7 +307,7 @@ async function materializeOfficeArtifactAttempt(
       error instanceof Error &&
       error.message.includes("MATERIALIZATION_BASE_STALE")
     )
-      return materializeOfficeArtifactAttempt(workId, content, attempt + 1);
+      return materializeOfficeArtifactAttempt(workId, content, attempt + 1, options);
     throw error;
   }
   return {

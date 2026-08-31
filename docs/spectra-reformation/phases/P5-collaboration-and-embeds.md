@@ -135,3 +135,11 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - Cards 1–5 PASS. Card 6 blocked before Word save (same-hash fixture hid the working DOCX). Cards 7–9 not started. Unit stays OPEN.
 - Class repairs on this branch: native-room recover only on live-hash mismatch; `replicas.forWork` uses artifact access not owner-only; region claims keep queued AI leases and serialize on promote; AI apply rebases after the wait; patch-verify requires every distinctive authored token (no 70% phantom Updated).
 - Evidence: `.shots/reformation/P5.V1/manifest.md`. Pablo asked to PR here and let another agent continue.
+
+### P5.V1 verification log (2026-09-01, native promotion repair — unit still OPEN)
+
+- SYSTEMIC Card 6 class: AI `artifact.update` committed shared Yjs/`artifact.content` before Bridge-verified native bytes; Keep Word then left a phantom AI marker. Repair: `beforeCommit` promotion hook; `queueMaterialization` `verified-first` does not patch work content while pending; `materializationStatus`/`cancelMaterialization`; AI completion waits a durable-ack epoch, not transport cleanliness.
+- Red-first: swapping `document.transact` before `beforeCommit` failed `refuses Yjs apply when native promotion fails first`; order restored. Focused 10 files / 119 tests green; `replicas.test.ts` supersede expectation unchanged.
+- Live Card 6 on fresh `P5V1-Card6-Fresh-20260831.docx` (`wx7drz5y9v4r6ewsfd31c3hmad8dgkak`): unique AI marker present in Yjs, Convex-visible studio, and ZIP bytes together (SHA `D8F6EC01…` after Word recover-save). Ambiguous *text* “Page 332 Question 5” did not refuse (134 unique `w14:paraId`s). Word opened with “unreadable content” on Python-zip-salted packages; recover+SaveAs wrote `P5V1-NATIVE-WORD-2301` to disk; Spectra Yjs still lacked the Word marker and showed no Keep Word UI after reload. Cards 7–9 unstarted. Fly.io unproved.
+- Field Note P6.I4: Library still titles a uniquely hashed fixture row `P5V1-Exercises-control.docx` (shot 64). Do not start P6.I4 here.
+- Status: class repair in product+tests; P5.V1 remains OPEN. Evidence `.shots/reformation/P5.V1/manifest.md`.

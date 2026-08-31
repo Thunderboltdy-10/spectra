@@ -20,6 +20,7 @@ import {
 import type { FidelityRegionKey } from "../commands/types";
 import { DOCUMENT_SLASH_COMMANDS } from "../editor/slash-command-extension";
 import { requireArtifactTypeManifest } from "../artifacts/registry";
+import { DOCUMENT_NATIVE_REASONS } from "../capabilities";
 
 const bindings = (patch?: (handlers: DocumentCommandHandlers) => DocumentCommandHandlers) =>
   documentCommandBindings(patch ? patch(documentStubHandlers()) : documentStubHandlers());
@@ -215,7 +216,9 @@ describe("document honesty under strict-native", () => {
       fullContext("strict-native"),
     );
     expect(availability.state).toBe("disabled");
-    expect(availability.state === "disabled" ? availability.reason : "").toMatch(/not its shape/);
+    expect(availability.state === "disabled" ? availability.reason : "").toBe(
+      DOCUMENT_NATIVE_REASONS.tableStructure,
+    );
   });
 
   it("disables a command whose touched region the linked file only preserves", () => {

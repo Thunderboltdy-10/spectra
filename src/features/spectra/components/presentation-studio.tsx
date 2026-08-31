@@ -2870,8 +2870,6 @@ export function PresentationStudio({
         activeSlide.nativeCompatibility?.transition === "preserved",
       animationsPreserved:
         activeSlide.nativeCompatibility?.animations === "preserved",
-      notesUnsupported:
-        activeSlide.nativeCompatibility?.speakerNotes === "unsupported",
       snapToObjects,
       showGrid,
       showGuides,

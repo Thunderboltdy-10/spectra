@@ -1,5 +1,52 @@
 # Presentation Capability Inventory
 
+## P12.I7 authoritative post-P3 closure — 2026-08-31
+
+**Named industry leader:** Microsoft PowerPoint for Microsoft 365 (desktop).
+
+**Authority:** the capability IR and PPTX lens schemas on `reform/P12.I7`; this section supersedes every 2026-08-22 status, proposal, priority, and gap statement below.
+**Closure rule:** `SHIP` means the operation is reachable through the IR and works in its declared profile; `REFUSE-HONESTLY` means strict-native shows the exact IR-owned sentence to both a person and the AI; `DEFER-WITH-OWNER` names work outside this bounded re-audit. There are no silent rows.
+
+### Standing IR census
+
+| Classification | Rows | Closure |
+|---|---:|---|
+| SHIP — PPTX lens writer | 16 | Fifteen post-P3 writers plus P12.I7 native hidden-slide state. |
+| SHIP — UI/read/export operation | 36 | These operations do not claim a native package write. |
+| REFUSE-HONESTLY — no native delta | 66 | One former false refusal became the hidden-slide writer; every remaining reason is exact and actionable. |
+| **Total** | **118** | Standing P12.I7 baseline: 16 writers / 66 refusals / 36 UI-only. |
+
+Speaker notes are part of the shipped writer set: the lens creates a valid native notes page and notes master when absent. P12.I7 removes the stale studio gate that could still disable that control. Hidden-slide state now reads and writes PowerPoint's own slide visibility flag and dirties only the selected slide part.
+
+### Microsoft PowerPoint family closure
+
+| Classification | Capability families | IR rows | Product answer |
+|---|---|---:|---|
+| SHIP | Slide title/text/text-box edits, add/remove/reorder slides, notes, alt text, single-shape geometry, and hidden-slide state | 16 | Writes through the PPTX lens with part-scoped preservation tests. |
+| SHIP | History, navigation, inspection/audits, presenter/rehearsal surfaces, views, and copy/export actions | 36 | Works without claiming a native package delta. |
+| REFUSE-HONESTLY | Native text/paragraph styling | 13 | Words remain editable; direct font and paragraph styling to PowerPoint. |
+| REFUSE-HONESTLY | Import copy and slide duplication | 2 | Offer a separate copy or native duplication in PowerPoint. |
+| REFUSE-HONESTLY | New shapes, equations, charts, tables, media, and live embeds/components | 10 | Name the exact unsupported object family and a native or unlinking action. |
+| REFUSE-HONESTLY | Layouts/placeholders, themes, backgrounds, slide size/numbers, and sections | 8 | Preserve deck structure; direct each structural change to PowerPoint. |
+| REFUSE-HONESTLY | Citations/bibliography | 2 | Offer unlinking or ordinary slide text. |
+| REFUSE-HONESTLY | Multi-object geometry, groups, and stacking order | 8 | Keep single-shape movement native; direct compound shape-tree edits to PowerPoint. |
+| REFUSE-HONESTLY | Transitions, auto-advance, and object animations | 8 | Preserve timing trees; direct motion authoring to PowerPoint. |
+| REFUSE-HONESTLY | Shape styling, lock/visibility, object deletion, crop, and chart data | 15 | Preserve native shape/media/chart machinery and name the PowerPoint action. |
+
+### Deferred leader gaps with owners
+
+| Field Note | Classification | Microsoft PowerPoint gap | Named later owner |
+|---|---|---|---|
+| P12.I7-PPT-1 | DEFER-WITH-OWNER | Native run/paragraph styling, fills/lines/effects, rich shape/media/chart/table/equation insertion | Orchestrator — future **PowerPoint Rich Objects unit**, after P12.V2 |
+| P12.I7-PPT-2 | DEFER-WITH-OWNER | Native transitions, auto-advance, and animation timing authoring | Orchestrator — future **PowerPoint Motion package-writer unit**, after P12.V2 |
+| P12.I7-PPT-3 | DEFER-WITH-OWNER | Layout/theme/background/slide-size/section/slide-number editing across masters | Orchestrator — future **PowerPoint Structure & Masters unit**, after P12.V2 |
+| P12.I7-PPT-4 | DEFER-WITH-OWNER | Grouping, z-order, native object deletion, crop, and linked-chart data rewrites | Orchestrator — future **PowerPoint Shape Tree unit**, after P12.V2 |
+| P12.I7-PPT-5 | DEFER-WITH-OWNER | SmartArt, connectors, custom shows, OLE, and macro authoring beyond safe preservation | Orchestrator — future **PowerPoint Advanced Objects unit**; macro execution remains prohibited |
+
+### Archaeology boundary
+
+Everything below this line is the original 2026-08-22 pre-IR research record. It remains useful for historical evidence and leader-feature discovery, but its statuses, command wiring claims, gaps, and implementation priorities are **superseded and non-authoritative**.
+
 **Scope:** Spectra Nova workbar/artifact capability pass (Phase 5 — Presentation).  
 **Evidence date:** 2026-08-22 (N7 accepted; N8 capability contract sealed; codebase at current workspace).  
 **Sources:** `CANON.md`, `STATE.md`, `PLAYBOOK.md` §3–7, `ARCHITECTURE-*.md`, N7/N8 mission briefs, `WORKBAR-ARTIFACT-CAPABILITY-CONTRACT.md`, `WORKBAR-ARTIFACT-CAPABILITY-AGENT-PROMPT.md` Phase 5, and codebase exploration (`presentation-studio.tsx`, `commands/registry.ts`, `lenses/pptx-lens.ts`, `presentation/*`, Office harness fixtures).

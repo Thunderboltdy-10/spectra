@@ -10,6 +10,8 @@ import { xlsxLens } from "../lenses/xlsx-lens";
 import { pptxLens } from "../lenses/pptx-lens";
 import {
   pptxArtifactContent,
+  pptxOperationsBetween,
+  pptxProjectionFromContent,
   xlsxArtifactContent,
   xlsxProjectionFromContent,
 } from "../lenses/office-content";
@@ -389,6 +391,49 @@ describe("PPTX native promotions", () => {
     expect(reopened.projection.slides[index]!.speakerNotes).toBe(
       "Open on the number, then the story.",
     );
+  });
+
+  it("round-trips PowerPoint hidden-slide state by changing only that slide part", async () => {
+    const source = await fixture("typical-preservation");
+    const opened = await pptxLens.open(source);
+    const target = opened.projection.slides[0]!;
+    expect(target.hidden).toBeUndefined();
+    const content = pptxArtifactContent(opened.projection);
+    content.slides[0]!.hidden = true;
+    const yjsDocument = presentationYjsAdapter.createDocument(content);
+    const projectedContent = presentationYjsAdapter.project(yjsDocument);
+    expect(projectedContent.slides[0]!.hidden).toBe(true);
+    const hiddenProjection = pptxProjectionFromContent(
+      projectedContent,
+      opened.projection,
+    );
+    expect(pptxOperationsBetween(opened.projection, hiddenProjection)).toContainEqual({
+      kind: "set-slide-hidden",
+      slideId: target.id,
+      hidden: true,
+    });
+    const saved = await pptxLens.materialize({
+      projection: hiddenProjection,
+      carry: opened.preservedCarry,
+    });
+    expect(await changedParts(source, saved)).toEqual([
+      target.id.replace(/^pptx:slide:\//, ""),
+    ]);
+    const reopened = await pptxLens.open(saved);
+    expect(reopened.projection.slides[0]!.hidden).toBe(true);
+    expect(pptxArtifactContent(reopened.projection).slides[0]!.hidden).toBe(true);
+
+    const shown = structuredClone(reopened.projection);
+    shown.slides[0]!.hidden = undefined;
+    const restored = await pptxLens.materialize({
+      projection: shown,
+      carry: reopened.preservedCarry,
+    });
+    expect(await changedParts(saved, restored)).toEqual([
+      target.id.replace(/^pptx:slide:\//, ""),
+    ]);
+    expect((await pptxLens.open(restored)).projection.slides[0]!.hidden)
+      .toBeUndefined();
   });
 
   it("describes a shape and moves it without touching anything else", async () => {

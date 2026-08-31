@@ -1,5 +1,51 @@
 # Document Capability Inventory
 
+## P12.I7 authoritative post-P3 closure — 2026-08-31
+
+**Named industry leader:** Microsoft Word for Microsoft 365 (desktop).
+
+**Authority:** the capability IR and DOCX lens schemas on `reform/P12.I7`; this section supersedes every 2026-08-22 status, proposal, priority, and gap statement below.
+**Closure rule:** `SHIP` means the operation is reachable through the IR and works in its declared profile; `REFUSE-HONESTLY` means strict-native shows the exact IR-owned sentence to both a person and the AI; `DEFER-WITH-OWNER` names work outside this bounded re-audit. There are no silent rows.
+
+### Standing IR census
+
+| Classification | Rows | Closure |
+|---|---:|---|
+| SHIP — DOCX lens writer | 39 | Each row names a delta imported from the DOCX lens schema. |
+| SHIP — UI/read/export operation | 18 | These operations do not claim a native package write. |
+| REFUSE-HONESTLY — no native delta | 46 | Exact Word-specific reason plus a next action; human and AI gates share it. |
+| **Total** | **103** | Standing P12.I7 baseline; unchanged from the post-P3 census. |
+
+### Microsoft Word family closure
+
+| Classification | Capability families | IR rows | Product answer |
+|---|---|---:|---|
+| SHIP | Paragraph and safe table-cell text, existing styles, safe block insertion/removal, native materialization | 39 | Writes through the DOCX lens; untouched parts remain preserved. |
+| SHIP | History, find/navigation, inspection, view chrome, comments surface, and copy/export actions | 18 | Works without claiming a native package delta. |
+| REFUSE-HONESTLY | List numbering and promote/demote | 4 | Preserve the numbering; direct the user to Word. |
+| REFUSE-HONESTLY | Import-copy boundary and new named-style definitions | 2 | Offer a separate copy or style creation in Word. |
+| REFUSE-HONESTLY | Table structure | 11 | Text remains editable; rows, columns, merges, headers, and deletion stay in Word. |
+| REFUSE-HONESTLY | Pictures and wrapping | 4 | Preserve image parts; direct image insertion/restyling to Word. |
+| REFUSE-HONESTLY | Hyperlinks and cross-references | 3 | Preserve links; direct link changes to Word. |
+| REFUSE-HONESTLY | Equations | 5 | Preserve Word equations; direct equation authoring to Word. |
+| REFUSE-HONESTLY | Sections, page size/orientation/margins/columns | 5 | Preserve section properties; direct page setup to Word. |
+| REFUSE-HONESTLY | Live Spectra reference | 1 | Offer unlinking or a normal Word link. |
+| REFUSE-HONESTLY | Footnotes/endnotes, fields/TOC, headers/footers | 6 | Preserve native parts; name the corresponding Word action. |
+| REFUSE-HONESTLY | Whole-document templates and revision resolution | 5 | Offer a separate import or accepting/rejecting changes in Word. |
+
+### Deferred leader gaps with owners
+
+| Field Note | Classification | Microsoft Word gap | Named later owner |
+|---|---|---|---|
+| P12.I7-WORD-1 | DEFER-WITH-OWNER | Tracked-changes authoring, revision navigation, and native review/comments parity | Orchestrator — future **Word Review native-authoring unit**, after P12.V2 |
+| P12.I7-WORD-2 | DEFER-WITH-OWNER | Structural OOXML: tables, page sections, headers/footers, footnotes/endnotes, fields/TOC, and numbering definitions | Orchestrator — future **Word Structure package-writer unit**, after P12.V2 |
+| P12.I7-WORD-3 | DEFER-WITH-OWNER | Rich objects: pictures/wrapping, hyperlinks/cross-references, and equation authoring | Orchestrator — future **Word Rich Objects package-writer unit**, after P12.V2 |
+| P12.I7-WORD-4 | DEFER-WITH-OWNER | Mail merge, forms/content controls, and macro authoring beyond safe preservation | Orchestrator — future **Word Automation unit**; macro execution remains prohibited |
+
+### Archaeology boundary
+
+Everything below this line is the original 2026-08-22 pre-IR research record. It remains useful for historical evidence and leader-feature discovery, but its statuses, command wiring claims, gaps, and implementation priorities are **superseded and non-authoritative**.
+
 **Scope:** Spectra Nova Document artifact — workbar, command registry, studio handlers, DOCX/OOXML fidelity, fixtures, and tests.  
 **Generated:** 2026-08-22 (Composer 2.5 Explorer, Phase 3 research).  
 **Sources:** `docs/spectra-nova/CANON.md`, `STATE.md`, `PLAYBOOK.md` §3–7, `ARCHITECTURE-*.md`, `missions/N7-serious-editors.md`, `missions/N8-ai-operates-spectra.md`, `WORKBAR-ARTIFACT-CAPABILITY-CONTRACT.md`, `WORKBAR-ARTIFACT-CAPABILITY-AGENT-PROMPT.md` (Phase 3), and codebase truth under `src/features/spectra/`.

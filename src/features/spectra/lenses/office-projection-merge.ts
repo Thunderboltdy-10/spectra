@@ -227,6 +227,12 @@ function mergeSlide(
     resolveWhole(`${base.id}:${suffix}`, ancestor, current, external, resolution);
   const title = scalar("title", base.title, ours.title, theirs.title);
   const notes = scalar("notes", base.speakerNotes, ours.speakerNotes, theirs.speakerNotes);
+  const hidden = scalar(
+    "hidden",
+    Boolean(base.hidden),
+    Boolean(ours.hidden),
+    Boolean(theirs.hidden),
+  );
   const structure = scalar(
     "structure",
     { layoutPartName: base.layoutPartName, hasTransition: base.hasTransition, hasTiming: base.hasTiming, notesPartName: base.notesPartName },
@@ -244,6 +250,7 @@ function mergeSlide(
   const conflicts: MergeConflict<unknown>[] = [];
   if (title.conflict) conflicts.push(title.conflict);
   if (notes.conflict) conflicts.push(notes.conflict);
+  if (hidden.conflict) conflicts.push(hidden.conflict);
   if (structure.conflict) conflicts.push(structure.conflict);
   conflicts.push(...objects.conflicts);
   const mergedStructure = structure.value ?? {
@@ -257,6 +264,7 @@ function mergeSlide(
       ...theirs,
       ...mergedStructure,
       title: title.value ?? "",
+      hidden: hidden.value === true || undefined,
       speakerNotes: notes.value ?? "",
       objects: objects.value,
       text: [title.value ?? "", ...slideText(objects.value)].filter(Boolean),
@@ -265,12 +273,14 @@ function mergeSlide(
     spectraChanged: [
       ...(title.oursChanged ? [`${base.id}:title`] : []),
       ...(notes.oursChanged ? [`${base.id}:notes`] : []),
+      ...(hidden.oursChanged ? [`${base.id}:hidden`] : []),
       ...(structure.oursChanged ? [`${base.id}:structure`] : []),
       ...objects.changedByOurs,
     ],
     externalChanged: [
       ...(title.theirsChanged ? [`${base.id}:title`] : []),
       ...(notes.theirsChanged ? [`${base.id}:notes`] : []),
+      ...(hidden.theirsChanged ? [`${base.id}:hidden`] : []),
       ...(structure.theirsChanged ? [`${base.id}:structure`] : []),
       ...objects.changedByTheirs,
     ],

@@ -133,6 +133,35 @@ describe("Office projection merge", () => {
       .toEqual(["Spectra", "PowerPoint"]);
   });
 
+  it("keeps an independent hidden-slide change through the PowerPoint merge", () => {
+    const base = {
+      slides: [{
+        id: "pptx:slide:/ppt/slides/slide1.xml",
+        index: 0,
+        title: "Title",
+        text: ["Title"],
+        objects: [],
+        hasTransition: false,
+        hasTiming: false,
+        speakerNotes: "",
+      }],
+      nativeBinding: { ...binding, format: "pptx" as const },
+    };
+    const merged = mergePptxProjections(
+      base,
+      { ...base, slides: [{ ...base.slides[0]!, hidden: true }] },
+      { ...base, slides: [{ ...base.slides[0]!, speakerNotes: "External note" }] },
+    );
+    expect(merged.conflicts).toEqual([]);
+    expect(merged.projection.slides[0]).toMatchObject({
+      hidden: true,
+      speakerNotes: "External note",
+    });
+    expect(merged.spectraChanged).toContain(
+      "pptx:slide:/ppt/slides/slide1.xml:hidden",
+    );
+  });
+
   it("refuses ambiguous native identities", () => {
     const base = {
       sheets: [{

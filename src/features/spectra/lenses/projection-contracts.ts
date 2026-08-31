@@ -279,6 +279,7 @@ export const pptxSlideProjectionSchema = z
     layoutPartName: z.string().optional(),
     hasTransition: z.boolean(),
     hasTiming: z.boolean(),
+    hidden: z.boolean().optional(),
     speakerNotes: z.string(),
     notesPartName: z.string().optional(),
   })
@@ -302,6 +303,7 @@ export const pptxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-text"), slideId: z.string(), paragraphIndex: z.number().int().nonnegative(), text: z.string(), shapeId: z.string().optional() }).strict(),
   z.object({ kind: z.literal("add-text-box"), slideId: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-notes"), slideId: z.string(), text: z.string() }).strict(),
+  z.object({ kind: z.literal("set-slide-hidden"), slideId: z.string(), hidden: z.boolean() }).strict(),
   z.object({ kind: z.literal("set-alt-text"), slideId: z.string(), shapeId: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-geometry"), slideId: z.string(), shapeId: z.string(), x: z.number(), y: z.number(), width: z.number(), height: z.number(), rotation: z.number() }).strict(),
   z.object({ kind: z.literal("add-slide"), slideId: z.string(), layoutPartName: z.string().optional(), title: z.string().optional(), text: z.array(z.string()).optional() }).strict(),

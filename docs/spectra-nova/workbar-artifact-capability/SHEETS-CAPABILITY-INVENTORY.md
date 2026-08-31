@@ -1,5 +1,48 @@
 # Sheets Capability Inventory
 
+## P12.I7 authoritative post-P3 closure — 2026-08-31
+
+**Named industry leader:** Microsoft Excel for Microsoft 365 (desktop).
+
+**Authority:** the capability IR and XLSX lens schemas on `reform/P12.I7`; this section supersedes every 2026-08-22 status, proposal, priority, and gap statement below.
+**Closure rule:** `SHIP` means the operation is reachable through the IR and works in its declared profile; `REFUSE-HONESTLY` means strict-native shows the exact IR-owned sentence to both a person and the AI; `DEFER-WITH-OWNER` names work outside this bounded re-audit. There are no silent rows.
+
+### Standing IR census
+
+| Classification | Rows | Closure |
+|---|---:|---|
+| SHIP — XLSX lens writer | 42 | Each row names a delta imported from the XLSX lens schema. |
+| SHIP — UI/read/export operation | 27 | These operations do not claim a native package write. |
+| REFUSE-HONESTLY — no native delta | 42 | Exact Excel-specific reason plus a next action; human and AI gates share it. |
+| **Total** | **111** | Standing P12.I7 baseline; unchanged from the post-P3 census. |
+
+### Microsoft Excel family closure
+
+| Classification | Capability families | IR rows | Product answer |
+|---|---|---:|---|
+| SHIP | Cell values/formulas, safe clearing, supported formatting, merges, and freeze panes | 42 | Writes through the XLSX lens; unsupported formula machinery and unrelated parts remain preserved. |
+| SHIP | History, selection/navigation, formula aids, inspection, views, and copy/export actions | 27 | Works without claiming a native package delta. |
+| REFUSE-HONESTLY | Import-copy boundary | 1 | Offer a separate Library copy. |
+| REFUSE-HONESTLY | Charts | 7 | Preserve chart parts and cached data; direct chart changes to Excel. |
+| REFUSE-HONESTLY | Row/column insert/delete and dimensions/visibility | 10 | Explain dependency risk; direct structural or dimension changes to Excel. |
+| REFUSE-HONESTLY | Sort, filters, and duplicate-row removal | 6 | Name the distinct structural risk and the matching Excel action. |
+| REFUSE-HONESTLY | Tables, validation, conditional formatting, calculation mode, and defined names | 7 | Preserve each native record family; direct its edit to Excel. |
+| REFUSE-HONESTLY | Worksheet lifecycle/order/visibility/tab colour | 9 | Preserve sheet identities; direct sheet management to Excel. |
+| REFUSE-HONESTLY | Cell notes and protection | 2 | Preserve the native parts/settings; direct the change to Excel. |
+
+### Deferred leader gaps with owners
+
+| Field Note | Classification | Microsoft Excel gap | Named later owner |
+|---|---|---|---|
+| P12.I7-EXCEL-1 | DEFER-WITH-OWNER | Pivot-table creation/editing, slicers, PivotCharts, and data-model semantics | Orchestrator — future **Excel Analytical Objects unit**, after P12.V2 |
+| P12.I7-EXCEL-2 | DEFER-WITH-OWNER | Native charts, tables, filters/sorts, validation, conditional formatting, defined names, notes, and sheet lifecycle | Orchestrator — future **Excel Package Writer unit**, after P12.V2 |
+| P12.I7-EXCEL-3 | DEFER-WITH-OWNER | Dependency-safe row/column insertion/deletion and dimension/visibility writes across formulas and preserved objects | Orchestrator — future **Excel Structural Rewrite unit**, after P12.V2 |
+| P12.I7-EXCEL-4 | DEFER-WITH-OWNER | Power Query/external data, data model, and VBA authoring beyond safe preservation | Orchestrator — future **Excel External Data & Automation unit**; macro execution remains prohibited |
+
+### Archaeology boundary
+
+Everything below this line is the original 2026-08-22 pre-IR research record. It remains useful for historical evidence and leader-feature discovery, but its statuses, command wiring claims, gaps, and implementation priorities are **superseded and non-authoritative**.
+
 **Purpose:** Research deliverable for the workbar/artifact capability implementation pass (Phase 4). Maps every Sheets authoring capability against the shared command contract, native fidelity classes, existing code, fixtures, and gaps.
 
 **Sources:** Nova canon/architecture docs, `WORKBAR-ARTIFACT-CAPABILITY-CONTRACT.md`, `WORKBAR-ARTIFACT-CAPABILITY-AGENT-PROMPT.md` Phase 4, N7/N8 mission logs, and codebase truth in `sheets-studio.tsx`, `sheets/model.ts`, `lenses/xlsx-lens.ts`, `commands/registry.ts`, `artifacts/registry.ts`, and Office harness fixtures.

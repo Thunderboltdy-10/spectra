@@ -129,3 +129,9 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - No live soak, browser profile, dev stack, Bridge, Office, corpus, or evidence was used; the fresh P5.V1 verifier owns execution and verdict.
 - Status: load harness IMPLEMENTED. P5.V1 remains OPEN; no verification or acceptance claimed.
 
+### P5.V1 verification log (2026-08-31, partial)
+
+- Live school: Windows Next `:3000`, Convex `:3002` `local-pablo_md-ai_school-2`, gateway `:3001` from `spectra-p5v1-fix`. Accounts A (P MD, admin) and B (Pablo MD). Fly.io unproved.
+- Cards 1–5 PASS. Card 6 blocked before Word save (same-hash fixture hid the working DOCX). Cards 7–9 not started. Unit stays OPEN.
+- Class repairs on this branch: native-room recover only on live-hash mismatch; `replicas.forWork` uses artifact access not owner-only; region claims keep queued AI leases and serialize on promote; AI apply rebases after the wait; patch-verify requires every distinctive authored token (no 70% phantom Updated).
+- Evidence: `.shots/reformation/P5.V1/manifest.md`. Pablo asked to PR here and let another agent continue.

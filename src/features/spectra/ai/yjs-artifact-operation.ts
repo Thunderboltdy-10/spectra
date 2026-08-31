@@ -54,6 +54,7 @@ import {
 import { workYjsAdapter } from "@/features/spectra/work/models/yjs/registry";
 import { workYjsOrigins } from "@/features/spectra/work/models/yjs/origins";
 import { encodeArtifactContentForStorage } from "../../../../shared/sheet-cells";
+import { claimAcquireAction } from "../../../../shared/region-claim-policy";
 import { CloudflareRealtimeProvider } from "@/features/spectra/realtime/providers";
 import { realtimeProviderForWorkType } from "@/features/spectra/realtime/providers/provider-factory";
 import type { CollaborationPresence } from "@/features/spectra/collaboration/types";
@@ -397,7 +398,7 @@ function actForStreamBeat(input: {
 
 type RegionClaim = {
   claimId: string;
-  status: "active" | "queued";
+  status: "active" | "queued" | "paused";
   leaseExpiresAt: number;
   conflict: null | {
     claimId: string;
@@ -738,12 +739,25 @@ async function acquirePlanClaims(params: {
           ? { runId: params.runId, operationId: params.operationId }
           : {}),
       });
-      if (claim.status !== "queued") {
+      const action = claimAcquireAction(claim.status);
+      if (action === "apply") {
         if (notified) await params.onConflictResolved?.();
         claims.push(claim);
         break;
       }
-      await releaseClaims([claim], params.clientId, "cancel");
+      if (action === "refuse") {
+        await releaseClaims([...claims, claim], params.clientId, "cancel");
+        throw new AiArtifactRegionConflictError(
+          claim,
+          params.artifactId,
+          params.operationId,
+          params.clientId,
+          params.baseSnapshot,
+          params.proposedSnapshot,
+        );
+      }
+      // Keep the queued lease. Cancelling it lets a second AI re-acquire as
+      // active and apply a stale plan, which forks the paragraph.
       if (!notified) {
         await params.onConflict?.({
           regionId: claim.conflict?.regionId ?? region.regionId,
@@ -1017,6 +1031,14 @@ async function synchronizeMutation(params: {
     baseSnapshot,
     proposedSnapshot,
   });
+  const afterClaimWait = params.rebaseAfterHumanWait?.();
+  if (afterClaimWait) {
+    plan = afterClaimWait.plan;
+    streamBase = afterClaimWait.streamBase;
+    streamBeats = afterClaimWait.streamBeats;
+    baseSnapshot = afterClaimWait.baseSnapshot;
+    proposedSnapshot = afterClaimWait.proposedSnapshot;
+  }
   logPhase("claims-acquired", { regionCount: plan.regions.length });
   /** Last control the AI touched, so the settle frame lands on it. */
   let lastFramePath: string | undefined;

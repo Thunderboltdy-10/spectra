@@ -21,6 +21,7 @@ import {
   applyStoredRoomUpdates,
   encodeStoredRoomSnapshot,
   shouldCompactRoom,
+  shouldRecoverNativeRoom,
 } from "../../../../scripts/collaboration-room-state.mjs";
 
 describe("P5.I2 gateway production helpers", () => {
@@ -128,6 +129,29 @@ describe("P5.I2 gateway production helpers", () => {
     });
     expect(degraded.status).toBe("degraded");
     expect(degraded.service).toBe("spectra-collaboration-gateway");
+  });
+
+
+  it("does not recover a room whose unprojected human log already matches the live hash", () => {
+    const hash = "a".repeat(43);
+    expect(
+      shouldRecoverNativeRoom({
+        liveStateVectorHash: hash,
+        observedStateVectorHash: hash,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRecoverNativeRoom({
+        liveStateVectorHash: hash,
+        observedStateVectorHash: "b".repeat(43),
+      }),
+    ).toBe(true);
+    expect(
+      shouldRecoverNativeRoom({
+        liveStateVectorHash: null,
+        observedStateVectorHash: hash,
+      }),
+    ).toBe(false);
   });
 
   it("reloads a room from snapshot plus later updates after a process restart", () => {

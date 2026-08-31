@@ -524,6 +524,89 @@ describe("replica truth machine", () => {
     expect(truth.pendingCount).toBe(0);
   });
 
+  it("lets a modify collaborator read replica truth without crashing", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const collaboratorIdentity = {
+      subject: "clerk_replica_collaborator",
+      email: "replica-collab@example.test",
+      emailVerified: true,
+    };
+    const strangerIdentity = {
+      subject: "clerk_replica_stranger",
+      email: "replica-stranger@example.test",
+      emailVerified: true,
+    };
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch(fixture.workId, { schoolId: fixture.schoolId });
+      const collaboratorAccountId = await ctx.db.insert("accounts", {
+        clerkId: collaboratorIdentity.subject,
+        email: collaboratorIdentity.email,
+        emailVerified: true,
+        name: "Replica Collaborator",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("schoolMemberships", {
+        accountId: collaboratorAccountId,
+        schoolId: fixture.schoolId,
+        role: "student",
+        status: "active",
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("accessGrants", {
+        schoolId: fixture.schoolId,
+        resourceType: "artifact",
+        resourceId: fixture.workId,
+        principalType: "account",
+        principalId: collaboratorAccountId,
+        level: "modify",
+        capabilities: ["read", "modify", "restore", "use", "comment"],
+        source: "direct",
+        createdByAccountId: fixture.accountId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const strangerAccountId = await ctx.db.insert("accounts", {
+        clerkId: strangerIdentity.subject,
+        email: strangerIdentity.email,
+        emailVerified: true,
+        name: "Replica Stranger",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("schoolMemberships", {
+        accountId: strangerAccountId,
+        schoolId: fixture.schoolId,
+        role: "student",
+        status: "active",
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    const ownerTruth = await t.withIdentity(identity).query(api.replicas.forWork, {
+      workId: fixture.workId,
+    });
+    expect(ownerTruth.replicas.length).toBeGreaterThan(0);
+    const collaboratorTruth = await t
+      .withIdentity(collaboratorIdentity)
+      .query(api.replicas.forWork, { workId: fixture.workId });
+    expect(collaboratorTruth.replicas.map((replica) => replica._id)).toEqual(
+      ownerTruth.replicas.map((replica) => replica._id),
+    );
+    await expect(
+      t.withIdentity(strangerIdentity).query(api.replicas.forWork, {
+        workId: fixture.workId,
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+  });
+
   it("does not keep Syncing after an applied Spectra write", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

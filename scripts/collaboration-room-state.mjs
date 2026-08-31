@@ -59,3 +59,24 @@ export function encodeStoredRoomSnapshot(Y, stored) {
     document.destroy();
   }
 }
+
+/**
+ * Native recover resets a bootstrap-only room whose Yjs clocks diverged.
+ * Unprojected human/AI updates (nextSequence advanced, no checkpoint yet)
+ * are the durable log and the restart source. Calling recover there throws
+ * COLLABORATION_DURABLE_RECOVERY_STALE because the live Y.Doc no longer
+ * matches artifact.content.
+ *
+ * @param {{
+ *   liveStateVectorHash?: string | null,
+ *   observedStateVectorHash?: string | null,
+ * }} options
+ */
+export function shouldRecoverNativeRoom({
+  liveStateVectorHash = null,
+  observedStateVectorHash = null,
+} = {}) {
+  if (!liveStateVectorHash) return false;
+  return observedStateVectorHash !== liveStateVectorHash;
+}
+

@@ -1,0 +1,5 @@
+﻿Card 6 Word reopen: NOT PERFORMED
+Reason: Library listed only P5V1-Exercises-control.docx in spectra-p5v1-docx-fixture (1 item). Working file P5V1-Exercises.docx was not a separate Library title. Control must stay at original hash; Word.Application was never launched. Did not fake Word-only without Spectra native route.
+Fixture hashes at end (both still original):
+P5V1-Exercises.docx SHA-256 8A5F5F8059ABC6E121AE28AB2EAB51B7AFC44BB0AE9FD52945078CFF621CAA8E
+P5V1-Exercises-control.docx SHA-256 8A5F5F8059ABC6E121AE28AB2EAB51B7AFC44BB0AE9FD52945078CFF621CAA8E

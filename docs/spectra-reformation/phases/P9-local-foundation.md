@@ -32,19 +32,6 @@ Make `npm run dev:local` (or equivalent) bring up one complete isolated stack: l
 - Required fidelity executions remain red on unchanged owned-by-other-unit code: DOCX stops at `DOCX_UNSUPPORTED_EDIT` in `docx-lens.ts`; Office fails its existing aggregate assertion. No lens/harness expectation was changed.
 - No Convex function body, seed/bootstrap path, shared runtime, browser profile, Bridge process, Office process, or lease was used.
 
-### P9.I1 local-package fix addendum — 2026-08-31
-
-- P9.I4 exposed a fresh-instance harness defect: Convex CLI 1.41 requires its
-  current project root to own `package.json` and declare `convex`; the generated
-  per-instance project owned only `convex.json`, so startup stopped before local
-  configuration unless a package was copied into the runtime directory.
-- Instance scaffolding now writes a private, deterministic package contract
-  using the checkout's declared Convex version on every add/start. The package
-  is isolated per numeric instance and contains no secrets or app scripts.
-- A red-to-green CLI-scaffolding regression creates two fresh runtime roots and
-  proves each gets the required independent manifest; focused harness tests are
-  now 15/15. This is a P9.I1 harness repair only; no P9.I4 seed path changed.
-
 ## P9.I2 — Convex efficiency: runs + reminders (H)
 
 Fix the class, not the counter. Known offenders and their required shape:
@@ -82,38 +69,9 @@ Fresh agent, first VU on a `local-deploy` lease:
 - **Bridge on local:** pair, mount an isolated fixture folder, discover, edit, Keep-in-Spectra — against the local instance.
 - **Reminder correctness:** a due planner reminder and a timetable reminder actually deliver post-migration (schedule-at-write, no minute-scan).
 
-### P9.I4 operator-authorization repair addendum — 2026-08-31
-
-- SYSTEMIC triage: Next server guards treated school membership as a prerequisite
-  for platform authorization, so every membershipless allowlisted operator failed
-  before the Convex operator-aware authorization seam could run.
-- Platform authorization now starts from the verified active account and requires
-  matching Next/Convex `SUPER_ADMIN_EMAILS` decisions; school authorization keeps
-  the unchanged membership-bearing actor contract.
-- Administration platform actions, operator-session school actions, the operator
-  admin shell, and operator-session secret access select their authorization scope
-  before loading a school actor. Ordinary membershipless accounts remain denied.
-- Focused regression coverage exercises both principal classes and route dispatch
-  (2 files / 10 tests). TypeScript, scoped ESLint, capability, secret, and diff
-  gates pass; no local stack, browser, Bridge, live Convex, or cloud resource ran.
-
 ## Exit gate
 
 N≥3 instances documented and startable; both accounts live on the seeded instance with ManageBac connected and folders imported; the five efficiency classes fixed with measured before/after evidence; budget baselines recorded; V1 PASS. From this gate onward **every VU in the program runs on a local instance (CANON R23)** and the cloud dev deployment is retired for testing.
-<<<<<<< HEAD
-=======
-
-### P9.I2 implementation log — 2026-08-31
-
-- Status: **IMPLEMENTED**; no acceptance claimed. No live deployment, Bridge, Office, or cloud resource was used.
-- `listTabs` now reads the tab projection plus latest result card; the former full run + full thread reads (two full documents per tab poll) are gone. A bounded 100-row backfill repairs legacy tabs.
-- Stale-run recovery replaced two owner-wide collections per stale run with `by_ai_run` equality queries plus direct ids already named by run operations; every repaired AI-card write also synchronizes P9.I3's bounded Library summary.
-- Planner and timetable reminders reconcile at source mutation time, retain scheduler handles, rearm failed/cancelled occurrences, validate source + access at delivery, and chain recurrence.
-- The two minute crons formerly admitted up to 60,000 planner documents and 300,000 timetable user-state documents per hour before nested reads. Idle safety is now hourly: two indexed overdue/missing-handle windows per family, empty when no work is pending (bounded at 300 candidate rows per family/run).
-- Red-first source contracts failed 3/3 before the repair; final focused contracts/behavior pass 9/9. AI lifecycle + Live Dock + P9.I3 projection regressions pass 28/28.
-- Root `tsc --noEmit`, scoped ESLint (0 warnings), capability ghost gate, secret scan (2,341 tracked files), and `git diff --check` pass.
-- Convex dry-run codegen was not available without `CONVEX_DEPLOYMENT`; it stopped before generation or deployment. P9.V1 owns local-instance delivery and measured dashboard budgets.
-- Merge-queue rebase: shell Convex settings were unset and `.env.local` classified local-only; no Convex CLI, server, browser, or cloud resource was used.
 
 ## P9.I3 unit log — 2026-08-30
 
@@ -129,27 +87,3 @@ N≥3 instances documented and startable; both accounts live on the seeded insta
 - Standing gate: root `tsc --noEmit`, scoped ESLint, `check:capabilities`, secret scan (2,328 tracked files after rebase), and `git diff --check` passed.
 - No fidelity harness required: no lens, Bridge, replica, bridgeSync, or `shared/` path changed.
 - Merge coordination: P9.I2's `spectraRuns` and the concurrently owned ManageBac writer must call exported summary sync after their artifact patches; route as product-logic integration, not a P9.I3 ownership violation.
-
-### P9.I3 summary-writer integration addendum — 2026-08-31
-
-- SYSTEMIC triage: write-maintained summaries were correct inside P9.I3, but later and cross-track artifact writers could leave the bounded Library row stale after changing its projection inputs.
-- The existing `syncArtifactSummary` seam now follows ManageBac planner/timetable refresh and source removal, the direct Agent improvement editor, and calendar migration tagging. P9.I2's stale-run repair already used the seam and was left unchanged.
-- A bounded writer audit also closed no-projection collaboration activity/recovery, legacy thread-reference deletion, and deleted-workspace provenance. Projection-bearing gateway commits continue through `syncSourceNodes`, which already synchronizes the summary.
-- Red-first parity coverage failed 5/5 before integration and passes 6/6 after it; the P9 Library/run/collaboration blast-radius suite passes 4 files / 22 tests.
-- `convex/replicas.ts` and `convex/bridgeSync.ts` remain untouched under the binding P10.I2 ownership split. No fidelity trigger path changed.
-
-### P9.I4 implementation log — 2026-08-31
-
-- Status: **IMPLEMENTED**; no verification, acceptance, or P9.V1 verdict claimed.
-- Added a local-only deterministic seed that refuses cloud/mismatched targets, requires account B in `SUPER_ADMIN_EMAILS`, invokes real `schools:create`, and verifies the full saga projection.
-- The seed writes only private runtime invitation/summary files, is idempotent for the same instance/TGC/admin tuple, and supports a non-mutating `--verify-only` pass.
-- Added the single Pablo checklist for localhost A/B sign-ins, invitation acceptance, ManageBac identity/bootstrap, Bridge pairing/import, expected screens, and state-preserving shutdown.
-- Live instance 1 reached TGC saga `ready`; account A is active `school_admin`; membershipless account B reached platform administration after composing the operator-auth repair.
-- B started and ended a labeled read-only TGC operator session; its school/mode/expiry banner was visible and no membership was created.
-- ManageBac verified all seven official personal capabilities readable and completed identity resolution, while honestly remaining `degraded`/partial with four open quarantine rows.
-- The four rows are two repeated `INTEGRATION_ROUTE_FAILED` failures for class details and class resources; SYSTEMIC class-sync coverage routes to P13.I2, with live retest in P13.V1, not P13.I4.
-- A current-source Bridge resumed the isolated journal after exposing a stale-binary protocol mismatch; `IBDP1 - Copy` reached active/Ready at 444/444 files and 419 resources, with zero op/queue rows.
-- The original `IBDP1` was never mounted or modified; local Convex data, bootstrap artifacts, Bridge journal, and saved profiles are preserved.
-- Focused tests passed 3 files / 12 tests; scoped ESLint, root TypeScript, capability ghost gate, secret scan (2,384 tracked files), release Bridge build, and diff check passed.
-- Profiles A/B, Next, Bridge, and local Convex were stopped; ports 3000–3003 and 47615 were released for P9.V1.
->>>>>>> 85cc715 (feat(spectra): add deterministic local bootstrap)

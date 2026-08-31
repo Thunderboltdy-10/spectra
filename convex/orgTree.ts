@@ -1,5 +1,5 @@
 import { query } from "./_generated/server";
-import { mutation } from "./orgNodeMutation";
+import { internalMutation, mutation } from "./orgNodeMutation";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -743,6 +743,36 @@ export const ensureAccountRoots = mutation({
       generalNodeId: node._id,
       workspaceNodesCreated: created,
       rootCount: roots.length,
+    };
+  },
+});
+
+/** One-time, cursor-shaped repair for rows created before childCount existed. */
+export const backfillChildCounts = internalMutation({
+  args: { cursor: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("orgNodes").paginate({
+      cursor: args.cursor,
+      numItems: 100,
+    });
+    let containers = 0;
+    for (const node of page.page) {
+      if (!isContainerKind(node.kind)) continue;
+      const children = await ctx.db
+        .query("orgNodes")
+        .withIndex("by_parent", (q) => q.eq("parentId", node._id))
+        .collect();
+      await ctx.db.patch(node._id, {
+        childCount: children.filter((child) => child.deletedAt === undefined)
+          .length,
+      });
+      containers += 1;
+    }
+    return {
+      processed: page.page.length,
+      containers,
+      cursor: page.isDone ? null : page.continueCursor,
+      done: page.isDone,
     };
   },
 });

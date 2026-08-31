@@ -1,8 +1,12 @@
-# P9 — Local Foundation & Convex Efficiency
+# P9 — Local Foundation & Convex Efficiency (launch foundations extracted; expansion phase archived)
 
-**Goal:** development and verification move to free, isolated, parallelizable **local Convex deployments**, and the five query classes burning the cloud dev deployment (~60 GB DB I/O overage, function-call cap hit) are fixed at the class level. The phase ends with two real accounts (platform operator + TGC school admin) living on a seeded local instance, the ManageBac key entered, Bridge re-paired, local folders re-imported — which is also the program's first honest onboarding dry-run.
+**Current status (2026-08-31):** the self-contained launch foundations from this phase were selected into the stable pre-expansion line: isolated local Convex runtime, generated instance-package repair, deterministic school seed, localhost auth/operator fixes, and bounded runs/reminders/Library/collaboration/org-tree paths. The broader P9–P15 campaign is archived under `EXPANSION-ARCHIVE.md` and is not an active launch phase.
 
-**Prerequisites:** none. Wave 0. **Architecture:** ARCHITECTURE-PLATFORM (Convex rules, budgets §4); ARCHITECTURE-TRUTH for anything replica-adjacent. **Findings absorbed:** the 2026-08-30 Convex dashboard analysis (per-function I/O below); P0.I2's unfinished reminder migration.
+**Historical goal:** development and verification move to free, isolated **local Convex deployments**, and the five query classes burning the cloud dev deployment (~60 GB DB I/O overage, function-call cap hit) are fixed at the class level. The phase also established the deterministic operator/admin school bootstrap used by P8.P1.
+
+**Do not launch P9.V1 as the next unit.** Remaining launch verification is integrated into P8.P1/P8.V1. Any future feature continuation starts after P8 from the stable release base using the archive resume protocol.
+
+**Historical prerequisites:** none. Wave 0. **Architecture:** ARCHITECTURE-PLATFORM (Convex rules, budgets §4); ARCHITECTURE-TRUTH for anything replica-adjacent. **Findings absorbed:** the 2026-08-30 Convex dashboard analysis; P0.I2's unfinished reminder migration.
 
 **Difficulty (PROCESS §4):** I1 = MT / xhigh. I2, I3 = Hard / xhigh. I4 = MT / high. V1 = Hard / max.
 

@@ -4,7 +4,7 @@
 
 **Prerequisites:** P1 accepted (truth), P3 accepted (IR — embeds derive interactions from it), P4.I2 useful but not blocking. **Architecture:** ARCHITECTURE-PLATFORM §1, ARCHITECTURE-CAPABILITIES §6. **Findings absorbed:** Part XVI (PERF-1..6), Part XV (SBX-2..5), CS-9 (payload GC — if not closed in P1), collaboration scale risks from the Yjs review.
 
-**Difficulty (PROCESS §4):** V1 = Hard / GPT 5.6 Sol xhigh. I1, I2, I3 = Medium-thinking / Grok 4.6 High.
+**Difficulty (PROCESS §4):** V1 = Hard / GPT 5.6 Sol xhigh. I1, I2, I3 are implemented history. V1 is the first active launch unit.
 
 ## P5.I1 — Render architecture (MT)
 
@@ -20,13 +20,45 @@ One embed model: the server contract (`artifactEmbeds`) and client `ReferenceNod
 
 ## P5.V1 — Multi-writer + classroom load verification (H)
 
-The composition matrix, adversarially: two humans + one AI editing one artifact; external Word save mid-session; offline peer reconverging; AI editing while a human types in the same region (claims honored); revocation mid-session. Classroom load: 30 real browser clients (scripted) in one document — typing latency p95 < 100 ms, gateway stable > 1 h, budgets held. Embed journeys: embed a quiz in a document, take it, edit the source, watch the embed update; export with fallbacks and verify in Word.
+**Model: GPT 5.6 Sol xhigh.** Run alone, serially, in the primary checkout. Do not depend on RC.V1; the completed corpus gate now belongs inside P8 after the code freeze.
 
-**Model: GPT 5.6 Sol max** (retiered 2026-08-30, ORCHESTRATION §4). Never concurrent with another live-product verifier. The two-human legs use both signed-in Playwright profiles (account A and account B — STATE §2; account B is created once via ORCHESTRATION §9 and must exist before this VU starts). RC.V1 (ORCHESTRATION §8) runs before this unit and may share its corpus copies.
+### Read-first questions
+
+Before touching code, answer these in the evidence manifest from current implementation truth:
+
+1. What event is the durable boundary for a human Yjs edit, an AI edit, and a native-file edit? Name the exact acknowledgements and stores.
+2. Which client state is allowed to say “saved,” “current,” or “available,” and what compensating exit exists if the gateway or Convex dies immediately afterward?
+3. Which render leaves subscribe to cursor frames, which subscribe to durability, and what measurement proves the studio body does not rerender on peer pointer movement?
+4. What is the tested restart source: verified snapshot plus later updates, or an accidental in-memory survivor?
+5. Which embed actions are live IR-backed interactions, which are read-only, and which native exports must refuse?
+
+### Execution cards — keep this order
+
+1. **Environment and integrity preflight.** Use the local Convex stack, local collaboration gateway, both existing signed-in profiles, and a fresh sacrificial fixture directory. Hash any real source tree before disconnecting it; never edit `IBDP1`. Record commit, environment URLs without secrets, profile identities, fixture hashes, gateway build, and all budget constants.
+2. **Durability recovery.** One human edit, gateway kill after local apply but before checkpoint, restart, fresh-browser reload, and readback. Repeat with a browser crash and with Convex latency. A local optimistic view is not evidence; the marker must survive a clean process restart.
+3. **Two humans + AI, different regions.** Both humans type while one AI operation streams. Verify exact authorship, stable region targets, visible presence, durable reload, and no whole-studio cursor rerenders.
+4. **Two humans + two AIs, same region.** Claims must serialize or refuse truthfully. No lost human keystrokes, duplicated AI operation, phantom success, or retry that can double-apply.
+5. **Offline and authority changes.** Take one peer offline, edit, revoke that member/device, reconnect, and prove the accepted/rejected effects match the UI sentence and audit trail. Repeat permission downgrade during an in-flight AI request.
+6. **Native coexistence.** On copied DOCX, save externally while human and AI activity exists. Resolve/rebase through the real route, reopen in Word, and compare package parts. XLSX/PPTX corpus depth waits for RC.V1, but ordinary native coexistence must work here.
+7. **Embed composition.** Embed quiz→document and sheet→whiteboard/chat, reload from a second profile, mutate the source, observe the live projection, exercise allowed interaction, then export and verify the native fallback/refusal.
+8. **30-client classroom soak.** Use the checked-in harness unchanged: exactly 30 isolated clients, at least 65 minutes, p95 local typing under 100 ms, all clients contributing samples, bounded reconnect recovery, one converged document/state-vector hash, stable gateway uptime, bounded update bytes, verified final snapshot and compaction. A shortened smoke may debug the harness but cannot pass the card.
+9. **Fresh composition rerun.** Repeat the shortest representative marker from cards 2–7 using clean processes and profiles so the pass is not dependent on warmed state.
+
+### Repair rule and blast radius
+
+A failure is triaged LOCAL or SYSTEMIC before editing. Repair a holdable class in the VU and rerun the failed card plus every later card that consumes the same state. Inspect gateway transport, Convex collaboration storage, Yjs adapter, projection checkpoint, presenter, Library summary, and native route when the state crosses them. Do not weaken client count, soak duration, timing thresholds, hash checks, strict-native refusal, or durability assertions. A production-host deploy is not required for this local school-launch gate, but the verdict must say that hosting remains unproved until Pablo deploys it.
+
+### Required evidence and exit
+
+- One manifest with environment, hashes, exact commands, raw timing summary, restart timestamps, gateway health, update/snapshot counts, and every repair commit.
+- Numbered browser evidence for cards 2–7 from both profiles where relevant.
+- Raw bounded JSON from the 30-client harness plus a human-readable budget table.
+- Focused regression tests for every repair, then full Vitest, typecheck, production build, architecture/capability/copy/token/secrets gates, and DOCX/Office/seam fidelity gates.
+- PASS requires all nine cards. REJECTED remains active work; it is not a reason to exclude P5 from launch.
 
 ## Exit gate
 
-Load + composition suites recorded; L4 budgets met at densities; embed journeys PASS; no truth divergence reproducible between Yjs, Convex projection, and bytes under the matrix; Pablo pass with a second human.
+Load + composition suites recorded; L4 budgets met at densities; embed journeys PASS; no truth divergence reproducible between Yjs, Convex projection, and bytes under the matrix; verifier records PASS and P5 closes.
 
 ### P5.I1 implementation log (2026-08-29)
 

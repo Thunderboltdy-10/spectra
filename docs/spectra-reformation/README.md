@@ -22,6 +22,7 @@ If two documents disagree, the higher one wins. If a Reformation document seems 
 | `PROCESS.md` | Roles, unit lifecycle, launch prompt template, difficulty routing, sub-agent policy | Every session, third |
 | `ORCHESTRATION.md` | Historical record of the retired parallel campaign; §8 still documents the real-corpus protocol | Reference only; never use it to launch worktrees or parallel agents |
 | `VERIFICATION.md` | The verification methodology: layers, journey protocol, contract tests, budgets | Every verifier session; implementers skim §1–§2 |
+| `EXPANSION-ARCHIVE.md` | Preserved P9–P15 refs/bundle, selected launch foundations, and the post-P8 resume protocol | Before any expansion-related merge or cherry-pick |
 | `PRODUCT.md` | What Spectra is, who it is for, the experience laws (toggles, plain words, invisible Bridge) | Any unit touching UX |
 | `ARCHITECTURE-TRUTH.md` | Truth hierarchy, replica machine, Bridge engine, status system | P0, P1, P2, P8 |
 | `ARCHITECTURE-FIDELITY.md` | Lens pipeline, one-schema rule, 3-way merge, identity, corpus | P2, P8 |
@@ -51,8 +52,8 @@ P5  Collaboration & Embeds             render architecture, gateway productioniz
 P6  Coherence                          UX debt closure, design-system adoption sweep,
                                        whole-product convergence audit (N10 absorbed)
 P7  Identity & Landing                 field, motion grammar, landing reveal (N11 absorbed)
-P8  The Release Gate                   chaos + multiplayer finale, release verdict
-                                       (N12 absorbed)
+P8  The School Launch Release Gate     production preflight, final real-corpus run,
+                                       chaos + multiplayer, repairs, release verdict
 ```
 
 **Why this order.** Truth before fidelity (a correct merge over a lying replica machine is still a lie). Fidelity before protocol (the IR maps to lens deltas; those must be real first). Protocol before AI (AI tools derive from the IR). AI before embeds (embeds consume the unified model). Coherence and identity after correctness. The finale is a gate, not a hope — and this time it cannot be postponed, because P8 *is* the release.
@@ -63,16 +64,17 @@ P8  The Release Gate                   chaos + multiplayer finale, release verdi
 - **Mobile** — sub-`md` layouts remain unsupported. Do not spend effort there; do not break desktop to pretend otherwise.
 - **Additional connectors** (Google, Notion, Quizlet) — the IR and lens architecture must be built so a connector is an adapter, but no connector beyond Office/ManageBac is implemented in this program.
 - **Local-model autocomplete** — cut from launch scope. The UX shell stays; the settings copy must stop implying a local model exists (finding AI-14).
+- **P9–P15 expansion feature chains** — preserved in `EXPANSION-ARCHIVE.md`; do not merge them wholesale. Only the named self-contained local/auth/I/O/Office reliability foundations selected into the stable line belong to launch.
 
 ## How this runs now (serial single-checkout mode)
 
 The temporary orchestrated campaign is retired (CANON R20). Work only in this checkout on `main`, one implementation or verification unit at a time. Do not create `reform/*` worktrees or launch parallel implementation lanes unless Pablo explicitly changes this rule.
 
-1. Open `STATE.md` §0, find the lowest OPEN unit whose prerequisites are ACCEPTED.
+1. Open `STATE.md` §0 and follow its explicit active order. A prerequisite is closed when VERIFIED or historically ACCEPTED.
 2. Read its phase brief and difficulty tag; use PROCESS §4.2 to choose the appropriate effort.
 3. Execute that unit completely in the primary checkout and commit a coherent result.
-4. When the implementer reports done, launch the paired **verification unit with a different agent** — never the same session, never the same context. The verifier starts as a person-shaped walk (VERIFICATION L3). On fail they repair a holdable class in-session and retest to PASS (PROCESS §2 / R17). If the class is too complex to hold, they stop and leave a paste-ready prompt. Close-out is PROCESS §5.1.
-5. Accept only when the verifier's verdict is recorded in STATE and Pablo accepts it.
-6. Answer stop-and-ask items before relaunching. A pending question blocks the next unit. Relevant tests belong to their owning unit; the entire repository sweep waits until paired verification has run.
+4. When the implementer reports done, launch the paired **verification unit with a different agent** — never the same session, never the same context. The verifier starts as a person-shaped walk (VERIFICATION L3). On fail they repair a holdable class in-session and retest to PASS (PROCESS §2 / R17). If the class is too complex to hold, they stop and leave a precise blocked packet. Close-out is PROCESS §5.2.
+5. A recorded verifier PASS changes the unit to VERIFIED and closes it. Agents never ask Pablo to accept or close verified work; his only required product decision is the P8.V2 launch/no-launch verdict.
+6. Answer stop-and-ask items before relaunching. A pending question blocks the next unit. Relevant tests belong to their owning unit; the entire repository sweep runs at phase gates.
 
 Between units: commit and leave `main` clean. Keys rotation (STATE §5) is Pablo's and blocks nothing except public exposure risk. Never two live-product verifiers at once; all units are serial.

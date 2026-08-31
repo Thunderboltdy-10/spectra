@@ -82,7 +82,7 @@ L1 harness green in the owning verification units for all formats; every write c
 - `tsc --noEmit` retained only recorded blockers; no changed production file failed.
 - FIELD NOTE · P6.I3: the logger calls nonexistent `errorEvents:log`; recorded as later dead wiring, not started here.
 - Evidence: `.shots/reformation/P2.V1/manifest.md` and numbered screenshots `00`–`09`.
-- Verdict: PASS after class-wide repair and full remaining P2.I1 journey retest; P2.I1 remains IMPLEMENTED pending Pablo acceptance.
+- Verdict: PASS after class-wide repair and full remaining P2.I1 journey retest; P2 is closed under the 2026-08-31 verifier-PASS rule.
 
 ## P2.I2 implementer log — 2026-08-27
 
@@ -200,5 +200,5 @@ L1 harness green in the owning verification units for all formats; every write c
 - FIELD NOTE · P5.I1: Presentation workbar logged “essential actions are 20.6 button-widths wide on Shape” in a tight loop. Not patched here.
 - FIELD NOTE · P2.I3: remaining R7 refusals (title preset, transitions/animations, Shape) unchanged. Notes `P2V2-PPT-27` did not appear in the collapsed “Add notes” control.
 - Hidden desktop `P2V2` closed after Bridge kill. Convex/web left running; no `convex push`. Evidence: `.shots/reformation/P2.V2/manifest.md` `00`–`29`.
-- Status: VERIFIED / PASS. P2.I1–I5 remain IMPLEMENTED pending Pablo acceptance. Next remaining: P3.I1.
+- Status: VERIFIED / PASS. P2 is closed under the 2026-08-31 verifier-PASS rule; no owner-acceptance request remains.
 

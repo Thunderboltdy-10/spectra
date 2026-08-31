@@ -63,7 +63,7 @@ Ghost gate + conformance suites in their owning units; the "add one capability" 
 
 ## P3.V1 verifier log — 2026-08-27
 
-- Status: **VERIFIED / PASS**. P3.I1 and P3.I2 stay IMPLEMENTED pending Pablo. No acceptance claimed.
+- Status: **VERIFIED / PASS**. P3 is closed under the 2026-08-31 verifier-PASS rule.
 - Class repaired (R12/R17): `sharedFamily` no longer claims sheets Fit or presentation Replace; extras `zoomFit` / `replace` match what each studio mounts. Canvas-direct `document.rewrite.paragraph` / `document.edit.tableCell` stay IR-only.
 - Class repaired: live presentation listed `export.odp` the IR lacked (`CAPABILITY_DEFINITION_MISSING`). One list per type in `office-exports.ts` now feeds IR, stubs, and live studios. Ghost sheets `export.pdf` removed (live never had it).
 - Generated parity: `capability-conformance.test.ts` — unique ids, imported lens kinds, Office UI reach, AI schemas, D41 Font/Size/Bold/Italic, app commands, studio projection. Ghost gate passed. Focused Vitest 6 files / 96 tests. Authored-file ESLint 0 errors. Secret scan 2114 files. `git diff --check` clean.
@@ -101,7 +101,7 @@ Ghost gate + conformance suites in their owning units; the "add one capability" 
 
 ## P3.V1 verifier log — 2026-08-28 (final reexec)
 
-- Status: **VERIFIED / PASS**. P3.I1–I4 stay IMPLEMENTED pending Pablo. No acceptance claimed.
+- Status: **VERIFIED / PASS**. P3 is closed under the 2026-08-31 verifier-PASS rule; no owner-acceptance request remains.
 - I3/I4 closures re-graded live; first-V1 IR honesty (`office-exports.ts`, sharedFamily extras) still holds.
 - Generated parity: unique ids, imported lens kinds, Office UI reach, AI schemas, D41 Font/Size/Bold/Italic, app commands, studio projection. Ghost gate passed. Focused Vitest 13 files / 180 tests. Secret scan 2119 files. `git diff --check` clean.
 - Journey: workspace 0 `CAPABILITY_DEFINITION_MISSING`. Scratch `P3V1-B` document tools; Rates Shape and Titration Format showed the same Font/Size/Bold/Italic labels. Overflow console spam unchanged — **P5.I1**. `runTabs` 401 — **P6.I3**.

@@ -180,4 +180,4 @@ Wrong-target suite zero-miss in its owning verification unit; honesty suite gree
 - Retest: append `UNDO-MARK-P4V1-REMAINDER-92828` on Draft; overflow Undo; POST 200 in 10.2s (`claims-acquired` → `claims-released`); toast **Restored the earlier copy**; remainder marker gone; `UNDO-MARK-P4V1-8841` kept (`89`–`92`).
 - F1: create `P4V1 Finalizer Probe` / `FINALIZER-PROBE-8821` finalized (`finalize-attempt` → `finalized`); no “no longer editable by that run” (`93`–`95`).
 - Bridge skipped (Physics mounted). Focused Vitest 4 files / 48 tests. Secret scan 2190 files; `git diff --check` passed.
-- Next: Pablo owner-accepts P4.V1. Do not start P6.
+- Closed under the 2026-08-31 rule: verifier PASS completed P4. The active next unit is recorded in STATE; do not request owner acceptance.

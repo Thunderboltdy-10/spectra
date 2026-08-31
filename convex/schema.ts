@@ -1293,7 +1293,8 @@ export default defineSchema({
     .index("by_account_starter", ["ownerAccountId", "starterKey"])
     .index("by_school_status", ["schoolId", "status"])
     .index("by_school_starter_status", ["schoolId", "starterKey", "status"])
-    .index("by_account_activity", ["ownerAccountId", "lastActivityAt"]),
+    .index("by_account_activity", ["ownerAccountId", "lastActivityAt"])
+    .index("by_ai_run", ["aiRunId"]),
 
   spectraArtifacts: defineTable({
     ownerAccountId: v.id("accounts"),
@@ -1447,6 +1448,7 @@ export default defineSchema({
       "updatedAt",
     ])
     .index("by_school_status", ["schoolId", "status", "updatedAt"])
+    .index("by_ai_run", ["aiRunId"])
     .index("by_created_thread", ["createdFrom.threadId", "updatedAt"])
     .index("by_created_workspace", ["createdFrom.workspaceId"])
     .searchIndex("search_text", {
@@ -2705,6 +2707,8 @@ export default defineSchema({
     taskTitle: v.string(),
     dueAt: v.number(),
     scheduledFor: v.number(),
+    nextReminderAt: v.optional(v.number()),
+    scheduledFunctionId: v.optional(v.id("_scheduled_functions")),
     idempotencyKey: v.string(),
     status: v.union(
       v.literal("pending"),
@@ -2723,6 +2727,8 @@ export default defineSchema({
     .index("by_idempotency", ["idempotencyKey"])
     .index("by_recipient_created", ["recipientAccountId", "createdAt"])
     .index("by_status_retry", ["status", "nextAttemptAt"])
+    .index("by_status_next_reminder", ["status", "nextReminderAt"])
+    .index("by_artifact_status", ["artifactId", "status"])
     .index("by_artifact_scheduled", ["artifactId", "scheduledFor"]),
 
   timetableReminderDeliveries: defineTable({
@@ -2732,18 +2738,37 @@ export default defineSchema({
     eventId: v.string(),
     reminderKey: v.string(),
     eventTitle: v.string(),
+    eventStart: v.optional(v.number()),
+    recurrence: v.optional(v.string()),
+    reminderMinutes: v.optional(v.number()),
     occurrenceStart: v.number(),
     scheduledFor: v.number(),
+    nextReminderAt: v.optional(v.number()),
+    scheduledFunctionId: v.optional(v.id("_scheduled_functions")),
+    sourceGeneration: v.optional(v.string()),
     idempotencyKey: v.string(),
     status: v.optional(
-      v.union(v.literal("pending"), v.literal("delivered"), v.literal("failed")),
+      v.union(
+        v.literal("pending"),
+        v.literal("delivered"),
+        v.literal("failed"),
+        v.literal("cancelled"),
+      ),
     ),
     createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
     deliveredAt: v.optional(v.number()),
     readAt: v.optional(v.number()),
   })
     .index("by_idempotency", ["idempotencyKey"])
     .index("by_recipient_created", ["recipientAccountId", "createdAt"])
+    .index("by_status_next_reminder", ["status", "nextReminderAt"])
+    .index("by_artifact_status", ["artifactId", "status"])
+    .index("by_artifact_recipient_status", [
+      "artifactId",
+      "recipientAccountId",
+      "status",
+    ])
     .index("by_artifact_scheduled", ["artifactId", "scheduledFor"]),
 
   changeGroups: defineTable({
@@ -3457,13 +3482,91 @@ export default defineSchema({
     ),
     selected: v.optional(v.boolean()),
     hiddenAt: v.optional(v.number()),
+    projectionVersion: v.optional(v.number()),
+    threadTitle: v.optional(v.string()),
+    runSummary: v.optional(
+      v.object({
+        _id: v.id("spectraAiRuns"),
+        executionId: v.optional(v.string()),
+        status: v.union(
+          v.literal("queued"),
+          v.literal("running"),
+          v.literal("awaiting_confirmation"),
+          v.literal("awaiting_resolution"),
+          v.literal("completed"),
+          v.literal("failed"),
+          v.literal("cancelled"),
+        ),
+        phase: v.optional(
+          v.union(
+            v.literal("created"),
+            v.literal("preparing"),
+            v.literal("planning"),
+            v.literal("reading"),
+            v.literal("retrieving"),
+            v.literal("creating"),
+            v.literal("updating"),
+            v.literal("applying"),
+            v.literal("streaming"),
+            v.literal("checking"),
+            v.literal("approval"),
+            v.literal("conflict"),
+            v.literal("completed"),
+            v.literal("stopped"),
+            v.literal("interrupted"),
+            v.literal("partial"),
+            v.literal("failed"),
+          ),
+        ),
+        sourceSurface: v.union(
+          v.literal("chat"),
+          v.literal("workspace"),
+          v.literal("artifact"),
+        ),
+        threadId: v.optional(v.id("spectraThreads")),
+        workspaceId: v.optional(v.id("spectraWorkspaces")),
+        artifactId: v.optional(v.id("spectraArtifacts")),
+        userPrompt: v.string(),
+        decision: v.optional(
+          v.union(
+            v.literal("answer"),
+            v.literal("operate"),
+            v.literal("clarify"),
+            v.literal("refuse"),
+          ),
+        ),
+        finalSummary: v.optional(v.string()),
+        error: v.optional(v.string()),
+        modelUsed: v.optional(v.string()),
+        providerUsed: v.optional(v.string()),
+        attemptCount: v.optional(v.number()),
+        recoveryState: v.optional(
+          v.union(v.literal("interrupted"), v.literal("partial")),
+        ),
+        retryable: v.optional(v.boolean()),
+        traceDegraded: v.optional(v.boolean()),
+        selectedAgentId: v.optional(v.id("spectraArtifacts")),
+        selectedAgentVersionId: v.optional(v.id("spectraArtifactVersions")),
+        dockSummary: v.optional(
+          v.object({
+            checkpointSummary: v.optional(v.string()),
+            recentSteps: v.array(v.string()),
+            inputRequest: v.optional(v.any()),
+          }),
+        ),
+        createdAt: v.number(),
+        updatedAt: v.number(),
+      }),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_account_updated", ["ownerAccountId", "updatedAt"])
     .index("by_account_run", ["ownerAccountId", "runId"])
     .index("by_account_thread", ["ownerAccountId", "threadId"])
-    .index("by_thread", ["threadId"]),
+    .index("by_run", ["runId"])
+    .index("by_thread", ["threadId"])
+    .index("by_projection_version", ["projectionVersion", "updatedAt"]),
 
   // Legacy read-only tombstone retained because dropping a live Convex table
   // is destructive. There are no product readers or writers; administration

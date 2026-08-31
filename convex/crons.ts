@@ -28,15 +28,15 @@ crons.interval(
   {},
 );
 crons.interval(
-  "schedule-planner-reminders",
-  { minutes: 1 },
-  internal.plannerReminders.dispatchDue,
+  "safety-sweep-planner-reminders",
+  { hours: 1 },
+  internal.plannerReminders.safetySweep,
   {},
 );
 crons.interval(
-  "schedule-timetable-reminders",
-  { minutes: 1 },
-  internal.timetableReminders.dispatchDue,
+  "safety-sweep-timetable-reminders",
+  { hours: 1 },
+  internal.timetableReminders.safetySweep,
   {},
 );
 crons.daily(

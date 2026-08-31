@@ -252,29 +252,31 @@ fn mount_root_key(grant: &Grant) -> String {
     hex::encode(sha2::Sha256::digest(normalized.as_bytes()))
 }
 
+fn configured_deployment_url(value: Option<String>) -> Result<String, String> {
+    let url = value
+        .map(|value| value.trim().trim_end_matches('/').to_owned())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "Set SPECTRA_CONVEX_URL to this Spectra instance's Convex URL before starting the Bridge."
+                .to_string()
+        })?;
+    let parsed = reqwest::Url::parse(&url).map_err(|_| {
+        "SPECTRA_CONVEX_URL must be a complete http:// or https:// Convex URL.".to_string()
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(
+            "SPECTRA_CONVEX_URL must be a complete http:// or https:// Convex URL.".to_string(),
+        );
+    }
+    Ok(url)
+}
+
 fn deployment_url(journal: &Journal) -> Result<String, String> {
-    if let Ok(url) = std::env::var("SPECTRA_CONVEX_URL") {
-        journal
-            .set_config("deployment_url", &url)
-            .map_err(|error| error.to_string())?;
-        return Ok(url);
-    }
-    #[cfg(debug_assertions)]
-    if journal
-        .config("deployment_url")
-        .map_err(|error| error.to_string())?
-        .is_none()
-    {
-        let url = "https://proper-orca-653.convex.cloud".to_owned();
-        journal
-            .set_config("deployment_url", &url)
-            .map_err(|error| error.to_string())?;
-        return Ok(url);
-    }
+    let url = configured_deployment_url(std::env::var("SPECTRA_CONVEX_URL").ok())?;
     journal
-        .config("deployment_url")
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "SPECTRA_CONVEX_URL is not configured".to_string())
+        .set_config("deployment_url", &url)
+        .map_err(|error| error.to_string())?;
+    Ok(url)
 }
 
 async fn run_replica_migration(
@@ -2383,7 +2385,23 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_bridge_data_dir;
+    use super::{configured_deployment_url, resolve_bridge_data_dir};
+
+    #[test]
+    fn bridge_requires_an_explicit_convex_url() {
+        let error = configured_deployment_url(None).unwrap_err();
+        assert!(error.contains("Set SPECTRA_CONVEX_URL"));
+        assert!(configured_deployment_url(Some("   ".into())).is_err());
+    }
+
+    #[test]
+    fn bridge_accepts_the_parameterized_local_convex_url() {
+        assert_eq!(
+            configured_deployment_url(Some(" http://127.0.0.1:3042/ ".into())).unwrap(),
+            "http://127.0.0.1:3042"
+        );
+        assert!(configured_deployment_url(Some("file:///tmp/convex".into())).is_err());
+    }
 
     #[test]
     fn bridge_data_dir_defaults_to_per_user_app_data() {

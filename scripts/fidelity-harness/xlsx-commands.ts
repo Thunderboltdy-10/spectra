@@ -318,13 +318,26 @@ export async function runXlsxCommandFixtures(fixtureDir: string) {
       // file at all.
       if (row.blocked) {
         let code: string | null = null;
+        let caughtDetail = "";
         try {
           await xlsxLens.materialize({
             projection: next,
             carry: opened.preservedCarry,
           });
         } catch (error) {
-          code = error instanceof XlsxLensError ? error.code : "UNKNOWN";
+          // `tsx` can evaluate the same source through distinct module URLs when
+          // this harness is imported by the aggregate Office runner. In that
+          // case a real XlsxLensError may not share this module's constructor
+          // identity. The public contract is its stable code, so retain the
+          // instanceof check while also accepting that cross-module shape.
+          code = error instanceof XlsxLensError
+            ? error.code
+            : error && typeof error === "object" && "code" in error && typeof error.code === "string"
+              ? error.code
+              : "UNKNOWN";
+          caughtDetail = error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error);
         }
         const held = code === row.blocked;
         assertions.push({
@@ -338,7 +351,7 @@ export async function runXlsxCommandFixtures(fixtureDir: string) {
           formulasIntact: held,
           notes: held
             ? `refused with ${code}, as it must`
-            : `expected ${row.blocked}, got ${code ?? "a saved file"}`,
+            : `expected ${row.blocked}, got ${code ?? "a saved file"}${caughtDetail ? ` (${caughtDetail})` : ""}`,
         });
         continue;
       }

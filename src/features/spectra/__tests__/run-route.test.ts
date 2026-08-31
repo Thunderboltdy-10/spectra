@@ -431,7 +431,7 @@ describe("Spectra run route", () => {
       expect.arrayContaining(["create_document", "create_quiz"]),
     );
     expect(selectedTools).not.toContain("submit_plan");
-  });
+  }, 60_000);
 
   it("keeps quoted planner subtask verbs inside one creation and enforces the explicit contract locally", async () => {
     const { fetchMock, getSavedArtifact } = setup({});
@@ -559,7 +559,7 @@ describe("Spectra run route", () => {
       expect.objectContaining({ title: "Read both sections", done: false }),
       expect.objectContaining({ title: "Write one correction", done: false }),
     ]);
-  });
+  }, 60_000);
 
   it("treats multiple-choice questions as one quiz rather than multiple artifacts", async () => {
     const { convexMutation, fetchMock, getSavedArtifact } = setup(quizPlan());

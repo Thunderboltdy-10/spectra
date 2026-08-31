@@ -112,6 +112,25 @@ function cloneProjection(projection: DocxProjection) {
   return structuredClone(projection);
 }
 
+async function availableParagraphStyle(
+  payload: Uint8Array,
+  currentStyle: unknown,
+) {
+  const document = await Document.open(payload);
+  const stylesPart = document.office.package.getPart("/word/styles.xml");
+  if (!stylesPart) return undefined;
+  const styles = await document.office.xml(stylesPart.name);
+  return elements(styles.root)
+    .filter(
+      (element) =>
+        element.namespaceUri() === WML_NAMESPACE &&
+        element.localName === "style" &&
+        element.getAttributeNs(WML_NAMESPACE, "type") === "paragraph",
+    )
+    .map((element) => element.getAttributeNs(WML_NAMESPACE, "styleId"))
+    .find((styleId) => Boolean(styleId) && styleId !== currentStyle);
+}
+
 /**
  * The paragraph a person would be editing.
  *
@@ -176,7 +195,17 @@ async function mutateProjection(
       text: "Inserted by the Spectra fidelity harness.",
     });
   } else if (mutation === "apply a style") {
-    paragraph.attrs = { ...paragraph.attrs, styleId: "Heading2" };
+    const styleId = await availableParagraphStyle(
+      source,
+      paragraph.attrs?.nativeStyleId ?? paragraph.attrs?.styleId,
+    );
+    if (!styleId)
+      return {
+        status: "unsupported-read-only" as const,
+        detail: "the fixture exposes no alternative native paragraph style",
+        output: source,
+      };
+    paragraph.attrs = { ...paragraph.attrs, styleId };
   } else if (mutation === "format the runs") {
     // Direct run formatting, the way the Format tab writes it: the projection
     // carries what the file already agreed on, and only the changed properties
@@ -286,7 +315,13 @@ async function run() {
       ["format the paragraph", "format_blocks"],
       ["AI edit via operations", "rewrite_blocks"],
     ] as const) {
-      const result = await mutateProjection(source, mutation);
+      let result: Awaited<ReturnType<typeof mutateProjection>>;
+      try {
+        result = await mutateProjection(source, mutation);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`${fixture} / ${mutation}: ${detail}`, { cause: error });
+      }
       const indexed = {
         operation,
         ...(commandsForOperation(operation).length

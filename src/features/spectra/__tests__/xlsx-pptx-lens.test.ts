@@ -121,6 +121,25 @@ describe("XLSX and PPTX fidelity lenses", () => {
     expect(preserved.value).toBe(5);
   });
 
+  it("reports the stable refusal code when a formula would become a literal", async () => {
+    const opened = await xlsxLens.open(await workbookFixture());
+    const projection = {
+      ...opened.projection,
+      sheets: opened.projection.sheets.map((sheet) => ({
+        ...sheet,
+        cells: sheet.cells.map((cell) =>
+          cell.ref === "C2"
+            ? { ...cell, formula: undefined, formulaSupport: undefined }
+            : cell,
+        ),
+      })),
+    };
+
+    await expect(
+      xlsxLens.materialize({ projection, carry: opened.preservedCarry }),
+    ).rejects.toMatchObject({ code: "XLSX_FORMULA_LITERALIZATION_BLOCKED" });
+  });
+
   it("propagates an omitted editor cell as a native clear", async () => {
     const source = await workbookFixture();
     const opened = await xlsxLens.open(source);

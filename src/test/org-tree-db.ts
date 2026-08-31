@@ -32,6 +32,16 @@ const INDEXES: Record<string, Record<string, string[]>> = {
     by_account_status: ["ownerAccountId", "status"],
   },
   spectraArtifacts: {},
+  spectraArtifactSummaries: {
+    by_artifact: ["artifactId"],
+    by_account_status_updated: ["ownerAccountId", "status", "updatedAt"],
+    by_account_blueprint_status_updated: [
+      "ownerAccountId",
+      "blueprintKey",
+      "status",
+      "updatedAt",
+    ],
+  },
   spectraThreads: {},
 };
 
@@ -93,6 +103,14 @@ class FakeQuery {
 
   async first() {
     return this.sorted().map((row) => ({ ...row }))[0] ?? null;
+  }
+
+  async unique() {
+    const rows = this.sorted();
+    if (rows.length > 1) {
+      throw new Error(`unique query returned ${rows.length} documents`);
+    }
+    return rows[0] ? { ...rows[0] } : null;
   }
 }
 
@@ -236,6 +254,8 @@ export async function seedArtifact(
     ownerAccountId: accountId,
     title,
     blueprintKey: "document",
+    content: { blocks: [], outline: [] },
+    tags: [],
     status: "active",
     createdAt: now,
     updatedAt: now,

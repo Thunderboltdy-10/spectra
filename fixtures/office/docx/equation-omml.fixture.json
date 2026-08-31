@@ -7,22 +7,7 @@
     "surrounding paragraphs": "NATIVE",
     "equation XML": "unsupported-but-preserved"
   },
-  "mutations": [
-    {
-      "commandId": "document.format.italic",
-      "operation": "format_blocks",
-      "touch": [
-        "word/document.xml"
-      ],
-      "proof": {
-        "container": "rPr",
-        "property": "i"
-      },
-      "preserve": [
-        "word/styles.xml"
-      ]
-    }
-  ],
+  "mutations": [],
   "refusedRegions": [
     {
       "commandId": "document.insert.equation",

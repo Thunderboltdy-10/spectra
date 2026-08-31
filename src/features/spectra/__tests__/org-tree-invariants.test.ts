@@ -309,7 +309,7 @@ describe("workspaceContextId follows the nearest workspace ancestor", () => {
     expect(await contextOf(work._id)).toBeUndefined();
   });
 
-  it("a move touches only placement metadata (I4)", async () => {
+  it("a move touches only placement metadata and maintained counts (I4)", async () => {
     const biology = await seedWorkspace(db, accountId, "Biology");
     const artifactId = await seedArtifact(db, accountId, "Essay");
     const work = await placeWork(artifactId, { workspaceId: biology._id });
@@ -320,6 +320,7 @@ describe("workspaceContextId follows the nearest workspace ancestor", () => {
 
     const touched = new Set(db.patches.flatMap((entry) => entry.keys));
     expect([...touched].sort()).toEqual([
+      "childCount",
       "orderKey",
       "parentId",
       "updatedAt",

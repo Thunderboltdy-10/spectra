@@ -36,6 +36,25 @@ async function countWml(payload: Uint8Array, localName: string) {
 }
 
 describe("DOCX preservation lens", () => {
+  it("appends beside shared native wrappers without requesting a redundant reorder", async () => {
+    const source = await fixture("bibliography-source.docx");
+    const opened = await docxLens.open(source);
+    const added = {
+      id: "spectra-bibliography-append",
+      type: "paragraph" as const,
+      text: "A safe paragraph after the bibliography wrapper.",
+    };
+    const output = await docxLens.materialize({
+      projection: {
+        ...opened.projection,
+        blocks: [...opened.projection.blocks, added],
+      },
+      carry: opened.preservedCarry,
+    });
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.blocks.at(-1)?.text).toBe(added.text);
+  });
+
   it("retains omitted native blocks when materializing a partial live projection", async () => {
     const source = await fixture("complex-structure.docx");
     const opened = await docxLens.open(source);

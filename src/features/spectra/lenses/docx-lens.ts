@@ -2370,7 +2370,17 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
       );
     const order = projection.blocks.map((block) => block.id);
     const priorOrder = carry.projection.blocks.map((block) => block.id);
-    if (order.length !== priorOrder.length || order.some((id, index) => id !== priorOrder[index]))
+    const retained = new Set(order);
+    const existing = new Set(priorOrder);
+    const retainedBefore = priorOrder.filter((id) => retained.has(id));
+    const retainedAfter = order.filter((id) => existing.has(id));
+    // Insert and delete operations already establish the desired position for
+    // new blocks and remove absent blocks. A native reorder is only necessary
+    // when retained regions changed relative order. Avoiding a redundant
+    // reorder matters for valid Word structures (for example bibliography
+    // content controls) where several projected regions intentionally share a
+    // carrier and therefore cannot be moved independently.
+    if (retainedAfter.some((id, index) => id !== retainedBefore[index]))
       operations.push({ kind: "reorder-regions", order });
     if (!operations.length) return carry.payload;
     return applyDelta(carry, { kind: "ai-edit", operations });

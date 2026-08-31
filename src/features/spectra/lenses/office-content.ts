@@ -12,6 +12,10 @@ import {
   type XlsxProjection,
 } from "./projection-contracts";
 
+function codedOfficeContentError(code: string, message: string) {
+  return Object.assign(new Error(message), { code });
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -382,10 +386,11 @@ export function xlsxOperationsBetween(
         continue;
       }
       if (cell.formula !== old.formula) {
-        if (!cell.formula)
-          throw new Error(
-            `Formula ${sheet.name}!${cell.ref} cannot be silently rewritten as a literal.`,
-          );
+          if (!cell.formula)
+            throw codedOfficeContentError(
+              "XLSX_FORMULA_LITERALIZATION_BLOCKED",
+              `Formula ${sheet.name}!${cell.ref} cannot be silently rewritten as a literal.`,
+            );
         operations.push({
           kind: "set-formula",
           sheetId: sheet.id,

@@ -48,6 +48,21 @@ export function normalizeInstanceId(rawValue) {
   return parsed;
 }
 
+export function localConvexProjectPackage(repositoryPackage, instanceId) {
+  const id = normalizeInstanceId(instanceId);
+  const convexVersion = repositoryPackage?.dependencies?.convex;
+  if (typeof convexVersion !== "string" || !convexVersion.trim()) {
+    throw new Error(
+      "The repository package.json must declare the Convex runtime dependency.",
+    );
+  }
+  return {
+    name: `spectra-local-instance-${id}`,
+    private: true,
+    dependencies: { convex: convexVersion },
+  };
+}
+
 export function portsForInstance(
   instanceId,
   { base = DEFAULT_PORT_BASE, stride = DEFAULT_PORT_STRIDE } = {},

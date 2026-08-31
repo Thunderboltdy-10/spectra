@@ -41,9 +41,14 @@ Runtime files are gitignored under:
   convex.env                       allowlisted values copied into Convex
   instance.json                    immutable id → port mapping
   runtime.json                     launcher and child PIDs while running
+  project/package.json             private Convex CLI project contract
   project/.env.local               local Convex deployment selector
   project/.convex/local/default/   SQLite database + object storage + config
 ```
+
+`local:add-instance` generates the private project package from the checkout's
+declared Convex version. Do not copy or maintain a second application package
+by hand; the harness refreshes this runtime-only contract on every start/add.
 
 Set `SPECTRA_LOCAL_ROOT` to relocate the whole runtime root. Reset checks the
 resolved instance path before deleting any Convex state.

@@ -8,6 +8,7 @@ import {
   INSTANCE_SCHEMA_VERSION,
   convexEnvFrom,
   derivedInstanceEnv,
+  localConvexProjectPackage,
   normalizeInstanceId,
   parseEnv,
   portsForInstance,
@@ -73,6 +74,7 @@ function instancePaths(instanceId, environment) {
     runtimeRoot,
     instanceRoot,
     projectRoot,
+    projectPackage: resolve(projectRoot, "package.json"),
     manifest: resolve(instanceRoot, "instance.json"),
     appEnv: resolve(instanceRoot, "env.local"),
     convexEnv: resolve(instanceRoot, "convex.env"),
@@ -166,6 +168,18 @@ async function ensureInstance(instanceId, options, environment) {
   await writeFile(
     resolve(paths.projectRoot, "convex.json"),
     `${JSON.stringify({ functions: functionsPath }, null, 2)}\n`,
+    "utf8",
+  );
+  const repositoryPackage = JSON.parse(
+    await readFile(resolve(repositoryRoot, "package.json"), "utf8"),
+  );
+  await writeFile(
+    paths.projectPackage,
+    `${JSON.stringify(
+      localConvexProjectPackage(repositoryPackage, instanceId),
+      null,
+      2,
+    )}\n`,
     "utf8",
   );
   await writeFile(

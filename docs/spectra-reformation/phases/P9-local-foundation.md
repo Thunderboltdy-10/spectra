@@ -82,6 +82,21 @@ Fresh agent, first VU on a `local-deploy` lease:
 - **Bridge on local:** pair, mount an isolated fixture folder, discover, edit, Keep-in-Spectra — against the local instance.
 - **Reminder correctness:** a due planner reminder and a timetable reminder actually deliver post-migration (schedule-at-write, no minute-scan).
 
+### P9.I4 operator-authorization repair addendum — 2026-08-31
+
+- SYSTEMIC triage: Next server guards treated school membership as a prerequisite
+  for platform authorization, so every membershipless allowlisted operator failed
+  before the Convex operator-aware authorization seam could run.
+- Platform authorization now starts from the verified active account and requires
+  matching Next/Convex `SUPER_ADMIN_EMAILS` decisions; school authorization keeps
+  the unchanged membership-bearing actor contract.
+- Administration platform actions, operator-session school actions, the operator
+  admin shell, and operator-session secret access select their authorization scope
+  before loading a school actor. Ordinary membershipless accounts remain denied.
+- Focused regression coverage exercises both principal classes and route dispatch
+  (2 files / 10 tests). TypeScript, scoped ESLint, capability, secret, and diff
+  gates pass; no local stack, browser, Bridge, live Convex, or cloud resource ran.
+
 ## Exit gate
 
 N≥3 instances documented and startable; both accounts live on the seeded instance with ManageBac connected and folders imported; the five efficiency classes fixed with measured before/after evidence; budget baselines recorded; V1 PASS. From this gate onward **every VU in the program runs on a local instance (CANON R23)** and the cloud dev deployment is retired for testing.

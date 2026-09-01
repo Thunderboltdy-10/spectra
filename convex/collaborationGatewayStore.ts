@@ -725,11 +725,13 @@ export const append = internalMutation({
         projected: false,
       };
     }
-    if (
-      artifact.liveStateVectorHash &&
-      artifact.liveStateVectorHash !== args.baseStateVectorHash
-    )
-      throw new Error("COLLABORATION_BASE_STATE_STALE");
+    // Overlapping Yjs writers capture `baseStateVectorHash` at apply time, then
+    // Convex appends later. A later CAS-lose is a CRDT rebase, not a dead
+    // socket: the update already lives in the gateway document and must join
+    // the durable log against the current live head.
+    const rebased =
+      Boolean(artifact.liveStateVectorHash) &&
+      artifact.liveStateVectorHash !== args.baseStateVectorHash;
     const projection = parseGatewayProjection(
       args.projectionJson,
       args.projectionHash,
@@ -825,7 +827,7 @@ export const append = internalMutation({
           lastSynchronizedAt: now,
         }),
       ]);
-      return { sequence, duplicate: false, regionIds: [] };
+      return { sequence, duplicate: false, rebased, regionIds: [] };
     }
     if (regionIds.length === 0 || regionIds.length > 128)
       throw new Error("COLLABORATION_REGION_CLAIM_REQUIRED");
@@ -1048,6 +1050,7 @@ export const append = internalMutation({
     return {
       sequence,
       duplicate: false,
+      rebased,
       regionIds,
       projected: Boolean(projection),
     };

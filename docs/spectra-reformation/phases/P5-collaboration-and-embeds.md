@@ -152,3 +152,15 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - Focused Vitest: classroom-load 15/15, gateway 27 with health-proxy path. Unit stays OPEN.
 - Live stack after this pass: Next `:3000` PID 39716 (this checkout, health-proxy); gateway `:3001` PID 15956 (supervisor recycle of spectra-p5v1-fix); Convex `:3002` PID 32800; Bridge 33632 / desktop P5V1Bridge. Playwright `-s=a`/`-s=b` still signed in. Do not kill for tidiness.
 - Status: not VERIFIED. Evidence `.shots/reformation/P5.V1/`.
+
+### P5.V1 verification log (2026-09-01, persist class repaired; Card 8 soak still OPEN)
+
+- Cards 1–7 unchanged PASS. Do not regrade 1–5. Card 6 `wx7ckq7q490vnb88byq11xdfds8dhymh` shot 112. Card 7 quiz `wx78prpm4tscs3jr3g21ksab1n8dg7qp`. Do not pollute `P5V1-QK-SAME-REGION`.
+- Persist class: `scripts/collaboration-persist.mjs` + Convex append rebase overlapping Yjs CAS; STALE is not `permanentPersistenceFailure`; gateway rebases onto durable/Convex head. Transient Convex `InternalServerError` retries; `GATEWAY_UNAVAILABLE` no longer force-reconnects the room.
+- Live sockets: handshake JWT expiry is `jwtVerify` on connect only — per-message `TOKEN_EXPIRED` was closing 30 clients at 10 minutes (4205 / unauthenticated queue). Collab session TTL is now 2h (`shared/collaboration-session-ttl.ts`) so a classroom outlasts one token. Authorize cache 15s; appends are not serialized behind authorize.
+- Harness: Clerk seed tab stays open and snapshots IndexedDB storageState before each of 30 sequential clients (60s `__session` otherwise loops `/legal/privacy`). Reconnect reuses a still-valid collab JWT instead of reminting through dead Clerk.
+- Soak not closed. 30/30 join reached with health `ready`/30/persist null on `wx72nw8qkww36p0879eqvgq1218dkga9`. Reconnect drill at 0.25 still `SETTLE_TIMEOUT` while durable acks lagged; a later join hit `COLLABORATION_DURABLE_RECOVERY_STALE` on load. 30/65/p95 not weakened. Card 9 and repo sweep unstarted. Fly.io unproved.
+- Field Note P6.I4 only (Library stale titles / Shared). Do not start P6.I4 or RC.V1.
+- Focused Vitest: classroom-load + gateway 31 passed; Convex checkpoint rebase test passed. Unit stays OPEN.
+- Live stack after this pass: Next `:3000` PID 19952; gateway `:3001` PID 32076 (this checkout); Convex `:3002` PID 3220 `local-pablo_md-ai_school-2`. Playwright `-s=a`/`-s=b` parked on `/legal/privacy`. Do not kill for tidiness.
+- Status: not VERIFIED. Evidence `.shots/reformation/P5.V1/`.

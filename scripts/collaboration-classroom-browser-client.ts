@@ -9,6 +9,7 @@ type Session = {
   documentName: string;
   url: string;
   level?: string;
+  expiresAt?: number;
 };
 
 type StartOptions = {
@@ -180,6 +181,7 @@ async function acquireSession(options: StartOptions): Promise<Session> {
       });
       payload = (await response.json()) as Partial<Session> & {
         error?: unknown;
+        expiresInMs?: number;
       };
     } catch (error) {
       lastFailure = `CLASSROOM_LOAD_TOKEN_REQUEST_FAILED:${error instanceof Error ? error.message : String(error)}`;
@@ -197,7 +199,17 @@ async function acquireSession(options: StartOptions): Promise<Session> {
         payload.documentName !== options.expectedRoom
       )
         throw new Error("CLASSROOM_LOAD_ROOM_MISMATCH");
-      return payload as Session;
+      const expiresInMs =
+        typeof payload.expiresInMs === "number" && payload.expiresInMs > 0
+          ? payload.expiresInMs
+          : 0;
+      return {
+        token: payload.token,
+        documentName: payload.documentName,
+        url: payload.url,
+        level: payload.level,
+        expiresAt: Date.now() + expiresInMs,
+      };
     }
     lastFailure = `CLASSROOM_LOAD_TOKEN_REQUEST_FAILED:${response.status}:${JSON.stringify(payload.error ?? "invalid response")}`;
     if (response.status !== 401) throw new Error(lastFailure);
@@ -410,7 +422,17 @@ export async function start(options: StartOptions) {
     name: firstSession.documentName,
     document,
     flushDelay: 180,
-    token: async () => (await acquireSession(options)).token,
+    token: async () => {
+      if (
+        runtime?.session.token &&
+        typeof runtime.session.expiresAt === "number" &&
+        runtime.session.expiresAt - Date.now() > 120_000
+      )
+        return runtime.session.token;
+      const next = await acquireSession(options);
+      if (runtime) runtime.session = next;
+      return next.token;
+    },
     onStatus: ({ status }) => noteStatus(status),
     onSynced: () => noteRecoveredIfSettled(),
     onStateless: ({ payload }) => onStateless(payload),

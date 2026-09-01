@@ -322,6 +322,49 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     expect(leftover.room?.snapshotSequence).toBe(12);
   });
 
+  it("rebases overlapping Yjs CAS instead of rejecting a stale base hash", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const first = yjsUpdate("typed");
+    const overlapping = yjsUpdate("typed concurrently");
+    await t.mutation(internal.collaborationGatewayStore.append, {
+      accountId: seed.accountId,
+      actorKind: "human",
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "client-1",
+      policyVersion: 0,
+      idempotencyKey: "human:one",
+      update: arrayBufferCopy(first.update),
+      baseStateVectorHash: "initial-state-vector",
+      stateVectorHash: first.hash,
+      regionIds: ["intro"],
+    });
+    const rebased = await t.mutation(internal.collaborationGatewayStore.append, {
+      accountId: seed.accountId,
+      actorKind: "human",
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "client-2",
+      policyVersion: 0,
+      idempotencyKey: "human:two",
+      update: arrayBufferCopy(overlapping.update),
+      baseStateVectorHash: "initial-state-vector",
+      stateVectorHash: overlapping.hash,
+      regionIds: ["intro"],
+    });
+    expect(rebased).toMatchObject({
+      duplicate: false,
+      rebased: true,
+    });
+    const after = await t.run(async (ctx) => ({
+      artifact: await ctx.db.get(seed.artifactId),
+      updates: await ctx.db.query("collaborationUpdates").collect(),
+    }));
+    expect(after.updates).toHaveLength(2);
+    expect(after.artifact?.liveStateVectorHash).toBe(overlapping.hash);
+  });
+
   it("rejects a snapshot whose state is ahead of its durable sequence", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedRoom(t);

@@ -7,8 +7,10 @@ import {
   DEFAULT_CLASSROOM_LOAD,
   CLASSROOM_LOAD_CLIENT_GLOBAL,
   classroomLoadInitScript,
+  CLASSROOM_LOAD_SESSION_STORAGE_STATE_SNAPSHOT,
   classroomLoadSessionDocumentUrl,
   classroomLoadSessionTokenReady,
+  waitForClassroomLoadSessionToken,
   deriveGatewayHealthUrl,
   redactedClassroomLoadConfig,
   resolveClassroomLoadConfig,
@@ -20,7 +22,8 @@ import {
   evaluateClassroomLoadReport,
   percentile,
 } from "../../../../scripts/collaboration-classroom-load-report.mjs";
-import { createCollaborationGatewayBridgeClient } from "../../../../scripts/collaboration-gateway-bridge-client.mjs";
+import { createCollaborationGatewayBridgeClient, serializeCollaborationBridge } from "../../../../scripts/collaboration-gateway-bridge-client.mjs";
+import { COLLABORATION_SESSION_TTL_MS } from "../../../../shared/collaboration-session-ttl";
 
 const environment = {
   NODE_ENV: "test" as const,
@@ -366,6 +369,53 @@ describe("P5.V1 classroom load metrics and termination", () => {
     ]);
   });
 
+  it("retries transient Convex action failures instead of treating them as a dead socket", async () => {
+    let attempts = 0;
+    const bridge = createCollaborationGatewayBridgeClient({
+      convexUrl: "https://example.convex.cloud",
+      bridgeKey: "bridge-key".repeat(4),
+      retryAttempts: 4,
+      retryDelayMs: () => 0,
+      sleep: async () => undefined,
+      now: () => 123_456,
+      nonce: () => "fixed-nonce",
+      client: {
+        action: async () => {
+          attempts += 1;
+          if (attempts < 3)
+            throw new Error(
+              '{"code":"InternalServerError","message":"Your request couldn\'t be completed. Try again later."}',
+            );
+          return { ok: true };
+        },
+      } as never,
+    });
+    await expect(
+      bridge("load", { artifactId: "artifact-classroom", partitionKey: "root" }),
+    ).resolves.toEqual({ ok: true });
+    expect(attempts).toBe(3);
+  });
+
+  it("serializes Convex bridge calls so overlapping writers cannot stampede the action runtime", async () => {
+    const seen: number[] = [];
+    let inflight = 0;
+    const raw = async (operation: string) => {
+      inflight += 1;
+      seen.push(inflight);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      inflight -= 1;
+      return operation;
+    };
+    const queued = serializeCollaborationBridge(raw as never);
+    const results = await Promise.all([
+      queued("authorize", {}),
+      queued("append", {}),
+      queued("load", {}),
+    ]);
+    expect(results).toEqual(["authorize", "append", "load"]);
+    expect(seen).toEqual([1, 1, 1]);
+  });
+
   it("uses nearest-rank percentiles and keeps the 100ms threshold strict", () => {
     expect(
       percentile(
@@ -553,5 +603,32 @@ describe("classroom load browser bundle attachment", () => {
     expect(classroomLoadSessionTokenReady(400, "/legal/privacy")).toBe(true);
     expect(classroomLoadSessionTokenReady(401, "/legal/privacy")).toBe(false);
     expect(classroomLoadSessionTokenReady(200, "/sign-in")).toBe(false);
+    expect(CLASSROOM_LOAD_SESSION_STORAGE_STATE_SNAPSHOT).toEqual({
+      indexedDB: true,
+    });
+    expect(COLLABORATION_SESSION_TTL_MS).toBeGreaterThan(
+      CLASSROOM_MINIMUM_DURATION_MS + 5 * 60 * 1_000,
+    );
+  });
+
+  it("waits through expired Clerk probes until the privacy origin can mint", async () => {
+    const probes = [
+      { status: 401, pathname: "/legal/privacy" },
+      { status: 0, pathname: "/legal/privacy" },
+      { status: 400, pathname: "/legal/privacy" },
+    ];
+    await expect(
+      waitForClassroomLoadSessionToken({
+        probe: async () => probes.shift() ?? { status: 400, pathname: "/legal/privacy" },
+        delay: async () => undefined,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      waitForClassroomLoadSessionToken({
+        probe: async () => ({ status: 401, pathname: "/legal/privacy" }),
+        delay: async () => undefined,
+        deadlineMs: 0,
+      }),
+    ).resolves.toBe(false);
   });
 });

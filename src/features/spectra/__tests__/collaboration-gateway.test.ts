@@ -23,6 +23,16 @@ import {
   shouldCompactRoom,
   shouldRecoverNativeRoom,
 } from "../../../../scripts/collaboration-room-state.mjs";
+import {
+  appendBaseStateVectorHash,
+  durableHeadKey,
+  isRebaseablePersistenceFailure,
+  isTransientCollaborationFailure,
+  permanentPersistenceFailure,
+  rebaseAppendPayload,
+  resolveRebaseHead,
+  COLLABORATION_AUTHORIZE_CACHE_MS,
+} from "../../../../scripts/collaboration-persist.mjs";
 
 describe("P5.I2 gateway production helpers", () => {
   it("admits a bounded native bootstrap snapshot and projection in one signed envelope", () => {
@@ -264,6 +274,81 @@ describe("P5.I2 gateway production helpers", () => {
 
     canonical.destroy();
     peer.destroy();
+  });
+
+  it("treats overlapping Yjs CAS as rebaseable persist work, not a dead socket", () => {
+    const stale = new Error("COLLABORATION_BASE_STATE_STALE");
+    expect(isRebaseablePersistenceFailure(stale)).toBe(true);
+    expect(permanentPersistenceFailure(stale)).toBe(false);
+    expect(
+      permanentPersistenceFailure(
+        new Error("COLLABORATION_GATEWAY_UNAVAILABLE"),
+      ),
+    ).toBe(false);
+    expect(
+      isTransientCollaborationFailure(
+        new Error("COLLABORATION_GATEWAY_UNAVAILABLE"),
+      ),
+    ).toBe(true);
+    expect(
+      isTransientCollaborationFailure(
+        new Error(
+          '{"code":"InternalServerError","message":"Your request couldn\'t be completed. Try again later."}',
+        ),
+      ),
+    ).toBe(true);
+    expect(COLLABORATION_AUTHORIZE_CACHE_MS).toBeGreaterThanOrEqual(15_000);
+    expect(
+      permanentPersistenceFailure(new Error("COLLABORATION_TOKEN_EXPIRED")),
+    ).toBe(true);
+    expect(
+      permanentPersistenceFailure(new Error("COLLABORATION_READ_ONLY")),
+    ).toBe(true);
+    expect(
+      permanentPersistenceFailure(new Error("COLLABORATION_ACCESS_REVOKED")),
+    ).toBe(true);
+    expect(
+      appendBaseStateVectorHash({
+        lastPersistedHash: "b".repeat(43),
+        capturedBaseHash: "a".repeat(43),
+      }),
+    ).toBe("b".repeat(43));
+    expect(
+      appendBaseStateVectorHash({
+        lastPersistedHash: null,
+        capturedBaseHash: "a".repeat(43),
+      }),
+    ).toBe("a".repeat(43));
+    expect(
+      rebaseAppendPayload(
+        { baseStateVectorHash: "a".repeat(43), stateVectorHash: "c".repeat(43) },
+        "b".repeat(43),
+      ),
+    ).toMatchObject({ baseStateVectorHash: "b".repeat(43) });
+    expect(durableHeadKey({ artifactId: "art", partitionKey: "root" })).toBe(
+      "art:root",
+    );
+    expect(
+      resolveRebaseHead({
+        lastPersistedHash: "a".repeat(43),
+        storedLiveHash: "b".repeat(43),
+      }),
+    ).toBe("b".repeat(43));
+    expect(
+      resolveRebaseHead({
+        lastPersistedHash: "a".repeat(43),
+        storedLiveHash: null,
+      }),
+    ).toBe("a".repeat(43));
+    expect(
+      rebaseAppendPayload(
+        { baseStateVectorHash: "a".repeat(43), stateVectorHash: "c".repeat(43) },
+        resolveRebaseHead({
+          lastPersistedHash: "a".repeat(43),
+          storedLiveHash: "b".repeat(43),
+        }),
+      ),
+    ).toMatchObject({ baseStateVectorHash: "b".repeat(43) });
   });
 
   it("compacts when the update log crosses size, count, or idle", () => {

@@ -24,7 +24,17 @@ import {
   MAX_REALTIME_MESSAGE_BYTES,
   canonicalDurableUpdate,
 } from "./collaboration-update-envelope.mjs";
-import { createCollaborationGatewayBridgeClient } from "./collaboration-gateway-bridge-client.mjs";
+import { createCollaborationGatewayBridgeClient, serializeCollaborationBridge } from "./collaboration-gateway-bridge-client.mjs";
+import {
+  appendBaseStateVectorHash,
+  durableHeadKey,
+  isRebaseablePersistenceFailure,
+  isTransientCollaborationFailure,
+  permanentPersistenceFailure,
+  rebaseAppendPayload,
+  resolveRebaseHead,
+  COLLABORATION_AUTHORIZE_CACHE_MS,
+} from "./collaboration-persist.mjs";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
 const tokenSecret = process.env.SPECTRA_COLLAB_TOKEN_SECRET;
@@ -35,10 +45,15 @@ if (!tokenSecret || tokenSecret.length < 32)
 if (!bridgeKey || bridgeKey.length < 32)
   throw new Error("COLLABORATION_BRIDGE_CONFIG_MISSING");
 
-const bridge = createCollaborationGatewayBridgeClient({
+const rawBridge = createCollaborationGatewayBridgeClient({
   convexUrl,
   bridgeKey,
 });
+const serializedBridge = serializeCollaborationBridge(rawBridge);
+const bridge = (operation, payload, options) =>
+  operation === "append"
+    ? rawBridge(operation, payload, options)
+    : serializedBridge(operation, payload, options);
 const jwtKey = new TextEncoder().encode(tokenSecret);
 const META_MAP = "spectra:artifact-meta";
 const REGION_MAP = "spectra:artifact-regions";
@@ -47,6 +62,7 @@ const CODE_LINES_MARKER = "$spectraCodeLines";
 const GATEWAY_PROTOCOL_VERSION = 1;
 const PERSISTENCE_DEBOUNCE_MS = 180;
 const PERSISTENCE_RETRY_MAX_MS = 5_000;
+const PERSISTENCE_REBASE_MAX_ATTEMPTS = 8;
 const GATEWAY_STARTED_AT = Date.now();
 const activeConnections = new Set();
 const documentMessageTails = new WeakMap();
@@ -54,6 +70,7 @@ const pendingMessageReleases = new Map();
 const acceptedDocumentMessages = new Map();
 const documentPersistenceQueues = new WeakMap();
 const documentCheckpointSchedulers = new WeakMap();
+const durableHeads = new Map();
 const checkpointSchedulers = new Set();
 let policySweepRunning = false;
 let lastPersistenceFailure = null;
@@ -134,6 +151,12 @@ function persistenceQueue(document) {
   return created;
 }
 
+function rememberDurableHead(context, hash) {
+  const key = durableHeadKey(context);
+  if (!key || typeof hash !== "string" || hash.length < 16) return;
+  durableHeads.set(key, hash);
+}
+
 function samePersistenceActor(left, right) {
   return (
     left.context.accountId === right.context.accountId &&
@@ -142,13 +165,6 @@ function samePersistenceActor(left, right) {
     left.context.artifactId === right.context.artifactId &&
     left.context.partitionKey === right.context.partitionKey &&
     left.context.policyVersion === right.context.policyVersion
-  );
-}
-
-function permanentPersistenceFailure(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /COLLABORATION_(?:ACCESS_REVOKED|TOKEN_EXPIRED|READ_ONLY|BASE_STATE_STALE|REGION_|AI_ATTRIBUTION|NATIVE_PROJECTION|MODEL_CHANGE|GATEWAY_(?:FORBIDDEN|UNAVAILABLE|UPDATE_(?:SIZE|INVALID)))/.test(
-    message,
   );
 }
 
@@ -174,10 +190,13 @@ function forceCanonicalReconnect(context, reason) {
 
 async function appendWithRetry(payload, entries) {
   let attempt = 0;
+  let rebaseAttempts = 0;
+  let nextPayload = payload;
   for (;;) {
     try {
-      const result = await bridge("append", payload);
+      const result = await bridge("append", nextPayload);
       lastPersistenceFailure = null;
+      rememberDurableHead(entries[0].context, nextPayload.stateVectorHash);
       for (const entry of entries)
         sendGatewayState(entry.connection, {
           type: "spectra.durable_ack",
@@ -185,6 +204,42 @@ async function appendWithRetry(payload, entries) {
         });
       return result;
     } catch (error) {
+      if (
+        isRebaseablePersistenceFailure(error) &&
+        rebaseAttempts < PERSISTENCE_REBASE_MAX_ATTEMPTS
+      ) {
+        const context = entries[0].context;
+        let liveHash = resolveRebaseHead({
+          lastPersistedHash: durableHeads.get(durableHeadKey(context)),
+          storedLiveHash: null,
+        });
+        let rebased = rebaseAppendPayload(nextPayload, liveHash);
+        if (rebased.baseStateVectorHash === nextPayload.baseStateVectorHash) {
+          try {
+            const stored = await bridge("load", {
+              artifactId: context.artifactId,
+              partitionKey: context.partitionKey,
+            });
+            liveHash = resolveRebaseHead({
+              lastPersistedHash: liveHash,
+              storedLiveHash: stored?.liveStateVectorHash,
+            });
+            rememberDurableHead(context, liveHash);
+            rebased = rebaseAppendPayload(nextPayload, liveHash);
+          } catch {
+            rebased = nextPayload;
+          }
+        }
+        if (rebased.baseStateVectorHash !== nextPayload.baseStateVectorHash) {
+          nextPayload = rebased;
+          rebaseAttempts += 1;
+          attempt += 1;
+          process.stderr.write(
+            `[durable append] rebasing overlapping Yjs CAS onto ${rebased.baseStateVectorHash}\n`,
+          );
+          continue;
+        }
+      }
       const persistenceMessage =
         error instanceof Error ? error.message : String(error);
       lastPersistenceFailure = {
@@ -204,6 +259,7 @@ async function appendWithRetry(payload, entries) {
         throw error;
       }
       attempt += 1;
+      if (attempt >= 12) throw error;
       const retryMs = Math.min(
         PERSISTENCE_RETRY_MAX_MS,
         150 * 2 ** Math.min(attempt - 1, 6),
@@ -274,7 +330,10 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
           policyVersion: first.context.policyVersion,
           idempotencyKey: `${first.context.clientId}:${updateHash}`,
           update: Buffer.from(mergedUpdate).toString("base64"),
-          baseStateVectorHash: first.baseStateVectorHash,
+          baseStateVectorHash: appendBaseStateVectorHash({
+            lastPersistedHash: durableHeads.get(durableHeadKey(first.context)),
+            capturedBaseHash: first.baseStateVectorHash,
+          }),
           stateVectorHash: last.stateVectorHash,
           regionIds,
           nativeInitialization: group.some(
@@ -654,21 +713,44 @@ async function reauthorize(context) {
   const now = Date.now();
   if (
     context.authorizationCheckedAt &&
-    now - context.authorizationCheckedAt < 1_500
+    now - context.authorizationCheckedAt < COLLABORATION_AUTHORIZE_CACHE_MS
   )
     return context;
-  if (context.expiresAt <= Math.floor(now / 1000))
-    throw new Error("COLLABORATION_TOKEN_EXPIRED");
-  const result = await bridge("authorize", {
-    accountId: context.accountId,
-    artifactId: context.artifactId,
-    partitionKey: context.partitionKey,
-    policyVersion: context.policyVersion,
-  });
-  if (!result?.allowed) throw new Error("COLLABORATION_ACCESS_REVOKED");
-  context.canModify = result.canModify === true;
-  context.authorizationCheckedAt = now;
-  return context;
+  // Handshake JWT expiry is enforced by jwtVerify on connect. Closing an
+  // already-authenticated socket at `exp` turns every 10-minute classroom into
+  // a reconnect storm (4205 / unauthenticated queue overflow). Revocation is
+  // Convex authorize + ACCESS_REVOKED, not wall-clock token expiry.
+  try {
+    const result = await bridge(
+      "authorize",
+      {
+        accountId: context.accountId,
+        artifactId: context.artifactId,
+        partitionKey: context.partitionKey,
+        policyVersion: context.policyVersion,
+      },
+      { retryAttempts: 1 },
+    );
+    if (!result?.allowed) {
+      if (result?.reason === "unavailable")
+        throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
+      throw new Error("COLLABORATION_ACCESS_REVOKED");
+    }
+    context.canModify = result.canModify === true;
+    context.authorizationCheckedAt = now;
+    return context;
+  } catch (error) {
+    if (
+      isTransientCollaborationFailure(error) &&
+      context.authorizationCheckedAt
+    ) {
+      process.stderr.write(
+        `[reauthorize] transient Convex failure; keeping last authorization\n`,
+      );
+      return context;
+    }
+    throw error;
+  }
 }
 
 const server = new Server({
@@ -950,6 +1032,7 @@ const server = new Server({
       partitionKey: context.partitionKey,
     });
     let storedDocument = applyStoredRoomUpdates(Y, stored);
+    rememberDurableHead(context, stored?.liveStateVectorHash);
     if (isNativeArtifactDocument(storedDocument)) {
       const observedStateVectorHash = documentStateVectorHash(storedDocument);
       if (
@@ -984,6 +1067,7 @@ const server = new Server({
           partitionKey: context.partitionKey,
         });
         storedDocument = applyStoredRoomUpdates(Y, stored);
+        rememberDurableHead(context, stored?.liveStateVectorHash);
       }
     }
     if (isNativeArtifactDocument(storedDocument)) {
@@ -1021,6 +1105,7 @@ const server = new Server({
           .update(projectionJson)
           .digest("base64url"),
       });
+      rememberDurableHead(context, stateVectorHash);
     }
     return document;
   },

@@ -11,8 +11,9 @@ import {
   redactedClassroomLoadConfig,
   resolveClassroomLoadConfig,
   classroomLoadInitScript,
+  CLASSROOM_LOAD_SESSION_STORAGE_STATE_SNAPSHOT,
   classroomLoadSessionDocumentUrl,
-  classroomLoadSessionTokenReady,
+  waitForClassroomLoadSessionToken,
 } from "./collaboration-classroom-load-config.mjs";
 import {
   boundedClassroomLoadJson,
@@ -120,6 +121,48 @@ function clientOptions(config, clientIndex, runId) {
   };
 }
 
+async function probeSessionToken(page, endpoint) {
+  return page.evaluate(async (tokenEndpoint) => {
+    try {
+      const response = await fetch(tokenEndpoint, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(4_000),
+      });
+      return { status: response.status, pathname: location.pathname };
+    } catch {
+      return { status: 0, pathname: location.pathname };
+    }
+  }, endpoint);
+}
+
+async function openClassroomLoadSessionSeed(browser, config) {
+  const context = await browser.newContext({
+    storageState: config.token.storageState,
+  });
+  const page = await context.newPage();
+  await page.goto(classroomLoadSessionDocumentUrl(config.token.endpoint), {
+    waitUntil: "domcontentloaded",
+    timeout: 60_000,
+  });
+  const ready = await waitForClassroomLoadSessionToken({
+    probe: () => probeSessionToken(page, config.token.endpoint),
+    delay,
+  });
+  if (!ready) {
+    await context.close();
+    throw new Error("CLASSROOM_LOAD_SESSION_TOKEN_UNAVAILABLE");
+  }
+  return context;
+}
+
+async function snapshotClassroomLoadSession(context) {
+  return context.storageState(CLASSROOM_LOAD_SESSION_STORAGE_STATE_SNAPSHOT);
+}
+
 async function startBrowserClient({
   browser,
   bundle,
@@ -127,10 +170,11 @@ async function startBrowserClient({
   clientIndex,
   runId,
   termination,
+  sessionStorageState,
 }) {
   const context = await browser.newContext(
     config.token.mode === "session"
-      ? { storageState: config.token.storageState }
+      ? { storageState: sessionStorageState ?? config.token.storageState }
       : {},
   );
   const page = await context.newPage();
@@ -148,30 +192,10 @@ async function startBrowserClient({
       waitUntil: "domcontentloaded",
       timeout: 60_000,
     });
-    const deadline = Date.now() + 45_000;
-    let ready = false;
-    while (Date.now() < deadline) {
-      const probe = await page.evaluate(async (endpoint) => {
-        try {
-          const response = await fetch(endpoint, {
-            method: "POST",
-            credentials: "include",
-            cache: "no-store",
-            headers: { "Content-Type": "application/json" },
-            body: "{}",
-            signal: AbortSignal.timeout(4_000),
-          });
-          return { status: response.status, pathname: location.pathname };
-        } catch {
-          return { status: 0, pathname: location.pathname };
-        }
-      }, config.token.endpoint);
-      if (classroomLoadSessionTokenReady(probe.status, probe.pathname)) {
-        ready = true;
-        break;
-      }
-      await delay(250);
-    }
+    const ready = await waitForClassroomLoadSessionToken({
+      probe: () => probeSessionToken(page, config.token.endpoint),
+      delay,
+    });
     if (!ready) throw new Error("CLASSROOM_LOAD_SESSION_TOKEN_UNAVAILABLE");
   } else {
     await page.goto(
@@ -344,6 +368,7 @@ async function runLoad(config) {
   const clientHandles = [];
   const runId = randomUUID();
   let browser = null;
+  let sessionSeed = null;
   const pollingController = new AbortController();
   let runStartedAt = null;
   let runStoppedAt = null;
@@ -394,9 +419,17 @@ async function runLoad(config) {
     browser.on("disconnected", () =>
       termination.request("CLASSROOM_LOAD_BROWSER_DISCONNECTED"),
     );
+    const sessionSeedContext =
+      config.token.mode === "session"
+        ? await openClassroomLoadSessionSeed(browser, config)
+        : null;
+    sessionSeed = sessionSeedContext;
     const startedClients = [];
     const startBatchSize = 1;
     for (let start = 0; start < config.clientCount; start += startBatchSize) {
+      const sessionStorageState = sessionSeedContext
+        ? await snapshotClassroomLoadSession(sessionSeedContext)
+        : null;
       const batch = await Promise.all(
         Array.from(
           { length: Math.min(startBatchSize, config.clientCount - start) },
@@ -408,6 +441,7 @@ async function runLoad(config) {
               clientIndex: start + offset,
               runId,
               termination,
+              sessionStorageState,
             }),
         ),
       );
@@ -623,6 +657,8 @@ async function runLoad(config) {
       } catch {}
       await client.context.close().catch(() => undefined);
     }
+    await sessionSeed?.close().catch(() => undefined);
+    sessionSeed = null;
     await browser?.close().catch(() => undefined);
     for (const [signal, listener] of stopSignals)
       process.removeListener(signal, listener);

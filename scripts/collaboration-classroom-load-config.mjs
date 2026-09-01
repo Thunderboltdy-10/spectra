@@ -49,6 +49,26 @@ export function classroomLoadSessionTokenReady(status, pathname) {
   );
 }
 
+export const CLASSROOM_LOAD_SESSION_STORAGE_STATE_SNAPSHOT = Object.freeze({
+  indexedDB: true,
+});
+
+export async function waitForClassroomLoadSessionToken({
+  probe,
+  delay,
+  deadlineMs = 45_000,
+  now = Date.now,
+}) {
+  const deadline = now() + deadlineMs;
+  while (now() < deadline) {
+    const result = await probe();
+    if (classroomLoadSessionTokenReady(result.status, result.pathname))
+      return true;
+    await delay(250);
+  }
+  return false;
+}
+
 const CLASSROOM_MAX_HEALTH_SAMPLES = 2_000;
 const CLASSROOM_MAX_DURABILITY_OBSERVATIONS = 64;
 

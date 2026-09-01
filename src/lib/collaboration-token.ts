@@ -2,6 +2,7 @@ import "server-only";
 
 import { SignJWT } from "jose";
 import { SPECTRA_PROTOCOL_VERSIONS } from "@/features/spectra/migrations/protocol";
+import { COLLABORATION_SESSION_TTL } from "../../shared/collaboration-session-ttl";
 
 export type CollaborationSessionClaims = {
   artifactId: string;
@@ -46,9 +47,11 @@ export async function signCollaborationSession(claims: CollaborationSessionClaim
     .setSubject(claims.accountId)
     .setJti(crypto.randomUUID())
     .setIssuedAt()
-    .setExpirationTime("10m")
+    .setExpirationTime(COLLABORATION_SESSION_TTL)
     .sign(signingKey());
 }
+
+export { COLLABORATION_SESSION_TTL, COLLABORATION_SESSION_TTL_MS } from "../../shared/collaboration-session-ttl";
 
 export function collaborationProtocolVersion() {
   return SPECTRA_PROTOCOL_VERSIONS.collaboration;

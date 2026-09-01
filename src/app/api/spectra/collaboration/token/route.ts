@@ -4,6 +4,7 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
   collaborationDocumentName,
   collaborationProtocolVersion,
+  COLLABORATION_SESSION_TTL_MS,
   signCollaborationSession,
 } from "@/lib/collaboration-token";
 import { ok } from "@/lib/http";
@@ -125,7 +126,7 @@ export async function POST(request: NextRequest) {
       documentName,
       provider: cloudflareRealtime ? "cloudflare_durable_object" : "self_hosted_yjs",
       url: collaborationUrl,
-      expiresInMs: 600_000,
+      expiresInMs: COLLABORATION_SESSION_TTL_MS,
       level: access.level,
       accountId: actor.accountId,
       displayName: actor.name,

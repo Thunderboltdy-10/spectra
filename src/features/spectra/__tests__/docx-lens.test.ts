@@ -399,6 +399,35 @@ describe("DOCX preservation lens", () => {
     });
   });
 
+  it("refuses duplicated existing paraIds on a materialized package instead of treating it as corrupt XML", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    const projection = structuredClone(opened.projection);
+    const target = projection.blocks.find(
+      (block) => block.type !== "table" && block.attrs?.nativeReadOnly !== true,
+    )!;
+    target.text = `${target.text} with duplicated anchors`;
+    const materialized = await docxLens.materialize({
+      projection,
+      carry: opened.preservedCarry,
+    });
+    const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
+    const files = unzipSync(materialized);
+    const documentName = Object.keys(files).find((name) => name.endsWith("word/document.xml"))!;
+    let count = 0;
+    const xml = strFromU8(files[documentName]!);
+    files[documentName] = strToU8(
+      xml.replace(/(w14:)?paraId="[^"]+"/g, (match) => {
+        count += 1;
+        return count <= 2 ? match.replace(/paraId="[^"]+"/, 'paraId="ABCDEF12"') : match;
+      }),
+    );
+    expect(count).toBeGreaterThanOrEqual(2);
+    await expect(docxLens.open(zipSync(files))).rejects.toMatchObject({
+      code: "DOCX_IDENTITY_AMBIGUOUS",
+    });
+  });
+
   it("refuses a concurrent merge whose stored base never persisted native anchors", async () => {
     const source = await fixture("complex-structure.docx");
     const opened = await docxLens.open(source);

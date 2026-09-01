@@ -6,7 +6,7 @@ import {
   gatewayHealthPayload,
   isGatewayHealthBody,
 } from "../../../../scripts/collaboration-health.mjs";
-import { collaborationPath } from "../../../../scripts/collaboration-proxy-path.mjs";
+import { collaborationPath, isCollaborationProxyRequest } from "../../../../scripts/collaboration-proxy-path.mjs";
 import {
   MAX_DURABLE_UPDATE_BYTES,
   MAX_REALTIME_MESSAGE_BYTES,
@@ -57,6 +57,9 @@ describe("P5.I2 gateway production helpers", () => {
     expect(collaborationPath("/_spectra/realtime/room?token=abc&foo=1")).toBe(
       "/room?token=abc&foo=1",
     );
+    expect(isCollaborationProxyRequest("/_spectra/health")).toBe(true);
+    expect(collaborationPath("/_spectra/health")).toBe("/_spectra/health");
+    expect(isCollaborationProxyRequest("/library")).toBe(false);
   });
 
   it("keeps client and gateway reconnect constants aligned", () => {

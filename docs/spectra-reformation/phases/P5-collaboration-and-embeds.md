@@ -143,3 +143,12 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - Live Card 6 on fresh `P5V1-Card6-Fresh-20260831.docx` (`wx7drz5y9v4r6ewsfd31c3hmad8dgkak`): unique AI marker present in Yjs, Convex-visible studio, and ZIP bytes together (SHA `D8F6EC01…` after Word recover-save). Ambiguous *text* “Page 332 Question 5” did not refuse (134 unique `w14:paraId`s). Word opened with “unreadable content” on Python-zip-salted packages; recover+SaveAs wrote `P5V1-NATIVE-WORD-2301` to disk; Spectra Yjs still lacked the Word marker and showed no Keep Word UI after reload. Cards 7–9 unstarted. Fly.io unproved.
 - Field Note P6.I4: Library still titles a uniquely hashed fixture row `P5V1-Exercises-control.docx` (shot 64). Do not start P6.I4 here.
 - Status: class repair in product+tests; P5.V1 remains OPEN. Evidence `.shots/reformation/P5.V1/manifest.md`.
+
+### P5.V1 verification log (2026-09-01, Card 6–7 closed; Card 8 blocked on persist/churn)
+
+- Cards 1–5 unchanged PASS. Card 6 Word-made copy `wx7ckq7q490vnb88byq11xdfds8dhymh`: Keep Word HUMAN+AI+WORD; identity refuse on duplicate `w14:paraId` (shot 112). Card 3/4 SAME-region rerun PASS (`P5V1-QK-SAME-REGION`, shot 121). Card 7 quiz→host live + B reload, sheet→board title live-update, sheet→chat, native PNG fallback, strict-native refuse.
+- Card 8 class repairs landed, soak not closed: Playwright IIFE pinned to `globalThis`; session clients hydrate Clerk on `/legal/privacy` (not a dummy 307 path); sequential start; Next proxies `/_spectra/health` + WS keepAlive. Fresh soak doc `wx72nw8qkww36p0879eqvgq1218dkga9`. 30/30 start then health oscillates (0–24) and `COLLABORATION_BASE_STATE_STALE` degrades the gateway. 30/65/p95 gates not weakened. Card 9 and sweep unstarted. Fly.io unproved.
+- Field Note P6.I4: Library listing/stale titles/Shared empty; workspace Library often will not switch while another studio is open (`/library?artifactId=` does).
+- Focused Vitest: classroom-load 15/15, gateway 27 with health-proxy path. Unit stays OPEN.
+- Live stack after this pass: Next `:3000` PID 39716 (this checkout, health-proxy); gateway `:3001` PID 15956 (supervisor recycle of spectra-p5v1-fix); Convex `:3002` PID 32800; Bridge 33632 / desktop P5V1Bridge. Playwright `-s=a`/`-s=b` still signed in. Do not kill for tidiness.
+- Status: not VERIFIED. Evidence `.shots/reformation/P5.V1/`.

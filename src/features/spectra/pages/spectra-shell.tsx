@@ -2547,10 +2547,11 @@ export function SpectraShell({
 
   useEffect(() => {
     function onOpenArtifact({ workId: artifactId }: { workId: string }) {
-      const artifact = artifactId
-        ? allArtifacts.find((item) => item._id === artifactId)
-        : null;
-      if (artifact) openArtifactPanel(artifact);
+      if (!artifactId) return;
+      // Overview cache is not the membership test. Embeds, follow, and
+      // calendar can name work that is not in the loaded snapshot yet; a
+      // silent miss leaves Open source looking wired and doing nothing.
+      openArtifactById(artifactId);
     }
     function onAiNavigate(detail: {
       actorId?: string;

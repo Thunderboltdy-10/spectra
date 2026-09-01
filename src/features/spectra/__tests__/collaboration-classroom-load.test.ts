@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createHash, createHmac } from "node:crypto";
+import { createContext, runInContext } from "node:vm";
 import {
   CLASSROOM_BROWSER_CLIENTS,
   CLASSROOM_MINIMUM_DURATION_MS,
   DEFAULT_CLASSROOM_LOAD,
+  CLASSROOM_LOAD_CLIENT_GLOBAL,
+  classroomLoadInitScript,
+  classroomLoadSessionDocumentUrl,
+  classroomLoadSessionTokenReady,
   deriveGatewayHealthUrl,
   redactedClassroomLoadConfig,
   resolveClassroomLoadConfig,
@@ -506,5 +511,47 @@ describe("P5.V1 classroom load report assertions", () => {
     expect(bounded.bytes).toBeLessThanOrEqual(1_024);
     expect(bounded.json).toContain("REPORT_UNBOUNDED");
     expect(bounded.json).not.toContain("x".repeat(1_000));
+  });
+});
+
+describe("classroom load browser bundle attachment", () => {
+  it("pins the IIFE global onto globalThis so Playwright init scripts can call start", () => {
+    const bundle = `"use strict";var ${CLASSROOM_LOAD_CLIENT_GLOBAL}={start(){return "ready"}};`;
+    const attached = classroomLoadInitScript(bundle);
+    const isolated = createContext({});
+    expect(
+      runInContext(
+        `(function(){${bundle};return globalThis.${CLASSROOM_LOAD_CLIENT_GLOBAL}})()`,
+        isolated,
+      ),
+    ).toBeUndefined();
+    const pinned = createContext({});
+    expect(
+      runInContext(
+        `(function(){${attached};return globalThis.${CLASSROOM_LOAD_CLIENT_GLOBAL}.start()})()`,
+        pinned,
+      ),
+    ).toBe("ready");
+  });
+
+  it("hydrates session clients on a Clerk origin that is not a studio host", () => {
+    expect(
+      classroomLoadSessionDocumentUrl(
+        "http://localhost:3000/api/spectra/collaboration/token",
+      ),
+    ).toBe("http://localhost:3000/legal/privacy");
+    expect(
+      classroomLoadSessionDocumentUrl(
+        "http://localhost:3000/api/spectra/collaboration/token",
+      ),
+    ).not.toContain("__spectra_classroom_load");
+    expect(
+      classroomLoadSessionDocumentUrl(
+        "http://localhost:3000/api/spectra/collaboration/token",
+      ),
+    ).not.toContain("/library");
+    expect(classroomLoadSessionTokenReady(400, "/legal/privacy")).toBe(true);
+    expect(classroomLoadSessionTokenReady(401, "/legal/privacy")).toBe(false);
+    expect(classroomLoadSessionTokenReady(200, "/sign-in")).toBe(false);
   });
 });

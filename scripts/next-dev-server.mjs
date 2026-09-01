@@ -1,18 +1,15 @@
 import { createServer, request as requestUpstream } from "node:http";
 import { connect } from "node:net";
 import next from "next";
-import { collaborationPath } from "./collaboration-proxy-path.mjs";
+import { collaborationPath, isCollaborationProxyRequest } from "./collaboration-proxy-path.mjs";
 
 const port = Number(process.env.SPECTRA_WEB_PORT || 3000);
 const hostname = process.env.SPECTRA_WEB_HOST || "0.0.0.0";
 const collaborationHost = process.env.SPECTRA_COLLAB_HOST || "127.0.0.1";
 const collaborationPort = Number(process.env.SPECTRA_COLLAB_PORT || 1234);
-const collaborationPrefix = "/_spectra/realtime";
 
 function isCollaborationRequest(url = "/") {
-  return url === collaborationPrefix
-    || url.startsWith(`${collaborationPrefix}/`)
-    || url.startsWith(`${collaborationPrefix}?`);
+  return isCollaborationProxyRequest(url);
 }
 
 function upstreamHeaders(request) {
@@ -50,9 +47,13 @@ function proxyCollaborationHttp(request, response) {
 }
 
 function proxyCollaborationUpgrade(request, socket, head) {
+  socket.setTimeout(0);
+  socket.setKeepAlive(true, 10_000);
   const upstream = connect(
     { host: collaborationHost, port: collaborationPort },
     () => {
+      upstream.setTimeout(0);
+      upstream.setKeepAlive(true, 10_000);
       const headerLines = [];
       for (let index = 0; index < request.rawHeaders.length; index += 2) {
         const name = request.rawHeaders[index];

@@ -159,34 +159,51 @@ async function acquireSession(options: StartOptions): Promise<Session> {
       documentName: options.connection.room,
       url: options.connection.gatewayUrl,
     };
-  const response = await fetch(options.connection.endpoint, {
-    method: "POST",
-    credentials: "include",
-    cache: "no-store",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      artifactId: options.connection.artifactId,
-      partitionKey: options.connection.partitionKey,
-      schemaVersion: options.connection.schemaVersion,
-      clientId: options.clientId,
-      realtimeProvider: "hocuspocus",
-    }),
-  });
-  const payload = (await response.json()) as Partial<Session> & {
-    error?: unknown;
-  };
-  if (
-    !response.ok ||
-    typeof payload.token !== "string" ||
-    typeof payload.documentName !== "string" ||
-    typeof payload.url !== "string"
-  )
-    throw new Error(
-      `CLASSROOM_LOAD_TOKEN_REQUEST_FAILED:${response.status}:${JSON.stringify(payload.error ?? "invalid response")}`,
-    );
-  if (options.expectedRoom && payload.documentName !== options.expectedRoom)
-    throw new Error("CLASSROOM_LOAD_ROOM_MISMATCH");
-  return payload as Session;
+  let lastFailure = "CLASSROOM_LOAD_TOKEN_REQUEST_FAILED";
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    let response: Response;
+    let payload: Partial<Session> & { error?: unknown };
+    try {
+      response = await fetch(options.connection.endpoint, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artifactId: options.connection.artifactId,
+          partitionKey: options.connection.partitionKey,
+          schemaVersion: options.connection.schemaVersion,
+          clientId: options.clientId,
+          realtimeProvider: "hocuspocus",
+        }),
+        signal: AbortSignal.timeout(8_000),
+      });
+      payload = (await response.json()) as Partial<Session> & {
+        error?: unknown;
+      };
+    } catch (error) {
+      lastFailure = `CLASSROOM_LOAD_TOKEN_REQUEST_FAILED:${error instanceof Error ? error.message : String(error)}`;
+      await sleep(500);
+      continue;
+    }
+    if (
+      response.ok &&
+      typeof payload.token === "string" &&
+      typeof payload.documentName === "string" &&
+      typeof payload.url === "string"
+    ) {
+      if (
+        options.expectedRoom &&
+        payload.documentName !== options.expectedRoom
+      )
+        throw new Error("CLASSROOM_LOAD_ROOM_MISMATCH");
+      return payload as Session;
+    }
+    lastFailure = `CLASSROOM_LOAD_TOKEN_REQUEST_FAILED:${response.status}:${JSON.stringify(payload.error ?? "invalid response")}`;
+    if (response.status !== 401) throw new Error(lastFailure);
+    await sleep(500);
+  }
+  throw new Error(lastFailure);
 }
 
 function findOrCreateWriter(document: Y.Doc, options: StartOptions): Y.XmlText {
@@ -473,7 +490,7 @@ export async function start(options: StartOptions) {
   await websocket.connect();
   await waitFor(
     () => provider.synced && runtime?.status === "connected",
-    30_000,
+    90_000,
     "CLASSROOM_LOAD_INITIAL_SYNC_TIMEOUT",
   );
   document.transact(
@@ -486,7 +503,7 @@ export async function start(options: StartOptions) {
       clientId: options.clientId,
     },
   );
-  await waitForSettled();
+  await waitForSettled(90_000);
   return {
     documentName: firstSession.documentName,
     gatewayUrl: firstSession.url,

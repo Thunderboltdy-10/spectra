@@ -8,6 +8,47 @@ import { MAX_REALTIME_MESSAGE_BYTES } from "./collaboration-update-envelope.mjs"
 export const CLASSROOM_BROWSER_CLIENTS = 30;
 export const CLASSROOM_MINIMUM_DURATION_MS = 60 * 60 * 1_000 + 1;
 export const CLASSROOM_MINIMUM_REPORT_BYTES = 1_024;
+export const CLASSROOM_LOAD_CLIENT_GLOBAL = "SpectraClassroomLoadClient";
+
+/**
+ * Playwright wraps addInitScript in a function. esbuild's IIFE `var Name=...`
+ * then stays function-local, so page.evaluate(globalThis.Name.start) is
+ * undefined. Pin the bundle onto globalThis before any client calls it.
+ */
+export function classroomLoadInitScript(bundle) {
+  if (
+    typeof bundle !== "string" ||
+    !bundle.includes(CLASSROOM_LOAD_CLIENT_GLOBAL)
+  )
+    throw new Error("CLASSROOM_LOAD_BROWSER_BUNDLE_MISSING");
+  return `${bundle}\nglobalThis.${CLASSROOM_LOAD_CLIENT_GLOBAL}=${CLASSROOM_LOAD_CLIENT_GLOBAL};`;
+}
+
+/**
+ * Session-mode clients must mint collaboration tokens from a Clerk-hydrated
+ * same-origin document. A dummy protected path 307s to sign-in once the
+ * short-lived `__session` JWT expires, and a studio/library URL would open
+ * extra Hocuspocus sockets (the soak forbids more than 30 gateway connections).
+ * Legal pages stay on the product origin, load Clerk, and do not join rooms.
+ */
+export function classroomLoadSessionDocumentUrl(endpoint) {
+  const origin = new URL(endpoint);
+  origin.pathname = "/legal/privacy";
+  origin.search = "";
+  origin.hash = "";
+  return origin.href;
+}
+
+export function classroomLoadSessionTokenReady(status, pathname) {
+  return (
+    Number.isInteger(status) &&
+    status > 0 &&
+    status !== 401 &&
+    typeof pathname === "string" &&
+    !pathname.startsWith("/sign-in")
+  );
+}
+
 const CLASSROOM_MAX_HEALTH_SAMPLES = 2_000;
 const CLASSROOM_MAX_DURABILITY_OBSERVATIONS = 64;
 

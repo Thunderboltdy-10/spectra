@@ -10,6 +10,9 @@ import {
   deriveGatewayHealthUrl,
   redactedClassroomLoadConfig,
   resolveClassroomLoadConfig,
+  classroomLoadInitScript,
+  classroomLoadSessionDocumentUrl,
+  classroomLoadSessionTokenReady,
 } from "./collaboration-classroom-load-config.mjs";
 import {
   boundedClassroomLoadJson,
@@ -139,15 +142,37 @@ async function startBrowserClient({
       `CLASSROOM_LOAD_PAGE_${clientIndex}_ERROR:${error.message}`,
     ),
   );
-  await page.addInitScript({ content: bundle });
+  await page.addInitScript({ content: classroomLoadInitScript(bundle) });
   if (config.token.mode === "session") {
-    const origin = new URL(config.token.endpoint);
-    origin.pathname = "/__spectra_classroom_load__";
-    origin.search = `?client=${clientIndex}`;
-    await page.goto(origin.toString(), {
-      waitUntil: "commit",
-      timeout: 30_000,
+    await page.goto(classroomLoadSessionDocumentUrl(config.token.endpoint), {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
     });
+    const deadline = Date.now() + 45_000;
+    let ready = false;
+    while (Date.now() < deadline) {
+      const probe = await page.evaluate(async (endpoint) => {
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            credentials: "include",
+            cache: "no-store",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+            signal: AbortSignal.timeout(4_000),
+          });
+          return { status: response.status, pathname: location.pathname };
+        } catch {
+          return { status: 0, pathname: location.pathname };
+        }
+      }, config.token.endpoint);
+      if (classroomLoadSessionTokenReady(probe.status, probe.pathname)) {
+        ready = true;
+        break;
+      }
+      await delay(250);
+    }
+    if (!ready) throw new Error("CLASSROOM_LOAD_SESSION_TOKEN_UNAVAILABLE");
   } else {
     await page.goto(
       `data:text/html,<title>Spectra classroom load ${clientIndex + 1}</title>`,
@@ -158,6 +183,7 @@ async function startBrowserClient({
     (options) => globalThis.SpectraClassroomLoadClient.start(options),
     clientOptions(config, clientIndex, runId),
   );
+  process.stderr.write(`[classroom-load] client ${clientIndex + 1}/30 started\n`);
   return { context, page, started, index: clientIndex };
 }
 
@@ -368,18 +394,25 @@ async function runLoad(config) {
     browser.on("disconnected", () =>
       termination.request("CLASSROOM_LOAD_BROWSER_DISCONNECTED"),
     );
-    const startedClients = await Promise.all(
-      Array.from({ length: config.clientCount }, (_, clientIndex) =>
-        startBrowserClient({
-          browser,
-          bundle,
-          config,
-          clientIndex,
-          runId,
-          termination,
-        }),
-      ),
-    );
+    const startedClients = [];
+    const startBatchSize = 1;
+    for (let start = 0; start < config.clientCount; start += startBatchSize) {
+      const batch = await Promise.all(
+        Array.from(
+          { length: Math.min(startBatchSize, config.clientCount - start) },
+          (_, offset) =>
+            startBrowserClient({
+              browser,
+              bundle,
+              config,
+              clientIndex: start + offset,
+              runId,
+              termination,
+            }),
+        ),
+      );
+      startedClients.push(...batch);
+    }
     clientHandles.push(...startedClients);
     browserSummary = {
       engine: "chromium",

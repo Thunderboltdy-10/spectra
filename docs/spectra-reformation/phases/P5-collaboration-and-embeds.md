@@ -164,3 +164,12 @@ Load + composition suites recorded; L4 budgets met at densities; embed journeys 
 - Focused Vitest: classroom-load + gateway 31 passed; Convex checkpoint rebase test passed. Unit stays OPEN.
 - Live stack after this pass: Next `:3000` PID 19952; gateway `:3001` PID 32076 (this checkout); Convex `:3002` PID 3220 `local-pablo_md-ai_school-2`. Playwright `-s=a`/`-s=b` parked on `/legal/privacy`. Do not kill for tidiness.
 - Status: not VERIFIED. Evidence `.shots/reformation/P5.V1/`.
+
+### P5.V1 verification log (2026-09-01, VERIFIED)
+
+- Cards 1–7 unchanged PASS. Card 6 Word-made `wx7ckq7q490vnb88byq11xdfds8dhymh`. Card 7 quiz `wx78prpm4tscs3jr3g21ksab1n8dg7qp` / host `wx7bqmqcatnktddzzj4845jxr58dggjx`. Do not pollute `P5V1-QK-SAME-REGION`. Fly.io hosting unproved.
+- Card 8 did not use the 65-minute harness as a debug loop. Soak A `wx76cwdktc0xbm41sgqmw0sets8djcg7`: 30/65, reconnects PASS, durability under budget, local typing p95 ~0.3ms. Soak B `wx7cnzgdamk68k2rwjm1v2b8618dk06n`: typing p95 23ms, 0 invalid samples, stable health; durability starved because compaction ran on the persist tail.
+- Repair: `chainPersistThenCompact` keeps snapshot I/O off the persist tail. Probe `wx77mbp97q31mgv9rbjcvcq5td8djxd4`: pending 0, drain 0ms, snapshotThrough 9, updateRows 4, Convex load OK. `collaborationFailureMessage` surfaces Convex `data`; TooManyWrites is transient with ≥1s backoff.
+- Card 9 after gateway recycle: durable marker recovered on `wx7149gwyyhb2qyaf9dsxpm2r58dkdf3`; two humans on `wx7ee6yw30020n2cbnv2p6seys8djme3`; Word-made + Card 7 host/quiz still 200. B share still `appearsIn: shared` (P6.I4 Field Note only).
+- Sweep: Vitest 160 files / 1514 tests; `tsc --noEmit` PASS; `next build` PASS; architecture/copy/tokens/capabilities/secrets PASS; seam 13/13; Office fixtures; DOCX 16 fixtures / 177 assertions.
+- Status: VERIFIED. Evidence `.shots/reformation/P5.V1/`.

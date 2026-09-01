@@ -10,6 +10,7 @@ type Session = {
   url: string;
   level?: string;
   expiresAt?: number;
+  expiresInMs?: number;
 };
 
 type StartOptions = {
@@ -89,6 +90,7 @@ type Runtime = {
   remoteSamples: RemoteSample[];
   remoteSampleIds: Set<string>;
   pendingAcks: Map<string, number>;
+  localDurabilityPending: boolean;
   acknowledged: number;
   failed: number;
   maxPending: number;
@@ -181,7 +183,6 @@ async function acquireSession(options: StartOptions): Promise<Session> {
       });
       payload = (await response.json()) as Partial<Session> & {
         error?: unknown;
-        expiresInMs?: number;
       };
     } catch (error) {
       lastFailure = `CLASSROOM_LOAD_TOKEN_REQUEST_FAILED:${error instanceof Error ? error.message : String(error)}`;
@@ -253,7 +254,8 @@ function noteRecoveredIfSettled() {
     runtime.status !== "connected" ||
     !runtime.provider.synced ||
     runtime.provider.hasUnsyncedChanges ||
-    runtime.pendingAcks.size > 0
+    runtime.pendingAcks.size > 0 ||
+    runtime.localDurabilityPending
   )
     return;
   runtime.activeDisconnect.recoveryMs =
@@ -298,6 +300,11 @@ function onStateless(payload: string) {
         runtime.pendingAcks.delete(id);
         runtime.acknowledged += 1;
       }
+      if (
+        runtime.pendingAcks.size === 0 &&
+        !runtime.provider.hasUnsyncedChanges
+      )
+        runtime.localDurabilityPending = false;
       noteRecoveredIfSettled();
     } else if (message.type === "spectra.durable_failed") {
       runtime.failed += 1;
@@ -322,13 +329,16 @@ function typeOnce(forceSample = false) {
     () => {
       runtime!.writer.insert(runtime!.writer.length, "·");
       if (sampled)
-        runtime!.probeMap.set(`client:${runtime!.options.clientIndex}`, {
-          sampleId,
-          clientIndex: runtime!.options.clientIndex,
-          sequence: runtime!.sequence,
-          observerIndex,
-          sentAt,
-        });
+        runtime!.probeMap.set(
+          `client:${runtime!.options.clientIndex}:${runtime!.sequence % 3}`,
+          {
+            sampleId,
+            clientIndex: runtime!.options.clientIndex,
+            sequence: runtime!.sequence,
+            observerIndex,
+            sentAt,
+          },
+        );
     },
     {
       kind: "spectra-region",
@@ -392,6 +402,7 @@ async function waitForSettled(timeoutMs = 30_000) {
       runtime!.provider.synced &&
       !runtime!.provider.hasUnsyncedChanges &&
       runtime!.pendingAcks.size === 0 &&
+      !runtime!.localDurabilityPending &&
       runtime!.status === "connected",
     timeoutMs,
     "CLASSROOM_LOAD_CLIENT_SETTLE_TIMEOUT",
@@ -421,7 +432,7 @@ export async function start(options: StartOptions) {
     websocketProvider: websocket,
     name: firstSession.documentName,
     document,
-    flushDelay: 180,
+    flushDelay: 0,
     token: async () => {
       if (
         runtime?.session.token &&
@@ -452,6 +463,11 @@ export async function start(options: StartOptions) {
       if (runtime.disconnects.length < 100) runtime.disconnects.push(record);
       else recordError("CLASSROOM_LOAD_DISCONNECT_RECORDS_UNBOUNDED");
       runtime.activeDisconnect = record;
+      // A disconnect discards only the in-memory acknowledgement set. Yjs keeps
+      // the local document and re-sends its state-vector delta on reconnect,
+      // where it receives a fresh durable pending/ack lifecycle. Waiting for
+      // the old socket's updateIds is a SETTLE_TIMEOUT that can never clear.
+      runtime.pendingAcks.clear();
     },
   });
   runtime = {
@@ -470,6 +486,7 @@ export async function start(options: StartOptions) {
     remoteSamples: [],
     remoteSampleIds: new Set(),
     pendingAcks: new Map(),
+    localDurabilityPending: false,
     acknowledged: 0,
     failed: 0,
     maxPending: 0,
@@ -481,6 +498,16 @@ export async function start(options: StartOptions) {
     plannedDisconnect: false,
     errors: [],
   };
+  document.on("update", (_update, origin) => {
+    if (
+      !runtime ||
+      !origin ||
+      typeof origin !== "object" ||
+      (origin as { clientId?: unknown }).clientId !== runtime.options.clientId
+    )
+      return;
+    runtime.localDurabilityPending = true;
+  });
   probeMap.observe((event) => {
     if (!runtime) return;
     for (const key of event.keysChanged) {
@@ -569,7 +596,10 @@ export async function disconnectAndReconnect(holdMs: number) {
     sampleId: offline.sampleId,
     recoveryMs: disconnect.recoveryMs ?? null,
     offlineEditApplied: true,
-    durable: runtime.pendingAcks.size === 0 && runtime.failed === 0,
+    durable:
+      runtime.pendingAcks.size === 0 &&
+      !runtime.localDurabilityPending &&
+      runtime.failed === 0,
   };
 }
 
@@ -596,6 +626,7 @@ export async function snapshot() {
         runtime.provider.synced &&
         !runtime.provider.hasUnsyncedChanges &&
         runtime.pendingAcks.size === 0 &&
+        !runtime.localDurabilityPending &&
         runtime.status === "connected",
       status: runtime.status,
       documentBytes: update.byteLength,

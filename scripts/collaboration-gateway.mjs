@@ -33,6 +33,10 @@ import {
   permanentPersistenceFailure,
   rebaseAppendPayload,
   resolveRebaseHead,
+  samePersistenceBatch,
+  chainPersistThenCompact,
+  collaborationFailureMessage,
+  collaborationRetryDelayMs,
   COLLABORATION_AUTHORIZE_CACHE_MS,
 } from "./collaboration-persist.mjs";
 
@@ -145,7 +149,20 @@ function persistenceQueue(document) {
     pending: [],
     snapshotAfterFirst: null,
     timer: null,
-    tail: Promise.resolve(),
+    chain: chainPersistThenCompact({
+      persist: (batch) =>
+        persistAcceptedMessages(
+          document,
+          batch.entries,
+          batch.snapshotAfterFirst,
+        ),
+      compact: (batch) => compactStoredRoom(batch.entries[0]?.context),
+      onCompactError: (error) => {
+        process.stderr.write(
+          `[compact] ${collaborationFailureMessage(error)}\n`,
+        );
+      },
+    }),
   };
   documentPersistenceQueues.set(document, created);
   return created;
@@ -157,15 +174,69 @@ function rememberDurableHead(context, hash) {
   durableHeads.set(key, hash);
 }
 
-function samePersistenceActor(left, right) {
-  return (
-    left.context.accountId === right.context.accountId &&
-    left.context.actorKind === right.context.actorKind &&
-    left.context.clientId === right.context.clientId &&
-    left.context.artifactId === right.context.artifactId &&
-    left.context.partitionKey === right.context.partitionKey &&
-    left.context.policyVersion === right.context.policyVersion
-  );
+const compactionState = new Map();
+let compactionInFlight = false;
+
+async function compactStoredRoom(context, { countAppend = true } = {}) {
+  if (!context?.artifactId || !context?.partitionKey) return;
+  const key = durableHeadKey(context);
+  const local = compactionState.get(key) ?? {
+    appends: 0,
+    lastSnapshotAt: null,
+  };
+  if (countAppend) {
+    local.appends += 1;
+    compactionState.set(key, local);
+  }
+  const due =
+    local.appends >= 200 ||
+    (local.lastSnapshotAt == null && local.appends >= 8);
+  if (!due || compactionInFlight) return;
+  compactionInFlight = true;
+  try {
+    const stored = await bridge("load", {
+      artifactId: context.artifactId,
+      partitionKey: context.partitionKey,
+    });
+    const throughSequence = (stored?.nextSequence ?? 1) - 1;
+    const currentSnapshotSequence = stored?.snapshot?.throughSequence ?? 0;
+    if (
+      !stored?.roomId ||
+      throughSequence <= currentSnapshotSequence ||
+      throughSequence <= 0
+    )
+      return;
+    if (
+      !shouldCompactRoom({
+        uncompactedBytes: stored.uncompactedBytes ?? 0,
+        updateCount: stored.updates?.length ?? 0,
+        lastSnapshotAt: stored.lastSnapshotAt ?? null,
+      })
+    ) {
+      local.appends = stored.updates?.length ?? 0;
+      local.lastSnapshotAt = stored.lastSnapshotAt ?? local.lastSnapshotAt;
+      compactionState.set(key, local);
+      return;
+    }
+    const { update, stateVector } = encodeStoredRoomSnapshot(Y, stored);
+    if (update.byteLength > 760 * 1024 || stateVector.byteLength > 128 * 1024)
+      return;
+    await bridge("snapshot", {
+      artifactId: context.artifactId,
+      partitionKey: context.partitionKey,
+      roomId: stored.roomId,
+      throughSequence,
+      update: Buffer.from(update).toString("base64"),
+      stateVector: Buffer.from(stateVector).toString("base64"),
+      contentHash: createHash("sha256").update(update).digest("base64url"),
+      schemaVersion: stored.schemaVersion,
+    });
+    local.appends = 0;
+    local.lastSnapshotAt = Date.now();
+    compactionState.set(key, local);
+  } finally {
+    compactionInFlight = false;
+  }
 }
 
 function forceCanonicalReconnect(context, reason) {
@@ -240,9 +311,8 @@ async function appendWithRetry(payload, entries) {
           continue;
         }
       }
-      const persistenceMessage =
-        error instanceof Error ? error.message : String(error);
-      lastPersistenceFailure = {
+      const persistenceMessage = collaborationFailureMessage(error);
+      const persistenceRecord = {
         code:
           persistenceMessage.match(/COLLABORATION_[A-Z_]+/)?.[0] ??
           "COLLABORATION_APPEND_FAILED",
@@ -250,22 +320,22 @@ async function appendWithRetry(payload, entries) {
         attempt: attempt + 1,
       };
       if (permanentPersistenceFailure(error)) {
-        const reason =
-          error instanceof Error
-            ? error.message
-            : "COLLABORATION_UPDATE_REJECTED";
-        process.stderr.write(`[durable append] ${reason}\n`);
-        forceCanonicalReconnect(entries[0].context, reason);
+        lastPersistenceFailure = persistenceRecord;
+        process.stderr.write(`[durable append] ${persistenceMessage}\n`);
+        forceCanonicalReconnect(entries[0].context, persistenceMessage);
         throw error;
       }
       attempt += 1;
-      if (attempt >= 12) throw error;
+      if (attempt >= 12) {
+        lastPersistenceFailure = persistenceRecord;
+        throw error;
+      }
       const retryMs = Math.min(
         PERSISTENCE_RETRY_MAX_MS,
-        150 * 2 ** Math.min(attempt - 1, 6),
+        collaborationRetryDelayMs(error, attempt - 1),
       );
       process.stderr.write(
-        `[durable append] retrying in ${retryMs}ms (${error instanceof Error ? error.message : String(error)})\n`,
+        `[durable append] retrying in ${retryMs}ms (${persistenceMessage})\n`,
       );
       await new Promise((resolve) => setTimeout(resolve, retryMs));
     }
@@ -278,13 +348,14 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
   try {
     Y.applyUpdate(scratch, snapshotAfterFirst);
     let index = 0;
+    let lastCheckpoint = null;
     while (index < entries.length) {
       const group = [entries[index]];
       if (index > 0) Y.applyUpdate(scratch, entries[index].documentUpdate);
       index += 1;
       while (
         index < entries.length &&
-        samePersistenceActor(group[0], entries[index])
+        samePersistenceBatch(group[0], entries[index])
       ) {
         Y.applyUpdate(scratch, entries[index].documentUpdate);
         group.push(entries[index]);
@@ -307,19 +378,18 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
           });
         continue;
       }
-      const projectionJson = artifactProjection(
-        scratch,
-        first.context.schemaVersion,
-      );
+      const immediateProjection =
+        first.context.actorKind === "ai" ||
+        group.some((entry) => entry.nativeInitialization);
+      const projectionJson = immediateProjection
+        ? artifactProjection(scratch, first.context.schemaVersion)
+        : null;
       const mergedUpdate = Y.mergeUpdates(
         group.map((entry) => entry.documentUpdate),
       );
       const updateHash = createHash("sha256")
         .update(mergedUpdate)
         .digest("base64url");
-      const immediateProjection =
-        first.context.actorKind === "ai" ||
-        group.some((entry) => entry.nativeInitialization);
       const appendResult = await appendWithRetry(
         {
           artifactId: first.context.artifactId,
@@ -339,27 +409,42 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
           nativeInitialization: group.some(
             (entry) => entry.nativeInitialization,
           ),
-          projectionJson: immediateProjection ? projectionJson : null,
-          projectionHash:
-            immediateProjection && projectionJson
-              ? createHash("sha256").update(projectionJson).digest("base64url")
-              : null,
+          projectionJson,
+          projectionHash: projectionJson
+            ? createHash("sha256").update(projectionJson).digest("base64url")
+            : null,
         },
         group,
       );
+      lastCheckpoint = {
+        artifactId: first.context.artifactId,
+        partitionKey: first.context.partitionKey,
+        accountId: first.context.accountId,
+        clientId: first.context.clientId,
+        policyVersion: first.context.policyVersion,
+        schemaVersion: first.context.schemaVersion,
+        stateVectorHash: last.stateVectorHash,
+        throughSequence: appendResult?.sequence ?? null,
+      };
+    }
+    if (lastCheckpoint) {
+      const projectionJson = artifactProjection(
+        scratch,
+        lastCheckpoint.schemaVersion,
+      );
       if (projectionJson) {
         checkpointScheduler(document).note({
-          artifactId: first.context.artifactId,
-          partitionKey: first.context.partitionKey,
-          accountId: first.context.accountId,
-          clientId: first.context.clientId,
-          policyVersion: first.context.policyVersion,
-          stateVectorHash: last.stateVectorHash,
+          artifactId: lastCheckpoint.artifactId,
+          partitionKey: lastCheckpoint.partitionKey,
+          accountId: lastCheckpoint.accountId,
+          clientId: lastCheckpoint.clientId,
+          policyVersion: lastCheckpoint.policyVersion,
+          stateVectorHash: lastCheckpoint.stateVectorHash,
           projectionJson,
           projectionHash: createHash("sha256")
             .update(projectionJson)
             .digest("base64url"),
-          throughSequence: appendResult?.sequence ?? null,
+          throughSequence: lastCheckpoint.throughSequence,
         });
       }
     }
@@ -383,11 +468,10 @@ function schedulePersistence(document, entry) {
     const entries = queue.pending.splice(0);
     const snapshotAfterFirst = queue.snapshotAfterFirst;
     queue.snapshotAfterFirst = null;
-    queue.tail = queue.tail
-      .then(() =>
-        persistAcceptedMessages(document, entries, snapshotAfterFirst),
-      )
-      .catch(() => undefined);
+    queue.chain.enqueue({
+      entries,
+      snapshotAfterFirst,
+    });
   }, PERSISTENCE_DEBOUNCE_MS);
   queue.timer.unref?.();
 }
@@ -1113,44 +1197,7 @@ const server = new Server({
   async onStoreDocument({ lastContext }) {
     if (!lastContext) return;
     await reauthorize(lastContext);
-    const stored = await bridge("load", {
-      artifactId: lastContext.artifactId,
-      partitionKey: lastContext.partitionKey,
-    });
-    const throughSequence = (stored?.nextSequence ?? 1) - 1;
-    const currentSnapshotSequence = stored?.snapshot?.throughSequence ?? 0;
-    if (
-      !stored?.roomId ||
-      throughSequence <= currentSnapshotSequence ||
-      throughSequence <= 0
-    )
-      return;
-    if (
-      !shouldCompactRoom({
-        uncompactedBytes: stored.uncompactedBytes ?? 0,
-        updateCount: stored.updates?.length ?? 0,
-        lastSnapshotAt: stored.lastSnapshotAt ?? null,
-      })
-    )
-      return;
-    // The live Hocuspocus document can contain an accepted update whose
-    // durable append is still in flight (or ultimately rejected). Compaction
-    // must be derived only from the snapshot/update log loaded from Convex;
-    // otherwise an ahead-of-log snapshot can erase the authoritative history
-    // and poison every post-restart base hash.
-    const { update, stateVector } = encodeStoredRoomSnapshot(Y, stored);
-    if (update.byteLength > 760 * 1024 || stateVector.byteLength > 128 * 1024)
-      return;
-    await bridge("snapshot", {
-      artifactId: lastContext.artifactId,
-      partitionKey: lastContext.partitionKey,
-      roomId: stored.roomId,
-      throughSequence,
-      update: Buffer.from(update).toString("base64"),
-      stateVector: Buffer.from(stateVector).toString("base64"),
-      contentHash: createHash("sha256").update(update).digest("base64url"),
-      schemaVersion: stored.schemaVersion,
-    });
+    await compactStoredRoom(lastContext, { countAppend: false });
   },
 });
 

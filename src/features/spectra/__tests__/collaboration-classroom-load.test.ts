@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHash, createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createContext, runInContext } from "node:vm";
 import {
   CLASSROOM_BROWSER_CLIENTS,
@@ -623,12 +624,46 @@ describe("classroom load browser bundle attachment", () => {
         delay: async () => undefined,
       }),
     ).resolves.toBe(true);
-    await expect(
+    await     expect(
       waitForClassroomLoadSessionToken({
         probe: async () => ({ status: 401, pathname: "/legal/privacy" }),
         delay: async () => undefined,
         deadlineMs: 0,
       }),
     ).resolves.toBe(false);
+  });
+
+  it("drops in-flight durable ids on disconnect and waits for a fresh ack lifecycle", () => {
+    const source = readFileSync(
+      "scripts/collaboration-classroom-browser-client.ts",
+      "utf8",
+    );
+    const disconnect = source.slice(
+      source.indexOf("onDisconnect:"),
+      source.indexOf("runtime = {"),
+    );
+    expect(disconnect).toContain("pendingAcks.clear()");
+    expect(source).toContain("localDurabilityPending");
+    expect(source).toContain("runtime.localDurabilityPending = true");
+    expect(source).toContain("runtime.localDurabilityPending = false");
+    const settle = source.slice(
+      source.indexOf("async function waitForSettled"),
+      source.indexOf("export async function start"),
+    );
+    expect(settle).toContain("!runtime!.localDurabilityPending");
+  });
+
+  it("sends local typing immediately and keeps recent probe samples across disconnect", () => {
+    const source = readFileSync(
+      "scripts/collaboration-classroom-browser-client.ts",
+      "utf8",
+    );
+    expect(source).toContain("flushDelay: 0");
+    expect(source).toContain("runtime!.sequence % 3");
+    const gateway = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
+    expect(gateway).toContain("chain.enqueue");
+    expect(gateway).toContain("chainPersistThenCompact");
+    expect(gateway).toContain("if (attempt >= 12) {");
+    expect(gateway).toContain("lastPersistenceFailure = persistenceRecord");
   });
 });

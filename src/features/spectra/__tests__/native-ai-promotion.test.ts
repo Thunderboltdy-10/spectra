@@ -5,7 +5,11 @@ import {
   isNativeContentRegion,
   linkedOfficeKind,
   promoteNativeAiContent,
+  type NativePromotionDeps,
 } from "../ai/native-ai-promotion";
+
+const asConvexFn = <T>(impl: () => Promise<T>) =>
+  (async () => impl()) as NonNullable<NativePromotionDeps["query"]>;
 
 describe("native AI promotion", () => {
   it("refuses Yjs apply when native promotion fails first", async () => {
@@ -123,12 +127,12 @@ describe("native AI promotion", () => {
         materializeOffice: async () => {
           throw new Error("office materializer must not run for docx");
         },
-        query: async () => {
+        query: asConvexFn(async () => {
           const state = states[Math.min(polls, states.length - 1)]!;
           polls += 1;
           return { requestId: "req-docx", state };
-        },
-        mutate: async () => ({ cancelled: false, state: "pending" }),
+        }),
+        mutate: asConvexFn(async () => ({ cancelled: false, state: "pending" })),
         sleep: async () => undefined,
         now: (() => {
           let t = 0;
@@ -157,8 +161,11 @@ describe("native AI promotion", () => {
           expect(options?.promotionMode).toBe("verified-first");
           return { state: "pending", requestId: "req-xlsx", hash: "dd" };
         },
-        query: async () => ({ requestId: "req-xlsx", state: "verified" as const }),
-        mutate: async () => ({ cancelled: false, state: "verified" }),
+        query: asConvexFn(async () => ({
+          requestId: "req-xlsx",
+          state: "verified" as const,
+        })),
+        mutate: asConvexFn(async () => ({ cancelled: false, state: "verified" })),
         sleep: async () => undefined,
         now: () => 1,
       },
@@ -181,14 +188,14 @@ describe("native AI promotion", () => {
             state: "pending",
             requestId: "req-pending",
           }),
-          query: async () => ({
+          query: asConvexFn(async () => ({
             requestId: "req-pending",
             state: "pending" as const,
-          }),
-          mutate: async (name, args) => {
+          })),
+          mutate: (async (name, args) => {
             cancelled.push(`${name}:${(args as { requestId: string }).requestId}`);
             return { cancelled: true, state: "failed" };
-          },
+          }) as NonNullable<NativePromotionDeps["mutate"]>,
           sleep: async () => undefined,
           now: () => 1,
         },
@@ -208,16 +215,16 @@ describe("native AI promotion", () => {
           state: "pending",
           requestId: "req-claimed",
         }),
-        query: async () => {
+        query: asConvexFn(async () => {
           polls += 1;
           return {
             requestId: "req-claimed",
             state: (polls === 1 ? "claimed" : "verified") as "claimed" | "verified",
           };
-        },
-        mutate: async () => {
+        }),
+        mutate: asConvexFn(async () => {
           throw new Error("claimed writes must not be cancelled");
-        },
+        }),
         sleep: async () => undefined,
         now: (() => {
           let t = 0;

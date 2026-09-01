@@ -31,6 +31,10 @@ import {
   permanentPersistenceFailure,
   rebaseAppendPayload,
   resolveRebaseHead,
+  samePersistenceBatch,
+  chainPersistThenCompact,
+  collaborationFailureMessage,
+  collaborationRetryDelayMs,
   COLLABORATION_AUTHORIZE_CACHE_MS,
 } from "../../../../scripts/collaboration-persist.mjs";
 
@@ -297,6 +301,21 @@ describe("P5.I2 gateway production helpers", () => {
         ),
       ),
     ).toBe(true);
+    expect(
+      isTransientCollaborationFailure(
+        new Error(
+          '[Request ID: abc] Server Error\nUncaught Error: {"code":"TooManyWrites","message":"Too many writes per second. Your deployment is limited to 4 MiB bytes written per 1 second."}',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      collaborationRetryDelayMs(
+        new Error(
+          'Uncaught Error: {"code":"TooManyWrites","message":"Too many writes per second."}',
+        ),
+        0,
+      ),
+    ).toBeGreaterThanOrEqual(1_000);
     expect(COLLABORATION_AUTHORIZE_CACHE_MS).toBeGreaterThanOrEqual(15_000);
     expect(
       permanentPersistenceFailure(new Error("COLLABORATION_TOKEN_EXPIRED")),
@@ -349,6 +368,87 @@ describe("P5.I2 gateway production helpers", () => {
         }),
       ),
     ).toMatchObject({ baseStateVectorHash: "b".repeat(43) });
+  });
+
+  it("coalesces same-account human edits in one durable batch and keeps AI per client", () => {
+    const human = (clientId: string) => ({
+      nativeInitialization: false,
+      context: {
+        artifactId: "art",
+        partitionKey: "root",
+        policyVersion: 0,
+        actorKind: "human",
+        accountId: "account-a",
+        clientId,
+      },
+    });
+    const otherAccount = {
+      nativeInitialization: false,
+      context: {
+        artifactId: "art",
+        partitionKey: "root",
+        policyVersion: 0,
+        actorKind: "human",
+        accountId: "account-b",
+        clientId: "client-1",
+      },
+    };
+    const ai = (clientId: string) => ({
+      nativeInitialization: false,
+      context: {
+        artifactId: "art",
+        partitionKey: "root",
+        policyVersion: 0,
+        actorKind: "ai",
+        accountId: "account-a",
+        clientId,
+      },
+    });
+    expect(samePersistenceBatch(human("c1"), human("c2"))).toBe(true);
+    expect(samePersistenceBatch(human("c1"), otherAccount)).toBe(false);
+    expect(samePersistenceBatch(human("c1"), ai("c1"))).toBe(false);
+    expect(samePersistenceBatch(ai("c1"), ai("c2"))).toBe(false);
+    expect(samePersistenceBatch(ai("c1"), ai("c1"))).toBe(true);
+  });
+
+  it("acks persist without waiting for compaction I/O", async () => {
+    let compactStarted = 0;
+    let compactFinished = 0;
+    let persistUnblockedBeforeCompact = false;
+    const chain = chainPersistThenCompact({
+      persist: async () => "acked",
+      compact: async () => {
+        compactStarted += 1;
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        compactFinished += 1;
+      },
+    });
+    const persistResult = await chain.enqueue({});
+    persistUnblockedBeforeCompact =
+      compactStarted === 1 && compactFinished === 0;
+    await chain.compactTail;
+    expect(persistResult).toBe("acked");
+    expect(persistUnblockedBeforeCompact).toBe(true);
+    expect(compactFinished).toBe(1);
+  });
+
+  it("surfaces Convex observe failures instead of the empty Error name", () => {
+    expect(
+      collaborationFailureMessage({
+        message: "Error",
+        data: { message: "COLLABORATION_BRIDGE_SNAPSHOT_REQUIRED" },
+      }),
+    ).toBe("COLLABORATION_BRIDGE_SNAPSHOT_REQUIRED");
+    expect(collaborationFailureMessage(new Error("Error"))).toBe(
+      "CLASSROOM_LOAD_CONVEX_OBSERVE_FAILED",
+    );
+    expect(
+      collaborationFailureMessage(
+        new Error(
+          '[Request ID: abc] Server Error\nUncaught Error: {"code":"TooManyWrites","message":"Too many writes per second."}',
+        ),
+      ),
+    ).toBe("Too many writes per second.");
   });
 
   it("compacts when the update log crosses size, count, or idle", () => {

@@ -274,10 +274,17 @@ function setup(
 
   vi.doMock("@/lib/auth-server", () => ({ requireActor }));
   vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
-  const materializeDocxArtifact = vi.fn(async () => ({
-    state: "conflicted" as const,
-    conflict: { message: "Both copies changed. Nothing overwritten." },
-  }));
+  const materializeDocxArtifact = vi.fn(
+    async (): Promise<{
+      state: "conflicted" | "pending" | "verified" | "claimed";
+      requestId?: string;
+      hash?: string;
+      conflict?: { message?: string };
+    }> => ({
+      state: "conflicted",
+      conflict: { message: "Both copies changed. Nothing overwritten." },
+    }),
+  );
   const materializeOfficeArtifact = vi.fn(async () => ({
     state: "conflicted" as const,
     conflict: { message: "Both copies changed. Nothing overwritten." },

@@ -28,6 +28,7 @@ import {
   storedRoomUpdates,
 } from "./collaboration-room-state.mjs";
 import { isGatewayHealthBody } from "./collaboration-health.mjs";
+import { collaborationFailureMessage } from "./collaboration-persist.mjs";
 
 const HELP = `Usage:
   npm run collaboration:classroom-load -- --config <load-config.json> [--report <report.json>]
@@ -392,9 +393,9 @@ async function runLoad(config) {
       const summary = {
         at: Date.now(),
         phase,
-        error: error instanceof Error ? error.message : String(error),
-        updateRows: Number.POSITIVE_INFINITY,
-        uncompactedBytes: Number.POSITIVE_INFINITY,
+        error: collaborationFailureMessage(error),
+        updateRows: 0,
+        uncompactedBytes: 0,
       };
       observations.push(summary);
       return summary;
@@ -580,7 +581,7 @@ async function runLoad(config) {
         at: Date.now(),
         status: "failed",
         compacted: 0,
-        error: error instanceof Error ? error.message : String(error),
+        error: collaborationFailureMessage(error),
       };
     }
     const finalConvex = await observe("final");

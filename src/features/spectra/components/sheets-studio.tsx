@@ -134,7 +134,6 @@ import {
   type SortKey,
 } from "../sheets/operations";
 import {
-  useComposerSafeArea,
   useStudioContract,
   type StudioContract,
 } from "./artifact-studio-shell";
@@ -1227,7 +1226,6 @@ export function SheetsStudio({
    */
   const contract = useShellContract();
   const rootRef = useRef<HTMLDivElement>(null);
-  useComposerSafeArea(rootRef);
   const canEditCells = contract ? contract.can("edit") : !readOnly;
   const grantLocked = readOnly || !canEditCells;
   const density = contract?.density ?? "comfortable";

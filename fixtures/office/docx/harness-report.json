@@ -1,6 +1,6 @@
 {
   "harness": "Spectra DOCX fidelity harness v1",
-  "generatedAt": "2026-08-31T16:33:35.513Z",
+  "generatedAt": "2026-09-01T20:10:28.898Z",
   "source": "Microsoft Open XML SDK public test assets (MIT)",
   "vocabulary": [
     "render fidelity",
@@ -189,7 +189,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "51c6803e328d9a9b39a32607f1ecebf21833a5f5fc92867ec6fdf6143771612e",
+      "semanticDigest": "cd984bff0f248474e7ca7a530fb81e973aaa16e10b70ab5d80adbebe3fd81923",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -365,7 +365,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "f26d3775200baca20711b23f0a76a6528ca13a7bb0f02ccc18265aa4ced34fcf",
+      "semanticDigest": "37cffb576eec55d8649dccd4aa7b7e1433e9f7979244f680d673014c8381617b",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -541,7 +541,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "8c0db88a2e6d7626679ddfd34b46db5470cbfb43f0420fcfb74711959d414edb",
+      "semanticDigest": "1a902d16a3f042937a04cb9f205118101c955592f7f18a8ad8cef5b16f3cc239",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -723,7 +723,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "6ddc90a2f67b6a238f176c34a5fa08997737ad9180131c3371c2998fdcd35dd6",
+      "semanticDigest": "282e7a7f2648b65e6bed26a20b3f7e0167017e0fb7430d1b1095e1d87fcad981",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1055,7 +1055,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "9f746e7606ac3eec9b337bd60521d8c5b94533852a2ede32b88e7e4ae0f483fa",
+      "semanticDigest": "e7d7fe1a31c1848c2e633ce157190aeda54a28fb07a7f094d4791e030583ec91",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1230,7 +1230,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "5071f84d483d4b7863912a221d0ce9458cfb14bbcc42e0d66853a5d1924d0896",
+      "semanticDigest": "2498ea769f71a7b4b96a321e89ffbc01ab1d3cf0943a969f599f4442ce471579",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1405,7 +1405,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "aa987e1e5d6713198a38809442aab23eed9b49d5b2a400567342fce2fce03cf8",
+      "semanticDigest": "a5a8627b75e515f292220a71fafb4e9f01686f3e9179ad665e575d8094378427",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1580,7 +1580,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "907445bb13ace38bc5b0b4512555f828c43dffa2c17a2ce7cf61428c931d543c",
+      "semanticDigest": "9dc7fae5fde4df2ad4562957af1a67551b575a931ecbf5be5d40d457a2e4485f",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1755,7 +1755,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "ff89751efb8fba501d139514eb9abbd932210fe2e15664009e8878d8c35f5bdf",
+      "semanticDigest": "c91d5f6de02a857b095e8954000b17beb86731e1ffe60a569071a7dd4b9a7f50",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -1937,7 +1937,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "eec5bbb84b32b5daafba3d4dcf5d06a2a796020c31e5c344f945a6f3228928d6",
+      "semanticDigest": "e3acd56fb25a7f13d7ef399017b1810a43c26b0204fbf524a4d00fa46b75d28d",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -2112,7 +2112,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "ed346edb87ffeb7d6c3d63ebe7968986e901e0539286b689e283bad1c3adca44",
+      "semanticDigest": "e2426b876a4493dc38f39749071f632e4928950e323c9387e525decaaaecd821",
       "detail": "AI received only lens-valid operations"
     },
     {
@@ -2288,7 +2288,7 @@
       "changedParts": [
         "word/document.xml"
       ],
-      "semanticDigest": "4724280e2ab5fc3eff1aa26b2472ad5c0d5fab010d8dd93c8eae20152093a464",
+      "semanticDigest": "27613769600aa6a5234f7a1e078f803f514fcace32f9fce827cb6656b3654d9f",
       "detail": "AI received only lens-valid operations"
     },
     {

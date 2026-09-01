@@ -3928,7 +3928,10 @@ export function SpectraShell({
               compact={false}
             />
           ) : (
-            <section className="relative flex min-h-0 min-w-0 flex-1">
+            <section
+              data-split-host
+              className="relative flex min-h-0 min-w-0 flex-1"
+            >
               <>
                 <div className="relative flex min-w-0 flex-1 flex-col">
                   {shareInvitations.length > 0 ? (
@@ -3974,7 +3977,7 @@ export function SpectraShell({
                       onRetry={() => void loadOverview(requestedWorkspaceId)}
                     />
                   ) : surfaceLoading || !scopeReady ? (
-                    <main className="spectra-workspace-content relative z-[2] min-h-0 flex-1 overflow-y-auto px-3 pb-[150px] pt-2 sm:px-5 lg:px-8">
+                    <main className="spectra-workspace-content spectra-composer-clearance relative z-[2] min-h-0 flex-1 overflow-y-auto px-3 pt-2 sm:px-5 lg:px-8">
                       <WorkspaceContentSkeleton />
                     </main>
                   ) : (

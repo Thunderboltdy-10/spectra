@@ -30,6 +30,7 @@ import {
 import { projectLegacyWorkSession } from "../work/session/session-controller";
 import { spectraBus } from "../events";
 import { workTypeMeta } from "./artifact-card";
+import { resolveSplitOverlay } from "./split-presentation";
 
 export type StudioMode = "closed" | "split" | "tab";
 export type StudioTab = { artifactId: string; openedAt: number };
@@ -229,64 +230,12 @@ export function useStudioDensity(
 }
 
 /**
- * Publishes the live composer's height as `--spectra-composer-safe-area` on the
- * studio root, so the shared scrollport can end above it.
- *
- * The composer is `position: fixed` over the workbench, so no amount of layout
- * inside a studio can know how tall it is; six of nine editors ended up with
- * their last rows of content underneath it. Measuring it once here fixes all of
- * them, and self-corrects to 0 when the composer is not mounted.
+ * The composer safe area is published globally by the composer band itself
+ * (`composer-safe-area.ts`, mounted by `WorkbenchLiveStack`); studios consume
+ * `--spectra-composer-safe-area` from the document root like every other
+ * surface. The per-studio publisher that used to live here measured the same
+ * band six ways and still missed surfaces outside the studios.
  */
-export function useComposerSafeArea(ref: RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    let frame = 0;
-    const apply = (height: number) => {
-      element.style.setProperty(
-        "--spectra-composer-safe-area",
-        `${Math.round(height)}px`,
-      );
-    };
-    const measure = () => {
-      const composer =
-        document.querySelector<HTMLElement>(".spectra-live-stack") ??
-        document.querySelector<HTMLElement>(".spectra-workbench-live-stack");
-      if (!composer) {
-        apply(0);
-        return;
-      }
-      const rect = composer.getBoundingClientRect();
-      // Zero when the composer is off-screen or collapsed, so Present mode and
-      // full-bleed activities do not pay for padding they do not need.
-      apply(rect.height > 0 && rect.bottom > 0 ? rect.height + 12 : 0);
-    };
-    const schedule = () => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        measure();
-      });
-    };
-    schedule();
-    const composer = document.querySelector<HTMLElement>(".spectra-live-stack");
-    const observer = new ResizeObserver(schedule);
-    if (composer) observer.observe(composer);
-    // The composer mounts and unmounts with the route, so watch for it
-    // appearing. Deliberately not `subtree: true` — a document-wide subtree
-    // observer would fire on every keystroke in the editor.
-    const mutations = new MutationObserver(schedule);
-    mutations.observe(document.body, { childList: true });
-    window.addEventListener("resize", schedule);
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      observer.disconnect();
-      mutations.disconnect();
-      window.removeEventListener("resize", schedule);
-      element.style.removeProperty("--spectra-composer-safe-area");
-    };
-  }, [ref]);
-}
 
 export function useArtifactStudioState(
   _storageKey: string,
@@ -427,6 +376,49 @@ export function StudioSplitShell({
 }) {
   const resizingRef = useRef(false);
   const panelRef = useRef<HTMLElement | null>(null);
+  /* When the host cannot honor the library reserve and this work's own floor
+     at once, the panel is promoted out of the flow: it overlays the content
+     column at full width instead of squeezing both sides into unreadability.
+     One pure resolver owns that boundary (`split-presentation.ts`). */
+  const [overlay, setOverlay] = useState(false);
+  const overlayRef = useRef(false);
+  const overlayRefMirror = useCallback(
+    (hostWidth: number) => {
+      const next = resolveSplitOverlay({
+        hostWidth,
+        panelMinWidth: minWidth,
+        contentReserve,
+        overlay: overlayRef.current,
+      });
+      if (next !== overlayRef.current) {
+        overlayRef.current = next;
+        setOverlay(next);
+      }
+      return next;
+    },
+    [contentReserve, minWidth],
+  );
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    /* Only the workbench row (library/workspace beside the panel) can promote
+       the panel to an overlay. Route side previews (settings, admin) wrap the
+       panel in a host that is exactly the panel's own width, so measuring
+       them would be circular — they keep their fixed-width behavior. */
+    const host = panel.closest<HTMLElement>("[data-split-host]");
+    if (!host) return;
+    const measure = () => {
+      overlayRefMirror(host.clientWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [overlayRefMirror]);
   useEffect(() => {
     const host =
       panelRef.current?.closest<HTMLElement>(".spectra-wave-y") ??
@@ -447,6 +439,9 @@ export function StudioSplitShell({
       const host =
         panel.closest<HTMLElement>(".spectra-wave-y") ?? panel.parentElement;
       if (!host) return;
+      // While the panel is an overlay it has no in-flow width to fit; the
+      // last fitted width is kept and clamped again when the split returns.
+      if (overlayRef.current) return;
       const peers = Array.from(
         host.querySelectorAll<HTMLElement>("[data-studio-panel]"),
       );
@@ -512,6 +507,7 @@ export function StudioSplitShell({
   useEffect(() => {
     function onMove(event: globalThis.PointerEvent) {
       if (!resizingRef.current || !onWidthChange) return;
+      if (overlayRef.current) return;
       const panel = panelRef.current;
       if (!panel) return;
       const host =
@@ -574,29 +570,44 @@ export function StudioSplitShell({
     <aside
       ref={panelRef}
       data-studio-panel
-      className="spectra-studio-split-panel relative z-chrome flex h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
-      style={{
-        width: `${width}px`,
-        flexGrow: 0,
-        flexShrink: 0,
-        flexBasis: `${width}px`,
-        minWidth: 0,
-        contain: "inline-size",
-        containerType: "inline-size",
-      }}
+      data-split-overlay={overlay ? "" : undefined}
+      className={
+        overlay
+          ? "spectra-studio-split-panel spectra-studio-split-panel--overlay absolute inset-0 z-panel flex h-full min-w-0 overflow-hidden bg-[var(--wave-paper,var(--bg-primary))]"
+          : "spectra-studio-split-panel relative z-chrome flex h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
+      }
+      style={
+        overlay
+          ? {
+              minWidth: 0,
+              contain: "inline-size",
+              containerType: "inline-size",
+            }
+          : {
+              width: `${width}px`,
+              flexGrow: 0,
+              flexShrink: 0,
+              flexBasis: `${width}px`,
+              minWidth: 0,
+              contain: "inline-size",
+              containerType: "inline-size",
+            }
+      }
       aria-label={ariaLabel}
     >
-      <button
-        type="button"
-        className="absolute -left-1 top-0 z-chrome h-full w-2 cursor-ew-resize bg-transparent transition-colors hover:bg-[color-mix(in_oklab,var(--text-tertiary)_18%,transparent)]"
-        aria-label={`Resize ${ariaLabel}`}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          resizingRef.current = true;
-          document.body.style.cursor = "ew-resize";
-          document.body.style.userSelect = "none";
-        }}
-      />
+      {!overlay ? (
+        <button
+          type="button"
+          className="absolute -left-1 top-0 z-chrome h-full w-2 cursor-ew-resize bg-transparent transition-colors hover:bg-[color-mix(in_oklab,var(--text-tertiary)_18%,transparent)]"
+          aria-label={`Resize ${ariaLabel}`}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            resizingRef.current = true;
+            document.body.style.cursor = "ew-resize";
+            document.body.style.userSelect = "none";
+          }}
+        />
+      ) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {children}
       </div>

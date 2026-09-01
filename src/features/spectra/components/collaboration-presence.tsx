@@ -970,7 +970,7 @@ export function CollaborationPresenceIndicator({
           onClick={() => {
             resumeFollow();
           }}
-          className="spectra-return-pill fixed bottom-5 left-1/2 z-[80] flex -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--brand-primary)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] py-1.5 pl-2.5 pr-3 text-caption font-medium text-[var(--text-secondary)] shadow-[0_10px_32px_rgba(20,18,15,.14)] backdrop-blur-md transition hover:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] hover:text-[var(--text-primary)]"
+          className="spectra-return-pill spectra-composer-above fixed left-1/2 z-panel flex -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--brand-primary)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] py-1.5 pl-2.5 pr-3 text-caption font-medium text-[var(--text-secondary)] shadow-[0_10px_32px_rgba(20,18,15,.14)] backdrop-blur-md transition hover:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] hover:text-[var(--text-primary)]"
         >
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[color-mix(in_oklab,var(--brand-primary)_12%,transparent)] text-[var(--brand-primary)]">
             <CornerUpLeft className="h-3 w-3" />

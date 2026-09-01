@@ -993,7 +993,7 @@ export function DocumentStudio({
         attributes: {
           "data-work-id": artifactId,
           class:
-            "min-h-full px-2 pb-24 pt-2 outline-none text-[var(--text-primary)]",
+            "spectra-composer-clearance min-h-full px-2 pt-2 outline-none text-[var(--text-primary)]",
         },
         handleDOMEvents: {
           // `immediatelyRender: false` can leave `editor.isInitialized` false

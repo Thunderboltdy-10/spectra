@@ -79,7 +79,7 @@ export function OrganizerRail({
         <span className="min-w-0 truncate">{floorLabel}</span>
       </button>
 
-      <div className="mt-1 min-h-0">
+      <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
         <RailBranch
           parentId={floorId}
           depth={0}
@@ -90,10 +90,12 @@ export function OrganizerRail({
         />
       </div>
 
-      <div className="mt-4 px-2 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
+      {/* Quick views keep their own floor: a long tree scrolls inside its
+          region above instead of painting over them. */}
+      <div className="mt-4 shrink-0 px-2 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
         Quick views
       </div>
-      <div className="mt-1 flex flex-col">
+      <div className="mt-1 flex shrink-0 flex-col">
         {QUICK_VIEWS.map(({ view, label, icon: Icon }) => {
           const active = location.kind === "quick" && location.view === view;
           return (

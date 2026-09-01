@@ -500,7 +500,7 @@ function ShellNavigation() {
         aria-label="Spectra navigation"
         data-collapsed={sidebarCollapsed}
         className={cn(
-          "spectra-shell-sidebar fixed inset-y-0 left-0 z-40 hidden flex-col overflow-hidden border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] transition-[width] duration-200 md:flex",
+          "spectra-shell-sidebar fixed inset-y-0 left-0 z-chrome hidden flex-col overflow-hidden border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] transition-[width] duration-200 md:flex",
           sidebarCollapsed ? "w-[76px]" : "w-[240px]",
         )}
       >

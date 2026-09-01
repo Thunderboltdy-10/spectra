@@ -1350,6 +1350,17 @@ body {
   max-width: min(880px, calc(100% - 280px));
 }
 
+/* Below the width where the library reserve and the studio's own floor both
+   fit, the panel leaves the flow and overlays the content column at full
+   width (the boundary is computed once in `split-presentation.ts`). The
+   library stays mounted underneath — scroll, selection and drafts survive —
+   and the composer (composer-dock) still floats above the panel. */
+.spectra-studio-split-panel--overlay {
+  max-width: none !important;
+  border-left: 0;
+  box-shadow: var(--shadow-lg);
+}
+
 .spectra-studio-split-placeholder {
   animation: none;
 }
@@ -15628,6 +15639,20 @@ body {
   position: fixed !important;
   left: 0 !important;
   right: 0 !important;
+}
+
+/* One bottom clearance for every surface the floating composer/dock band can
+   cover. The band measures and publishes its own height
+   (`composer-safe-area.ts`); surfaces consume it here instead of each
+   guessing a constant that goes stale the moment the dock grows a row. */
+.spectra-composer-clearance {
+  padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 16px);
+}
+
+/* Floating pills (selection count, return-to-follow) sit just above the
+   composer band instead of parking underneath it. */
+.spectra-composer-above {
+  bottom: calc(var(--spectra-composer-safe-area, 0px) + 8px);
 }
 
 @media (min-width: 768px) {

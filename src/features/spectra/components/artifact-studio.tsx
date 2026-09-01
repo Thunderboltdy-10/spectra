@@ -182,7 +182,6 @@ import {
 import {
   StudioContractProvider,
   StudioSplitShell,
-  useComposerSafeArea,
   useStudioContractValue,
   useStudioDensity,
   useOptionalStudioContract,
@@ -5161,7 +5160,6 @@ function ArtifactStudioEditor({
     [contractType],
   );
   const studioDensity = useStudioDensity(studioSurfaceRef, responsiveContract);
-  useComposerSafeArea(studioSurfaceRef);
   const loadVersionHistory = useCallback(() => {
     setHistoryOpen(true);
     void getSpectraArtifactVersions(artifact._id, 100).then((result) => {

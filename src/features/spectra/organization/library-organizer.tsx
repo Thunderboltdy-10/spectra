@@ -1093,7 +1093,7 @@ export function LibraryOrganizer({
           /* Same scope, same filter, different shape. The board mounts beside
              the rail rather than replacing the surface, so the breadcrumb, the
              search and the rail keep meaning what they meant a moment ago. */
-          <section className="flex min-w-0 flex-1 flex-col overflow-hidden px-3 pb-3 pt-3">
+          <section className="spectra-composer-clearance flex min-w-0 flex-1 flex-col overflow-hidden px-3 pt-3">
             <WorkBoard
               scopeNodeId={currentParentId ?? floorId}
               groupBy={boardGroupBy}
@@ -1224,7 +1224,7 @@ export function LibraryOrganizer({
               /* The command composer floats over the bottom of every surface,
                  so the list keeps a lane beneath the last row rather than
                  hiding it. */
-              "min-h-0 flex-1 overflow-y-auto px-2 pb-24 pt-1 outline-none",
+              "spectra-composer-clearance min-h-0 flex-1 overflow-y-auto px-2 pt-1 outline-none",
               "focus-visible:shadow-[inset_0_0_0_2px_color-mix(in_oklab,var(--brand-primary)_30%,transparent)]",
               drag && "select-none",
             )}
@@ -1389,7 +1389,7 @@ export function LibraryOrganizer({
         />
       ) : null}
       {selectedNodes.length > 1 ? (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-lg)]">
+        <div className="spectra-composer-above pointer-events-none fixed left-1/2 z-toast -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-lg)]">
             {selectedNodes.length} selected · drag them anywhere
         </div>
       ) : null}
@@ -1664,7 +1664,7 @@ function DragProxy({
   return createPortal(
     <div
       aria-hidden
-      className="pointer-events-none fixed z-[400] flex items-center gap-2 rounded-[7px] border px-2.5 py-1.5 text-[12px] shadow-[var(--shadow-lg)]"
+      className="pointer-events-none fixed z-toast flex items-center gap-2 rounded-[7px] border px-2.5 py-1.5 text-[12px] shadow-[var(--shadow-lg)]"
       style={{
         left: drag.x + 12,
         top: drag.y + 10,

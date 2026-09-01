@@ -1,20 +1,32 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, LoaderCircle, School, ShieldCheck } from "lucide-react";
 import { SpectraLogo } from "@/components/spectra-logo";
 import { mutateAdministration } from "@/features/spectra/administration/api";
+import {
+  clearJoinTokenCookie,
+  persistJoinTokenCookie,
+  resolveJoinToken,
+} from "@/lib/invitation-session";
 
 function JoinSchoolContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const token = searchParams.get("token") ?? "";
+  const token = resolveJoinToken(
+    searchParams.toString(),
+    typeof document === "undefined" ? "" : document.cookie,
+  );
   const [status, setStatus] = useState<
     "ready" | "accepting" | "accepted" | "error"
   >("ready");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (token) persistJoinTokenCookie(token, document);
+  }, [token]);
 
   async function accept() {
     if (!token) {
@@ -22,21 +34,31 @@ function JoinSchoolContent() {
       setError("This invitation link is incomplete.");
       return;
     }
+    persistJoinTokenCookie(token, document);
     setStatus("accepting");
     setError("");
     try {
       await mutateAdministration("acceptInvitation", { token });
+      clearJoinTokenCookie(document);
       setStatus("accepted");
       window.setTimeout(() => {
         router.replace("/workspace");
         router.refresh();
       }, 900);
     } catch (nextError) {
+      const raw = nextError instanceof Error ? nextError.message : "";
+      if (
+        /INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
+          raw,
+        )
+      )
+        clearJoinTokenCookie(document);
+      const human = raw.match(
+        /(?:INVITATION_[A-Z_]+|MEMBERSHIP_[A-Z_]+):\s*(.+)/,
+      );
       setStatus("error");
       setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "The invitation could not be accepted.",
+        (human?.[1] ?? raw).trim() || "The invitation could not be accepted.",
       );
     }
   }

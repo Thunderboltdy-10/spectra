@@ -17,7 +17,10 @@ import {
 } from "./identityShared";
 import { writeAuditEvent } from "./auditShared";
 import {
+  appendOrderKey,
   findNodesForSource,
+  findPrimaryNode,
+  placeSourceNode,
   purgeAccountSourceNodes,
   workspaceContextNodes,
 } from "./orgTreeShared";
@@ -274,6 +277,53 @@ export const listIncomingInvitations = query({
   },
 });
 
+async function placeAcceptedShare(
+  ctx: Parameters<typeof getAuthenticatedActor>[0],
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  resourceType: "workspace" | "artifact" | "agent",
+  resourceId: string,
+  title: string,
+) {
+  if (resourceType === "workspace") {
+    const existing = await findPrimaryNode(
+      ctx,
+      actor.accountId,
+      "workspace",
+      resourceId,
+    );
+    if (existing) return;
+    const workspaceId = ctx.db.normalizeId("spectraWorkspaces", resourceId);
+    const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
+    if (!workspace) return;
+    const now = Date.now();
+    await ctx.db.insert("orgNodes", {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      parentId: null,
+      kind: "workspace",
+      name: workspace.title,
+      sourceId: workspace._id,
+      typeKey: "workspace",
+      activityAt: now,
+      orderKey: await appendOrderKey(ctx, actor.accountId, null),
+      workspaceContextId: workspace._id,
+      placedByAccountId: actor.accountId,
+      childCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return;
+  }
+  await placeSourceNode(ctx, {
+    accountId: actor.accountId,
+    schoolId: actor.schoolId,
+    kind: "work",
+    sourceId: resourceId,
+    name: title,
+    keepExistingPlacement: true,
+  });
+}
+
 export const acceptShareInvitation = mutation({
   args: {
     invitationId: v.id("shareInvitations"),
@@ -286,21 +336,18 @@ export const acceptShareInvitation = mutation({
         "AUTH_NO_SCHOOL: An active school membership is required.",
       );
     const invitation = await ctx.db.get(args.invitationId);
-    if (
-      !invitation ||
-      invitation.inviteeAccountId !== actor.accountId ||
-      invitation.status !== "pending"
-    )
+    if (!invitation || invitation.inviteeAccountId !== actor.accountId)
       throw new Error(
         "SHARING_INVITATION_UNAVAILABLE: This invitation is no longer pending.",
       );
     const now = Date.now();
     if (invitation.expiresAt && invitation.expiresAt <= now) {
-      await ctx.db.patch(invitation._id, {
-        status: "expired",
-        respondedAt: now,
-        updatedAt: now,
-      });
+      if (invitation.status === "pending")
+        await ctx.db.patch(invitation._id, {
+          status: "expired",
+          respondedAt: now,
+          updatedAt: now,
+        });
       throw new Error(
         "SHARING_INVITATION_EXPIRED: Ask the owner to invite you again.",
       );
@@ -313,6 +360,28 @@ export const acceptShareInvitation = mutation({
     if (!loaded || loaded.schoolId !== actor.schoolId)
       throw new Error(
         "SHARING_RESOURCE_UNAVAILABLE: The shared item is no longer available.",
+      );
+    if (invitation.status === "accepted" && invitation.grantId) {
+      await placeAcceptedShare(
+        ctx,
+        actor,
+        invitation.resourceType,
+        invitation.resourceId,
+        loaded.resource.title,
+      );
+      return {
+        grantId: invitation.grantId,
+        resourceType: invitation.resourceType,
+        resourceId: invitation.resourceId,
+        level: invitation.level,
+        appearsIn: "shared" as const,
+        alreadyAccepted: true,
+        policyVersion: 0,
+      };
+    }
+    if (invitation.status !== "pending")
+      throw new Error(
+        "SHARING_INVITATION_UNAVAILABLE: This invitation is no longer pending.",
       );
     const grantId = await ctx.db.insert("accessGrants", {
       schoolId: actor.schoolId,
@@ -334,6 +403,13 @@ export const acceptShareInvitation = mutation({
       respondedAt: now,
       updatedAt: now,
     });
+    await placeAcceptedShare(
+      ctx,
+      actor,
+      invitation.resourceType,
+      invitation.resourceId,
+      loaded.resource.title,
+    );
     const policyVersion = await bumpPolicyVersion(
       ctx,
       invitation.resourceType,

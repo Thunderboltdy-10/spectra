@@ -54,7 +54,9 @@ describe("P6.I1 UX debt closure", () => {
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");
     expect(library).toContain("flex-wrap items-center");
     expect(library).toContain('label: "Retry"');
-    expect(library).toContain("firstRun");
+    expect(library).toContain("Delete forever");
+    expect(library).toContain("Empty Trash");
+    expect(library).toContain("TrashPurgeDialog");
     expect(board).toContain("aria-label={`Move ${node.name}`}");
     expect(board).toContain("data-drop-node");
     expect(dock).toContain("outsideCurrentWorkspace");
@@ -72,6 +74,6 @@ describe("P6.I1 UX debt closure", () => {
     expect(shortcuts).not.toContain("Export as markdown");
     expect(appShell).not.toContain("window.location.assign");
     expect(appShell).not.toContain("window.location.href");
-    expect(appShell).toContain('router.push("/settings")');
+    expect(appShell).toContain("<SignedInContinue");
   });
 });

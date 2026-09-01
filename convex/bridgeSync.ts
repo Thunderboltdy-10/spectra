@@ -398,15 +398,15 @@ async function discoverResourceForMount(
         });
       }
       if (previousPath && previousPath !== input.relativePath) {
-        if (policy.structure === "mirror-from-disk" || policy.structure === "mirror-both") {
-          const node = await findPrimaryNode(ctx, actor.accountId, "work", String(existingReplica.workId));
-          if (node) {
-            const nextParts = input.relativePath.replaceAll("\\", "/").split("/").filter(Boolean);
-            const nextName = nextParts.pop()!;
+        const node = await findPrimaryNode(ctx, actor.accountId, "work", String(existingReplica.workId));
+        if (node) {
+          const nextParts = input.relativePath.replaceAll("\\", "/").split("/").filter(Boolean);
+          const nextName = nextParts.pop()!;
+          if (policy.structure === "mirror-from-disk" || policy.structure === "mirror-both") {
             const nextParent = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, mount.rootOrgNodeId, nextParts);
             if (node.parentId !== nextParent) await moveNode(ctx, node, { parentId: nextParent });
-            if (node.name !== nextName) await renameNode(ctx, node, nextName);
           }
+          if (node.name !== nextName) await renameNode(ctx, node, nextName);
         }
       }
       for (const duplicate of candidates.filter((candidate) => candidate._id !== existingReplica._id)) {

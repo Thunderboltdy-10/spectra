@@ -1413,6 +1413,228 @@ export async function purgeSourceNodes(
   return nodes.length;
 }
 
+const TRASH_PURGE_BATCH = 200;
+const INDEX_DRAIN_PAGE = 100;
+
+export const TRASH_PURGE_EMPTY =
+  "Select something in Trash to delete forever.";
+export const TRASH_PURGE_TOO_MANY =
+  "Delete at most 200 items at a time.";
+export const TRASH_PURGE_NOT_TRASHED =
+  "Only items in Trash can be deleted forever.";
+export const TRASH_PURGE_GENERAL =
+  "General cannot be deleted. It is where work with no other home lives.";
+export const TRASH_PURGE_TIMETABLE =
+  "Your Timetable stays in General and cannot be deleted.";
+
+export type TrashedPurgeItem = {
+  nodeId: Id<"orgNodes">;
+  kind: OrgNodeKind;
+  name: string;
+  sourceId?: string;
+};
+
+export type TrashedPurgeResult = {
+  purged: TrashedPurgeItem[];
+};
+
+function isProtectedTimetableArtifact(artifact: Doc<"spectraArtifacts">) {
+  if (artifact.blueprintKey !== "timetable") return false;
+  const tags = artifact.tags ?? [];
+  return (
+    tags.includes("system-timetable") ||
+    tags.includes("managebac") ||
+    artifact.createdFrom?.contextSummary ===
+      "Automatic ManageBac timetable bootstrap" ||
+    artifact.createdFrom?.contextSummary === "Personal Spectra timetable"
+  );
+}
+
+/**
+ * Refuse the whole mixed selection before any write. Partial silent success is
+ * the forbidden third option (P6.I4).
+ */
+export async function refuseTrashedPurge(
+  ctx: OrgCtx,
+  roots: OrgNode[],
+): Promise<string | null> {
+  if (roots.length === 0) return TRASH_PURGE_EMPTY;
+  if (roots.length > TRASH_PURGE_BATCH) return TRASH_PURGE_TOO_MANY;
+  for (const node of roots) {
+    if (node.deletedAt === undefined) return TRASH_PURGE_NOT_TRASHED;
+    const subtree = await subtreeNodes(ctx, node, { includeTrashed: true });
+    for (const row of subtree) {
+      if (row.kind === "workspace" && row.sourceId) {
+        const workspaceId = ctx.db.normalizeId(
+          "spectraWorkspaces",
+          row.sourceId,
+        );
+        const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
+        if (workspace && isGeneralWorkspace(workspace))
+          return TRASH_PURGE_GENERAL;
+      }
+      if (row.kind === "work" && row.sourceId) {
+        const artifactId = ctx.db.normalizeId("spectraArtifacts", row.sourceId);
+        const artifact = artifactId ? await ctx.db.get(artifactId) : null;
+        if (artifact && isProtectedTimetableArtifact(artifact))
+          return TRASH_PURGE_TIMETABLE;
+      }
+    }
+  }
+  return null;
+}
+
+async function drainIndexPage<T extends { _id: string }>(
+  takePage: () => Promise<T[]>,
+  visit: (row: T) => Promise<void>,
+) {
+  for (;;) {
+    const page = await takePage();
+    if (page.length === 0) return;
+    for (const row of page) await visit(row);
+  }
+}
+
+async function deleteTrashedOrgNode(ctx: OrgWriteCtx, node: OrgNode) {
+  if (!(await ctx.db.get(node._id))) return;
+  await ctx.db.delete(node._id);
+  if (node.deletedAt === undefined)
+    await adjustChildCount(ctx, node.parentId, -1);
+}
+
+async function purgeOwnedThread(
+  ctx: OrgWriteCtx,
+  thread: Doc<"spectraThreads">,
+) {
+  await drainIndexPage(
+    () =>
+      ctx.db
+        .query("spectraMessages")
+        .withIndex("by_thread", (q) => q.eq("threadId", thread._id))
+        .take(INDEX_DRAIN_PAGE),
+    (row) => ctx.db.delete(row._id),
+  );
+  await purgeSourceNodes(ctx, "thread", thread._id);
+  if (await ctx.db.get(thread._id)) await ctx.db.delete(thread._id);
+}
+
+async function purgeOwnedWorkRecord(
+  ctx: OrgWriteCtx,
+  artifact: Doc<"spectraArtifacts">,
+) {
+  await purgeSourceNodes(ctx, "work", artifact._id);
+  await drainIndexPage(
+    () =>
+      ctx.db
+        .query("artifactUserStates")
+        .withIndex("by_artifact_updated", (q) =>
+          q.eq("artifactId", artifact._id),
+        )
+        .take(INDEX_DRAIN_PAGE),
+    (row) => ctx.db.delete(row._id),
+  );
+  await drainIndexPage(
+    () =>
+      ctx.db
+        .query("spectraArtifactLinks")
+        .withIndex("by_source", (q) => q.eq("sourceArtifactId", artifact._id))
+        .take(INDEX_DRAIN_PAGE),
+    (row) => ctx.db.delete(row._id),
+  );
+  await drainIndexPage(
+    () =>
+      ctx.db
+        .query("spectraArtifactLinks")
+        .withIndex("by_target", (q) => q.eq("targetArtifactId", artifact._id))
+        .take(INDEX_DRAIN_PAGE),
+    (row) => ctx.db.delete(row._id),
+  );
+  if (await ctx.db.get(artifact._id)) await ctx.db.delete(artifact._id);
+  await syncArtifactSummary(ctx, artifact._id);
+}
+
+/**
+ * Permanently remove a mixed Trash selection. Callers must refuse first.
+ * Convex mutations are one transaction, so a throw after this starts rolls
+ * the whole batch back.
+ */
+export async function purgeTrashedNodes(
+  ctx: OrgWriteCtx,
+  roots: OrgNode[],
+): Promise<TrashedPurgeResult> {
+  const expanded = new Map<string, OrgNode>();
+  for (const root of roots) {
+    const subtree = await subtreeNodes(ctx, root, { includeTrashed: true });
+    for (const row of subtree) expanded.set(row._id, row);
+  }
+  const items = [...expanded.values()];
+  const requested = new Map(
+    roots.map((root) => [
+      root._id,
+      {
+        nodeId: root._id,
+        kind: root.kind,
+        name: root.name,
+        sourceId: root.sourceId,
+      } satisfies TrashedPurgeItem,
+    ]),
+  );
+
+  for (const node of items) {
+    if (node.kind !== "work" || !node.sourceId) continue;
+    const artifactId = ctx.db.normalizeId("spectraArtifacts", node.sourceId);
+    const artifact = artifactId ? await ctx.db.get(artifactId) : null;
+    if (!artifact) {
+      await purgeSourceNodes(ctx, "work", node.sourceId);
+      continue;
+    }
+    if (artifact.ownerAccountId === node.accountId)
+      await purgeOwnedWorkRecord(ctx, artifact);
+    else
+      await purgeAccountSourceNodes(
+        ctx,
+        node.accountId,
+        "work",
+        artifact._id,
+      );
+  }
+
+  for (const node of items) {
+    if (node.kind !== "thread" || !node.sourceId) continue;
+    const threadId = ctx.db.normalizeId("spectraThreads", node.sourceId);
+    const thread = threadId ? await ctx.db.get(threadId) : null;
+    if (!thread) {
+      await purgeSourceNodes(ctx, "thread", node.sourceId);
+      continue;
+    }
+    if (thread.ownerAccountId === node.accountId)
+      await purgeOwnedThread(ctx, thread);
+    else
+      await purgeAccountSourceNodes(
+        ctx,
+        node.accountId,
+        "thread",
+        thread._id,
+      );
+  }
+
+  for (const node of items) {
+    if (node.kind !== "workspace" || !node.sourceId) continue;
+    const workspaceId = ctx.db.normalizeId("spectraWorkspaces", node.sourceId);
+    const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
+    if (workspace) await dissolveWorkspaceNode(ctx, workspace);
+    else await purgeSourceNodes(ctx, "workspace", node.sourceId);
+  }
+
+  for (const node of items) {
+    if (node.kind === "work" || node.kind === "thread" || node.kind === "workspace")
+      continue;
+    await deleteTrashedOrgNode(ctx, node);
+  }
+
+  return { purged: [...requested.values()] };
+}
+
 /* ------------------------------------------------------- placement reads */
 
 /**

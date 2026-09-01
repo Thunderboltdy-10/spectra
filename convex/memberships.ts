@@ -68,18 +68,29 @@ export const acceptInvitation = mutation({
       .query("membershipInvitations")
       .withIndex("by_token_hash", (q) => q.eq("tokenHash", args.tokenHash))
       .unique();
-    if (!invitation || invitation.status !== "pending")
+    if (!invitation)
       throw new Error("INVITATION_INVALID: This invitation is unavailable.");
-    const now = Date.now();
-    if (invitation.expiresAt <= now) {
-      await ctx.db.patch(invitation._id, { status: "expired", updatedAt: now });
-      throw new Error("INVITATION_EXPIRED: This invitation has expired.");
-    }
     if (normalizeEmail(invitation.email) !== actor.account.email)
       throw new Error(
         "INVITATION_EMAIL_MISMATCH: Sign in with the invited verified email.",
       );
+    const now = Date.now();
     const existing = await getActiveMembership(ctx, actor.accountId);
+    if (invitation.status === "accepted") {
+      if (existing?.schoolId === invitation.schoolId)
+        return {
+          membershipId: existing._id,
+          schoolId: existing.schoolId,
+          alreadyMember: true,
+        };
+      throw new Error("INVITATION_INVALID: This invitation is unavailable.");
+    }
+    if (invitation.status !== "pending")
+      throw new Error("INVITATION_INVALID: This invitation is unavailable.");
+    if (invitation.expiresAt <= now) {
+      await ctx.db.patch(invitation._id, { status: "expired", updatedAt: now });
+      throw new Error("INVITATION_EXPIRED: This invitation has expired.");
+    }
     if (existing) {
       if (existing.schoolId === invitation.schoolId) {
         await ctx.db.patch(invitation._id, {

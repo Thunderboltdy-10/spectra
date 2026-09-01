@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import {
   ArtifactDeleteDialog,
   PendingCreateDialog,
+  TrashPurgeDialog,
   WorkspaceDeleteDialog,
 } from "../components/shell-dialogs";
 
@@ -190,6 +191,23 @@ describe("shell dialogs", () => {
     );
     expect(confirmButton.disabled).toBe(false);
     fireEvent.click(confirmButton);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("TrashPurgeDialog uses the shared delete voice", () => {
+    const onConfirm = vi.fn();
+    render(
+      <TrashPurgeDialog
+        open
+        title="Delete “Unit 3” forever?"
+        detail="Folders include everything inside them. This cannot be undone."
+        busy={false}
+        onCancel={() => {}}
+        onConfirm={onConfirm}
+      />,
+    );
+    expect(screen.getByText("Delete “Unit 3” forever?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /delete forever/i }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 

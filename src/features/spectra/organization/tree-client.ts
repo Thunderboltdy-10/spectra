@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
@@ -112,6 +112,12 @@ export type BoardCard = TreeNode & { parentName?: string };
 const ROOT = "root";
 const nodeArg = (parentId: string | null) => (parentId ?? ROOT) as string;
 
+/** Skip Convex tree reads until the session is actually signed in. */
+function useAuthedArgs<T>(args: T | "skip"): T | "skip" {
+  const { isAuthenticated } = useConvexAuth();
+  return isAuthenticated === true ? args : "skip";
+}
+
 /** The children of one folder, paginated so a 2k-item folder still opens fast. */
 export function useTreeChildren(
   parentId: string | null,
@@ -126,14 +132,16 @@ export function useTreeChildren(
   const enabled = options?.enabled ?? true;
   const result = usePaginatedQuery(
     api.orgTree.listChildren,
-    enabled
-      ? {
-          parentId: nodeArg(parentId),
-          sortKey: options?.sortKey,
-          direction: options?.direction,
-          typeFilter: options?.typeFilter,
-        }
-      : "skip",
+    useAuthedArgs(
+      enabled
+        ? {
+            parentId: nodeArg(parentId),
+            sortKey: options?.sortKey,
+            direction: options?.direction,
+            typeFilter: options?.typeFilter,
+          }
+        : "skip",
+    ),
     { initialNumItems: options?.pageSize ?? 150 },
   );
   return {
@@ -148,13 +156,16 @@ export function useTreeChildren(
 export function useTreeContainers(parentId: string | null, enabled = true) {
   const result = useQuery(
     api.orgTree.listContainers,
-    enabled ? { parentId: nodeArg(parentId) } : "skip",
+    useAuthedArgs(enabled ? { parentId: nodeArg(parentId) } : "skip"),
   );
   return (result?.nodes ?? null) as TreeNode[] | null;
 }
 
 export function useTreePath(nodeId: string | null) {
-  const result = useQuery(api.orgTree.path, nodeId ? { nodeId } : "skip");
+  const result = useQuery(
+    api.orgTree.path,
+    useAuthedArgs(nodeId ? { nodeId } : "skip"),
+  );
   if (!result) return null;
   return {
     node: result.node as unknown as TreeNode,
@@ -172,14 +183,16 @@ export function useTreeSearch(
   const trimmed = term.trim();
   const result = useQuery(
     api.orgTree.search,
-    trimmed.length >= 2
-      ? {
-          term: trimmed,
-          kinds,
-          limit: 60,
-          scopeNodeId: scopeNodeId ?? undefined,
-        }
-      : "skip",
+    useAuthedArgs(
+      trimmed.length >= 2
+        ? {
+            term: trimmed,
+            kinds,
+            limit: 60,
+            scopeNodeId: scopeNodeId ?? undefined,
+          }
+        : "skip",
+    ),
   );
   return {
     active: trimmed.length >= 2,
@@ -194,9 +207,11 @@ export function useTreeQuickView(
 ) {
   const result = useQuery(
     api.orgTree.quickView,
-    view
-      ? { view, kinds, limit: 300, scopeNodeId: scopeNodeId ?? undefined }
-      : "skip",
+    useAuthedArgs(
+      view
+        ? { view, kinds, limit: 300, scopeNodeId: scopeNodeId ?? undefined }
+        : "skip",
+    ),
   );
   return {
     nodes: (result?.nodes ?? null) as TreeNode[] | null,
@@ -205,7 +220,10 @@ export function useTreeQuickView(
 }
 
 export function useTreeTrash(enabled: boolean) {
-  const result = useQuery(api.orgTree.listTrash, enabled ? {} : "skip");
+  const result = useQuery(
+    api.orgTree.listTrash,
+    useAuthedArgs(enabled ? {} : "skip"),
+  );
   return (result?.nodes ?? null) as TreeNode[] | null;
 }
 
@@ -220,7 +238,7 @@ export function useTreePlacement(
 ) {
   const result = useQuery(
     api.orgTree.placementForSource,
-    sourceId ? { kind, sourceId } : "skip",
+    useAuthedArgs(sourceId ? { kind, sourceId } : "skip"),
   );
   if (!result) return null;
   return {
@@ -239,7 +257,9 @@ export function useLiveOrgIdentities(
   const boundedSources = useMemo(() => sources.slice(0, 64), [sources]);
   const result = useQuery(
     api.orgTree.liveIdentities,
-    boundedSources.length ? { sources: boundedSources } : "skip",
+    useAuthedArgs(
+      boundedSources.length ? { sources: boundedSources } : "skip",
+    ),
   );
   return result ? (result.identities as LiveIdentity[]) : EMPTY_LIVE_IDENTITIES;
 }
@@ -258,9 +278,11 @@ export function useBoardColumns(
 ) {
   const result = useQuery(
     api.orgTreeBoard.columns,
-    enabled
-      ? { scopeNodeId: scopeNodeId ?? ROOT, groupBy, typeFilter }
-      : "skip",
+    useAuthedArgs(
+      enabled
+        ? { scopeNodeId: scopeNodeId ?? ROOT, groupBy, typeFilter }
+        : "skip",
+    ),
   );
   return {
     loading: enabled && result === undefined,
@@ -288,13 +310,13 @@ export function useBoardColumnCards(
 ) {
   const result = usePaginatedQuery(
     api.orgTreeBoard.column,
-    {
+    useAuthedArgs({
       scopeNodeId: scopeNodeId ?? ROOT,
       groupBy,
       columnKey,
       typeFilter,
       now,
-    },
+    }),
     { initialNumItems: pageSize },
   );
   return {
@@ -318,6 +340,7 @@ export function useTreeActions() {
   const move = useMutation(api.orgTree.move);
   const trash = useMutation(api.orgTree.trash);
   const restore = useMutation(api.orgTree.restore);
+  const purge = useMutation(api.orgTree.purge);
   const setPinned = useMutation(api.orgTree.setPinned);
   const createReference = useMutation(api.orgTree.createReference);
   const ensureRoots = useMutation(api.orgTree.ensureAccountRoots);
@@ -346,6 +369,8 @@ export function useTreeActions() {
         trash({ nodeIds: nodeIds as Id<"orgNodes">[] }),
       restore: (nodeIds: string[]) =>
         restore({ nodeIds: nodeIds as Id<"orgNodes">[] }),
+      purge: (nodeIds: string[]) =>
+        purge({ nodeIds: nodeIds as Id<"orgNodes">[] }),
       setPinned: (nodeId: string, pinned: boolean) =>
         setPinned({ nodeId: nodeId as Id<"orgNodes">, pinned }),
       createReference: (targetNodeId: string, parentId: string | null) =>
@@ -377,6 +402,7 @@ export function useTreeActions() {
       move,
       trash,
       restore,
+      purge,
       setPinned,
       createReference,
       ensureRoots,

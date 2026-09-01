@@ -26,6 +26,17 @@ const INDEXES: Record<string, Record<string, string[]>> = {
     by_workspace_context: ["workspaceContextId"],
     by_account_deleted: ["accountId", "deletedAt"],
     by_trashed_root: ["trashedRootId"],
+    by_account_trash_root: ["accountId", "isTrashRoot", "deletedAt"],
+  },
+  artifactUserStates: {
+    by_artifact_updated: ["artifactId", "updatedAt"],
+  },
+  spectraArtifactLinks: {
+    by_source: ["sourceArtifactId"],
+    by_target: ["targetArtifactId"],
+  },
+  spectraMessages: {
+    by_thread: ["threadId"],
   },
   spectraWorkspaces: {
     by_account_starter: ["ownerAccountId", "starterKey"],
@@ -257,6 +268,23 @@ export async function seedArtifact(
     content: { blocks: [], outline: [] },
     tags: [],
     status: "active",
+    createdAt: now,
+    updatedAt: now,
+  })) as string;
+}
+
+export async function seedThread(
+  db: FakeDb,
+  accountId: string,
+  title: string,
+) {
+  const now = Date.now();
+  return (await db.insert("spectraThreads", {
+    ownerAccountId: accountId,
+    title,
+    origin: "workspace",
+    status: "active",
+    messageCount: 0,
     createdAt: now,
     updatedAt: now,
   })) as string;

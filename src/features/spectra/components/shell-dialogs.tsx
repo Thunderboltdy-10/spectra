@@ -271,6 +271,49 @@ export function WorkspaceEditDialog({
   );
 }
 
+export function TrashPurgeDialog({
+  open,
+  title,
+  detail,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  detail: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
+      <DialogContent className="max-w-[min(440px,calc(100vw-32px))] gap-0 p-5">
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription className="mt-2">{detail}</DialogDescription>
+        <DialogFooter className="mt-5">
+          <Button variant="secondary" size="md" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            size="md"
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            {busy ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+            Delete forever
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ArtifactDeleteDialog({
   open,
   artifactTitle,

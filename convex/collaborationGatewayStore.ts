@@ -1,6 +1,8 @@
 import { internalQuery } from "./_generated/server";
 import { internalMutation } from "./orgNodeMutation";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId } from "./identityShared";
 import { internal } from "./_generated/api";
@@ -11,6 +13,7 @@ import { syncArtifactSummary, syncSourceNodes } from "./orgTreeShared";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import { claimAuthorizesGatewayUpdate } from "./collaborationClaimAuthorization";
 import { encodeArtifactContentForStorage } from "../shared/sheet-cells";
+import { filenameFromRelativePath } from "../shared/native-filename";
 
 const NATIVE_PROJECTION_REGION = "$spectra:native-projection";
 const MAX_GATEWAY_UPDATE_BYTES = 760 * 1024;
@@ -55,6 +58,48 @@ function artifactProjectionPatch(
     contentHash: projectionHash,
     textIndex: `${projection.title}\n${projection.summary ?? ""}\n${projection.tags.join(" ")}\n${JSON.stringify(projection.content).slice(0, 80_000)}`,
   };
+}
+
+async function listingNameForNativeWork(
+  ctx: MutationCtx,
+  artifact: {
+    _id: Id<"spectraArtifacts">;
+    title: string;
+    nativeFormat?: string;
+  },
+  projectedTitle: string,
+) {
+  if (!artifact.nativeFormat) return projectedTitle;
+  const local = await ctx.db
+    .query("workReplicas")
+    .withIndex("by_work_kind", (q) =>
+      q.eq("workId", artifact._id).eq("kind", "local"),
+    )
+    .first();
+  if (!local?.relativePath) return artifact.title || projectedTitle;
+  return filenameFromRelativePath(local.relativePath);
+}
+
+async function syncListingAfterProjection(
+  ctx: MutationCtx,
+  artifact: {
+    _id: Id<"spectraArtifacts">;
+    title: string;
+    nativeFormat?: string;
+  },
+  projectedTitle: string,
+) {
+  const listingTitle = await listingNameForNativeWork(
+    ctx,
+    artifact,
+    projectedTitle,
+  );
+  if (listingTitle !== projectedTitle)
+    await ctx.db.patch(artifact._id, {
+      title: listingTitle,
+      updatedAt: Date.now(),
+    });
+  await syncSourceNodes(ctx, "work", artifact._id, listingTitle);
 }
 
 function parseGatewayProjection(
@@ -620,7 +665,7 @@ export const bootstrapNative = internalMutation({
     /* Every commit is activity, whether or not the title moved: the tree caches
        both the name and the moment, so a recency-ordered column can be an
        indexed window instead of a scan (D42, D40). */
-    await syncSourceNodes(ctx, "work", artifact._id, projection.title);
+    await syncListingAfterProjection(ctx, artifact, projection.title);
     return { sequence: args.expectedNextSequence, duplicate: false };
   },
 });
@@ -1012,7 +1057,7 @@ export const append = internalMutation({
        records that the work was touched, which is what recency-ordered columns
        page against (D42). */
     if (projection)
-      await syncSourceNodes(ctx, "work", artifact._id, projection.title);
+      await syncListingAfterProjection(ctx, artifact, projection.title);
     else await syncArtifactSummary(ctx, artifact._id);
     if (projection) {
       // Every open human session must point at a renderable global state, even
@@ -1147,8 +1192,13 @@ export const checkpoint = internalMutation({
     const now = Date.now();
     if (!args.clientId.trim())
       throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
+    const listingTitle = await listingNameForNativeWork(
+      ctx,
+      artifact,
+      projection.title,
+    );
     const finalSnapshot = {
-      title: projection.title,
+      title: listingTitle,
       summary: projection.summary,
       content: encodeArtifactContentForStorage(
         projection.typeKey,
@@ -1158,6 +1208,7 @@ export const checkpoint = internalMutation({
     };
     await ctx.db.patch(artifact._id, {
       ...artifactProjectionPatch(projection, args.projectionHash),
+      title: listingTitle,
       syncState: "synchronized",
       liveStateVectorHash: args.stateVectorHash,
       lastSynchronizedAt: now,
@@ -1168,7 +1219,7 @@ export const checkpoint = internalMutation({
       lastProjectionAt: now,
       updatedAt: now,
     });
-    await syncSourceNodes(ctx, "work", artifact._id, projection.title);
+    await syncSourceNodes(ctx, "work", artifact._id, listingTitle);
     const openGroups = await ctx.db
       .query("changeGroups")
       .withIndex("by_artifact_status_activity", (q) =>

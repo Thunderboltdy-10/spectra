@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { IsolatedErrorBoundary } from "@/components/global-error-boundary";
+import { TrashPurgeDialog } from "../components/shell-dialogs";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/use-now";
 import { presentSync } from "../bridge/status";
@@ -293,6 +294,11 @@ export function LibraryOrganizer({
   const [viewportHeight, setViewportHeight] = useState(640);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [purgeConfirm, setPurgeConfirm] = useState<{
+    nodeIds: string[];
+    names: string[];
+    emptying: boolean;
+  } | null>(null);
   /* The rail is the tree; hiding it gives the rows or the columns the whole
      window. Reachable from both views, because a reader who wants more room for
      a board wants it for a list too. */
@@ -610,6 +616,34 @@ export function LibraryOrganizer({
     },
     [actions, run],
   );
+
+  const requestPurge = useCallback(
+    (nodes: TreeNode[], emptying = false) => {
+      if (nodes.length === 0) return;
+      setPurgeConfirm({
+        nodeIds: nodes.map((node) => node.nodeId),
+        names: nodes.map((node) => node.name),
+        emptying,
+      });
+    },
+    [],
+  );
+
+  const confirmPurge = useCallback(() => {
+    if (!purgeConfirm) return;
+    const { nodeIds, emptying } = purgeConfirm;
+    void run("Those items stayed in the Trash.", async () => {
+      await actions.purge(nodeIds);
+      setPurgeConfirm(null);
+      toast.success(
+        emptying
+          ? "Trash emptied."
+          : nodeIds.length === 1
+            ? "Deleted forever."
+            : `Deleted ${nodeIds.length} items forever.`,
+      );
+    });
+  }, [actions, purgeConfirm, run]);
 
   const createFolderHere = useCallback(() => {
     void run("The folder was not created.", async () => {
@@ -1011,6 +1045,15 @@ export function LibraryOrganizer({
             }
           />
           {toolbarTrail}
+          {location.kind === "trash" && rows.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => requestPurge(rows, true)}
+              className="flex h-8 items-center rounded-[7px] px-2.5 text-[13px] text-[var(--danger)] hover:bg-[var(--bg-hover)]"
+            >
+              Empty Trash
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -1265,7 +1308,10 @@ export function LibraryOrganizer({
               </span>
             ) : null}
             {location.kind === "trash" && rows.length > 0 ? (
-              <span>Trashed items are kept until you restore them.</span>
+              <span>
+                Trashed items stay until you restore them or delete them
+                forever.
+              </span>
             ) : null}
             <span className="ml-auto hidden @3xl/rows:block">
               Drag to move · hold Alt to leave a reference · F2 renames
@@ -1304,6 +1350,7 @@ export function LibraryOrganizer({
               );
             })
           }
+          onPurge={(nodes) => requestPurge(nodes)}
           onShare={onShareWork}
           onToggleContext={onToggleContext}
           onNewFolder={createFolderHere}
@@ -1321,6 +1368,26 @@ export function LibraryOrganizer({
       ) : null}
 
       {drag ? <DragProxy drag={drag} /> : null}
+      {purgeConfirm ? (
+        <TrashPurgeDialog
+          open
+          title={
+            purgeConfirm.emptying
+              ? "Empty the Trash?"
+              : purgeConfirm.names.length === 1
+                ? `Delete “${purgeConfirm.names[0]}” forever?`
+                : `Delete ${purgeConfirm.names.length} items forever?`
+          }
+          detail={
+            purgeConfirm.emptying
+              ? "Everything here will be permanently removed. This cannot be undone."
+              : "Folders include everything inside them. This cannot be undone."
+          }
+          busy={busy}
+          onCancel={() => setPurgeConfirm(null)}
+          onConfirm={confirmPurge}
+        />
+      ) : null}
       {selectedNodes.length > 1 ? (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-[200] -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-lg)]">
             {selectedNodes.length} selected · drag them anywhere
@@ -1428,6 +1495,7 @@ function NodeMenu({
   onTogglePin,
   onTrash,
   onRestore,
+  onPurge,
   onShare,
   onToggleContext,
   onNewFolder,
@@ -1446,6 +1514,7 @@ function NodeMenu({
   onTogglePin: (nodes: TreeNode[]) => void;
   onTrash: (nodeIds: string[]) => void;
   onRestore: (nodeIds: string[]) => void;
+  onPurge: (nodes: TreeNode[]) => void;
   onShare?: (artifactId: string) => void;
   onToggleContext?: (artifactId: string) => void;
   onNewFolder: () => void;
@@ -1502,12 +1571,22 @@ function NodeMenu({
             ))}
           </>
         ) : inTrash ? (
-          <DropdownMenuItem
-            onSelect={() => onRestore(nodes.map((node) => node.nodeId))}
-          >
-            <RotateCcw className="size-3.5 text-[var(--text-tertiary)]" />
-            {count === 1 ? "Restore" : `Restore ${count} items`}
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem
+              onSelect={() => onRestore(nodes.map((node) => node.nodeId))}
+            >
+              <RotateCcw className="size-3.5 text-[var(--text-tertiary)]" />
+              {count === 1 ? "Restore" : `Restore ${count} items`}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-[var(--danger)] data-[highlighted]:text-[var(--danger)]"
+              onSelect={() => onPurge(nodes)}
+            >
+              <Trash2 className="size-3.5" />
+              {count === 1 ? "Delete forever" : `Delete ${count} items forever`}
+            </DropdownMenuItem>
+          </>
         ) : (
           <>
             {single ? (

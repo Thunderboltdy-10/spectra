@@ -92,6 +92,15 @@ Tier-2/3 god-file splits (content adapters, history, chrome, readonly viewers); 
 
 No functional P6 Field Note lacks an owner; mixed Trash is real and tested; the seeded school login path has a fresh-browser proof; one coherent commit and an implementation log. Do not ask for owner acceptance.
 
+### P6.I4 implementation log — 2026-09-01
+
+- TRIAGE · SYSTEMIC: Trash was restore-only; mixed folder/thread/work had no atomic forever-delete. One `orgTree.purge` now refuses in a sentence before any write, or purges the expanded subtree with an itemized result. Bounded `take(100)` drains, not owner/room `.collect()`.
+- Library Trash: Restore + Delete forever, Empty Trash, shared `TrashPurgeDialog`. Copy: items stay until restore or delete forever.
+- Native Library titles use the path basename (`listingNameForNativeWork`); path rename always updates the node name. Accepting a share places an invitee org node so Shared can list it; accept is idempotent.
+- Join token cookie survives Clerk; AppShell will not dump a signed-in user to workspace while it is stored. Already-accepted school invites return `alreadyMember`. Tree reads skip until Convex is authenticated (stale JWT).
+- Taste: Empty Trash only when Trash has rows; dialog reuses the studio delete voice. Studio `permanentlyDelete` still owns blob/meter cleanup.
+- Evidence: focused Vitest 7 files / 54 tests; `.shots/reformation/P6.I4/` (Trash empty, seeded Library, `/` → school workspace). No acceptance claimed.
+
 ## P6.UI1 — Responsive shell, Library, and workbar coherence (MT) — **IMPORTANT / LAUNCH-CRITICAL / UI SPECIALIST 1 OF 4**
 
 **Model: Grok 4.6 High with the frontend UI specialist skill stack.** Work from live screenshots before changing code. This sub-phase owns visual structure and interaction density, not capability semantics.

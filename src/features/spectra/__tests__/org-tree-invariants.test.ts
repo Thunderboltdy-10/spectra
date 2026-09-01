@@ -4,6 +4,7 @@ import {
   fakeCtx,
   seedAccount,
   seedArtifact,
+  seedThread,
   seedWorkspace,
 } from "@/test/org-tree-db";
 import {
@@ -23,6 +24,11 @@ import {
   restoreTrashedNode,
   trashNode,
   workspaceContextNodes,
+  refuseTrashedPurge,
+  purgeTrashedNodes,
+  TRASH_PURGE_EMPTY,
+  TRASH_PURGE_NOT_TRASHED,
+  TRASH_PURGE_TIMETABLE,
 } from "../../../../convex/orgTreeShared";
 import { compareOrderKeys } from "../organization/order-key";
 
@@ -553,5 +559,129 @@ describe("revoked access removes only the recipient's filing", () => {
 
     expect(purged).toBe(0);
     expect(await db.get(projected._id)).not.toBeNull();
+  });
+});
+
+describe("permanent trash is atomic for mixed folder, thread and work", () => {
+  it("refuses before any write when the selection is not in Trash", async () => {
+    const folder = await createFolderNode(ctx, {
+      accountId: id(accountId),
+      name: "Unit 3",
+      parentId: null,
+    });
+    expect(await refuseTrashedPurge(ctx, [folder])).toBe(TRASH_PURGE_NOT_TRASHED);
+    expect(await refuseTrashedPurge(ctx, [])).toBe(TRASH_PURGE_EMPTY);
+    expect(await db.get(folder._id)).not.toBeNull();
+  });
+
+  it("refuses a protected timetable without deleting siblings", async () => {
+    const folder = await createFolderNode(ctx, {
+      accountId: id(accountId),
+      name: "Week",
+      parentId: null,
+    });
+    const now = Date.now();
+    const timetableId = await db.insert("spectraArtifacts", {
+      ownerAccountId: accountId,
+      title: "Timetable",
+      blueprintKey: "timetable",
+      content: {},
+      tags: ["system-timetable"],
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const essayId = await seedArtifact(db, accountId, "Essay");
+    await placeWork(timetableId as string, { parentId: folder._id });
+    await placeWork(essayId, { parentId: folder._id });
+    const trashed = await trashNode(ctx, folder);
+    expect(trashed.trashed).toBeGreaterThan(0);
+    const root = (await db.get(folder._id))!;
+    expect(await refuseTrashedPurge(ctx, [root as never])).toBe(
+      TRASH_PURGE_TIMETABLE,
+    );
+    expect(await db.get(folder._id)).not.toBeNull();
+    expect(await db.get(essayId)).not.toBeNull();
+    expect(await db.get(timetableId)).not.toBeNull();
+  });
+
+  it("purges a mixed folder of work and thread and keeps child counts honest", async () => {
+    const biology = await seedWorkspace(db, accountId, "Biology");
+    const workspaceNode = await ensureWorkspaceNode(ctx, biology as never);
+    const folder = await createFolderNode(ctx, {
+      accountId: id(accountId),
+      name: "Unit 3",
+      parentId: workspaceNode._id,
+    });
+    const artifactId = await seedArtifact(db, accountId, "Essay");
+    const work = await placeWork(artifactId, { parentId: folder._id });
+    const threadId = await seedThread(db, accountId, "Seminar");
+    const thread = await placeSourceNode(ctx, {
+      accountId: id(accountId),
+      kind: "thread",
+      sourceId: threadId,
+      name: "Seminar",
+      target: { parentId: id(folder._id) },
+    });
+    await db.insert("spectraMessages", {
+      threadId,
+      role: "user",
+      content: "hello",
+      createdAt: Date.now(),
+    });
+
+    const liveChildren = await listChildNodes(
+      ctx,
+      id(accountId),
+      id(workspaceNode._id),
+    );
+    expect(liveChildren.map((row) => row._id)).toContain(folder._id);
+
+    await trashNode(ctx, folder);
+    const restored = await restoreTrashedNode(
+      ctx,
+      (await db.get(folder._id))! as never,
+    );
+    expect(restored.restored).toBeGreaterThan(0);
+    await trashNode(ctx, (await db.get(folder._id))! as never);
+
+    const root = (await db.get(folder._id))!;
+    expect(await refuseTrashedPurge(ctx, [root as never])).toBeNull();
+    const result = await purgeTrashedNodes(ctx, [root as never]);
+    expect(result.purged).toEqual([
+      expect.objectContaining({
+        nodeId: folder._id,
+        kind: "folder",
+        name: "Unit 3",
+      }),
+    ]);
+    expect(await db.get(folder._id)).toBeNull();
+    expect(await db.get(work._id)).toBeNull();
+    expect(await db.get(thread._id)).toBeNull();
+    expect(await db.get(artifactId)).toBeNull();
+    expect(await db.get(threadId)).toBeNull();
+    expect(db.all("spectraMessages")).toHaveLength(0);
+    expect(db.all("spectraArtifactSummaries")).toHaveLength(0);
+    expect((await db.get(workspaceNode._id))?.childCount).toBe(0);
+    expect(
+      await listChildNodes(ctx, id(accountId), id(workspaceNode._id)),
+    ).toHaveLength(0);
+  });
+
+  it("places an invitee's own node so Shared can list accepted work", async () => {
+    const inviteeId = await seedAccount(db);
+    const artifactId = await seedArtifact(db, accountId, "Lab notes");
+    await placeWork(artifactId);
+    const inviteeNode = await placeSourceNode(ctx, {
+      accountId: id(inviteeId),
+      kind: "work",
+      sourceId: artifactId,
+      name: "Lab notes",
+      keepExistingPlacement: true,
+    });
+    expect(inviteeNode.accountId).toBe(inviteeId);
+    expect(inviteeNode.deletedAt).toBeUndefined();
+    const ownerNodes = await nodesFor("work", artifactId);
+    expect(ownerNodes).toHaveLength(2);
   });
 });

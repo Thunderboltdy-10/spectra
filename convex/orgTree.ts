@@ -23,6 +23,8 @@ import {
   listChildNodes,
   moveNode,
   placeSourceNode,
+  purgeTrashedNodes,
+  refuseTrashedPurge,
   renameNode,
   requireOwnNode,
   restoreTrashedNode,
@@ -645,6 +647,69 @@ export const restore = mutation({
       results.push(await restoreTrashedNode(ctx, node));
     }
     return { restored: results };
+  },
+});
+
+const COLLAB_DRAIN_PAGE = 100;
+
+async function drainArtifactCollaboration(
+  ctx: Parameters<typeof requireSpectraActor>[0],
+  artifactId: Id<"spectraArtifacts">,
+) {
+  for (;;) {
+    const rooms = await ctx.db
+      .query("collaborationRooms")
+      .withIndex("by_artifact_partition", (q) => q.eq("artifactId", artifactId))
+      .take(COLLAB_DRAIN_PAGE);
+    if (rooms.length === 0) break;
+    for (const room of rooms) {
+      for (;;) {
+        const updates = await ctx.db
+          .query("collaborationUpdates")
+          .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
+          .take(COLLAB_DRAIN_PAGE);
+        if (updates.length === 0) break;
+        for (const row of updates) await ctx.db.delete(row._id);
+      }
+      for (;;) {
+        const snapshots = await ctx.db
+          .query("collaborationSnapshots")
+          .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
+          .take(COLLAB_DRAIN_PAGE);
+        if (snapshots.length === 0) break;
+        for (const row of snapshots) await ctx.db.delete(row._id);
+      }
+      await ctx.db.delete(room._id);
+    }
+  }
+}
+
+/**
+ * One permanent-trash contract for every trashable launch object. Mixed
+ * folder/thread/work selections purge atomically with an itemized result, or
+ * refuse before any write with a plain sentence.
+ */
+export const purge = mutation({
+  args: { nodeIds: v.array(v.id("orgNodes")) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const roots: OrgNode[] = [];
+    for (const nodeId of args.nodeIds) {
+      roots.push(await requireOwnNode(ctx, nodeId, actor.accountId));
+    }
+    const refusal = await refuseTrashedPurge(ctx, roots);
+    if (refusal) throw new Error(refusal);
+    const workIds = new Set<string>();
+    for (const root of roots) {
+      const subtree = await subtreeNodes(ctx, root, { includeTrashed: true });
+      for (const node of subtree)
+        if (node.kind === "work" && node.sourceId) workIds.add(node.sourceId);
+    }
+    for (const sourceId of workIds) {
+      const artifactId = ctx.db.normalizeId("spectraArtifacts", sourceId);
+      if (artifactId) await drainArtifactCollaboration(ctx, artifactId);
+    }
+    return await purgeTrashedNodes(ctx, roots);
   },
 });
 

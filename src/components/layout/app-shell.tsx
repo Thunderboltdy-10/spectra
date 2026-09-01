@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import { useClerk } from "@clerk/nextjs";
 import { SpectraLogo } from "@/components/spectra-logo";
+import { SignedInContinue } from "@/components/signed-in-continue";
 import { cn } from "@/lib/utils";
 import {
   getSpectraArtifactCommentNotifications,
@@ -1103,6 +1104,7 @@ export function AppShell({
         onFocusSearch={() => spectraBus.emit("shell.focusSidebarSearch", {})}
       />
       <KeyboardShortcutsHelp />
+      <SignedInContinue />
       <ShellNavigation />
       <main
         style={{

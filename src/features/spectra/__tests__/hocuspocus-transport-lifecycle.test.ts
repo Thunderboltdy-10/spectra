@@ -101,6 +101,15 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     expect(hocuspocus.websocket?.destroy).toHaveBeenCalledOnce();
   });
 
+  it("issues one collaboration token while two connects overlap", async () => {
+    const first = new HocuspocusArtifactTransport("artifact-shared");
+    const second = new HocuspocusArtifactTransport("artifact-shared");
+    await Promise.all([first.connect(), second.connect()]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    first.destroy();
+    second.destroy();
+  });
+
   it("keeps sync and flush pending until the gateway durably acknowledges a local edit", async () => {
     const transport = new HocuspocusArtifactTransport("artifact-durable");
     await transport.connect();

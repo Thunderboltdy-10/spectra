@@ -113,10 +113,38 @@ npm run dev:local -- --instance 3
 On the first start, `convex dev` asks which existing project to use. To make
 that step non-interactive, set both `SPECTRA_LOCAL_CONVEX_TEAM` and
 `SPECTRA_LOCAL_CONVEX_PROJECT` in the instance environment. The harness pins
-the requested local ports, synchronizes the Convex environment, restarts the
-backend with those values, then starts Next.js and the Hocuspocus gateway. It
-prints the app, Convex, dashboard, and Bridge URLs only after all three services
-answer their health checks.
+the requested local ports, synchronizes the Convex environment, keeps that same
+backend running, then starts Next.js and the Hocuspocus gateway. It
+prints the app, Convex, dashboard, and Bridge URLs only after web, Convex, and
+the gateway all report `status: "ready"` with their dependencies answering — not
+merely that the processes exist. Large local SQLite files need minutes to bind;
+the harness sets `CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS` to 900 so the CLI
+does not give up at 30 seconds.
+
+## Production preflight
+
+P8.P1 freezes a production candidate. Build first, then start the same instance
+against that build:
+
+```powershell
+npm run local:build -- --instance 1
+npm run local:start:prod -- --instance 1
+```
+
+`local:build` runs `next build` with that instance's `env.local`, so the
+production client and health probes target the local Convex URL instead of a
+cloud deployment leftover in root `.env.local`. `local:start:prod` refuses to
+start without `.next/BUILD_ID`.
+
+```powershell
+node scripts/local/preflight.mjs --instance 1 --unit P8.P1
+```
+
+The shared evidence manifest lives at `.shots/reformation/<unit>/manifest.json`
+and is the format RC.V1 and P8.V1 continue. It records commit, environment,
+hashes, actors, steps, observations, budgets, repairs, and verdict. Do not copy
+secrets into it. Originals under `Documents\IBDP1` stay unmounted; P8.P1 smoke
+uses a disposable fixture, and RC.V1 hashes the sacrificial copy tree.
 
 Check an instance without starting it:
 

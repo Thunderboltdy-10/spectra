@@ -31,6 +31,18 @@
 
 No cloud-test dependence, no original-file edits, no copying secrets into evidence, no disabling auth, no dev-server verdict, no raw seed inserts, no expansion imports. Exit when the frozen candidate is reproducible from the runbooks, all services are readiness-green, the school seed is usable, the sacrificial paths/hashes are recorded, and the production smoke passes.
 
+### P8.P1 implementation log — 2026-09-02
+
+- Production local stack: `local:build` inlines instance Convex URL; `local:start:prod` serves `.next` against instance 1.
+- Convex CLI 30s default aborted the 6.4 GB SQLite bind (P6.V1 class). Set `CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS=900` and keep the same backend after `convex env set` instead of stopping and paying bootstrap twice.
+- Web `/api/health` treated Convex `/instance_name` JSON parse failure as not_ready despite HTTP 200. Probe now accepts text/plain; stack start waits for `status: "ready"`.
+- D42: one coalesced thread index (limit 40); in-flight coalesce for threads, shareInvitations, collaboration tokens.
+- `queueMaterialization`: artifact modify + this actor's local replica/payload; collaborators cannot write the owner's disk. Storage-strategy owner checks left owner-only.
+- Seed verify-only: The Global College saga ready; A school_admin; B operator without membership. Originals unmounted. Disposable fixture `P8P1-smoke.docx` sha256 `b790e6bc…`.
+- Smoke (prod, A): Library, collab marker, AI run asked which duplicate New Document, Calendar/notifications, Admin 2 members, native import, clean restart recovered Library.
+- Bridge health not_ready; no disposable pair. Convex CLI printed a cloud spending-limit warning; local :3002 still answered. One Library AUTH race recovered via Try again.
+- Checks: local-harness 7/27, replicas+hocuspocus 2/41, capability ghost, production build. Evidence `.shots/reformation/P8.P1/`. Status: IMPLEMENTED.
+
 ## RC.V1 — Final real-corpus fidelity gate (H)
 
 **Model: GPT 5.6 Sol xhigh.** This is the complete run that never finished earlier. The old partial/rejected RC evidence is diagnostic history, not a pass. Run after P8.P1 on the frozen production build, immediately before the final chaos gate.

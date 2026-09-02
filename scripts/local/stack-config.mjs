@@ -3,6 +3,18 @@ const DEFAULT_PORT_STRIDE = 20;
 
 export const INSTANCE_SCHEMA_VERSION = 1;
 
+/** Local SQLite can take ~5 minutes to bind after a restart (P6.V1). */
+export const LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS = 900;
+
+export function withLocalConvexCliEnv(env = {}) {
+  return {
+    ...env,
+    CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS: String(
+      LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS,
+    ),
+  };
+}
+
 export const CONVEX_ENV_KEYS = [
   "ARTIFICIAL_ANALYSIS_API_KEY",
   "CLERK_JWT_ISSUER_DOMAIN",

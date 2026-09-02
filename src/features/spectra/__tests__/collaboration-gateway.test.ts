@@ -133,6 +133,7 @@ describe("P5.I2 gateway production helpers", () => {
     expect(isGatewayHealthBody(ready)).toBe(true);
     expect(ready.status).toBe("ready");
     expect(ready.uptimeMs).toBe(15);
+    expect(ready.dependencies.convex.status).toBe("ready");
     const degraded = gatewayHealthPayload({
       protocolVersion: 1,
       connections: 3,
@@ -146,6 +147,12 @@ describe("P5.I2 gateway production helpers", () => {
     });
     expect(degraded.status).toBe("degraded");
     expect(degraded.service).toBe("spectra-collaboration-gateway");
+    const notReady = gatewayHealthPayload({
+      protocolVersion: 1,
+      convex: { status: "not_ready", detail: "Convex did not answer." },
+    });
+    expect(notReady.status).toBe("not_ready");
+    expect(isGatewayHealthBody(notReady)).toBe(true);
   });
 
 

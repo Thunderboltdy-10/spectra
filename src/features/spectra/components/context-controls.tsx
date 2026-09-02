@@ -233,7 +233,7 @@ export function ContextFocusControl({
       setThreads([]);
       return;
     }
-    void getSpectraThreads({ limit: 80 })
+    void getSpectraThreads()
       .then((threadRows) => {
         setThreads(threadRows.threads);
       })

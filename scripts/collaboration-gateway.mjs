@@ -78,6 +78,33 @@ const durableHeads = new Map();
 const checkpointSchedulers = new Set();
 let policySweepRunning = false;
 let lastPersistenceFailure = null;
+let convexReadiness = { at: 0, status: "not_ready", detail: "Convex has not been probed yet." };
+
+async function probeConvexReadiness() {
+  const now = Date.now();
+  if (now - convexReadiness.at < 5_000) return convexReadiness;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1_200);
+  try {
+    const response = await fetch(`${String(convexUrl).replace(/\/$/, "")}/instance_name`, {
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    const text = (await response.text()).trim();
+    convexReadiness = response.ok && text
+      ? { at: now, status: "ready", detail: text }
+      : { at: now, status: "not_ready", detail: `HTTP ${response.status}` };
+  } catch (error) {
+    convexReadiness = {
+      at: now,
+      status: "not_ready",
+      detail: error instanceof Error ? error.message : "Convex did not answer.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+  return convexReadiness;
+}
 
 async function acquireDocumentMessage(document, socketId) {
   const previous = documentMessageTails.get(document) ?? Promise.resolve();
@@ -851,6 +878,7 @@ const server = new Server({
 
   async onRequest({ request, response }) {
     if (!request.url?.startsWith("/_spectra/health")) return;
+    const convex = await probeConvexReadiness();
     response.writeHead(200, {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
@@ -862,6 +890,7 @@ const server = new Server({
           connections: activeConnections.size,
           lastPersistenceFailure,
           startedAt: GATEWAY_STARTED_AT,
+          convex: { status: convex.status, detail: convex.detail },
         }),
       }),
     );

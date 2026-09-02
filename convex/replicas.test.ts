@@ -607,6 +607,178 @@ describe("replica truth machine", () => {
     ).rejects.toThrow(/WORK_NOT_FOUND/);
   });
 
+  it("lets a modify collaborator queue materialization only onto their own local replica", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const collaboratorIdentity = {
+      subject: "clerk_replica_writer",
+      email: "replica-writer@example.test",
+      emailVerified: true,
+    };
+    const readerIdentity = {
+      subject: "clerk_replica_reader",
+      email: "replica-reader@example.test",
+      emailVerified: true,
+    };
+    const seeded = await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch(fixture.workId, { schoolId: fixture.schoolId });
+      const collaboratorAccountId = await ctx.db.insert("accounts", {
+        clerkId: collaboratorIdentity.subject,
+        email: collaboratorIdentity.email,
+        emailVerified: true,
+        name: "Replica Writer",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const readerAccountId = await ctx.db.insert("accounts", {
+        clerkId: readerIdentity.subject,
+        email: readerIdentity.email,
+        emailVerified: true,
+        name: "Replica Reader",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      for (const accountId of [collaboratorAccountId, readerAccountId]) {
+        await ctx.db.insert("schoolMemberships", {
+          accountId,
+          schoolId: fixture.schoolId,
+          role: "student",
+          status: "active",
+          joinedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      await ctx.db.insert("accessGrants", {
+        schoolId: fixture.schoolId,
+        resourceType: "artifact",
+        resourceId: fixture.workId,
+        principalType: "account",
+        principalId: collaboratorAccountId,
+        level: "modify",
+        capabilities: ["read", "modify", "restore", "use", "comment"],
+        source: "direct",
+        createdByAccountId: fixture.accountId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("accessGrants", {
+        schoolId: fixture.schoolId,
+        resourceType: "artifact",
+        resourceId: fixture.workId,
+        principalType: "account",
+        principalId: readerAccountId,
+        level: "read",
+        capabilities: ["read", "use", "comment"],
+        source: "direct",
+        createdByAccountId: fixture.accountId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const deviceId = await ctx.db.insert("bridgeDevices", {
+        accountId: collaboratorAccountId,
+        name: "Collaborator Bridge",
+        platform: "windows",
+        credentialHash: "c".repeat(64),
+        protocolVersion: "1",
+        appVersion: "1",
+        pairedAt: now,
+        lastSeenAt: now,
+        state: "active",
+      });
+      const mountId = await ctx.db.insert("bridgeMounts", {
+        accountId: collaboratorAccountId,
+        deviceId,
+        rootLabel: "Collab",
+        grantId: "grant_collaborator",
+        state: "active",
+        fileCount: 1,
+        doubleSyncRisk: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const storageId = await ctx.storage.store(new Blob(["collab"]));
+      const payloadId = await ctx.db.insert("payloadObjects", {
+        accountId: collaboratorAccountId,
+        hash: nextHash,
+        storageId,
+        bytes: 6,
+        mediaType: "application/test",
+        refCount: 0,
+        state: "active",
+        createdAt: now,
+        verifiedAt: now,
+      });
+      const localId = await ctx.db.insert("workReplicas", {
+        accountId: collaboratorAccountId,
+        workId: fixture.workId,
+        kind: "local",
+        deviceId,
+        mountId,
+        localResourceId: "resource-collab",
+        relativePath: "Shared.docx",
+        nativeFormat: "docx",
+        payloadRef: String(fixture.basePayloadId),
+        revision: baseHash,
+        baseRevision: baseHash,
+        contentHash: baseHash,
+        state: "current",
+        lastVerifiedAt: now,
+        updatedAt: now,
+      });
+      return { localId, payloadId };
+    });
+
+    const queued = await t
+      .withIdentity(collaboratorIdentity)
+      .mutation(api.replicas.queueMaterialization, {
+        workId: fixture.workId,
+        payloadRef: String(seeded.payloadId),
+        contentHash: nextHash,
+        baseRevision: baseHash,
+        fidelityMap: { entries: [] },
+        regionIds: ["body"],
+        partNames: ["word/document.xml"],
+      });
+    expect(queued.state).toBe("pending");
+
+    await expect(
+      t.withIdentity(collaboratorIdentity).mutation(api.replicas.queueMaterialization, {
+        workId: fixture.workId,
+        payloadRef: String(seeded.payloadId),
+        contentHash: nextHash,
+        baseRevision: baseHash,
+        fidelityMap: { entries: [] },
+        regionIds: ["body"],
+        partNames: ["word/document.xml"],
+        localReplicaId: fixture.localId,
+      }),
+    ).rejects.toThrow(/LOCAL_REPLICA_UNAVAILABLE/);
+
+    await expect(
+      t.withIdentity(readerIdentity).mutation(api.replicas.queueMaterialization, {
+        workId: fixture.workId,
+        payloadRef: String(seeded.payloadId),
+        contentHash: nextHash,
+        baseRevision: baseHash,
+        fidelityMap: { entries: [] },
+        regionIds: ["body"],
+        partNames: ["word/document.xml"],
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+
+    const uploadUrl = await t
+      .withIdentity(collaboratorIdentity)
+      .mutation(api.payloads.issueUpload, {
+        workId: fixture.workId,
+      });
+    expect(typeof uploadUrl).toBe("string");
+    expect(String(uploadUrl).length).toBeGreaterThan(8);
+  });
+
   it("does not keep Syncing after an applied Spectra write", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

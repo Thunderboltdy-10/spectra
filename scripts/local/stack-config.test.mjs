@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS,
   convexEnvFrom,
   derivedInstanceEnv,
   localConvexProjectPackage,
@@ -8,6 +9,7 @@ import {
   portsForInstance,
   upsertEnv,
   validateRequiredEnv,
+  withLocalConvexCliEnv,
 } from "./stack-config.mjs";
 
 describe("local stack instance configuration", () => {
@@ -120,5 +122,15 @@ describe("local stack instance configuration", () => {
       SPECTRA_SECRET_BRIDGE_KEY: "s".repeat(32),
     });
     expect(convexEnvFrom(env)).not.toHaveProperty("CLERK_SECRET_KEY");
+  });
+
+  it("gives the Convex CLI enough time for a large local SQLite to bind", () => {
+    expect(LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS).toBe(900);
+    expect(
+      withLocalConvexCliEnv({ CONVEX_DEPLOYMENT: "local:example" }),
+    ).toMatchObject({
+      CONVEX_DEPLOYMENT: "local:example",
+      CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS: "900",
+    });
   });
 });

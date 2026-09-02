@@ -164,6 +164,20 @@ export async function evaluateAccess(ctx: AuthorityCtx, resourceType: ResourceTy
   return evaluateAccessForActor(ctx, actor, resourceType, resourceId);
 }
 
+/** Replica/payload writes use WORK_NOT_FOUND so existence is not leaked. */
+export async function requireActorArtifactCapability(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  workId: Id<"spectraArtifacts">,
+  capability: Capability,
+) {
+  const access = await evaluateAccessForActor(ctx, actor, "artifact", workId);
+  if (!access.allowed || !access.capabilities.includes(capability)) {
+    throw new Error("WORK_NOT_FOUND");
+  }
+  return access;
+}
+
 export async function requireCapability(ctx: AuthorityCtx, resourceType: ResourceType, resourceId: string, capability: Capability) {
   const decision = await evaluateAccess(ctx, resourceType, resourceId);
   if (!decision.allowed || !decision.capabilities.includes(capability)) throw new Error("AUTH_RESOURCE_FORBIDDEN: You do not have permission for this action.");

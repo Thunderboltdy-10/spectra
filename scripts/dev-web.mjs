@@ -25,8 +25,7 @@ async function probeWeb() {
     if (
       response.ok
       && payload?.service === "spectra-web"
-      && payload?.status === "ready"
-      && payload?.protocolVersion === 1
+      && typeof payload?.protocolVersion === "number"
     ) {
       return { state: "spectra" };
     }

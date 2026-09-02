@@ -5,6 +5,7 @@ import type { PublishedCodeBuildProjection } from "../code/published-build";
 import type { QuizExperience } from "../quiz/experience";
 import type { TimetablePersonalState } from "../timetable/model";
 import { spectraBus } from "../events";
+import { coalesceInFlight } from "@/lib/coalesce-inflight";
 
 export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference" | "resource";
 
@@ -1528,6 +1529,17 @@ const runEventRequests = new Map<
   string,
   { at: number; promise: Promise<{ events: SpectraRunEvent[] }> }
 >();
+const shareInvitationRequests = new Map<
+  string,
+  { at: number; promise: Promise<{ invitations: SpectraShareInvitation[] }> }
+>();
+const threadIndexRequests = new Map<
+  string,
+  { at: number; promise: Promise<{ threads: SpectraThread[] }> }
+>();
+
+export const SPECTRA_THREAD_INDEX_LIMIT = 40;
+const FIRST_PAINT_FETCH_TTL_MS = 1_100;
 
 export function invalidateSpectraRunTabsCache() {
   runTabsRequests.clear();
@@ -1540,23 +1552,29 @@ export async function getSpectraRunTabs(
   if (options.includeHidden) qs.set("includeHidden", "true");
   if (options.limit) qs.set("limit", String(options.limit));
   const key = qs.toString();
-  if (options.force) runTabsRequests.delete(key);
-  const existing = runTabsRequests.get(key);
-  if (existing && Date.now() - existing.at < 1_100) return existing.promise;
-  const promise = fetch(`/api/spectra?${key}`, { cache: "no-store" }).then(
-    (response) => readJson<{ runTabs: SpectraRunTab[] }>(response),
+  return coalesceInFlight(
+    runTabsRequests,
+    key,
+    FIRST_PAINT_FETCH_TTL_MS,
+    () =>
+      fetch(`/api/spectra?${key}`, { cache: "no-store" }).then((response) =>
+        readJson<{ runTabs: SpectraRunTab[] }>(response),
+      ),
+    { force: options.force },
   );
-  runTabsRequests.set(key, { at: Date.now(), promise });
-  void promise.catch(() => {
-    if (runTabsRequests.get(key)?.promise === promise)
-      runTabsRequests.delete(key);
-  });
-  return promise;
 }
 
-export async function getSpectraShareInvitations() {
-  return readJson<{ invitations: SpectraShareInvitation[] }>(
-    await fetch("/api/spectra?action=shareInvitations", { cache: "no-store" }),
+export async function getSpectraShareInvitations(options: { force?: boolean } = {}) {
+  return coalesceInFlight(
+    shareInvitationRequests,
+    "shareInvitations",
+    FIRST_PAINT_FETCH_TTL_MS,
+    () =>
+      fetch("/api/spectra?action=shareInvitations", { cache: "no-store" }).then(
+        (response) =>
+          readJson<{ invitations: SpectraShareInvitation[] }>(response),
+      ),
+    { force: options.force },
   );
 }
 
@@ -2213,12 +2231,21 @@ export async function getSpectraArtifactEmbed(embedId: string) {
 export async function getSpectraThreads(params?: {
   includeArchived?: boolean;
   limit?: number;
+  force?: boolean;
 }) {
   const qs = new URLSearchParams({ action: "threads" });
   if (params?.includeArchived) qs.set("includeArchived", "true");
-  if (params?.limit) qs.set("limit", String(params.limit));
-  return readJson<{ threads: SpectraThread[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  qs.set("limit", String(params?.limit ?? SPECTRA_THREAD_INDEX_LIMIT));
+  const key = qs.toString();
+  return coalesceInFlight(
+    threadIndexRequests,
+    key,
+    FIRST_PAINT_FETCH_TTL_MS,
+    () =>
+      fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }).then(
+        (response) => readJson<{ threads: SpectraThread[] }>(response),
+      ),
+    { force: params?.force },
   );
 }
 

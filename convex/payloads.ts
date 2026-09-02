@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
+import { requireActorArtifactCapability } from "./authorityShared";
 import { assertPayloadWriteAllowed } from "./syncPolicy";
 
 function assertHash(hash: string) {
@@ -15,7 +16,9 @@ async function assertWorkPayloadWriteAllowed(
   const locals = await ctx.db.query("workReplicas")
     .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local"))
     .take(50);
-  const mountIds = [...new Set(locals.flatMap((replica) => replica.mountId ? [replica.mountId] : []))];
+  const mountIds = [...new Set(locals
+    .filter((replica) => replica.accountId === accountId)
+    .flatMap((replica) => replica.mountId ? [replica.mountId] : []))];
   if (!mountIds.length) return assertPayloadWriteAllowed(ctx, accountId, workId);
   for (const mountId of mountIds)
     await assertPayloadWriteAllowed(ctx, accountId, workId, mountId);
@@ -26,8 +29,7 @@ export const put = mutation({
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    const work = await ctx.db.get(args.workId);
-    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
     await assertWorkPayloadWriteAllowed(ctx, actor.accountId, args.workId);
     assertHash(args.hash);
     if (!Number.isSafeInteger(args.bytes) || args.bytes < 0) throw new Error("PAYLOAD_BYTES_INVALID");
@@ -83,8 +85,7 @@ export const issueUpload = mutation({
   handler: async (ctx, { workId }) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    const work = await ctx.db.get(workId);
-    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    await requireActorArtifactCapability(ctx, actor, workId, "modify");
     await assertWorkPayloadWriteAllowed(ctx, actor.accountId, workId);
     return ctx.storage.generateUploadUrl();
   },

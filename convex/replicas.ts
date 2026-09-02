@@ -9,7 +9,7 @@ import {
   activeReplicaWriteTarget,
   latestActiveWriteForReplica,
 } from "./bridgeIdentity";
-import { bumpPolicyVersion, evaluateAccessForActor } from "./authorityShared";
+import { bumpPolicyVersion, evaluateAccessForActor, requireActorArtifactCapability } from "./authorityShared";
 import { computeEffectivePolicy } from "./syncPolicy";
 import { POLICY_PRESETS, type SyncPolicyPreset } from "../shared/sync-policy";
 import { planStorageStrategyTransition } from "../shared/storage-strategy";
@@ -711,15 +711,17 @@ export const queueMaterialization = mutation({
       projectionTextIndex: z.string().max(200_000).optional(),
       promotionMode: z.enum(["verified-first", "immediate-projection"]).optional(),
     }).parse(args);
+    await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
     const work = await ctx.db.get(args.workId);
-    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    if (!work) throw new Error("WORK_NOT_FOUND");
     const payloadId = ctx.db.normalizeId("payloadObjects", input.payloadRef);
     const payload = payloadId ? await ctx.db.get(payloadId) : null;
     if (!payload || payload.accountId !== actor.accountId || payload.hash !== input.contentHash || payload.state !== "active")
       throw new Error("MATERIALIZATION_PAYLOAD_INVALID");
-    const locals = await ctx.db.query("workReplicas")
+    const locals = (await ctx.db.query("workReplicas")
       .withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local"))
-      .take(20);
+      .take(20))
+      .filter((candidate) => candidate.accountId === actor.accountId);
     const local = args.localReplicaId
       ? locals.find((candidate) => candidate._id === args.localReplicaId)
       : locals.filter((candidate) => candidate.state !== "unavailable").sort((left, right) => right.updatedAt - left.updatedAt)[0];

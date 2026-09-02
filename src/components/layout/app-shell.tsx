@@ -289,7 +289,7 @@ function ShellNavigation() {
   useEffect(() => {
     let active = true;
     const refresh = () => {
-      void getSpectraThreads({ limit: 40 })
+      void getSpectraThreads()
         .then(({ threads: rows }) => {
           if (active)
             setThreads(rows.filter((thread) => thread.status === "active"));

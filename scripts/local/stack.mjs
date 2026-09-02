@@ -6,6 +6,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   INSTANCE_SCHEMA_VERSION,
+  LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS,
   convexEnvFrom,
   derivedInstanceEnv,
   localConvexProjectPackage,
@@ -15,10 +16,19 @@ import {
   serializeEnv,
   upsertEnv,
   validateRequiredEnv,
+  withLocalConvexCliEnv,
 } from "./stack-config.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "..", "..");
+const nextCli = resolve(
+  repositoryRoot,
+  "node_modules",
+  "next",
+  "dist",
+  "bin",
+  "next",
+);
 const convexCli = resolve(
   repositoryRoot,
   "node_modules",
@@ -27,6 +37,8 @@ const convexCli = resolve(
   "main.js",
 );
 const defaultRuntimeRoot = resolve(repositoryRoot, ".spectra-local");
+const LOCAL_CONVEX_READY_TIMEOUT_MS =
+  LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS * 1000;
 
 function parseArguments(argv) {
   const result = { command: argv[0] ?? "start", values: {}, flags: new Set() };
@@ -292,9 +304,9 @@ function spawnService(label, command, args, { cwd, env }) {
   return child;
 }
 
-async function fetchText(url) {
+async function fetchText(url, timeoutMs = 1_500) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1_500);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       signal: controller.signal,
@@ -405,14 +417,14 @@ async function configureAndSyncConvex(paths, ports, appEnv) {
       "This instance needs its one-time local Convex selection. Follow the Convex prompt if team/project were not set in env.local.\n",
     );
   }
-  const childEnv = { ...process.env, ...appEnv };
+  const childEnv = withLocalConvexCliEnv({ ...process.env, ...appEnv });
   if (firstConfiguration) {
     delete childEnv.CONVEX_DEPLOYMENT;
     delete childEnv.CONVEX_SELF_HOSTED_URL;
     delete childEnv.CONVEX_SELF_HOSTED_ADMIN_KEY;
   }
-  const bootstrap = spawnService(
-    "Convex bootstrap",
+  const convex = spawnService(
+    "Convex",
     process.execPath,
     [convexCli, ...convexArguments(ports, appEnv, firstConfiguration)],
     { cwd: paths.projectRoot, env: childEnv },
@@ -428,7 +440,7 @@ async function configureAndSyncConvex(paths, ports, appEnv) {
           ),
         );
       },
-      { timeoutMs: 15 * 60_000, child: bootstrap },
+      { timeoutMs: LOCAL_CONVEX_READY_TIMEOUT_MS, child: convex },
     );
     const deploymentName = await readConvexConfiguration(paths, ports);
     const currentAppEnv = parseEnv(await readFile(paths.appEnv, "utf8"));
@@ -442,13 +454,14 @@ async function configureAndSyncConvex(paths, ports, appEnv) {
       [convexCli, "env", "set", "--force", "--from-file", paths.convexEnv],
       {
         cwd: paths.projectRoot,
-        env: { ...process.env, ...currentAppEnv },
+        env: withLocalConvexCliEnv({ ...process.env, ...currentAppEnv }),
         label: "Convex environment synchronization",
       },
     );
-    return deploymentName;
-  } finally {
-    await stopChild(bootstrap);
+    return { deploymentName, child: convex };
+  } catch (error) {
+    await stopChild(convex);
+    throw error;
   }
 }
 
@@ -483,6 +496,18 @@ async function startInstance(instanceId, options, environment) {
       "Convex CLI is missing. Run npm install before starting a local instance.",
     );
   }
+  const mode = String(options.values.mode ?? "development").trim();
+  if (mode !== "development" && mode !== "production") {
+    throw new Error('Local stack --mode must be "development" or "production".');
+  }
+  if (mode === "production") {
+    const buildId = resolve(repositoryRoot, ".next", "BUILD_ID");
+    if (!existsSync(buildId)) {
+      throw new Error(
+        "Production mode needs a build. Run npm run local:build -- --instance <id> first, so the client inlines the local Convex URL.",
+      );
+    }
+  }
   const { paths, ports } = await ensureInstance(
     instanceId,
     options,
@@ -504,13 +529,17 @@ async function startInstance(instanceId, options, environment) {
   }
   await assertPortsFree(ports);
 
-  const deploymentName = await configureAndSyncConvex(paths, ports, appEnv);
-  await assertPortsFree(ports);
-  const finalEnv = {
+  const { deploymentName, child: convex } = await configureAndSyncConvex(
+    paths,
+    ports,
+    appEnv,
+  );
+  const finalEnv = withLocalConvexCliEnv({
     ...process.env,
     ...parseEnv(await readFile(paths.appEnv, "utf8")),
-  };
-  const children = [];
+    NODE_ENV: mode === "production" ? "production" : process.env.NODE_ENV,
+  });
+  const children = [convex];
   let shuttingDown = false;
   let shutdownPromise = null;
 
@@ -532,20 +561,13 @@ async function startInstance(instanceId, options, environment) {
   );
 
   try {
-    const convex = spawnService(
-      "Convex",
-      process.execPath,
-      [convexCli, ...convexArguments(ports, finalEnv, false)],
-      { cwd: paths.projectRoot, env: finalEnv },
-    );
-    children.push(convex);
     await waitFor(
       "local Convex backend",
       async () =>
         (await fetchText(
           `http://127.0.0.1:${ports.convexCloud}/instance_name`,
         )) === deploymentName,
-      { timeoutMs: 120_000, child: convex },
+      { timeoutMs: LOCAL_CONVEX_READY_TIMEOUT_MS, child: convex },
     );
 
     const collaboration = spawnService(
@@ -557,7 +579,13 @@ async function startInstance(instanceId, options, environment) {
     const web = spawnService(
       "Next.js",
       process.execPath,
-      [resolve(repositoryRoot, "scripts", "dev-web.mjs")],
+      [
+        resolve(
+          repositoryRoot,
+          "scripts",
+          mode === "production" ? "start-web.mjs" : "dev-web.mjs",
+        ),
+      ],
       { cwd: repositoryRoot, env: finalEnv },
     );
     children.push(collaboration, web);
@@ -602,7 +630,11 @@ async function startInstance(instanceId, options, environment) {
           );
           if (!text) return false;
           try {
-            return JSON.parse(text).service === "spectra-collaboration-gateway";
+            const body = JSON.parse(text);
+            return (
+              body.service === "spectra-collaboration-gateway" &&
+              body.status === "ready"
+            );
           } catch {
             return false;
           }
@@ -614,10 +646,12 @@ async function startInstance(instanceId, options, environment) {
         async () => {
           const text = await fetchText(
           `http://localhost:${ports.web}/api/health`,
+          4_000,
           );
           if (!text) return false;
           try {
-            return JSON.parse(text).service === "spectra-web";
+            const body = JSON.parse(text);
+            return body.service === "spectra-web" && body.status === "ready";
           } catch {
             return false;
           }
@@ -631,7 +665,7 @@ async function startInstance(instanceId, options, environment) {
   }
 
   process.stdout.write(
-    `\nSpectra local instance ${instanceId} is ready.\n` +
+    `\nSpectra local instance ${instanceId} is ready (${mode}).\n` +
       `  App:       http://localhost:${ports.web}\n` +
       `  Convex:    http://127.0.0.1:${ports.convexCloud}\n` +
       `  Dashboard: http://127.0.0.1:${ports.convexCloud}/_system/frontend\n` +
@@ -678,6 +712,35 @@ async function resetInstance(instanceId, options, environment) {
   );
 }
 
+async function buildInstance(instanceId, options, environment) {
+  if (!existsSync(nextCli)) {
+    throw new Error(
+      "Next.js is missing. Run npm install before building a local instance.",
+    );
+  }
+  const { paths } = await ensureInstance(instanceId, options, environment);
+  if (!existsSync(paths.appEnv)) {
+    throw new Error(
+      `Instance ${instanceId} is not configured. Add it and fill ${paths.appEnv} first.`,
+    );
+  }
+  const appEnv = parseEnv(await readFile(paths.appEnv, "utf8"));
+  const problems = validateRequiredEnv(appEnv);
+  if (problems.length > 0) {
+    throw new Error(
+      `Instance ${instanceId} cannot build. Fill ${paths.appEnv}:\n- ${problems.join("\n- ")}`,
+    );
+  }
+  process.stdout.write(
+    `Building the production app for local instance ${instanceId} (${appEnv.NEXT_PUBLIC_CONVEX_URL}).\n`,
+  );
+  await runProcess(process.execPath, [nextCli, "build"], {
+    cwd: repositoryRoot,
+    env: { ...process.env, ...appEnv, NODE_ENV: "production" },
+    label: "Next.js production build",
+  });
+}
+
 async function statusInstance(instanceId, environment) {
   const paths = instancePaths(instanceId, environment);
   const manifest = await loadManifest(paths);
@@ -702,6 +765,8 @@ async function main() {
   const options = parseArguments(process.argv.slice(2));
   const instanceId = normalizeInstanceId(options.values.instance ?? "1");
   switch (options.command) {
+    case "build":
+      return buildInstance(instanceId, options, process.env);
     case "add-instance":
       return addInstance(instanceId, options, process.env);
     case "start":
@@ -714,7 +779,7 @@ async function main() {
       return statusInstance(instanceId, process.env);
     default:
       throw new Error(
-        `Unknown local stack command "${options.command}". Use start, stop, reset, add-instance, or status.`,
+        `Unknown local stack command "${options.command}". Use start, stop, reset, add-instance, build, or status.`,
       );
   }
 }

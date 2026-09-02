@@ -22,7 +22,7 @@ async function probeGateway() {
     if (!response.ok) return { state: "foreign", detail: `HTTP ${response.status}` };
     try {
       const payload = JSON.parse(body);
-      if (payload?.service === "spectra-collaboration-gateway" && (payload?.status === "ready" || payload?.status === "degraded")) {
+      if (payload?.service === "spectra-collaboration-gateway" && (payload?.status === "ready" || payload?.status === "degraded" || payload?.status === "not_ready")) {
         return { state: "spectra", detail: `protocol ${payload.protocolVersion ?? "unknown"}` };
       }
     } catch {

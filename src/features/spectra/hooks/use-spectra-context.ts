@@ -237,7 +237,7 @@ export function useSpectraContext(
 
   useEffect(() => {
     let disposed = false;
-    void getSpectraThreads({ limit: 200 })
+    void getSpectraThreads()
       .then((value) => {
         if (!disposed) {
           setThreads(value.threads);
@@ -246,7 +246,7 @@ export function useSpectraContext(
       })
       .catch(() => undefined);
     const refresh = () =>
-      void getSpectraThreads({ limit: 200 })
+      void getSpectraThreads()
         .then((value) => {
           if (!disposed) {
             setThreads(value.threads);

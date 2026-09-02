@@ -12,6 +12,7 @@ import { readInteractionState } from "./interaction-model";
 import { resolveDocumentRelativeSelection } from "../work/models/yjs/relative-position";
 import { ScopedCollaborationSnapshots } from "./scoped-snapshots";
 import { COLLAB_RECONNECT } from "./reconnect-backoff";
+import { coalesceInFlight } from "@/lib/coalesce-inflight";
 
 function authenticationActuallyRevoked(reason?: string) {
   const value = (reason ?? "").toUpperCase();
@@ -185,7 +186,21 @@ function clientIdentity(artifactId: string) {
   return value;
 }
 
-async function session(
+const collaborationSessionRequests = new Map<
+  string,
+  { at: number; promise: Promise<SessionResponse> }
+>();
+
+export function collaborationSessionRequestKey(
+  artifactId: string,
+  partitionKey: string,
+  clientId: string,
+  schemaVersion: number,
+) {
+  return `${artifactId}:${partitionKey}:${clientId}:${schemaVersion}`;
+}
+
+async function fetchCollaborationSession(
   artifactId: string,
   partitionKey: string,
   clientId: string,
@@ -215,6 +230,31 @@ async function session(
     throw new Error(error || "Could not start collaboration.");
   }
   return payload;
+}
+
+async function session(
+  artifactId: string,
+  partitionKey: string,
+  clientId: string,
+  schemaVersion: number,
+) {
+  return coalesceInFlight(
+    collaborationSessionRequests,
+    collaborationSessionRequestKey(
+      artifactId,
+      partitionKey,
+      clientId,
+      schemaVersion,
+    ),
+    1_100,
+    () =>
+      fetchCollaborationSession(
+        artifactId,
+        partitionKey,
+        clientId,
+        schemaVersion,
+      ),
+  );
 }
 
 export class HocuspocusArtifactTransport implements ArtifactCollaborationTransport {

@@ -173,6 +173,20 @@ Run realistic density (10k-node Library, large artifacts, long names, multiple a
 
 Run full Vitest, typecheck, production build, lint zero-warning, architecture/copy/capability/token/secrets, all fidelity harnesses, and browser smoke on the built app. LOCAL and holdable SYSTEMIC failures are repaired class-wide and the affected matrix reruns. PASS closes P6 mechanically.
 
+### P6.V1 verification log — 2026-09-02
+
+- Verdict: **REJECTED**; P6 remains open because the zero-warning gate is red.
+- TRIAGE · SYSTEMIC: dual read/write auth helpers leaked query contexts into write helpers. `placeAcceptedShare` and `drainArtifactCollaboration` now require `MutationCtx`; root typecheck passes.
+- TRIAGE · LOCAL: P6.UI2 named derived sidebar geometry separately from the source-level contract. State now distinguishes the stored preference while `sidebarCollapsed` again names effective geometry; behavior is unchanged and the unweakened workbench test passes.
+- TRIAGE · SYSTEMIC UX-14/DS-2: global consent sat below the composer and hand-rolled its modal. Banner and shared Radix Dialog now use `z-toast`; dialog role/name, trap, Escape, and focus return passed in the built app.
+- TRIAGE · SYSTEMIC shared Button: Tailwind merging dropped semantic foreground classes beside `text-caption`, rendering every shared primary black-on-black. Token-backed arbitrary properties preserve foreground across all variants; component regression and built computed colours pass.
+- Before/after: `.shots/reformation/P6.V1/00`–`08`; final `08` retains Spectra spacing/type/components and restores primary contrast. The 1024px reduced-motion/200% view has no horizontal overflow.
+- Gates green: Vitest 165/1,552; `tsc`; production build; architecture/copy/capability/secrets/diff; seam 13/13; Office 32 plus 200k-cell/120-slide performance; DOCX 16 fixtures/177 assertions.
+- Gate red: `npm run lint` exits 1 — 1,960 warnings across 102 product files. Narrow ignores cover generated `.playwright-cli`, `.shots`, and `.spectra-local` only; no product rule was disabled.
+- The remaining DS-1/DS-2/DS-3 class spans multiple independent studios and admin shells, so R17 requires a fresh implementation packet rather than a partial verifier burn-down.
+- Local Convex `127.0.0.1:3002` failed both 30s and 120s startup windows; the built failure/retry card was honest, but account A/B, 10k density, live workbars, and request budgets remain for the verifier rerun.
+- Evidence manifest: `.shots/reformation/P6.V1/manifest.md`. No acceptance claimed.
+
 ## Exit gate
 
 Token and lint rules cover all product source; a11y checks green; V1 PASS with zero launch-blocking SYSTEMIC findings open; verifier closes P6 without requesting owner acceptance.

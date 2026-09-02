@@ -2,7 +2,7 @@ import { query } from "./_generated/server";
 import { mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { QueryCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import {
   bumpPolicyVersion,
   capabilitiesForLevel,
@@ -278,7 +278,7 @@ export const listIncomingInvitations = query({
 });
 
 async function placeAcceptedShare(
-  ctx: Parameters<typeof getAuthenticatedActor>[0],
+  ctx: MutationCtx,
   actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
   resourceType: "workspace" | "artifact" | "agent",
   resourceId: string,

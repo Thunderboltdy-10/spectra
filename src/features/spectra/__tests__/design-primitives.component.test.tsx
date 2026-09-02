@@ -154,6 +154,8 @@ describe("Button", () => {
     const className = screen.getByRole("button", { name: "Create" }).className;
     expect(className).toContain("focus-visible:ring-2");
     expect(className).toContain("hover:-translate-y-px");
+    expect(className.split(/\s+/)).toContain("[color:var(--bg-primary)]");
+    expect(className.split(/\s+/)).toContain("text-caption");
   });
 });
 

@@ -3,6 +3,7 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import {
   normalizeArtifactId,
   requireArtifactCapability,
@@ -653,7 +654,7 @@ export const restore = mutation({
 const COLLAB_DRAIN_PAGE = 100;
 
 async function drainArtifactCollaboration(
-  ctx: Parameters<typeof requireSpectraActor>[0],
+  ctx: MutationCtx,
   artifactId: Id<"spectraArtifacts">,
 ) {
   for (;;) {

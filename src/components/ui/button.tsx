@@ -37,14 +37,14 @@ const buttonVariants = cva(
       variant: {
         /** The one primary. 15.7:1 against its own fill. */
         primary:
-          "border border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90 disabled:border-transparent disabled:bg-[color-mix(in_oklab,var(--text-primary)_72%,var(--bg-elevated))] disabled:text-[var(--bg-primary)]",
+          "border border-[var(--text-primary)] bg-[var(--text-primary)] [color:var(--bg-primary)] hover:opacity-90 disabled:border-transparent disabled:bg-[color-mix(in_oklab,var(--text-primary)_72%,var(--bg-elevated))] disabled:[color:var(--bg-primary)]",
         secondary:
-          "border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] disabled:opacity-45",
+          "border border-[var(--border-default)] bg-[var(--bg-elevated)] [color:var(--text-primary)] hover:bg-[var(--bg-secondary)] disabled:opacity-45",
         ghost:
-          "border border-transparent bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45",
+          "border border-transparent bg-transparent [color:var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:[color:var(--text-primary)] disabled:opacity-45",
         /** Destructive confirmation only. Rose stays a local discontinuity. */
         destructive:
-          "border border-[color-mix(in_oklab,var(--danger)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--danger)_80%,var(--text-primary))] hover:bg-[color-mix(in_oklab,var(--danger)_16%,var(--bg-secondary))] disabled:opacity-45",
+          "border border-[color-mix(in_oklab,var(--danger)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] [color:color-mix(in_oklab,var(--danger)_80%,var(--text-primary))] hover:bg-[color-mix(in_oklab,var(--danger)_16%,var(--bg-secondary))] disabled:opacity-45",
       },
       size: {
         sm: "min-h-8 px-2.5 text-micro",

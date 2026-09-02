@@ -14,6 +14,10 @@ import { LAYERS, LAYER_CLASS } from "@/components/ui/layers";
 
 const TOKENS_PATH = join(process.cwd(), "src/styles/spectra-tokens.css");
 const APP_CSS_PATH = join(process.cwd(), "src/styles/spectra-app.css");
+const COOKIE_CONSENT_PATH = join(
+  process.cwd(),
+  "src/components/cookie-consent-manager.tsx",
+);
 
 const EXPECTED: Array<[string, number]> = [
   ["base", 0],
@@ -50,6 +54,16 @@ describe("layering contract", () => {
     for (let index = 1; index < values.length; index += 1) {
       expect(values[index]).toBeGreaterThan(values[index - 1]!);
     }
+  });
+
+  it("keeps global consent decisions above the composer dock", () => {
+    const consentSource = readFileSync(COOKIE_CONSENT_PATH, "utf8");
+    expect(consentSource).toContain("bottom-4 z-toast");
+    expect(consentSource).toContain('layer="toast"');
+    expect(consentSource).toContain("<Dialog open={settingsOpen}");
+    expect(consentSource).toContain("<DialogTrigger asChild>");
+    expect(consentSource).not.toMatch(/z-(?:chrome|modal)/);
+    expect(consentSource).not.toContain('className="fixed inset-0');
   });
 });
 

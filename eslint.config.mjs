@@ -58,6 +58,12 @@ const eslintConfig = defineConfig([
     "workers/**",
     ".tmp-*/**",
     "bridge/target/**",
+    // Generated browser scripts, immutable verification evidence, and local
+    // runtime state are not product source. P6 keeps their exclusion narrow;
+    // all src/ design and correctness rules remain enabled.
+    ".playwright-cli/**",
+    ".shots/**",
+    ".spectra-local/**",
   ]),
 ]);
 

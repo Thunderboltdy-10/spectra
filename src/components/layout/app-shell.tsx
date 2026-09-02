@@ -151,7 +151,8 @@ function ShellNavigation() {
   const [, setWorkspacesUnavailable] = useState(false);
   const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [sidebarSearch, setSidebarSearch] = useState("");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [preferredSidebarCollapsed, setPreferredSidebarCollapsed] =
+    useState(false);
   /* The workbench can ask chrome to rail the sidebar while open panels need
      the room (`shell.sidebarCrowd`). Auto-rail is presentational only: the
      stored preference is never rewritten, an explicit toggle during a
@@ -167,8 +168,8 @@ function ShellNavigation() {
       }),
     [],
   );
-  const effectiveSidebarCollapsed =
-    sidebarCollapsed || (sidebarCrowded && !crowdOverride);
+  const sidebarCollapsed =
+    preferredSidebarCollapsed || (sidebarCrowded && !crowdOverride);
   const [mobileWorkspaceOpen, setMobileWorkspaceOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
@@ -204,30 +205,30 @@ function ShellNavigation() {
 
   useLayoutEffect(() => {
     const stored = window.localStorage.getItem("spectra:sidebar-collapsed");
-    setSidebarCollapsed(stored === "true");
+    setPreferredSidebarCollapsed(stored === "true");
   }, []);
 
   /* The dataset mirrors the *effective* geometry so the pre-hydration CSS in
      spectra-field.css and the live tree never disagree, whether the rail came
      from the user's preference or from a crowded workbench. */
   useEffect(() => {
-    if (effectiveSidebarCollapsed)
+    if (sidebarCollapsed)
       document.documentElement.dataset.spectraSidebarCollapsed = "true";
     else delete document.documentElement.dataset.spectraSidebarCollapsed;
-  }, [effectiveSidebarCollapsed]);
+  }, [sidebarCollapsed]);
 
   const toggleSidebar = useCallback(() => {
     // The toggle steers the geometry the user is looking at; during a
     // crowded episode that explicit choice wins over the auto-rail.
-    const next = !effectiveSidebarCollapsed;
-    setSidebarCollapsed(next);
+    const next = !sidebarCollapsed;
+    setPreferredSidebarCollapsed(next);
     window.localStorage.setItem("spectra:sidebar-collapsed", String(next));
     spectraBus.emit("shell.sidebarLayout", { collapsed: next });
     if (sidebarCrowded) setCrowdOverride(true);
-  }, [effectiveSidebarCollapsed, sidebarCrowded]);
+  }, [sidebarCollapsed, sidebarCrowded]);
 
   const focusSidebarSearch = useCallback(() => {
-    setSidebarCollapsed(false);
+    setPreferredSidebarCollapsed(false);
     window.localStorage.setItem("spectra:sidebar-collapsed", "false");
     if (sidebarCrowded) setCrowdOverride(true);
     spectraBus.emit("shell.sidebarLayout", { collapsed: false });
@@ -512,16 +513,16 @@ function ShellNavigation() {
 
   useLayoutEffect(() => {
     snapRailMarkerToActive();
-  }, [activeCoreHref, effectiveSidebarCollapsed, snapRailMarkerToActive]);
+  }, [activeCoreHref, sidebarCollapsed, snapRailMarkerToActive]);
 
   return (
     <>
       <aside
         aria-label="Spectra navigation"
-        data-collapsed={effectiveSidebarCollapsed}
+        data-collapsed={sidebarCollapsed}
         className={cn(
           "spectra-shell-sidebar fixed inset-y-0 left-0 z-chrome hidden flex-col overflow-hidden border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] transition-[width] duration-200 md:flex",
-          effectiveSidebarCollapsed ? "w-[76px]" : "w-[240px]",
+          sidebarCollapsed ? "w-[76px]" : "w-[240px]",
         )}
       >
         <div className="mt-3 flex h-8 shrink-0 items-center gap-1 px-2">
@@ -529,12 +530,12 @@ function ShellNavigation() {
             type="button"
             onClick={toggleSidebar}
             aria-label={
-              effectiveSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+              sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
             }
-            title={effectiveSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             className="grid size-8 shrink-0 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
-            {effectiveSidebarCollapsed ? (
+            {sidebarCollapsed ? (
               <PanelLeftOpen size={14} />
             ) : (
               <PanelLeftClose size={14} />
@@ -550,7 +551,7 @@ function ShellNavigation() {
               data-sidebar-expanded=""
               className={cn(
                 "font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513] transition-opacity",
-                effectiveSidebarCollapsed && "pointer-events-none opacity-0",
+                sidebarCollapsed && "pointer-events-none opacity-0",
               )}
             >
               spectra
@@ -561,7 +562,7 @@ function ShellNavigation() {
           data-sidebar-expanded=""
           className={cn(
             "relative mx-3 mt-2.5 block",
-            effectiveSidebarCollapsed &&
+            sidebarCollapsed &&
               "pointer-events-none h-0 overflow-hidden opacity-0",
           )}
         >
@@ -610,7 +611,7 @@ function ShellNavigation() {
                 onMouseEnter={(event) => placeRailMarker(event.currentTarget)}
                 aria-current={active ? "page" : undefined}
                 title={
-                  effectiveSidebarCollapsed
+                  sidebarCollapsed
                     ? label === "Home"
                       ? "Workspace"
                       : label
@@ -618,7 +619,7 @@ function ShellNavigation() {
                 }
                 className={cn(
                   "relative flex h-9 items-center gap-2.5 rounded-[6px] text-[13px] font-medium transition-colors",
-                  effectiveSidebarCollapsed ? "justify-center px-0" : "px-2.5",
+                  sidebarCollapsed ? "justify-center px-0" : "px-2.5",
                   active
                     ? "bg-[#eeece9] text-[#171513]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -627,7 +628,7 @@ function ShellNavigation() {
                 <Icon size={15} strokeWidth={active ? 2.05 : 1.65} />
                 <span
                   data-sidebar-expanded=""
-                  className={cn(effectiveSidebarCollapsed && "sr-only")}
+                  className={cn(sidebarCollapsed && "sr-only")}
                 >
                   {label === "Home" ? "Workspace" : label}
                 </span>
@@ -639,13 +640,13 @@ function ShellNavigation() {
           href="/chat"
           className={cn(
             "mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-[7px] bg-[var(--brand-primary)] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.16)] transition hover:brightness-95",
-            effectiveSidebarCollapsed && "mx-auto w-10",
+            sidebarCollapsed && "mx-auto w-10",
           )}
         >
           <Plus size={15} />{" "}
           <span
             data-sidebar-expanded=""
-            className={cn(effectiveSidebarCollapsed && "sr-only")}
+            className={cn(sidebarCollapsed && "sr-only")}
           >
             New chat
           </span>
@@ -653,11 +654,11 @@ function ShellNavigation() {
         <div
           className={cn(
             "spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto pb-3",
-            effectiveSidebarCollapsed ? "px-2" : "px-3",
+            sidebarCollapsed ? "px-2" : "px-3",
           )}
           data-sidebar-recents=""
         >
-          {effectiveSidebarCollapsed
+          {sidebarCollapsed
             ? null
             : ([true, false] as const).map((pinned) => {
                 const term = sidebarSearch.trim().toLowerCase();
@@ -699,13 +700,13 @@ function ShellNavigation() {
         <div
           className={cn(
             "relative mt-auto shrink-0 border-t border-[var(--border-subtle)] py-2",
-            effectiveSidebarCollapsed ? "px-2" : "px-3",
+            sidebarCollapsed ? "px-2" : "px-3",
           )}
         >
           <div
             className={cn(
               "flex items-center justify-between",
-              effectiveSidebarCollapsed && "flex-col justify-center gap-1",
+              sidebarCollapsed && "flex-col justify-center gap-1",
             )}
           >
             <button
@@ -748,7 +749,7 @@ function ShellNavigation() {
               onClick={() => openUserProfile()}
               className={cn(
                 "mt-2 flex w-full items-center gap-2 rounded-[7px] px-1 py-1 text-left hover:bg-[var(--bg-secondary)]",
-                effectiveSidebarCollapsed && "justify-center",
+                sidebarCollapsed && "justify-center",
               )}
               aria-label="Manage account"
             >
@@ -772,7 +773,7 @@ function ShellNavigation() {
               </span>
               <span
                 data-sidebar-expanded=""
-                className={cn("min-w-0 flex-1", effectiveSidebarCollapsed && "sr-only")}
+                className={cn("min-w-0 flex-1", sidebarCollapsed && "sr-only")}
               >
                 <strong className="block truncate text-micro font-semibold text-[var(--text-primary)]">
                   {administrationIdentity.account.name}

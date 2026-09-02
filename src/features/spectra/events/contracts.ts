@@ -71,6 +71,10 @@ export type SpectraEvents = {
   "notifications.changed": Record<string, never>;
   "workspaces.changed": Record<string, never>;
   "shell.sidebarLayout": { collapsed: boolean };
+  /* The workbench row asking chrome to rail the sidebar because open panels
+     do not fit beside the expanded sidebar (presentational; never writes the
+     stored preference). */
+  "shell.sidebarCrowd": { crowded: boolean };
   "shell.focusSidebarSearch": Record<string, never>;
   "work.updated": { workId: string; origin: "human" | "ai" | "system" };
   "run.requiredInput": {

@@ -4106,11 +4106,14 @@ body {
   --bg-code-editor: #2a2a3c;
   --text-code-editor: #cdd6f4;
 
-  /* Text */
+  /* Text — the quiet end of the scale is shifted one step darker so every
+     tier clears WCAG AA on every paper surface (DS-4): secondary 5.6:1,
+     tertiary 4.7:1, placeholder equals tertiary. The hierarchy ratio is
+     preserved; only the absolute lightness moved. */
   --text-primary: #211f1c;
-  --text-secondary: #716d67;
-  --text-tertiary: #9b9690;
-  --text-placeholder: #aaa59e;
+  --text-secondary: #65615b;
+  --text-tertiary: #716d67;
+  --text-placeholder: #716d67;
   --text-inverse: #f8fafc;
 
   /* Borders */
@@ -4362,8 +4365,10 @@ body {
 
   --text-primary: #eeebe7;
   --text-secondary: #b5afa8;
-  --text-tertiary: #817b74;
-  --text-placeholder: #817b74;
+  /* Tertiary/placeholder lifted to clear AA on the darkest surfaces
+     (DS-4): 5.6:1 on bg-primary, 5.0:1 on elevated. */
+  --text-tertiary: #928c85;
+  --text-placeholder: #928c85;
   --text-inverse: #1a1816;
 
   --border-default: #33312e;

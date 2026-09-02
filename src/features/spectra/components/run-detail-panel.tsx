@@ -28,6 +28,7 @@ import {
   type SpectraThreadDetail,
 } from "../data/api";
 import type { ResultCardStreamView } from "../ai/stream-events";
+import { deriveLiveDockTab, liveDockStateCopy } from "../runs/live-dock";
 import { IconAction } from "./card-system";
 
 function legacyRunDetail(detail: SpectraRunDetail): SpectraThreadDetail {
@@ -87,6 +88,9 @@ export function RunDetailPanel({
   onAction,
   onUseThread,
   onSaved,
+  overlay,
+  width: controlledWidth,
+  onWidthChange,
 }: {
   runId: string;
   card?: ResultCardStreamView;
@@ -98,11 +102,18 @@ export function RunDetailPanel({
   ) => void;
   onUseThread?: (threadId: string, title: string) => void;
   onSaved?: (threadId: string) => void;
+  /** Workbench-row controlled presentation (`resolveWorkbenchPanes`). */
+  overlay?: boolean;
+  /** Workbench-row allocated width (`allocateWorkbenchPanes`). */
+  width?: number;
+  onWidthChange?: (width: number) => void;
 }) {
   const router = useRouter();
   const [detail, setDetail] = useState<SpectraRunDetail | null>(null);
   const [busy, setBusy] = useState<"keep" | "continue" | null>(null);
-  const [width, setWidth] = useState(680);
+  const [internalWidth, setInternalWidth] = useState(680);
+  const width = controlledWidth ?? internalWidth;
+  const setWidth = onWidthChange ?? setInternalWidth;
   useEffect(() => {
     let active = true;
     void getSpectraRunDetail(runId)
@@ -139,6 +150,17 @@ export function RunDetailPanel({
           updatedAt: persistedCard.updatedAt,
         }
       : undefined);
+  /* The header speaks the dock's one run vocabulary (CANON R13) — never a
+     raw status enum with the underscores stripped. */
+  const runTruth = useMemo(() => {
+    if (!detail) return null;
+    return deriveLiveDockTab({
+      runId: detail.run._id,
+      threadId: detail.run.threadId ?? "",
+      run: detail.run,
+      card: displayCard ?? null,
+    });
+  }, [detail, displayCard]);
 
   async function keep(
     placeInWorkspace: boolean,
@@ -187,11 +209,15 @@ export function RunDetailPanel({
       onWidthChange={setWidth}
       ariaLabel="Thread panel"
       cssWidthVariable="--spectra-run-panel-width"
+      overlay={overlay}
     >
-      <div className="flex h-full min-h-0 flex-col">
+      {/* The floating composer band spans the full row width, including under
+          this panel — the clearance keeps the conversation and the action
+          footer above it. */}
+      <div className="spectra-composer-clearance flex h-full min-h-0 flex-col">
         <header className="flex min-h-16 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] text-[#8b6ff0]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--brand-primary)]">
               <MessageSquare className="h-4 w-4" />
             </span>
             <div className="min-w-0">
@@ -199,7 +225,7 @@ export function RunDetailPanel({
                 {conversation?.thread.title ?? "Conversation"}
               </div>
               <div className="text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
-                Thread · {displayCard?.status.replaceAll("_", " ") ?? "loading"}
+                Thread · {runTruth ? liveDockStateCopy[runTruth.state] : "Loading"}
               </div>
             </div>
           </div>

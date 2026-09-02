@@ -322,7 +322,7 @@ export function ArtifactCommentsPanel({
 
   if (!open) return null;
   return (
-    <div className="absolute inset-0 z-[70] flex justify-end bg-[color-mix(in_oklab,var(--text-primary)_12%,transparent)] backdrop-blur-[1px]" onPointerDown={onClose}>
+    <div className="absolute inset-0 z-panel flex justify-end bg-[color-mix(in_oklab,var(--text-primary)_12%,transparent)] backdrop-blur-[1px]" onPointerDown={onClose}>
       <aside role="dialog" aria-modal="true" aria-labelledby="artifact-comments-title" className="flex h-full w-full max-w-[410px] flex-col border-l border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[-20px_0_60px_rgba(27,20,12,0.12)]" onPointerDown={(event) => event.stopPropagation()}>
         <header className="flex shrink-0 items-start justify-between border-b border-[var(--border-default)] px-4 py-4">
           <div className="flex min-w-0 items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] text-[var(--accent-cyan)]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><h2 id="artifact-comments-title" className="font-display text-[18px] font-semibold text-[var(--text-primary)]">Comments</h2><p className="mt-0.5 truncate text-micro text-[var(--text-tertiary)]">{artifactTitle}</p></div></div>

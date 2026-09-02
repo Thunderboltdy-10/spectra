@@ -198,7 +198,10 @@ describe("Live Dock V2", () => {
       "skipAutoContinueThreadIdRef.current = liveThread.id",
     );
     expect(shell).toContain("threadId: composerThread?.id ?? null");
-    expect(shell).toContain("width={liveThreadPanelWidth}");
+    // The thread panel's width state is its intent; the row allocator turns
+    // intents into actual widths (`allocateWorkbenchPanes`).
+    expect(shell).toContain("width={paneWidths.thread ?? liveThreadPanelWidth}");
+    expect(shell).toContain('notePaneIntent("thread", next)');
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
     expect(runHook).toContain("options?.threadId === null");
     expect(dock).toContain("dock-tab-identity min-w-0 flex-1 py-1 text-left");

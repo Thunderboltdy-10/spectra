@@ -50,6 +50,7 @@ import {
 import {
   closePreservesRunningJob,
   deriveLiveDockTab,
+  liveDockStateCopy,
   selectExpandedInputRun,
   type LiveDockTabSource,
   type LiveDockTruthState,
@@ -191,19 +192,6 @@ function dockTraceSteps(
     createdAt: 0,
   }));
 }
-
-const stateCopy: Record<LiveDockTruthState, string> = {
-  working: "Working",
-  waiting: "Waiting",
-  needs_input: "Needs input",
-  completing: "Checking",
-  completed: "Completed",
-  completed_limited: "Completed with limits",
-  paused: "Paused",
-  reconnecting: "Reconnecting",
-  cancelled: "Cancelled",
-  failed_terminal: "Recovery exhausted",
-};
 
 function StateIcon({ state }: { state: LiveDockTruthState }) {
   const className = "h-3.5 w-3.5 shrink-0";
@@ -796,7 +784,7 @@ export function LiveDock({
               ? "Undone"
               : ["working", "completing", "completed"].includes(model.state)
                 ? null
-                : stateCopy[model.state];
+                : liveDockStateCopy[model.state];
             const expanded = selectedInputRunId === tab.runId;
             const disclosureAnchor = `--live-dock-${tab.runId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
             const active = continuation?.id === tab.threadId;

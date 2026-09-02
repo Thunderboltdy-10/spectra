@@ -2630,6 +2630,7 @@ export function ArtifactStudio({
   artifacts,
   busy = false,
   panelWidth,
+  panelOverlay,
   sourceLabel,
   onPanelWidthChange,
   onClose,
@@ -2650,6 +2651,8 @@ export function ArtifactStudio({
   dirtyIds: Set<string>;
   busy?: boolean;
   panelWidth?: number;
+  /** Workbench-row controlled presentation (`resolveWorkbenchPanes`). */
+  panelOverlay?: boolean;
   sourceLabel: string;
   onPanelWidthChange?: (width: number) => void;
   onClose: () => void;
@@ -2887,6 +2890,7 @@ export function ArtifactStudio({
       onWidthChange={onPanelWidthChange}
       ariaLabel="Work studio"
       cssWidthVariable="--spectra-studio-width"
+      overlay={panelOverlay}
       // The registry states how narrow this type can get before it stops
       // working; the panel floor comes from there rather than from one number
       // that has to suit a flashcard and a spreadsheet equally.

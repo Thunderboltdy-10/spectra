@@ -152,6 +152,23 @@ function ShellNavigation() {
   const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  /* The workbench can ask chrome to rail the sidebar while open panels need
+     the room (`shell.sidebarCrowd`). Auto-rail is presentational only: the
+     stored preference is never rewritten, an explicit toggle during a
+     crowded episode wins until the crowding clears, and the sidebar returns
+     to the user's preference the moment the row fits again. */
+  const [sidebarCrowded, setSidebarCrowded] = useState(false);
+  const [crowdOverride, setCrowdOverride] = useState(false);
+  useEffect(
+    () =>
+      spectraBus.on("shell.sidebarCrowd", ({ crowded }) => {
+        setSidebarCrowded(crowded);
+        if (!crowded) setCrowdOverride(false);
+      }),
+    [],
+  );
+  const effectiveSidebarCollapsed =
+    sidebarCollapsed || (sidebarCrowded && !crowdOverride);
   const [mobileWorkspaceOpen, setMobileWorkspaceOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
@@ -187,29 +204,32 @@ function ShellNavigation() {
 
   useLayoutEffect(() => {
     const stored = window.localStorage.getItem("spectra:sidebar-collapsed");
-    const collapsed = stored === "true";
-    setSidebarCollapsed(collapsed);
-    if (collapsed)
-      document.documentElement.dataset.spectraSidebarCollapsed = "true";
-    else delete document.documentElement.dataset.spectraSidebarCollapsed;
+    setSidebarCollapsed(stored === "true");
   }, []);
 
+  /* The dataset mirrors the *effective* geometry so the pre-hydration CSS in
+     spectra-field.css and the live tree never disagree, whether the rail came
+     from the user's preference or from a crowded workbench. */
+  useEffect(() => {
+    if (effectiveSidebarCollapsed)
+      document.documentElement.dataset.spectraSidebarCollapsed = "true";
+    else delete document.documentElement.dataset.spectraSidebarCollapsed;
+  }, [effectiveSidebarCollapsed]);
+
   const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((collapsed) => {
-      const next = !collapsed;
-      window.localStorage.setItem("spectra:sidebar-collapsed", String(next));
-      if (next)
-        document.documentElement.dataset.spectraSidebarCollapsed = "true";
-      else delete document.documentElement.dataset.spectraSidebarCollapsed;
-      spectraBus.emit("shell.sidebarLayout", { collapsed: next });
-      return next;
-    });
-  }, []);
+    // The toggle steers the geometry the user is looking at; during a
+    // crowded episode that explicit choice wins over the auto-rail.
+    const next = !effectiveSidebarCollapsed;
+    setSidebarCollapsed(next);
+    window.localStorage.setItem("spectra:sidebar-collapsed", String(next));
+    spectraBus.emit("shell.sidebarLayout", { collapsed: next });
+    if (sidebarCrowded) setCrowdOverride(true);
+  }, [effectiveSidebarCollapsed, sidebarCrowded]);
 
   const focusSidebarSearch = useCallback(() => {
     setSidebarCollapsed(false);
     window.localStorage.setItem("spectra:sidebar-collapsed", "false");
-    delete document.documentElement.dataset.spectraSidebarCollapsed;
+    if (sidebarCrowded) setCrowdOverride(true);
     spectraBus.emit("shell.sidebarLayout", { collapsed: false });
     window.requestAnimationFrame(() => {
       const search = document.querySelector<HTMLInputElement>(
@@ -218,7 +238,7 @@ function ShellNavigation() {
       search?.focus();
       search?.select();
     });
-  }, []);
+  }, [sidebarCrowded]);
 
   useEffect(
     () => spectraBus.on("shell.focusSidebarSearch", focusSidebarSearch),
@@ -492,16 +512,16 @@ function ShellNavigation() {
 
   useLayoutEffect(() => {
     snapRailMarkerToActive();
-  }, [activeCoreHref, sidebarCollapsed, snapRailMarkerToActive]);
+  }, [activeCoreHref, effectiveSidebarCollapsed, snapRailMarkerToActive]);
 
   return (
     <>
       <aside
         aria-label="Spectra navigation"
-        data-collapsed={sidebarCollapsed}
+        data-collapsed={effectiveSidebarCollapsed}
         className={cn(
           "spectra-shell-sidebar fixed inset-y-0 left-0 z-chrome hidden flex-col overflow-hidden border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] transition-[width] duration-200 md:flex",
-          sidebarCollapsed ? "w-[76px]" : "w-[240px]",
+          effectiveSidebarCollapsed ? "w-[76px]" : "w-[240px]",
         )}
       >
         <div className="mt-3 flex h-8 shrink-0 items-center gap-1 px-2">
@@ -509,12 +529,12 @@ function ShellNavigation() {
             type="button"
             onClick={toggleSidebar}
             aria-label={
-              sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+              effectiveSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
             }
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={effectiveSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             className="grid size-8 shrink-0 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
-            {sidebarCollapsed ? (
+            {effectiveSidebarCollapsed ? (
               <PanelLeftOpen size={14} />
             ) : (
               <PanelLeftClose size={14} />
@@ -530,7 +550,7 @@ function ShellNavigation() {
               data-sidebar-expanded=""
               className={cn(
                 "font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513] transition-opacity",
-                sidebarCollapsed && "pointer-events-none opacity-0",
+                effectiveSidebarCollapsed && "pointer-events-none opacity-0",
               )}
             >
               spectra
@@ -541,7 +561,7 @@ function ShellNavigation() {
           data-sidebar-expanded=""
           className={cn(
             "relative mx-3 mt-2.5 block",
-            sidebarCollapsed &&
+            effectiveSidebarCollapsed &&
               "pointer-events-none h-0 overflow-hidden opacity-0",
           )}
         >
@@ -590,7 +610,7 @@ function ShellNavigation() {
                 onMouseEnter={(event) => placeRailMarker(event.currentTarget)}
                 aria-current={active ? "page" : undefined}
                 title={
-                  sidebarCollapsed
+                  effectiveSidebarCollapsed
                     ? label === "Home"
                       ? "Workspace"
                       : label
@@ -598,7 +618,7 @@ function ShellNavigation() {
                 }
                 className={cn(
                   "relative flex h-9 items-center gap-2.5 rounded-[6px] text-[13px] font-medium transition-colors",
-                  sidebarCollapsed ? "justify-center px-0" : "px-2.5",
+                  effectiveSidebarCollapsed ? "justify-center px-0" : "px-2.5",
                   active
                     ? "bg-[#eeece9] text-[#171513]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -607,7 +627,7 @@ function ShellNavigation() {
                 <Icon size={15} strokeWidth={active ? 2.05 : 1.65} />
                 <span
                   data-sidebar-expanded=""
-                  className={cn(sidebarCollapsed && "sr-only")}
+                  className={cn(effectiveSidebarCollapsed && "sr-only")}
                 >
                   {label === "Home" ? "Workspace" : label}
                 </span>
@@ -619,13 +639,13 @@ function ShellNavigation() {
           href="/chat"
           className={cn(
             "mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-[7px] bg-[var(--brand-primary)] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.16)] transition hover:brightness-95",
-            sidebarCollapsed && "mx-auto w-10",
+            effectiveSidebarCollapsed && "mx-auto w-10",
           )}
         >
           <Plus size={15} />{" "}
           <span
             data-sidebar-expanded=""
-            className={cn(sidebarCollapsed && "sr-only")}
+            className={cn(effectiveSidebarCollapsed && "sr-only")}
           >
             New chat
           </span>
@@ -633,11 +653,11 @@ function ShellNavigation() {
         <div
           className={cn(
             "spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto pb-3",
-            sidebarCollapsed ? "px-2" : "px-3",
+            effectiveSidebarCollapsed ? "px-2" : "px-3",
           )}
           data-sidebar-recents=""
         >
-          {sidebarCollapsed
+          {effectiveSidebarCollapsed
             ? null
             : ([true, false] as const).map((pinned) => {
                 const term = sidebarSearch.trim().toLowerCase();
@@ -679,13 +699,13 @@ function ShellNavigation() {
         <div
           className={cn(
             "relative mt-auto shrink-0 border-t border-[var(--border-subtle)] py-2",
-            sidebarCollapsed ? "px-2" : "px-3",
+            effectiveSidebarCollapsed ? "px-2" : "px-3",
           )}
         >
           <div
             className={cn(
               "flex items-center justify-between",
-              sidebarCollapsed && "flex-col justify-center gap-1",
+              effectiveSidebarCollapsed && "flex-col justify-center gap-1",
             )}
           >
             <button
@@ -728,7 +748,7 @@ function ShellNavigation() {
               onClick={() => openUserProfile()}
               className={cn(
                 "mt-2 flex w-full items-center gap-2 rounded-[7px] px-1 py-1 text-left hover:bg-[var(--bg-secondary)]",
-                sidebarCollapsed && "justify-center",
+                effectiveSidebarCollapsed && "justify-center",
               )}
               aria-label="Manage account"
             >
@@ -752,7 +772,7 @@ function ShellNavigation() {
               </span>
               <span
                 data-sidebar-expanded=""
-                className={cn("min-w-0 flex-1", sidebarCollapsed && "sr-only")}
+                className={cn("min-w-0 flex-1", effectiveSidebarCollapsed && "sr-only")}
               >
                 <strong className="block truncate text-micro font-semibold text-[var(--text-primary)]">
                   {administrationIdentity.account.name}
@@ -1054,6 +1074,16 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const [shellSidebarCollapsed, setShellSidebarCollapsed] = useState(false);
+  /* Mirrors the sidebar's crowd derivation so the content padding and the
+     dock band's left edge follow the auto-rail, not just the stored
+     preference. An explicit toggle during crowding (delivered through
+     `shell.sidebarLayout`) takes control until the crowding clears. */
+  const [shellSidebarCrowded, setShellSidebarCrowded] = useState(false);
+  const [shellCrowdOverride, setShellCrowdOverride] = useState(false);
+  const shellSidebarCrowdedRef = useRef(false);
+  shellSidebarCrowdedRef.current = shellSidebarCrowded;
+  const shellEffectiveCollapsed =
+    shellSidebarCollapsed || (shellSidebarCrowded && !shellCrowdOverride);
   const showTabRail =
     pathname === "/workspace" ||
     pathname.startsWith("/workspace/") ||
@@ -1073,19 +1103,32 @@ export function AppShell({
     );
     return spectraBus.on("shell.sidebarLayout", ({ collapsed }) => {
       setShellSidebarCollapsed(collapsed);
+      // An explicit layout choice while the workbench is crowded wins over
+      // the auto-rail for the rest of the crowded episode.
+      setShellCrowdOverride((current) =>
+        shellSidebarCrowdedRef.current ? true : current,
+      );
     });
   }, []);
+  useEffect(
+    () =>
+      spectraBus.on("shell.sidebarCrowd", ({ crowded }) => {
+        setShellSidebarCrowded(crowded);
+        if (!crowded) setShellCrowdOverride(false);
+      }),
+    [],
+  );
 
   return (
     <div
-      data-sidebar-collapsed={shellSidebarCollapsed}
+      data-sidebar-collapsed={shellEffectiveCollapsed}
       style={{
         minHeight: "100dvh",
         ...(noScroll ? { height: "100dvh", overflow: "hidden" } : {}),
       }}
       className={cn(
         "spectra-app-shell min-h-dvh bg-[var(--bg-primary)] text-[var(--text-primary)] transition-[padding] duration-200",
-        shellSidebarCollapsed ? "md:pl-[76px]" : "md:pl-[240px]",
+        shellEffectiveCollapsed ? "md:pl-[76px]" : "md:pl-[240px]",
       )}
     >
       <KeyboardShortcutsRegistrar

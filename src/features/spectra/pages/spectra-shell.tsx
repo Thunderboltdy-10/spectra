@@ -146,8 +146,19 @@ import {
   type SpectraWorkspaceItem,
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { isArtifactTypeKey } from "../artifacts/registry";
 import { openSpectraPackage } from "../lenses/spectra-package";
 import { getWorkDefinition } from "../work/registry";
+import {
+  allocateWorkbenchPanes,
+  resolveSidebarRail,
+  resolveWorkbenchPanes,
+  SIDE_PANEL_FLOOR_PX,
+  SIDEBAR_EXPANDED_PX,
+  SIDEBAR_RAILED_PX,
+  WORKBENCH_CONTENT_RESERVE_PX,
+  type WorkbenchPaneSpec,
+} from "../components/split-presentation";
 import {
   readSharedWorkbenchSession,
   updateWorkbenchSurface,
@@ -1128,6 +1139,32 @@ export function SpectraShell({
   );
   const [studioPanelWidth, setStudioPanelWidth] = useState(720);
   const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(480);
+  const [runPanelWidth, setRunPanelWidth] = useState(680);
+  /* One budget for the whole workbench row (CANON D44): sidebar, library,
+     open work, thread and run panel all draw from the same pixels, so one
+     pure resolver (`split-presentation.ts`) decides who stays in flow and
+     who overlays the content column — and when the sidebar should rail
+     itself to buy the row back. The width states above are *intents*; the
+     allocator turns intents into actual widths in one pass, so panels can
+     never oscillate or sum over budget. */
+  const workbenchRowRef = useRef<HTMLDivElement | null>(null);
+  const [workbenchRowWidth, setWorkbenchRowWidth] = useState(0);
+  const [workbenchWindowWidth, setWorkbenchWindowWidth] = useState(0);
+  const [paneOverlay, setPaneOverlay] = useState<Record<string, boolean>>({});
+  const paneOverlayRef = useRef<Record<string, boolean>>({});
+  const paneRecencyRef = useRef<Record<string, number>>({});
+  const [sidebarRailed, setSidebarRailed] = useState(false);
+  const sidebarRailedRef = useRef(false);
+  /** A drag sets the intent and outranks default priority in the allocator. */
+  const notePaneIntent = useCallback(
+    (pane: "studio" | "thread" | "run", width: number) => {
+      paneRecencyRef.current[pane] = Date.now();
+      if (pane === "studio") setStudioPanelWidth(width);
+      else if (pane === "thread") setLiveThreadPanelWidth(width);
+      else setRunPanelWidth(width);
+    },
+    [],
+  );
   const [pendingCreateType, setPendingCreateType] =
     useState<ArtifactTypeKey | null>(null);
   const [workspaceDeleteOpen, setWorkspaceDeleteOpen] = useState(false);
@@ -1709,6 +1746,155 @@ export function SpectraShell({
     // callback while a user changes workspace or artifact focus.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allArtifacts, preferences, replacePreferences, router, studio],
+  );
+
+  /* The workbench row is measured once here; every panel's split/overlay
+     presentation is derived from that single measurement so panels never
+     negotiate against each other independently. */
+  useEffect(() => {
+    const row = workbenchRowRef.current;
+    if (!row) return;
+    const measure = () => {
+      const next = Math.round(row.getBoundingClientRect().width);
+      setWorkbenchRowWidth((current) => (current === next ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    const measure = () => setWorkbenchWindowWidth(window.innerWidth);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+
+  const studioPaneFloor = useMemo(() => {
+    const key = studio.activeArtifact?.blueprintKey;
+    return key && isArtifactTypeKey(key)
+      ? getWorkDefinition(key).responsive.minInlineSize
+      : 560;
+  }, [studio.activeArtifact?.blueprintKey]);
+
+  const workbenchPanes = useMemo<WorkbenchPaneSpec[]>(() => {
+    const panes: WorkbenchPaneSpec[] = [];
+    if (studio.mode === "split" && studio.activeArtifact)
+      panes.push({
+        id: "studio",
+        floor: studioPaneFloor,
+        priority: 0,
+        overlay: false,
+      });
+    if (liveThread)
+      panes.push({
+        id: "thread",
+        floor: SIDE_PANEL_FLOOR_PX,
+        priority: 1,
+        overlay: false,
+      });
+    if (activeRunPanelId)
+      panes.push({
+        id: "run",
+        floor: SIDE_PANEL_FLOOR_PX,
+        priority: 2,
+        overlay: false,
+      });
+    return panes;
+  }, [
+    studio.mode,
+    studio.activeArtifact,
+    studioPaneFloor,
+    liveThread,
+    activeRunPanelId,
+  ]);
+
+  /* In tab mode the open work *is* the content column, so the reserve a side
+     panel must leave is the work's own floor, not the library's. */
+  const workbenchReserve =
+    studio.mode === "tab" && studio.activeArtifact
+      ? Math.max(WORKBENCH_CONTENT_RESERVE_PX, studioPaneFloor)
+      : WORKBENCH_CONTENT_RESERVE_PX;
+
+  useEffect(() => {
+    const panes = workbenchPanes.map((pane) => ({
+      ...pane,
+      overlay: paneOverlayRef.current[pane.id] ?? false,
+    }));
+    const next = resolveWorkbenchPanes({
+      hostWidth: workbenchRowWidth,
+      contentReserve: workbenchReserve,
+      panes,
+    });
+    const current = paneOverlayRef.current;
+    const ids = new Set([...Object.keys(current), ...Object.keys(next)]);
+    let changed = false;
+    for (const id of ids)
+      if ((current[id] ?? false) !== (next[id] ?? false)) changed = true;
+    if (changed) {
+      paneOverlayRef.current = next;
+      setPaneOverlay(next);
+    }
+  }, [workbenchRowWidth, workbenchPanes, workbenchReserve]);
+
+  /* The sidebar is the first pressure valve: when the expanded chrome would
+     force a panel out of the flow that the railed chrome would keep, ask the
+     shell to rail it. Decided from the window width (not the row) so the
+     rail itself cannot feed back into the decision. */
+  useEffect(() => {
+    const demand = workbenchPanes.length
+      ? workbenchReserve +
+        workbenchPanes.reduce((total, pane) => total + pane.floor, 0)
+      : 0;
+    const next = resolveSidebarRail({
+      windowWidth: workbenchWindowWidth,
+      expandedWidth: SIDEBAR_EXPANDED_PX,
+      railedWidth: SIDEBAR_RAILED_PX,
+      demand,
+      railed: sidebarRailedRef.current,
+    });
+    if (next !== sidebarRailedRef.current) {
+      sidebarRailedRef.current = next;
+      setSidebarRailed(next);
+    }
+  }, [workbenchWindowWidth, workbenchPanes, workbenchReserve]);
+
+  useEffect(() => {
+    spectraBus.emit("shell.sidebarCrowd", { crowded: sidebarRailed });
+    return () => {
+      if (sidebarRailedRef.current)
+        spectraBus.emit("shell.sidebarCrowd", { crowded: false });
+    };
+  }, [sidebarRailed]);
+
+  /* Actual panel widths come from one allocation pass over the intents —
+     never from panels measuring each other. */
+  const paneWidths = useMemo(
+    () =>
+      allocateWorkbenchPanes({
+        hostWidth: workbenchRowWidth,
+        contentReserve: workbenchReserve,
+        panes: workbenchPanes.map((pane) => ({
+          ...pane,
+          overlay: paneOverlay[pane.id] ?? false,
+          intent:
+            pane.id === "studio"
+              ? studioPanelWidth
+              : pane.id === "thread"
+                ? liveThreadPanelWidth
+                : runPanelWidth,
+          recency: paneRecencyRef.current[pane.id] ?? 0,
+        })),
+      }),
+    [
+      workbenchRowWidth,
+      workbenchReserve,
+      workbenchPanes,
+      paneOverlay,
+      studioPanelWidth,
+      liveThreadPanelWidth,
+      runPanelWidth,
+    ],
   );
 
   useEffect(() => {
@@ -3877,7 +4063,11 @@ export function SpectraShell({
               </div>
             </div>
           ) : null}
-          <div className="relative flex min-h-0 min-w-0 flex-1">
+          <div
+            ref={workbenchRowRef}
+            data-split-host
+            className="relative flex min-h-0 min-w-0 flex-1"
+          >
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {workSetIsolated && tiledArtifacts.length > 0 ? (
             <ArtifactTileSurface
@@ -4095,9 +4285,10 @@ export function SpectraShell({
                     busy={
                       busyKey === `artifact:update:${studio.activeArtifact._id}`
                     }
-                    panelWidth={studioPanelWidth}
+                    panelWidth={paneWidths.studio ?? studioPanelWidth}
+                    panelOverlay={paneOverlay.studio ?? false}
                     sourceLabel={workspace?.title ?? surfaceLabel}
-                    onPanelWidthChange={setStudioPanelWidth}
+                    onPanelWidthChange={(next) => notePaneIntent("studio", next)}
                     onClose={closeActiveStudio}
                     onExpand={openArtifactTab}
                     onActivateTab={activateArtifactTab}
@@ -4305,14 +4496,15 @@ export function SpectraShell({
             <LiveThreadPanel
               threadId={liveThread.id}
               title={liveThread.title}
+              overlay={paneOverlay.thread ?? false}
               liveExchange={
                 runEngine.liveExchange &&
                 runEngine.liveExchange.threadId === liveThread.id
                   ? runEngine.liveExchange
                   : null
               }
-              width={liveThreadPanelWidth}
-              onWidthChange={setLiveThreadPanelWidth}
+              width={paneWidths.thread ?? liveThreadPanelWidth}
+              onWidthChange={(next) => notePaneIntent("thread", next)}
               continuing={composerThread?.id === liveThread.id}
               onContinue={() => {
                 void (async () => {
@@ -4368,6 +4560,9 @@ export function SpectraShell({
           {activeRunPanelId ? (
             <RunDetailPanel
               runId={activeRunPanelId}
+              overlay={paneOverlay.run ?? false}
+              width={paneWidths.run ?? runPanelWidth}
+              onWidthChange={(next) => notePaneIntent("run", next)}
               card={runEngine.cards.find(
                 (card) => card.runId === activeRunPanelId,
               )}

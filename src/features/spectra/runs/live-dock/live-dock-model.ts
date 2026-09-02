@@ -84,6 +84,21 @@ const phaseSteps: Record<string, string> = {
   completed: "Completed",
 };
 
+/* The one vocabulary for run truth (CANON R13): the dock, the run panel and
+   any future surface label the same state with the same plain words. */
+export const liveDockStateCopy: Record<LiveDockTruthState, string> = {
+  working: "Working",
+  waiting: "Waiting",
+  needs_input: "Needs input",
+  completing: "Checking",
+  completed: "Completed",
+  completed_limited: "Completed with limits",
+  paused: "Paused",
+  reconnecting: "Reconnecting",
+  cancelled: "Cancelled",
+  failed_terminal: "Recovery exhausted",
+};
+
 function compactText(value: string | undefined) {
   return value
     ?.replace(/(^|\s)#{1,6}\s+/g, "$1")

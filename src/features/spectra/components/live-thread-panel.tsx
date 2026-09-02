@@ -19,6 +19,7 @@ export function LiveThreadPanel({
   continuing = false,
   onOpenArtifact,
   onOpenWorkspace,
+  overlay,
 }: {
   threadId: string;
   title: string;
@@ -31,6 +32,8 @@ export function LiveThreadPanel({
   continuing?: boolean;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenWorkspace?: (workspaceId: string) => void;
+  /** Workbench-row controlled presentation (`resolveWorkbenchPanes`). */
+  overlay?: boolean;
 }) {
   const follow = useFollowAi();
   return (
@@ -39,8 +42,9 @@ export function LiveThreadPanel({
       onWidthChange={onWidthChange}
       ariaLabel="Live thread"
       cssWidthVariable="--spectra-live-thread-width"
+      overlay={overlay}
     >
-      <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+      <div className="spectra-composer-clearance flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         <header className="flex h-14 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b border-[var(--border-default)] px-4">
           <span
             className="spectra-card-type-icon !h-8 !w-8 shrink-0 text-[var(--brand-primary)]"
@@ -147,6 +151,8 @@ export function LiveThreadPanel({
             </button>
           </div>
         ) : null}
+        {/* The floating composer band spans the full row width, including
+            under this panel — keep the conversation above it. */}
         <div className="min-h-0 flex-1">
           <ThreadConversation
             threadId={threadId}

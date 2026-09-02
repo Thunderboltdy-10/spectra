@@ -356,6 +356,17 @@ export function useArtifactStudioState(
   };
 }
 
+/** Sibling panels that still hold in-flow width: overlays and the loading
+ *  placeholder take none, so they must not squeeze fitting or resizing. */
+function inFlowSiblingPanels(host: HTMLElement, panel: HTMLElement) {
+  return Array.from(host.querySelectorAll<HTMLElement>("[data-studio-panel]")).filter(
+    (candidate) =>
+      candidate !== panel &&
+      !candidate.hasAttribute("data-split-overlay") &&
+      !candidate.hasAttribute("aria-hidden"),
+  );
+}
+
 export function StudioSplitShell({
   width,
   onWidthChange,
@@ -363,6 +374,7 @@ export function StudioSplitShell({
   cssWidthVariable,
   minWidth = 360,
   contentReserve = 420,
+  overlay: controlledOverlay,
   children,
 }: {
   width: number;
@@ -372,6 +384,13 @@ export function StudioSplitShell({
   minWidth?: number;
   /** Minimum main-canvas width kept when fitting this panel. */
   contentReserve?: number;
+  /**
+   * When provided, the workbench row owns the split/overlay decision
+   * (`resolveWorkbenchPanes`) so every open panel is budgeted together.
+   * Left undefined outside the workbench (route side previews), where the
+   * panel keeps its own host-measured behavior.
+   */
+  overlay?: boolean;
   children: ReactNode;
 }) {
   const resizingRef = useRef(false);
@@ -380,8 +399,10 @@ export function StudioSplitShell({
      at once, the panel is promoted out of the flow: it overlays the content
      column at full width instead of squeezing both sides into unreadability.
      One pure resolver owns that boundary (`split-presentation.ts`). */
-  const [overlay, setOverlay] = useState(false);
+  const [internalOverlay, setInternalOverlay] = useState(false);
+  const overlay = controlledOverlay ?? internalOverlay;
   const overlayRef = useRef(false);
+  overlayRef.current = overlay;
   const overlayRefMirror = useCallback(
     (hostWidth: number) => {
       const next = resolveSplitOverlay({
@@ -392,13 +413,15 @@ export function StudioSplitShell({
       });
       if (next !== overlayRef.current) {
         overlayRef.current = next;
-        setOverlay(next);
+        setInternalOverlay(next);
       }
       return next;
     },
     [contentReserve, minWidth],
   );
   useEffect(() => {
+    // The workbench row controls the presentation; nothing to measure here.
+    if (controlledOverlay !== undefined) return;
     const panel = panelRef.current;
     if (!panel) return;
     /* Only the workbench row (library/workspace beside the panel) can promote
@@ -418,7 +441,45 @@ export function StudioSplitShell({
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [overlayRefMirror]);
+  }, [controlledOverlay, overlayRefMirror]);
+  /* An overlay covers the content region but spares every sibling that is
+     still in flow: a split studio stays fully visible beside an overlayed
+     thread. The spared width is the sum of the in-flow siblings' actual
+     (user-resizable) widths, measured live so drags update the inset. */
+  const [insetRight, setInsetRight] = useState(0);
+  useEffect(() => {
+    if (!overlay) {
+      setInsetRight(0);
+      return;
+    }
+    const panel = panelRef.current;
+    if (!panel) return;
+    const host =
+      panel.closest<HTMLElement>("[data-split-host]") ?? panel.parentElement;
+    if (!host) return;
+    const measure = () => {
+      const siblings = inFlowSiblingPanels(host, panel);
+      const next = Math.round(
+        siblings.reduce(
+          (total, candidate) => total + candidate.getBoundingClientRect().width,
+          0,
+        ),
+      );
+      setInsetRight((current) => (current === next ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    for (const sibling of Array.from(
+      host.querySelectorAll<HTMLElement>("[data-studio-panel]"),
+    ))
+      if (sibling !== panel) observer.observe(sibling);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [overlay]);
   useEffect(() => {
     const host =
       panelRef.current?.closest<HTMLElement>(".spectra-wave-y") ??
@@ -430,7 +491,12 @@ export function StudioSplitShell({
     };
   }, [cssWidthVariable, width]);
   const fittedRef = useRef(false);
+  /* The width the user actually chose (drag) or accepted (first fit). Forced
+     clamps borrow from it; drags rewrite it. Only used while uncontrolled —
+     the workbench row allocates controlled panels' widths itself. */
+  const intentWidthRef = useRef(width);
   useEffect(() => {
+    if (controlledOverlay !== undefined) return;
     if (!onWidthChange) return;
     const updateWidth = onWidthChange;
     function fitPanel() {
@@ -442,23 +508,17 @@ export function StudioSplitShell({
       // While the panel is an overlay it has no in-flow width to fit; the
       // last fitted width is kept and clamped again when the split returns.
       if (overlayRef.current) return;
-      const peers = Array.from(
-        host.querySelectorAll<HTMLElement>("[data-studio-panel]"),
-      );
+      const peers = inFlowSiblingPanels(host, panel);
       const siblingWidth = peers
-        .filter((candidate) => candidate !== panel)
         .reduce(
           (total, candidate) => total + candidate.getBoundingClientRect().width,
           0,
         );
-      const siblingCount = peers.length - 1;
-      const reserve =
-        siblingCount > 0
-          ? Math.max(
-              320,
-              Math.min(contentReserve, Math.floor(host.clientWidth * 0.28)),
-            )
-          : contentReserve;
+      const siblingCount = peers.length;
+      /* The reserve never weakens: narrow hosts are resolved by overlay
+         promotion (`resolveWorkbenchPanes`), not by squeezing the library
+         below the width it can be read at. */
+      const reserve = contentReserve;
       const floor = siblingCount > 0 ? Math.min(minWidth, 480) : minWidth;
       const hostWidth = host.clientWidth;
       const maximum = Math.max(
@@ -475,16 +535,25 @@ export function StudioSplitShell({
           : maximum;
       // Switching work in an already-open panel must not resize the panel.
       // Only raise the floor if the new type cannot fit; never snap to a
-      // different type's preferred share of the workbench.
+      // different type's preferred share of the workbench. The width is the
+      // user's intent: the budget borrows from it while the host is tight
+      // and hands it back when room returns, instead of stranding the panel
+      // at its floor after one narrow episode.
       if (fittedRef.current) {
-        if (width < floor) updateWidth(floor);
-        else if (width > maximum) updateWidth(maximum);
+        const target = Math.max(
+          floor,
+          Math.min(intentWidthRef.current, maximum),
+        );
+        if (Math.abs(target - width) >= 2) updateWidth(target);
         return;
       }
       const next = Math.max(
         floor,
         Math.min(width, maximum, fairCap, responsiveCap),
       );
+      // The first fit borrows from the intent but never rewrites it: only a
+      // user drag does. A panel that mounted during a crowded moment grows
+      // back to its chosen width when the row makes room again.
       fittedRef.current = true;
       if (Math.abs(next - width) >= 8) updateWidth(next);
       else if (width > maximum || width > fairCap || width > responsiveCap)
@@ -496,11 +565,50 @@ export function StudioSplitShell({
       panelRef.current?.closest<HTMLElement>(".spectra-wave-y") ??
       panelRef.current?.parentElement;
     const observer = host ? new ResizeObserver(fitPanel) : null;
-    if (host) observer?.observe(host);
+    if (host) {
+      observer?.observe(host);
+      /* A sibling clamping or restoring changes what this panel may take;
+         width changes do not resize the host, so watch the siblings too. */
+      for (const sibling of Array.from(
+        host.querySelectorAll<HTMLElement>("[data-studio-panel]"),
+      ))
+        if (sibling !== panelRef.current) observer?.observe(sibling);
+    }
+    /* A sibling panel opening, closing, or leaving the flow (overlay) does
+       not resize the host, but it changes what this panel may take — refit
+       on those structural changes too. */
+    const mutations = host
+      ? new MutationObserver((records) => {
+          if (
+            records.some(
+              (record) =>
+                record.type === "attributes" ||
+                Array.from(record.addedNodes).some(
+                  (node) =>
+                    node instanceof HTMLElement &&
+                    node.hasAttribute("data-studio-panel"),
+                ) ||
+                Array.from(record.removedNodes).some(
+                  (node) =>
+                    node instanceof HTMLElement &&
+                    node.hasAttribute("data-studio-panel"),
+                ),
+            )
+          )
+            fitPanel();
+        })
+      : null;
+    mutations?.observe(host!, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-split-overlay"],
+    });
     window.addEventListener("resize", fitPanel);
     return () => {
       window.cancelAnimationFrame(frame);
       observer?.disconnect();
+      mutations?.disconnect();
       window.removeEventListener("resize", fitPanel);
     };
   }, [contentReserve, minWidth, onWidthChange, width]);
@@ -513,10 +621,7 @@ export function StudioSplitShell({
       const host =
         panel.closest<HTMLElement>(".spectra-wave-y") ?? panel.parentElement;
       const panelLeft = panel.getBoundingClientRect().left;
-      const peers = host
-        ? Array.from(host.querySelectorAll<HTMLElement>("[data-studio-panel]"))
-        : [];
-      const siblings = peers.filter((candidate) => candidate !== panel);
+      const siblings = host ? inFlowSiblingPanels(host, panel) : [];
       const rightSiblingWidth = siblings
         .filter(
           (candidate) => candidate.getBoundingClientRect().left > panelLeft,
@@ -532,27 +637,45 @@ export function StudioSplitShell({
       const hostRight =
         host?.getBoundingClientRect().right ?? window.innerWidth;
       const floor = siblings.length > 0 ? Math.min(minWidth, 300) : minWidth;
-      const reserve =
-        siblings.length > 0 ? Math.min(contentReserve, 240) : contentReserve;
-      const hostWidth = host?.clientWidth ?? window.innerWidth;
-      const available = Math.max(floor, hostWidth - allSiblingWidth - reserve);
-      const fairCap =
-        siblings.length > 0
-          ? Math.max(floor, Math.floor(hostWidth * 0.52))
-          : available;
-      const responsiveCap =
-        siblings.length === 0 && hostWidth < 1920
-          ? Math.max(floor, Math.floor(hostWidth * 0.5))
-          : available;
-      onWidthChange(
-        Math.max(
-          floor,
-          Math.min(
-            Math.round(hostRight - event.clientX - rightSiblingWidth),
-            Math.min(960, available, fairCap, responsiveCap),
-          ),
-        ),
-      );
+      /* Controlled panels are budgeted by the row allocator
+         (`allocateWorkbenchPanes`): the drag reports the raw desired width
+         and the allocator applies the budget in the same pass, so a drag
+         can never push a sibling under its floor or the library under its
+         reserve. Uncontrolled panels (route previews) keep the local caps. */
+      const dragged =
+        controlledOverlay !== undefined
+          ? Math.max(
+              floor,
+              Math.min(
+                Math.round(hostRight - event.clientX - rightSiblingWidth),
+                960,
+              ),
+            )
+          : (() => {
+              const reserve = contentReserve;
+              const hostWidth = host?.clientWidth ?? window.innerWidth;
+              const available = Math.max(
+                floor,
+                hostWidth - allSiblingWidth - reserve,
+              );
+              const fairCap =
+                siblings.length > 0
+                  ? Math.max(floor, Math.floor(hostWidth * 0.52))
+                  : available;
+              const responsiveCap =
+                siblings.length === 0 && hostWidth < 1920
+                  ? Math.max(floor, Math.floor(hostWidth * 0.5))
+                  : available;
+              return Math.max(
+                floor,
+                Math.min(
+                  Math.round(hostRight - event.clientX - rightSiblingWidth),
+                  Math.min(960, available, fairCap, responsiveCap),
+                ),
+              );
+            })();
+      intentWidthRef.current = dragged;
+      onWidthChange(dragged);
     }
     function onUp() {
       resizingRef.current = false;
@@ -565,7 +688,7 @@ export function StudioSplitShell({
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
     };
-  }, [contentReserve, minWidth, onWidthChange]);
+  }, [contentReserve, controlledOverlay, minWidth, onWidthChange]);
   return (
     <aside
       ref={panelRef}
@@ -573,12 +696,15 @@ export function StudioSplitShell({
       data-split-overlay={overlay ? "" : undefined}
       className={
         overlay
-          ? "spectra-studio-split-panel spectra-studio-split-panel--overlay absolute inset-0 z-panel flex h-full min-w-0 overflow-hidden bg-[var(--wave-paper,var(--bg-primary))]"
+          ? "spectra-studio-split-panel spectra-studio-split-panel--overlay absolute inset-y-0 left-0 z-panel flex h-full min-w-0 overflow-hidden bg-[var(--wave-paper,var(--bg-primary))]"
           : "spectra-studio-split-panel relative z-chrome flex h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
       }
       style={
         overlay
           ? {
+              // Spare the combined width of siblings still in flow so a
+              // split studio stays fully visible beside an overlayed panel.
+              right: `${insetRight}px`,
               minWidth: 0,
               contain: "inline-size",
               containerType: "inline-size",

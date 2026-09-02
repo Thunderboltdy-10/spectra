@@ -236,8 +236,8 @@ describe("shell dialogs", () => {
         open
         typeLabel="document"
         workspaces={[
-          { id: "ws1", title: "Biology", accentColor: "#123456" },
-          { id: "ws2", title: "History", accentColor: "#654321" },
+          { id: "ws1", title: "Biology", accentColor: "var(--accent-cyan)" },
+          { id: "ws2", title: "History", accentColor: "var(--accent-gold)" },
         ]}
         onCancel={() => {}}
         onSelect={onSelect}

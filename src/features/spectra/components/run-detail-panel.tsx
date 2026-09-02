@@ -135,21 +135,24 @@ export function RunDetailPanel({
   }, [detail]);
   const persistedCard = detail?.cards[0];
   const isPermanent = Boolean(detail?.run.threadId);
-  const displayCard: ResultCardStreamView | undefined =
-    card ??
-    (persistedCard
-      ? {
-          id: persistedCard._id,
-          runId: persistedCard.runId,
-          status: persistedCard.status,
-          title: persistedCard.title,
-          summary: persistedCard.summary,
-          variant: persistedCard.variant,
-          actions: persistedCard.actions,
-          provenance: persistedCard.provenance,
-          updatedAt: persistedCard.updatedAt,
-        }
-      : undefined);
+  const displayCard: ResultCardStreamView | undefined = useMemo(
+    () =>
+      card ??
+      (persistedCard
+        ? {
+            id: persistedCard._id,
+            runId: persistedCard.runId,
+            status: persistedCard.status,
+            title: persistedCard.title,
+            summary: persistedCard.summary,
+            variant: persistedCard.variant,
+            actions: persistedCard.actions,
+            provenance: persistedCard.provenance,
+            updatedAt: persistedCard.updatedAt,
+          }
+        : undefined),
+    [card, persistedCard],
+  );
   /* The header speaks the dock's one run vocabulary (CANON R13) — never a
      raw status enum with the underscores stripped. */
   const runTruth = useMemo(() => {
@@ -217,11 +220,11 @@ export function RunDetailPanel({
       <div className="spectra-composer-clearance flex h-full min-h-0 flex-col">
         <header className="flex min-h-16 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--brand-primary)]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--brand-primary)]">
               <MessageSquare className="h-4 w-4" />
             </span>
             <div className="min-w-0">
-              <div className="truncate font-display text-[17px] font-semibold">
+              <div className="truncate font-display text-title font-semibold">
                 {conversation?.thread.title ?? "Conversation"}
               </div>
               <div className="text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
@@ -256,7 +259,7 @@ export function RunDetailPanel({
           ) : conversation ? (
             <ConversationSurface detail={conversation} compact />
           ) : (
-            <div className="flex h-full items-center justify-center gap-2 text-[12px] text-[var(--text-tertiary)]">
+            <div className="flex h-full items-center justify-center gap-2 text-caption text-[var(--text-tertiary)]">
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading conversation
             </div>
@@ -269,7 +272,7 @@ export function RunDetailPanel({
               data-card-state="confirmation"
               className="mb-2 px-3 py-2"
             >
-              <div className="text-[11px] font-semibold text-[var(--text-primary)]">
+              <div className="text-micro font-semibold text-[var(--text-primary)]">
                 Proposed changes need approval
               </div>
               <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
@@ -279,7 +282,7 @@ export function RunDetailPanel({
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
-                  className="h-8 rounded-[7px] bg-[var(--text-primary)] px-3 text-[11px] font-semibold text-[var(--bg-primary)]"
+                  className="h-8 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
                   onClick={() =>
                     onAction?.(displayCard, "confirm", displayCard.runId)
                   }
@@ -288,7 +291,7 @@ export function RunDetailPanel({
                 </button>
                 <button
                   type="button"
-                  className="h-8 rounded-[7px] px-3 text-[11px] font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                  className="h-8 rounded-control px-3 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                   onClick={() =>
                     onAction?.(displayCard, "cancel", displayCard.runId)
                   }
@@ -322,7 +325,7 @@ export function RunDetailPanel({
                   const place = Boolean(detail?.run.workspaceId);
                   void keep(place, false, place);
                 }}
-                className="flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[11px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] disabled:opacity-50"
+                className="flex h-9 items-center gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] disabled:opacity-50"
                 aria-label={
                   detail?.run.workspaceId
                     ? "Save conversation to workspace"

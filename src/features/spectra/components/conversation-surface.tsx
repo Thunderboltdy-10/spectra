@@ -224,10 +224,10 @@ function ChoiceBlock({
         data-conversation-action="choice-answered"
         aria-label="Answered question"
       >
-        <div className="text-[12px] font-semibold text-[var(--text-primary)]">
+        <div className="text-caption font-semibold text-[var(--text-primary)]">
           {question}
         </div>
-        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+        <p className="mt-1 text-micro text-[var(--text-secondary)]">
           {selectedTitle === "Skipped"
             ? "Skipped"
             : `Answered: ${selectedTitle}`}
@@ -236,11 +236,11 @@ function ChoiceBlock({
     );
   return (
     <section
-      className="mt-4 overflow-hidden rounded-[11px] border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] p-3"
+      className="mt-4 overflow-hidden rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] p-3"
       data-conversation-action="choice"
       aria-label="Choose one response"
     >
-      <div className="mb-2 text-[12px] font-semibold text-[var(--text-primary)]">
+      <div className="mb-2 text-caption font-semibold text-[var(--text-primary)]">
         {question}
       </div>
       <div
@@ -263,13 +263,13 @@ function ChoiceBlock({
                 );
               });
             }}
-            className={`group min-h-11 rounded-[9px] border px-3 py-2.5 text-left transition ${selected === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] hover:shadow-[0_5px_18px_rgba(27,20,12,0.06)] disabled:opacity-55"}`}
+            className={`group min-h-11 rounded-card border px-3 py-2.5 text-left transition ${selected === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] hover:shadow-[0_5px_18px_rgba(27,20,12,0.06)] disabled:opacity-55"}`}
           >
-            <span className="block text-[12px] font-semibold text-[var(--text-primary)]">
+            <span className="block text-caption font-semibold text-[var(--text-primary)]">
               {option.title}
             </span>
             {option.description ? (
-              <span className="mt-1 block text-[11px] leading-4 text-[var(--text-secondary)]">
+              <span className="mt-1 block text-micro leading-4 text-[var(--text-secondary)]">
                 {option.description}
               </span>
             ) : null}
@@ -284,7 +284,7 @@ function ChoiceBlock({
             setPending("Skipped");
             Promise.resolve(onSkip()).catch(() => setPending(null));
           }}
-          className="mt-2 h-7 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] disabled:opacity-45"
+          className="mt-2 h-7 rounded-chip px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] disabled:opacity-45"
         >
           Skip for now
         </button>
@@ -315,10 +315,10 @@ function BatchedChoiceBlock({
         data-conversation-action="choice-batch-answered"
         aria-label="Answered questions"
       >
-        <p className="text-[12px] font-semibold text-[var(--text-primary)]">
+        <p className="text-caption font-semibold text-[var(--text-primary)]">
           {questions.length} questions asked
         </p>
-        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+        <p className="mt-1 text-micro text-[var(--text-secondary)]">
           {selectedTitle}
         </p>
       </section>
@@ -326,16 +326,16 @@ function BatchedChoiceBlock({
   const complete = questions.every((question) => answers[question.id]);
   return (
     <section
-      className="mt-4 rounded-[11px] border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] p-3"
+      className="mt-4 rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] p-3"
       aria-label="Answer multiple questions"
     >
-      <p className="mb-2 text-[12px] font-bold text-[var(--text-primary)]">
+      <p className="mb-2 text-caption font-bold text-[var(--text-primary)]">
         A few quick questions
       </p>
       <div className="max-h-72 space-y-3 overflow-y-auto pr-1 [scrollbar-width:thin]">
         {questions.map((question, index) => (
           <fieldset key={question.id}>
-            <legend className="text-[11px] font-semibold leading-4 text-[var(--text-primary)]">
+            <legend className="text-micro font-semibold leading-4 text-[var(--text-primary)]">
               {index + 1}. {question.question}
             </legend>
             <div className="mt-1 grid gap-1 sm:grid-cols-2">
@@ -350,7 +350,7 @@ function BatchedChoiceBlock({
                       [question.id]: option.title,
                     }))
                   }
-                  className={`rounded-[6px] border px-2 py-1.5 text-left text-[11px] font-semibold ${answers[question.id] === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
+                  className={`rounded-chip border px-2 py-1.5 text-left text-micro font-semibold ${answers[question.id] === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
                 >
                   {option.title}
                 </button>
@@ -364,7 +364,7 @@ function BatchedChoiceBlock({
                     [question.id]: "Skipped",
                   }))
                 }
-                className="rounded-[6px] px-2 py-1.5 text-left text-[11px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                className="rounded-chip px-2 py-1.5 text-left text-micro text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
               >
                 Skip this question
               </button>
@@ -385,7 +385,7 @@ function BatchedChoiceBlock({
           setPending(true);
           void Promise.resolve(onSubmit(answer)).catch(() => setPending(false));
         }}
-        className="mt-3 h-9 w-full rounded-[7px] bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+        className="mt-3 h-9 w-full rounded-control bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
       >
         Continue with these answers
       </button>
@@ -499,13 +499,13 @@ function ArtifactConflictResolution({
   const available = detail?.claimStatus === "paused";
   return (
     <section
-      className="mt-2 overflow-hidden rounded-[9px] border border-[color-mix(in_oklab,#d88922_24%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_4%,var(--bg-elevated))]"
+      className="mt-2 overflow-hidden rounded-card border border-[color-mix(in_oklab,var(--accent-gold)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-gold)_4%,var(--bg-elevated))]"
       aria-label="Resolve work edit conflict"
     >
       <header className="flex items-start gap-2.5 border-b border-[var(--border-subtle)] px-3 py-2.5">
-        <GitCompareArrows className="mt-0.5 h-4 w-4 shrink-0 text-[#b46d15]" />
+        <GitCompareArrows className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold text-[var(--text-primary)]">
+          <div className="text-micro font-semibold text-[var(--text-primary)]">
             Same-region edit needs your decision
           </div>
           <p className="mt-0.5 text-micro leading-4 text-[var(--text-secondary)]">
@@ -573,7 +573,7 @@ function ArtifactConflictResolution({
             onChange={(event) => setMergeDraft(event.target.value)}
             spellCheck={false}
             aria-label="Merged work operation"
-            className="min-h-44 w-full resize-y rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 font-mono text-micro leading-4 text-[var(--text-primary)] outline-none transition focus:border-[var(--accent-cyan)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)]"
+            className="min-h-44 w-full resize-y rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 font-mono text-micro leading-4 text-[var(--text-primary)] outline-none transition focus:border-[var(--accent-cyan)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)]"
           />
         </div>
       ) : null}
@@ -590,7 +590,7 @@ function ArtifactConflictResolution({
           type="button"
           disabled={Boolean(busy)}
           onClick={() => void resolve("cancel")}
-          className="min-h-8 rounded-[7px] px-2.5 text-micro font-medium text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+          className="min-h-8 rounded-control px-2.5 text-micro font-medium text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
         >
           Cancel proposal
         </button>
@@ -598,7 +598,7 @@ function ArtifactConflictResolution({
           type="button"
           disabled={Boolean(busy)}
           onClick={() => void resolve("keep_current")}
-          className="min-h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+          className="min-h-8 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
         >
           {busy === "keep_current" ? "Keeping…" : "Keep current"}
         </button>
@@ -609,7 +609,7 @@ function ArtifactConflictResolution({
             setError(null);
             setMergeOpen((open) => !open);
           }}
-          className="min-h-8 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-2.5 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] disabled:opacity-45"
+          className="min-h-8 rounded-control border border-[color-mix(in_oklab,var(--accent-cyan)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-2.5 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] disabled:opacity-45"
         >
           {mergeOpen ? "Close merge" : "Edit & merge"}
         </button>
@@ -618,7 +618,7 @@ function ArtifactConflictResolution({
             type="button"
             disabled={!available || Boolean(busy)}
             onClick={() => void resolve("merge")}
-            className="min-h-8 rounded-[7px] bg-[var(--accent-cyan)] px-3 text-micro font-semibold text-white shadow-[0_5px_16px_color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-8 rounded-control bg-[var(--accent-cyan)] px-3 text-micro font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy === "merge"
               ? "Queuing…"
@@ -631,7 +631,7 @@ function ArtifactConflictResolution({
             type="button"
             disabled={!available || Boolean(busy)}
             onClick={() => void resolve("apply")}
-            className="min-h-8 rounded-[7px] bg-[var(--accent-cyan)] px-3 text-micro font-semibold text-white shadow-[0_5px_16px_color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-8 rounded-control bg-[var(--accent-cyan)] px-3 text-micro font-semibold text-white shadow-soft disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy === "apply"
               ? "Queuing…"
@@ -776,13 +776,13 @@ function CodeProposalReview({
   if (!proposed && paths.length === 0) return null;
   return (
     <section
-      className="mt-2 overflow-hidden rounded-[9px] border border-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-primary))]"
+      className="mt-2 overflow-hidden rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-primary))]"
       aria-label="Review Code proposal"
     >
       <header className="flex items-start gap-2.5 border-b border-[var(--border-subtle)] px-3 py-2.5">
         <Code2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-cyan)]" />
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold text-[var(--text-primary)]">
+          <div className="text-micro font-semibold text-[var(--text-primary)]">
             Code proposal
           </div>
           <p className="mt-0.5 text-micro leading-4 text-[var(--text-secondary)]">
@@ -831,7 +831,7 @@ function CodeProposalReview({
             {sensitive.map((item) => (
               <span
                 key={item}
-                className="rounded-full border border-[color-mix(in_oklab,#d88922_28%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_6%,var(--bg-primary))] px-2 py-1 text-micro font-semibold text-[#a86616]"
+                className="rounded-full border border-[color-mix(in_oklab,var(--accent-gold)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-gold)_6%,var(--bg-primary))] px-2 py-1 text-micro font-semibold text-[var(--warning)]"
               >
                 {item}
               </span>
@@ -879,11 +879,11 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
         ) : trace.run.status === "awaiting_confirmation" ? (
           <ShieldCheck className="h-3.5 w-3.5 text-amber-600" />
         ) : trace.run.status === "awaiting_resolution" ? (
-          <GitCompareArrows className="h-3.5 w-3.5 text-[#b46d15]" />
+          <GitCompareArrows className="h-3.5 w-3.5 text-[var(--warning)]" />
         ) : (
           <Wrench className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
         )}
-        <span className="flex-1 text-[11px] font-semibold text-[var(--text-secondary)]">
+        <span className="flex-1 text-micro font-semibold text-[var(--text-secondary)]">
           {trace.operations.length === 0
             ? "Run"
             : `${trace.operations.length} ${trace.operations.length === 1 ? "action" : "actions"}`}
@@ -901,7 +901,7 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
       {open ? (
         <div className="border-t border-[var(--border-subtle)] px-3 py-2.5">
           {trace.operations.length === 0 ? (
-            <p className="text-[11px] text-[var(--text-tertiary)]">
+            <p className="text-micro text-[var(--text-tertiary)]">
               {publicSpectraFailureText(
                 trace.run.error,
                 trace.run.retryable !== false,
@@ -912,9 +912,9 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
               {trace.operations.map((operation) => (
                 <div
                   key={operation._id}
-                  className="rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_58%,transparent)] px-2.5 py-2"
+                  className="rounded-control bg-[color-mix(in_oklab,var(--bg-primary)_58%,transparent)] px-2.5 py-2"
                 >
-                  <div className="flex items-center gap-2 text-[11px]">
+                  <div className="flex items-center gap-2 text-micro">
                     {operation.status === "executed" ? (
                       <Check className="h-3.5 w-3.5 text-[var(--success)]" />
                     ) : operation.status === "failed" ? (
@@ -981,10 +981,10 @@ function RunOutcomeNote({
   onRetry?: () => void;
 }) {
   return (
-    <div className="mt-3 flex items-start gap-2.5 rounded-[9px] border border-[color-mix(in_oklab,#d88922_24%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_4%,var(--bg-primary))] px-3 py-2.5">
-      <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0 text-[#a86616]" />
+    <div className="mt-3 flex items-start gap-2.5 rounded-card border border-[color-mix(in_oklab,var(--accent-gold)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-gold)_4%,var(--bg-primary))] px-3 py-2.5">
+      <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-semibold text-[var(--text-primary)]">
+        <p className="text-micro font-semibold text-[var(--text-primary)]">
           {savedCount > 0
             ? `${savedCount} ${savedCount === 1 ? "change" : "changes"} saved`
             : "Partly completed"}
@@ -1002,7 +1002,7 @@ function RunOutcomeNote({
           type="button"
           onClick={onRetry}
           disabled={retrying}
-          className="flex shrink-0 items-center gap-1.5 rounded-[6px] border border-[color-mix(in_oklab,#d88922_32%,var(--border-default))] px-2 py-1 text-micro font-semibold text-[#a86616] transition hover:bg-[color-mix(in_oklab,#d88922_8%,var(--bg-primary))] disabled:opacity-50"
+          className="flex shrink-0 items-center gap-1.5 rounded-chip border border-[color-mix(in_oklab,var(--accent-gold)_32%,var(--border-default))] px-2 py-1 text-micro font-semibold text-[var(--warning)] transition hover:bg-[color-mix(in_oklab,var(--accent-gold)_8%,var(--bg-primary))] disabled:opacity-50"
         >
           {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
           Retry unfinished part
@@ -1096,14 +1096,14 @@ function TerminalRunFailureNote({
     return null;
   return (
     <div
-      className={`mt-3 rounded-[9px] border px-3 py-2.5 ${trace.run.retryable === false ? "border-[color-mix(in_oklab,var(--danger)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))]" : "border-[color-mix(in_oklab,var(--warning)_22%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--warning)_4%,var(--bg-primary))]"}`}
+      className={`mt-3 rounded-card border px-3 py-2.5 ${trace.run.retryable === false ? "border-[color-mix(in_oklab,var(--danger)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))]" : "border-[color-mix(in_oklab,var(--warning)_22%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--warning)_4%,var(--bg-primary))]"}`}
     >
       <div className="flex items-start gap-2.5">
         <AlertCircle
           className={`mt-px h-3.5 w-3.5 shrink-0 ${trace.run.retryable === false ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}
         />
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-[var(--text-primary)]">
+          <p className="text-micro font-semibold text-[var(--text-primary)]">
             {trace.run.retryable === false
               ? "Spectra could not complete this request"
               : "Spectra paused this run"}
@@ -1125,7 +1125,7 @@ function TerminalRunFailureNote({
                 setRetrying(false),
               );
             }}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[6px] bg-[var(--text-primary)] px-2 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-50"
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-chip bg-[var(--text-primary)] px-2 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-50"
           >
             {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
             Retry
@@ -1376,7 +1376,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
   return (
     <div className="mt-2 max-w-[560px]">
       <div
-        className="inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-2 py-1 text-micro text-[var(--text-secondary)]"
+        className="inline-flex max-w-full items-center gap-1.5 rounded-control border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-2 py-1 text-micro text-[var(--text-secondary)]"
         title={reason}
       >
         <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
@@ -1393,7 +1393,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
             type="button"
             disabled={feedbackSent}
             onClick={() => setFeedbackOpen((value) => !value)}
-            className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-semibold hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65"
+            className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-chip px-1.5 py-0.5 font-semibold hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65"
           >
             {feedbackSent ? (
               <Check className="h-2.5 w-2.5" />
@@ -1407,7 +1407,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
           type="button"
           disabled={busy || ordinaryNext}
           onClick={() => void clearAgent()}
-          className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-semibold hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65"
+          className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-chip px-1.5 py-0.5 font-semibold hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65"
         >
           {busy ? (
             <Loader2 className="h-2.5 w-2.5 animate-spin" />
@@ -1420,7 +1420,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
         </button>
       </div>
       {feedbackOpen ? (
-        <div className="mt-1.5 grid gap-2 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 text-micro shadow-[var(--shadow-sm)]">
+        <div className="mt-1.5 grid gap-2 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 text-micro shadow-[var(--shadow-sm)]">
           <div className="grid grid-cols-[auto_1fr] gap-2">
             <div className="grid gap-1">
               <span className="font-semibold text-[var(--text-secondary)]">
@@ -1465,7 +1465,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
             value={feedbackComment}
             onChange={(event) => setFeedbackComment(event.target.value)}
             placeholder="Optional detail — never include private information"
-            className="min-h-16 resize-y rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 outline-none"
+            className="min-h-16 resize-y rounded-chip border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 outline-none"
           />
           <label className="flex items-start gap-2 text-micro text-[var(--text-tertiary)]">
             <input
@@ -1481,7 +1481,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
             <button
               type="button"
               onClick={() => setFeedbackOpen(false)}
-              className="h-8 rounded-[6px] px-2.5 text-[var(--text-secondary)]"
+              className="h-8 rounded-chip px-2.5 text-[var(--text-secondary)]"
             >
               Cancel
             </button>
@@ -1489,7 +1489,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
               type="button"
               disabled={feedbackBusy}
               onClick={() => void submitFeedback()}
-              className="inline-flex h-8 items-center gap-1 rounded-[6px] bg-[var(--accent-cyan)] px-2.5 font-semibold text-white disabled:opacity-60"
+              className="inline-flex h-8 items-center gap-1 rounded-chip bg-[var(--accent-cyan)] px-2.5 font-semibold text-white disabled:opacity-60"
             >
               {feedbackBusy ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -1526,8 +1526,8 @@ function ArtifactResult({
     >
       <div className="flex items-start gap-3">
         <span
-          className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)]"
-          style={{ color: meta?.color ?? "#d88922" }}
+          className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)]"
+          style={{ color: meta?.color ?? "var(--accent-gold)" }}
         >
           <ArtifactIcon className="h-4 w-4" />
         </span>
@@ -1536,16 +1536,16 @@ function ArtifactResult({
             <button
               type="button"
               onClick={() => onOpen(artifact._id)}
-              className="rounded-[4px] text-left text-[12px] font-semibold text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]"
+              className="rounded-chip text-left text-caption font-semibold text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]"
             >
               {artifact.title}
             </button>
           ) : (
-            <div className="text-[12px] font-semibold text-[var(--text-primary)]">
+            <div className="text-caption font-semibold text-[var(--text-primary)]">
               {artifact.title}
             </div>
           )}
-          <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">
+          <div className="mt-0.5 text-micro text-[var(--text-secondary)]">
             {artifact.summary ?? artifact.blueprintKey.replaceAll("_", " ")}
           </div>
         </div>
@@ -1555,7 +1555,7 @@ function ArtifactResult({
             event.stopPropagation();
             onOpen?.(artifact._id);
           }}
-          className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+          className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
           aria-label="Open work"
           title="Open work"
         >
@@ -1567,7 +1567,7 @@ function ArtifactResult({
             event.stopPropagation();
             setChoosing((value) => !value);
           }}
-          className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+          className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
           aria-label="Add to workspace"
           title="Add to workspace"
         >
@@ -1604,13 +1604,13 @@ function ArtifactResult({
                   )
                   .finally(() => setBusy(false));
               }}
-              className="rounded-[6px] bg-[var(--bg-primary)] px-2.5 py-1.5 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="rounded-chip bg-[var(--bg-primary)] px-2.5 py-1.5 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
               {workspace.title}
             </button>
           ))}
           {workspaces.length === 0 ? (
-            <span className="text-[11px] text-[var(--text-tertiary)]">
+            <span className="text-micro text-[var(--text-tertiary)]">
               Create a workspace first.
             </span>
           ) : null}
@@ -1636,14 +1636,14 @@ function WorkspaceResult({
       className="mt-3 flex w-full items-start gap-3 px-4 py-3 text-left"
       onClick={() => onOpen?.(workspace._id)}
     >
-      <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))] text-[var(--accent-cyan)]">
+      <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-control bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))] text-[var(--accent-cyan)]">
         <FolderPlus className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-[12px] font-semibold text-[var(--text-primary)]">
+        <span className="block text-caption font-semibold text-[var(--text-primary)]">
           {workspace.title}
         </span>
-        <span className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-[var(--text-secondary)]">
+        <span className="mt-0.5 line-clamp-2 text-micro leading-4 text-[var(--text-secondary)]">
           {workspace.description ?? "Workspace updated by Spectra."}
         </span>
       </span>
@@ -1680,8 +1680,8 @@ function LiveContentReveal({
       <SpectraRichContent
         content={visibleText}
         className={cn(
-          "text-[14px] leading-7 text-[var(--text-primary)]",
-          !compact && "sm:text-[15px]",
+          "text-body leading-7 text-[var(--text-primary)]",
+          !compact && "sm:text-subhead",
         )}
       />
     </div>
@@ -1832,7 +1832,7 @@ export function ConversationSurface({
         >
           {loading ? (
             <div className="space-y-8 py-10" aria-label="Loading conversation">
-              <div className="ml-auto h-16 w-[58%] animate-pulse rounded-[16px] bg-[var(--bg-secondary)]" />
+              <div className="ml-auto h-16 w-[58%] animate-pulse rounded-surface bg-[var(--bg-secondary)]" />
               <div className="space-y-3">
                 <div className="h-3 w-24 animate-pulse rounded bg-[var(--bg-secondary)]" />
                 <div className="h-3 w-full animate-pulse rounded bg-[var(--bg-secondary)]" />
@@ -1876,14 +1876,14 @@ export function ConversationSurface({
                   {message.role === "user" ? (
                     <>
                       <div className="ml-auto max-w-[82%]">
-                        <div className="whitespace-pre-wrap rounded-[18px_18px_5px_18px] border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)]">
+                        <div className="whitespace-pre-wrap rounded-card rounded-br-chip border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-ui leading-6 text-[var(--text-primary)]">
                           {message.content}
                           {messageAttachments(message).length > 0 ? (
                             <div className="mt-3 flex flex-wrap gap-1.5">
                               {messageAttachments(message).map((attachment) => (
                                 <span
                                   key={`${attachment.name}:${attachment.size ?? 0}`}
-                                  className="flex max-w-[220px] items-center gap-1.5 rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] px-2 py-1 text-micro text-[var(--text-secondary)]"
+                                  className="flex max-w-[220px] items-center gap-1.5 rounded-control bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] px-2 py-1 text-micro text-[var(--text-secondary)]"
                                 >
                                   <FileText className="h-3 w-3 shrink-0" />
                                   <span className="truncate">
@@ -1903,7 +1903,7 @@ export function ConversationSurface({
                       liveExchange?.runId !== trace.run._id &&
                       !persistedAssistantRunIds.has(trace.run._id) ? (
                         <div className="relative mt-4 pl-7">
-                          <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-[#b77721] shadow-[0_0_0_4px_color-mix(in_oklab,#b77721_10%,transparent)]" />
+                          <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-[var(--accent-gold)] ring-4 ring-[color-mix(in_oklab,var(--accent-gold)_10%,transparent)]" />
                           <PersistedProgressTrace trace={trace} />
                           <PersistedRunOutcomeNote
                             trace={trace}
@@ -1918,7 +1918,7 @@ export function ConversationSurface({
                     </>
                   ) : (
                     <div className="relative pl-8">
-                      <span className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_9%,transparent)]">
+                      <span className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-chip bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] ring-4 ring-cyan/10">
                         <SpectraMark size={13} />
                       </span>
                       {trace && trace.run.providerUsed !== "Spectra" ? (
@@ -1927,8 +1927,8 @@ export function ConversationSurface({
                       <SpectraRichContent
                         content={message.content}
                         className={cn(
-                          "text-[14px] leading-7 text-[var(--text-primary)]",
-                          !compact && "sm:text-[15px]",
+                          "text-body leading-7 text-[var(--text-primary)]",
+                          !compact && "sm:text-subhead",
                         )}
                       />
                       {(() => {
@@ -2065,7 +2065,7 @@ export function ConversationSurface({
               !persistedUserRunIds.has(liveExchange.runId) ? (
                 <article className={cn("relative", compact ? "mb-7" : "mb-10")}>
                   <div className="ml-auto max-w-[82%]">
-                    <div className="rounded-[18px_18px_5px_18px] border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)]">
+                    <div className="rounded-card rounded-br-chip border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-ui leading-6 text-[var(--text-primary)]">
                       {liveExchange.prompt}
                     </div>
                     <div className="mt-1.5 text-right text-micro text-[var(--text-tertiary)]">
@@ -2078,7 +2078,7 @@ export function ConversationSurface({
               !persistedAssistantRunIds.has(liveExchange.runId) ? (
                 <article className={cn("relative", compact ? "mb-7" : "mb-10")}>
                   <div className="relative pl-8">
-                    <span className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_9%,transparent)]">
+                    <span className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-chip bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] ring-4 ring-cyan/10">
                       <SpectraMark size={13} />
                     </span>
                     <ProgressTrace
@@ -2124,14 +2124,14 @@ export function ConversationSurface({
                 .map((trace) => (
                   <div
                     key={`unresolved:${trace.run._id}`}
-                    className="mb-7 ml-7 rounded-[9px] bg-[var(--bg-secondary)] px-3.5 py-3"
+                    className="mb-7 ml-7 rounded-card bg-[var(--bg-secondary)] px-3.5 py-3"
                   >
-                    <div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--text-secondary)]">
+                    <div className="flex items-center gap-2 text-micro font-semibold text-[var(--text-secondary)]">
                       {trace.run.status === "running" ||
                       trace.run.status === "queued" ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
                       ) : trace.run.status === "awaiting_resolution" ? (
-                        <GitCompareArrows className="h-3.5 w-3.5 text-[#b46d15]" />
+                        <GitCompareArrows className="h-3.5 w-3.5 text-[var(--warning)]" />
                       ) : (
                         <AlertCircle
                           className={`h-3.5 w-3.5 ${trace.run.retryable === false ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}
@@ -2218,7 +2218,7 @@ export function ConversationSurface({
               behavior: "smooth",
             });
           }}
-          className="absolute bottom-28 left-1/2 z-20 flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-full bg-[var(--bg-elevated)] px-3 text-[11px] font-medium text-[var(--text-secondary)] shadow-[0_8px_24px_rgba(27,20,12,0.12)] hover:text-[var(--text-primary)]"
+          className="absolute bottom-28 left-1/2 z-chrome flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-full bg-[var(--bg-elevated)] px-3 text-micro font-medium text-[var(--text-secondary)] shadow-card hover:text-[var(--text-primary)]"
         >
           <ArrowDown className="h-3.5 w-3.5" />
           Latest
@@ -2376,7 +2376,7 @@ export function ThreadConversation({
             onSteer={runEngine.steer}
             onSubmit={(value, attachments) => runEngine.run(value, attachments)}
             context={
-              <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
+              <span className="flex items-center gap-1.5 text-micro text-[var(--text-secondary)]">
                 <MessageSquare className="h-3.5 w-3.5" />
                 Thread
               </span>

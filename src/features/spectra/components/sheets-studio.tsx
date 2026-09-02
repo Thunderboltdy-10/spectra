@@ -1030,8 +1030,8 @@ function SheetsTrackGrip({
       }}
       className={
         axis === "column"
-          ? "sheets-track-grip absolute inset-y-0 right-0 z-10 w-2"
-          : "sheets-track-grip absolute inset-x-0 bottom-0 z-10 h-2"
+          ? "sheets-track-grip absolute inset-y-0 right-0 z-chrome w-2"
+          : "sheets-track-grip absolute inset-x-0 bottom-0 z-chrome h-2"
       }
     />
   );
@@ -2101,8 +2101,8 @@ export function SheetsStudio({
         id,
         range: selectionLabel,
         kind: "color_scale",
-        minimumColor: "#eff8f3",
-        maximumColor: "#72d0a8",
+        minimumColor: "color-mix(in oklab, var(--success) 8%, var(--bg-primary))",
+        maximumColor: "var(--accent-mint)",
       };
     else {
       const value = Number(conditionalThreshold);
@@ -2119,8 +2119,8 @@ export function SheetsStudio({
         kind: "cell_is",
         operator: conditionalKind,
         value,
-        fillColor: "#d9f4e8",
-        textColor: "#126a4a",
+        fillColor: "color-mix(in oklab, var(--success) 16%, var(--bg-elevated))",
+        textColor: "var(--success)",
       };
     }
     updateActiveSheet((sheet) => ({
@@ -5263,8 +5263,8 @@ export function SheetsStudio({
             aria-label={panelTitle}
             className={
               mode === "split"
-                ? "absolute inset-x-0 bottom-0 z-[45] flex max-h-[min(46%,380px)] flex-col gap-3 overflow-y-auto border-t border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
-                : "absolute inset-y-0 right-0 z-[45] flex w-[min(312px,calc(100%-44px))] flex-col gap-3 overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
+                ? "absolute inset-x-0 bottom-0 z-chrome flex max-h-[min(46%,380px)] flex-col gap-3 overflow-y-auto border-t border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
+                : "absolute inset-y-0 right-0 z-chrome flex w-[min(312px,calc(100%-44px))] flex-col gap-3 overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
             }
           >
             <header className="flex items-center gap-2">
@@ -5404,7 +5404,7 @@ export function SheetsStudio({
                   {(
                     [
                       ["Text", "textColor", "#222522"],
-                      ["Fill", "fillColor", "#ffffff"],
+                      ["Fill", "fillColor", "var(--bg-elevated)"],
                     ] as const
                   ).map(([label, key, fallback]) => (
                     <label key={key} className="block">
@@ -6295,7 +6295,7 @@ export function SheetsStudio({
         {/* The empty state invites rather than blocks: the grid underneath is
             live, so the first keystroke lands in A1. */}
         {sheetIsEmpty && !importing && !analysing ? (
-          <div className="pointer-events-none absolute inset-x-0 top-[34%] z-[44] flex justify-center px-6">
+          <div className="pointer-events-none absolute inset-x-0 top-[34%] z-chrome flex justify-center px-6">
             <div className="pointer-events-auto max-w-[302px] text-center">
               <p className="text-subhead font-semibold text-[var(--text-primary)]">
                 {emptyState.headline}
@@ -6322,7 +6322,7 @@ export function SheetsStudio({
         {importing ? (
           <div
             aria-live="polite"
-            className="absolute inset-0 z-[47] grid place-items-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] px-6"
+            className="absolute inset-0 z-chrome grid place-items-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] px-6"
           >
             <div className="flex flex-col items-center gap-2.5 text-center">
               <span className="block h-1 w-40 overflow-hidden rounded-pill bg-[var(--bg-secondary)]">
@@ -6342,7 +6342,7 @@ export function SheetsStudio({
         {notice ? (
           <div
             aria-live="polite"
-            className="absolute left-1/2 z-[46] flex max-w-[min(430px,calc(100%-28px))] -translate-x-1/2 items-start gap-2 rounded-card border bg-[var(--bg-elevated)] px-3 py-2 text-caption shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
+            className="absolute left-1/2 z-chrome flex max-w-[min(430px,calc(100%-28px))] -translate-x-1/2 items-start gap-2 rounded-card border bg-[var(--bg-elevated)] px-3 py-2 text-caption shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
             style={{
               bottom: "calc(12px + var(--spectra-composer-safe-area, 0px))",
               borderColor:

@@ -146,13 +146,13 @@ export function RightSidePanel({
       className={cn(
         "relative h-full w-full shrink-0 overflow-hidden",
         "bg-[var(--bg-elevated)]/80 border-l border-[var(--border-default)]/40 backdrop-blur-[40px]",
-        "shadow-[-12px_0_32px_-16px_rgba(0,0,0,0.12),-20px_0_44px_-34px_rgba(15,23,42,0.45)]",
+        "shadow-[var(--shadow-lg)]",
         className,
       )}
     >
       {/* Resize handle — invisible 6px drag strip on left edge */}
       <div
-        className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-[var(--accent-cyan)]/10 active:bg-[var(--accent-cyan)]/15 transition-colors"
+        className="absolute inset-y-0 left-0 z-chrome w-1.5 cursor-col-resize hover:bg-[var(--accent-cyan)]/10 active:bg-[var(--accent-cyan)]/15 transition-colors"
         onMouseDown={handleMouseDown}
       />
 

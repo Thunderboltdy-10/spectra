@@ -29,7 +29,7 @@ function SignInCard({ redirectUrl }: { redirectUrl?: string }) {
           <section className="mb-6 md:mb-0">
             <div className="mb-5 flex items-center gap-2.5">
               <SpectraMark size={30} />
-              <span className="text-[15px] font-bold tracking-tight text-[var(--text-primary)]">
+              <span className="text-subhead font-bold tracking-tight text-[var(--text-primary)]">
                 Spectra
               </span>
             </div>

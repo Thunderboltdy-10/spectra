@@ -105,7 +105,7 @@ export function PrismLayer({
     <div
       ref={hostRef}
       data-prism-layer
-      className="pointer-events-none fixed inset-0 z-0"
+      className="pointer-events-none fixed inset-0 z-base"
       style={{ contain: "strict" }}
     >
       <PrismStage

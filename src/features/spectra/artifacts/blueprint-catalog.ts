@@ -124,7 +124,7 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
         name: "Classes",
         kind: "class",
         visible: true,
-        color: "#26a879",
+        color: "var(--accent-mint)",
         authority: "school",
       },
       {
@@ -132,7 +132,7 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
         name: "Study blocks",
         kind: "study",
         visible: true,
-        color: "#7865ea",
+        color: "var(--brand-primary)",
         authority: "user",
       },
       {
@@ -140,7 +140,7 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
         name: "Tasks & deadlines",
         kind: "tasks",
         visible: true,
-        color: "#f2ad2e",
+        color: "var(--accent-gold)",
         authority: "workspace",
       },
     ],

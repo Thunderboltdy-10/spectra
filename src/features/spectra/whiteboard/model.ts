@@ -165,14 +165,14 @@ export function createWhiteboardNode(
     return {
       ...base,
       content: { text: "Add a thought" },
-      style: { fill: "#fff3c9", stroke: "#e9c965", color: "#3f3823" },
+      style: { fill: "color-mix(in oklab, var(--accent-gold) 28%, var(--bg-elevated))", stroke: "var(--accent-gold)", color: "var(--text-primary)" },
       semanticLabel: "Sticky note",
     };
   if (type === "text")
     return {
       ...base,
       content: { text: "Add text" },
-      style: { color: "#26332e", fontSize: 30, fontWeight: 650 },
+      style: { color: "var(--text-primary)", fontSize: 30, fontWeight: 650 },
       semanticLabel: "Text",
     };
   if (type === "shape")
@@ -180,9 +180,9 @@ export function createWhiteboardNode(
       ...base,
       content: { text: "Concept", shape: "rounded-rectangle" },
       style: {
-        fill: "#f4f1ff",
-        stroke: "#8874ee",
-        color: "#4938af",
+        fill: "var(--bg-user-bubble)",
+        stroke: "var(--brand-primary)",
+        color: "var(--brand-primary)",
         radius: 14,
       },
       semanticLabel: "Concept",
@@ -191,14 +191,14 @@ export function createWhiteboardNode(
     return {
       ...base,
       content: { title: "New frame" },
-      style: { fill: "#ffffff", stroke: "#b8bbb7" },
+      style: { fill: "var(--bg-elevated)", stroke: "var(--border-strong)" },
       semanticLabel: "Frame",
     };
   if (type === "card")
     return {
       ...base,
       content: { title: "Card", text: "Add supporting detail" },
-      style: { fill: "#ffffff", stroke: "#d8d9d5" },
+      style: { fill: "var(--bg-elevated)", stroke: "var(--border-default)" },
       semanticLabel: "Card",
     };
   if (type === "table")
@@ -210,7 +210,7 @@ export function createWhiteboardNode(
           ["Example", "Value"],
         ],
       },
-      style: { fill: "#ffffff", stroke: "#d8d9d5" },
+      style: { fill: "var(--bg-elevated)", stroke: "var(--border-default)" },
       semanticLabel: "Table",
     };
   return { ...base, content: {}, semanticLabel: type };

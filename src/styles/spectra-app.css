@@ -7631,6 +7631,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .presentation-canvas {
   position: relative;
+  isolation: isolate;
   container: presentation-canvas / inline-size;
   overflow: hidden;
   width: 100%;

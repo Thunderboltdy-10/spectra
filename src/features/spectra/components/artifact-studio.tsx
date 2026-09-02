@@ -23,7 +23,6 @@ import {
   Bold,
   BookOpen,
   CalendarCheck2,
-  Circle,
   Code2,
   Copy,
   Download,
@@ -198,17 +197,9 @@ import {
 } from "./artifact-studio-value-utils";
 import {
   arrayOfRecords,
-  clozeAnswer,
-  clozeParts,
-  clozePrompt,
-  deckStudyKey,
-  id,
-  quizSettingsFromContent,
   record,
   type DeckCard,
-  type DeckStudyItem,
   type QuizQuestion,
-  type QuizSettings,
 } from "./artifact-content-model";
 export { tagsFromDraft } from "./artifact-studio-value-utils";
 import {
@@ -713,7 +704,7 @@ function ReadonlyCodeSnapshot({
   }
 
   return (
-    <section className="mt-6 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+    <section className="mt-6 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)]">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-default)] px-3 py-2">
         <div className="flex items-center gap-1">
           <button
@@ -755,14 +746,14 @@ function ReadonlyCodeSnapshot({
                 type="button"
                 key={file.id}
                 onClick={() => setActiveFileId(file.id)}
-                className={`flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-micro ${file.id === activeFile.id ? "bg-[var(--bg-elevated)] font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}
+                className={`flex w-full items-center gap-2 rounded-chip px-2 py-1.5 text-left text-micro ${file.id === activeFile.id ? "bg-[var(--bg-elevated)] font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}
               >
                 <FileText className="h-3 w-3" />
                 <span className="truncate">{file.path}</span>
               </button>
             ))}
           </aside>
-          <div className="min-w-0 bg-[#151713] text-[#e8eadf]">
+          <div className="min-w-0 bg-[var(--text-primary)] text-[var(--bg-tertiary)]">
             <div className="border-b border-white/10 px-3 py-2 text-micro text-white/55">
               {activeFile.path} · {activeFile.language}
             </div>
@@ -774,7 +765,7 @@ function ReadonlyCodeSnapshot({
       ) : (
         <div className="p-2">
           <p
-            className={`mb-2 rounded-[6px] px-2 py-1.5 text-micro ${state === "error" ? "bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
+            className={`mb-2 rounded-chip px-2 py-1.5 text-micro ${state === "error" ? "bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
           >
             {message}
           </p>
@@ -800,7 +791,7 @@ function ReadonlyCodeSnapshot({
               }
             />
           ) : consoleLines.length ? (
-            <pre className="max-h-[360px] overflow-auto rounded-[8px] bg-[#151713] p-4 font-mono text-micro leading-4 text-[#e8eadf]">
+            <pre className="max-h-[360px] overflow-auto rounded-control bg-[var(--text-primary)] p-4 font-mono text-micro leading-4 text-[var(--bg-tertiary)]">
               {consoleLines.join("\n")}
             </pre>
           ) : (
@@ -844,16 +835,16 @@ function ReadonlyArtifactSnapshot({
     blueprintKey === "timetable" ? arrayOfRecords(body.events) : [];
   return (
     <article className="min-h-full bg-[var(--bg-primary)] px-5 py-6 text-[var(--text-primary)]">
-      <h3 className="font-display text-[24px] font-semibold leading-tight">
+      <h3 className="font-display text-metric font-semibold leading-tight">
         {snapshot.title}
       </h3>
       {snapshot.summary ? (
-        <p className="mt-2 text-[12px] leading-5 text-[var(--text-secondary)]">
+        <p className="mt-2 text-caption leading-5 text-[var(--text-secondary)]">
           {snapshot.summary}
         </p>
       ) : null}
       {blueprintKey === "document" ? (
-        <div className="mt-7 space-y-4 text-[13px] leading-6">
+        <div className="mt-7 space-y-4 text-ui leading-6">
           {blocks.map((block, index) => {
             const text = typeof block.text === "string" ? block.text : "";
             const type =
@@ -862,7 +853,7 @@ function ReadonlyArtifactSnapshot({
               return (
                 <h4
                   key={String(block.id ?? index)}
-                  className="pt-3 font-display text-[20px] font-semibold"
+                  className="pt-3 font-display text-heading font-semibold"
                 >
                   {text}
                 </h4>
@@ -871,7 +862,7 @@ function ReadonlyArtifactSnapshot({
               return (
                 <aside
                   key={String(block.id ?? index)}
-                  className="rounded-[9px] border border-[color-mix(in_oklab,var(--accent-mint)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-mint)_6%,var(--bg-primary))] px-4 py-3"
+                  className="rounded-card border border-[color-mix(in_oklab,var(--accent-mint)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-mint)_6%,var(--bg-primary))] px-4 py-3"
                 >
                   {text}
                 </aside>
@@ -892,19 +883,19 @@ function ReadonlyArtifactSnapshot({
           {cards.map((card, index) => (
             <section
               key={card.id}
-              className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
+              className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
             >
-              <div className="text-micro font-semibold uppercase tracking-[.1em] text-[#7560e8]">
+              <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--brand-primary)]">
                 Card {index + 1} · {card.section}
               </div>
-              <div className="mt-2 font-display text-[17px] font-semibold">
+              <div className="mt-2 font-display text-title font-semibold">
                 {card.front}
               </div>
-              <div className="mt-3 text-[12px] leading-5 text-[var(--text-secondary)]">
+              <div className="mt-3 text-caption leading-5 text-[var(--text-secondary)]">
                 {card.back}
               </div>
               {card.hint ? (
-                <div className="mt-3 rounded-[7px] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-primary))] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
+                <div className="mt-3 rounded-control bg-[color-mix(in_oklab,var(--brand-primary)_6%,var(--bg-primary))] px-3 py-2 text-micro text-[var(--text-secondary)]">
                   {card.hint}
                 </div>
               ) : null}
@@ -917,20 +908,20 @@ function ReadonlyArtifactSnapshot({
           {questions.map((question, index) => (
             <section
               key={question.id}
-              className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
+              className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
             >
               <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-mint)]">
                 Question {index + 1}
               </div>
-              <div className="mt-2 font-display text-[17px] font-semibold">
+              <div className="mt-2 font-display text-title font-semibold">
                 {question.prompt}
               </div>
               {question.options?.length ? (
-                <ol className="mt-3 space-y-1.5 text-[12px] text-[var(--text-secondary)]">
+                <ol className="mt-3 space-y-1.5 text-caption text-[var(--text-secondary)]">
                   {question.options.map((option, optionIndex) => (
                     <li
                       key={`${question.id}:${optionIndex}`}
-                      className="rounded-[7px] border border-[var(--border-subtle)] px-3 py-2"
+                      className="rounded-control border border-[var(--border-subtle)] px-3 py-2"
                     >
                       {String.fromCharCode(65 + optionIndex)}. {option}
                     </li>
@@ -943,8 +934,8 @@ function ReadonlyArtifactSnapshot({
       ) : null}
       {blueprintKey === "planner_task" ? (
         <div className="mt-6 space-y-4">
-          <section className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-            <div className="grid grid-cols-2 gap-4 text-[11px]">
+          <section className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+            <div className="grid grid-cols-2 gap-4 text-micro">
               <div>
                 <span className="block text-[var(--text-tertiary)]">
                   Status
@@ -966,7 +957,7 @@ function ReadonlyArtifactSnapshot({
           {subtasks.map((task, index) => (
             <div
               key={String(task.id ?? index)}
-              className="flex items-center gap-3 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-[12px]"
+              className="flex items-center gap-3 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5 text-caption"
             >
               <span
                 className={`h-4 w-4 rounded-full border ${task.completed ? "border-[var(--success)] bg-[var(--success)]" : "border-[var(--border-default)]"}`}
@@ -981,13 +972,13 @@ function ReadonlyArtifactSnapshot({
           {slides.map((slide, index) => (
             <section
               key={String(slide.id ?? index)}
-              className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
+              className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)]"
             >
               <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
                 <span className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
                   Slide {index + 1}
                 </span>
-                <h4 className="mt-1 font-display text-[15px] font-semibold leading-tight">
+                <h4 className="mt-1 font-display text-subhead font-semibold leading-tight">
                   {String(slide.title ?? "Untitled slide")}
                 </h4>
               </header>
@@ -1003,7 +994,7 @@ function ReadonlyArtifactSnapshot({
                   .map((object, objectIndex) => (
                     <div
                       key={String(object.id ?? objectIndex)}
-                      className="rounded-[7px] border border-[var(--border-subtle)] px-2.5 py-2"
+                      className="rounded-control border border-[var(--border-subtle)] px-2.5 py-2"
                     >
                       <span className="block text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
                         {humanizeKey(String(object.type ?? "object"))}
@@ -1043,7 +1034,7 @@ function ReadonlyArtifactSnapshot({
             return (
               <section
                 key={String(sheet.id ?? index)}
-                className="overflow-hidden rounded-[9px] border border-[var(--border-default)]"
+                className="overflow-hidden rounded-card border border-[var(--border-default)]"
               >
                 <header className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-micro font-semibold">
                   {String(sheet.name ?? `Sheet ${index + 1}`)}
@@ -1082,7 +1073,7 @@ function ReadonlyArtifactSnapshot({
         />
       ) : null}
       {blueprintKey === "whiteboard" ? (
-        <div className="relative mt-6 min-h-[430px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[radial-gradient(circle_at_1px_1px,var(--border-subtle)_1px,transparent_0)] bg-[size:20px_20px]">
+        <div className="relative mt-6 min-h-[430px] overflow-hidden rounded-card border border-[var(--border-default)] bg-[radial-gradient(circle_at_1px_1px,var(--border-subtle)_1px,transparent_0)] bg-[size:20px_20px]">
           {edges.map((edge, index) => (
             <div
               key={String(edge.id ?? index)}
@@ -1097,7 +1088,7 @@ function ReadonlyArtifactSnapshot({
           {nodes.map((node, index) => (
             <div
               key={String(node.id ?? index)}
-              className="absolute max-w-[150px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-micro shadow-sm"
+              className="absolute max-w-[150px] rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-micro shadow-sm"
               style={{
                 left: `${8 + ((index * 27) % 72)}%`,
                 top: `${10 + ((index * 31) % 72)}%`,
@@ -1120,11 +1111,11 @@ function ReadonlyArtifactSnapshot({
           {events.map((event, index) => (
             <section
               key={String(event.id ?? index)}
-              className="flex items-center gap-3 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-3"
+              className="flex items-center gap-3 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-3"
             >
               <CalendarCheck2 className="h-4 w-4 text-[var(--accent-cyan)]" />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[11px] font-semibold">
+                <div className="truncate text-micro font-semibold">
                   {String(event.title ?? "Untitled event")}
                 </div>
                 <div className="mt-0.5 text-micro text-[var(--text-tertiary)]">
@@ -1151,11 +1142,11 @@ function ReadonlyArtifactSnapshot({
       ) : null}
       {blueprintKey === "agent" ? (
         <div className="mt-6 grid gap-4">
-          <section className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+          <section className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
             <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
               Instructions
             </div>
-            <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-[var(--text-primary)]">
+            <p className="mt-2 whitespace-pre-wrap text-caption leading-6 text-[var(--text-primary)]">
               {String(record(body.instructions).text ?? "No instructions")}
             </p>
           </section>
@@ -1214,11 +1205,11 @@ function MetricSnapshot({
   values: Record<string, unknown>[];
 }) {
   return (
-    <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+    <section className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
       <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
         {label}
       </div>
-      <div className="mt-2 text-[18px] font-semibold text-[var(--text-primary)]">
+      <div className="mt-2 text-heading font-semibold text-[var(--text-primary)]">
         {values.length}
       </div>
       <p className="mt-1 line-clamp-3 text-micro leading-4 text-[var(--text-secondary)]">
@@ -1327,17 +1318,17 @@ function HistoryComparisonOverlay({
 
   return (
     <section
-      className="absolute inset-0 z-[180] flex min-h-0 flex-col bg-[var(--bg-primary)] pb-[88px]"
+      className="absolute inset-0 z-composer-dock flex min-h-0 flex-col bg-[var(--bg-primary)] pb-[88px]"
       aria-label="Version history comparison"
     >
       <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-4">
         <div className="flex min-w-0 items-center gap-3">
           <History className="h-4 w-4 text-[var(--text-secondary)]" />
-          <span className="text-[13px] font-medium text-[var(--text-secondary)]">
+          <span className="text-ui font-medium text-[var(--text-secondary)]">
             Comparing versions
           </span>
           {selected ? (
-            <span className="truncate rounded-[6px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-2 py-1 text-[12px] font-medium text-[#6f59cf]">
+            <span className="truncate rounded-chip bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-secondary))] px-2 py-1 text-caption font-medium text-[var(--brand-primary)]">
               Previewing v{selected.versionNumber ?? "—"} from{" "}
               {new Date(selected.createdAt).toLocaleString()}
             </span>
@@ -1346,7 +1337,7 @@ function HistoryComparisonOverlay({
         <button
           type="button"
           onClick={onClose}
-          className="flex h-9 items-center gap-1.5 rounded-[8px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+          className="flex h-9 items-center gap-1.5 rounded-control px-2.5 text-ui font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
         >
           <X className="h-3.5 w-3.5" />
           Close comparison
@@ -1356,7 +1347,7 @@ function HistoryComparisonOverlay({
         <main className="flex min-h-0 flex-col border-r border-[var(--border-default)]">
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2.5">
             <div className="min-w-0">
-              <h2 className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">
+              <h2 className="truncate font-display text-editor font-semibold text-[var(--text-primary)]">
                 {artifact.title}
               </h2>
               <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
@@ -1367,7 +1358,7 @@ function HistoryComparisonOverlay({
             <button
               type="button"
               onClick={() => setShowChanges((value) => !value)}
-              className={`h-8 rounded-[7px] border px-3 text-micro font-medium ${showChanges ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+              className={`h-8 rounded-control border px-3 text-micro font-medium ${showChanges ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
             >
               {showChanges
                 ? "Show artifact comparison"
@@ -1380,7 +1371,7 @@ function HistoryComparisonOverlay({
                 {changes.map((change, index) => (
                   <article
                     key={`${index}:${change.label}`}
-                    className="overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
+                    className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)]"
                   >
                     <header className="border-b border-[var(--border-subtle)] px-3 py-2">
                       <label className="flex cursor-pointer items-center gap-2 text-micro font-semibold text-[var(--text-primary)]">
@@ -1424,7 +1415,7 @@ function HistoryComparisonOverlay({
                   </article>
                 ))}
                 {changes.length === 0 ? (
-                  <div className="flex min-h-[260px] items-center justify-center text-[11px] text-[var(--text-secondary)]">
+                  <div className="flex min-h-[260px] items-center justify-center text-micro text-[var(--text-secondary)]">
                     This version matches the current artifact.
                   </div>
                 ) : null}
@@ -1436,11 +1427,11 @@ function HistoryComparisonOverlay({
                 style={{ gridTemplateColumns: `${split}% 8px minmax(0,1fr)` }}
               >
                 <section className="min-h-0 overflow-auto">
-                  <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
+                  <div className="sticky top-0 z-chrome flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
                     <span className="text-micro font-semibold text-[var(--text-primary)]">
                       Version v{selected.versionNumber ?? "—"}
                     </span>
-                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[#6f59cf]">
+                    <span className="rounded-chip bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[var(--brand-primary)]">
                       Preview only
                     </span>
                   </div>
@@ -1469,11 +1460,11 @@ function HistoryComparisonOverlay({
                   <span className="absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--border-strong)] group-hover:bg-[var(--accent-cyan)]" />
                 </button>
                 <section className="min-h-0 overflow-auto">
-                  <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
+                  <div className="sticky top-0 z-chrome flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
                     <span className="text-micro font-semibold text-[var(--text-primary)]">
                       Current live version
                     </span>
-                    <span className="rounded-[5px] bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[var(--success)]">
+                    <span className="rounded-chip bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[var(--success)]">
                       Live
                     </span>
                   </div>
@@ -1489,7 +1480,7 @@ function HistoryComparisonOverlay({
             <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center">
               <div className="max-w-[380px]">
                 <AlertCircle className="mx-auto h-5 w-5 text-[var(--warning)]" />
-                <h4 className="mt-3 text-[11px] font-semibold text-[var(--text-primary)]">
+                <h4 className="mt-3 text-micro font-semibold text-[var(--text-primary)]">
                   This version cannot be rendered
                 </h4>
                 <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
@@ -1503,7 +1494,7 @@ function HistoryComparisonOverlay({
               </div>
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-[11px] text-[var(--text-secondary)]">
+            <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-micro text-[var(--text-secondary)]">
               Select a version from the timeline.
             </div>
           )}
@@ -1528,7 +1519,7 @@ function HistoryComparisonOverlay({
                 onClick={() =>
                   selected?.after && onRestore(selected, [...selectedRegions])
                 }
-                className="h-8 rounded-[7px] border border-[var(--border-default)] px-3 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                className="h-8 rounded-control border border-[var(--border-default)] px-3 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
               >
                 Restore {selectedRegions.size} selected
               </button>
@@ -1538,7 +1529,7 @@ function HistoryComparisonOverlay({
                   !selected?.after || readOnly || Boolean(busyVersionId)
                 }
                 onClick={() => selected?.after && onRestore(selected)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[#7658ed] px-3 text-micro font-semibold text-white disabled:opacity-35"
+                className="inline-flex h-8 items-center gap-1.5 rounded-control bg-[var(--brand-primary)] px-3 text-micro font-semibold text-white disabled:opacity-35"
               >
                 {busyVersionId ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1553,7 +1544,7 @@ function HistoryComparisonOverlay({
         <aside className="flex min-h-0 flex-col bg-[var(--bg-elevated)]">
           <header className="flex shrink-0 items-center justify-between border-b border-[var(--border-default)] px-4 py-3">
             <div>
-              <h3 className="text-[12px] font-semibold text-[var(--text-primary)]">
+              <h3 className="text-caption font-semibold text-[var(--text-primary)]">
                 Version history
               </h3>
               <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
@@ -1567,7 +1558,7 @@ function HistoryComparisonOverlay({
                   setCheckpointOpen((value) => !value);
                   setCheckpointError(null);
                 }}
-                className="flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                className="flex h-7 items-center gap-1 rounded-chip px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               >
                 <Plus className="h-3 w-3" />
                 Checkpoint
@@ -1595,13 +1586,13 @@ function HistoryComparisonOverlay({
                   }}
                   autoFocus
                   placeholder="e.g. Before teacher review"
-                  className="h-8 min-w-0 flex-1 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
+                  className="h-8 min-w-0 flex-1 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
                 />
                 <button
                   type="button"
                   disabled={!checkpointName.trim() || checkpointBusy}
                   onClick={() => void createCheckpoint()}
-                  className="h-8 rounded-[7px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35"
+                  className="h-8 rounded-control bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35"
                 >
                   {checkpointBusy ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -1621,8 +1612,8 @@ function HistoryComparisonOverlay({
             </div>
           ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-            <div className="relative mb-1 flex gap-3 rounded-[8px] px-3 py-2.5">
-              <span className="relative z-10 mt-1.5 h-2 w-2 rounded-full bg-[var(--success)]" />
+            <div className="relative mb-1 flex gap-3 rounded-control px-3 py-2.5">
+              <span className="relative z-chrome mt-1.5 h-2 w-2 rounded-full bg-[var(--success)]" />
               <div className="absolute bottom-[-8px] left-[18px] top-5 w-px bg-[var(--border-default)]" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
@@ -1650,10 +1641,10 @@ function HistoryComparisonOverlay({
                   type="button"
                   key={version._id}
                   onClick={() => onSelect(version)}
-                  className={`relative flex w-full gap-3 rounded-[8px] border px-3 py-2.5 text-left ${selectedVersion ? "border-[color-mix(in_oklab,#7658ed_50%,var(--border-default))] bg-[color-mix(in_oklab,#7658ed_5%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`}
+                  className={`relative flex w-full gap-3 rounded-control border px-3 py-2.5 text-left ${selectedVersion ? "border-[color-mix(in_oklab,var(--brand-primary)_50%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`}
                 >
                   <span
-                    className={`relative z-10 mt-1.5 h-2 w-2 shrink-0 rounded-full ${version.source === "ai" ? "bg-[#7658ed]" : version.source === "restore" || version.source === "revert" ? "bg-[#278bd8]" : version.source === "checkpoint" ? "bg-[#8b6ff0]" : "bg-[var(--text-secondary)]"}`}
+                    className={`relative z-chrome mt-1.5 h-2 w-2 shrink-0 rounded-full ${version.source === "ai" ? "bg-[var(--brand-primary)]" : version.source === "restore" || version.source === "revert" ? "bg-[#278bd8]" : version.source === "checkpoint" ? "bg-[var(--brand-primary)]" : "bg-[var(--text-secondary)]"}`}
                   />
                   {index < versions.length - 1 ? (
                     <span className="absolute bottom-[-8px] left-[18px] top-5 w-px bg-[var(--border-default)]" />
@@ -1673,7 +1664,7 @@ function HistoryComparisonOverlay({
                       </span>
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
+                      <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
                         {historyKind(version)}
                       </span>
                       <span className="truncate text-micro text-[var(--text-tertiary)]">
@@ -1904,15 +1895,6 @@ function humanDiff(
     visit(historical, current, []);
   }
   return changes.slice(0, 120);
-}
-
-function contentTextFromJson(node?: JSONContent): string {
-  if (!node) return "";
-  const own = typeof node.text === "string" ? node.text : "";
-  const childText = Array.isArray(node.content)
-    ? node.content.map(contentTextFromJson).join(" ")
-    : "";
-  return `${own} ${childText}`.trim();
 }
 
 function inlineMathContent(text: string): JSONContent[] | undefined {
@@ -2775,12 +2757,12 @@ export function ArtifactStudio({
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         <header className="flex min-h-[78px] shrink-0 items-center justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] text-[#8b6ff0]">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--brand-primary)]">
               <MessageSquare className="h-5 w-5" />
             </span>
             <div className="min-w-0">
               <div
-                className="truncate font-display text-[20px] font-semibold text-[var(--text-primary)]"
+                className="truncate font-display text-heading font-semibold text-[var(--text-primary)]"
                 title={artifact.title}
               >
                 {artifact.title}
@@ -2910,7 +2892,7 @@ function ArtifactStudioEditor({
   artifact,
   artifacts,
   busy,
-  sourceLabel,
+  sourceLabel: _sourceLabel,
   onClose,
   onExpand,
   onOpenArtifact,
@@ -3257,12 +3239,10 @@ function ArtifactStudioEditor({
     nativeWriteError,
     setNativeWriteError,
     nativeMaterialization,
-    nativeAttribution,
     setNativeAttribution,
     nativeProjectionReady,
     nativeProjectionOverrideRef,
     nativeConflict,
-    setNativeConflict,
     queueNativeMaterialization,
     reconcileNativeRevision,
   } = nativeSync;
@@ -3275,6 +3255,7 @@ function ArtifactStudioEditor({
   );
   const incomingLiveContent = nativeBodyBinding ? null : live.liveValue.content;
   const incomingLiveTagDraft = live.liveValue.tags.join(", ");
+  const incomingReactBody = nativeBodyBinding ? null : content;
   const incomingSnapshot = useMemo(
     () => ({
       title: live.liveValue.title,
@@ -3286,19 +3267,17 @@ function ArtifactStudioEditor({
       content: nativeBodyBinding
         ? currentSnapshotRef.current.content
         : (nativeProjectionOverrideRef.current ??
-          (nativeProjectionReady ? content : incomingLiveContent)),
+          (nativeProjectionReady ? incomingReactBody : incomingLiveContent)),
     }),
     [
       incomingLiveContent,
       incomingLiveTagDraft,
+      incomingReactBody,
       live.liveValue.summary,
       live.liveValue.title,
-      // Native Word/Excel/PowerPoint bodies are Yjs-bound. React `content`
-      // identity is not a remote write; putting it here retriggered incoming
-      // reconciliation (and setBaseline) on every keystroke.
-      nativeBodyBinding ? null : content,
       humanSummary,
       nativeBodyBinding,
+      nativeProjectionOverrideRef,
       nativeProjectionReady,
     ],
   );
@@ -3344,7 +3323,7 @@ function ArtifactStudioEditor({
     } finally {
       setNativeRecoveryBusy(null);
     }
-  }, [artifact._id, artifact.title, nativePortableArtifact]);
+  }, [artifact._id, artifact.title, nativePortableArtifact, setNativeAttribution]);
   const materializeNativeCopy = useCallback(async () => {
     if (!nativePortableArtifact) return;
     setNativeRecoveryBusy("materialize");
@@ -3379,7 +3358,7 @@ function ArtifactStudioEditor({
     } finally {
       setNativeRecoveryBusy(null);
     }
-  }, [artifact._id, nativePortableArtifact]);
+  }, [artifact._id, nativePortableArtifact, setNativeAttribution]);
   const synchronizeDraft = useCallback(
     async (snapshot = currentSnapshotRef.current) => {
       if (
@@ -4709,6 +4688,7 @@ function ArtifactStudioEditor({
   }, [
     artifact._id,
     artifact.updatedAt,
+    baseline,
     dismissedRemoteKey,
     incomingSnapshot,
     isCollaborativeArtifact,
@@ -5273,7 +5253,7 @@ function ArtifactStudioEditor({
   const identityBlock = (
     <div className="spectra-artifact-identity flex min-w-0 flex-1 items-start">
       <div className="min-w-0 flex-1">
-        <div className="rounded-[7px]">
+        <div className="rounded-control">
           <textarea
             value={presencePreview?.title ?? title}
             readOnly={readOnly}
@@ -5296,7 +5276,7 @@ function ArtifactStudioEditor({
             placeholder="Untitled work"
           />
         </div>
-        <div className="mt-0.5 rounded-[7px]">
+        <div className="mt-0.5 rounded-control">
           <div className="relative">
             <textarea
               ref={summaryRef}
@@ -5423,11 +5403,11 @@ function ArtifactStudioEditor({
           ))}
         </div>
       ) : null}
-      <header className="spectra-artifact-header relative z-30 flex shrink-0 flex-col bg-transparent">
+      <header className="spectra-artifact-header relative z-chrome flex shrink-0 flex-col bg-transparent">
         <div className="spectra-artifact-header-topline flex min-w-0 items-start justify-between gap-3">
           <div className="spectra-artifact-identity-cluster flex min-w-0 flex-1 items-start gap-3">
             <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
               style={{ color: meta.color }}
             >
               <Icon className="h-4 w-4" />
@@ -5458,7 +5438,7 @@ function ArtifactStudioEditor({
             ) : null}
             {artifactSyncMessage ? (
               <span
-                className={`spectra-artifact-sync-message max-w-[13rem] truncate text-[11px] ${
+                className={`spectra-artifact-sync-message max-w-[13rem] truncate text-micro ${
                   presentation.state === "error"
                     ? "text-[var(--danger)]"
                     : "text-[var(--text-secondary)]"
@@ -5619,20 +5599,20 @@ function ArtifactStudioEditor({
         </div>
       </header>
       {readOnly && !livePermissionLost ? (
-        <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
+        <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-micro text-[var(--text-secondary)]">
           Read-only access{accessExplanation ? ` · ${accessExplanation}` : ""} ·
           You can inspect, comment, and place this work, but only a collaborator
           with modify access can change it.
         </div>
       ) : accessExplanation ? (
-        <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
+        <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-micro text-[var(--text-secondary)]">
           {accessExplanation} · You can modify this work.
         </div>
       ) : null}
       {livePermissionLost ? (
         <div
           role="status"
-          className="shrink-0 border-y border-[color-mix(in_oklab,#d88922_24%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_6%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
+          className="shrink-0 border-y border-[color-mix(in_oklab,var(--accent-gold)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-gold)_6%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)]"
         >
           Spectra is refreshing this work’s access. You can keep editing your
           local draft; it will synchronize after edit access is confirmed.
@@ -5642,7 +5622,7 @@ function ArtifactStudioEditor({
       isCollaborativeArtifact &&
       dirty &&
       (live.state === "reconnecting" || live.state === "unsynchronized") ? (
-        <div className="relative z-[60] h-0 shrink-0">
+        <div className="relative z-dropdown h-0 shrink-0">
           <div
             role="status"
             className="spectra-collaboration-notice absolute right-3 top-2"
@@ -5652,7 +5632,7 @@ function ArtifactStudioEditor({
         </div>
       ) : null}
       {isCollaborativeArtifact && liveConflict && dirty ? (
-        <div className="relative z-[61] h-0 shrink-0">
+        <div className="relative z-dropdown h-0 shrink-0">
           <div
             role="alert"
             className="spectra-collaboration-notice absolute right-3 top-2 flex items-center gap-2"
@@ -5666,21 +5646,21 @@ function ArtifactStudioEditor({
             </span>
             <button
               type="button"
-              className="shrink-0 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-micro font-medium"
+              className="shrink-0 rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-micro font-medium"
               onClick={() => void synchronizeDraft(currentSnapshotRef.current)}
             >
               Retry
             </button>
             <button
               type="button"
-              className="shrink-0 rounded-[6px] px-2 py-1 text-micro font-medium text-[var(--text-tertiary)]"
+              className="shrink-0 rounded-chip px-2 py-1 text-micro font-medium text-[var(--text-tertiary)]"
               onClick={() => void discardQueuedDraft()}
             >
               Use latest
             </button>
             <button
               type="button"
-              className="grid size-7 shrink-0 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="grid size-7 shrink-0 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               aria-label="Dismiss"
               onClick={() => setLiveConflict(null)}
             >
@@ -5694,7 +5674,7 @@ function ArtifactStudioEditor({
           role="alert"
           className="shrink-0 border-y border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_7%,var(--bg-primary))] px-5 py-2.5"
         >
-          <div className="flex flex-wrap items-start gap-2 text-[12px] text-[var(--text-secondary)]">
+          <div className="flex flex-wrap items-start gap-2 text-caption text-[var(--text-secondary)]">
             <AlertCircle className="h-4 w-4 shrink-0 text-[var(--warning)]" />
             <div className="min-w-[240px] flex-1">
               <p>{nativeConflict.message}</p>
@@ -5724,7 +5704,7 @@ function ArtifactStudioEditor({
             </div>
             <button
               type="button"
-              className="rounded-[7px] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+              className="rounded-control px-2.5 py-1 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
               onClick={() =>
                 void reconcileNativeRevision("spectra").catch(
                   (error: unknown) =>
@@ -5740,7 +5720,7 @@ function ArtifactStudioEditor({
             </button>
             <button
               type="button"
-              className="rounded-[7px] bg-[var(--text-primary)] px-2.5 py-1 text-[11px] font-medium text-[var(--bg-primary)]"
+              className="rounded-control bg-[var(--text-primary)] px-2.5 py-1 text-micro font-medium text-[var(--bg-primary)]"
               onClick={() =>
                 void reconcileNativeRevision("word").catch((error: unknown) =>
                   setNativeWriteError(
@@ -5758,7 +5738,7 @@ function ArtifactStudioEditor({
       ) : nativeWriteError ? (
         <div
           role="alert"
-          className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
+          className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)]"
         >
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />
           <span className="min-w-0 flex-1">
@@ -5768,7 +5748,7 @@ function ArtifactStudioEditor({
       ) : nativeRecoveryError ? (
         <div
           role="alert"
-          className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
+          className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)]"
         >
           <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />
           <span>
@@ -5785,9 +5765,9 @@ function ArtifactStudioEditor({
         // can quote; the raw text stays in the console outside production.
         <div
           role="status"
-          className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,#d88922_20%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
+          className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,var(--accent-gold)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-gold)_5%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)]"
         >
-          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[#d88922]" />
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[var(--accent-gold)]" />
           <span className="min-w-0 flex-1">{liveRecovery.message}</span>
           <span className="shrink-0 font-mono text-micro text-[var(--text-tertiary)]">
             {liveRecovery.reference}
@@ -5795,9 +5775,9 @@ function ArtifactStudioEditor({
         </div>
       ) : null}
       {remoteConflict ? (
-        <div className="shrink-0 border-b border-[color-mix(in_oklab,#d88922_28%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2.5">
-          <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]">
-            <AlertCircle className="h-4 w-4 shrink-0 text-[#d88922]" />
+        <div className="shrink-0 border-b border-[color-mix(in_oklab,var(--accent-gold)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-gold)_7%,var(--bg-primary))] px-5 py-2.5">
+          <div className="flex flex-wrap items-center gap-2 text-caption text-[var(--text-secondary)]">
+            <AlertCircle className="h-4 w-4 shrink-0 text-[var(--accent-gold)]" />
             <span className="min-w-0 flex-1">
               A newer saved version arrived while you were editing. Your local
               changes are still untouched.
@@ -5805,14 +5785,14 @@ function ArtifactStudioEditor({
             <button
               type="button"
               onClick={keepLocalEdits}
-              className="rounded-[7px] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+              className="rounded-control px-2.5 py-1 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
             >
               Keep local edits
             </button>
             <button
               type="button"
               onClick={reloadRemoteVersion}
-              className="rounded-[7px] bg-[var(--text-primary)] px-2.5 py-1 text-[11px] font-medium text-[var(--bg-primary)]"
+              className="rounded-control bg-[var(--text-primary)] px-2.5 py-1 text-micro font-medium text-[var(--bg-primary)]"
             >
               Reload latest
             </button>
@@ -6148,10 +6128,10 @@ export function ArtifactRichTextEditor({
           variant === "card"
             ? // 180px left a single-line answer floating in an almost empty
               // box; two of them pushed the note, tags and settings off screen.
-              "min-h-[112px] px-6 py-6 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none"
+              "min-h-[112px] px-6 py-6 text-center font-serif text-metric leading-snug text-[var(--text-primary)] outline-none"
             : variant === "planner"
-              ? "min-h-[136px] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)] outline-none"
-              : "min-h-[62px] px-3 py-2 text-[13px] leading-5 text-[var(--text-primary)] outline-none",
+              ? "min-h-[136px] px-4 py-3 text-ui leading-6 text-[var(--text-primary)] outline-none"
+              : "min-h-[62px] px-3 py-2 text-ui leading-5 text-[var(--text-primary)] outline-none",
       },
     },
     onFocus: () => {
@@ -6456,12 +6436,12 @@ function ThreadReferenceStudio({ content }: { content: unknown }) {
   return (
     <div className="flex min-h-[420px] items-center justify-center bg-[var(--bg-primary)] p-8 text-center">
       <div className="max-w-[420px]">
-        <MessageSquare className="mx-auto h-10 w-10 rounded-[10px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] p-2.5 text-[#8b6ff0]" />
+        <MessageSquare className="mx-auto h-10 w-10 rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] p-2.5 text-[var(--brand-primary)]" />
         <div>
-          <h3 className="mt-4 font-display text-[22px] font-semibold text-[var(--text-primary)]">
+          <h3 className="mt-4 font-display text-metric font-semibold text-[var(--text-primary)]">
             Conversation unavailable
           </h3>
-          <p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">
+          <p className="mt-2 text-ui leading-6 text-[var(--text-secondary)]">
             This older artifact is a disconnected reference, not a conversation.
             Keep a current run or place a chat thread to create a working thread
             artifact.
@@ -6620,19 +6600,19 @@ function StudioDetails({
     }
   }
   return (
-    <aside className="spectra-studio-details overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
+    <aside className="spectra-studio-details overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)]">
       <div className="grid grid-cols-2 border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 pt-1">
         <button
           type="button"
           onClick={() => setDetailsTab("details")}
-          className={`h-11 border-b-2 text-[12px] font-semibold ${detailsTab === "details" ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-secondary)]"}`}
+          className={`h-11 border-b-2 text-caption font-semibold ${detailsTab === "details" ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-secondary)]"}`}
         >
           Details
         </button>
         <button
           type="button"
           onClick={() => setDetailsTab("history")}
-          className={`h-11 border-b-2 text-[12px] font-semibold ${detailsTab === "history" ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-secondary)]"}`}
+          className={`h-11 border-b-2 text-caption font-semibold ${detailsTab === "history" ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-secondary)]"}`}
         >
           Activity
         </button>
@@ -6640,7 +6620,7 @@ function StudioDetails({
       {detailsTab === "details" ? (
         <div className="space-y-3 p-3">
           <SideCard title="Blueprint">
-            <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-primary)]">
+            <div className="flex items-center gap-2 text-caption font-semibold text-[var(--text-primary)]">
               <Icon className="h-4 w-4" style={{ color: meta.color }} />
               {meta.label}
             </div>
@@ -6651,16 +6631,16 @@ function StudioDetails({
                 placements.map((placement) => (
                   <div
                     key={placement.nodeId}
-                    className="rounded-[7px] px-1 py-1 text-[12px] font-medium text-[var(--text-primary)]"
+                    className="rounded-control px-1 py-1 text-caption font-medium text-[var(--text-primary)]"
                   >
                     {placement.workspaceTitle}
-                    <div className="text-[11px] font-normal text-[var(--text-secondary)]">
+                    <div className="text-micro font-normal text-[var(--text-secondary)]">
                       Workspace
                     </div>
                   </div>
                 ))
               ) : (
-                <div className="text-[13px] text-[var(--text-secondary)]">
+                <div className="text-ui text-[var(--text-secondary)]">
                   Library inbox
                 </div>
               )}
@@ -6671,7 +6651,7 @@ function StudioDetails({
               <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] text-center">
                 {detailWaveStats.map(([value, label]) => (
                   <div key={label} className="px-1">
-                    <strong className="block font-sans text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
+                    <strong className="block font-sans text-ui font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
                       {value}
                     </strong>
                     <span className="text-micro text-[var(--text-tertiary)]">
@@ -6686,7 +6666,7 @@ function StudioDetails({
             <SideCard title="Deck metrics">
               <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] text-center">
                 <div>
-                  <strong className="block font-display text-[14px] text-[var(--text-primary)]">
+                  <strong className="block font-display text-body text-[var(--text-primary)]">
                     {detailDeckCards.length}
                   </strong>
                   <span className="text-micro text-[var(--text-tertiary)]">
@@ -6694,7 +6674,7 @@ function StudioDetails({
                   </span>
                 </div>
                 <div>
-                  <strong className="block font-display text-[14px] text-[var(--text-primary)]">
+                  <strong className="block font-display text-body text-[var(--text-primary)]">
                     {detailDeckSections}
                   </strong>
                   <span className="text-micro text-[var(--text-tertiary)]">
@@ -6702,7 +6682,7 @@ function StudioDetails({
                   </span>
                 </div>
                 <div>
-                  <strong className="block font-display text-[14px] text-[var(--text-primary)]">
+                  <strong className="block font-display text-body text-[var(--text-primary)]">
                     ~{Math.max(1, Math.round(detailDeckCards.length * 0.75))}{" "}
                     min
                   </strong>
@@ -6719,7 +6699,7 @@ function StudioDetails({
                 link.artifact ? (
                   <div
                     key={link._id}
-                    className="group rounded-[7px] px-1 py-1.5 text-[11px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                    className="group rounded-control px-1 py-1.5 text-micro text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                     data-link-direction={link.direction}
                   >
                     <div className="flex items-center gap-2">
@@ -6749,7 +6729,7 @@ function StudioDetails({
                 return (
                   <div
                     key={linked._id}
-                    className="flex items-center gap-2 text-[12px] text-[var(--text-primary)]"
+                    className="flex items-center gap-2 text-caption text-[var(--text-primary)]"
                   >
                     <LinkedIcon
                       className="h-4 w-4"
@@ -6762,13 +6742,13 @@ function StudioDetails({
                 );
               })}
               {links.length === 0 && durableLinks.length === 0 ? (
-                <div className="text-[12px] text-[var(--text-secondary)]">
+                <div className="text-caption text-[var(--text-secondary)]">
                   No confirmed links yet.
                 </div>
               ) : null}
               <button
                 type="button"
-                className="inline-flex h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="inline-flex h-7 items-center gap-1.5 rounded-chip px-1.5 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 onClick={() => setLinkPickerOpen((open) => !open)}
                 aria-expanded={linkPickerOpen}
               >
@@ -6779,7 +6759,7 @@ function StudioDetails({
                   {suggestions.map(({ candidate }) => (
                     <div
                       key={candidate._id}
-                      className="flex items-center gap-2 rounded-[5px] px-1 py-1 text-micro"
+                      className="flex items-center gap-2 rounded-chip px-1 py-1 text-micro"
                     >
                       <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">
                         {candidate.title}
@@ -6801,7 +6781,7 @@ function StudioDetails({
           {suggestions.length > 0 ? (
             <details
               open
-              className="spectra-related-artifacts rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
+              className="spectra-related-artifacts rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
             >
               <summary className="text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
                 Related suggestions · {suggestions.length}
@@ -6810,16 +6790,16 @@ function StudioDetails({
                 {suggestions.map(({ candidate }) => (
                   <div
                     key={candidate._id}
-                    className="group flex items-center gap-2 rounded-[7px] px-1.5 py-1.5 hover:bg-[var(--bg-primary)]"
+                    className="group flex items-center gap-2 rounded-control px-1.5 py-1.5 hover:bg-[var(--bg-primary)]"
                   >
-                    <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-secondary)]">
+                    <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-secondary)]">
                       {candidate.title}
                     </span>
                     <button
                       type="button"
                       disabled={linkingId === candidate._id}
                       onClick={() => void confirmLink(candidate)}
-                      className="rounded-[5px] px-1.5 py-1 text-micro font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
+                      className="rounded-chip px-1.5 py-1 text-micro font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
                     >
                       {linkingId === candidate._id
                         ? "Linking…"
@@ -6832,7 +6812,7 @@ function StudioDetails({
           ) : null}
           {artifact.createdFrom ? (
             <SideCard title="Provenance">
-              <div className="text-[11px] leading-5 text-[var(--text-secondary)]">
+              <div className="text-micro leading-5 text-[var(--text-secondary)]">
                 <div className="font-medium text-[var(--text-primary)]">
                   {artifact.createdFrom.contextSummary ??
                     `Created from ${artifact.createdFrom.source}`}
@@ -6885,7 +6865,7 @@ function StudioDetails({
               ))}
               <button
                 type="button"
-                className="grid h-7 w-7 place-items-center rounded-[6px] border border-[var(--border-default)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="grid h-7 w-7 place-items-center rounded-chip border border-[var(--border-default)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 onClick={() => setTagEditorOpen((open) => !open)}
                 aria-label="Add tag"
                 aria-expanded={tagEditorOpen}
@@ -6909,12 +6889,12 @@ function StudioDetails({
                       setNewTag("");
                     }
                   }}
-                  className="h-8 min-w-0 flex-1 bg-transparent text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                  className="h-8 min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                   placeholder="Add a tag"
                 />
                 <button
                   type="button"
-                  className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--accent-cyan)] hover:bg-[var(--bg-hover)]"
+                  className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--accent-cyan)] hover:bg-[var(--bg-hover)]"
                   onClick={() => {
                     if (!newTag.trim()) return;
                     onTagDraftChange(
@@ -7024,9 +7004,9 @@ function StudioDetails({
               {historyVersions.map((version, index) => (
                 <div
                   key={version._id}
-                  className="rounded-[8px] bg-[var(--bg-primary)] px-3 py-2.5"
+                  className="rounded-control bg-[var(--bg-primary)] px-3 py-2.5"
                 >
-                  <div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--text-primary)]">
+                  <div className="flex items-center gap-2 text-micro font-semibold text-[var(--text-primary)]">
                     <History className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
                     {index === 0
                       ? "Current saved version"
@@ -7041,7 +7021,7 @@ function StudioDetails({
                 </div>
               ))}
               {historyVersions.length === 0 ? (
-                <p className="text-[11px] leading-5 text-[var(--text-secondary)]">
+                <p className="text-micro leading-5 text-[var(--text-secondary)]">
                   No saved versions yet.
                 </p>
               ) : null}
@@ -7060,7 +7040,7 @@ function SideCard({ title, children }: { title: string; children: ReactNode }) {
       data-side-card-title={title.toLowerCase().replaceAll(" ", "-")}
       className="p-4"
     >
-      <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+      <h3 className="mb-3 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
         {title}
       </h3>
       {children}
@@ -7116,13 +7096,13 @@ export function Field({
   }
   return (
     <label
-      className="block rounded-[8px]"
+      className="block rounded-control"
       data-ai-region={aiRegionAttr(aiActive && !markedControl)}
       // Fall back to the label only when the control itself could not be
       // annotated, so a target always resolves to something honest.
       {...(path && !markedControl ? targetAttrs(path) : {})}
     >
-      <span className="mb-1.5 block text-[12px] font-semibold text-[var(--text-secondary)]">
+      <span className="mb-1.5 block text-caption font-semibold text-[var(--text-secondary)]">
         {label}
       </span>
       {control}
@@ -7241,11 +7221,11 @@ export function Divider() {
 }
 
 export function inputClass() {
-  return "h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-transparent px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]";
+  return "h-10 w-full rounded-control border border-[var(--border-default)] bg-transparent px-3 text-ui text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))]";
 }
 
 export function textareaClass(extra = "") {
-  return `w-full resize-none rounded-[8px] border border-[var(--border-default)] bg-transparent px-3 py-2 text-[13px] leading-6 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))] ${extra}`;
+  return `w-full resize-none rounded-control border border-[var(--border-default)] bg-transparent px-3 py-2 text-ui leading-6 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))] ${extra}`;
 }
 
 export function iconButtonClass() {
@@ -7253,9 +7233,9 @@ export function iconButtonClass() {
 }
 
 export function smallActionClass() {
-  return "inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-transparent px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
+  return "inline-flex h-8 items-center gap-1.5 rounded-control bg-transparent px-2.5 text-caption font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
 }
 
 function toolbarClass() {
-  return "flex h-8 min-w-8 items-center justify-center rounded-[7px] px-2 text-[12px] font-medium text-[var(--text-secondary)] transition disabled:opacity-40";
+  return "flex h-8 min-w-8 items-center justify-center rounded-control px-2 text-caption font-medium text-[var(--text-secondary)] transition disabled:opacity-40";
 }

@@ -266,10 +266,10 @@ export function DockScene() {
                     "opacity var(--motion-slow) var(--ease-standard), transform var(--motion-slow) var(--ease-out-expo)",
                 }}
               >
-                <span className="w-[104px] shrink-0 text-[11px] font-semibold uppercase leading-[1.3] tracking-[0.16em] text-[var(--text-tertiary)]">
+                <span className="w-[104px] shrink-0 text-micro font-semibold uppercase leading-[1.3] tracking-[0.16em] text-[var(--text-tertiary)]">
                   {row.label}
                 </span>
-                <span className="text-[15px] leading-[1.5] text-[var(--text-secondary)]">
+                <span className="text-subhead leading-[1.5] text-[var(--text-secondary)]">
                   {row.title}
                 </span>
               </li>

@@ -197,12 +197,12 @@ export const PRESENTATION_ASPECT_RATIOS: readonly CommandControlOption[] = [
 
 /** Slide fills that stay legible under every theme's body ink. */
 export const PRESENTATION_BACKGROUNDS: readonly string[] = [
-  "#ffffff",
-  "#fbfaf5",
+  "var(--bg-elevated)",
+  "var(--bg-primary)",
   "#f5f7fb",
   "#f7f5fb",
   "#f6f8f6",
-  "#183f35",
+  "var(--accent-mint)",
   "#173252",
   "#452b54",
   "#272924",
@@ -210,20 +210,20 @@ export const PRESENTATION_BACKGROUNDS: readonly string[] = [
 ];
 
 export const PRESENTATION_SHAPE_FILLS: readonly string[] = [
-  "#dcefe4",
+  "color-mix(in oklab, var(--accent-mint) 16%, var(--bg-elevated))",
   "#d1e9ff",
   "#e9d7fe",
   "#fef0c7",
   "#fee4e2",
   "#f2f4f7",
-  "#ffffff",
-  "#183f35",
+  "var(--bg-elevated)",
+  "var(--accent-mint)",
   "#3538cd",
   "#101828",
 ];
 
 export const PRESENTATION_SHAPE_STROKES: readonly string[] = [
-  "#84b79a",
+  "var(--accent-mint)",
   "#84caff",
   "#b692f6",
   "#fdb022",

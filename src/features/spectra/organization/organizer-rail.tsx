@@ -67,12 +67,12 @@ export function OrganizerRail({
         data-drop-kind="container"
         onClick={() => handlers.onNavigate({ kind: "folder", nodeId: floorId })}
         className={cn(
-          "flex h-8 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[13px] font-medium transition-colors",
+          "flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-ui font-medium transition-colors",
           atFloor
             ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-sidebar))] text-[var(--text-primary)]"
             : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
           dropNodeId === (floorId ?? "root") &&
-            "shadow-[inset_0_0_0_2px_var(--brand-primary)]",
+            "ring-2 ring-brand",
         )}
       >
         <Home className="size-3.5 shrink-0" strokeWidth={1.9} />
@@ -104,7 +104,7 @@ export function OrganizerRail({
               type="button"
               onClick={() => handlers.onNavigate({ kind: "quick", view })}
               className={cn(
-                "flex h-8 items-center gap-2 rounded-[6px] px-2 text-left text-[13px] transition-colors",
+                "flex h-8 items-center gap-2 rounded-chip px-2 text-left text-ui transition-colors",
                 active
                   ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-sidebar))] font-medium text-[var(--text-primary)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -119,7 +119,7 @@ export function OrganizerRail({
           type="button"
           onClick={() => handlers.onNavigate({ kind: "trash" })}
           className={cn(
-            "mt-1 flex h-8 items-center gap-2 rounded-[6px] px-2 text-left text-[13px] transition-colors",
+            "mt-1 flex h-8 items-center gap-2 rounded-chip px-2 text-left text-ui transition-colors",
             location.kind === "trash"
               ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-sidebar))] font-medium text-[var(--text-primary)]"
               : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -160,7 +160,7 @@ function RailBranch({
   if (nodes.length === 0)
     return depth === 0 ? null : (
       <p
-        className="py-1 text-[12px] text-[var(--text-tertiary)]"
+        className="py-1 text-caption text-[var(--text-tertiary)]"
         style={{ paddingLeft: 10 + depth * 13 }}
       >
         No folders inside
@@ -195,12 +195,12 @@ function RailBranch({
                 handlers.onNavigate({ kind: "folder", nodeId: node.nodeId })
               }
               className={cn(
-                "group flex h-8 cursor-default items-center gap-1 rounded-[6px] pr-1.5 text-[13px] transition-colors",
+                "group flex h-8 cursor-default items-center gap-1 rounded-chip pr-1.5 text-ui transition-colors",
                 selected
                   ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-sidebar))] font-medium text-[var(--text-primary)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                 dropNodeId === node.nodeId &&
-                  "shadow-[inset_0_0_0_2px_var(--brand-primary)]",
+                  "ring-2 ring-brand",
               )}
               style={{ paddingLeft: 2 + depth * 13 }}
             >
@@ -214,7 +214,7 @@ function RailBranch({
                   handlers.onToggle(node.nodeId);
                 }}
                 className={cn(
-                  "grid size-4 shrink-0 place-items-center rounded-[4px] text-[var(--text-tertiary)]",
+                  "grid size-4 shrink-0 place-items-center rounded-chip text-[var(--text-tertiary)]",
                   hasChildren
                     ? "hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                     : "invisible",
@@ -229,7 +229,7 @@ function RailBranch({
               </button>
               <span
                 aria-hidden
-                className="flex size-[19px] shrink-0 items-center justify-center rounded-[4px]"
+                className="flex size-[19px] shrink-0 items-center justify-center rounded-chip"
                 style={{ backgroundColor: identity.soft }}
               >
                 <Icon
@@ -268,7 +268,7 @@ function RailSkeleton() {
       {[0, 1, 2, 3].map((row) => (
         <div
           key={row}
-          className="h-6 animate-pulse rounded-[6px] bg-[var(--bg-tertiary)]"
+          className="h-6 animate-pulse rounded-chip bg-[var(--bg-tertiary)]"
           style={{ width: `${88 - row * 9}%` }}
         />
       ))}

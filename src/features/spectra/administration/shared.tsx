@@ -258,7 +258,7 @@ export function AdminDialog({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[120] grid place-items-center bg-[var(--bg-overlay)] p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-composer-dock grid place-items-center bg-[var(--bg-overlay)] p-4 backdrop-blur-[2px]"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -268,12 +268,12 @@ export function AdminDialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="max-h-[min(86dvh,760px)] w-full max-w-[540px] overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_30px_90px_rgba(31,25,18,.22)]"
+        className="max-h-[min(86dvh,760px)] w-full max-w-[540px] overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]"
       >
         <header className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
           <div className="flex gap-3">
             {danger ? (
-              <span className="grid size-9 shrink-0 place-items-center rounded-control bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]">
+              <span className="grid size-9 shrink-0 place-items-center rounded-control bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] [color:color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]">
                 <AlertCircle size={17} />
               </span>
             ) : null}
@@ -364,7 +364,7 @@ export function InlineLink({
 
 export function PrivacyNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-control border border-[color-mix(in_oklab,var(--success)_18%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--success)_7%,var(--bg-secondary))] px-3 py-2.5 text-micro leading-4 text-[color-mix(in_oklab,var(--success)_78%,var(--text-primary))]">
+    <div className="flex items-start gap-2 rounded-control border border-[color-mix(in_oklab,var(--success)_18%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--success)_7%,var(--bg-secondary))] px-3 py-2.5 text-micro leading-4 [color:color-mix(in_oklab,var(--success)_78%,var(--text-primary))]">
       <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
       <span>{children}</span>
     </div>

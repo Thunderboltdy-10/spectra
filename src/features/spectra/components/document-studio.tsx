@@ -726,12 +726,6 @@ export function DocumentStudio({
   );
   const [importReport, setImportReport] = useState<string>();
   const [importError, setImportError] = useState<string>();
-  const nativeNoticeKey = `spectra:native-features-notice:${artifactId}`;
-  const [nativeNoticeDismissed, setNativeNoticeDismissed] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.localStorage.getItem(nativeNoticeKey) === "dismissed",
-  );
   const createLiveReference = useCallback(
     async ({
       sourceArtifactId,
@@ -3509,7 +3503,7 @@ export function DocumentStudio({
             <EditorContent
               editor={editor}
               className={cn(
-                "tiptap-root spectra-document-canvas [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-[23px] [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4",
+                "tiptap-root spectra-document-canvas [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-metric [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4",
                 pageLayout === "page"
                   ? "mx-auto max-w-[920px]"
                   : "h-full w-full",

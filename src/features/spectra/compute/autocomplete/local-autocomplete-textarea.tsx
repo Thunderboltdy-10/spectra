@@ -90,7 +90,7 @@ export const LocalAutocompleteTextarea = forwardRef<HTMLTextAreaElement, Props>(
     return (
       <div className={cn("relative", className)} data-autocomplete-surface={surface}>
         {autocomplete.suggestion ? (
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2 text-[12px] leading-5">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2 text-caption leading-5">
             <span className="invisible">{value}</span>
             <span className="text-[var(--text-tertiary)] opacity-70">{autocomplete.suggestion.text}</span>
           </div>
@@ -110,7 +110,7 @@ export const LocalAutocompleteTextarea = forwardRef<HTMLTextAreaElement, Props>(
             onCompositionEnd?.(event);
           }}
           aria-describedby={autocomplete.suggestion ? instructionsId : props["aria-describedby"]}
-          className={cn("relative z-[1] bg-transparent", textareaClassName)}
+          className={cn("relative z-base bg-transparent", textareaClassName)}
         />
         {autocomplete.suggestion ? (
           <span id={instructionsId} className="sr-only">

@@ -405,11 +405,11 @@ export function SchoolDataShell() {
           <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate font-display text-[20px] font-semibold tracking-[-0.02em]">
+              <h2 className="truncate font-display text-heading font-semibold tracking-[-0.02em]">
                 {activeSection.label}
               </h2>
               </div>
-              <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+              <p className="mt-1 text-micro text-[var(--text-secondary)]">
                 {payload?.integration
                   ? `ManageBac · last success ${formatDate(payload.integration.lastSyncAt)}`
                   : "No school source is connected"}
@@ -430,7 +430,7 @@ export function SchoolDataShell() {
                 type="button"
                 disabled={Boolean(busy)}
                 onClick={() => void run("sync", () => syncSpectraManageBac())}
-                className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-3.5 text-[11px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-3.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
                 {busy === "sync" ? (
                   <LoaderCircle className="size-3.5 animate-spin" />
@@ -446,13 +446,13 @@ export function SchoolDataShell() {
             {error ? (
               <div
                 role="alert"
-                className="mb-4 rounded-xl border border-rose-600/20 bg-rose-500/8 px-4 py-3 text-[11px] text-rose-800"
+                className="mb-4 rounded-xl border border-rose-600/20 bg-rose-500/8 px-4 py-3 text-micro text-rose-800"
               >
                 {error}
               </div>
             ) : null}
             {loading ? (
-              <div className="flex min-h-[360px] items-center justify-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+              <div className="flex min-h-[360px] items-center justify-center gap-2 text-micro text-[var(--text-tertiary)]">
                 <LoaderCircle className="size-4 animate-spin" />
                 Loading verified school records…
               </div>
@@ -460,7 +460,7 @@ export function SchoolDataShell() {
             {!loading && payload ? (
               <>
                 {activeState.kind === "partial" ? (
-                  <div className="flex items-center gap-2 rounded-[8px] px-1 py-2 text-[11px] text-[var(--text-secondary)]">
+                  <div className="flex items-center gap-2 rounded-control px-1 py-2 text-micro text-[var(--text-secondary)]">
                     <Clock3 className="size-3.5 shrink-0 text-amber-700" />
                     <span className="min-w-0 flex-1">
                       {activeState.details}
@@ -562,7 +562,7 @@ function Overview({
             <p className="text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               Next from school
             </p>
-            <h2 className="mt-1 font-display text-[21px] font-semibold">
+            <h2 className="mt-1 font-display text-heading font-semibold">
               {upcoming.length ? "Upcoming" : "Recently synchronized"}
             </h2>
           </div>
@@ -581,7 +581,7 @@ function Overview({
           </div>
         ) : recent.length ? (
           <>
-            <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
+            <p className="mt-2 text-micro text-[var(--text-secondary)]">
               Nothing is currently due. These are the latest verified records
               received from school.
             </p>
@@ -595,9 +595,9 @@ function Overview({
           // Records did arrive; none of them carry a date. That is a school
           // with nothing scheduled, not a school with no data, and saying
           // otherwise contradicts the Classes section directly.
-          <div className="mt-6 rounded-[10px] bg-[var(--bg-secondary)] px-5 py-7">
-            <p className="text-[13px] font-medium">Nothing is scheduled</p>
-            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          <div className="mt-6 rounded-card bg-[var(--bg-secondary)] px-5 py-7">
+            <p className="text-ui font-medium">Nothing is scheduled</p>
+            <p className="mt-1 text-micro text-[var(--text-secondary)]">
               {payload.classes.length} verified{" "}
               {payload.classes.length === 1 ? "class" : "classes"} arrived from
               school. None of them currently have a deadline or an upcoming
@@ -606,24 +606,24 @@ function Overview({
             <button
               type="button"
               onClick={() => onSelect("classes")}
-              className="mt-4 text-[11px] font-medium text-[var(--text-primary)] hover:underline"
+              className="mt-4 text-micro font-medium text-[var(--text-primary)] hover:underline"
             >
               View classes
             </button>
           </div>
         ) : (
-          <div className="mt-6 rounded-[10px] bg-[var(--bg-secondary)] px-5 py-7">
-            <p className="text-[13px] font-medium">
+          <div className="mt-6 rounded-card bg-[var(--bg-secondary)] px-5 py-7">
+            <p className="text-ui font-medium">
               No school records have arrived yet
             </p>
-            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+            <p className="mt-1 text-micro text-[var(--text-secondary)]">
               Run a sync or review provider coverage to bring verified classes
               and deadlines into Spectra.
             </p>
             <button
               type="button"
               onClick={() => onSelect("sync")}
-              className="mt-4 text-[11px] font-medium text-[var(--text-primary)] hover:underline"
+              className="mt-4 text-micro font-medium text-[var(--text-primary)] hover:underline"
             >
               Review sync status
             </button>
@@ -641,12 +641,12 @@ function Overview({
                 key={String(label)}
                 type="button"
                 onClick={() => onSelect(key as SectionKey)}
-                className="flex w-full items-center gap-3 rounded-[10px] px-3 py-3 text-left hover:bg-[var(--bg-hover)]"
+                className="flex w-full items-center gap-3 rounded-card px-3 py-3 text-left hover:bg-[var(--bg-hover)]"
               >
-                <span className="min-w-0 flex-1 text-[12px] text-[var(--text-secondary)]">
+                <span className="min-w-0 flex-1 text-caption text-[var(--text-secondary)]">
                   {String(label)}
                 </span>
-                <strong className="font-display text-[20px] font-semibold">
+                <strong className="font-display text-heading font-semibold">
                   {String(value)}
                 </strong>
                 <ChevronRight className="size-3 text-[var(--text-tertiary)]" />
@@ -672,7 +672,7 @@ function Classes({
     <section className="mt-5">
       <header className="flex items-center justify-between px-1 py-3">
         <div>
-          <h2 className="font-display text-[18px] font-semibold">
+          <h2 className="font-display text-heading font-semibold">
             Current classes
           </h2>
           <p className="mt-1 text-micro text-[var(--text-tertiary)]">
@@ -687,11 +687,11 @@ function Classes({
           {payload.classes.map((item) => (
             <li
               key={item.recordId}
-              className="flex items-center gap-3 rounded-[10px] px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]"
+              className="flex items-center gap-3 rounded-card px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]"
             >
               <GraduationCap className="size-4 shrink-0 text-emerald-800" />
               <div className="min-w-0 flex-1">
-                <strong className="block truncate text-[12px]">
+                <strong className="block truncate text-caption">
                   {item.title}
                 </strong>
                 <span className="text-micro text-[var(--text-tertiary)]">
@@ -716,7 +716,7 @@ function Classes({
                       }),
                     )
                   }
-                  className="rounded-[8px] border border-[var(--border-default)] px-3 py-1.5 text-micro font-semibold hover:bg-[var(--bg-hover)] disabled:opacity-40"
+                  className="rounded-control border border-[var(--border-default)] px-3 py-1.5 text-micro font-semibold hover:bg-[var(--bg-hover)] disabled:opacity-40"
                 >
                   {busy === `class:${item.recordId}`
                     ? "Creating…"
@@ -727,7 +727,7 @@ function Classes({
           ))}
         </ul>
       ) : (
-        <p className="px-5 py-12 text-center text-[11px] text-[var(--text-tertiary)]">
+        <p className="px-5 py-12 text-center text-micro text-[var(--text-tertiary)]">
           The class route completed with zero current records.
         </p>
       )}
@@ -749,7 +749,7 @@ function RecordSection({
     <section className="mt-5">
       {records.length ? (
         <>
-          <p className="px-1 text-[11px] text-[var(--text-secondary)]">
+          <p className="px-1 text-micro text-[var(--text-secondary)]">
             {records.length} verified record{records.length === 1 ? "" : "s"}
           </p>
           <div className="mt-3 space-y-1">
@@ -759,11 +759,11 @@ function RecordSection({
           </div>
         </>
       ) : (
-        <div className="rounded-[10px] bg-[var(--bg-secondary)] px-5 py-7">
-          <p className="text-[13px] font-medium">
+        <div className="rounded-card bg-[var(--bg-secondary)] px-5 py-7">
+          <p className="text-ui font-medium">
             No {section.label.toLowerCase()} in the latest sync
           </p>
-          <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          <p className="mt-1 text-micro text-[var(--text-secondary)]">
             The provider route completed successfully and returned no current records.
           </p>
         </div>
@@ -789,10 +789,10 @@ function RecordLine({ record, date }: { record: RecordRow; date?: number }) {
     date ??
     timestamp(value.dueAt ?? value.deadlineAt ?? value.startAt ?? value.start);
   return (
-    <div className="flex items-center gap-3 rounded-[10px] px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]">
+    <div className="flex items-center gap-3 rounded-card px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]">
       <FileText className="size-3.5 shrink-0 text-[var(--text-tertiary)]" />
       <div className="min-w-0 flex-1">
-        <strong className="block truncate text-[11px]">{title}</strong>
+        <strong className="block truncate text-micro">{title}</strong>
         <span className="block truncate text-micro text-[var(--text-tertiary)]">
           {subtitle}
         </span>
@@ -811,7 +811,7 @@ function RecordLine({ record, date }: { record: RecordRow; date?: number }) {
           target="_blank"
           rel="noreferrer"
           aria-label="Open provider source"
-          className="grid size-7 place-items-center rounded-[8px] hover:bg-[var(--bg-hover)]"
+          className="grid size-7 place-items-center rounded-control hover:bg-[var(--bg-hover)]"
         >
           <ExternalLink className="size-3" />
         </a>
@@ -825,7 +825,7 @@ function SyncStatus({ payload }: { payload: SchoolPayload }) {
     <div className="mt-5 grid gap-8 lg:grid-cols-[1.2fr_.8fr]">
       <section>
         <header className="px-1 py-3">
-          <h2 className="font-display text-[18px] font-semibold">
+          <h2 className="font-display text-heading font-semibold">
             Capability ledger
           </h2>
         </header>
@@ -850,10 +850,10 @@ function SyncStatus({ payload }: { payload: SchoolPayload }) {
             return (
               <div
                 key={capability._id}
-                className="flex items-center gap-3 rounded-[10px] px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]"
+                className="flex items-center gap-3 rounded-card px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]"
               >
                 <div className="min-w-0 flex-1">
-                  <strong className="block truncate text-[11px]">
+                  <strong className="block truncate text-micro">
                     {capability.name}
                   </strong>
                   <span className="text-micro text-[var(--text-tertiary)]">
@@ -869,12 +869,12 @@ function SyncStatus({ payload }: { payload: SchoolPayload }) {
         </div>
       </section>
       <section className="px-1 py-3">
-        <h2 className="font-display text-[18px] font-semibold">Recent syncs</h2>
+        <h2 className="font-display text-heading font-semibold">Recent syncs</h2>
         <div className="mt-3 space-y-2">
           {payload.syncRuns.slice(0, 8).map((run) => (
             <div
               key={run._id}
-              className="rounded-[10px] p-3 transition-colors hover:bg-[var(--bg-secondary)]"
+              className="rounded-card p-3 transition-colors hover:bg-[var(--bg-secondary)]"
             >
               <div className="flex items-center justify-between">
                 <strong className="text-micro">{run.stage}</strong>

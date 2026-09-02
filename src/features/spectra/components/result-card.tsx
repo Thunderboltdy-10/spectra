@@ -17,7 +17,7 @@ function tone(card: ResultCardView) {
   if (card.status === "failed") return "var(--danger)";
   if (card.status === "cancelled") return "var(--warning)";
   if (card.status === "completed") return "var(--success)";
-  if (card.actions.some((action) => action.key === "confirm")) return "#d88922";
+  if (card.actions.some((action) => action.key === "confirm")) return "var(--accent-gold)";
   return "var(--accent-cyan)";
 }
 
@@ -60,24 +60,24 @@ function ProvenanceLine({ card }: { card: ResultCardView }) {
   }
 
   return <div className="col-start-2 col-end-[-1] -mt-1 mb-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-[var(--text-tertiary)]">
-    {hasAgent ? <span className="inline-flex min-w-0 items-center gap-1 rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-secondary))] px-1.5 py-0.5 text-[var(--text-secondary)]" title={provenance.agentRoutingReason}>
+    {hasAgent ? <span className="inline-flex min-w-0 items-center gap-1 rounded-chip bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-secondary))] px-1.5 py-0.5 text-[var(--text-secondary)]" title={provenance.agentRoutingReason}>
       <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
       <span className="truncate">Using {provenance.agentTitle}</span>
       <span className="text-micro text-[var(--text-tertiary)]">{provenance.agentRoutingSource === "continued" ? "retained" : provenance.agentRoutingSource === "explicit" ? "selected" : "auto"}</span>
-      <button type="button" disabled={clearingAgent || ordinaryNext} className="ml-0.5 inline-flex items-center gap-0.5 rounded-[4px] px-1 py-0.5 font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65" onClick={(event) => { event.stopPropagation(); void switchToOrdinarySpectra(); }} title="Stop retaining this agent for the thread">
+      <button type="button" disabled={clearingAgent || ordinaryNext} className="ml-0.5 inline-flex items-center gap-0.5 rounded-chip px-1 py-0.5 font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65" onClick={(event) => { event.stopPropagation(); void switchToOrdinarySpectra(); }} title="Stop retaining this agent for the thread">
         {clearingAgent ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : ordinaryNext ? <Check className="h-2.5 w-2.5" /> : <Undo2 className="h-2.5 w-2.5" />}
         {ordinaryNext ? "Ordinary next" : "Use ordinary Spectra"}
       </button>
     </span> : null}
-    {hasSources ? <button type="button" className="inline-flex items-center gap-1 rounded-[5px] px-1 py-0.5 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-secondary)]" onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}>
+    {hasSources ? <button type="button" className="inline-flex items-center gap-1 rounded-chip px-1 py-0.5 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-secondary)]" onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}>
       Based on {parts.join(" and ") || provenance.workspaceTitle}
       <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
     </button> : null}
     {open ? <div className="mt-1 flex flex-wrap gap-1.5 px-1 animate-[spectra-fade-up_180ms_ease-out]">
-      {provenance.artifactTitles?.map((title) => <span key={title} className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">{title}</span>)}
-      {provenance.workspaceTitle ? <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">{provenance.workspaceTitle}</span> : null}
-      {provenance.attachmentNames?.map((name) => <span key={name} className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">{name}</span>)}
-      {provenance.threadId ? <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">Continued conversation</span> : null}
+      {provenance.artifactTitles?.map((title) => <span key={title} className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5">{title}</span>)}
+      {provenance.workspaceTitle ? <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5">{provenance.workspaceTitle}</span> : null}
+      {provenance.attachmentNames?.map((name) => <span key={name} className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5">{name}</span>)}
+      {provenance.threadId ? <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5">Continued conversation</span> : null}
     </div> : null}
   </div>;
 }
@@ -156,19 +156,19 @@ export function ResultCardStack({
             role="group"
             data-spectra-card="result"
             data-card-state={cardState}
-            className="group grid min-h-[40px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1 text-left text-[12px] animate-[spectra-fade-up_180ms_ease-out]"
+            className="group grid min-h-[40px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1 text-left text-caption animate-[spectra-fade-up_180ms_ease-out]"
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,currentColor_10%,var(--bg-elevated))]" style={{ color: tone(card) }}>
               {card.status === "running" && !awaitingApproval ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : awaitingApproval ? <ShieldCheck className="h-3.5 w-3.5" /> : card.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : card.status === "failed" || card.status === "cancelled" ? <AlertCircle className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
-                {opensDetails ? <button type="button" onClick={() => onOpen?.(card)} className="shrink-0 rounded-[4px] font-semibold text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]" aria-label={`Open details for ${card.title}`}>{card.title}</button> : <span className="shrink-0 font-semibold text-[var(--text-primary)]">{card.title}</span>}
+                {opensDetails ? <button type="button" onClick={() => onOpen?.(card)} className="shrink-0 rounded-chip font-semibold text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]" aria-label={`Open details for ${card.title}`}>{card.title}</button> : <span className="shrink-0 font-semibold text-[var(--text-primary)]">{card.title}</span>}
                 {card.summary ? <RichText content={card.summary} className="line-clamp-1 min-w-0 flex-1 overflow-hidden text-[var(--text-secondary)] [&_*]:inline [&_a_svg]:hidden [&_code]:px-1 [&_p]:m-0 [&_p]:leading-normal" /> : null}
               </div>
               {awaitingApproval ? (
                 <div
-                  className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-[7px] border border-[color-mix(in_oklab,var(--warning)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_5%,var(--bg-primary))] px-2 py-1"
+                  className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-control border border-[color-mix(in_oklab,var(--warning)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_5%,var(--bg-primary))] px-2 py-1"
                   onClick={(event) => event.stopPropagation()}
                 >
                   <span className="mr-1 text-micro font-medium text-[var(--text-secondary)]">
@@ -176,21 +176,21 @@ export function ResultCardStack({
                   </span>
                   <button
                     type="button"
-                    className="rounded-[6px] bg-[var(--text-primary)] px-2 py-1 text-micro font-semibold text-[var(--bg-primary)] hover:opacity-90"
+                    className="rounded-chip bg-[var(--text-primary)] px-2 py-1 text-micro font-semibold text-[var(--bg-primary)] hover:opacity-90"
                     onClick={() => onAction?.(card, "confirm", card.runId)}
                   >
                     Apply changes
                   </button>
                   {onRevise || onAction ? <button
                     type="button"
-                    className="rounded-[6px] px-2 py-1 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    className="rounded-chip px-2 py-1 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                     onClick={() => setRevisingCardId((current) => current === card.id ? null : card.id)}
                   >
                     Ask for changes
                   </button> : null}
                   <button
                     type="button"
-                    className="rounded-[6px] px-2 py-1 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                    className="rounded-chip px-2 py-1 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                     onClick={() => onAction?.(card, "cancel", card.runId)}
                   >
                     Reject
@@ -204,7 +204,7 @@ export function ResultCardStack({
                       setRevision("");
                       setRevisingCardId(null);
                     });
-                  }}><input autoFocus value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="What should Spectra change?" className="h-8 min-w-0 flex-1 rounded-[6px] bg-[var(--bg-elevated)] px-2.5 text-[11px] text-[var(--text-primary)] outline-none" /><button type="submit" disabled={!revision.trim()} className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35">Send</button></form> : null}
+                  }}><input autoFocus value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="What should Spectra change?" className="h-8 min-w-0 flex-1 rounded-chip bg-[var(--bg-elevated)] px-2.5 text-micro text-[var(--text-primary)] outline-none" /><button type="submit" disabled={!revision.trim()} className="h-8 rounded-chip bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35">Send</button></form> : null}
                 </div>
               ) : null}
             </div>
@@ -234,7 +234,7 @@ export function ResultCardStack({
           </div>
         );
       })}
-      <span className="pointer-events-none sticky bottom-0 z-10 block h-3 -mt-3 bg-[linear-gradient(to_bottom,transparent,var(--bg-primary))]" aria-hidden="true" />
+      <span className="pointer-events-none sticky bottom-0 z-chrome block h-3 -mt-3 bg-[linear-gradient(to_bottom,transparent,var(--bg-primary))]" aria-hidden="true" />
     </div>
   );
 }

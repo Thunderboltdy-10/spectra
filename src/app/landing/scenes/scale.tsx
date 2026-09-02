@@ -140,10 +140,10 @@ export function ScaleScene() {
                     "opacity var(--motion-slow) var(--ease-standard), transform var(--motion-slow) var(--ease-out-expo)",
                 }}
               >
-                <dt className="text-[11px] font-semibold uppercase leading-[1.3] tracking-[0.16em] text-[var(--text-tertiary)]">
+                <dt className="text-micro font-semibold uppercase leading-[1.3] tracking-[0.16em] text-[var(--text-tertiary)]">
                   {entry.label}
                 </dt>
-                <dd className="mt-1 text-[38px] font-semibold leading-[1] tracking-[-0.03em] tabular-nums text-[var(--text-primary)]">
+                <dd className="mt-1 text-display font-semibold leading-[1] tracking-[-0.03em] tabular-nums text-[var(--text-primary)]">
                   {entry.value}
                 </dd>
               </div>

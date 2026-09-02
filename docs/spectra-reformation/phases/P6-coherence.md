@@ -187,6 +187,16 @@ Run full Vitest, typecheck, production build, lint zero-warning, architecture/co
 - Local Convex `127.0.0.1:3002` failed both 30s and 120s startup windows; the built failure/retry card was honest, but account A/B, 10k density, live workbars, and request budgets remain for the verifier rerun.
 - Evidence manifest: `.shots/reformation/P6.V1/manifest.md`. No acceptance claimed.
 
+### P6.V1 implementation log — 2026-09-02 (repair continuation)
+
+- Role: Implementer. Status: **IMPLEMENTED**. Not VERIFIED.
+- Class: DS-1/DS-2/DS-3 zero-warning. Mapped arbitrary type/radius/shadow/hex/z across 117 product files onto existing tokens; closed the leftover unused-var, hook-dep, color-mix `text-[…]`, JSX numeric z-index, and test hex-property tail. No new tokens, ignores, duplicate primitives, or gate weakening.
+- Taste: landing channel names `z-chrome`; presentation canvas `isolation: isolate` keeps slide-number chrome inside the slide; deck audit resolves known `var(--token)` paints at the Node boundary so contrast still measures after migration. Office cell colours stay hex via identifiers.
+- Tests: presentation WCAG fixtures restored to hex identifiers (migrator had rewritten them); token resolution covered by an extra assertion. Unused `contentTextFromJson` and dead native-notice state deleted.
+- Gates: `npm run lint` 0 warnings; Vitest 165 files / 1,552 tests; `tsc --noEmit`; production build; architecture/copy/capability/token/secrets; fidelity seam 13/13, Office 32 + 200k-cell/120-slide, DOCX 16 fixtures / 177 assertions; `git diff --check`.
+- Visual: `.shots/reformation/P6.V1/repair/before/` and `after/` — chrome still Spectra (sidebar, tokens, type, composer, failure card). Dark School, 1024 School, keyboard Try again, and 200% zoom with no html scrollWidth overflow. Signed-in `/` stays the shell.
+- Convex `127.0.0.1:3002` still down. Account A/B, 10k Library density, live workbars, and network budget remain for the independent verifier rerun. DS-4 white-on-violet stays P7.UI1.
+
 ## Exit gate
 
 Token and lint rules cover all product source; a11y checks green; V1 PASS with zero launch-blocking SYSTEMIC findings open; verifier closes P6 without requesting owner acceptance.

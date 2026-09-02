@@ -7,7 +7,7 @@ import { LAYERS, LAYER_CLASS } from "@/components/ui/layers";
  * The stacking contract, proven from its own files (ARCHITECTURE-PLATFORM §3).
  *
  * The defect this guards against is numeric negotiation: 90/94/95/96 sibling
- * dialogs, a z-220 composer, a z-400 share dialog, two 2147483000s. The
+ * dialogs, a z-220 composer, a z-chrome0 share dialog, two 2147483000s. The
  * contract only survives if the tokens exist, stay ordered, map to classes
  * every primitive uses, and no overlay can take a number instead of a name.
  */

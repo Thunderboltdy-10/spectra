@@ -19,7 +19,7 @@ function ReferenceNodeView({ node, selected, deleteNode }: NodeViewProps) {
       {embedId ? (
         <ArtifactEmbedById embedId={embedId} onRemove={deleteNode} />
       ) : (
-        <div className="rounded-[10px] border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 py-3 text-[11px] text-[var(--text-secondary)]">
+        <div className="rounded-card border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 py-3 text-micro text-[var(--text-secondary)]">
           This older reference is no longer linked to a live source. Add it
           again to restore live updates.
         </div>

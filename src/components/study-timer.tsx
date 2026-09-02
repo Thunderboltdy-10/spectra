@@ -145,8 +145,8 @@ function readPersistedState(): PersistedTimerState | null {
       completedSessions,
       workMinutes,
       breakMinutes,
-      workColor: typeof parsed.workColor === "string" ? parsed.workColor : "#06b6d4", // Default to cyan-500 equivalent
-      breakColor: typeof parsed.breakColor === "string" ? parsed.breakColor : "#22c55e", // Default to green-500 equivalent
+      workColor: typeof parsed.workColor === "string" ? parsed.workColor : "var(--accent-cyan)", // Default to cyan-500 equivalent
+      breakColor: typeof parsed.breakColor === "string" ? parsed.breakColor : "var(--success)", // Default to green-500 equivalent
     };
   } catch {
     return null;
@@ -163,8 +163,8 @@ function getInitialTimerState(): PersistedTimerState {
     completedSessions: 0,
     workMinutes: DEFAULT_WORK_MINUTES,
     breakMinutes: DEFAULT_BREAK_MINUTES,
-    workColor: "#06b6d4",
-    breakColor: "#22c55e",
+    workColor: "var(--accent-cyan)",
+    breakColor: "var(--success)",
   };
 }
 
@@ -474,7 +474,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
             className="h-2 w-2 rounded-full"
             style={{ backgroundColor: phaseColor, boxShadow: isRunning ? `0 0 6px ${phaseColor}` : "none" }}
           />
-          <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">{phaseLabel}</p>
+          <p className="text-micro uppercase tracking-[0.14em] text-[var(--text-secondary)]">{phaseLabel}</p>
         </div>
         <button
           type="button"
@@ -502,7 +502,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
       {/* Linear progress bar with remaining time */}
       {isRunning ? (
         <div className="my-4 flex items-center gap-2">
-          <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[var(--text-secondary)]">
+          <span className="shrink-0 text-micro font-semibold tabular-nums text-[var(--text-secondary)]">
             {formatRemaining(Math.floor((duration - remainingMs) / 1000))}
           </span>
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
@@ -515,7 +515,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
             />
           </div>
           <span
-            className="shrink-0 text-[11px] font-semibold tabular-nums"
+            className="shrink-0 text-micro font-semibold tabular-nums"
             style={{ color: phaseColor }}
           >
             {display}

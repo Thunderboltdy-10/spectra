@@ -237,7 +237,7 @@ export function SandboxedArtifactRuntime({
     );
   return (
     <section
-      className={`relative overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] ${className}`}
+      className={`relative overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] ${className}`}
       data-runtime-status={status}
     >
       {description ? (
@@ -254,7 +254,7 @@ export function SandboxedArtifactRuntime({
           <button
             type="button"
             onClick={() => setGeneration((value) => value + 1)}
-            className="flex h-6 items-center gap-1 rounded-[5px] px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            className="flex h-6 items-center gap-1 rounded-chip px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             aria-label="Restart interactive preview"
           >
             <RotateCw className="h-3 w-3" />
@@ -286,7 +286,7 @@ export function SandboxedArtifactRuntime({
         </div>
       ) : null}
       {status === "error" || status === "limited" ? (
-        <div className="absolute inset-x-3 bottom-3 rounded-[8px] border border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] p-3 shadow-[0_8px_30px_rgba(31,26,18,.12)] backdrop-blur">
+        <div className="absolute inset-x-3 bottom-3 rounded-control border border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] p-3 shadow-card backdrop-blur">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
             <div className="min-w-0 flex-1">
@@ -303,7 +303,7 @@ export function SandboxedArtifactRuntime({
             <button
               type="button"
               onClick={() => setGeneration((value) => value + 1)}
-              className="h-7 rounded-[6px] border border-[var(--border-default)] px-2 text-micro font-semibold text-[var(--text-primary)]"
+              className="h-7 rounded-chip border border-[var(--border-default)] px-2 text-micro font-semibold text-[var(--text-primary)]"
             >
               Restart
             </button>
@@ -322,7 +322,7 @@ function RuntimeFailure({
   onRetry: () => void;
 }) {
   return (
-    <div className="rounded-[9px] border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] p-4">
+    <div className="rounded-card border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] p-4">
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
         <div className="min-w-0 flex-1">
@@ -336,7 +336,7 @@ function RuntimeFailure({
         <button
           type="button"
           onClick={onRetry}
-          className="h-7 rounded-[6px] border border-[var(--border-default)] px-2 text-micro font-semibold text-[var(--text-primary)]"
+          className="h-7 rounded-chip border border-[var(--border-default)] px-2 text-micro font-semibold text-[var(--text-primary)]"
         >
           Retry
         </button>

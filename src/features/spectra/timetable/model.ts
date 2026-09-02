@@ -102,7 +102,7 @@ const layerKinds = new Set<TimetableLayerKind>([
   "external",
   "study",
 ]);
-const layerColors = ["#26a879", "#7865ea", "#f2ad2e", "#f07157", "#4a91de"];
+const layerColors = ["var(--accent-mint)", "var(--brand-primary)", "var(--accent-gold)", "#f07157", "var(--accent-cyan)"];
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -481,7 +481,7 @@ export function normalizeTimetableContent(value: unknown): TimetableContent {
         name: "Classes",
         kind: "class",
         visible: true,
-        color: "#26a879",
+        color: "var(--accent-mint)",
         authority: "school",
       },
       {
@@ -489,7 +489,7 @@ export function normalizeTimetableContent(value: unknown): TimetableContent {
         name: "Study blocks",
         kind: "study",
         visible: true,
-        color: "#7865ea",
+        color: "var(--brand-primary)",
         authority: "user",
       },
       {
@@ -497,7 +497,7 @@ export function normalizeTimetableContent(value: unknown): TimetableContent {
         name: "Tasks & deadlines",
         kind: "tasks",
         visible: true,
-        color: "#f2ad2e",
+        color: "var(--accent-gold)",
         authority: "workspace",
       },
     );
@@ -834,7 +834,7 @@ function defaultPersonalLayers(): TimetableLayer[] {
       name: "Personal",
       kind: "personal",
       visible: true,
-      color: "#4a91de",
+      color: "var(--accent-cyan)",
       authority: "user",
       private: true,
     },
@@ -843,7 +843,7 @@ function defaultPersonalLayers(): TimetableLayer[] {
       name: "Study blocks",
       kind: "study",
       visible: true,
-      color: "#7865ea",
+      color: "var(--brand-primary)",
       authority: "user",
       private: true,
     },

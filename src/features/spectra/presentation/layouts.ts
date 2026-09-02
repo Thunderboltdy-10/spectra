@@ -69,9 +69,9 @@ export const GENERATED_PRESENTATION_LAYOUT_CYCLE = [
 ] as const satisfies readonly PresentationLayoutId[];
 
 const GENERATED_THEME = {
-  background: "#f7f9fd",
-  heading: "#183f35",
-  body: "#2f3e39",
+  background: "var(--bg-secondary)",
+  heading: "var(--accent-mint)",
+  body: "var(--text-primary)",
 } as const;
 
 function canvasHeight(deck: PresentationContent) {

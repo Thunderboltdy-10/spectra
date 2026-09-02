@@ -42,8 +42,8 @@ function SettingGroup({ title, description, children }: { title: string; descrip
   return (
     <section className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10">
       <header className="pt-2">
-        <h2 className="font-display text-[18px] font-semibold text-[var(--text-primary)]">{title}</h2>
-        <p className="mt-1 max-w-2xl text-[12px] leading-5 text-[var(--text-secondary)]">{description}</p>
+        <h2 className="font-display text-heading font-semibold text-[var(--text-primary)]">{title}</h2>
+        <p className="mt-1 max-w-2xl text-caption leading-5 text-[var(--text-secondary)]">{description}</p>
       </header>
       <div className="space-y-1">{children}</div>
     </section>
@@ -52,10 +52,10 @@ function SettingGroup({ title, description, children }: { title: string; descrip
 
 function SettingRow({ label, description, control }: { label: string; description?: string; control: ReactNode }) {
   return (
-    <div className="group flex min-h-[68px] items-center gap-4 rounded-[10px] px-3.5 py-3 transition-colors hover:bg-[var(--bg-secondary)] sm:px-4">
+    <div className="group flex min-h-[68px] items-center gap-4 rounded-card px-3.5 py-3 transition-colors hover:bg-[var(--bg-secondary)] sm:px-4">
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-[var(--text-primary)]">{label}</div>
-        {description ? <div className="mt-0.5 max-w-2xl text-[11px] leading-[18px] text-[var(--text-secondary)]">{description}</div> : null}
+        <div className="text-ui font-medium text-[var(--text-primary)]">{label}</div>
+        {description ? <div className="mt-0.5 max-w-2xl text-micro leading-[18px] text-[var(--text-secondary)]">{description}</div> : null}
       </div>
       <div className="shrink-0">{control}</div>
     </div>

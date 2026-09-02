@@ -21,7 +21,7 @@ const NAMED_COLORS: Record<string, string> = {
   navy: "#1e3a8a",
   indigo: "#4f46e5",
   teal: "#0d9488",
-  cyan: "#06b6d4",
+  cyan: "var(--accent-cyan)",
   green: "#16a34a",
   red: "#dc2626",
   orange: "#ea580c",
@@ -29,7 +29,7 @@ const NAMED_COLORS: Record<string, string> = {
   purple: "#7c3aed",
   pink: "#db2777",
   black: "#111827",
-  white: "#ffffff",
+  white: "var(--bg-elevated)",
   gray: "#6b7280",
   grey: "#6b7280",
 };

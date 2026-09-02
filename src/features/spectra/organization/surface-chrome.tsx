@@ -50,7 +50,7 @@ import type { SortDirection, SortKey, TypeFilter } from "./tree-model";
 
 /** Every control in the toolbar is this button. One height, one radius. */
 export const controlClass =
-  "flex h-8 shrink-0 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] outline-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] focus-visible:border-[var(--brand-primary)] disabled:opacity-40";
+  "flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-caption font-medium text-[var(--text-secondary)] outline-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] focus-visible:border-[var(--brand-primary)] disabled:opacity-40";
 
 /** The engaged state: a control that is currently narrowing what you see. */
 export const controlActiveClass =
@@ -107,14 +107,14 @@ export function SurfaceSearch({
         onChange={(event) => onChange(event.target.value)}
         placeholder={`Search ${scopeLabel}`}
         aria-label={`Search ${scopeLabel}`}
-        className="h-8 w-full rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-7 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--brand-primary)]"
+        className="h-8 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-7 text-ui text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--brand-primary)]"
       />
       {value ? (
         <button
           type="button"
           aria-label="Clear search"
           onClick={() => onChange("")}
-          className="absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-[4px] text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+          className="absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
         >
           <X className="size-3.5" />
         </button>
@@ -140,7 +140,7 @@ export function SurfaceViewSwitch({
   return (
     <nav
       aria-label="View"
-      className="flex h-8 shrink-0 items-center gap-0.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5"
+      className="flex h-8 shrink-0 items-center gap-0.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5"
     >
       {views.map((option) => {
         const Icon = option.icon;
@@ -152,9 +152,9 @@ export function SurfaceViewSwitch({
             aria-pressed={active}
             onClick={() => onChange(option.key)}
             className={cn(
-              "flex h-7 items-center gap-1.5 rounded-[5px] px-2.5 text-[12px] font-medium transition",
+              "flex h-7 items-center gap-1.5 rounded-chip px-2.5 text-caption font-medium transition",
               active
-                ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]"
+                ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
             )}
           >
@@ -282,7 +282,7 @@ export function SurfaceSortMenu({
         >
           <DropdownMenuRadioItem value="manual">
             Arrangement
-            <span className="ml-auto pr-4 text-[11px] text-[var(--text-tertiary)]">
+            <span className="ml-auto pr-4 text-micro text-[var(--text-tertiary)]">
               drag
             </span>
           </DropdownMenuRadioItem>
@@ -391,7 +391,7 @@ export function SurfaceNewMenu({
     <DropdownMenu>
       <DropdownMenuTrigger disabled={disabled} asChild={Boolean(trigger)}>
         {trigger ?? (
-          <span className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--text-inverse)] transition-opacity hover:opacity-90">
+          <span className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-ui font-medium text-[var(--text-inverse)] transition-opacity hover:opacity-90">
             <Plus className="size-3.5" />
             {label}
           </span>

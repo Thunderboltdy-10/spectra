@@ -35,11 +35,11 @@ export type StatusTone =
 
 const toneClass: Record<Exclude<StatusTone, "unknown">, string> = {
   healthy:
-    "border-[color-mix(in_oklab,var(--success)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--success)_80%,var(--text-primary))]",
+    "border-[color-mix(in_oklab,var(--success)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-secondary))] [color:color-mix(in_oklab,var(--success)_80%,var(--text-primary))]",
   attention:
-    "border-[color-mix(in_oklab,var(--warning)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_13%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--warning)_80%,var(--text-primary))]",
+    "border-[color-mix(in_oklab,var(--warning)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_13%,var(--bg-secondary))] [color:color-mix(in_oklab,var(--warning)_80%,var(--text-primary))]",
   failure:
-    "border-[color-mix(in_oklab,var(--danger)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]",
+    "border-[color-mix(in_oklab,var(--danger)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] [color:color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]",
   neutral:
     "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]",
 };

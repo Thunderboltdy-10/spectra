@@ -419,7 +419,7 @@ export function ShareDialog({
       >
         <header className="flex items-start justify-between border-b border-[var(--border-default)] px-5 py-4">
           <div className="flex min-w-0 items-start gap-3">
-            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-secondary))] text-[var(--brand-primary)]">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-secondary))] text-[var(--brand-primary)]">
               <Share2 className="h-4 w-4" />
             </span>
             <div className="min-w-0">
@@ -433,7 +433,7 @@ export function ShareDialog({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             aria-label="Close sharing"
           >
             <X className="h-4 w-4" />
@@ -442,7 +442,7 @@ export function ShareDialog({
 
         <div className="min-h-0 overflow-y-auto px-5 py-4">
           <label
-            className="text-[11px] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]"
+            className="text-micro font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]"
             htmlFor="share-member-search"
           >
             Invite someone
@@ -456,7 +456,7 @@ export function ShareDialog({
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search school members by name or email"
-                className="h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-9 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
+                className="h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-9 text-ui text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
               />
               {searching ? (
                 <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[var(--text-tertiary)]" />
@@ -475,17 +475,17 @@ export function ShareDialog({
             value={note}
             onChange={(event) => setNote(event.target.value.slice(0, 500))}
             placeholder="Add a note (optional)"
-            className="mt-2 h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
+            className="mt-2 h-9 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-caption text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
           />
 
           {search.trim().length >= 2 ? (
-            <div className="mt-2 overflow-hidden rounded-[8px] border border-[var(--border-default)]">
+            <div className="mt-2 overflow-hidden rounded-control border border-[var(--border-default)]">
               {availableMembers.map((member) => (
                 <div
                   key={member.accountId}
                   className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5 last:border-b-0"
                 >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-[11px] font-semibold text-[var(--text-secondary)]">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-semibold text-[var(--text-secondary)]">
                     {member.name
                       .split(/\s+/)
                       .slice(0, 2)
@@ -494,10 +494,10 @@ export function ShareDialog({
                       .toUpperCase()}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+                    <div className="truncate text-ui font-medium text-[var(--text-primary)]">
                       {member.name}
                     </div>
-                    <div className="truncate text-[11px] text-[var(--text-tertiary)]">
+                    <div className="truncate text-micro text-[var(--text-tertiary)]">
                       {member.email}
                     </div>
                   </div>
@@ -505,7 +505,7 @@ export function ShareDialog({
                     type="button"
                     disabled={busyKey === `invite:${member.accountId}`}
                     onClick={() => void invite(member)}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] px-2.5 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-default)] px-2.5 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
                   >
                     {busyKey === `invite:${member.accountId}` ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -517,7 +517,7 @@ export function ShareDialog({
                 </div>
               ))}
               {!searching && availableMembers.length === 0 ? (
-                <p className="px-3 py-4 text-center text-[12px] text-[var(--text-secondary)]">
+                <p className="px-3 py-4 text-center text-caption text-[var(--text-secondary)]">
                   No available school member matches that search.
                 </p>
               ) : null}
@@ -526,17 +526,17 @@ export function ShareDialog({
 
           {accessRequests.length > 0 ? (
             <section
-              className="mt-6 rounded-[10px] border border-[color-mix(in_oklab,var(--brand-primary)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_4%,var(--bg-primary))]"
+              className="mt-6 rounded-card border border-[color-mix(in_oklab,var(--brand-primary)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_4%,var(--bg-primary))]"
               aria-labelledby="access-requests-title"
             >
               <div className="flex items-start gap-3 border-b border-[var(--border-subtle)] px-4 py-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[var(--bg-elevated)] text-[var(--brand-primary)]">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control bg-[var(--bg-elevated)] text-[var(--brand-primary)]">
                   <Inbox className="h-4 w-4" />
                 </span>
                 <div>
                   <h3
                     id="access-requests-title"
-                    className="text-[12px] font-semibold text-[var(--text-primary)]"
+                    className="text-caption font-semibold text-[var(--text-primary)]"
                   >
                     Access requests
                   </h3>
@@ -564,7 +564,7 @@ export function ShareDialog({
                             .toUpperCase() ?? "?"}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+                          <div className="truncate text-caption font-medium text-[var(--text-primary)]">
                             {request.requester?.name ?? "Unavailable member"}
                           </div>
                           <div className="mt-0.5 text-micro text-[var(--text-tertiary)]">
@@ -575,7 +575,7 @@ export function ShareDialog({
                               : ""}
                           </div>
                           {request.message ? (
-                            <p className="mt-2 rounded-[6px] bg-[var(--bg-elevated)] px-2.5 py-2 text-micro leading-4 text-[var(--text-secondary)]">
+                            <p className="mt-2 rounded-chip bg-[var(--bg-elevated)] px-2.5 py-2 text-micro leading-4 text-[var(--text-secondary)]">
                               {request.message}
                             </p>
                           ) : null}
@@ -605,7 +605,7 @@ export function ShareDialog({
                           onClick={() =>
                             void resolveAccessRequest(request, "decline")
                           }
-                          className="h-8 rounded-[7px] px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                          className="h-8 rounded-control px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
                         >
                           Decline
                         </button>
@@ -615,7 +615,7 @@ export function ShareDialog({
                           onClick={() =>
                             void resolveAccessRequest(request, "approve")
                           }
-                          className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
                         >
                           {working ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -633,20 +633,20 @@ export function ShareDialog({
           ) : null}
 
           <div className="mt-6 flex items-center justify-between">
-            <h3 className="text-[12px] font-semibold text-[var(--text-primary)]">
+            <h3 className="text-caption font-semibold text-[var(--text-primary)]">
               People with access
             </h3>
-            <span className="text-[11px] text-[var(--text-tertiary)]">
+            <span className="text-micro text-[var(--text-tertiary)]">
               {shares.length} {shares.length === 1 ? "person" : "people"}
             </span>
           </div>
-          <div className="mt-2 overflow-hidden rounded-[8px] border border-[var(--border-default)]">
+          <div className="mt-2 overflow-hidden rounded-control border border-[var(--border-default)]">
             {loading ? (
               <div className="flex h-20 items-center justify-center">
                 <Loader2 className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" />
               </div>
             ) : shares.length === 0 ? (
-              <p className="px-4 py-5 text-center text-[12px] leading-5 text-[var(--text-secondary)]">
+              <p className="px-4 py-5 text-center text-caption leading-5 text-[var(--text-secondary)]">
                 Only you have access. Search above to invite a collaborator.
               </p>
             ) : (
@@ -655,7 +655,7 @@ export function ShareDialog({
                   key={share.invitationId}
                   className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5 last:border-b-0"
                 >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-[11px] font-semibold text-[var(--text-secondary)]">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-semibold text-[var(--text-secondary)]">
                     {share.account?.name
                       .split(/\s+/)
                       .slice(0, 2)
@@ -664,7 +664,7 @@ export function ShareDialog({
                       .toUpperCase() ?? "?"}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+                    <div className="truncate text-ui font-medium text-[var(--text-primary)]">
                       {share.account?.name ?? "Unavailable member"}
                     </div>
                     <div className="flex items-center gap-1.5 text-micro text-[var(--text-tertiary)]">
@@ -691,7 +691,7 @@ export function ShareDialog({
                       triggerClassName="w-[124px]"
                     />
                   ) : (
-                    <span className="rounded-[5px] bg-[var(--bg-secondary)] px-2 py-1 text-micro text-[var(--text-secondary)]">
+                    <span className="rounded-chip bg-[var(--bg-secondary)] px-2 py-1 text-micro text-[var(--text-secondary)]">
                       {share.level === "modify" ? "Can modify" : "Read-only"}
                     </span>
                   )}
@@ -699,7 +699,7 @@ export function ShareDialog({
                     type="button"
                     disabled={busyKey === `remove:${share.invitationId}`}
                     onClick={() => void removeShare(share)}
-                    className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] hover:text-[var(--danger)] disabled:opacity-45"
+                    className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] hover:text-[var(--danger)] disabled:opacity-45"
                     aria-label={
                       share.status === "pending"
                         ? "Withdraw invitation"
@@ -720,24 +720,24 @@ export function ShareDialog({
           {resourceType !== "workspace" && inheritedAudience.length > 0 ? (
             <section className="mt-6" aria-labelledby="workspace-access-title">
               <div className="flex items-start gap-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
                   <Building2 className="h-4 w-4" />
                 </span>
                 <div>
                   <h3
                     id="workspace-access-title"
-                    className="text-[12px] font-semibold text-[var(--text-primary)]"
+                    className="text-caption font-semibold text-[var(--text-primary)]"
                   >
                     Access through workspaces
                   </h3>
-                  <p className="mt-1 text-[11px] leading-5 text-[var(--text-secondary)]">
+                  <p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">
                     These people inherit access from a workspace containing this
                     artifact. You can narrow or remove it here without changing
                     the workspace.
                   </p>
                 </div>
               </div>
-              <div className="mt-3 overflow-hidden rounded-[8px] border border-[var(--border-default)]">
+              <div className="mt-3 overflow-hidden rounded-control border border-[var(--border-default)]">
                 {inheritedAudience.map((entry) => {
                   const selected =
                     entry.exception?.effect === "deny"
@@ -759,7 +759,7 @@ export function ShareDialog({
                           .toUpperCase()}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+                        <div className="truncate text-caption font-medium text-[var(--text-primary)]">
                           {entry.account.name}
                         </div>
                         <div className="mt-0.5 truncate text-micro text-[var(--text-tertiary)]">
@@ -805,18 +805,18 @@ export function ShareDialog({
           ) : null}
 
           <section
-            className="mt-6 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
+            className="mt-6 rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
             aria-labelledby="public-access-title"
           >
             <div className="flex items-start gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-secondary))] text-[var(--brand-primary)]">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-secondary))] text-[var(--brand-primary)]">
                 <Globe2 className="h-4 w-4" />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <h3
                     id="public-access-title"
-                    className="text-[12px] font-semibold text-[var(--text-primary)]"
+                    className="text-caption font-semibold text-[var(--text-primary)]"
                   >
                     Public access
                   </h3>
@@ -824,14 +824,14 @@ export function ShareDialog({
                     Explicit
                   </span>
                 </div>
-                <p className="mt-1 text-[11px] leading-5 text-[var(--text-secondary)]">
+                <p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">
                   Anyone with a public link can view a read-only copy. They
                   cannot edit, comment, collaborate, or see private context.
                 </p>
               </div>
             </div>
             {createdPublicUrl ? (
-              <div className="mt-4 rounded-[8px] border border-[color-mix(in_oklab,var(--success)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_5%,var(--bg-elevated))] p-3">
+              <div className="mt-4 rounded-control border border-[color-mix(in_oklab,var(--success)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_5%,var(--bg-elevated))] p-3">
                 <div className="flex items-center gap-1.5 text-micro font-semibold text-[var(--success)]">
                   <ShieldCheck className="h-3.5 w-3.5" />
                   New link ready
@@ -842,12 +842,12 @@ export function ShareDialog({
                     value={createdPublicUrl}
                     onFocus={(event) => event.currentTarget.select()}
                     aria-label="New public link"
-                    className="h-9 min-w-0 flex-1 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[11px] text-[var(--text-secondary)] outline-none"
+                    className="h-9 min-w-0 flex-1 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-micro text-[var(--text-secondary)] outline-none"
                   />
                   <button
                     type="button"
                     onClick={() => void copyPublicLink()}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
                   >
                     <Copy className="h-3.5 w-3.5" />
                     Copy
@@ -864,11 +864,11 @@ export function ShareDialog({
                 {publicLinks.map((link) => (
                   <div
                     key={link.linkId}
-                    className="flex items-center gap-3 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5"
+                    className="flex items-center gap-3 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5"
                   >
                     <Link2 className="h-3.5 w-3.5 text-[var(--brand-primary)]" />
                     <div className="min-w-0 flex-1">
-                      <div className="text-[11px] font-medium text-[var(--text-primary)]">
+                      <div className="text-micro font-medium text-[var(--text-primary)]">
                         Public read-only link
                       </div>
                       <div className="text-micro text-[var(--text-tertiary)]">
@@ -881,7 +881,7 @@ export function ShareDialog({
                       type="button"
                       disabled={busyKey === `public:${link.linkId}`}
                       onClick={() => void revokePublicLink(link)}
-                      className="h-7 rounded-[6px] px-2 text-micro font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] disabled:opacity-45"
+                      className="h-7 rounded-chip px-2 text-micro font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] disabled:opacity-45"
                     >
                       {busyKey === `public:${link.linkId}` ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -893,7 +893,7 @@ export function ShareDialog({
                 ))}
               </div>
             ) : (
-              <div className="mt-4 rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-3 text-micro text-[var(--text-tertiary)]">
+              <div className="mt-4 rounded-control border border-dashed border-[var(--border-default)] px-3 py-3 text-micro text-[var(--text-tertiary)]">
                 Public access is off. This item remains private unless you
                 explicitly create a link.
               </div>
@@ -920,7 +920,7 @@ export function ShareDialog({
                 type="button"
                 disabled={busyKey === "public:create"}
                 onClick={() => void createPublicLink()}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                className="inline-flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
               >
                 {busyKey === "public:create" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

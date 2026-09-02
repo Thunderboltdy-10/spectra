@@ -251,7 +251,7 @@ export function WorkbenchScene() {
           <SpectraRichContent
             content={DOC_BODY}
             verifiedSourceIds={VERIFIED_SOURCE_IDS}
-            className="text-[14px] leading-[1.72]"
+            className="text-body leading-[1.72]"
           />
         </div>
       );

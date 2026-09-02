@@ -219,7 +219,7 @@ export function ReferencesScene() {
                       "opacity var(--motion-slow) var(--ease-standard), transform var(--motion-slow) var(--ease-out-expo)",
                   }}
                 >
-                  <span className="flex-1 text-[14px] leading-[1.5] text-[var(--text-secondary)]">
+                  <span className="flex-1 text-body leading-[1.5] text-[var(--text-secondary)]">
                     {source.label}
                   </span>
                   <Chip
@@ -247,7 +247,7 @@ export function ReferencesScene() {
                 <SpectraRichContent
                   content={CITED}
                   verifiedSourceIds={VERIFIED_SOURCE_IDS}
-                  className="text-[15px] leading-[1.72]"
+                  className="text-subhead leading-[1.72]"
                 />
 
                 <Carried
@@ -267,7 +267,7 @@ export function ReferencesScene() {
                   </div>
                 </Carried>
 
-                <p className="text-[15px] leading-[1.72] text-[var(--text-secondary)]">
+                <p className="text-subhead leading-[1.72] text-[var(--text-secondary)]">
                   The class set would let the same figures be compared across
                   every group, if it were shared.
                 </p>

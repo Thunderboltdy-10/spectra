@@ -867,7 +867,6 @@ export function LibraryOrganizer({
       actions,
       beginDrag,
       consumeSuppressedClick,
-      onToggleContext,
       openNode,
       publishWorkSelection,
       renamingId,
@@ -945,7 +944,7 @@ export function LibraryOrganizer({
           {toolbarLead}
           <nav
             aria-label="Location"
-            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-[13px]"
+            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-ui"
           >
             {searching ? (
               <span className="truncate text-[var(--text-secondary)]">
@@ -1049,7 +1048,7 @@ export function LibraryOrganizer({
             <button
               type="button"
               onClick={() => requestPurge(rows, true)}
-              className="flex h-8 items-center rounded-[7px] px-2.5 text-[13px] text-[var(--danger)] hover:bg-[var(--bg-hover)]"
+              className="flex h-8 items-center rounded-control px-2.5 text-ui text-[var(--danger)] hover:bg-[var(--bg-hover)]"
             >
               Empty Trash
             </button>
@@ -1291,7 +1290,7 @@ export function LibraryOrganizer({
             )}
           </div>
 
-          <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-[var(--border-subtle)] px-4 text-[11px] text-[var(--text-tertiary)]">
+          <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-[var(--border-subtle)] px-4 text-micro text-[var(--text-tertiary)]">
             <span>
               {rows.length} {rows.length === 1 ? "item" : "items"}
               {children.status === "CanLoadMore" && !flat ? "+" : ""}
@@ -1389,7 +1388,7 @@ export function LibraryOrganizer({
         />
       ) : null}
       {selectedNodes.length > 1 ? (
-        <div className="spectra-composer-above pointer-events-none fixed left-1/2 z-toast -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-lg)]">
+        <div className="spectra-composer-above pointer-events-none fixed left-1/2 z-toast -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-caption text-[var(--text-secondary)] shadow-[var(--shadow-lg)]">
             {selectedNodes.length} selected · drag them anywhere
         </div>
       ) : null}
@@ -1469,11 +1468,11 @@ function Crumb({
       data-drop-kind="container"
       onClick={() => onNavigate({ kind: "folder", nodeId })}
       className={cn(
-        "flex min-w-0 items-center gap-1.5 rounded-[6px] px-1.5 py-1 transition-colors",
+        "flex min-w-0 items-center gap-1.5 rounded-chip px-1.5 py-1 transition-colors",
         active
           ? "font-medium text-[var(--text-primary)]"
           : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-        dropping && "shadow-[inset_0_0_0_2px_var(--brand-primary)]",
+        dropping && "ring-2 ring-brand",
       )}
     >
       {icon ? <Home className="size-3.5 shrink-0" strokeWidth={1.9} /> : null}
@@ -1609,7 +1608,7 @@ function NodeMenu({
               <DropdownMenuItem onSelect={() => onRename(single.nodeId)}>
                 <Pencil className="size-3.5 text-[var(--text-tertiary)]" />
                 Rename
-                <span className="ml-auto text-[11px] text-[var(--text-tertiary)]">
+                <span className="ml-auto text-micro text-[var(--text-tertiary)]">
                   F2
                 </span>
               </DropdownMenuItem>
@@ -1664,7 +1663,7 @@ function DragProxy({
   return createPortal(
     <div
       aria-hidden
-      className="pointer-events-none fixed z-toast flex items-center gap-2 rounded-[7px] border px-2.5 py-1.5 text-[12px] shadow-[var(--shadow-lg)]"
+      className="pointer-events-none fixed z-toast flex items-center gap-2 rounded-control border px-2.5 py-1.5 text-caption shadow-[var(--shadow-lg)]"
       style={{
         left: drag.x + 12,
         top: drag.y + 10,
@@ -1695,7 +1694,7 @@ function RowSkeleton() {
     <div className="flex flex-col gap-1 p-1" aria-hidden>
       {Array.from({ length: 10 }, (_, row) => (
         <div key={row} className="flex h-[30px] items-center gap-2">
-          <div className="size-[22px] shrink-0 animate-pulse rounded-[5px] bg-[var(--bg-tertiary)]" />
+          <div className="size-[22px] shrink-0 animate-pulse rounded-chip bg-[var(--bg-tertiary)]" />
           <div
             className="h-3 animate-pulse rounded-full bg-[var(--bg-tertiary)]"
             style={{ width: `${34 - (row % 4) * 6}%` }}
@@ -1764,17 +1763,17 @@ function EmptyState({
 
   return (
     <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 px-6 text-center">
-      <p className="text-[15px] font-medium text-[var(--text-primary)]">
+      <p className="text-subhead font-medium text-[var(--text-primary)]">
         {copy.title}
       </p>
-      <p className="max-w-[380px] text-[13px] text-[var(--text-secondary)]">
+      <p className="max-w-[380px] text-ui text-[var(--text-secondary)]">
         {copy.body}
       </p>
       {filtered ? (
         <button
           type="button"
           onClick={onClearFilter}
-          className="mt-2 flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)]"
+          className="mt-2 flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-ui text-[var(--text-primary)]"
         >
           Clear the filter
         </button>
@@ -1782,7 +1781,7 @@ function EmptyState({
         <button
           type="button"
           onClick={onNewFolder}
-          className="mt-2 flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+          className="mt-2 flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-ui text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
         >
           <FolderPlus className="size-3.5" />
           New folder

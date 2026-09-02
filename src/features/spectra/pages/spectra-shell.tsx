@@ -500,12 +500,12 @@ function WorkspaceHeader({
     >
       <div className="flex items-start justify-between gap-5">
         <div className="flex min-w-0 items-start gap-4">
-          <span className="grid size-14 shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_oklab,var(--accent-violet)_10%,var(--bg-elevated))] text-[var(--accent-violet)]">
+          <span className="grid size-14 shrink-0 place-items-center rounded-card bg-[color-mix(in_oklab,var(--accent-violet)_10%,var(--bg-elevated))] text-[var(--accent-violet)]">
             <Sprout className="size-7" />
           </span>
           <div className="min-w-0 pt-0.5">
             <div className="flex items-center gap-2">
-              <h1 className="truncate font-display text-[29px] font-semibold leading-[1.12] tracking-[-.02em] text-[var(--text-primary)]">
+              <h1 className="truncate font-display text-display font-semibold leading-[1.12] tracking-[-.02em] text-[var(--text-primary)]">
                 {workspace?.title ?? "Workspace"}
               </h1>
               {workspace?.isShared ? (
@@ -515,7 +515,7 @@ function WorkspaceHeader({
                 />
               ) : null}
             </div>
-            <p className="mt-1.5 max-w-[52ch] text-[14px] leading-relaxed text-[var(--text-secondary)]">
+            <p className="mt-1.5 max-w-[52ch] text-body leading-relaxed text-[var(--text-secondary)]">
               {workspace?.description ?? "All your work, organized and ready."}
             </p>
           </div>
@@ -581,14 +581,14 @@ function RootHeader({
     <header className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-4 pt-4">
       <div className="flex items-start justify-between gap-5">
         <div className="flex min-w-0 items-start gap-4">
-          <span className="grid size-14 shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--brand-primary)]">
+          <span className="grid size-14 shrink-0 place-items-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--brand-primary)]">
             <Icon className="size-7" />
           </span>
           <div className="min-w-0 pt-0.5">
-            <h1 className="truncate font-display text-[29px] font-semibold leading-[1.12] tracking-[-.02em] text-[var(--text-primary)]">
+            <h1 className="truncate font-display text-display font-semibold leading-[1.12] tracking-[-.02em] text-[var(--text-primary)]">
               {surface === "library" ? "Library" : "Workspace"}
             </h1>
-            <p className="mt-1.5 max-w-[52ch] text-[14px] leading-relaxed text-[var(--text-secondary)]">
+            <p className="mt-1.5 max-w-[52ch] text-body leading-relaxed text-[var(--text-secondary)]">
               {surface === "library"
                 ? "Everything you have made, filed where you put it."
                 : workspaceCount === 1
@@ -629,12 +629,12 @@ function SelectObjectsButton({
 function WorkspaceContentSkeleton() {
   return (
     <div className="px-1 pt-2" aria-label="Loading workspace">
-      <div className="ml-auto h-9 w-[520px] max-w-full animate-pulse rounded-[9px] bg-[var(--bg-secondary)]" />
+      <div className="ml-auto h-9 w-[520px] max-w-full animate-pulse rounded-card bg-[var(--bg-secondary)]" />
       <div className="mt-7 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {Array.from({ length: 6 }, (_, index) => (
           <div
             key={index}
-            className="h-[116px] animate-pulse rounded-[10px] bg-[linear-gradient(110deg,var(--bg-secondary),color-mix(in_oklab,var(--bg-elevated)_70%,var(--bg-secondary)),var(--bg-secondary))] [background-size:220%_100%]"
+            className="h-[116px] animate-pulse rounded-card bg-[linear-gradient(110deg,var(--bg-secondary),color-mix(in_oklab,var(--bg-elevated)_70%,var(--bg-secondary)),var(--bg-secondary))] [background-size:220%_100%]"
             style={{ animationDelay: `${index * 55}ms` }}
           />
         ))}
@@ -712,18 +712,18 @@ function Inspector({
       null;
     return (
       <InspectorSurface inline={inline} title="Selected run" onClose={onClose}>
-        <div className="mt-5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-          <div className="flex items-center justify-between text-[12px] text-[var(--text-secondary)]">
+        <div className="mt-5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+          <div className="flex items-center justify-between text-caption text-[var(--text-secondary)]">
             <span>{formatShortDate(selectedRun.createdAt)}</span>
             <span className="flex items-center gap-1">
               <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
               {selectedRun.status}
             </span>
           </div>
-          <h2 className="mt-5 font-display text-[20px] font-semibold leading-tight text-[var(--text-primary)]">
+          <h2 className="mt-5 font-display text-heading font-semibold leading-tight text-[var(--text-primary)]">
             {selectedRun.userPrompt}
           </h2>
-          <p className="mt-4 text-[13px] leading-6 text-[var(--text-secondary)]">
+          <p className="mt-4 text-ui leading-6 text-[var(--text-secondary)]">
             {selectedRun.finalSummary}
           </p>
         </div>
@@ -749,21 +749,21 @@ function Inspector({
             <div>
               <div className="mt-5">
                 <Icon
-                  className="h-8 w-8 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5"
+                  className="h-8 w-8 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5"
                   style={{ color: meta.color }}
                 />
                 <div className="mt-3 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
                   {meta.label} · {selectedArtifact.status}
                 </div>
-                <h2 className="mt-2 font-display text-[22px] font-semibold leading-tight text-[var(--text-primary)]">
+                <h2 className="mt-2 font-display text-metric font-semibold leading-tight text-[var(--text-primary)]">
                   {selectedArtifact.title}
                 </h2>
-                <div className="mt-2 text-[12px] text-[var(--text-secondary)]">
+                <div className="mt-2 text-caption text-[var(--text-secondary)]">
                   Updated {formatRelativeTime(selectedArtifact.updatedAt)}
                 </div>
               </div>
               <InspectorSection title="Description">
-                <p className="text-[13px] leading-6 text-[var(--text-secondary)]">
+                <p className="text-ui leading-6 text-[var(--text-secondary)]">
                   {previewText(selectedArtifact.summary, "No description yet.")}
                 </p>
               </InspectorSection>
@@ -794,13 +794,13 @@ function Inspector({
                   {selectedPlacements.map((placement) => (
                     <div
                       key={placement.workspaceId}
-                      className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-[12px] font-medium text-[var(--text-primary)]"
+                      className="rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-caption font-medium text-[var(--text-primary)]"
                     >
                       {placement.workspaceTitle}
                     </div>
                   ))}
                   {selectedPlacements.length === 0 ? (
-                    <div className="rounded-[8px] border border-dashed border-[var(--border-default)] p-3 text-[11px] leading-5 text-[var(--text-secondary)]">
+                    <div className="rounded-control border border-dashed border-[var(--border-default)] p-3 text-micro leading-5 text-[var(--text-secondary)]">
                       This work is in General. Move it into a workspace when it
                       belongs with a project or subject.
                     </div>
@@ -813,14 +813,14 @@ function Inspector({
                     <InspectorObject key={artifact._id} artifact={artifact} />
                   ))}
                   {links.length === 0 ? (
-                    <div className="text-[13px] text-[var(--text-secondary)]">
+                    <div className="text-ui text-[var(--text-secondary)]">
                       No references yet.
                     </div>
                   ) : null}
                 </div>
               </InspectorSection>
               <InspectorSection title="Sources and provenance">
-                <p className="text-[11px] leading-5 text-[var(--text-secondary)]">
+                <p className="text-micro leading-5 text-[var(--text-secondary)]">
                   {selectedArtifact.createdFrom?.source
                     ? `Created from ${selectedArtifact.createdFrom.source.replaceAll("_", " ")}${selectedArtifact.createdFrom.sourceAttachmentNames?.length ? ` with ${selectedArtifact.createdFrom.sourceAttachmentNames.length} source file${selectedArtifact.createdFrom.sourceAttachmentNames.length === 1 ? "" : "s"}` : ""}.`
                     : "No external source provenance is recorded."}
@@ -936,7 +936,7 @@ function InspectorTitle({
 }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
+      <h2 className="text-body font-semibold text-[var(--text-primary)]">
         {title}
       </h2>
       <div className="flex items-center gap-1">
@@ -962,7 +962,7 @@ function InspectorSection({
 }) {
   return (
     <section className="mt-6 border-t border-[var(--border-default)] pt-5">
-      <h3 className="mb-3 text-[13px] font-semibold text-[var(--text-primary)]">
+      <h3 className="mb-3 text-ui font-semibold text-[var(--text-primary)]">
         {title}
       </h3>
       {children}
@@ -974,13 +974,13 @@ function InspectorObject({ artifact }: { artifact: SpectraArtifact }) {
   const meta = workTypeMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   return (
-    <div className="flex items-center gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5">
+    <div className="flex items-center gap-3 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2.5">
       <Icon className="h-4 w-4 shrink-0" style={{ color: meta.color }} />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+        <div className="truncate text-caption font-medium text-[var(--text-primary)]">
           {artifact.title}
         </div>
-        <div className="text-[11px] text-[var(--text-secondary)]">
+        <div className="text-micro text-[var(--text-secondary)]">
           {meta.label}
         </div>
       </div>
@@ -1001,7 +1001,7 @@ function ActionRow({
   return (
     <button
       type="button"
-      className="flex h-10 w-full items-center gap-3 rounded-[8px] text-left text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:text-[var(--text-tertiary)] disabled:hover:bg-transparent"
+      className="flex h-10 w-full items-center gap-3 rounded-control text-left text-ui font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:text-[var(--text-tertiary)] disabled:hover:bg-transparent"
       onClick={onClick}
     >
       <Icon className="h-4 w-4 text-[var(--text-secondary)]" />
@@ -4167,7 +4167,7 @@ export function SpectraShell({
                       onRetry={() => void loadOverview(requestedWorkspaceId)}
                     />
                   ) : surfaceLoading || !scopeReady ? (
-                    <main className="spectra-workspace-content spectra-composer-clearance relative z-[2] min-h-0 flex-1 overflow-y-auto px-3 pt-2 sm:px-5 lg:px-8">
+                    <main className="spectra-workspace-content spectra-composer-clearance relative z-chrome min-h-0 flex-1 overflow-y-auto px-3 pt-2 sm:px-5 lg:px-8">
                       <WorkspaceContentSkeleton />
                     </main>
                   ) : (
@@ -4177,7 +4177,7 @@ export function SpectraShell({
                        Board alike (CANON D41). This route used to render a second
                        toolbar with a second search and a second type filter above
                        the board; that row is gone. */
-                    <main className="spectra-workspace-content relative z-[2] flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <main className="spectra-workspace-content relative z-chrome flex min-h-0 flex-1 flex-col overflow-hidden">
                       <LibraryOrganizer
                         key={`${scopeNodeId ?? "root"}:${boardFolderNodeId ?? ""}`}
                         scope={

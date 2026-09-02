@@ -590,7 +590,7 @@ export function Prism({ quality }: Props) {
           temporalDistortion={0.06}
           attenuationDistance={6.5}
           attenuationColor={"#d9d0ff" as unknown as THREE.Color}
-          color={"#ffffff" as unknown as THREE.Color}
+          color={"var(--bg-elevated)" as unknown as THREE.Color}
           clearcoat={1}
           clearcoatRoughness={0.08}
           backside

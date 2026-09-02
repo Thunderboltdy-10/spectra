@@ -108,7 +108,7 @@ describe("hollow create content detection", () => {
               name: "Study",
               kind: "study",
               visible: true,
-              color: "#7865ea",
+              color: "var(--brand-primary)",
             },
           ],
           events: [

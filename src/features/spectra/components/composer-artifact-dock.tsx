@@ -151,8 +151,8 @@ export function ComposerArtifactDock({
           >
             <div className="flex items-center gap-2.5">
               <span
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)]"
-                style={{ color: meta?.color ?? "#d88922" }}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)]"
+                style={{ color: meta?.color ?? "var(--accent-gold)" }}
               >
                 <Icon className="h-3.5 w-3.5" />
               </span>
@@ -161,12 +161,12 @@ export function ComposerArtifactDock({
                   <button
                     type="button"
                     onClick={() => onOpen(artifact._id)}
-                    className="block max-w-full truncate rounded-[4px] text-left text-[12px] font-semibold text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]"
+                    className="block max-w-full truncate rounded-chip text-left text-caption font-semibold text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]"
                   >
                     {artifact.title}
                   </button>
                 ) : (
-                  <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">
+                  <div className="truncate text-caption font-semibold text-[var(--text-primary)]">
                     {artifact.title}
                   </div>
                 )}
@@ -180,7 +180,7 @@ export function ComposerArtifactDock({
                 <button
                   type="button"
                   onClick={() => onOpen(artifact._id)}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
                   aria-label={`Open ${artifact.title}`}
                   title="Open"
                 >
@@ -190,7 +190,7 @@ export function ComposerArtifactDock({
               {threadId && isArtifactTypeKey(artifact.blueprintKey) ? (
                 embeddedSourceIds.has(artifact._id) ? (
                   <span
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--success)]"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[var(--success)]"
                     aria-label={`${artifact.title} is in this conversation`}
                     title="In conversation"
                   >
@@ -201,7 +201,7 @@ export function ComposerArtifactDock({
                     type="button"
                     onClick={() => void keepInThread(artifact)}
                     disabled={Boolean(busyArtifactId)}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] disabled:opacity-45"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] disabled:opacity-45"
                     aria-label={`Keep ${artifact.title} in this conversation`}
                     title="Keep in conversation"
                   >
@@ -217,7 +217,7 @@ export function ComposerArtifactDock({
                 <button
                   type="button"
                   onClick={() => onDismiss(artifact._id)}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
                   aria-label={`Hide ${artifact.title}`}
                   title="Hide"
                 >

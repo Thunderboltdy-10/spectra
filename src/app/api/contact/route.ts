@@ -103,13 +103,13 @@ export async function POST(request: NextRequest) {
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;">
             <h2 style="color:#1a1510;margin:0 0 16px;">New contact form submission</h2>
             <table style="width:100%;border-collapse:collapse;">
-              <tr><td style="padding:8px 0;color:#6b5f52;width:120px;">Name</td><td style="padding:8px 0;color:#1a1510;">${htmlName}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b5f52;">Email</td><td style="padding:8px 0;"><a href="mailto:${htmlEmail}" style="color:#0e8ee8;">${htmlEmail}</a></td></tr>
-              ${htmlSchool ? `<tr><td style="padding:8px 0;color:#6b5f52;">School</td><td style="padding:8px 0;color:#1a1510;">${htmlSchool}</td></tr>` : ""}
-              ${htmlRole ? `<tr><td style="padding:8px 0;color:#6b5f52;">Role</td><td style="padding:8px 0;color:#1a1510;">${htmlRole}</td></tr>` : ""}
+              <tr><td style="padding:8px 0;color:var(--text-secondary);width:120px;">Name</td><td style="padding:8px 0;color:#1a1510;">${htmlName}</td></tr>
+              <tr><td style="padding:8px 0;color:var(--text-secondary);">Email</td><td style="padding:8px 0;"><a href="mailto:${htmlEmail}" style="color:var(--accent-cyan);">${htmlEmail}</a></td></tr>
+              ${htmlSchool ? `<tr><td style="padding:8px 0;color:var(--text-secondary);">School</td><td style="padding:8px 0;color:#1a1510;">${htmlSchool}</td></tr>` : ""}
+              ${htmlRole ? `<tr><td style="padding:8px 0;color:var(--text-secondary);">Role</td><td style="padding:8px 0;color:#1a1510;">${htmlRole}</td></tr>` : ""}
             </table>
             <div style="margin-top:16px;padding:16px;background:#f5f3ef;border-radius:12px;">
-              <p style="margin:0 0 4px;color:#6b5f52;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;">Message</p>
+              <p style="margin:0 0 4px;color:var(--text-secondary);font-size:12px;text-transform:uppercase;letter-spacing:0.1em;">Message</p>
               <p style="margin:0;color:#1a1510;white-space:pre-wrap;">${htmlMessage}</p>
             </div>
           </div>

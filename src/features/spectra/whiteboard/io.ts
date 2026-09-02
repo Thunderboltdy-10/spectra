@@ -93,7 +93,7 @@ export function buildWhiteboardSvg(
     .sort((left, right) => left.zIndex - right.zIndex)
     .map((node) => {
       const fill = String(
-        node.style?.fill ?? (node.type === "note" ? "#fff3c9" : "#ffffff"),
+        node.style?.fill ?? (node.type === "note" ? "color-mix(in oklab, var(--accent-gold) 28%, var(--bg-elevated))" : "var(--bg-elevated)"),
       );
       const stroke = String(node.style?.stroke ?? "#d5d7d2");
       const text = escapeXml(
@@ -245,7 +245,7 @@ function importSvg(
     node.style = {
       fill:
         geometry.getAttribute("fill") ||
-        (type === "text" ? "transparent" : "#ffffff"),
+        (type === "text" ? "transparent" : "var(--bg-elevated)"),
       stroke: geometry.getAttribute("stroke") || "#d5d7d2",
     };
     node.provenance = { source: "Sanitized SVG import", createdAt: Date.now() };

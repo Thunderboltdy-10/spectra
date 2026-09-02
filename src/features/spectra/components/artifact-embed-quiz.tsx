@@ -198,7 +198,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
       return (
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-[12px] font-semibold text-[var(--text-primary)]">
+            <div className="text-caption font-semibold text-[var(--text-primary)]">
               {previews.length}{" "}
               {previews.length === 1 ? "question" : "questions"}
             </div>
@@ -206,7 +206,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
               {canAnswer ? "Publish to practice" : "Read-only preview"}
             </p>
           </div>
-          <span className="rounded-[6px] border border-[var(--border-default)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]">
+          <span className="rounded-chip border border-[var(--border-default)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]">
             {canAnswer ? "Draft" : "Preview"}
           </span>
         </div>
@@ -217,9 +217,9 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
         {previews.slice(0, 6).map((question, index) => (
           <div
             key={String(question.id ?? index)}
-            className="rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3"
+            className="rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3"
           >
-            <p className="text-[12px] font-semibold leading-5 text-[var(--text-primary)]">
+            <p className="text-caption font-semibold leading-5 text-[var(--text-primary)]">
               {richText(question.prompt) || "Empty question"}
             </p>
           </div>
@@ -240,9 +240,9 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
 
   if (!attempt) {
     return (
-      <div className="flex min-h-24 items-center justify-between gap-4 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5">
+      <div className="flex min-h-24 items-center justify-between gap-4 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5">
         <div>
-          <p className="text-[12px] font-semibold text-[var(--text-primary)]">
+          <p className="text-caption font-semibold text-[var(--text-primary)]">
             Private practice
           </p>
           <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
@@ -256,7 +256,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
           type="button"
           onClick={() => void start()}
           disabled={busy === "start"}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
         >
           {busy === "start" ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
@@ -269,11 +269,11 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
 
   if (attempt.status === "submitted") {
     return (
-      <div className="rounded-[8px] border border-[color-mix(in_oklab,var(--success)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_5%,var(--bg-primary))] p-4">
-        <p className="text-[12px] font-semibold text-[var(--text-primary)]">
+      <div className="rounded-control border border-[color-mix(in_oklab,var(--success)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_5%,var(--bg-primary))] p-4">
+        <p className="text-caption font-semibold text-[var(--text-primary)]">
           Practice submitted
         </p>
-        <p className="mt-1 text-[14px] font-semibold text-[var(--success)]">
+        <p className="mt-1 text-body font-semibold text-[var(--success)]">
           {attempt.score ?? 0} / {attempt.maxScore ?? 0}
           {typeof attempt.percentage === "number"
             ? ` (${Math.round(attempt.percentage)}%)`
@@ -295,7 +295,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
   return (
     <div>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-[13px] font-semibold leading-5 text-[var(--text-primary)]">
+        <p className="text-ui font-semibold leading-5 text-[var(--text-primary)]">
           {richText(question.prompt) || "Empty question"}
         </p>
         <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
@@ -319,7 +319,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
             aria-label="Previous question"
             disabled={!canNavigate || activeIndex === 0 || busy !== null}
             onClick={() => setActiveIndex((value) => Math.max(0, value - 1))}
-            className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -336,7 +336,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
                 Math.min(attempt.questions.length - 1, value + 1),
               )
             }
-            className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
+            className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -345,7 +345,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
           type="button"
           onClick={() => void submit()}
           disabled={!canSubmit || busy !== null}
-          className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+          className="inline-flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
         >
           {busy === "submit" ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
@@ -392,10 +392,10 @@ function QuestionResponse({
                     : [...selected, option],
                 )
               }
-              className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[11px] disabled:opacity-55 ${active ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))]" : "border-[var(--border-subtle)]"}`}
+              className={`flex w-full items-center gap-2 rounded-control border px-3 py-2 text-left text-micro disabled:opacity-55 ${active ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))]" : "border-[var(--border-subtle)]"}`}
             >
               <span
-                className={`flex h-4 w-4 items-center justify-center rounded-[4px] border ${active ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)]"}`}
+                className={`flex h-4 w-4 items-center justify-center rounded-chip border ${active ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)]"}`}
               >
                 {active ? <Check className="h-3 w-3" /> : null}
               </span>
@@ -415,7 +415,7 @@ function QuestionResponse({
         {order.map((option, index) => (
           <div
             key={`${option}:${index}`}
-            className="grid grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2 text-[11px]"
+            className="grid grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-control border border-[var(--border-subtle)] px-3 py-2 text-micro"
           >
             <span className="font-semibold text-[var(--text-tertiary)]">
               {index + 1}
@@ -434,7 +434,7 @@ function QuestionResponse({
                   ];
                   onCommit(next);
                 }}
-                className="rounded-[5px] p-1 disabled:opacity-25"
+                className="rounded-chip p-1 disabled:opacity-25"
               >
                 <ChevronUp className="h-3.5 w-3.5" />
               </button>
@@ -450,7 +450,7 @@ function QuestionResponse({
                   ];
                   onCommit(next);
                 }}
-                className="rounded-[5px] p-1 disabled:opacity-25"
+                className="rounded-chip p-1 disabled:opacity-25"
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </button>
@@ -473,7 +473,7 @@ function QuestionResponse({
               key={pair.id}
               className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2"
             >
-              <span className="text-[11px] font-medium text-[var(--text-primary)]">
+              <span className="text-micro font-medium text-[var(--text-primary)]">
                 {richText(pair.left) || "Untitled prompt"}
               </span>
               <SelectField
@@ -511,7 +511,7 @@ function QuestionResponse({
               type="button"
               disabled={disabled}
               onClick={() => onCommit(option)}
-              className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[11px] disabled:opacity-55 ${active ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))]" : "border-[var(--border-subtle)]"}`}
+              className={`flex w-full items-center gap-2 rounded-control border px-3 py-2 text-left text-micro disabled:opacity-55 ${active ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))]" : "border-[var(--border-subtle)]"}`}
             >
               <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-micro">
                 {String.fromCharCode(65 + index)}
@@ -525,7 +525,7 @@ function QuestionResponse({
   }
   const long = question.type === "long_response";
   const className =
-    "mt-3 w-full rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent-cyan)] disabled:opacity-55";
+    "mt-3 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-caption text-[var(--text-primary)] outline-none focus:border-[var(--accent-cyan)] disabled:opacity-55";
   return long ? (
     <textarea
       rows={4}

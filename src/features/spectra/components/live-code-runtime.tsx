@@ -289,7 +289,7 @@ export function LiveCodeRuntime({
   if (content.runtime === "python") {
     const busy = pythonState === "loading" || pythonState === "running";
     return (
-      <div className="overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
+      <div className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)]">
         <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
           <span className="inline-flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
             <ShieldCheck className="h-3 w-3 text-[var(--success)]" /> Live
@@ -299,7 +299,7 @@ export function LiveCodeRuntime({
             type="button"
             onClick={runPython}
             disabled={!allowInteraction || busy}
-            className="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+            className="inline-flex h-7 items-center gap-1.5 rounded-chip bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
           >
             {busy ? (
               <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
@@ -345,7 +345,7 @@ export function LiveCodeRuntime({
               </p>
             )}
             {pythonState === "error" ? (
-              <p className="mt-2 rounded-[6px] border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] p-2 text-micro text-[var(--danger)]">
+              <p className="mt-2 rounded-chip border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] p-2 text-micro text-[var(--danger)]">
                 {message}
               </p>
             ) : null}
@@ -359,7 +359,7 @@ export function LiveCodeRuntime({
     content.files.find((file) => file.id === content.entryFileId) ??
     content.files[0];
   return (
-    <div className="overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[#151713] text-[#e8eadf]">
+    <div className="overflow-hidden rounded-control border border-[var(--border-default)] bg-[var(--text-primary)] text-[var(--bg-tertiary)]">
       <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-micro text-white/55">
         <Code2 className="h-3 w-3" /> {entry?.path ?? "source"}
       </div>
@@ -386,7 +386,7 @@ function RuntimeNotice({
   action?: { label: string; onClick: () => void };
 }) {
   return (
-    <div className="flex min-h-40 items-center justify-center rounded-[9px] border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] p-5 text-center">
+    <div className="flex min-h-40 items-center justify-center rounded-card border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] p-5 text-center">
       <div className="max-w-sm">
         <Icon
           className={`mx-auto h-5 w-5 text-[var(--text-tertiary)] ${spinning ? "animate-spin motion-reduce:animate-none" : ""}`}
@@ -401,7 +401,7 @@ function RuntimeNotice({
           <button
             type="button"
             onClick={action.onClick}
-            className="mt-3 h-7 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro font-semibold text-[var(--text-primary)]"
+            className="mt-3 h-7 rounded-chip border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro font-semibold text-[var(--text-primary)]"
           >
             {action.label}
           </button>

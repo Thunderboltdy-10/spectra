@@ -175,7 +175,7 @@ export const SHEETS_TEXT_ROTATIONS: readonly number[] = [-90, -45, 0, 45, 90];
 
 /** Fill colours that stay readable behind black grid text. */
 export const SHEETS_FILL_COLORS: readonly string[] = [
-  "#ffffff", "#f2f4f7", "#e4e7ec", "#fef0c7", "#fee4e2",
+  "var(--bg-elevated)", "#f2f4f7", "#e4e7ec", "#fef0c7", "#fee4e2",
   "#ecfdf3", "#d1e9ff", "#e9d7fe", "#fdf2fa", "#fffaeb",
 ];
 

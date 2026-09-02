@@ -32,7 +32,7 @@ export function InvitationStrip({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex h-10 w-full items-center gap-2 px-4 text-left text-[13px] text-[var(--text-primary)]"
+        className="flex h-10 w-full items-center gap-2 px-4 text-left text-ui text-[var(--text-primary)]"
       >
         <Mail className="size-4 shrink-0 text-[var(--brand-primary)]" />
         <span className="font-medium">
@@ -77,11 +77,11 @@ function InvitationInbox({
       <div className="mb-4">
         <h2
           id="share-invitations-title"
-          className="font-display text-[21px] font-semibold text-[var(--text-primary)]"
+          className="font-display text-heading font-semibold text-[var(--text-primary)]"
         >
           Waiting for you
         </h2>
-        <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
+        <p className="mt-1 text-ui text-[var(--text-secondary)]">
           Nothing appears in Shared until you accept. You can review the
           requested access first.
         </p>
@@ -97,11 +97,11 @@ function InvitationInbox({
           return (
             <article
               key={invitation.invitationId}
-              className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_1px_2px_rgba(27,20,12,0.03)]"
+              className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-sm)]"
             >
               <div className="flex items-start gap-3.5">
                 <span
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] bg-[var(--bg-secondary)]"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-card bg-[var(--bg-secondary)]"
                   style={{
                     color: artifactMeta?.color ?? "var(--text-secondary)",
                   }}
@@ -110,16 +110,16 @@ function InvitationInbox({
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <h3 className="truncate font-display text-[18px] font-semibold text-[var(--text-primary)]">
+                    <h3 className="truncate font-display text-heading font-semibold text-[var(--text-primary)]">
                       {invitation.resource.title}
                     </h3>
-                    <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
+                    <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
                       {invitation.resourceType === "workspace"
                         ? "Workspace"
                         : (artifactMeta?.label ?? "Work")}
                     </span>
                   </div>
-                  <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
+                  <p className="mt-1 text-caption text-[var(--text-secondary)]">
                     <span className="font-medium text-[var(--text-primary)]">
                       {invitation.inviter?.name ?? "A school member"}
                     </span>{" "}
@@ -128,7 +128,7 @@ function InvitationInbox({
                     access.
                   </p>
                   {invitation.message ? (
-                    <p className="mt-3 rounded-[7px] border-l-2 border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] leading-5 text-[var(--text-secondary)]">
+                    <p className="mt-3 rounded-control border-l-2 border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-caption leading-5 text-[var(--text-secondary)]">
                       {invitation.message}
                     </p>
                   ) : null}
@@ -139,7 +139,7 @@ function InvitationInbox({
                   type="button"
                   disabled={working}
                   onClick={() => onRespond(invitation.invitationId, "decline")}
-                  className="h-8 rounded-[7px] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
+                  className="h-8 rounded-control px-3 text-caption font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
                 >
                   Decline
                 </button>
@@ -147,7 +147,7 @@ function InvitationInbox({
                   type="button"
                   disabled={working}
                   onClick={() => onRespond(invitation.invitationId, "accept")}
-                  className="inline-flex h-8 items-center gap-2 rounded-[7px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-45"
+                  className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3 text-caption font-medium text-[var(--bg-primary)] disabled:opacity-45"
                 >
                   {working ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

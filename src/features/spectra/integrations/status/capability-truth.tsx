@@ -59,7 +59,7 @@ export function CapabilityTruthBadge({
   return (
     <span
       className={cn(
-        "inline-flex min-h-6 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold",
+        "inline-flex min-h-6 items-center gap-1.5 rounded-full border px-2.5 text-micro font-semibold",
         good && "border-emerald-600/20 bg-emerald-500/8 text-emerald-800",
         pending && "border-sky-600/20 bg-sky-500/8 text-sky-800",
         warning && "border-amber-600/20 bg-amber-500/9 text-amber-800",
@@ -105,14 +105,14 @@ export function CapabilityTruthState({
   return (
     <div
       role={state.kind === "unavailable" ? "alert" : "status"}
-      className="flex max-w-2xl items-start gap-3 rounded-[10px] bg-[var(--bg-secondary)] px-5 py-4"
+      className="flex max-w-2xl items-start gap-3 rounded-card bg-[var(--bg-secondary)] px-5 py-4"
     >
       <CircleDashed className="mt-0.5 size-4 shrink-0 text-[var(--text-tertiary)]" />
       <div className="min-w-0 flex-1">
-        <p className="text-[12px] font-semibold text-[var(--text-primary)]">
+        <p className="text-caption font-semibold text-[var(--text-primary)]">
           {title}: {capabilityStateLabel(state)}
         </p>
-        <p className="mt-0.5 text-[11px] leading-5 text-[var(--text-secondary)]">
+        <p className="mt-0.5 text-micro leading-5 text-[var(--text-secondary)]">
           {detail || emptyLabel || "No records are currently available."}
         </p>
       </div>
@@ -123,7 +123,7 @@ export function CapabilityTruthState({
         <button
           type="button"
           onClick={onRetry}
-          className="shrink-0 rounded-lg border border-[var(--border-default)] px-2.5 py-1.5 text-[11px] font-semibold hover:bg-[var(--bg-hover)]"
+          className="shrink-0 rounded-lg border border-[var(--border-default)] px-2.5 py-1.5 text-micro font-semibold hover:bg-[var(--bg-hover)]"
         >
           Retry
         </button>

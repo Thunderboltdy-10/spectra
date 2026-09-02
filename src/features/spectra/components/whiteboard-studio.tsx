@@ -379,7 +379,7 @@ function BoardNode({
             content,
             "fill",
             ["fill"],
-            node.type === "note" ? "#fff3c9" : "#ffffff",
+            node.type === "note" ? "color-mix(in oklab, var(--accent-gold) 28%, var(--bg-elevated))" : "var(--bg-elevated)",
           ),
         ),
         borderColor: String(
@@ -427,7 +427,7 @@ function BoardNode({
           {String(content.title ?? "Frame")}
         </span>
       ) : node.type === "embed" && typeof content.embedId === "string" ? (
-        <div className="h-full w-full overflow-auto rounded-[10px]">
+        <div className="h-full w-full overflow-auto rounded-card">
           <ArtifactEmbedById embedId={content.embedId} />
         </div>
       ) : node.type === "embed" ? (
@@ -528,7 +528,7 @@ function BoardNode({
               color:
                 typeof content.headerColor === "string"
                   ? content.headerColor
-                  : "#ffffff",
+                  : "var(--bg-elevated)",
             }}
           />
           <textarea
@@ -3654,7 +3654,7 @@ export function WhiteboardStudio({
                   Fill
                   <input
                     type="color"
-                    value={String(styleValue(selectedNode, "fill", "#ffffff"))}
+                    value={String(styleValue(selectedNode, "fill", "var(--bg-elevated)"))}
                     disabled={readOnly || selectedNode.locked}
                     onChange={(event) =>
                       updateSelected((node) => {

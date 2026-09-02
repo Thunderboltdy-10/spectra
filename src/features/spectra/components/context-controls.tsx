@@ -50,12 +50,12 @@ export function showContinuationConflict({
       <div
         role="alertdialog"
         aria-label="Choose conversation continuation"
-        className="w-[min(430px,calc(100vw-28px))] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_18px_48px_rgba(27,20,12,0.18)]"
+        className="w-[min(430px,calc(100vw-28px))] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-hover"
       >
-        <div className="text-[12px] font-semibold text-[var(--text-primary)]">
+        <div className="text-caption font-semibold text-[var(--text-primary)]">
           Keep the continuation coherent
         </div>
-        <p className="mt-1 text-[11px] leading-5 text-[var(--text-secondary)]">
+        <p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">
           You are continuing {currentTitle} while opening {candidateTitle}.
           Choose what the next message should continue.
         </p>
@@ -63,7 +63,7 @@ export function showContinuationConflict({
           <button
             type="button"
             onClick={() => toast.dismiss(id)}
-            className="min-h-9 rounded-[7px] px-2.5 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            className="min-h-9 rounded-control px-2.5 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
           >
             Keep current
           </button>
@@ -73,7 +73,7 @@ export function showContinuationConflict({
               toast.dismiss(id);
               onCancel();
             }}
-            className="min-h-9 rounded-[7px] px-2.5 text-[11px] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,transparent)]"
+            className="min-h-9 rounded-control px-2.5 text-micro text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,transparent)]"
           >
             Cancel opening
           </button>
@@ -83,7 +83,7 @@ export function showContinuationConflict({
               toast.dismiss(id);
               onReplace();
             }}
-            className="min-h-9 rounded-[7px] bg-[var(--text-primary)] px-3 text-[11px] font-semibold text-[var(--bg-primary)]"
+            className="min-h-9 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
           >
             Replace continuation
           </button>
@@ -342,7 +342,7 @@ export function ContextFocusControl({
         }}
         data-focus-state={mode}
         data-spectra-context-trigger="true"
-        className={`relative grid size-9 place-items-center rounded-[8px] text-[var(--text-secondary)] shadow-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${open ? "bg-[var(--bg-hover)] text-[var(--text-primary)]" : ""}`}
+        className={`relative grid size-9 place-items-center rounded-control text-[var(--text-secondary)] shadow-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${open ? "bg-[var(--bg-hover)] text-[var(--text-primary)]" : ""}`}
         aria-label={`Choose AI focus${focusSummary ? `: ${focusSummary}` : ""}${contextCount ? ` · ${contextCount} context` : ""}`}
         aria-expanded={open}
         aria-controls="spectra-context-browser"
@@ -370,34 +370,34 @@ export function ContextFocusControl({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 4, scale: 0.98 }}
                 transition={{ duration: 0.16 }}
-                className="fixed z-[300] w-[min(400px,calc(100vw-24px))] overflow-hidden rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[0_18px_48px_rgba(27,20,12,0.16)]"
+                className="fixed z-toast w-[min(400px,calc(100vw-24px))] overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-hover"
                 style={dialogPosition}
               >
-                <div className="px-2 pb-2 pt-1 text-[16px] font-semibold text-[var(--text-primary)]">
+                <div className="px-2 pb-2 pt-1 text-editor font-semibold text-[var(--text-primary)]">
                   Context
                 </div>
-                <div className="px-2 pb-1.5 text-[11px] font-semibold text-[var(--text-secondary)]">
+                <div className="px-2 pb-1.5 text-micro font-semibold text-[var(--text-secondary)]">
                   Chat
                 </div>
                 {continuation ? (
-                  <div className="mx-1 mb-2 flex min-h-11 items-center gap-2 rounded-[8px] border border-[color-mix(in_oklab,#8b6ff0_22%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-primary))] px-2.5 py-2">
-                    <MessageSquare className="h-4 w-4 text-[#765bd8]" />
+                  <div className="mx-1 mb-2 flex min-h-11 items-center gap-2 rounded-control border border-[color-mix(in_oklab,var(--brand-primary)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_6%,var(--bg-primary))] px-2.5 py-2">
+                    <MessageSquare className="h-4 w-4 text-[var(--brand-primary)]" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+                      <div className="truncate text-caption font-medium text-[var(--text-primary)]">
                         {continuation.title}
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => chooseContinuation(null)}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                       aria-label="Start a new chat"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 ) : (
-                  <div className="mx-1 mb-2 flex min-h-11 items-center gap-2 rounded-[8px] border border-dashed border-[var(--border-default)] px-2.5 py-2 text-[12px] font-medium text-[var(--text-secondary)]">
+                  <div className="mx-1 mb-2 flex min-h-11 items-center gap-2 rounded-control border border-dashed border-[var(--border-default)] px-2.5 py-2 text-caption font-medium text-[var(--text-secondary)]">
                     <MessageSquare className="h-4 w-4" />
                     New chat
                     <span className="sr-only">
@@ -406,7 +406,7 @@ export function ContextFocusControl({
                     <Check className="ml-auto h-3.5 w-3.5 text-[var(--accent-cyan)]" />
                   </div>
                 )}
-                <div className="mx-1 mb-1 border-t border-[var(--border-subtle)] px-1 pb-1.5 pt-2 text-[11px] font-semibold text-[var(--text-secondary)]">
+                <div className="mx-1 mb-1 border-t border-[var(--border-subtle)] px-1 pb-1.5 pt-2 text-micro font-semibold text-[var(--text-secondary)]">
                   Also use
                 </div>
                 <button
@@ -417,7 +417,7 @@ export function ContextFocusControl({
                       source: "composer",
                     });
                   }}
-                  className="mx-1 mb-1.5 flex min-h-10 w-[calc(100%-8px)] items-center gap-2 rounded-[8px] border border-[var(--border-default)] px-2.5 text-left text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                  className="mx-1 mb-1.5 flex min-h-10 w-[calc(100%-8px)] items-center gap-2 rounded-control border border-[var(--border-default)] px-2.5 text-left text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                 >
                   <Crosshair className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
                   Pick from page
@@ -425,18 +425,18 @@ export function ContextFocusControl({
                     Semantic targets
                   </span>
                 </button>
-                <div className="mx-1 mb-1.5 flex h-10 items-center gap-2 rounded-[8px] bg-[var(--bg-primary)] px-2.5 shadow-[inset_0_0_0_1px_var(--border-default)]">
+                <div className="mx-1 mb-1.5 flex h-10 items-center gap-2 rounded-control bg-[var(--bg-primary)] px-2.5 ring-1 ring-[var(--border-default)]">
                   <Search className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
                   <input
                     autoFocus
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="Find artifacts, agents, workspaces, or threads…"
-                    className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--text-tertiary)]"
+                    className="min-w-0 flex-1 bg-transparent text-ui outline-none placeholder:text-[var(--text-tertiary)]"
                   />
                 </div>
                 {explicit.length || includedVisible.length ? (
-                  <div className="mx-1 mb-1.5 rounded-[8px] border border-[var(--border-subtle)] p-2">
+                  <div className="mx-1 mb-1.5 rounded-control border border-[var(--border-subtle)] p-2">
                     <div className="mb-1.5 text-micro font-medium text-[var(--text-tertiary)]">
                       Included
                     </div>
@@ -446,7 +446,7 @@ export function ContextFocusControl({
                           key={`explicit:${item.type}:${item.id}:${item.semanticTargetId ?? "root"}`}
                           type="button"
                           onClick={() => removeExplicit(item.type, item.id)}
-                          className={`inline-flex max-w-full items-center gap-1 rounded-[6px] px-1.5 py-1 text-micro ${item.stale ? "bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-secondary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
+                          className={`inline-flex max-w-full items-center gap-1 rounded-chip px-1.5 py-1 text-micro ${item.stale ? "bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-secondary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
                           title={
                             item.stale
                               ? "This object is no longer available. Remove from context."
@@ -470,7 +470,7 @@ export function ContextFocusControl({
                         .map((item) => (
                           <span
                             key={`visible:${item.type}:${item.id}`}
-                            className="inline-flex max-w-full items-center gap-1 rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] px-1.5 py-1 text-micro font-medium text-[var(--text-secondary)]"
+                            className="inline-flex max-w-full items-center gap-1 rounded-chip bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] px-1.5 py-1 text-micro font-medium text-[var(--text-secondary)]"
                             title="Included because it is visible"
                           >
                             <span className="max-w-[240px] truncate">
@@ -499,10 +499,10 @@ export function ContextFocusControl({
                             capability: "context",
                           })
                         }
-                        className="flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
+                        className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
                       >
                         <BookOpen className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-                        <span className="min-w-0 flex-1 truncate text-[11px]">
+                        <span className="min-w-0 flex-1 truncate text-micro">
                           {item.title}
                         </span>
                         <span className="text-micro text-[var(--text-tertiary)]">
@@ -517,7 +517,7 @@ export function ContextFocusControl({
                         : workTypeMeta[item.blueprintKey]?.icon ?? FileText;
                       const itemColor = isAgent
                         ? "var(--brand-primary)"
-                        : workTypeMeta[item.blueprintKey]?.color ?? "#d88922";
+                        : workTypeMeta[item.blueprintKey]?.color ?? "var(--accent-gold)";
                       return (
                       <button
                         key={item._id}
@@ -537,13 +537,13 @@ export function ContextFocusControl({
                                   : "tile",
                           })
                         }
-                        className="flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
+                        className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
                       >
                         <ItemIcon
                           className="h-3.5 w-3.5"
                           style={{ color: itemColor }}
                         />
-                        <span className="min-w-0 flex-1 truncate text-[11px]">
+                        <span className="min-w-0 flex-1 truncate text-micro">
                           {item.title}
                         </span>
                         <span className="text-micro text-[var(--text-tertiary)]">
@@ -562,7 +562,7 @@ export function ContextFocusControl({
                       .map((item) => (
                         <div
                           key={item._id}
-                          className="flex items-center gap-1 rounded-[7px] hover:bg-[var(--bg-hover)]"
+                          className="flex items-center gap-1 rounded-control hover:bg-[var(--bg-hover)]"
                         >
                           <button
                             type="button"
@@ -578,8 +578,8 @@ export function ContextFocusControl({
                             }
                             className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"
                           >
-                            <MessageSquare className="h-3.5 w-3.5 text-[#8b6ff0]" />
-                            <span className="min-w-0 flex-1 truncate text-[11px]">
+                            <MessageSquare className="h-3.5 w-3.5 text-[var(--brand-primary)]" />
+                            <span className="min-w-0 flex-1 truncate text-micro">
                               {item.title}
                             </span>
                             <span className="text-micro text-[var(--text-tertiary)]">
@@ -596,7 +596,7 @@ export function ContextFocusControl({
                                 runId: item.lastRunId,
                               })
                             }
-                            className="mr-1 rounded-[6px] px-2 py-1 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[var(--bg-secondary)]"
+                            className="mr-1 rounded-chip px-2 py-1 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[var(--bg-secondary)]"
                           >
                             Continue
                           </button>
@@ -645,7 +645,7 @@ export function SelectionActionBar({
           data-card-state="context"
           className="mb-2 ml-[52px] flex min-h-10 flex-wrap items-center gap-1.5 px-2.5 py-1.5"
         >
-          <span className="mr-1 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--text-primary)]">
+          <span className="mr-1 inline-flex items-center gap-1.5 text-caption font-semibold text-[var(--text-primary)]">
             <Files className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
             {count ? `${count} selected` : "Select objects"}
           </span>
@@ -654,7 +654,7 @@ export function SelectionActionBar({
               <button
                 type="button"
                 onClick={onAddToContext}
-                className="rounded-[6px] px-2 py-1 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="rounded-chip px-2 py-1 text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 Add to context
               </button>
@@ -662,7 +662,7 @@ export function SelectionActionBar({
                 <button
                   type="button"
                   onClick={onTile}
-                  className="rounded-[6px] px-2 py-1 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  className="rounded-chip px-2 py-1 text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
                   Group as tiles
                 </button>
@@ -671,7 +671,7 @@ export function SelectionActionBar({
                 <button
                   type="button"
                   onClick={onMove}
-                  className="rounded-[6px] px-2 py-1 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  className="rounded-chip px-2 py-1 text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
                   Move
                 </button>
@@ -679,7 +679,7 @@ export function SelectionActionBar({
               <button
                 type="button"
                 onClick={onClear}
-                className="ml-auto flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                className="ml-auto flex h-7 w-7 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
                 title="Clear selection"
                 aria-label="Clear selection"
               >
@@ -687,14 +687,14 @@ export function SelectionActionBar({
               </button>
             </>
           ) : (
-            <span className="text-[11px] text-[var(--text-tertiary)]">
+            <span className="text-micro text-[var(--text-tertiary)]">
               Checkmarks appear only in this mode.
             </span>
           )}
           <button
             type="button"
             onClick={onExit}
-            className={`${count ? "" : "ml-auto"} rounded-[6px] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]`}
+            className={`${count ? "" : "ml-auto"} rounded-chip px-2 py-1 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]`}
           >
             Done
           </button>
@@ -794,8 +794,8 @@ export function GlobalSearch({
         onClick={() => setOpen(true)}
         className={
           trigger === "icon"
-            ? "flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            : "flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            ? "flex h-9 w-9 items-center justify-center rounded-control text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            : "flex h-9 items-center gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-caption font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         }
         title="Search Spectra"
         aria-label="Search work and workspaces"
@@ -808,7 +808,7 @@ export function GlobalSearch({
       <AnimatePresence>
         {open ? (
           <motion.div
-            className="fixed inset-0 z-[120] flex items-start justify-center bg-black/20 px-4 pt-[12vh]"
+            className="fixed inset-0 z-composer-dock flex items-start justify-center bg-black/20 px-4 pt-[12vh]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -827,7 +827,7 @@ export function GlobalSearch({
               animate={{ y: 0, opacity: 1, scale: 1 }}
               exit={{ y: -8, opacity: 0, scale: 0.99 }}
               transition={{ type: "spring", stiffness: 420, damping: 34 }}
-              className="w-full max-w-[680px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_16px_48px_rgba(27,20,12,0.18)]"
+              className="w-full max-w-[680px] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-hover"
               onPointerDown={(event) => event.stopPropagation()}
             >
               <div className="flex items-center gap-3 border-b border-[var(--border-default)] px-4">
@@ -837,24 +837,24 @@ export function GlobalSearch({
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search titles, summaries, types, workspaces, and stored text…"
-                  className="h-14 min-w-0 flex-1 bg-transparent text-[15px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                  className="h-14 min-w-0 flex-1 bg-transparent text-subhead text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                 />
-                <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-tertiary)]">
+                <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-tertiary)]">
                   ESC
                 </span>
               </div>
               <div className="max-h-[58vh] overflow-y-auto p-2">
                 {searching ? (
                   <div className="space-y-2 px-2 py-3" aria-label="Searching">
-                    <div className="h-10 animate-pulse rounded-[8px] bg-[var(--bg-secondary)]" />
-                    <div className="h-10 animate-pulse rounded-[8px] bg-[var(--bg-secondary)] [animation-delay:90ms]" />
-                    <div className="h-10 animate-pulse rounded-[8px] bg-[var(--bg-secondary)] [animation-delay:180ms]" />
+                    <div className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)]" />
+                    <div className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)] [animation-delay:90ms]" />
+                    <div className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)] [animation-delay:180ms]" />
                   </div>
                 ) : null}
                 {query.trim().length < 2 ? (
                   <div className="px-3 py-10 text-center">
                     <Sparkles className="mx-auto h-5 w-5 text-[var(--text-tertiary)]" />
-                    <p className="mt-3 text-[12px] text-[var(--text-secondary)]">
+                    <p className="mt-3 text-caption text-[var(--text-secondary)]">
                       Search across your Spectra workspace.
                     </p>
                   </div>
@@ -872,11 +872,11 @@ export function GlobalSearch({
                           onOpenWorkspace(workspace);
                           setOpen(false);
                         }}
-                        className="flex w-full items-center gap-3 rounded-[8px] px-2.5 py-2 text-left hover:bg-[var(--bg-hover)]"
+                        className="flex w-full items-center gap-3 rounded-control px-2.5 py-2 text-left hover:bg-[var(--bg-hover)]"
                       >
                         <BookOpen className="h-4 w-4 text-[var(--accent-cyan)]" />
                         <span>
-                          <span className="block text-[12px] font-medium text-[var(--text-primary)]">
+                          <span className="block text-caption font-medium text-[var(--text-primary)]">
                             {workspace.title}
                           </span>
                           <span className="line-clamp-1 text-micro text-[var(--text-tertiary)]">
@@ -899,7 +899,7 @@ export function GlobalSearch({
                       return (
                         <div
                           key={artifact._id}
-                          className="group flex items-center rounded-[8px] hover:bg-[var(--bg-hover)]"
+                          className="group flex items-center rounded-control hover:bg-[var(--bg-hover)]"
                         >
                           <button
                             type="button"
@@ -914,7 +914,7 @@ export function GlobalSearch({
                               style={{ color: meta.color }}
                             />
                             <span className="min-w-0">
-                              <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">
+                              <span className="block truncate text-caption font-medium text-[var(--text-primary)]">
                                 {artifact.title}
                               </span>
                               <span className="block truncate text-micro text-[var(--text-tertiary)]">
@@ -931,7 +931,7 @@ export function GlobalSearch({
                             <button
                               type="button"
                               onClick={() => onPlaceArtifact(artifact)}
-                              className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] opacity-60 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
+                              className="flex h-8 w-8 items-center justify-center rounded-chip text-[var(--text-tertiary)] opacity-60 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
                               title={`Place in ${placementLabel ?? "workspace"}`}
                               aria-label={`Place ${artifact.title} in ${placementLabel ?? "workspace"}`}
                             >
@@ -941,7 +941,7 @@ export function GlobalSearch({
                           <button
                             type="button"
                             onClick={() => onToggleSelected(artifact)}
-                            className={`mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-micro font-medium ${selected ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"}`}
+                            className={`mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-chip px-2 text-micro font-medium ${selected ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"}`}
                             title={
                               selected
                                 ? "Remove from context"
@@ -969,7 +969,7 @@ export function GlobalSearch({
                 query.trim().length >= 2 &&
                 !results.workspaces.length &&
                 !results.artifacts.length ? (
-                  <p className="px-3 py-12 text-center text-[12px] text-[var(--text-secondary)]">
+                  <p className="px-3 py-12 text-center text-caption text-[var(--text-secondary)]">
                     No matching workspaces or artifacts.
                   </p>
                 ) : null}
@@ -983,5 +983,5 @@ export function GlobalSearch({
 }
 
 function PlusIcon() {
-  return <span className="text-[17px] leading-none">+</span>;
+  return <span className="text-title leading-none">+</span>;
 }

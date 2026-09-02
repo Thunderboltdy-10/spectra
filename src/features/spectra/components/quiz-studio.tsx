@@ -150,10 +150,10 @@ function QuizExperienceSection({
   return (
     <section className="border-0 bg-transparent p-0">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+        <h3 className="text-ui font-semibold text-[var(--text-primary)]">
           How this quiz is used
         </h3>
-        <p className="text-[11px] text-[var(--text-secondary)]">
+        <p className="text-micro text-[var(--text-secondary)]">
           {describeQuizExperience(experience)}
         </p>
       </div>
@@ -171,13 +171,13 @@ function QuizExperienceSection({
               disabled={readOnly}
               aria-pressed={active}
               onClick={() => onChange(candidate.experience)}
-              className={`rounded-[10px] border p-3 text-left transition-colors disabled:opacity-45 ${
+              className={`rounded-card border p-3 text-left transition-colors disabled:opacity-45 ${
                 active
                   ? "border-[var(--border-strong)] bg-[var(--bg-elevated)]"
                   : "border-[var(--border-default)] hover:border-[var(--border-strong)]"
               }`}
             >
-              <span className="block text-[12px] font-semibold text-[var(--text-primary)]">
+              <span className="block text-caption font-semibold text-[var(--text-primary)]">
                 {candidate.name}
               </span>
               <span className="mt-1 block text-micro leading-4 text-[var(--text-secondary)]">
@@ -200,7 +200,7 @@ function QuizExperienceSection({
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="mt-3 text-[11px] font-semibold text-[var(--text-secondary)] underline-offset-2 hover:underline"
+        className="mt-3 text-micro font-semibold text-[var(--text-secondary)] underline-offset-2 hover:underline"
       >
         {open ? "Hide detailed settings" : "Change individual settings"}
       </button>
@@ -434,7 +434,7 @@ function QuizResultPie({
           background: `conic-gradient(var(--success) 0deg ${correctDeg}deg, color-mix(in oklab, var(--danger) 82%, var(--text-primary)) ${correctDeg}deg ${correctDeg + incorrectDeg}deg, var(--bg-secondary) ${correctDeg + incorrectDeg}deg 360deg)`,
         }}
       />
-      <ul className="space-y-1.5 text-[13px] text-[var(--text-secondary)]">
+      <ul className="space-y-1.5 text-ui text-[var(--text-secondary)]">
         <li>
           <span className="font-semibold text-[var(--success)]">{correct}</span>
           {" · right"}
@@ -1703,7 +1703,7 @@ export function QuizStudio({
             questions nobody has re-validated. */}
         {canEditQuiz && !publishIssues.length ? (
           <p
-            className="border-b border-[var(--border-subtle)] px-4 py-2 text-[11px] leading-5 text-[var(--text-secondary)]"
+            className="border-b border-[var(--border-subtle)] px-4 py-2 text-micro leading-5 text-[var(--text-secondary)]"
             role="status"
           >
             {published ? (
@@ -1743,7 +1743,7 @@ export function QuizStudio({
               ) : (
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--success)]" />
               )}
-              <div className="min-w-0 flex-1 text-[11px] leading-5 text-[var(--text-secondary)]">
+              <div className="min-w-0 flex-1 text-micro leading-5 text-[var(--text-secondary)]">
                 <strong className="block text-[var(--text-primary)]">
                   {publishIssues.length
                     ? "Resolve these before publishing"
@@ -1798,7 +1798,7 @@ export function QuizStudio({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">
+                    <h3 className="font-display text-metric font-semibold text-[var(--text-primary)]">
                       {practiceAttempt
                         ? practiceAttempt.status === "submitted"
                           ? "Your result"
@@ -1806,12 +1806,12 @@ export function QuizStudio({
                         : "Quiz preview"}
                     </h3>
                     {practiceAttempt?.status === "in_progress" ? (
-                      <span className="rounded-[6px] border border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] px-2 py-0.5 text-micro font-semibold uppercase tracking-[0.07em] text-[var(--accent-cyan)]">
+                      <span className="rounded-chip border border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] px-2 py-0.5 text-micro font-semibold uppercase tracking-[0.07em] text-[var(--accent-cyan)]">
                         In progress
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
+                  <p className="mt-1 text-caption text-[var(--text-secondary)]">
                     {practiceAttempt
                       ? practiceAttempt.status === "submitted"
                         ? practiceAttempt.timeElapsed
@@ -1820,7 +1820,7 @@ export function QuizStudio({
                         : "Answers save as you write them. Reconnect before submitting if that is interrupted."
                       : "Preview stays local. Attempt creates a private attempt pinned to this quiz version; preview does not, and does not spend one of yours."}
                   </p>
-                  <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                  <p className="mt-1 text-micro text-[var(--text-tertiary)]">
                     {describeQuizExperience(
                       practiceExperience ?? quizSettings.experience,
                     )}
@@ -1828,7 +1828,7 @@ export function QuizStudio({
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {submitted ? (
-                    <div className="rounded-[8px] bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] px-3 py-2 text-right text-[12px] font-semibold text-[var(--success)]">
+                    <div className="rounded-control bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] px-3 py-2 text-right text-caption font-semibold text-[var(--success)]">
                       {practiceAttempt?.status === "submitted"
                         ? `${practiceAttempt.score ?? 0}/${practiceAttempt.maxScore ?? 0} points · ${practiceAttempt.percentage ?? 0}%`
                         : `${displayedQuestions.filter((question) => questionCorrect(question)).length}/${displayedQuestions.length} correct`}
@@ -1844,7 +1844,7 @@ export function QuizStudio({
                     </div>
                   ) : practiceSecondsRemaining !== null ? (
                     <div
-                      className={`rounded-[8px] border px-3 py-2 text-right ${
+                      className={`rounded-control border px-3 py-2 text-right ${
                         practiceSecondsRemaining > 60
                           ? "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
                           : practiceSecondsRemaining > 0
@@ -1854,7 +1854,7 @@ export function QuizStudio({
                       role="timer"
                       aria-live="off"
                     >
-                      <strong className="block font-display text-[16px] tabular-nums">
+                      <strong className="block font-display text-editor tabular-nums">
                         {practiceSecondsRemaining > 0
                           ? quizClockLabel(practiceSecondsRemaining)
                           : "0:00"}
@@ -1872,7 +1872,7 @@ export function QuizStudio({
                     <button
                       type="button"
                       onClick={leaveAttempt}
-                      className="h-9 shrink-0 whitespace-nowrap rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 text-[12px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                      className="h-9 shrink-0 whitespace-nowrap rounded-control border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 text-caption font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                     >
                       {practiceAttempt.status === "submitted"
                         ? "Close result"
@@ -1882,7 +1882,7 @@ export function QuizStudio({
                     <button
                       type="button"
                       onClick={() => openQuizMode("build")}
-                      className="h-9 shrink-0 whitespace-nowrap rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 text-[12px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                      className="h-9 shrink-0 whitespace-nowrap rounded-control border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 text-caption font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                     >
                       Back to build
                     </button>
@@ -1890,7 +1890,7 @@ export function QuizStudio({
                 </div>
               </div>
               {practiceAttempt?.instructions || quizSettings.instructions ? (
-                <div className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-[11px] leading-5 text-[var(--text-secondary)]">
+                <div className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-micro leading-5 text-[var(--text-secondary)]">
                   <strong className="mr-1 text-[var(--text-primary)]">
                     Before you begin:
                   </strong>
@@ -1899,7 +1899,7 @@ export function QuizStudio({
               ) : null}
               {practiceAttempt?.status === "submitted" &&
               !practiceAnswersRevealed ? (
-                <div className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-[11px] leading-5 text-[var(--text-secondary)]">
+                <div className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-micro leading-5 text-[var(--text-secondary)]">
                   <strong className="mr-1 text-[var(--text-primary)]">
                     Answers are not shown yet.
                   </strong>
@@ -1909,7 +1909,7 @@ export function QuizStudio({
                 </div>
               ) : null}
               {practiceError ? (
-                <div className="flex items-start gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] p-3 text-[11px] leading-5 text-[var(--danger)]">
+                <div className="flex items-start gap-2 rounded-card border border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] p-3 text-micro leading-5 text-[var(--danger)]">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>{practiceError}</span>
                 </div>
@@ -1923,7 +1923,7 @@ export function QuizStudio({
                   />
                   <button
                     type="button"
-                    className="h-9 shrink-0 whitespace-nowrap rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)]"
+                    className="h-9 shrink-0 whitespace-nowrap rounded-control bg-[var(--text-primary)] px-3 text-caption font-medium text-[var(--bg-primary)]"
                     onClick={() => setInspectAttempt(true)}
                   >
                     Inspect answers
@@ -1995,7 +1995,7 @@ export function QuizStudio({
                           `Question ${index + 1}`
                         }
                         onClick={() => setActiveQuestionId(question.id)}
-                        className={`h-8 min-w-8 rounded-[7px] border px-1.5 text-[12px] font-semibold tabular-nums ${
+                        className={`h-8 min-w-8 rounded-control border px-1.5 text-caption font-semibold tabular-nums ${
                           active
                             ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]"
                             : graded === true
@@ -2019,9 +2019,9 @@ export function QuizStudio({
                 .map((question) => (
                   <div
                     key={question.id}
-                    className={`rounded-[8px] border bg-transparent p-4 ${submitted || revealedPracticeResultByQuestion.has(question.id) ? ((practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response") ? "border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))]" : questionCorrect(question) ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]") : "border-[var(--border-default)]"}`}
+                    className={`rounded-control border bg-transparent p-4 ${submitted || revealedPracticeResultByQuestion.has(question.id) ? ((practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response") ? "border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))]" : questionCorrect(question) ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]") : "border-[var(--border-default)]"}`}
                   >
-                    <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-secondary)]">
+                    <div className="flex items-center gap-2 text-caption font-semibold text-[var(--text-secondary)]">
                       <button
                         type="button"
                         className={iconButtonClass()}
@@ -2047,7 +2047,7 @@ export function QuizStudio({
                         <ChevronRight className="h-4 w-4" />
                       </button>
                     </div>
-                    <div className="mt-2 text-[15px] font-medium text-[var(--text-primary)]">
+                    <div className="mt-2 text-subhead font-medium text-[var(--text-primary)]">
                       {plannerDescriptionText(question.prompt) ||
                         "Untitled question"}
                     </div>
@@ -2060,10 +2060,10 @@ export function QuizStudio({
                               .downloadUrl!
                           }
                           alt={question.media.altText ?? ""}
-                          className="mt-3 max-h-[320px] w-full rounded-[8px] border border-[var(--border-default)] object-contain"
+                          className="mt-3 max-h-[320px] w-full rounded-control border border-[var(--border-default)] object-contain"
                         />
                       ) : (
-                        <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-micro text-[var(--text-tertiary)]">
+                        <div className="mt-3 rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-micro text-[var(--text-tertiary)]">
                           Question image unavailable
                         </div>
                       )
@@ -2082,7 +2082,7 @@ export function QuizStudio({
                               )
                             }
                             key={`${question.id}-${optionIndex}`}
-                            className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] transition ${answers[question.id] === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                            className={`flex w-full items-center gap-2 rounded-control border px-3 py-2 text-left text-ui transition ${answers[question.id] === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                           >
                             <Radio className="h-3.5 w-3.5" />
                             {option || `Option ${optionIndex + 1}`}
@@ -2111,10 +2111,10 @@ export function QuizStudio({
                                 );
                               }}
                               key={`${question.id}-${optionIndex}`}
-                              className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] ${selected ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))]" : "border-[var(--border-default)]"}`}
+                              className={`flex w-full items-center gap-2 rounded-control border px-3 py-2 text-left text-ui ${selected ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))]" : "border-[var(--border-default)]"}`}
                             >
                               <span
-                                className={`flex h-4 w-4 items-center justify-center rounded-[4px] border ${selected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)]"}`}
+                                className={`flex h-4 w-4 items-center justify-center rounded-chip border ${selected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)]"}`}
                               >
                                 {selected ? (
                                   <Check className="h-3 w-3" />
@@ -2132,7 +2132,7 @@ export function QuizStudio({
                           ).map((option, optionIndex, order) => (
                             <div
                               key={`${question.id}-${option}-${optionIndex}`}
-                              className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[13px]"
+                              className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 rounded-control border border-[var(--border-default)] px-3 py-2 text-ui"
                             >
                               <strong>{optionIndex + 1}</strong>
                               <span>
@@ -2199,9 +2199,9 @@ export function QuizStudio({
                             return (
                               <div
                                 key={pair.id}
-                                className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2"
+                                className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-2 rounded-control border border-[var(--border-default)] px-3 py-2"
                               >
-                                <span className="text-[12px] font-medium text-[var(--text-primary)]">
+                                <span className="text-caption font-medium text-[var(--text-primary)]">
                                   {pair.left || "Untitled prompt"}
                                 </span>
                                 <span
@@ -2285,7 +2285,7 @@ export function QuizStudio({
                     </div>
                     {revealedPracticeResultByQuestion.has(question.id) ||
                     (submitted && canEditQuiz && !practiceAttempt) ? (
-                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-[11px] leading-5 text-[var(--text-secondary)]">
+                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-micro leading-5 text-[var(--text-secondary)]">
                         <div>
                           <strong className="text-[var(--text-primary)]">
                             Answer:
@@ -2340,7 +2340,7 @@ export function QuizStudio({
                         {practiceAttempt &&
                         revealedPracticeResultByQuestion.get(question.id)
                           ?.advisoryFeedback ? (
-                          <div className="mt-1 rounded-[6px] bg-[var(--bg-secondary)] px-2 py-1.5 text-[var(--text-secondary)]">
+                          <div className="mt-1 rounded-chip bg-[var(--bg-secondary)] px-2 py-1.5 text-[var(--text-secondary)]">
                             {
                               revealedPracticeResultByQuestion.get(question.id)
                                 ?.advisoryFeedback
@@ -2418,7 +2418,7 @@ export function QuizStudio({
                         practiceSyncing.length > 0 ||
                         (Boolean(practiceAttempt) && !canSubmitQuiz)
                       }
-                      className="h-9 shrink-0 whitespace-nowrap rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-45"
+                      className="h-9 shrink-0 whitespace-nowrap rounded-control bg-[var(--text-primary)] px-3 text-caption font-medium text-[var(--bg-primary)] disabled:opacity-45"
                       onClick={() =>
                         practiceAttempt
                           ? void submitPracticeAttempt()
@@ -2473,13 +2473,13 @@ export function QuizStudio({
                   shuffleQuestions: !quizSettings.shuffleQuestions,
                 })
               }
-              className="flex items-center justify-between rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"
+              className="flex items-center justify-between rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"
             >
               <span>
-                <span className="block text-[13px] font-semibold text-[var(--text-primary)]">
+                <span className="block text-ui font-semibold text-[var(--text-primary)]">
                   Shuffle questions
                 </span>
-                <span className="mt-1 block text-[11px] text-[var(--text-secondary)]">
+                <span className="mt-1 block text-micro text-[var(--text-secondary)]">
                   Present a different order on each attempt.
                 </span>
               </span>
@@ -2494,13 +2494,13 @@ export function QuizStudio({
                   shuffleOptions: !quizSettings.shuffleOptions,
                 })
               }
-              className="flex items-center justify-between rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"
+              className="flex items-center justify-between rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"
             >
               <span>
-                <span className="block text-[13px] font-semibold text-[var(--text-primary)]">
+                <span className="block text-ui font-semibold text-[var(--text-primary)]">
                   Shuffle answer options
                 </span>
-                <span className="mt-1 block text-[11px] text-[var(--text-secondary)]">
+                <span className="mt-1 block text-micro text-[var(--text-secondary)]">
                   Preserve ordering questions while varying choice positions.
                 </span>
               </span>
@@ -2513,13 +2513,13 @@ export function QuizStudio({
               onClick={() =>
                 commitSettings({ allowResume: !quizSettings.allowResume })
               }
-              className="flex items-center justify-between rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"
+              className="flex items-center justify-between rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"
             >
               <span>
-                <span className="block text-[13px] font-semibold text-[var(--text-primary)]">
+                <span className="block text-ui font-semibold text-[var(--text-primary)]">
                   Resume interrupted practice
                 </span>
-                <span className="mt-1 block text-[11px] text-[var(--text-secondary)]">
+                <span className="mt-1 block text-micro text-[var(--text-secondary)]">
                   Keep synchronized in-progress attempts available after
                   navigation or reconnect.
                 </span>
@@ -2529,7 +2529,7 @@ export function QuizStudio({
               />
             </button>
             <Field label="Printed sheet time allowance">
-              <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
+              <div className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
                 <SelectField
                   ariaLabel="Printed sheet time allowance"
                   value={String(quizSettings.defaultTimeMultiplier)}
@@ -2553,7 +2553,7 @@ export function QuizStudio({
               </div>
             </Field>
             <Field label="Personal practice target">
-              <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
+              <div className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
                 <input
                   type="range"
                   min={0}
@@ -2564,7 +2564,7 @@ export function QuizStudio({
                   }
                   className="w-full accent-[var(--accent-cyan)]"
                 />
-                <div className="mt-2 text-right font-display text-[20px] font-semibold text-[var(--text-primary)]">
+                <div className="mt-2 text-right font-display text-heading font-semibold text-[var(--text-primary)]">
                   {quizSettings.targetScore}%
                 </div>
                 <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
@@ -2577,45 +2577,45 @@ export function QuizStudio({
         ) : view === "summary" ? (
           <div className="mx-auto max-w-[760px] p-6">
             <div className="mb-5">
-              <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">
+              <h3 className="font-display text-metric font-semibold text-[var(--text-primary)]">
                 Responses
               </h3>
-              <p className="mt-1 max-w-[540px] text-[11px] leading-5 text-[var(--text-secondary)]">
+              <p className="mt-1 max-w-[540px] text-micro leading-5 text-[var(--text-secondary)]">
                 How the group did, question by question. Nobody is named and no
                 individual response is shown here.
               </p>
             </div>
             {responseSummaryError ? (
-              <div className="flex items-start gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] p-3 text-[11px] text-[var(--danger)]">
+              <div className="flex items-start gap-2 rounded-card border border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] p-3 text-micro text-[var(--danger)]">
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 {responseSummaryError}
               </div>
             ) : !responseSummary ? (
-              <div className="flex min-h-[180px] items-center justify-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+              <div className="flex min-h-[180px] items-center justify-center gap-2 text-micro text-[var(--text-tertiary)]">
                 <Loader2 className="h-4 w-4 animate-spin" /> Reading responses
               </div>
             ) : !responseSummary.available ? (
               <div data-spectra-card="result" className="p-6 text-center">
-                <h3 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
+                <h3 className="font-display text-heading font-semibold text-[var(--text-primary)]">
                   Nothing to report
                 </h3>
-                <p className="mx-auto mt-2 max-w-[440px] text-[12px] leading-5 text-[var(--text-secondary)]">
+                <p className="mx-auto mt-2 max-w-[440px] text-caption leading-5 text-[var(--text-secondary)]">
                   {responseSummary.reason}
                 </p>
                 <button
                   type="button"
                   onClick={() => setView("settings")}
-                  className="mt-4 rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-medium text-[var(--bg-primary)]"
+                  className="mt-4 rounded-control bg-[var(--text-primary)] px-3 py-2 text-micro font-medium text-[var(--bg-primary)]"
                 >
                   Open quiz settings
                 </button>
               </div>
             ) : !responseSummary.submittedCount ? (
               <div data-spectra-card="result" className="p-6 text-center">
-                <h3 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
+                <h3 className="font-display text-heading font-semibold text-[var(--text-primary)]">
                   No submissions yet
                 </h3>
-                <p className="mx-auto mt-2 max-w-[440px] text-[12px] leading-5 text-[var(--text-secondary)]">
+                <p className="mx-auto mt-2 max-w-[440px] text-caption leading-5 text-[var(--text-secondary)]">
                   {responseSummary.inProgressCount
                     ? `${responseSummary.inProgressCount} ${responseSummary.inProgressCount === 1 ? "attempt is" : "attempts are"} still open. Results appear as they are submitted.`
                     : "Share this quiz to start collecting responses."}
@@ -2647,9 +2647,9 @@ export function QuizStudio({
                   ).map(([label, value]) => (
                     <div
                       key={label}
-                      className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2.5"
+                      className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2.5"
                     >
-                      <strong className="block font-display text-[20px] tabular-nums text-[var(--text-primary)]">
+                      <strong className="block font-display text-heading tabular-nums text-[var(--text-primary)]">
                         {value}
                       </strong>
                       <span className="text-micro uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
@@ -2666,16 +2666,16 @@ export function QuizStudio({
                     return (
                       <div
                         key={entry.questionId}
-                        className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
+                        className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
                       >
                         <div className="flex items-start justify-between gap-4">
-                          <p className="min-w-0 text-[12px] leading-5 text-[var(--text-primary)]">
+                          <p className="min-w-0 text-caption leading-5 text-[var(--text-primary)]">
                             <span className="mr-2 text-micro tabular-nums text-[var(--text-tertiary)]">
                               {index + 1}
                             </span>
                             {entry.prompt}
                           </p>
-                          <strong className="shrink-0 font-display text-[16px] tabular-nums text-[var(--text-primary)]">
+                          <strong className="shrink-0 font-display text-editor tabular-nums text-[var(--text-primary)]">
                             {entry.answered ? `${share}%` : "No answers"}
                           </strong>
                         </div>
@@ -2688,7 +2688,7 @@ export function QuizStudio({
                                 share >= 70
                                   ? "var(--success)"
                                   : share >= 40
-                                    ? "#d88922"
+                                    ? "var(--accent-gold)"
                                     : "var(--danger)",
                             }}
                           />
@@ -2724,10 +2724,10 @@ export function QuizStudio({
           <div className="mx-auto max-w-[760px] p-6">
             <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">
+                <h3 className="font-display text-metric font-semibold text-[var(--text-primary)]">
                   Your results
                 </h3>
-                <p className="mt-1 max-w-[520px] text-[11px] leading-5 text-[var(--text-secondary)]">
+                <p className="mt-1 max-w-[520px] text-micro leading-5 text-[var(--text-secondary)]">
                   Every attempt you have made on this quiz, newest first. Only
                   you can open them. Authors and collaborators see the group,
                   not your answers.
@@ -2737,19 +2737,19 @@ export function QuizStudio({
                 type="button"
                 disabled={!published || practiceBusy || !canAttemptQuiz}
                 onClick={() => void beginPractice()}
-                className="rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+                className="rounded-control bg-[var(--text-primary)] px-3 py-2 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
                 New private attempt
               </button>
             </div>
             {practiceError ? (
-              <div className="mb-3 flex items-start gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] p-3 text-[11px] text-[var(--danger)]">
+              <div className="mb-3 flex items-start gap-2 rounded-card border border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] p-3 text-micro text-[var(--danger)]">
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 {practiceError}
               </div>
             ) : null}
             {practiceLoading ? (
-              <div className="flex min-h-[180px] items-center justify-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+              <div className="flex min-h-[180px] items-center justify-center gap-2 text-micro text-[var(--text-tertiary)]">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading your
                 attempts
               </div>
@@ -2760,11 +2760,11 @@ export function QuizStudio({
                     key={attempt.attemptId}
                     type="button"
                     onClick={() => hydratePracticeAttempt(attempt)}
-                    className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left transition hover:border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] hover:bg-[var(--bg-hover)]"
+                    className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left transition hover:border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] hover:bg-[var(--bg-hover)]"
                   >
                     <span className="min-w-0">
                       <span className="flex items-center gap-2">
-                        <strong className="text-[12px] text-[var(--text-primary)]">
+                        <strong className="text-caption text-[var(--text-primary)]">
                           Practice {practiceAttempts.length - index}
                         </strong>
                         <span
@@ -2781,7 +2781,7 @@ export function QuizStudio({
                       </span>
                     </span>
                     <span className="text-right">
-                      <strong className="block font-display text-[18px] text-[var(--text-primary)]">
+                      <strong className="block font-display text-heading text-[var(--text-primary)]">
                         {attempt.status === "submitted"
                           ? `${attempt.percentage ?? 0}%`
                           : `${Object.keys(attempt.responses).length}/${attempt.questions.length}`}
@@ -2798,17 +2798,17 @@ export function QuizStudio({
             ) : (
               <div data-spectra-card="result" className="p-6 text-center">
                 <CheckCircle2 className="mx-auto h-7 w-7 text-[var(--success)]" />
-                <h3 className="mt-3 font-display text-[22px] font-semibold text-[var(--text-primary)]">
+                <h3 className="mt-3 font-display text-metric font-semibold text-[var(--text-primary)]">
                   No private attempts yet
                 </h3>
-                <p className="mx-auto mt-2 max-w-[440px] text-[12px] leading-5 text-[var(--text-secondary)]">
+                <p className="mx-auto mt-2 max-w-[440px] text-caption leading-5 text-[var(--text-secondary)]">
                   Preview lets authors inspect the experience. A private
                   practice run creates your own version-pinned learning record.
                 </p>
                 <button
                   type="button"
                   onClick={() => setView("preview")}
-                  className="mt-4 rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-medium text-[var(--bg-primary)]"
+                  className="mt-4 rounded-control bg-[var(--text-primary)] px-3 py-2 text-micro font-medium text-[var(--bg-primary)]"
                 >
                   Open preview
                 </button>
@@ -3351,7 +3351,7 @@ function QuestionEditor({
       <div className="mb-4 flex items-center justify-between">
         {/* Which question you are editing. The workbar already states the
             position in the set, so this does not repeat "of N". */}
-        <div className="text-[13px] font-semibold text-[var(--text-primary)]">
+        <div className="text-ui font-semibold text-[var(--text-primary)]">
           Question {questionNumber}
         </div>
         <div className="flex items-center gap-1">
@@ -3464,7 +3464,7 @@ function QuestionEditor({
       ) ? (
         <section className="mt-4">
           <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-[12px] font-semibold text-[var(--text-secondary)]">
+            <h4 className="text-caption font-semibold text-[var(--text-secondary)]">
               Answer options
             </h4>
           </div>
@@ -3475,7 +3475,7 @@ function QuestionEditor({
                 className="grid grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2"
               >
                 {question.type === "ordering" ? (
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border-default)] text-[11px] font-semibold text-[var(--text-secondary)]">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border-default)] text-micro font-semibold text-[var(--text-secondary)]">
                     {index + 1}
                   </span>
                 ) : (
@@ -3669,7 +3669,7 @@ function QuestionEditor({
               ) : null}
             </div>
           ) : null}
-          <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
+          <p className="mt-2 text-micro text-[var(--text-tertiary)]">
             {question.type === "ordering"
               ? "The order shown above is the canonical answer."
               : question.type === "select_all"
@@ -3681,7 +3681,7 @@ function QuestionEditor({
               be the answer. Both are said here, while the author can still fix
               them, rather than only at publish. */}
           {answerKeyProblems.length ? (
-            <ul className="mt-2 space-y-1 text-[11px] leading-5 text-[var(--warning)]">
+            <ul className="mt-2 space-y-1 text-micro leading-5 text-[var(--warning)]">
               {answerKeyProblems.map((problem) => (
                 <li key={problem} className="flex items-start gap-1.5">
                   <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -3694,7 +3694,7 @@ function QuestionEditor({
       ) : question.type === "matching" ? (
         <section className="mt-4">
           <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-[12px] font-semibold text-[var(--text-secondary)]">
+            <h4 className="text-caption font-semibold text-[var(--text-secondary)]">
               Matching pairs
             </h4>
             <button

@@ -130,15 +130,15 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
             key={String(block.id ?? index)}
             className={
               block.type === "heading"
-                ? "font-display text-[16px] font-semibold text-[var(--text-primary)]"
-                : "text-[12px] leading-5 text-[var(--text-secondary)]"
+                ? "font-display text-editor font-semibold text-[var(--text-primary)]"
+                : "text-caption leading-5 text-[var(--text-secondary)]"
             }
           >
             {textFrom(block.text ?? block.content) || "Empty block"}
           </p>
         ))}
         {blocks.length === 0 ? (
-          <p className="text-[11px] text-[var(--text-tertiary)]">
+          <p className="text-micro text-[var(--text-tertiary)]">
             Empty document
           </p>
         ) : null}
@@ -165,19 +165,19 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
           {cards.slice(0, 4).map((entry, index) => (
             <div
               key={String(entry.id ?? index)}
-              className="min-h-[112px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3.5"
+              className="min-h-[112px] rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-3.5"
             >
               <span className="text-micro font-semibold uppercase tracking-[.11em] text-[var(--text-tertiary)]">
                 {index % 2 === 0 ? "Front" : "Back"}
               </span>
-              <p className="mt-2 font-display text-[13px] leading-5 text-[var(--text-primary)]">
+              <p className="mt-2 font-display text-ui leading-5 text-[var(--text-primary)]">
                 {textFrom(index % 2 === 0 ? entry.front : entry.back) ||
                   "Empty card"}
               </p>
             </div>
           ))}
           {cards.length === 0 ? (
-            <p className="text-[11px] text-[var(--text-tertiary)]">
+            <p className="text-micro text-[var(--text-tertiary)]">
               Empty deck
             </p>
           ) : null}
@@ -190,13 +190,13 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
           type="button"
           disabled={!canReveal}
           onClick={() => setRevealed((value) => !value)}
-          className="flex min-h-[116px] w-full items-center justify-center rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-5 text-center disabled:cursor-default"
+          className="flex min-h-[116px] w-full items-center justify-center rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-5 text-center disabled:cursor-default"
         >
           <span>
             <span className="block text-micro font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
               {revealed ? "Answer" : "Prompt"}
             </span>
-            <span className="mt-2 block text-[15px] font-medium leading-6 text-[var(--text-primary)]">
+            <span className="mt-2 block text-subhead font-medium leading-6 text-[var(--text-primary)]">
               {textFrom(revealed ? card?.back : card?.front) || "Empty card"}
             </span>
             {!canReveal ? (
@@ -215,7 +215,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
                 setRevealed(false);
               }}
               disabled={!canNavigate || activeIndex === 0}
-              className="rounded-[6px] p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
+              className="rounded-chip p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -231,7 +231,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
                 setRevealed(false);
               }}
               disabled={!canNavigate || activeIndex >= cards.length - 1}
-              className="rounded-[6px] p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
+              className="rounded-chip p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -249,7 +249,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
     if (embed.mode === "compact")
       return (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <span className="text-[11px] font-semibold capitalize text-[var(--text-primary)]">
+          <span className="text-micro font-semibold capitalize text-[var(--text-primary)]">
             {String(content.status ?? "todo").replaceAll("_", " ")}
           </span>
           <span className="text-micro capitalize text-[var(--text-tertiary)]">
@@ -286,8 +286,8 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
     const slide = slides[Math.min(activeIndex, Math.max(0, slides.length - 1))];
     return (
       <div>
-        <div className="aspect-video rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-[8%]">
-          <h4 className="font-display text-[clamp(15px,2vw,26px)] font-semibold text-[var(--text-primary)]">
+        <div className="aspect-video rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-[8%]">
+          <h4 className="font-display text-heading font-semibold text-[var(--text-primary)]">
             {textFrom(slide?.title) || "Untitled slide"}
           </h4>
           <p className="mt-3 max-w-[76%] text-micro leading-4 text-[var(--text-secondary)]">
@@ -332,7 +332,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
       embed.mode === "compact" ? 12 : 40,
     );
     return (
-      <div className="overflow-hidden rounded-[8px] border border-[var(--border-default)]">
+      <div className="overflow-hidden rounded-control border border-[var(--border-default)]">
         <div className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-micro font-semibold text-[var(--text-secondary)]">
           {String(sheet?.name ?? "Sheet 1")}
         </div>
@@ -399,11 +399,11 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
       embed.mode === "compact" ? 8 : 24,
     );
     return (
-      <div className="relative min-h-[190px] overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[radial-gradient(circle_at_1px_1px,var(--border-subtle)_1px,transparent_0)] bg-[size:18px_18px]">
+      <div className="relative min-h-[190px] overflow-hidden rounded-card border border-[var(--border-default)] bg-[radial-gradient(circle_at_1px_1px,var(--border-subtle)_1px,transparent_0)] bg-[size:18px_18px]">
         {nodes.map((node, index) => (
           <div
             key={String(node.id ?? index)}
-            className="absolute max-w-[120px] rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-micro text-[var(--text-primary)] shadow-sm"
+            className="absolute max-w-[120px] rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-micro text-[var(--text-primary)] shadow-sm"
             style={{
               left: `${8 + ((index * 23) % 70)}%`,
               top: `${10 + ((index * 31) % 68)}%`,
@@ -426,11 +426,11 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
         {events.map((event, index) => (
           <div
             key={String(event.id ?? index)}
-            className="flex items-center gap-3 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2"
+            className="flex items-center gap-3 rounded-control border border-[var(--border-subtle)] px-3 py-2"
           >
             <CalendarDays className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[11px] font-semibold text-[var(--text-primary)]">
+              <div className="truncate text-micro font-semibold text-[var(--text-primary)]">
                 {textFrom(event.title) || "Event"}
               </div>
               <div className="text-micro text-[var(--text-tertiary)]">
@@ -458,11 +458,11 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
     const evidence = records(content.evidenceBindings ?? content.evidence);
     return (
       <div className="grid gap-2 sm:grid-cols-3">
-        <div className="sm:col-span-3 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
+        <div className="sm:col-span-3 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
           <div className="text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
             Mission
           </div>
-          <p className="mt-1 text-[11px] leading-5 text-[var(--text-primary)]">
+          <p className="mt-1 text-micro leading-5 text-[var(--text-primary)]">
             {textFrom(mission.objective ?? content.objective, 420) ||
               "Mission is still being shaped."}
           </p>
@@ -483,11 +483,11 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[8px] bg-[var(--bg-primary)] p-3">
+    <div className="rounded-control bg-[var(--bg-primary)] p-3">
       <div className="text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
         {label}
       </div>
-      <div className="mt-1 text-[12px] font-semibold capitalize text-[var(--text-primary)]">
+      <div className="mt-1 text-caption font-semibold capitalize text-[var(--text-primary)]">
         {value}
       </div>
     </div>
@@ -599,13 +599,13 @@ export function ArtifactEmbed({
   if (status) {
     const StatusIcon = status.icon;
     return (
-      <section className="rounded-[10px] border border-dashed border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-secondary)_82%,var(--bg-elevated))] px-4 py-3.5">
+      <section className="rounded-card border border-dashed border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-secondary)_82%,var(--bg-elevated))] px-4 py-3.5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-tertiary)]">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-tertiary)]">
             <StatusIcon className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-semibold text-[var(--text-primary)]">
+            <div className="text-caption font-semibold text-[var(--text-primary)]">
               {status.title}
             </div>
             <p className="mt-0.5 max-w-[620px] text-micro leading-4 text-[var(--text-secondary)]">
@@ -620,7 +620,7 @@ export function ArtifactEmbed({
                 type="button"
                 disabled={busy}
                 onClick={onRequestAccess}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+                className="inline-flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
                 <Send className="h-3 w-3" />
                 Request access
@@ -635,7 +635,7 @@ export function ArtifactEmbed({
                 onClick={() =>
                   onCancelAccessRequest(embed.accessRequest!.requestId)
                 }
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                className="inline-flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-default)] px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
               >
                 <X className="h-3 w-3" />
                 Cancel request
@@ -648,7 +648,7 @@ export function ArtifactEmbed({
                 type="button"
                 disabled={busy}
                 onClick={onUseLiveVersion}
-                className="h-8 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+                className="h-8 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
                 Use live source
               </button>
@@ -658,7 +658,7 @@ export function ArtifactEmbed({
                 type="button"
                 disabled={busy}
                 onClick={onRetry}
-                className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
                 aria-label="Retry embed"
               >
                 <RotateCw className="h-3.5 w-3.5" />
@@ -680,7 +680,7 @@ export function ArtifactEmbed({
       }
       ref={rootRef}
       data-reference-id={embed.embedId}
-      className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_1px_2px_rgba(28,24,18,0.025)]"
+      className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-sm)]"
       style={
         embed.mode === "expanded"
           ? {
@@ -737,7 +737,7 @@ export function ArtifactEmbed({
     >
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5 sm:px-4">
         <span
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--embed-accent)_9%,var(--bg-secondary))]"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control bg-[color-mix(in_oklab,var(--embed-accent)_9%,var(--bg-secondary))]"
           style={
             { "--embed-accent": meta.color, color: meta.color } as CSSProperties
           }
@@ -745,7 +745,7 @@ export function ArtifactEmbed({
           <Icon className="h-4 w-4" />
         </span>
         <div className="min-w-[140px] flex-1 basis-[min(100%,220px)]">
-          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">
+          <div className="truncate text-caption font-semibold text-[var(--text-primary)]">
             {embed.source.title}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
@@ -789,7 +789,7 @@ export function ArtifactEmbed({
             onClick={() =>
               onModeChange(embed.mode === "compact" ? "expanded" : "compact")
             }
-            className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+            className="flex h-8 items-center gap-1.5 rounded-control px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
             aria-label={
               embed.mode === "compact"
                 ? "Expand reference"
@@ -813,7 +813,7 @@ export function ArtifactEmbed({
           <button
             type="button"
             onClick={() => onOpenSource(embed.source!.artifactId)}
-            className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="flex h-8 items-center gap-1.5 rounded-control px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             Open source
             <ArrowUpRight className="h-3 w-3" />
@@ -824,7 +824,7 @@ export function ArtifactEmbed({
             type="button"
             disabled={busy}
             onClick={onRemove}
-            className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
+            className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
             aria-label="Remove reference"
             title="Remove"
           >
@@ -856,7 +856,7 @@ export function ArtifactEmbed({
           <ContentAdapter embed={embed} />
         ) : (
           <div
-            className={`${embed.mode === "compact" ? "min-h-32" : "min-h-56"} flex items-center justify-center rounded-[8px] border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 text-center`}
+            className={`${embed.mode === "compact" ? "min-h-32" : "min-h-56"} flex items-center justify-center rounded-control border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 text-center`}
             aria-label="Published runtime paused"
           >
             <p className="max-w-sm text-micro leading-4 text-[var(--text-tertiary)]">

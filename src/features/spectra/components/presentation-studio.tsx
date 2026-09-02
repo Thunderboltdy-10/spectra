@@ -350,7 +350,7 @@ const THEMES = [
     id: "spectra-botanical",
     name: "Botanical",
     tokens: {
-      background: "#fbfaf5",
+      background: "var(--bg-primary)",
       heading: "#173f35",
       body: "#324b43",
       accent: "#2f9a72",
@@ -361,7 +361,7 @@ const THEMES = [
     id: "spectra-cobalt",
     name: "Cobalt",
     tokens: {
-      background: "#f7f9fd",
+      background: "var(--bg-secondary)",
       heading: "#173252",
       body: "#38536d",
       accent: "#3278bf",
@@ -372,7 +372,7 @@ const THEMES = [
     id: "spectra-plum",
     name: "Plum",
     tokens: {
-      background: "#fbf8fc",
+      background: "var(--bg-user-bubble)",
       heading: "#452b54",
       body: "#644d6d",
       accent: "#8a5ca1",
@@ -383,7 +383,7 @@ const THEMES = [
     id: "spectra-graphite",
     name: "Graphite",
     tokens: {
-      background: "#f7f6f3",
+      background: "var(--bg-secondary)",
       heading: "#272924",
       body: "#51534d",
       accent: "#73776d",
@@ -902,7 +902,7 @@ function SlideCanvas({
           aspectRatio:
             deck.settings?.aspectRatio === "4:3" ? "4 / 3" : "16 / 9",
           background: compact
-            ? slide.background || tokens.background || "#fbfaf5"
+            ? slide.background || tokens.background || "var(--bg-primary)"
             : "var(--bg-primary)",
           color: tokens.body || "#324b43",
           animationDuration:
@@ -927,9 +927,9 @@ function SlideCanvas({
       {showSlideNumber && deck.settings?.showSlideNumbers !== false ? (
         <span
           aria-hidden="true"
+          className="pointer-events-none z-chrome"
           style={{
             position: "absolute",
-            zIndex: 1,
             left: "3.2cqw",
             bottom: "2.6cqw",
             fontSize: "1.4cqw",
@@ -1856,10 +1856,10 @@ export function PresentationStudio({
   }
   function applyTextPreset(preset: "title" | "subtitle" | "body" | "caption") {
     const tokens = {
-      title: { fontSize: 54, fontWeight: 700, color: "#143d34" },
-      subtitle: { fontSize: 27, fontWeight: 520, color: "#168767" },
-      body: { fontSize: 21, fontWeight: 430, color: "#2f3e39" },
-      caption: { fontSize: 15, fontWeight: 520, color: "#60706a" },
+      title: { fontSize: 54, fontWeight: 700, color: "var(--accent-mint)" },
+      subtitle: { fontSize: 27, fontWeight: 520, color: "var(--accent-mint)" },
+      body: { fontSize: 21, fontWeight: 430, color: "var(--text-primary)" },
+      caption: { fontSize: 15, fontWeight: 520, color: "var(--text-secondary)" },
     } as const;
     updateSelected((object) => {
       object.style = { ...object.style, ...tokens[preset] };

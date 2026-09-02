@@ -310,11 +310,11 @@ function OverviewSurface({
                   {data.groupWorkspaces.map((workspace) => (
                     <tr
                       key={workspace.workspaceId}
-                      className="rounded-[10px] transition-colors hover:bg-[var(--bg-secondary)]"
+                      className="rounded-card transition-colors hover:bg-[var(--bg-secondary)]"
                     >
                       <td className="py-2.5">
                         <span className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
-                          <School size={13} className="text-[#755ee2]" />
+                          <School size={13} className="text-[var(--brand-primary)]" />
                           {workspace.title}
                         </span>
                       </td>
@@ -330,7 +330,7 @@ function OverviewSurface({
                       <td className="py-2.5 text-right">
                         <Link
                           href={`/workspace?workspaceId=${encodeURIComponent(workspace.workspaceId)}`}
-                          className="text-[#705df2] hover:underline"
+                          className="text-[var(--brand-primary)] hover:underline"
                         >
                           Open
                         </Link>
@@ -372,7 +372,7 @@ function OverviewSurface({
                     type="button"
                     key={item.feedbackId}
                     onClick={() => onTab("feedback")}
-                    className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2.5 text-left transition-colors hover:bg-[var(--bg-secondary)]"
+                    className="flex w-full items-center gap-3 rounded-card px-2 py-2.5 text-left transition-colors hover:bg-[var(--bg-secondary)]"
                   >
                     <ChevronDown
                       size={12}
@@ -414,9 +414,9 @@ function OverviewSurface({
               {data.recentActivity.slice(0, 5).map((event) => (
                 <div
                   key={event.eventId}
-                  className="flex items-center gap-3 rounded-[10px] px-2 py-2.5 transition-colors hover:bg-[var(--bg-secondary)]"
+                  className="flex items-center gap-3 rounded-card px-2 py-2.5 transition-colors hover:bg-[var(--bg-secondary)]"
                 >
-                  <Activity size={13} className="text-[#25846a]" />
+                  <Activity size={13} className="text-[var(--accent-mint)]" />
                   <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-primary)]">
                     {actionLabel(event.action)}
                   </span>
@@ -439,7 +439,7 @@ function OverviewSurface({
         <section>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+              <h2 className="font-[var(--font-serif)] text-subhead font-medium">
                 Usage
               </h2>
               <p className="mt-1 text-micro text-[var(--text-tertiary)]">
@@ -463,7 +463,7 @@ function OverviewSurface({
             )
               .filter(([, value]) => value !== null && value !== undefined)
               .map(([label, value, kind]) => (
-                <div key={label} className="flex justify-between gap-4 rounded-[8px] px-2 py-1.5 hover:bg-[var(--bg-hover)]">
+                <div key={label} className="flex justify-between gap-4 rounded-control px-2 py-1.5 hover:bg-[var(--bg-hover)]">
                   <span className="text-[var(--text-secondary)]">{label}</span>
                   <strong>
                     {kind === "bytes"
@@ -487,8 +487,8 @@ function OverviewSurface({
 
         <section>
           <div className="flex items-center gap-2">
-            <Database size={14} className="text-[#735fd5]" />
-            <h2 className="text-[12px] font-medium">ManageBac connection</h2>
+            <Database size={14} className="text-[var(--brand-primary)]" />
+            <h2 className="text-caption font-medium">ManageBac connection</h2>
           </div>
           <div className="mt-3">
             <StatusBadge
@@ -503,14 +503,14 @@ function OverviewSurface({
           </div>
           <Link
             href="/managebac"
-            className="mt-3 block text-micro font-medium text-[#16805f] hover:underline"
+            className="mt-3 block text-micro font-medium text-[var(--accent-mint)] hover:underline"
           >
             Sync settings
           </Link>
         </section>
 
         <section>
-          <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
             School settings
           </h2>
           <div className="mt-3 space-y-1">
@@ -527,7 +527,7 @@ function OverviewSurface({
                 type="button"
                 key={String(label)}
                 onClick={() => onTab(tab as Tab)}
-                className="flex w-full items-center gap-2 rounded-[8px] px-2 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 <Icon size={12} />
                 {label}
@@ -647,7 +647,7 @@ export function SchoolAdminShell() {
   return (
     <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh bg-[var(--bg-primary)] pb-24">
       {overview.operatorSession ? (
-        <div className="sticky top-0 z-30 flex min-h-10 items-center justify-between gap-3 border-b border-[#d5e5f0] bg-[#eef7fc] px-5 py-2 text-micro text-[#315e78]">
+        <div className="sticky top-0 z-chrome flex min-h-10 items-center justify-between gap-3 border-b border-[color-mix(in oklab, var(--accent-cyan) 16%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-cyan) 8%, var(--bg-primary))] px-5 py-2 text-micro text-[var(--accent-cyan)]">
           <span className="flex items-center gap-2">
             <KeyRound size={13} />
             <strong>{overview.operatorSession.label}</strong>
@@ -915,7 +915,7 @@ function PeopleSurface({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search verified school members"
-              className="h-9 w-full rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-3 text-[11px] outline-none focus:border-[var(--brand-primary)]"
+              className="h-9 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-3 text-micro outline-none focus:border-[var(--brand-primary)]"
             />
           </label>
           <AdminButton onClick={onRefresh}>
@@ -940,11 +940,11 @@ function PeopleSurface({
                 {people.map((person) => (
                   <tr
                     key={person.membershipId}
-                    className="rounded-[10px] transition-colors hover:bg-[var(--bg-secondary)]"
+                    className="rounded-card transition-colors hover:bg-[var(--bg-secondary)]"
                   >
                     <td className="py-2.5">
                       <div className="flex items-center gap-2">
-                        <span className="grid size-7 place-items-center rounded-full bg-[#eeeafd] text-micro font-semibold text-[#6f5bd4]">
+                        <span className="grid size-7 place-items-center rounded-full bg-[var(--bg-user-bubble)] text-micro font-semibold text-[var(--brand-primary)]">
                           {person.name
                             .split(/\s+/)
                             .slice(0, 2)
@@ -1146,7 +1146,7 @@ function PeopleSurface({
           </>
         }
       >
-        <div className="break-all rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 font-mono text-micro leading-5">
+        <div className="break-all rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 font-mono text-micro leading-5">
           {manualInvitationUrl}
         </div>
       </AdminDialog>
@@ -1220,17 +1220,17 @@ function GroupsSurface({
             {groups.map((group) => (
               <div
                 key={group.groupId}
-                className="rounded-[8px] border border-[var(--border-subtle)] p-4"
+                className="rounded-control border border-[var(--border-subtle)] p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <span className="grid size-9 place-items-center rounded-[9px] bg-[#eaf6f0] text-[#16805f]">
+                  <span className="grid size-9 place-items-center rounded-card bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]">
                     <UsersRound size={16} />
                   </span>
                   <StatusBadge tone="neutral">
                     {group.source}
                   </StatusBadge>
                 </div>
-                <h3 className="mt-4 text-[12px] font-semibold">{group.name}</h3>
+                <h3 className="mt-4 text-caption font-semibold">{group.name}</h3>
                 <p className="mt-1 min-h-8 text-micro leading-4 text-[var(--text-tertiary)]">
                   {group.description || `${group.type} group`}
                 </p>
@@ -1327,11 +1327,11 @@ function GroupsSurface({
             <legend className="mb-2 text-micro font-medium text-[var(--text-secondary)]">
               Initial members
             </legend>
-            <div className="max-h-48 space-y-1 overflow-y-auto rounded-[7px] border border-[var(--border-default)] p-2">
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-control border border-[var(--border-default)] p-2">
               {people.map((person) => (
                 <label
                   key={person.accountId}
-                  className="flex items-center gap-3 rounded-[6px] px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]"
+                  className="flex items-center gap-3 rounded-chip px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]"
                 >
                   <input
                     type="checkbox"
@@ -1438,7 +1438,7 @@ function CommunicationSurface({
                 {rows.map((row) => (
                   <tr
                     key={row.announcementId}
-                    className="rounded-[10px] transition-colors hover:bg-[var(--bg-secondary)]"
+                    className="rounded-card transition-colors hover:bg-[var(--bg-secondary)]"
                   >
                     <td className="py-3">
                       <strong className="block font-medium">{row.title}</strong>
@@ -1564,7 +1564,7 @@ function CommunicationSurface({
               {["student", "teacher", "school_admin"].map((role) => (
                 <label
                   key={role}
-                  className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] p-3 text-micro"
+                  className="flex items-center gap-2 rounded-control border border-[var(--border-default)] p-3 text-micro"
                 >
                   <input
                     type="checkbox"
@@ -1583,11 +1583,11 @@ function CommunicationSurface({
             </div>
           ) : null}
           {targetKind === "groups" ? (
-            <div className="max-h-44 overflow-y-auto rounded-[7px] border border-[var(--border-default)] p-2">
+            <div className="max-h-44 overflow-y-auto rounded-control border border-[var(--border-default)] p-2">
               {groups.map((group) => (
                 <label
                   key={group.groupId}
-                  className="flex items-center gap-2 rounded-[6px] px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]"
+                  className="flex items-center gap-2 rounded-chip px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]"
                 >
                   <input
                     type="checkbox"
@@ -1695,7 +1695,7 @@ function UsageSurface({
                     className="group relative flex h-full min-w-3 flex-1 items-end"
                   >
                     <div
-                      className="w-full rounded-t-[3px] bg-[#70c7aa] transition-colors group-hover:bg-[#259b74]"
+                      className="w-full rounded-t-[3px] bg-[var(--accent-mint)] transition-colors group-hover:bg-[var(--accent-mint)]"
                       style={{
                         height: `${Math.max(2, (total / maximum) * 100)}%`,
                       }}
@@ -1707,7 +1707,7 @@ function UsageSurface({
                 );
               })
             ) : (
-              <div className="m-auto text-[11px] text-[var(--text-tertiary)]">
+              <div className="m-auto text-micro text-[var(--text-tertiary)]">
                 No completed meter window yet
               </div>
             )}
@@ -1900,9 +1900,9 @@ function AgentsResourcesSurface({
           detail="Knowledge resources stay permission-bound to their underlying artifact or workspace."
         />
         <div className="grid gap-3 p-4 pt-1 sm:grid-cols-2">
-          <div className="rounded-[7px] border border-[var(--border-subtle)] p-3">
-            <BookOpen size={15} className="text-[#16805f]" />
-            <strong className="mt-3 block text-[11px]">
+          <div className="rounded-control border border-[var(--border-subtle)] p-3">
+            <BookOpen size={15} className="text-[var(--accent-mint)]" />
+            <strong className="mt-3 block text-micro">
               Permission inheritance
             </strong>
             <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
@@ -1910,9 +1910,9 @@ function AgentsResourcesSurface({
               access.
             </p>
           </div>
-          <div className="rounded-[7px] border border-[var(--border-subtle)] p-3">
-            <ShieldCheck size={15} className="text-[#735fd5]" />
-            <strong className="mt-3 block text-[11px]">
+          <div className="rounded-control border border-[var(--border-subtle)] p-3">
+            <ShieldCheck size={15} className="text-[var(--brand-primary)]" />
+            <strong className="mt-3 block text-micro">
               Evaluation health
             </strong>
             <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
@@ -1970,12 +1970,12 @@ function IntegrationsSurface({
             ].map(([label, value, detail]) => (
               <div
                 key={String(label)}
-                className="rounded-[7px] border border-[var(--border-subtle)] p-3"
+                className="rounded-control border border-[var(--border-subtle)] p-3"
               >
                 <span className="text-micro text-[var(--text-tertiary)]">
                   {label}
                 </span>
-                <strong className="mt-1 block text-[12px]">{value}</strong>
+                <strong className="mt-1 block text-caption">{value}</strong>
                 {detail ? (
                   <span className="mt-0.5 block text-micro text-[var(--text-tertiary)]">
                     {detail}
@@ -2006,7 +2006,7 @@ function IntegrationsSurface({
             "Removed records are tombstoned",
           ].map((item) => (
             <div key={item} className="flex items-center gap-2">
-              <Check size={12} className="text-[#15916c]" />
+              <Check size={12} className="text-[var(--accent-mint)]" />
               {item}
             </div>
           ))}
@@ -2066,15 +2066,15 @@ function GovernanceSurface() {
           {freedoms.map(({ icon: Icon, title, detail }) => (
             <div
               key={title}
-              className="rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5"
+              className="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5"
             >
               <div className="flex items-start justify-between gap-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[#eef8f4] text-[#16805f]">
+                <span className="grid size-8 shrink-0 place-items-center rounded-control bg-[color-mix(in oklab, var(--accent-mint) 8%, var(--bg-primary))] text-[var(--accent-mint)]">
                   <Icon size={15} />
                 </span>
                 <StatusBadge tone="healthy">Always available</StatusBadge>
               </div>
-              <strong className="mt-3 block text-[11px]">{title}</strong>
+              <strong className="mt-3 block text-micro">{title}</strong>
               <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                 {detail}
               </p>
@@ -2084,7 +2084,7 @@ function GovernanceSurface() {
       </AdminCard>
       <div className="space-y-3">
         <AdminCard className="p-4">
-          <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
             What administration can do
           </h2>
           <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
@@ -2156,11 +2156,11 @@ function FeedbackSurface({
                 }}
                 className="flex w-full items-start gap-3 py-3 text-left"
               >
-                <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--bg-secondary)]">
+                <span className="grid size-8 shrink-0 place-items-center rounded-control bg-[var(--bg-secondary)]">
                   <MessageCircle size={14} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <strong className="block truncate text-[11px]">
+                  <strong className="block truncate text-micro">
                     {item.subject}
                   </strong>
                   <span className="mt-1 block line-clamp-2 text-micro leading-4 text-[var(--text-tertiary)]">
@@ -2224,7 +2224,7 @@ function FeedbackSurface({
       >
         {selected ? (
           <div className="space-y-4">
-            <div className="rounded-[7px] bg-[var(--bg-secondary)] p-3 text-[11px] leading-5">
+            <div className="rounded-control bg-[var(--bg-secondary)] p-3 text-micro leading-5">
               {selected.message}
             </div>
             <SelectField
@@ -2364,7 +2364,7 @@ function ProfileSurface({
       </AdminCard>
       <div className="space-y-3">
         <AdminCard className="p-4">
-          <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
             Accessibility defaults
           </h2>
           <div className="mt-3 space-y-3">
@@ -2392,13 +2392,13 @@ function ProfileSurface({
         <AdminCard className="p-4">
           <div className="flex items-center gap-3">
             <span
-              className="grid size-12 place-items-center rounded-[12px] text-white"
+              className="grid size-12 place-items-center rounded-surface text-white"
               style={{ backgroundColor: accent }}
             >
               <Building2 size={22} />
             </span>
             <div>
-              <strong className="text-[12px]">{name}</strong>
+              <strong className="text-caption">{name}</strong>
               <p className="mt-1 text-micro text-[var(--text-tertiary)]">
                 Profile preview
               </p>

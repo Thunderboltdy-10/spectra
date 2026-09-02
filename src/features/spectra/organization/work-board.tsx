@@ -194,7 +194,7 @@ export function WorkBoard({
 
   if (board.loading)
     return (
-      <div className="flex min-h-[280px] items-center gap-2 px-1 py-10 text-[13px] text-[var(--text-tertiary)]">
+      <div className="flex min-h-[280px] items-center gap-2 px-1 py-10 text-ui text-[var(--text-tertiary)]">
         <Loader2 className="size-3.5 animate-spin" />
         Laying out the board
       </div>
@@ -202,15 +202,15 @@ export function WorkBoard({
 
   if (board.columns.length === 0)
     return (
-      <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 rounded-[10px] border border-dashed border-[var(--border-default)] text-center">
+      <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 rounded-card border border-dashed border-[var(--border-default)] text-center">
         <Layers
           className="size-5 text-[var(--text-tertiary)]"
           strokeWidth={1.6}
         />
-        <p className="text-[13px] font-medium text-[var(--text-primary)]">
+        <p className="text-ui font-medium text-[var(--text-primary)]">
           Nothing to lay out yet
         </p>
-        <p className="max-w-[320px] text-[12px] text-[var(--text-secondary)]">
+        <p className="max-w-[320px] text-caption text-[var(--text-secondary)]">
           The board shows work from every folder in this scope. Make something
           and it appears here.
         </p>
@@ -342,7 +342,7 @@ function BoardColumnView({
       data-drop-kind={
         column.fixes.parentNodeId === undefined ? undefined : "container"
       }
-      className="flex min-h-0 flex-col overflow-hidden rounded-[10px] border p-2.5"
+      className="flex min-h-0 flex-col overflow-hidden rounded-card border p-2.5"
       style={{
         borderColor: `color-mix(in oklab, ${color} 26%, var(--border-default))`,
         background: `color-mix(in oklab, ${color} 3.5%, var(--bg-primary))`,
@@ -366,24 +366,24 @@ function BoardColumnView({
                     : undefined,
               })
             }
-            className="min-w-0 truncate text-left text-[13px] font-semibold capitalize text-[var(--text-primary)] hover:underline"
+            className="min-w-0 truncate text-left text-ui font-semibold capitalize text-[var(--text-primary)] hover:underline"
           >
             {label}
           </button>
         ) : (
-          <h3 className="min-w-0 truncate text-[13px] font-semibold capitalize text-[var(--text-primary)]">
+          <h3 className="min-w-0 truncate text-ui font-semibold capitalize text-[var(--text-primary)]">
             {label}
           </h3>
         )}
         <span
-          className="shrink-0 text-[12px] tabular-nums text-[var(--text-tertiary)]"
+          className="shrink-0 text-caption tabular-nums text-[var(--text-tertiary)]"
           title={`${column.count ?? cards.length} in total`}
         >
           {page.loading ? "" : (column.count ?? cards.length)}
         </span>
       </header>
       {column.sublabel ? (
-        <p className="mb-2 shrink-0 truncate px-1 text-[11px] text-[var(--text-tertiary)]">
+        <p className="mb-2 shrink-0 truncate px-1 text-micro text-[var(--text-tertiary)]">
           {column.sublabel}
         </p>
       ) : null}
@@ -403,14 +403,14 @@ function BoardColumnView({
             {[0, 1, 2].map((index) => (
               <div
                 key={index}
-                className="h-[74px] animate-pulse rounded-[8px] bg-[var(--bg-secondary)]"
+                className="h-[74px] animate-pulse rounded-control bg-[var(--bg-secondary)]"
                 style={{ animationDelay: `${index * 70}ms` }}
               />
             ))}
           </div>
         ) : null}
         {!page.loading && cards.length === 0 ? (
-          <p className="rounded-[8px] border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-[12px] text-[var(--text-tertiary)]">
+          <p className="rounded-control border border-dashed border-[var(--border-subtle)] px-3 py-4 text-center text-caption text-[var(--text-tertiary)]">
             Empty
           </p>
         ) : null}
@@ -473,7 +473,7 @@ function BoardColumnView({
           ),
         )}
         {page.status === "LoadingMore" ? (
-          <p className="flex items-center justify-center gap-1.5 py-2 text-[11px] text-[var(--text-tertiary)]">
+          <p className="flex items-center justify-center gap-1.5 py-2 text-micro text-[var(--text-tertiary)]">
             <Loader2 className="size-3 animate-spin" />
             Loading more
           </p>
@@ -607,9 +607,9 @@ function ColumnCreate({
           fixedType ? undefined : (
             <button
               type="button"
-              className="flex h-8 w-full items-center justify-center gap-1.5 rounded-[7px] border border-dashed border-[var(--border-default)] text-[12px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="flex h-8 w-full items-center justify-center gap-1.5 rounded-control border border-dashed border-[var(--border-default)] text-caption font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
-              <span aria-hidden className="text-[14px] leading-none">
+              <span aria-hidden className="text-body leading-none">
                 +
               </span>
               New here
@@ -645,11 +645,11 @@ function PlaceCard({
       onClick={onOpen}
       onContextMenu={onContextMenu}
       onPointerDown={onBeginDrag}
-      className="group flex w-full min-w-0 items-center gap-2.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-left transition-colors hover:border-[var(--border-strong)]"
+      className="group flex w-full min-w-0 items-center gap-2.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-left transition-colors hover:border-[var(--border-strong)]"
     >
       <span
         aria-hidden
-        className="flex size-7 shrink-0 items-center justify-center rounded-[6px]"
+        className="flex size-7 shrink-0 items-center justify-center rounded-chip"
         style={{ backgroundColor: identity.soft }}
       >
         <Icon
@@ -659,10 +659,10 @@ function PlaceCard({
         />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">
+        <span className="block truncate text-ui font-semibold text-[var(--text-primary)]">
           {node.workspace?.title ?? node.name}
         </span>
-        <span className="block truncate text-[11px] text-[var(--text-tertiary)]">
+        <span className="block truncate text-micro text-[var(--text-tertiary)]">
           {identity.label} · {node.childCount ?? 0}{" "}
           {(node.childCount ?? 0) === 1 ? "item" : "items"} inside
         </span>

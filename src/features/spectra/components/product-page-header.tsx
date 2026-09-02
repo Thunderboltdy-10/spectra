@@ -28,11 +28,11 @@ export function ProductPageHeader({
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="mt-1 truncate font-display text-[32px] font-semibold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
+        <h1 className="mt-1 truncate font-display text-display font-semibold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
           {title}
         </h1>
         {description ? (
-          <p className="mt-2 max-w-2xl text-[12px] leading-5 text-[var(--text-secondary)]">
+          <p className="mt-2 max-w-2xl text-caption leading-5 text-[var(--text-secondary)]">
             {description}
           </p>
         ) : null}

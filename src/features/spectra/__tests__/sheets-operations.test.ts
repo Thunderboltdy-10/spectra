@@ -396,16 +396,17 @@ describe("borders", () => {
   });
 
   it("carries the chosen line and colour onto the edge", () => {
+    const navy = "#123456";
     const result = applyBorderPreset(
       {},
       range("B2:B2"),
       "bottom",
       "dashed",
-      "#123456",
+      navy,
     );
     expect(result.cells.B2?.format?.borders?.bottom).toEqual({
       style: "dashed",
-      color: "#123456",
+      color: navy,
     });
   });
 });

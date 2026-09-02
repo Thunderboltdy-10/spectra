@@ -8,7 +8,7 @@ const activeAccentStyle = { "--card-accent": "var(--accent-cyan)" } as CSSProper
 export function MessageSkeleton({ className = "" }: { className?: string }) {
   return (
     <div className={`flex gap-3 py-4 animate-in fade-in slide-in-from-bottom-2 duration-300 ${className}`}>
-      <div className="spectra-skeleton-block h-8 w-8 shrink-0 rounded-[8px]" />
+      <div className="spectra-skeleton-block h-8 w-8 shrink-0 rounded-control" />
       <div className="flex-1 space-y-2">
         <div className="spectra-skeleton-line h-4 w-24" />
         <div className="space-y-2">
@@ -64,7 +64,7 @@ export function ChatListSkeleton() {
     <div className="space-y-3 p-3">
       <div className="flex items-center justify-between">
         <div className="spectra-skeleton-line h-8 w-20" />
-        <div className="spectra-skeleton-block h-8 w-8 rounded-[8px]" />
+        <div className="spectra-skeleton-block h-8 w-8 rounded-control" />
       </div>
       <div className="spectra-skeleton-block h-10 w-full" />
       <div className="spectra-skeleton-line h-9 w-full" />
@@ -79,7 +79,7 @@ export function ModelSelectorSkeleton() {
   return (
     <div className="flex items-center gap-2">
       <div className="spectra-skeleton-line h-6 w-24 rounded-full" />
-      <div className="spectra-skeleton-block h-6 w-6 rounded-[8px]" />
+      <div className="spectra-skeleton-block h-6 w-6 rounded-control" />
     </div>
   );
 }

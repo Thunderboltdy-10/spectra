@@ -65,33 +65,33 @@ export const CALENDAR_LAYERS: ReadonlyArray<{
     key: "classes",
     label: "Classes",
     itemKinds: ["official_event"],
-    color: "#16826a",
+    color: "var(--accent-mint)",
   },
   {
     key: "deadlines",
     label: "Official deadlines",
     itemKinds: ["official_deadline"],
-    color: "#c45f3d",
+    color: "var(--accent-coral)",
   },
   {
     key: "tasks",
     label: "Plans",
     itemKinds: ["task", "milestone", "reminder"],
-    color: "#a67420",
+    color: "var(--accent-gold)",
   },
   {
     key: "work",
     label: "Scheduled work",
     itemKinds: ["scheduled_work_block"],
-    color: "#5969bf",
+    color: "var(--accent-violet)",
   },
   {
     key: "personal",
     label: "Personal",
     itemKinds: ["personal_event"],
-    color: "#887b6e",
+    color: "var(--text-tertiary)",
   },
-  { key: "shared", label: "Shared", itemKinds: [], color: "#486b8e" },
+  { key: "shared", label: "Shared", itemKinds: [], color: "var(--accent-cyan)" },
 ] as const;
 
 export type CalendarOverview = {

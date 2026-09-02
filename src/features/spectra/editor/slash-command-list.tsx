@@ -45,7 +45,7 @@ export const SlashCommandList = forwardRef<SlashCommandListRef, { items: SlashCo
         const Icon = icons[item.icon as keyof typeof icons];
         return <button key={item.id} type="button" role="option" aria-selected={index === selectedIndex} aria-disabled={Boolean(item.disabledReason) || undefined} data-disabled={Boolean(item.disabledReason) || undefined} title={item.disabledReason ?? undefined} className={`slash-command-item ${index === selectedIndex ? "is-selected" : ""}`} onMouseEnter={() => { if (!item.disabledReason) setSelectedIndex(index); }} onClick={() => select(index)}>
           <span className="slash-command-icon">{Icon ? <Icon className="h-4 w-4" /> : item.icon}</span>
-          <span className="min-w-0 text-left"><span className="block text-sm font-medium text-[var(--text-primary)]">{item.label}</span><span className="block truncate text-[11px] text-[var(--text-tertiary)]">{item.disabledReason ?? item.description}</span></span>
+          <span className="min-w-0 text-left"><span className="block text-sm font-medium text-[var(--text-primary)]">{item.label}</span><span className="block truncate text-micro text-[var(--text-tertiary)]">{item.disabledReason ?? item.description}</span></span>
         </button>;
       })}
     </div>)}

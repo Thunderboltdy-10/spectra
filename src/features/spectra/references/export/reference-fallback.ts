@@ -31,15 +31,15 @@ export function referenceFallbackSvg(fallback: ReferenceFallback) {
   <title id="title">${title}</title>
   <desc id="description">${type} reference. ${fallback.versionLabel} in Spectra.</desc>
   <rect width="960" height="420" fill="#fbfbf8"/>
-  <rect x="2" y="2" width="956" height="416" rx="18" fill="#ffffff" stroke="#d9d9d3" stroke-width="4"/>
+  <rect x="2" y="2" width="956" height="416" rx="18" fill="var(--bg-elevated)" stroke="#d9d9d3" stroke-width="4"/>
   <rect x="48" y="52" width="70" height="70" rx="14" fill="#f0edff"/>
-  <text x="83" y="101" fill="#765bd8" text-anchor="middle" font-family="Manrope, Segoe UI, sans-serif" font-size="34" font-weight="800">S</text>
+  <text x="83" y="101" fill="var(--brand-primary)" text-anchor="middle" font-family="Manrope, Segoe UI, sans-serif" font-size="34" font-weight="800">S</text>
   <text x="150" y="82" fill="#686965" font-family="Manrope, Segoe UI, sans-serif" font-size="24" font-weight="700">${type}</text>
   <text x="150" y="116" fill="#858680" font-family="Manrope, Segoe UI, sans-serif" font-size="20">${fallback.versionLabel} Spectra reference</text>
   <text x="48" y="210" fill="#242622" font-family="Manrope, Segoe UI, sans-serif" font-size="42" font-weight="700">${title}</text>
   <line x1="48" y1="276" x2="912" y2="276" stroke="#e4e4de" stroke-width="2"/>
   <text x="48" y="326" fill="#686965" font-family="Manrope, Segoe UI, sans-serif" font-size="21">Open the live source in Spectra</text>
-  <text x="48" y="364" fill="#765bd8" font-family="Manrope, Segoe UI, sans-serif" font-size="18">${url}</text>
+  <text x="48" y="364" fill="var(--brand-primary)" font-family="Manrope, Segoe UI, sans-serif" font-size="18">${url}</text>
 </svg>`;
 }
 

@@ -212,7 +212,7 @@ export function ArtifactTileSurface({
       className={
         isolated
           ? "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-primary)]"
-          : "absolute inset-0 z-[70] flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--bg-primary)]"
+          : "absolute inset-0 z-panel flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--bg-primary)]"
       }
       aria-label={isolated ? "Focused work set" : "Workbench split layout"}
       onDragOver={(event) => {
@@ -239,14 +239,14 @@ export function ArtifactTileSurface({
             <button
               type="button"
               onClick={() => setAddOpen((value) => !value)}
-              className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="flex h-9 w-9 items-center justify-center rounded-control text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               aria-label="Add work to tiled set"
               aria-expanded={addOpen}
             >
               <Plus className="h-4 w-4" />
             </button>
             {addOpen ? (
-              <div className="absolute right-0 top-[calc(100%+7px)] max-h-[280px] w-[260px] overflow-y-auto rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_16px_38px_rgba(27,20,12,0.15)]">
+              <div className="absolute right-0 top-[calc(100%+7px)] max-h-[280px] w-[260px] overflow-y-auto rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-hover">
                 {allArtifacts
                   .filter(
                     (artifact) =>
@@ -262,12 +262,12 @@ export function ArtifactTileSurface({
                         onAddArtifact(artifact._id);
                         setAddOpen(false);
                       }}
-                      className="flex w-full items-center gap-2 rounded-[8px] px-2.5 py-2 text-left transition hover:bg-[var(--bg-hover)]"
+                      className="flex w-full items-center gap-2 rounded-control px-2.5 py-2 text-left transition hover:bg-[var(--bg-hover)]"
                     >
-                      <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--text-primary)]">
+                      <span className="min-w-0 flex-1 truncate text-ui text-[var(--text-primary)]">
                         {artifact.title}
                       </span>
-                      <span className="text-[11px] capitalize text-[var(--text-tertiary)]">
+                      <span className="text-micro capitalize text-[var(--text-tertiary)]">
                         {artifact.blueprintKey.replaceAll("_", " ")}
                       </span>
                     </button>
@@ -277,7 +277,7 @@ export function ArtifactTileSurface({
                     (visible) => visible._id === artifact._id,
                   ),
                 ) ? (
-                  <div className="px-2.5 py-3 text-[12px] text-[var(--text-tertiary)]">
+                  <div className="px-2.5 py-3 text-caption text-[var(--text-tertiary)]">
                     All available work is already open.
                   </div>
                 ) : null}
@@ -288,7 +288,7 @@ export function ArtifactTileSurface({
         <button
           type="button"
           onClick={isolated ? onExitFocusSet : onFocusSet}
-          className="flex h-9 items-center gap-1.5 rounded-[8px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          className="flex h-9 items-center gap-1.5 rounded-control px-2.5 text-ui font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           title={
             isolated
               ? "Return to workspace with these tiles still available"
@@ -305,7 +305,7 @@ export function ArtifactTileSurface({
         <button
           type="button"
           onClick={safeCloseAll}
-          className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          className="flex h-9 w-9 items-center justify-center rounded-control text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           aria-label="Close tiled set"
           title="Close tiled set"
         >
@@ -340,7 +340,7 @@ export function ArtifactTileSurface({
                   className={`relative flex h-full min-h-0 min-w-0 flex-1 ${draggingId === artifact._id ? "opacity-60" : ""}`}
                 >
                   <span
-                    className="absolute left-2 top-2 z-30 flex h-7 w-7 cursor-grab items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)]"
+                    className="absolute left-2 top-2 z-chrome flex h-7 w-7 cursor-grab items-center justify-center rounded-control bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)]"
                     title="Drag to rearrange"
                   >
                     <GripVertical className="h-3.5 w-3.5" />

@@ -258,10 +258,10 @@ function parsePptx(
               )
                 ? 700
                 : 400,
-              color: "#23322d",
+              color: "var(--text-primary)",
               align: "left",
             }
-          : { fill: "#e6ece8", stroke: "#9aaba2", radius: 8 },
+          : { fill: "var(--bg-secondary)", stroke: "var(--text-tertiary)", radius: 8 },
         readingOrder: objectIndex,
       });
     }
@@ -295,7 +295,7 @@ function parsePptx(
           type: "shape",
           ...sceneBounds(frame, slideWidth, slideHeight, canvasHeight),
           content: { text: "Imported graphic — replace or rebuild in Spectra" },
-          style: { fill: "#f1eee7", stroke: "#c9c2b4", radius: 10 },
+          style: { fill: "var(--bg-secondary)", stroke: "var(--border-strong)", radius: 10 },
           altText: "Unsupported PowerPoint graphic placeholder",
           readingOrder: objects.length,
         }),
@@ -433,7 +433,7 @@ function parseOdp(files: Record<string, Uint8Array>): PresentationImportResult {
           style: {
             fontSize: 28,
             fontWeight: objectIndex === 0 ? 650 : 400,
-            color: "#23322d",
+            color: "var(--text-primary)",
             align: "left",
           },
           readingOrder: objectIndex,
@@ -725,7 +725,7 @@ export async function renderPresentationSlide(
     throw new Error("Canvas export is unavailable in this browser.");
   context.scale(scale, scale);
   context.fillStyle =
-    slide.background ?? content.theme.tokens?.background ?? "#fbfaf5";
+    slide.background ?? content.theme.tokens?.background ?? "var(--bg-primary)";
   context.fillRect(0, 0, 1_000, canvasHeight);
   const byId = assetMap(assets);
   for (const object of [...slide.objects].sort(
@@ -742,7 +742,7 @@ export async function renderPresentationSlide(
     if (object.type === "text") {
       const fontSize = Number(object.style?.fontSize ?? 32);
       const weight = Number(object.style?.fontWeight ?? 400);
-      context.fillStyle = String(object.style?.color ?? "#23322d");
+      context.fillStyle = String(object.style?.color ?? "var(--text-primary)");
       context.font = `${object.style?.italic ? "italic " : ""}${weight} ${fontSize}px Georgia`;
       context.textBaseline = "top";
       const lines = presentationObjectText(object).split("\n");

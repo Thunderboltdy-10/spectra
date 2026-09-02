@@ -38,7 +38,7 @@ export function WorkbenchSplitTree({
       if (focusedPaneId && focusedPaneId !== current.paneId) return null;
       const active = current.tabs.find((tab) => tab.id === current.activeTabId) ?? current.tabs[0]!;
       return (
-        <section className={`relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-primary)] ${chrome === "pane" ? "rounded-[9px] border border-[var(--border-default)]" : ""}`} data-workbench-pane={current.paneId}>
+        <section className={`relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-primary)] ${chrome === "pane" ? "rounded-card border border-[var(--border-default)]" : ""}`} data-workbench-pane={current.paneId}>
           {chrome === "pane" ? (
           <header className="flex h-9 shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] pr-1">
             <div className="spectra-thin-scrollbar flex min-w-0 flex-1 overflow-x-auto">
@@ -78,7 +78,7 @@ export function WorkbenchSplitTree({
               ))}
             </div>
             {showPaneFocus ? (
-              <button type="button" onClick={() => setFocusedPaneId((value) => value === current.paneId ? null : current.paneId)} className="flex h-7 w-7 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label={focusedPaneId ? "Restore split layout" : `Focus ${active.title}`}>
+              <button type="button" onClick={() => setFocusedPaneId((value) => value === current.paneId ? null : current.paneId)} className="flex h-7 w-7 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label={focusedPaneId ? "Restore split layout" : `Focus ${active.title}`}>
                 {focusedPaneId ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
               </button>
             ) : null}

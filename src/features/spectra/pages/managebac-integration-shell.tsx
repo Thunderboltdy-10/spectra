@@ -160,13 +160,13 @@ function StatusPill({
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center gap-1 rounded-[5px] px-2 text-micro font-medium",
-        state === "good" && "bg-[#e7f6ef] text-[#287a5e]",
-        state === "warning" && "bg-[#fff3df] text-[#a46019]",
-        state === "danger" && "bg-[#fff0ed] text-[#b64838]",
+        "inline-flex h-5 items-center gap-1 rounded-chip px-2 text-micro font-medium",
+        state === "good" && "bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]",
+        state === "warning" && "bg-[color-mix(in oklab, var(--accent-gold) 18%, var(--bg-elevated))] text-[var(--accent-gold)]",
+        state === "danger" && "bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] text-[var(--accent-coral)]",
         state === "neutral" &&
           "bg-[var(--bg-secondary)] text-[var(--text-secondary)]",
-        state === "blue" && "bg-[#eaf3ff] text-[#3574ad]",
+        state === "blue" && "bg-[color-mix(in oklab, var(--accent-cyan) 10%, var(--bg-elevated))] text-[var(--accent-cyan)]",
       )}
     >
       {children}
@@ -188,10 +188,10 @@ function EmptyState({
       <span className="mb-3 text-[var(--text-tertiary)]">
         <Icon size={18} />
       </span>
-      <strong className="font-display text-[17px] font-semibold text-[var(--text-primary)]">
+      <strong className="font-display text-title font-semibold text-[var(--text-primary)]">
         {title}
       </strong>
-      <p className="mt-1 max-w-sm text-[12px] leading-5 text-[var(--text-tertiary)]">
+      <p className="mt-1 max-w-sm text-caption leading-5 text-[var(--text-tertiary)]">
         {detail}
       </p>
     </div>
@@ -214,12 +214,12 @@ function _SummaryMetric({
       <span className="block text-micro text-[var(--text-tertiary)]">
         {label}
       </span>
-      <strong className="mt-1 flex items-center gap-1.5 truncate text-[12px] font-semibold text-[var(--text-primary)]">
+      <strong className="mt-1 flex items-center gap-1.5 truncate text-caption font-semibold text-[var(--text-primary)]">
         {state ? (
           <span
             className={cn(
               "size-1.5 rounded-full",
-              state === "good" ? "bg-[#2aaa7b]" : "bg-[#e7a43d]",
+              state === "good" ? "bg-[var(--accent-mint)]" : "bg-[var(--accent-gold)]",
             )}
           />
         ) : null}
@@ -280,7 +280,7 @@ function RecordsList({
             className={cn(
               "grid size-6 shrink-0 place-items-center",
               record.tombstone
-                ? "text-[#b64838]"
+                ? "text-[var(--accent-coral)]"
                 : "text-[var(--text-tertiary)]",
             )}
           >
@@ -288,7 +288,7 @@ function RecordsList({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <strong className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+              <strong className="truncate text-caption font-medium text-[var(--text-primary)]">
                 {recordTitle(record)}
               </strong>
               {record.tombstone ? (
@@ -364,16 +364,16 @@ function PeriodMapPanel({
     <div className="grid gap-x-10 gap-y-7 xl:grid-cols-[minmax(0,1fr)_320px]">
       <section className="min-w-0">
         <header className="mb-4">
-          <div className="flex items-center gap-2"><Clock3 size={14} className="text-[#2f8769]" /><h2 className="text-[14px] font-semibold">Verified school periods</h2></div>
-          <p className="mt-1 max-w-2xl text-[11px] leading-5 text-[var(--text-tertiary)]">Calendar uses a period only when a source event has no exact time. Exact source times always win.</p>
+          <div className="flex items-center gap-2"><Clock3 size={14} className="text-[var(--accent-mint)]" /><h2 className="text-body font-semibold">Verified school periods</h2></div>
+          <p className="mt-1 max-w-2xl text-micro leading-5 text-[var(--text-tertiary)]">Calendar uses a period only when a source event has no exact time. Exact source times always win.</p>
         </header>
         {periodMaps.length ? (
           <div className="space-y-1">
             {periodMaps.slice().sort((a, b) => a.startMinutes - b.startMinutes).map((period) => (
               <article key={period._id} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-[var(--bg-secondary)]">
-                <span className="grid size-8 shrink-0 place-items-center text-micro font-bold text-[#277b5e]">{period.periodKey.slice(0, 3).toUpperCase()}</span>
-                <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="truncate text-[11px]">{period.label}</strong><StatusPill state="good">Verified</StatusPill></div><p className="mt-1 text-micro text-[var(--text-tertiary)]">{timeFromMinutes(period.startMinutes)}–{timeFromMinutes(period.endMinutes)} · {period.timezone} · {period.weekdays.map((day) => weekdays[day]).join(", ")}</p></div>
-                <button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(period._id)} className="grid size-7 place-items-center rounded-md text-[var(--text-tertiary)] opacity-0 hover:bg-[#fff0ed] hover:text-[#a84436] group-hover:opacity-100 focus:opacity-100 disabled:opacity-45" aria-label={`Remove ${period.label}`}><X size={13} /></button>
+                <span className="grid size-8 shrink-0 place-items-center text-micro font-bold text-[var(--accent-mint)]">{period.periodKey.slice(0, 3).toUpperCase()}</span>
+                <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="truncate text-micro">{period.label}</strong><StatusPill state="good">Verified</StatusPill></div><p className="mt-1 text-micro text-[var(--text-tertiary)]">{timeFromMinutes(period.startMinutes)}–{timeFromMinutes(period.endMinutes)} · {period.timezone} · {period.weekdays.map((day) => weekdays[day]).join(", ")}</p></div>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(period._id)} className="grid size-7 place-items-center rounded-md text-[var(--text-tertiary)] opacity-0 hover:bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] hover:text-[var(--accent-coral)] group-hover:opacity-100 focus:opacity-100 disabled:opacity-45" aria-label={`Remove ${period.label}`}><X size={13} /></button>
               </article>
             ))}
           </div>
@@ -383,8 +383,8 @@ function PeriodMapPanel({
       <section className="xl:pt-0.5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-[14px] font-semibold">Period editor</h2>
-            <p className="mt-1 text-[11px] leading-5 text-[var(--text-tertiary)]">Use the provider’s exact period key.</p>
+            <h2 className="text-body font-semibold">Period editor</h2>
+            <p className="mt-1 text-micro leading-5 text-[var(--text-tertiary)]">Use the provider’s exact period key.</p>
           </div>
           <button type="button" onClick={() => setEditorOpen((open) => !open)} className="grid size-8 shrink-0 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-expanded={editorOpen} aria-label={editorOpen ? "Close period editor" : "Add period"} title={editorOpen ? "Close period editor" : "Add period"}>
             {editorOpen ? <X size={14} /> : <Plus size={14} />}
@@ -405,14 +405,14 @@ function PeriodMapPanel({
         }}
       >
         <div className="grid grid-cols-2 gap-3">
-          <label className="text-micro font-medium text-[var(--text-secondary)]">Period key<input required value={draft.periodKey} onChange={(event) => setDraft((current) => ({ ...current, periodKey: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px] outline-none focus:border-[#39856d]" placeholder="period-1" /></label>
-          <label className="text-micro font-medium text-[var(--text-secondary)]">Label<input required value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px] outline-none focus:border-[#39856d]" placeholder="Period 1" /></label>
-          <label className="text-micro font-medium text-[var(--text-secondary)]">Start<input required type="time" value={draft.start} onChange={(event) => setDraft((current) => ({ ...current, start: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px]" /></label>
-          <label className="text-micro font-medium text-[var(--text-secondary)]">End<input required type="time" value={draft.end} onChange={(event) => setDraft((current) => ({ ...current, end: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px]" /></label>
+          <label className="text-micro font-medium text-[var(--text-secondary)]">Period key<input required value={draft.periodKey} onChange={(event) => setDraft((current) => ({ ...current, periodKey: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro outline-none focus:border-[var(--accent-mint)]" placeholder="period-1" /></label>
+          <label className="text-micro font-medium text-[var(--text-secondary)]">Label<input required value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro outline-none focus:border-[var(--accent-mint)]" placeholder="Period 1" /></label>
+          <label className="text-micro font-medium text-[var(--text-secondary)]">Start<input required type="time" value={draft.start} onChange={(event) => setDraft((current) => ({ ...current, start: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro" /></label>
+          <label className="text-micro font-medium text-[var(--text-secondary)]">End<input required type="time" value={draft.end} onChange={(event) => setDraft((current) => ({ ...current, end: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro" /></label>
         </div>
-        <label className="mt-3 block text-micro font-medium text-[var(--text-secondary)]">IANA timezone<input required value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px]" placeholder="Europe/Madrid" /></label>
-        <fieldset className="mt-3"><legend className="text-micro font-medium text-[var(--text-secondary)]">Weekdays</legend><div className="mt-1.5 flex flex-wrap gap-1">{weekdays.map((label, value) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(value)} onClick={() => setDraft((current) => ({ ...current, weekdays: current.weekdays.includes(value) ? current.weekdays.filter((day) => day !== value) : [...current.weekdays, value].sort() }))} className={cn("h-7 rounded-md border px-2 text-micro font-semibold", draft.weekdays.includes(value) ? "border-[#2d7d62] bg-[#edf8f3] text-[#24664f]" : "border-[var(--border-default)] text-[var(--text-tertiary)]")}>{label}</button>)}</div></fieldset>
-        <button type="submit" disabled={Boolean(busy)} className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#173d33] text-micro font-semibold text-white disabled:opacity-45"><Save size={13} />Verify period</button>
+        <label className="mt-3 block text-micro font-medium text-[var(--text-secondary)]">IANA timezone<input required value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro" placeholder="Europe/Madrid" /></label>
+        <fieldset className="mt-3"><legend className="text-micro font-medium text-[var(--text-secondary)]">Weekdays</legend><div className="mt-1.5 flex flex-wrap gap-1">{weekdays.map((label, value) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(value)} onClick={() => setDraft((current) => ({ ...current, weekdays: current.weekdays.includes(value) ? current.weekdays.filter((day) => day !== value) : [...current.weekdays, value].sort() }))} className={cn("h-7 rounded-md border px-2 text-micro font-semibold", draft.weekdays.includes(value) ? "border-[var(--accent-mint)] bg-[color-mix(in oklab, var(--accent-mint) 8%, var(--bg-primary))] text-[var(--accent-mint)]" : "border-[var(--border-default)] text-[var(--text-tertiary)]")}>{label}</button>)}</div></fieldset>
+        <button type="submit" disabled={Boolean(busy)} className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[var(--accent-mint)] text-micro font-semibold text-white disabled:opacity-45"><Save size={13} />Verify period</button>
       </form> : null}
       </section>
     </div>
@@ -578,7 +578,7 @@ export function ManageBacIntegrationShell() {
   if (loading)
     return (
       <div className="grid h-full min-h-[70vh] place-items-center bg-[var(--bg-primary)]">
-        <div className="flex items-center gap-2 text-[12px] text-[var(--text-tertiary)]">
+        <div className="flex items-center gap-2 text-caption text-[var(--text-tertiary)]">
           <LoaderCircle className="animate-spin" size={15} />
           Loading school data integration
         </div>
@@ -591,7 +591,7 @@ export function ManageBacIntegrationShell() {
         <div className="flex min-h-full w-full flex-col px-4 pb-24 pt-3 sm:px-6 lg:px-8">
           {error ? (
             <div
-              className="mb-2 flex items-start gap-2 rounded-lg border border-[#edc7bf] bg-[#fff7f4] px-3 py-2.5 text-[11px] leading-5 text-[#9a4336]"
+              className="mb-2 flex items-start gap-2 rounded-lg border border-[color-mix(in oklab, var(--accent-coral) 22%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] px-3 py-2.5 text-micro leading-5 text-[var(--danger)]"
               role="alert"
             >
               <AlertTriangle className="mt-0.5 shrink-0" size={14} />
@@ -599,7 +599,7 @@ export function ManageBacIntegrationShell() {
               <button
                 type="button"
                 onClick={() => setError("")}
-                className="grid size-5 place-items-center rounded hover:bg-[#f5ded8]"
+                className="grid size-5 place-items-center rounded hover:bg-[color-mix(in oklab, var(--accent-coral) 18%, var(--bg-elevated))]"
                 aria-label="Dismiss error"
               >
                 <X size={12} />
@@ -615,28 +615,28 @@ export function ManageBacIntegrationShell() {
               description="Manage the school connection, synchronization, and verified provider records. Class workspaces are created explicitly from School data."
               actions={
                 <>
-                  <button type="button" onClick={() => void refresh()} className="inline-flex size-8 items-center justify-center rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Refresh connection data" title="Refresh connection data"><RefreshCw size={13} /></button>
-                  {integration ? <button type="button" disabled={Boolean(busy)} onClick={() => void runAction("sync", () => syncSpectraManageBac())} className="inline-flex h-8 items-center gap-2 rounded-[7px] bg-[var(--text-primary)] px-3 text-[11px] font-medium text-[var(--bg-primary)] transition hover:opacity-90 disabled:opacity-60"><RefreshCw size={13} className={busy === "sync" ? "animate-spin" : ""} />Sync now</button> : null}
-                  {overview?.admin ? <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex size-8 items-center justify-center rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="ManageBac settings" title="ManageBac settings"><Settings2 size={13} /></button> : null}
+                  <button type="button" onClick={() => void refresh()} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Refresh connection data" title="Refresh connection data"><RefreshCw size={13} /></button>
+                  {integration ? <button type="button" disabled={Boolean(busy)} onClick={() => void runAction("sync", () => syncSpectraManageBac())} className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3 text-micro font-medium text-[var(--bg-primary)] transition hover:opacity-90 disabled:opacity-60"><RefreshCw size={13} className={busy === "sync" ? "animate-spin" : ""} />Sync now</button> : null}
+                  {overview?.admin ? <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="ManageBac settings" title="ManageBac settings"><Settings2 size={13} /></button> : null}
                   {!contextOpen ? <AuxiliaryRailTrigger label="ManageBac context" onOpen={() => setContextOpen(true)} /> : null}
                 </>
               }
             />
 
             {!integration && (
-              <div className="mb-1 rounded-[9px] border border-dashed border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-secondary)_45%,transparent)] px-5 py-5">
+              <div className="mb-1 rounded-card border border-dashed border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-secondary)_45%,transparent)] px-5 py-5">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <span className="grid size-9 place-items-center rounded-lg bg-[var(--bg-elevated)] text-[#39799e]">
+                    <span className="grid size-9 place-items-center rounded-lg bg-[var(--bg-elevated)] text-[var(--accent-cyan)]">
                       <KeyRound size={16} />
                     </span>
                     <div>
-                      <strong className="text-[13px] font-semibold">
+                      <strong className="text-ui font-semibold">
                         {overview?.admin
                           ? "Connect your school’s read-only API"
                           : "Your school has not connected ManageBac"}
                       </strong>
-                      <p className="mt-1 max-w-xl text-[11px] leading-5 text-[var(--text-tertiary)]">
+                      <p className="mt-1 max-w-xl text-micro leading-5 text-[var(--text-tertiary)]">
                         {overview?.admin
                           ? "Use the tenant API Manager reference—Spectra never guesses routes, sends write requests, or exposes the school token."
                           : "A school administrator must configure and verify the tenant capabilities before personal synchronization is available."}
@@ -647,7 +647,7 @@ export function ManageBacIntegrationShell() {
                     <button
                       type="button"
                       onClick={() => setSettingsOpen(true)}
-                      className="inline-flex h-8 items-center gap-2 rounded-[7px] bg-[#20211e] px-3.5 text-[11px] font-medium text-white shadow-sm hover:bg-[#31322e]"
+                      className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3.5 text-micro font-medium text-white shadow-sm hover:bg-[var(--text-primary)]"
                     >
                       <Link2 size={13} />
                       Connect ManageBac
@@ -674,13 +674,13 @@ export function ManageBacIntegrationShell() {
                 />
               ) : !overview?.admin && data?.mapping?.status !== "verified" ? (
                 <div className="mx-auto flex min-h-[390px] max-w-lg flex-col items-center justify-center text-center">
-                  <span className="grid size-12 place-items-center rounded-2xl bg-[#edf5ff] text-[#3b77a8]">
+                  <span className="grid size-12 place-items-center rounded-2xl bg-[color-mix(in oklab, var(--accent-cyan) 8%, var(--bg-elevated))] text-[var(--accent-cyan)]">
                     <UserCheck size={22} />
                   </span>
                   <h2 className="mt-4 font-display text-xl font-semibold">
                     Match your verified school account
                   </h2>
-                  <p className="mt-2 text-[12px] leading-5 text-[var(--text-tertiary)]">
+                  <p className="mt-2 text-caption leading-5 text-[var(--text-tertiary)]">
                     Spectra searches only for your authenticated school email,
                     accepts exactly one match, and never sends or reveals a
                     selectable student ID.
@@ -693,7 +693,7 @@ export function ManageBacIntegrationShell() {
                         resolveSpectraManageBacIdentity(),
                       )
                     }
-                    className="mt-5 inline-flex h-9 items-center gap-2 rounded-lg bg-[#20211e] px-4 text-[11px] font-medium text-white disabled:opacity-60"
+                    className="mt-5 inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-micro font-medium text-white disabled:opacity-60"
                   >
                     {busy === "identity" ? (
                       <LoaderCircle className="animate-spin" size={14} />
@@ -708,32 +708,32 @@ export function ManageBacIntegrationShell() {
                   <section className="min-w-0">
                     <p className="text-micro font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Connection</p>
                     <div className="mt-3 flex items-start gap-3">
-                      <span className={cn("mt-2 size-2.5 shrink-0 rounded-full shadow-[0_0_0_5px_color-mix(in_oklab,currentColor_10%,transparent)]", integration.status === "connected" ? "text-emerald-600 bg-emerald-600" : "text-amber-500 bg-amber-500")} />
+                      <span className={cn("mt-2 size-2.5 shrink-0 rounded-full ring-4 ring-current/10", integration.status === "connected" ? "text-emerald-600 bg-emerald-600" : "text-amber-500 bg-amber-500")} />
                       <div>
-                        <h2 className="font-display text-[24px] font-semibold tracking-[-0.02em]">{integration.status === "connected" ? "ManageBac is connected" : "The connection needs attention"}</h2>
-                        <p className="mt-2 max-w-xl text-[12px] leading-5 text-[var(--text-secondary)]">{integration.status === "connected" ? "Verified school records are available to Spectra." : "The last synchronization completed with partial coverage. Existing verified records remain available."}</p>
+                        <h2 className="font-display text-metric font-semibold tracking-[-0.02em]">{integration.status === "connected" ? "ManageBac is connected" : "The connection needs attention"}</h2>
+                        <p className="mt-2 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">{integration.status === "connected" ? "Verified school records are available to Spectra." : "The last synchronization completed with partial coverage. Existing verified records remain available."}</p>
                       </div>
                     </div>
-                    <p className="ml-5 mt-4 text-[11px] text-[var(--text-tertiary)]">{data?.school?.name ?? "Your school"} · last synchronized {integration.lastSyncAt ? relative(integration.lastSyncAt) : "never"} · {data?.conflicts.length ?? 0} conflicts</p>
+                    <p className="ml-5 mt-4 text-micro text-[var(--text-tertiary)]">{data?.school?.name ?? "Your school"} · last synchronized {integration.lastSyncAt ? relative(integration.lastSyncAt) : "never"} · {data?.conflicts.length ?? 0} conflicts</p>
                     <div className="ml-5 mt-5 flex flex-wrap gap-1">
-                      <button type="button" onClick={() => setTab("history")} className="h-8 rounded-lg px-3 text-[11px] font-medium hover:bg-[var(--bg-hover)]">Sync history</button>
-                      <button type="button" onClick={() => setTab("conflicts")} className="h-8 rounded-lg px-3 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">Review conflicts</button>
+                      <button type="button" onClick={() => setTab("history")} className="h-8 rounded-lg px-3 text-micro font-medium hover:bg-[var(--bg-hover)]">Sync history</button>
+                      <button type="button" onClick={() => setTab("conflicts")} className="h-8 rounded-lg px-3 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">Review conflicts</button>
                     </div>
                   </section>
 
                   <section className="min-w-0 lg:pt-1">
-                    <h2 className="text-[14px] font-semibold">Synchronized data</h2>
-                    <p className="mt-1 text-[11px] leading-5 text-[var(--text-tertiary)]">Open a verified source collection.</p>
+                    <h2 className="text-body font-semibold">Synchronized data</h2>
+                    <p className="mt-1 text-micro leading-5 text-[var(--text-tertiary)]">Open a verified source collection.</p>
                     <div className="mt-3 space-y-1">
                       {([
                         ["Classes", classes.length, "classes", BookOpen],
                         ["Calendar", timetable.length, "calendar", CalendarDays],
                         ["Tasks", tasks.length, "tasks", ListChecks],
                       ] as const).map(([label, count, target, Icon]) => (
-                        <button key={target} type="button" onClick={() => setTab(target)} className="group flex h-11 w-full items-center gap-3 rounded-xl px-2.5 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]">
+                        <button key={target} type="button" onClick={() => setTab(target)} className="group flex h-11 w-full items-center gap-3 rounded-xl px-2.5 text-micro text-[var(--text-secondary)] transition hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]">
                           <Icon size={14} className="text-[var(--text-tertiary)] transition-transform group-hover:scale-110 group-hover:text-[var(--text-primary)]" />
                           <span className="flex-1 text-left">{label}</span>
-                          <strong className="font-display text-[16px] font-semibold tabular-nums text-[var(--text-primary)]">{count}</strong>
+                          <strong className="font-display text-editor font-semibold tabular-nums text-[var(--text-primary)]">{count}</strong>
                           <ChevronRight size={13} className="text-[var(--text-tertiary)] transition-transform group-hover:translate-x-0.5" />
                         </button>
                       ))}
@@ -821,7 +821,7 @@ export function ManageBacIntegrationShell() {
               type="button"
               onClick={() => setDetailsTab(item)}
               className={cn(
-                "h-7 rounded-md text-[11px] capitalize text-[var(--text-tertiary)] transition",
+                "h-7 rounded-md text-micro capitalize text-[var(--text-tertiary)] transition",
                 detailsTab === item &&
                   "bg-[color-mix(in_oklab,var(--text-primary)_7%,transparent)] font-medium text-[var(--text-primary)]",
               )}
@@ -835,14 +835,14 @@ export function ManageBacIntegrationShell() {
           <div className="space-y-7 px-4 pb-5 pt-3">
             <RightCard title="Integration">
               <div className="flex items-center gap-2.5">
-                <span className="grid size-7 place-items-center text-[#367ea8]">
+                <span className="grid size-7 place-items-center text-[var(--accent-cyan)]">
                   <Network size={15} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <strong className="block text-[12px] font-medium">
+                  <strong className="block text-caption font-medium">
                     ManageBac
                   </strong>
-                  <span className="block truncate text-[11px] text-[var(--text-tertiary)]">
+                  <span className="block truncate text-micro text-[var(--text-tertiary)]">
                     {integration?.providerVersion
                       ? `Reference ${integration.providerVersion}`
                       : "Tenant-verified API"}
@@ -859,12 +859,12 @@ export function ManageBacIntegrationShell() {
             </RightCard>
             <RightCard title="Connected school">
               <div className="flex items-center gap-2.5">
-                <School size={16} className="text-[#6e62d8]" />
+                <School size={16} className="text-[var(--brand-primary)]" />
                 <div className="min-w-0">
-                  <strong className="block truncate text-[12px] font-medium">
+                  <strong className="block truncate text-caption font-medium">
                     {data?.school?.name ?? "Your school"}
                   </strong>
-                  <span className="text-[11px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Read-only operational connection
                   </span>
                 </div>
@@ -919,7 +919,7 @@ export function ManageBacIntegrationShell() {
               ) : null}
             </RightCard>
             <RightCard title="Data provenance">
-              <p className="text-[11px] leading-5 text-[var(--text-secondary)]">
+              <p className="text-micro leading-5 text-[var(--text-secondary)]">
                 Imported records retain source identity, contract version,
                 refresh time, and tombstone state. User overlays remain
                 separate.
@@ -927,7 +927,7 @@ export function ManageBacIntegrationShell() {
               <button
                 type="button"
                 onClick={() => setTab("provenance")}
-                className="mt-2 text-micro text-[#3676b0]"
+                className="mt-2 text-micro text-[var(--accent-cyan)]"
               >
                 Review provenance
               </button>
@@ -990,10 +990,10 @@ export function ManageBacIntegrationShell() {
                     <History size={11} />
                   </span>
                   <div className="min-w-0">
-                    <strong className="block text-[11px] font-medium capitalize">
+                    <strong className="block text-micro font-medium capitalize">
                       {run.kind} sync {run.status.replaceAll("_", " ")}
                     </strong>
-                    <span className="block text-[11px] text-[var(--text-tertiary)]">
+                    <span className="block text-micro text-[var(--text-tertiary)]">
                       {run.counts.created} added · {run.counts.updated} updated
                       · {relative(run.completedAt ?? run.createdAt)}
                     </span>
@@ -1078,18 +1078,18 @@ function SyncTable({ runs }: { runs: SpectraManageBacSyncRun[] }) {
               key={run._id}
               className="group"
             >
-              <td className="rounded-l-lg px-4 py-2.5 text-[11px] transition-colors group-hover:bg-[var(--bg-secondary)]">
+              <td className="rounded-l-lg px-4 py-2.5 text-micro transition-colors group-hover:bg-[var(--bg-secondary)]">
                 {formatDate(run.completedAt ?? run.createdAt)}
               </td>
               <td className="px-3 py-2.5 transition-colors group-hover:bg-[var(--bg-secondary)]">
                 <SyncStatus run={run} />
               </td>
-              <td className="px-3 py-2.5 text-[11px] transition-colors group-hover:bg-[var(--bg-secondary)]">{run.counts.created}</td>
-              <td className="px-3 py-2.5 text-[11px] transition-colors group-hover:bg-[var(--bg-secondary)]">{run.counts.updated}</td>
-              <td className="px-3 py-2.5 text-[11px] transition-colors group-hover:bg-[var(--bg-secondary)]">
+              <td className="px-3 py-2.5 text-micro transition-colors group-hover:bg-[var(--bg-secondary)]">{run.counts.created}</td>
+              <td className="px-3 py-2.5 text-micro transition-colors group-hover:bg-[var(--bg-secondary)]">{run.counts.updated}</td>
+              <td className="px-3 py-2.5 text-micro transition-colors group-hover:bg-[var(--bg-secondary)]">
                 {run.counts.conflicts}
               </td>
-              <td className="rounded-r-lg px-3 py-2.5 text-[11px] capitalize text-[var(--text-secondary)] transition-colors group-hover:bg-[var(--bg-secondary)]">
+              <td className="rounded-r-lg px-3 py-2.5 text-micro capitalize text-[var(--text-secondary)] transition-colors group-hover:bg-[var(--bg-secondary)]">
                 {run.kind}
               </td>
             </tr>
@@ -1120,11 +1120,11 @@ function ConflictList({
         return (
           <article key={conflict._id} className="rounded-xl px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]">
             <div className="flex items-start gap-2.5">
-              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[#fff3df] text-[#d17a21]">
+              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[color-mix(in oklab, var(--accent-gold) 18%, var(--bg-elevated))] text-[var(--accent-gold)]">
                 <AlertCircle size={12} />
               </span>
               <div className="min-w-0 flex-1">
-                <strong className="block text-[11px] font-medium">
+                <strong className="block text-micro font-medium">
                   {conflict.kind.replaceAll("_", " ")}
                 </strong>
                 <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
@@ -1151,7 +1151,7 @@ function ConflictList({
                   type="button"
                   disabled={Boolean(busy)}
                   onClick={() => onResolve(conflict, "rebase")}
-                  className="h-7 rounded-md bg-[#20211e] px-2.5 text-micro text-white hover:bg-[#30312d] disabled:opacity-50"
+                  className="h-7 rounded-md bg-[var(--text-primary)] px-2.5 text-micro text-white hover:bg-[var(--text-primary)] disabled:opacity-50"
                 >
                   Rebase
                 </button>
@@ -1197,7 +1197,7 @@ function ProvenancePanel({
       <section className="min-w-0">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-[12px] font-semibold">
+            <h2 className="text-caption font-semibold">
               Verified capability manifest
             </h2>
             <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
@@ -1208,7 +1208,7 @@ function ProvenancePanel({
             <button
               type="button"
               onClick={onOpenManifest}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-micro text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
               <Code2 size={11} />
               Import manifest
@@ -1278,7 +1278,7 @@ function ProvenancePanel({
       </section>
       <div className="space-y-10">
         <section>
-          <h2 className="text-[12px] font-semibold">Source guarantees</h2>
+          <h2 className="text-caption font-semibold">Source guarantees</h2>
           <div className="mt-3 space-y-3">
             {[
               [
@@ -1307,7 +1307,7 @@ function ProvenancePanel({
                 <div key={String(title)} className="flex gap-2.5">
                   <ItemIcon
                     size={14}
-                    className="mt-0.5 shrink-0 text-[#367f67]"
+                    className="mt-0.5 shrink-0 text-[var(--accent-mint)]"
                   />
                   <div>
                     <strong className="block text-micro font-medium">
@@ -1324,7 +1324,7 @@ function ProvenancePanel({
         </section>
         <section>
           <div className="flex items-center justify-between">
-            <h2 className="text-[12px] font-semibold">Quarantine</h2>
+            <h2 className="text-caption font-semibold">Quarantine</h2>
             <StatusPill state={quarantine.length ? "warning" : "good"}>
               {quarantine.length} open
             </StatusPill>
@@ -1334,14 +1334,14 @@ function ProvenancePanel({
             live records.
           </p>
           {quarantine.length ? <div className="mt-3 flex items-center gap-1">
-            {admin ? <button type="button" onClick={onOpenManifest} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Code2 size={12} />Update manifest</button> : null}
-            <button type="button" onClick={onRetrySync} disabled={syncBusy} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50"><RefreshCw size={12} className={syncBusy ? "animate-spin" : ""} />Retry sync</button>
+            {admin ? <button type="button" onClick={onOpenManifest} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-micro font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Code2 size={12} />Update manifest</button> : null}
+            <button type="button" onClick={onRetrySync} disabled={syncBusy} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-micro font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50"><RefreshCw size={12} className={syncBusy ? "animate-spin" : ""} />Retry sync</button>
           </div> : null}
           {quarantine.slice(0, 5).map((item) => (
             <a
               key={item._id}
               href={`#capability-${item.capabilityId}`}
-              className="group mt-1 flex items-center gap-2 rounded-lg px-2 py-2 text-[11px] text-[#8a5a26] transition-colors hover:bg-amber-500/8"
+              className="group mt-1 flex items-center gap-2 rounded-lg px-2 py-2 text-micro text-[var(--accent-gold)] transition-colors hover:bg-amber-500/8"
               title="Inspect the quarantined capability"
             >
               <AlertTriangle size={12} className="shrink-0" />
@@ -1355,7 +1355,7 @@ function ProvenancePanel({
         {admin ? (
           <section>
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-[12px] font-semibold">Identity resolution</h2>
+              <h2 className="text-caption font-semibold">Identity resolution</h2>
               <StatusPill state={identityQueue.length ? "warning" : "good"}>
                 {identityQueue.length} needs attention
               </StatusPill>
@@ -1390,7 +1390,7 @@ function ProvenancePanel({
             ))}
           </section>
         ) : null}
-        <p className="text-[11px] leading-5 text-[var(--text-tertiary)]">{records.length} accessible normalized records. Raw provider payloads stay server-side.</p>
+        <p className="text-micro leading-5 text-[var(--text-tertiary)]">{records.length} accessible normalized records. Raw provider payloads stay server-side.</p>
       </div>
     </div>
   );
@@ -1405,7 +1405,7 @@ function RightCard({
 }) {
   return (
     <section>
-      <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+      <h3 className="mb-2.5 text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
         {title}
       </h3>
       {children}
@@ -1427,13 +1427,13 @@ function DetailRow({
   return (
     <div className="flex min-h-8 items-center gap-2 rounded-lg px-1 transition-colors hover:bg-[var(--bg-hover)]">
       <Icon size={12} className="text-[var(--text-tertiary)]" />
-      <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-secondary)]">
+      <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-secondary)]">
         {label}
       </span>
       <span
         className={cn(
-          "shrink-0 text-[11px] text-[var(--text-secondary)]",
-          good && "text-[#2d8b68]",
+          "shrink-0 text-micro text-[var(--text-secondary)]",
+          good && "text-[var(--accent-mint)]",
         )}
       >
         {value}
@@ -1458,7 +1458,7 @@ function QuickAction({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex h-9 w-full items-center gap-2 rounded-lg px-1.5 text-left text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
+      className="flex h-9 w-full items-center gap-2 rounded-lg px-1.5 text-left text-micro text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
     >
       <Icon size={13} />
       {label}
@@ -1489,18 +1489,18 @@ function SettingsDialog({
   onManifest: () => void;
 }) {
   const input =
-    "h-9 w-full rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-[11px] outline-none focus:border-[#7aa999] focus:ring-2 focus:ring-[#dceee7]";
+    "h-9 w-full rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-micro outline-none focus:border-[#7aa999] focus:ring-2 focus:ring-[#dceee7]";
   const canConnectWithoutTypedToken =
     !connected && envTokenAvailable && config.token.length === 0;
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-[#1d211e]/25 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       aria-label="ManageBac settings"
     >
-      <div className="max-h-[92vh] w-full max-w-[520px] overflow-y-auto rounded-[13px] border border-white/70 bg-[#fbfaf8] shadow-[0_24px_80px_rgba(20,24,21,.25)]">
-        <header className="sticky top-0 z-10 flex items-start justify-between border-b border-[var(--border-subtle)] bg-[#fbfaf8]/95 px-5 py-4 backdrop-blur">
+      <div className="max-h-[92vh] w-full max-w-[520px] overflow-y-auto rounded-surface border border-white/70 bg-[var(--bg-primary)] shadow-[var(--shadow-lg)]">
+        <header className="sticky top-0 z-chrome flex items-start justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 px-5 py-4 backdrop-blur">
           <div>
             <h2 className="font-display text-xl font-semibold">
               ManageBac connection
@@ -1561,17 +1561,17 @@ function SettingsDialog({
               }
             />
           </label>
-          <div className="rounded-[8px] border border-[#cfe5da] bg-[#f3f9f6] p-3 text-micro leading-4 text-[#426b5c]">
+          <div className="rounded-control border border-[color-mix(in oklab, var(--accent-mint) 18%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-mint) 6%, var(--bg-primary))] p-3 text-micro leading-4 text-[var(--accent-mint)]">
             Sync cadence, auth header format, and conflict policy are fixed by
             Spectra. Individual users cannot supply their own ManageBac keys.
           </div>
-          <section className="rounded-lg border border-[#cfe5da] bg-[#f1f8f5] p-3">
+          <section className="rounded-lg border border-[color-mix(in oklab, var(--accent-mint) 18%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-mint) 6%, var(--bg-primary))] p-3">
             <div className="flex gap-2">
               <ShieldCheck
                 size={15}
-                className="mt-0.5 shrink-0 text-[#2e8665]"
+                className="mt-0.5 shrink-0 text-[var(--accent-mint)]"
               />
-              <p className="text-micro leading-4 text-[#426b5c]">
+              <p className="text-micro leading-4 text-[var(--accent-mint)]">
                 Spectra rejects write routes, private-network hosts, redirects,
                 unverified schemas, broad identity enumeration, and any
                 client-supplied ManageBac user ID.
@@ -1579,12 +1579,12 @@ function SettingsDialog({
             </div>
           </section>
         </div>
-        <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] bg-[#fbfaf8]/95 px-5 py-3 backdrop-blur">
+        <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 px-5 py-3 backdrop-blur">
           <button
             type="button"
             onClick={onManifest}
             disabled={!connected}
-            className="inline-flex h-8 items-center gap-2 rounded-[7px] border border-[var(--border-subtle)] px-3 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-45"
+            className="inline-flex h-8 items-center gap-2 rounded-control border border-[var(--border-subtle)] px-3 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-45"
           >
             <Code2 size={12} />
             Capability manifest
@@ -1593,7 +1593,7 @@ function SettingsDialog({
             <button
               type="button"
               onClick={onClose}
-              className="h-8 rounded-[7px] px-3 text-micro hover:bg-[var(--bg-secondary)]"
+              className="h-8 rounded-control px-3 text-micro hover:bg-[var(--bg-secondary)]"
             >
               Cancel
             </button>
@@ -1608,7 +1608,7 @@ function SettingsDialog({
                 (config.token.length > 0 && config.token.length < 16)
               }
               onClick={onSave}
-              className="inline-flex h-8 items-center gap-2 rounded-[7px] bg-[#20211e] px-3.5 text-micro font-medium text-white disabled:opacity-45"
+              className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3.5 text-micro font-medium text-white disabled:opacity-45"
             >
               {busy ? (
                 <LoaderCircle className="animate-spin" size={12} />
@@ -1643,12 +1643,12 @@ function ManifestDialog({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-[#1d211e]/25 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       aria-label="Import capability manifest"
     >
-      <div className="w-full max-w-[760px] overflow-hidden rounded-[13px] border border-white/70 bg-[#fbfaf8] shadow-[0_24px_80px_rgba(20,24,21,.25)]">
+      <div className="w-full max-w-[760px] overflow-hidden rounded-surface border border-white/70 bg-[var(--bg-primary)] shadow-[var(--shadow-lg)]">
         <header className="flex items-start justify-between border-b border-[var(--border-subtle)] px-5 py-4">
           <div>
             <h2 className="font-display text-xl font-semibold">
@@ -1676,12 +1676,12 @@ function ManifestDialog({
             value={value}
             onChange={(event) => setValue(event.target.value)}
             spellCheck={false}
-            className="h-[400px] w-full resize-none rounded-[9px] border border-[var(--border-subtle)] bg-[#20231f] p-4 font-mono text-micro leading-5 text-[#dce9df] outline-none focus:ring-2 focus:ring-[#bfd9cf]"
+            className="h-[400px] w-full resize-none rounded-card border border-[var(--border-subtle)] bg-[var(--text-primary)] p-4 font-mono text-micro leading-5 [color:color-mix(in_oklab,var(--accent-mint)_14%,var(--bg-elevated))] outline-none focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-mint)_22%,var(--bg-elevated))]"
             placeholder={
               '{\n  "providerVersion": "tenant reference version",\n  "capabilities": [\n    {\n      "category": "Classes",\n      "name": "My classes",\n      "recordType": "class",\n      "path": "/verified/tenant/path",\n      "purpose": "Import the authenticated user’s current classes",\n      "scope": "personal",\n      "minimumRole": "student",\n      "pagination": "page",\n      "changeStrategy": "full_reconciliation",\n      "freshnessSlaMinutes": 120,\n      "contractVersion": "…",\n      "responseSchemaHash": "…",\n      "permissionState": "read_only",\n      "verificationStatus": "verified",\n      "routeSource": "tenant_reference",\n      "normalization": { "recordsPath": "…", "idPath": "…" }\n    }\n  ]\n}'
             }
           />
-          <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#fff7ed] px-3 py-2.5 text-micro leading-4 text-[#8b5b2c]">
+          <div className="mt-3 flex items-start gap-2 rounded-lg bg-[color-mix(in oklab, var(--accent-gold) 10%, var(--bg-elevated))] px-3 py-2.5 text-micro leading-4 text-[var(--accent-gold)]">
             <TriangleAlert className="mt-0.5 shrink-0" size={13} />
             Do not paste the API token, raw student responses, or copied payload
             contents. The manifest contains contracts and mappings only.
@@ -1691,7 +1691,7 @@ function ManifestDialog({
           <button
             type="button"
             onClick={onClose}
-            className="h-8 rounded-[7px] px-3 text-micro hover:bg-[var(--bg-secondary)]"
+            className="h-8 rounded-control px-3 text-micro hover:bg-[var(--bg-secondary)]"
           >
             Cancel
           </button>
@@ -1699,7 +1699,7 @@ function ManifestDialog({
             type="button"
             disabled={busy || !value.trim()}
             onClick={onImport}
-            className="inline-flex h-8 items-center gap-2 rounded-[7px] bg-[#20211e] px-3.5 text-micro font-medium text-white disabled:opacity-45"
+            className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3.5 text-micro font-medium text-white disabled:opacity-45"
           >
             {busy ? (
               <LoaderCircle className="animate-spin" size={12} />
@@ -1725,19 +1725,19 @@ function DisconnectDialog({
 }) {
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-center bg-[#1d211e]/25 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-dropdown grid place-items-center bg-[var(--text-primary)]/25 p-4 backdrop-blur-[2px]"
       role="alertdialog"
       aria-modal="true"
       aria-label="Disconnect ManageBac"
     >
-      <div className="w-full max-w-[430px] rounded-[13px] border border-white/70 bg-[#fbfaf8] p-5 shadow-[0_24px_80px_rgba(20,24,21,.25)]">
-        <span className="grid size-10 place-items-center rounded-xl bg-[#fff0ed] text-[#b54b3d]">
+      <div className="w-full max-w-[430px] rounded-surface border border-white/70 bg-[var(--bg-primary)] p-5 shadow-[var(--shadow-lg)]">
+        <span className="grid size-10 place-items-center rounded-xl bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] text-[var(--accent-coral)]">
           <AlertTriangle size={18} />
         </span>
         <h2 className="mt-4 font-display text-xl font-semibold">
           Disconnect ManageBac?
         </h2>
-        <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">
+        <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
           The server-side token will be revoked, scheduled runs will stop, and
           identity mappings will be cleared. Imported artifacts and user
           overlays remain intact with stale or removed-source provenance.
@@ -1747,7 +1747,7 @@ function DisconnectDialog({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="h-8 rounded-[7px] px-3 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
+            className="h-8 rounded-control px-3 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
           >
             Keep connected
           </button>
@@ -1755,7 +1755,7 @@ function DisconnectDialog({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="inline-flex h-8 items-center gap-2 rounded-[7px] bg-[#a94337] px-3.5 text-micro font-medium text-white disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--danger)] px-3.5 text-micro font-medium text-white disabled:opacity-50"
           >
             {busy ? (
               <LoaderCircle className="animate-spin" size={12} />

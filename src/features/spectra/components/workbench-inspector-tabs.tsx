@@ -188,7 +188,7 @@ export function WorkbenchInspectorTabs({
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
-            className={`h-9 border-b-2 text-[12px] font-medium transition ${tab === key ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"}`}
+            className={`h-9 border-b-2 text-caption font-medium transition ${tab === key ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"}`}
           >
             {tabLabels[key]}
           </button>
@@ -199,7 +199,7 @@ export function WorkbenchInspectorTabs({
       {tab === "comments" ? (
         <section className="py-4" role="tabpanel">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] text-[var(--text-secondary)]">
+            <span className="text-micro text-[var(--text-secondary)]">
               {comments.filter((comment) => comment.status === "open" || comment.status === "orphaned").length} open
             </span>
             <label className="flex items-center gap-1.5 text-micro text-[var(--text-secondary)]">
@@ -213,13 +213,13 @@ export function WorkbenchInspectorTabs({
             {visibleComments.map((comment) => {
               const orphaned = comment.status === "orphaned";
               return (
-                <article key={comment._id} data-selected={selectedCommentId === comment._id} className={`rounded-[8px] border bg-[var(--bg-elevated)] p-3 ${selectedCommentId === comment._id ? "border-[var(--accent-cyan)] shadow-[0_0_0_2px_color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]" : "border-[var(--border-default)]"}`}>
+                <article key={comment._id} data-selected={selectedCommentId === comment._id} className={`rounded-control border bg-[var(--bg-elevated)] p-3 ${selectedCommentId === comment._id ? "border-[var(--accent-cyan)] shadow-[0_0_0_2px_color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]" : "border-[var(--border-default)]"}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-[11px] font-semibold text-[var(--text-primary)]">{comment.author?.name ?? "Former collaborator"}</span>
+                    <span className="truncate text-micro font-semibold text-[var(--text-primary)]">{comment.author?.name ?? "Former collaborator"}</span>
                     <span className="shrink-0 text-micro text-[var(--text-tertiary)]">{formatRelativeTime(comment.createdAt)}</span>
                   </div>
-                  <SpectraRichContent content={comment.body} className="mt-1.5 whitespace-pre-wrap text-[12px] leading-5 text-[var(--text-secondary)]" />
-                  <button type="button" onClick={() => void revealOrReanchor(comment)} className={`mt-2 flex w-full items-center gap-1.5 rounded-[6px] px-2 py-1.5 text-left text-micro ${orphaned ? "bg-[color-mix(in_oklab,#d88922_8%,var(--bg-secondary))] text-[#a96816]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}>
+                  <SpectraRichContent content={comment.body} className="mt-1.5 whitespace-pre-wrap text-caption leading-5 text-[var(--text-secondary)]" />
+                  <button type="button" onClick={() => void revealOrReanchor(comment)} className={`mt-2 flex w-full items-center gap-1.5 rounded-chip px-2 py-1.5 text-left text-micro ${orphaned ? "bg-[color-mix(in_oklab,var(--accent-gold)_8%,var(--bg-secondary))] text-[#a96816]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}>
                     {orphaned ? <RefreshCw className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
                     <span className="min-w-0 flex-1 truncate">{orphaned ? "Target changed — attach to whole work" : (comment.anchor.fallbackExcerpt ?? comment.anchor.regionId)}</span>
                   </button>
@@ -233,10 +233,10 @@ export function WorkbenchInspectorTabs({
               );
             })}
           </div>
-          <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2">
-            <LocalAutocompleteTextarea surface="comment" value={commentBody} onValueChange={setCommentBody} placeholder="Add a general comment…" className="min-h-16 w-full" textareaClassName="min-h-16 w-full resize-y px-1 text-[12px] leading-5 text-[var(--text-primary)] outline-none" />
+          <div className="mt-3 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2">
+            <LocalAutocompleteTextarea surface="comment" value={commentBody} onValueChange={setCommentBody} placeholder="Add a general comment…" className="min-h-16 w-full" textareaClassName="min-h-16 w-full resize-y px-1 text-caption leading-5 text-[var(--text-primary)] outline-none" />
             <div className="flex justify-end">
-              <button type="button" disabled={!commentBody.trim() || busy === "create"} onClick={() => void createGeneralComment()} className="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40">
+              <button type="button" disabled={!commentBody.trim() || busy === "create"} onClick={() => void createGeneralComment()} className="inline-flex h-7 items-center gap-1.5 rounded-chip bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40">
                 {busy === "create" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />} Add
               </button>
             </div>
@@ -245,9 +245,9 @@ export function WorkbenchInspectorTabs({
       ) : null}
       {tab === "history" ? (
         <section className="py-4" role="tabpanel">
-          <div className="grid grid-cols-4 gap-1 rounded-[7px] bg-[var(--bg-secondary)] p-1">
+          <div className="grid grid-cols-4 gap-1 rounded-control bg-[var(--bg-secondary)] p-1">
             {(["all", "changes", "ai", "access"] as HistoryFilter[]).map((filter) => (
-              <button key={filter} type="button" onClick={() => setHistoryFilter(filter)} className={`h-7 rounded-[5px] text-micro font-medium capitalize ${historyFilter === filter ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}>{filter}</button>
+              <button key={filter} type="button" onClick={() => setHistoryFilter(filter)} className={`h-7 rounded-chip text-micro font-medium capitalize ${historyFilter === filter ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]" : "text-[var(--text-tertiary)]"}`}>{filter}</button>
             ))}
           </div>
           <div className="mt-3 space-y-1">
@@ -256,7 +256,7 @@ export function WorkbenchInspectorTabs({
             {history.map((entry) => (
               <div key={entry.id} className="flex gap-2.5 border-b border-[var(--border-subtle)] py-2.5 last:border-0">
                 {entry.category === "ai" ? <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent-cyan)]" /> : <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />}
-                <div className="min-w-0"><p className="text-[11px] leading-4 text-[var(--text-primary)]">{entry.summary}</p><p className="mt-0.5 text-micro capitalize text-[var(--text-tertiary)]">{entry.category} · {formatRelativeTime(entry.createdAt)}</p></div>
+                <div className="min-w-0"><p className="text-micro leading-4 text-[var(--text-primary)]">{entry.summary}</p><p className="mt-0.5 text-micro capitalize text-[var(--text-tertiary)]">{entry.category} · {formatRelativeTime(entry.createdAt)}</p></div>
               </div>
             ))}
           </div>
@@ -285,5 +285,5 @@ function LoadingState() {
 }
 
 function EmptyState({ icon: Icon, text }: { icon: typeof Clock3; text: string }) {
-  return <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-6 text-center"><Icon className="mx-auto h-4 w-4 text-[var(--text-tertiary)]" /><p className="mt-2 text-micro leading-4 text-[var(--text-secondary)]">{text}</p></div>;
+  return <div className="rounded-control border border-dashed border-[var(--border-default)] px-3 py-6 text-center"><Icon className="mx-auto h-4 w-4 text-[var(--text-tertiary)]" /><p className="mt-2 text-micro leading-4 text-[var(--text-secondary)]">{text}</p></div>;
 }

@@ -262,7 +262,7 @@ export function NotificationBell({
                   >
                     {notification.body}
                   </p>
-                  <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+                  <p className="mt-1.5 text-micro text-[var(--text-tertiary)]">
                     {formatDistanceToNow(notification.createdAt, { addSuffix: true })}
                   </p>
                 </div>

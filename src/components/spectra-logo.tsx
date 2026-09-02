@@ -5,7 +5,7 @@ import { MARK, SpectraMark } from "@/components/spectra-mark";
 
 // ── Brand colours ────────────────────────────────────────────────────────────
 const DEFAULT_PRIMARY = "#7b5cf5";
-const DEFAULT_ACCENT = "#2e8fd4";
+const DEFAULT_ACCENT = "var(--accent-cyan)";
 
 function readBrandColors() {
   if (typeof window === "undefined")

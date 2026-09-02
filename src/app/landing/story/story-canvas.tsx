@@ -148,9 +148,8 @@ export function StoryCanvas({
         {shell}
         <div
           ref={channelRef}
-          className="landing-channel"
+          className="landing-channel z-chrome"
           data-open="false"
-          style={{ zIndex: 10 }}
         >
           <div
             ref={canvasRef}

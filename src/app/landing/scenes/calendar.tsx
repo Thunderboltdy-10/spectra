@@ -398,7 +398,7 @@ export function CalendarScene() {
 
         {/* The rule being obeyed, stated once, in the product's own terms. */}
         <p
-          className="mt-4 text-[13px] leading-[1.5] text-[var(--text-tertiary)]"
+          className="mt-4 text-ui leading-[1.5] text-[var(--text-tertiary)]"
           style={{
             opacity: clamp01((t - 0.78) / 0.08),
             transition: "opacity var(--motion-slow) var(--ease-standard)",

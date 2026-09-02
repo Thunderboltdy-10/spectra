@@ -72,14 +72,14 @@ export const OrganizerRow = memo(function OrganizerRow({
       data-node-row={node.nodeId}
       style={{ top, height: ROW_HEIGHT }}
       className={cn(
-        "group absolute inset-x-0 flex cursor-default items-center gap-2 rounded-[6px] pl-2 pr-1.5 text-[13px] transition-colors",
+        "group absolute inset-x-0 flex cursor-default items-center gap-2 rounded-chip pl-2 pr-1.5 text-ui transition-colors",
         selected
           ? "bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-elevated))] text-[var(--text-primary)]"
           : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
         cursor &&
-          "shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--brand-primary)_45%,transparent)]",
+          "ring-1 ring-[color-mix(in_oklab,var(--brand-primary)_45%,transparent)]",
         dropRing &&
-          "bg-[color-mix(in_oklab,var(--brand-primary)_12%,var(--bg-elevated))] shadow-[inset_0_0_0_2px_var(--brand-primary)]",
+          "bg-[color-mix(in_oklab,var(--brand-primary)_12%,var(--bg-elevated))] ring-2 ring-brand",
       )}
       onPointerDown={(event) => callbacks.onPointerDown(event, node)}
       onClick={(event) => callbacks.onClick(event, node)}
@@ -102,7 +102,7 @@ export const OrganizerRow = memo(function OrganizerRow({
         <span
           aria-hidden
           className={cn(
-            "flex size-4 shrink-0 items-center justify-center rounded-[4px] border",
+            "flex size-4 shrink-0 items-center justify-center rounded-chip border",
             selected
               ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]"
               : "border-[var(--border-default)] text-transparent",
@@ -114,7 +114,7 @@ export const OrganizerRow = memo(function OrganizerRow({
 
       <span
         aria-hidden
-        className="flex size-[22px] shrink-0 items-center justify-center rounded-[5px]"
+        className="flex size-[22px] shrink-0 items-center justify-center rounded-chip"
         style={{ backgroundColor: identity.soft }}
       >
         <Icon className="size-[13px]" style={{ color: identity.color }} strokeWidth={1.9} />
@@ -132,7 +132,7 @@ export const OrganizerRow = memo(function OrganizerRow({
             {node.name}
           </span>
           {node.kind === "link" ? (
-            <span className="ml-1.5 text-[11px] text-[var(--text-tertiary)]">
+            <span className="ml-1.5 text-micro text-[var(--text-tertiary)]">
               reference
             </span>
           ) : null}
@@ -160,22 +160,22 @@ export const OrganizerRow = memo(function OrganizerRow({
       )}
 
       {inContext ? (
-        <span className="shrink-0 rounded-[4px] bg-[color-mix(in_oklab,var(--accent-mint)_14%,var(--bg-elevated))] px-1.5 py-px text-micro font-medium uppercase tracking-[0.06em] text-[var(--accent-mint)]">
+        <span className="shrink-0 rounded-chip bg-[color-mix(in_oklab,var(--accent-mint)_14%,var(--bg-elevated))] px-1.5 py-px text-micro font-medium uppercase tracking-[0.06em] text-[var(--accent-mint)]">
           Context
         </span>
       ) : null}
 
       {showLocation ? (
-        <span className="hidden w-[190px] shrink-0 truncate text-[12px] text-[var(--text-tertiary)] @3xl/rows:block">
+        <span className="hidden w-[190px] shrink-0 truncate text-caption text-[var(--text-tertiary)] @3xl/rows:block">
           {node.parentPath?.length ? node.parentPath.join(" / ") : "Library"}
         </span>
       ) : null}
 
-      <span className="hidden w-[104px] shrink-0 truncate text-[12px] text-[var(--text-secondary)] @xl/rows:block">
+      <span className="hidden w-[104px] shrink-0 truncate text-caption text-[var(--text-secondary)] @xl/rows:block">
         {identity.label}
       </span>
 
-      <span className="hidden w-[76px] shrink-0 text-right text-[12px] text-[var(--text-tertiary)] tabular-nums @lg/rows:block">
+      <span className="hidden w-[76px] shrink-0 text-right text-caption text-[var(--text-tertiary)] tabular-nums @lg/rows:block">
         {node.isContainer && node.kind !== "workspace"
           ? `${node.childCount ?? 0}`
           : relativeTime(node.source?.updatedAt ?? node.updatedAt, now)}
@@ -192,7 +192,7 @@ export const OrganizerRow = memo(function OrganizerRow({
           }}
           onPointerDown={(event) => event.stopPropagation()}
           className={cn(
-            "grid size-6 place-items-center rounded-[5px] text-[var(--text-tertiary)] transition-opacity hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]",
+            "grid size-6 place-items-center rounded-chip text-[var(--text-tertiary)] transition-opacity hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]",
             node.pinned
               ? "text-[var(--accent-gold)] opacity-100"
               : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
@@ -208,7 +208,7 @@ export const OrganizerRow = memo(function OrganizerRow({
             callbacks.onMenuButton(event, node);
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          className="grid size-6 place-items-center rounded-[5px] text-[var(--text-tertiary)] opacity-0 transition-opacity hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
+          className="grid size-6 place-items-center rounded-chip text-[var(--text-tertiary)] opacity-0 transition-opacity hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
         >
           <MoreHorizontal className="size-4" />
         </button>
@@ -272,7 +272,7 @@ function RenameField({
         settledRef.current = true;
         onCommit(value.trim());
       }}
-      className="min-w-0 flex-1 rounded-[5px] border border-[var(--brand-primary)] bg-[var(--bg-elevated)] px-1.5 py-0.5 text-[13px] text-[var(--text-primary)] outline-none"
+      className="min-w-0 flex-1 rounded-chip border border-[var(--brand-primary)] bg-[var(--bg-elevated)] px-1.5 py-0.5 text-ui text-[var(--text-primary)] outline-none"
     />
   );
 }

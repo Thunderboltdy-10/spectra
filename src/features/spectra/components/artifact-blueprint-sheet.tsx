@@ -339,28 +339,28 @@ export function ArtifactBlueprintSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-[rgba(18,14,10,0.24)] backdrop-blur-[2px]" onPointerDown={() => { if (!busy) onClose(); }}>
+    <div className="fixed inset-0 z-modal bg-[var(--bg-overlay)] backdrop-blur-[2px]" onPointerDown={() => { if (!busy) onClose(); }}>
       <aside
         role="dialog"
         aria-modal="true"
         aria-labelledby={dialogTitleId}
-        className="spectra-blueprint-sheet absolute right-0 top-0 flex h-[100dvh] w-full max-w-[1120px] flex-col border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[0_24px_80px_rgba(18,14,10,0.22)]"
+        className="spectra-blueprint-sheet absolute right-0 top-0 flex h-[100dvh] w-full max-w-[1120px] flex-col border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[var(--shadow-lg)]"
         onPointerDown={(event) => event.stopPropagation()}
       >
         <header className="border-b border-[var(--border-default)] px-6 py-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-[8px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]" style={{ color: meta.color }}>
+                <span className="flex h-10 w-10 items-center justify-center rounded-control border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]" style={{ color: meta.color }}>
                   <Icon className="h-5 w-5" />
                 </span>
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">{mode === "create" ? "Create work" : "Work details"}</div>
-                  <h2 id={dialogTitleId} className="font-display text-[26px] font-semibold leading-tight text-[var(--text-primary)]">{mode === "create" ? `New ${meta.label}` : artifact?.title ?? "Untitled work"}</h2>
+                  <div className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">{mode === "create" ? "Create work" : "Work details"}</div>
+                  <h2 id={dialogTitleId} className="font-display text-metric font-semibold leading-tight text-[var(--text-primary)]">{mode === "create" ? `New ${meta.label}` : artifact?.title ?? "Untitled work"}</h2>
                 </div>
               </div>
             </div>
-            <button type="button" className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={onClose} aria-label="Close artifact detail">
+            <button type="button" className="flex h-9 w-9 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={onClose} aria-label="Close artifact detail">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -373,11 +373,11 @@ export function ArtifactBlueprintSheet({
                   <button
                     key={choice.key}
                     type="button"
-                    className={`min-h-[86px] rounded-[8px] border p-2.5 text-left transition ${selected ? "border-[#8b6ff0] bg-[color-mix(in_oklab,#8b6ff0_5%,var(--bg-elevated))]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)]"}`}
+                    className={`min-h-[86px] rounded-control border p-2.5 text-left transition ${selected ? "border-[var(--brand-primary)] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-elevated))]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)]"}`}
                     onClick={() => selectBlueprint(choice.key)}
                   >
                     <ChoiceIcon className="h-4 w-4" style={{ color: workTypeMeta[choice.key].color }} />
-                    <div className="mt-2 text-[12px] font-semibold text-[var(--text-primary)]">{choice.label}</div>
+                    <div className="mt-2 text-caption font-semibold text-[var(--text-primary)]">{choice.label}</div>
                     <div className="mt-1 line-clamp-2 text-micro leading-4 text-[var(--text-secondary)]">{choice.description}</div>
                   </button>
                 );
@@ -398,12 +398,12 @@ export function ArtifactBlueprintSheet({
               {blueprintKey === "flashcard_deck" ? <DeckEditor cards={cards} setCards={setCards} /> : null}
               {blueprintKey === "quiz" ? <QuizEditor questions={questions} setQuestions={setQuestions} /> : null}
               {blueprintKey === "planner_task" ? <TaskEditor task={task} setTask={setTask} /> : null}
-              {artifact?.blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-[9px] bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[#8b6ff0]" /><p className="mt-3 text-[13px] leading-6 text-[var(--text-secondary)]">Thread references continue in the shared conversation view.</p></div></div> : null}
+              {artifact?.blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-card bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[var(--brand-primary)]" /><p className="mt-3 text-ui leading-6 text-[var(--text-secondary)]">Thread references continue in the shared conversation view.</p></div></div> : null}
             </section>
             <aside className="space-y-4">
-              <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Blueprint</div>
-                <div className="mt-3 flex items-center gap-2 text-[14px] font-semibold text-[var(--text-primary)]">
+              <div className="rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+                <div className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Blueprint</div>
+                <div className="mt-3 flex items-center gap-2 text-body font-semibold text-[var(--text-primary)]">
                   <Icon className="h-4 w-4" style={{ color: meta.color }} />
                   {meta.label}
                 </div>
@@ -412,12 +412,12 @@ export function ArtifactBlueprintSheet({
                   <MiniMetric label="Object" value={metricPreview(artifact ?? null, blueprintKey, previewContent)} />
                 </div>
               </div>
-              <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+              <div className="rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
                 <Field label="Tags">
                   <input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} className={inputClass()} placeholder="biology, revision" />
                 </Field>
               </div>
-              <div className="rounded-[8px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_54%,transparent)] p-4 text-[12px] leading-5 text-[var(--text-secondary)]">
+              <div className="rounded-control border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_54%,transparent)] p-4 text-caption leading-5 text-[var(--text-secondary)]">
                 <Sparkles className="mb-2 h-4 w-4 text-[var(--text-tertiary)]" />
                 Changes stay in this draft until you save. You can keep working across every section without losing the rest of the artifact.
               </div>
@@ -425,7 +425,7 @@ export function ArtifactBlueprintSheet({
           </div>
         </main>
         <footer className="flex items-center justify-between gap-4 border-t border-[var(--border-default)] px-6 py-4">
-          <div className="hidden items-center gap-2 text-[12px] text-[var(--text-secondary)] sm:flex">
+          <div className="hidden items-center gap-2 text-caption text-[var(--text-secondary)] sm:flex">
             <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
             Saves to the shared artifact object.
           </div>
@@ -445,7 +445,7 @@ export function ArtifactBlueprintSheet({
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[12px] font-semibold text-[var(--text-secondary)]">{label}</span>
+      <span className="mb-1.5 block text-caption font-semibold text-[var(--text-secondary)]">{label}</span>
       {children}
     </label>
   );
@@ -453,8 +453,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function MiniMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-2">
-      <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">{value}</div>
+    <div className="rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-2">
+      <div className="truncate text-ui font-semibold text-[var(--text-primary)]">{value}</div>
       <div className="text-micro text-[var(--text-tertiary)]">{label}</div>
     </div>
   );
@@ -500,9 +500,9 @@ function DocumentEditor({ value, onChange }: { value: string; onChange: (value: 
   }
 
   return (
-    <section className="spectra-sheet-document overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+    <section className="spectra-sheet-document overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)]">
       <div className="flex flex-wrap items-center gap-1 border-b border-[var(--border-default)] px-2 py-2" role="toolbar" aria-label="Document formatting">
-        <button type="button" className="mr-1 h-8 rounded-[7px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => prefixLines("## ")} title="Heading 2">Heading 2</button>
+        <button type="button" className="mr-1 h-8 rounded-control px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => prefixLines("## ")} title="Heading 2">Heading 2</button>
         <ToolbarButton label="Bold" icon={Bold} onClick={() => replaceSelection("**")} />
         <ToolbarButton label="Italic" icon={Italic} onClick={() => replaceSelection("_")} />
         <ToolbarButton label="Bulleted list" icon={List} onClick={() => prefixLines("- ")} />
@@ -522,7 +522,7 @@ function DocumentEditor({ value, onChange }: { value: string; onChange: (value: 
           value={value}
           onChange={(event) => { onChange(event.target.value); rememberSelection(event.target); }}
           onSelect={(event) => rememberSelection(event.currentTarget)}
-          className="min-h-[440px] w-full resize-y bg-transparent font-serif text-[16px] leading-8 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+          className="min-h-[440px] w-full resize-y bg-transparent font-serif text-editor leading-8 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
           placeholder="Start writing, or paste notes here. Separate sections with a blank line."
         />
         <div className="mt-3 flex items-center justify-between border-t border-[var(--border-default)] pt-3 text-micro text-[var(--text-tertiary)]">
@@ -596,28 +596,28 @@ function DeckEditor({ cards, setCards }: { cards: DeckCard[]; setCards: (cards: 
   }
 
   return (
-    <section className="spectra-sheet-deck overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+    <section className="spectra-sheet-deck overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)]">
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-default)] px-3 py-2.5">
-        <div className="flex rounded-[8px] bg-[var(--bg-primary)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]" role="tablist" aria-label="Deck mode">
-          {(["edit", "study"] as const).map((value) => <button key={value} type="button" role="tab" aria-selected={mode === value} className={`h-7 rounded-[6px] px-3 text-[11px] font-medium capitalize ${mode === value ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`} onClick={() => { setMode(value); setRevealed(false); }}>{value}</button>)}
+        <div className="flex rounded-control bg-[var(--bg-primary)] p-1 ring-1 ring-[var(--border-default)]" role="tablist" aria-label="Deck mode">
+          {(["edit", "study"] as const).map((value) => <button key={value} type="button" role="tab" aria-selected={mode === value} className={`h-7 rounded-chip px-3 text-micro font-medium capitalize ${mode === value ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`} onClick={() => { setMode(value); setRevealed(false); }}>{value}</button>)}
         </div>
-        <span className="text-[11px] text-[var(--text-secondary)]">{cards.length} {cards.length === 1 ? "card" : "cards"}</span>
-        {mode === "study" ? <div className="ml-auto flex min-w-[150px] items-center gap-2 text-micro text-[var(--text-tertiary)]"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]"><span className="block h-full rounded-full bg-[#8b6ff0] transition-[width] motion-reduce:transition-none" style={{ width: `${cards.length ? reviewedIds.size / cards.length * 100 : 0}%` }} /></div>{reviewedIds.size}/{cards.length}</div> : <button type="button" className={`${secondaryButtonClass()} ml-auto`} onClick={addCard}><Plus className="h-3.5 w-3.5" />Add card</button>}
+        <span className="text-micro text-[var(--text-secondary)]">{cards.length} {cards.length === 1 ? "card" : "cards"}</span>
+        {mode === "study" ? <div className="ml-auto flex min-w-[150px] items-center gap-2 text-micro text-[var(--text-tertiary)]"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]"><span className="block h-full rounded-full bg-[var(--brand-primary)] transition-[width] motion-reduce:transition-none" style={{ width: `${cards.length ? reviewedIds.size / cards.length * 100 : 0}%` }} /></div>{reviewedIds.size}/{cards.length}</div> : <button type="button" className={`${secondaryButtonClass()} ml-auto`} onClick={addCard}><Plus className="h-3.5 w-3.5" />Add card</button>}
       </div>
       <div className="grid min-h-[500px] md:grid-cols-[230px_minmax(0,1fr)]">
         <aside className="max-h-[560px] overflow-y-auto border-b border-[var(--border-default)] p-2 md:border-b-0 md:border-r">
           {cards.map((card, index) => (
-            <button key={card.id} type="button" onClick={() => { setActiveId(card.id); setRevealed(false); }} className={`mb-1 flex w-full items-start gap-2 rounded-[7px] border px-2.5 py-2 text-left ${card.id === activeCard?.id ? "border-[color-mix(in_oklab,#8b6ff0_42%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`} aria-current={card.id === activeCard?.id ? "true" : undefined}>
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] bg-[var(--bg-secondary)] font-sans text-micro font-normal text-[var(--text-secondary)]">{index + 1}</span>
-              <span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium text-[var(--text-primary)]">{card.front || "Untitled card"}</span><span className="mt-0.5 block truncate text-micro text-[var(--text-tertiary)]">{card.section || "Section 1"}</span></span>
-              {card.confidence && card.confidence !== "unknown" ? <span className={`mt-1 h-1.5 w-1.5 rounded-full ${card.confidence === "strong" ? "bg-[var(--success)]" : card.confidence === "weak" ? "bg-[var(--warning)]" : "bg-[#8b6ff0]"}`} /> : null}
+            <button key={card.id} type="button" onClick={() => { setActiveId(card.id); setRevealed(false); }} className={`mb-1 flex w-full items-start gap-2 rounded-control border px-2.5 py-2 text-left ${card.id === activeCard?.id ? "border-[color-mix(in_oklab,var(--brand-primary)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_6%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`} aria-current={card.id === activeCard?.id ? "true" : undefined}>
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-chip bg-[var(--bg-secondary)] font-sans text-micro font-normal text-[var(--text-secondary)]">{index + 1}</span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-micro font-medium text-[var(--text-primary)]">{card.front || "Untitled card"}</span><span className="mt-0.5 block truncate text-micro text-[var(--text-tertiary)]">{card.section || "Section 1"}</span></span>
+              {card.confidence && card.confidence !== "unknown" ? <span className={`mt-1 h-1.5 w-1.5 rounded-full ${card.confidence === "strong" ? "bg-[var(--success)]" : card.confidence === "weak" ? "bg-[var(--warning)]" : "bg-[var(--brand-primary)]"}`} /> : null}
             </button>
           ))}
         </aside>
         <div className="min-w-0 p-3 sm:p-5">
           {activeCard && mode === "edit" ? <div className="space-y-4">
             <div className="flex items-center gap-1">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Card {activeIndex + 1} of {cards.length}</span>
+              <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Card {activeIndex + 1} of {cards.length}</span>
               <div className="ml-auto flex items-center gap-1">
                 <ToolbarButton label="Move card up" icon={ArrowUp} disabled={activeIndex === 0} onClick={() => moveCard(-1)} />
                 <ToolbarButton label="Move card down" icon={ArrowDown} disabled={activeIndex === cards.length - 1} onClick={() => moveCard(1)} />
@@ -627,17 +627,17 @@ function DeckEditor({ cards, setCards }: { cards: DeckCard[]; setCards: (cards: 
             </div>
             <Field label="Section"><input value={activeCard.section ?? ""} onChange={(event) => updateCard(activeCard.id, { section: event.target.value })} className={inputClass()} placeholder="Section 1" /></Field>
             <div className="grid gap-3 lg:grid-cols-2">
-              <Field label="Front"><LocalAutocompleteTextarea surface="quiz_card_text" value={activeCard.front} onValueChange={(front) => updateCard(activeCard.id, { front })} className="w-full" textareaClassName={textareaClass("min-h-[180px] font-serif text-[18px] leading-7")} placeholder="Write the prompt" /></Field>
-              <Field label="Back"><LocalAutocompleteTextarea surface="quiz_card_text" value={activeCard.back} onValueChange={(back) => updateCard(activeCard.id, { back })} className="w-full" textareaClassName={textareaClass("min-h-[180px] font-serif text-[18px] leading-7")} placeholder="Write the answer" /></Field>
+              <Field label="Front"><LocalAutocompleteTextarea surface="quiz_card_text" value={activeCard.front} onValueChange={(front) => updateCard(activeCard.id, { front })} className="w-full" textareaClassName={textareaClass("min-h-[180px] font-serif text-heading leading-7")} placeholder="Write the prompt" /></Field>
+              <Field label="Back"><LocalAutocompleteTextarea surface="quiz_card_text" value={activeCard.back} onValueChange={(back) => updateCard(activeCard.id, { back })} className="w-full" textareaClassName={textareaClass("min-h-[180px] font-serif text-heading leading-7")} placeholder="Write the answer" /></Field>
             </div>
             <Field label="Hint (optional)"><input value={activeCard.hint ?? ""} onChange={(event) => updateCard(activeCard.id, { hint: event.target.value })} className={inputClass()} placeholder="A useful nudge, without giving away the answer" /></Field>
           </div> : null}
           {activeCard && mode === "study" ? <div className="flex min-h-[450px] flex-col">
-            <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)]"><button type="button" className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]" onClick={() => moveStudyCard(-1)}><ArrowLeft className="h-3.5 w-3.5" />Previous</button><span>Card {activeIndex + 1} of {cards.length}</span><button type="button" className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]" onClick={() => moveStudyCard(1)}>Next<ArrowRight className="h-3.5 w-3.5" /></button></div>
-            <button type="button" className="mt-4 flex min-h-[280px] flex-1 flex-col items-center justify-center rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-8 text-center shadow-[0_18px_45px_-36px_rgba(60,38,100,.46)]" onClick={() => setRevealed((value) => !value)} aria-label={revealed ? "Hide answer" : "Reveal answer"}>
+            <div className="flex items-center justify-between text-micro text-[var(--text-tertiary)]"><button type="button" className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]" onClick={() => moveStudyCard(-1)}><ArrowLeft className="h-3.5 w-3.5" />Previous</button><span>Card {activeIndex + 1} of {cards.length}</span><button type="button" className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]" onClick={() => moveStudyCard(1)}>Next<ArrowRight className="h-3.5 w-3.5" /></button></div>
+            <button type="button" className="mt-4 flex min-h-[280px] flex-1 flex-col items-center justify-center rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-8 text-center shadow-hover" onClick={() => setRevealed((value) => !value)} aria-label={revealed ? "Hide answer" : "Reveal answer"}>
               <span className="text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">{revealed ? "Answer" : "Prompt"}</span>
-              <span className="mt-6 max-w-[560px] font-serif text-[24px] leading-9 text-[var(--text-primary)]">{revealed ? activeCard.back || "No answer yet" : activeCard.front || "No prompt yet"}</span>
-              {!revealed && activeCard.hint ? <span className="mt-8 text-[11px] text-[var(--text-secondary)]">Hint: {activeCard.hint}</span> : null}
+              <span className="mt-6 max-w-[560px] font-serif text-metric leading-9 text-[var(--text-primary)]">{revealed ? activeCard.back || "No answer yet" : activeCard.front || "No prompt yet"}</span>
+              {!revealed && activeCard.hint ? <span className="mt-8 text-micro text-[var(--text-secondary)]">Hint: {activeCard.hint}</span> : null}
               <span className="mt-8 inline-flex items-center gap-1.5 text-micro text-[var(--text-tertiary)]">{revealed ? <RotateCcw className="h-3 w-3" /> : <Eye className="h-3 w-3" />}{revealed ? "Tap to see the prompt" : "Tap to reveal"}</span>
             </button>
             {revealed ? <div className="mt-4 grid grid-cols-3 gap-2" aria-label="Rate this card"><button type="button" className={`${secondaryButtonClass()} justify-center border-[color-mix(in_oklab,var(--warning)_32%,var(--border-default))]`} onClick={() => markConfidence("weak")}>Again</button><button type="button" className={`${secondaryButtonClass()} justify-center`} onClick={() => markConfidence("medium")}>Learning</button><button type="button" className={`${secondaryButtonClass()} justify-center border-[color-mix(in_oklab,var(--success)_32%,var(--border-default))]`} onClick={() => markConfidence("strong")}>Got it</button></div> : null}
@@ -688,22 +688,22 @@ function QuizEditor({ questions, setQuestions }: { questions: QuizQuestion[]; se
   }
 
   return (
-    <section className="spectra-sheet-quiz overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+    <section className="spectra-sheet-quiz overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)]">
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-default)] px-3 py-2.5">
-        <div className="flex rounded-[8px] bg-[var(--bg-primary)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]" role="tablist" aria-label="Quiz view">
-          {(["builder", "preview"] as const).map((value) => <button key={value} type="button" role="tab" aria-selected={view === value} className={`h-7 rounded-[6px] px-3 text-[11px] font-medium capitalize ${view === value ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`} onClick={() => setView(value)}>{value}</button>)}
+        <div className="flex rounded-control bg-[var(--bg-primary)] p-1 ring-1 ring-[var(--border-default)]" role="tablist" aria-label="Quiz view">
+          {(["builder", "preview"] as const).map((value) => <button key={value} type="button" role="tab" aria-selected={view === value} className={`h-7 rounded-chip px-3 text-micro font-medium capitalize ${view === value ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`} onClick={() => setView(value)}>{value}</button>)}
         </div>
-        <span className="text-[11px] text-[var(--text-secondary)]">{completeCount} of {questions.length} ready</span>
+        <span className="text-micro text-[var(--text-secondary)]">{completeCount} of {questions.length} ready</span>
         <div className="h-1.5 min-w-[90px] flex-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]" role="progressbar" aria-label="Quiz completion" aria-valuemin={0} aria-valuemax={questions.length} aria-valuenow={completeCount}><span className="block h-full rounded-full bg-[var(--mode-quiz)] transition-[width] motion-reduce:transition-none" style={{ width: `${questions.length ? completeCount / questions.length * 100 : 0}%` }} /></div>
         <button type="button" className={secondaryButtonClass()} onClick={addQuestion}><Plus className="h-3.5 w-3.5" />Add question</button>
       </div>
       {view === "builder" ? <div className="grid min-h-[540px] lg:grid-cols-[240px_minmax(0,1fr)]">
         <aside className="max-h-[620px] overflow-y-auto border-b border-[var(--border-default)] p-2 lg:border-b-0 lg:border-r">
-          {questions.map((question, index) => <button key={question.id} type="button" onClick={() => setActiveId(question.id)} className={`mb-1 flex w-full items-start gap-2 rounded-[7px] border px-2.5 py-2 text-left ${question.id === activeQuestion?.id ? "border-[color-mix(in_oklab,var(--mode-quiz)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--mode-quiz)_6%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`} aria-current={question.id === activeQuestion?.id ? "true" : undefined}><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] bg-[var(--bg-secondary)] font-sans text-micro font-normal text-[var(--text-secondary)]">{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium text-[var(--text-primary)]">{question.prompt || "Untitled question"}</span><span className="mt-0.5 block text-micro capitalize text-[var(--text-tertiary)]">{(question.type ?? "short_answer").replace("_", " ")}</span></span>{questionIsComplete(question) ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-[var(--success)]" /> : <Circle className="mt-0.5 h-3.5 w-3.5 text-[var(--text-tertiary)]" />}</button>)}
+          {questions.map((question, index) => <button key={question.id} type="button" onClick={() => setActiveId(question.id)} className={`mb-1 flex w-full items-start gap-2 rounded-control border px-2.5 py-2 text-left ${question.id === activeQuestion?.id ? "border-[color-mix(in_oklab,var(--mode-quiz)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--mode-quiz)_6%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`} aria-current={question.id === activeQuestion?.id ? "true" : undefined}><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-chip bg-[var(--bg-secondary)] font-sans text-micro font-normal text-[var(--text-secondary)]">{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate text-micro font-medium text-[var(--text-primary)]">{question.prompt || "Untitled question"}</span><span className="mt-0.5 block text-micro capitalize text-[var(--text-tertiary)]">{(question.type ?? "short_answer").replace("_", " ")}</span></span>{questionIsComplete(question) ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-[var(--success)]" /> : <Circle className="mt-0.5 h-3.5 w-3.5 text-[var(--text-tertiary)]" />}</button>)}
         </aside>
         {activeQuestion ? <div className="min-w-0 space-y-4 p-3 sm:p-5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Question {activeIndex + 1} of {questions.length}</span>
+            <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Question {activeIndex + 1} of {questions.length}</span>
             <div className="ml-auto flex items-center gap-1">
               <ToolbarButton label="Move question up" icon={ArrowUp} disabled={activeIndex === 0} onClick={() => moveQuestion(-1)} />
               <ToolbarButton label="Move question down" icon={ArrowDown} disabled={activeIndex === questions.length - 1} onClick={() => moveQuestion(1)} />
@@ -716,12 +716,12 @@ function QuizEditor({ questions, setQuestions }: { questions: QuizQuestion[]; se
             <SelectField label="Difficulty" value={activeQuestion.difficulty ?? "medium"} onChange={(next) => updateQuestion(activeQuestion.id, { difficulty: next as QuizQuestion["difficulty"] })} options={[{ value: "easy", label: "Easy" }, { value: "medium", label: "Medium" }, { value: "hard", label: "Hard" }]} size="lg" />
             <Field label="Points"><input type="number" min={1} max={100} value={activeQuestion.points ?? 1} onChange={(event) => updateQuestion(activeQuestion.id, { points: Math.max(1, Number(event.target.value) || 1) })} className={inputClass()} /></Field>
           </div>
-          <Field label="Question"><LocalAutocompleteTextarea surface="quiz_card_text" value={activeQuestion.prompt} onValueChange={(prompt) => updateQuestion(activeQuestion.id, { prompt })} className="w-full" textareaClassName={textareaClass("min-h-[100px] text-[15px] leading-6")} placeholder="What should the learner answer?" /></Field>
-          {activeQuestion.type === "multiple_choice" ? <fieldset className="space-y-2"><legend className="mb-1.5 text-[12px] font-semibold text-[var(--text-secondary)]">Answer options</legend>{(activeQuestion.options ?? []).map((option, optionIndex) => <div key={`${activeQuestion.id}-option-${optionIndex}`} className="flex items-center gap-2"><input type="radio" name={`correct-${activeQuestion.id}`} checked={Boolean(option.trim()) && activeQuestion.correctAnswer === option} onChange={() => { if (option.trim()) updateQuestion(activeQuestion.id, { correctAnswer: option }); }} aria-label={`Mark option ${optionIndex + 1} correct`} /><input value={option} onChange={(event) => { const nextOptions = [...(activeQuestion.options ?? [])]; const wasCorrect = Boolean(option.trim()) && activeQuestion.correctAnswer === option; nextOptions[optionIndex] = event.target.value; updateQuestion(activeQuestion.id, { options: nextOptions, ...(wasCorrect ? { correctAnswer: event.target.value } : {}) }); }} className={inputClass()} placeholder={`Option ${optionIndex + 1}`} /><ToolbarButton label={`Remove option ${optionIndex + 1}`} icon={X} disabled={(activeQuestion.options?.length ?? 0) <= 2} onClick={() => { const nextOptions = (activeQuestion.options ?? []).filter((_, index) => index !== optionIndex); updateQuestion(activeQuestion.id, { options: nextOptions, correctAnswer: activeQuestion.correctAnswer === option ? "" : activeQuestion.correctAnswer }); }} /></div>)}<button type="button" className={secondaryButtonClass()} onClick={() => updateQuestion(activeQuestion.id, { options: [...(activeQuestion.options ?? []), ""] })}><Plus className="h-3.5 w-3.5" />Add option</button></fieldset> : <Field label="Correct answer"><input value={activeQuestion.correctAnswer ?? ""} onChange={(event) => updateQuestion(activeQuestion.id, { correctAnswer: event.target.value })} className={inputClass()} placeholder="Expected answer or key phrase" /></Field>}
+          <Field label="Question"><LocalAutocompleteTextarea surface="quiz_card_text" value={activeQuestion.prompt} onValueChange={(prompt) => updateQuestion(activeQuestion.id, { prompt })} className="w-full" textareaClassName={textareaClass("min-h-[100px] text-subhead leading-6")} placeholder="What should the learner answer?" /></Field>
+          {activeQuestion.type === "multiple_choice" ? <fieldset className="space-y-2"><legend className="mb-1.5 text-caption font-semibold text-[var(--text-secondary)]">Answer options</legend>{(activeQuestion.options ?? []).map((option, optionIndex) => <div key={`${activeQuestion.id}-option-${optionIndex}`} className="flex items-center gap-2"><input type="radio" name={`correct-${activeQuestion.id}`} checked={Boolean(option.trim()) && activeQuestion.correctAnswer === option} onChange={() => { if (option.trim()) updateQuestion(activeQuestion.id, { correctAnswer: option }); }} aria-label={`Mark option ${optionIndex + 1} correct`} /><input value={option} onChange={(event) => { const nextOptions = [...(activeQuestion.options ?? [])]; const wasCorrect = Boolean(option.trim()) && activeQuestion.correctAnswer === option; nextOptions[optionIndex] = event.target.value; updateQuestion(activeQuestion.id, { options: nextOptions, ...(wasCorrect ? { correctAnswer: event.target.value } : {}) }); }} className={inputClass()} placeholder={`Option ${optionIndex + 1}`} /><ToolbarButton label={`Remove option ${optionIndex + 1}`} icon={X} disabled={(activeQuestion.options?.length ?? 0) <= 2} onClick={() => { const nextOptions = (activeQuestion.options ?? []).filter((_, index) => index !== optionIndex); updateQuestion(activeQuestion.id, { options: nextOptions, correctAnswer: activeQuestion.correctAnswer === option ? "" : activeQuestion.correctAnswer }); }} /></div>)}<button type="button" className={secondaryButtonClass()} onClick={() => updateQuestion(activeQuestion.id, { options: [...(activeQuestion.options ?? []), ""] })}><Plus className="h-3.5 w-3.5" />Add option</button></fieldset> : <Field label="Correct answer"><input value={activeQuestion.correctAnswer ?? ""} onChange={(event) => updateQuestion(activeQuestion.id, { correctAnswer: event.target.value })} className={inputClass()} placeholder="Expected answer or key phrase" /></Field>}
           <Field label="Explanation (shown during review)"><LocalAutocompleteTextarea surface="quiz_card_text" value={activeQuestion.explanation ?? ""} onValueChange={(explanation) => updateQuestion(activeQuestion.id, { explanation })} className="w-full" textareaClassName={textareaClass("min-h-[90px]")} placeholder="Explain why the answer is correct" /></Field>
           <Field label="Time guide (seconds)"><input type="number" min={5} max={3600} value={activeQuestion.timeLimitSeconds ?? 90} onChange={(event) => updateQuestion(activeQuestion.id, { timeLimitSeconds: Math.max(5, Number(event.target.value) || 90) })} className={inputClass()} /></Field>
         </div> : null}
-      </div> : <div className="mx-auto max-w-[720px] space-y-4 p-4 sm:p-7">{questions.map((question, index) => <article key={question.id} className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"><div className="flex items-center gap-2 text-micro text-[var(--text-tertiary)]"><span>Question {index + 1}</span><span>•</span><span className="capitalize">{question.difficulty ?? "medium"}</span><span className="ml-auto">{question.points ?? 1} {(question.points ?? 1) === 1 ? "point" : "points"}</span></div><h4 className="mt-3 font-serif text-[18px] leading-7 text-[var(--text-primary)]">{question.prompt || "Untitled question"}</h4>{question.type === "multiple_choice" ? <div className="mt-4 space-y-2">{(question.options ?? []).map((option, optionIndex) => <div key={optionIndex} className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[12px] text-[var(--text-secondary)]"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-semibold">{String.fromCharCode(65 + optionIndex)}</span>{option || `Option ${optionIndex + 1}`}</div>)}</div> : <div className="mt-4 h-16 rounded-[7px] border border-dashed border-[var(--border-default)] bg-[var(--bg-elevated)]" />}</article>)}</div>}
+      </div> : <div className="mx-auto max-w-[720px] space-y-4 p-4 sm:p-7">{questions.map((question, index) => <article key={question.id} className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"><div className="flex items-center gap-2 text-micro text-[var(--text-tertiary)]"><span>Question {index + 1}</span><span>•</span><span className="capitalize">{question.difficulty ?? "medium"}</span><span className="ml-auto">{question.points ?? 1} {(question.points ?? 1) === 1 ? "point" : "points"}</span></div><h4 className="mt-3 font-serif text-heading leading-7 text-[var(--text-primary)]">{question.prompt || "Untitled question"}</h4>{question.type === "multiple_choice" ? <div className="mt-4 space-y-2">{(question.options ?? []).map((option, optionIndex) => <div key={optionIndex} className="flex items-center gap-2 rounded-control border border-[var(--border-default)] px-3 py-2 text-caption text-[var(--text-secondary)]"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-semibold">{String.fromCharCode(65 + optionIndex)}</span>{option || `Option ${optionIndex + 1}`}</div>)}</div> : <div className="mt-4 h-16 rounded-control border border-dashed border-[var(--border-default)] bg-[var(--bg-elevated)]" />}</article>)}</div>}
     </section>
   );
 }
@@ -758,12 +758,12 @@ function TaskEditor({ task, setTask }: { task: PlannerTask; setTask: (task: Plan
   }
 
   return (
-    <section className="spectra-sheet-task space-y-5 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-5">
-      <div className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
-        <div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#d47a16_10%,var(--bg-elevated))] text-[#d47a16]"><CalendarCheck2 className="h-4 w-4" /></div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2 text-[11px]"><span className="font-semibold text-[var(--text-primary)]">Task progress</span><span className="text-[var(--text-tertiary)]">{progress}%</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]" role="progressbar" aria-label="Task progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span className="block h-full rounded-full bg-[#d47a16] transition-[width] motion-reduce:transition-none" style={{ width: `${progress}%` }} /></div></div></div>
+    <section className="spectra-sheet-task space-y-5 rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 sm:p-5">
+      <div className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
+        <div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-control bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-elevated))] text-[var(--warning)]"><CalendarCheck2 className="h-4 w-4" /></div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2 text-micro"><span className="font-semibold text-[var(--text-primary)]">Task progress</span><span className="text-[var(--text-tertiary)]">{progress}%</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]" role="progressbar" aria-label="Task progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span className="block h-full rounded-full bg-[var(--warning)] transition-[width] motion-reduce:transition-none" style={{ width: `${progress}%` }} /></div></div></div>
       </div>
       <Field label="Task description">
-        <LocalAutocompleteTextarea surface="description" value={task.description ?? ""} onValueChange={(description) => setTask({ ...task, description })} className="w-full" textareaClassName={textareaClass("min-h-[130px] text-[14px] leading-6")} placeholder="What needs to happen? Add context, notes, and a clear outcome." />
+        <LocalAutocompleteTextarea surface="description" value={task.description ?? ""} onValueChange={(description) => setTask({ ...task, description })} className="w-full" textareaClassName={textareaClass("min-h-[130px] text-body leading-6")} placeholder="What needs to happen? Add context, notes, and a clear outcome." />
       </Field>
       <div className="grid gap-3 md:grid-cols-3">
         <Segmented label="Status" value={task.status} options={["todo", "doing", "done"]} onChange={(value) => setTask({ ...task, status: value as "todo" | "doing" | "done" })} />
@@ -777,23 +777,23 @@ function TaskEditor({ task, setTask }: { task: PlannerTask; setTask: (task: Plan
         <Field label="Ends"><input type="datetime-local" value={dateTimeInputValue(task.endAt)} min={dateTimeInputValue(task.startAt)} onChange={(event) => setTask({ ...task, endAt: dateTimeValue(event.target.value) })} className={inputClass()} /></Field>
         <Field label="Estimate (minutes)"><div className="relative"><Clock3 className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-[var(--text-tertiary)]" /><input type="number" min={1} max={100000} value={task.estimateMinutes ?? ""} onChange={(event) => setTask({ ...task, estimateMinutes: event.target.value ? Math.max(1, Number(event.target.value)) : undefined })} className={`${inputClass()} pl-9`} placeholder="90" /></div></Field>
       </div>
-      <label className="inline-flex items-center gap-2 text-[12px] text-[var(--text-secondary)]"><input type="checkbox" checked={task.allDay} onChange={(event) => setTask({ ...task, allDay: event.target.checked })} />All-day task</label>
+      <label className="inline-flex items-center gap-2 text-caption text-[var(--text-secondary)]"><input type="checkbox" checked={task.allDay} onChange={(event) => setTask({ ...task, allDay: event.target.checked })} />All-day task</label>
       <section>
-        <div className="mb-2 flex items-center justify-between"><h3 className="text-[12px] font-semibold text-[var(--text-secondary)]">Subtasks <span className="font-normal text-[var(--text-tertiary)]">{completed}/{task.subtasks.length}</span></h3></div>
-        <div className="overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
-          {task.subtasks.map((subtask) => <div key={subtask.id} className="flex items-center gap-2 border-b border-[var(--border-default)] px-3 py-2 last:border-b-0"><button type="button" className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${subtask.done ? "border-[var(--success)] bg-[var(--success)] text-white" : "border-[var(--border-default)] text-transparent hover:border-[var(--success)]"}`} onClick={() => toggleSubtask(subtask.id)} aria-label={subtask.done ? `Mark ${subtask.title} incomplete` : `Complete ${subtask.title}`}><Check className="h-3 w-3" /></button><input value={subtask.title} onChange={(event) => setTask({ ...task, subtasks: task.subtasks.map((item) => item.id === subtask.id ? { ...item, title: event.target.value } : item) })} className={`min-w-0 flex-1 bg-transparent text-[12px] outline-none ${subtask.done ? "text-[var(--text-tertiary)] line-through" : "text-[var(--text-primary)]"}`} aria-label="Subtask title" /><ToolbarButton label={`Delete ${subtask.title || "subtask"}`} icon={Trash2} danger onClick={() => setTask({ ...task, subtasks: task.subtasks.filter((item) => item.id !== subtask.id) })} /></div>)}
-          <div className="flex items-center gap-2 px-3 py-2"><Plus className="h-4 w-4 text-[var(--text-tertiary)]" /><input value={subtaskDraft} onChange={(event) => setSubtaskDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSubtask(); } }} className="min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="Add a subtask and press Enter" /><button type="button" onClick={addSubtask} disabled={!subtaskDraft.trim()} className="text-[11px] font-medium text-[var(--accent-cyan)] disabled:opacity-35">Add</button></div>
+        <div className="mb-2 flex items-center justify-between"><h3 className="text-caption font-semibold text-[var(--text-secondary)]">Subtasks <span className="font-normal text-[var(--text-tertiary)]">{completed}/{task.subtasks.length}</span></h3></div>
+        <div className="overflow-hidden rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)]">
+          {task.subtasks.map((subtask) => <div key={subtask.id} className="flex items-center gap-2 border-b border-[var(--border-default)] px-3 py-2 last:border-b-0"><button type="button" className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${subtask.done ? "border-[var(--success)] bg-[var(--success)] text-white" : "border-[var(--border-default)] text-transparent hover:border-[var(--success)]"}`} onClick={() => toggleSubtask(subtask.id)} aria-label={subtask.done ? `Mark ${subtask.title} incomplete` : `Complete ${subtask.title}`}><Check className="h-3 w-3" /></button><input value={subtask.title} onChange={(event) => setTask({ ...task, subtasks: task.subtasks.map((item) => item.id === subtask.id ? { ...item, title: event.target.value } : item) })} className={`min-w-0 flex-1 bg-transparent text-caption outline-none ${subtask.done ? "text-[var(--text-tertiary)] line-through" : "text-[var(--text-primary)]"}`} aria-label="Subtask title" /><ToolbarButton label={`Delete ${subtask.title || "subtask"}`} icon={Trash2} danger onClick={() => setTask({ ...task, subtasks: task.subtasks.filter((item) => item.id !== subtask.id) })} /></div>)}
+          <div className="flex items-center gap-2 px-3 py-2"><Plus className="h-4 w-4 text-[var(--text-tertiary)]" /><input value={subtaskDraft} onChange={(event) => setSubtaskDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addSubtask(); } }} className="min-w-0 flex-1 bg-transparent text-caption text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="Add a subtask and press Enter" /><button type="button" onClick={addSubtask} disabled={!subtaskDraft.trim()} className="text-micro font-medium text-[var(--accent-cyan)] disabled:opacity-35">Add</button></div>
         </div>
       </section>
       <Field label="Progress note"><LocalAutocompleteTextarea surface="plan_note" value={task.progressNote ?? ""} onValueChange={(progressNote) => setTask({ ...task, progressNote })} className="w-full" textareaClassName={textareaClass("min-h-[90px]")} placeholder="Capture the latest decision, blocker, or next step" /></Field>
       <section>
-        <h3 className="mb-2 text-[12px] font-semibold text-[var(--text-secondary)]">Notes and links</h3>
-        {task.attachments.length > 0 ? <div className="mb-2 space-y-1.5">{task.attachments.map((attachment) => <div key={attachment.id} className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2"><Link2 className="h-3.5 w-3.5 text-[#d47a16]" /><a href={attachment.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-[11px] font-medium text-[var(--text-primary)] hover:text-[var(--accent-cyan)]">{attachment.name || attachment.url}</a><ToolbarButton label={`Remove ${attachment.name || "link"}`} icon={Trash2} danger onClick={() => setTask({ ...task, attachments: task.attachments.filter((item) => item.id !== attachment.id) })} /></div>)}</div> : null}
+        <h3 className="mb-2 text-caption font-semibold text-[var(--text-secondary)]">Notes and links</h3>
+        {task.attachments.length > 0 ? <div className="mb-2 space-y-1.5">{task.attachments.map((attachment) => <div key={attachment.id} className="flex items-center gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2"><Link2 className="h-3.5 w-3.5 text-[var(--warning)]" /><a href={attachment.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-micro font-medium text-[var(--text-primary)] hover:text-[var(--accent-cyan)]">{attachment.name || attachment.url}</a><ToolbarButton label={`Remove ${attachment.name || "link"}`} icon={Trash2} danger onClick={() => setTask({ ...task, attachments: task.attachments.filter((item) => item.id !== attachment.id) })} /></div>)}</div> : null}
         <div className="grid gap-2 sm:grid-cols-[minmax(0,.8fr)_minmax(0,1.4fr)_auto]"><input value={linkName} onChange={(event) => setLinkName(event.target.value)} className={inputClass()} placeholder="Link label" /><input value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addLink(); } }} className={inputClass()} inputMode="url" placeholder="https://…" /><button type="button" className={secondaryButtonClass()} disabled={!linkUrl.trim()} onClick={addLink}><Link2 className="h-3.5 w-3.5" />Add</button></div>
       </section>
       <section>
-        <h3 className="mb-2 text-[12px] font-semibold text-[var(--text-secondary)]">Reminders</h3>
-        <div className="flex flex-wrap gap-2">{task.reminders.map((reminder) => <button key={reminder} type="button" onClick={() => setTask({ ...task, reminders: task.reminders.filter((item) => item !== reminder) })} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[11px] text-[var(--text-secondary)]" title="Remove reminder"><Clock3 className="h-3 w-3" />{reminder}<X className="h-3 w-3" /></button>)}<div className="flex h-8 items-center gap-1 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2"><input value={reminderDraft} onChange={(event) => setReminderDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && reminderDraft.trim()) { event.preventDefault(); setTask({ ...task, reminders: [...task.reminders, reminderDraft.trim()] }); setReminderDraft(""); } }} className="w-28 bg-transparent text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="e.g. 1 day before" /><button type="button" onClick={() => { if (!reminderDraft.trim()) return; setTask({ ...task, reminders: [...task.reminders, reminderDraft.trim()] }); setReminderDraft(""); }} aria-label="Add reminder"><Plus className="h-3 w-3 text-[var(--text-tertiary)]" /></button></div></div>
+        <h3 className="mb-2 text-caption font-semibold text-[var(--text-secondary)]">Reminders</h3>
+        <div className="flex flex-wrap gap-2">{task.reminders.map((reminder) => <button key={reminder} type="button" onClick={() => setTask({ ...task, reminders: task.reminders.filter((item) => item !== reminder) })} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro text-[var(--text-secondary)]" title="Remove reminder"><Clock3 className="h-3 w-3" />{reminder}<X className="h-3 w-3" /></button>)}<div className="flex h-8 items-center gap-1 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2"><input value={reminderDraft} onChange={(event) => setReminderDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && reminderDraft.trim()) { event.preventDefault(); setTask({ ...task, reminders: [...task.reminders, reminderDraft.trim()] }); setReminderDraft(""); } }} className="w-28 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="e.g. 1 day before" /><button type="button" onClick={() => { if (!reminderDraft.trim()) return; setTask({ ...task, reminders: [...task.reminders, reminderDraft.trim()] }); setReminderDraft(""); }} aria-label="Add reminder"><Plus className="h-3 w-3 text-[var(--text-tertiary)]" /></button></div></div>
       </section>
     </section>
   );
@@ -807,16 +807,16 @@ function questionIsComplete(question: QuizQuestion) {
 }
 
 function ToolbarButton({ label, icon: Icon, onClick, disabled = false, danger = false }: { label: string; icon: LucideIcon; onClick: () => void; disabled?: boolean; danger?: boolean }) {
-  return <button type="button" onClick={onClick} disabled={disabled} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_34%,transparent)] disabled:opacity-30 ${danger ? "hover:!bg-[color-mix(in_oklab,var(--danger)_7%,transparent)] hover:!text-[var(--danger)]" : ""}`} aria-label={label} title={label}><Icon className="h-3.5 w-3.5" aria-hidden="true" /></button>;
+  return <button type="button" onClick={onClick} disabled={disabled} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-[var(--text-tertiary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_34%,transparent)] disabled:opacity-30 ${danger ? "hover:!bg-[color-mix(in_oklab,var(--danger)_7%,transparent)] hover:!text-[var(--danger)]" : ""}`} aria-label={label} title={label}><Icon className="h-3.5 w-3.5" aria-hidden="true" /></button>;
 }
 
 function Segmented({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
   return (
     <div>
-      <div className="mb-1.5 text-[12px] font-semibold text-[var(--text-secondary)]">{label}</div>
-      <div className="flex rounded-[8px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">
+      <div className="mb-1.5 text-caption font-semibold text-[var(--text-secondary)]">{label}</div>
+      <div className="flex rounded-control bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 ring-1 ring-[var(--border-default)]">
         {options.map((option) => (
-          <button key={option} type="button" className={`h-8 flex-1 rounded-[7px] px-2 text-[12px] font-medium capitalize ${value === option ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_5px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`} onClick={() => onChange(option)}>
+          <button key={option} type="button" className={`h-8 flex-1 rounded-control px-2 text-caption font-medium capitalize ${value === option ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_5px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`} onClick={() => onChange(option)}>
             {option}
           </button>
         ))}
@@ -826,19 +826,19 @@ function Segmented({ label, value, options, onChange }: { label: string; value: 
 }
 
 function inputClass() {
-  return "h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]";
+  return "h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-ui text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))]";
 }
 
 function textareaClass(extra = "") {
-  return `w-full resize-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))] ${extra}`;
+  return `w-full resize-none rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-ui text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))] ${extra}`;
 }
 
 function secondaryButtonClass() {
-  return "inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
+  return "inline-flex h-9 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-caption font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
 }
 
 function primaryButtonClass() {
-  return "inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--bg-primary)] disabled:opacity-45";
+  return "inline-flex h-9 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-ui font-medium text-[var(--bg-primary)] disabled:opacity-45";
 }
 
 export function blueprintKeyForCard(card: ArtifactCardView): EditableBlueprintKey {

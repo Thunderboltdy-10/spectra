@@ -54,7 +54,7 @@ export function LiveThreadPanel({
           </span>
           <div className="min-w-0 flex-1 overflow-hidden">
             <div
-              className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]"
+              className="truncate font-display text-editor font-semibold text-[var(--text-primary)]"
               title={title || "Live thread"}
             >
               {title || "Live thread"}

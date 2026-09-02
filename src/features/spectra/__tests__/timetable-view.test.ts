@@ -13,7 +13,7 @@ const studyLayer: TimetableLayer = {
   name: "Study",
   kind: "study",
   visible: true,
-  color: "#7865ea",
+  color: "var(--brand-primary)",
   authority: "workspace",
 };
 
@@ -22,7 +22,7 @@ const classLayer: TimetableLayer = {
   name: "Classes",
   kind: "class",
   visible: true,
-  color: "#26a879",
+  color: "var(--accent-mint)",
   authority: "school",
 };
 
@@ -126,7 +126,7 @@ describe("sharedTimetableContent study layers", () => {
           name: "Enzyme revision",
           kind: "study",
           visible: true,
-          color: "#7865ea",
+          color: "var(--brand-primary)",
         },
       ],
       events: [
@@ -154,7 +154,7 @@ describe("sharedTimetableContent study layers", () => {
           name: "Private study",
           kind: "study",
           visible: true,
-          color: "#7865ea",
+          color: "var(--brand-primary)",
           authority: "user",
         },
       ],
@@ -183,7 +183,7 @@ describe("sharedTimetableContent study layers", () => {
           name: "Classes",
           kind: "class",
           visible: true,
-          color: "#26a879",
+          color: "var(--accent-mint)",
           authority: "school",
         },
         {
@@ -191,7 +191,7 @@ describe("sharedTimetableContent study layers", () => {
           name: "Private study",
           kind: "study",
           visible: true,
-          color: "#7865ea",
+          color: "var(--brand-primary)",
           authority: "user",
         },
       ],

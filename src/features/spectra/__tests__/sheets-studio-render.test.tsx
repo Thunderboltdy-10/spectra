@@ -83,6 +83,7 @@ describe("grid view state", () => {
 
 describe("cell formatting", () => {
   it("paints every field the format model can hold", () => {
+    const navy = "#123456";
     const { container } = mount(
       workbook({
         sheet: {
@@ -97,7 +98,7 @@ describe("cell formatting", () => {
                 indent: 2,
                 fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
                 borders: {
-                  bottom: { style: "double", color: "#123456" },
+                  bottom: { style: "double", color: navy },
                   top: { style: "thin" },
                 },
               },

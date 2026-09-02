@@ -64,29 +64,29 @@ function JoinSchoolContent() {
   }
 
   return (
-    <main className="grid min-h-dvh place-items-center bg-[radial-gradient(circle_at_50%_0%,rgba(77,174,147,.11),transparent_42%),var(--bg-primary)] p-5 text-[var(--text-primary)]">
-      <section className="w-full max-w-[470px] rounded-[18px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-7 shadow-[0_30px_100px_rgba(36,29,20,.12)]">
+    <main className="grid min-h-dvh place-items-center bg-[radial-gradient(circle_at_50%_0%,color-mix(in_oklab,var(--accent-mint)_11%,transparent),transparent_42%),var(--bg-primary)] p-5 text-[var(--text-primary)]">
+      <section className="w-full max-w-[470px] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-7 shadow-[var(--shadow-lg)]">
         <div className="flex items-center gap-2">
           <SpectraLogo size={28} />
-          <span className="font-[var(--font-serif)] text-[17px] font-medium">
+          <span className="font-[var(--font-serif)] text-title font-medium">
             Spectra
           </span>
         </div>
-        <span className="mt-8 grid size-12 place-items-center rounded-[13px] bg-[#e8f5ef] text-[#16805f]">
+        <span className="mt-8 grid size-12 place-items-center rounded-surface bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]">
           {status === "accepted" ? <Check size={22} /> : <School size={22} />}
         </span>
-        <h1 className="mt-5 font-[var(--font-serif)] text-[28px] font-medium tracking-[-.025em]">
+        <h1 className="mt-5 font-[var(--font-serif)] text-display font-medium tracking-[-.025em]">
           {status === "accepted"
             ? "Welcome to your school"
             : "Accept your school invitation"}
         </h1>
-        <p className="mt-2 text-[12px] leading-5 text-[var(--text-tertiary)]">
+        <p className="mt-2 text-caption leading-5 text-[var(--text-tertiary)]">
           {status === "accepted"
             ? "Your single school membership is active. Spectra is opening your workspace."
             : "Sign in with the exact verified email that received this invitation. Joining never changes your ordinary artifact or agent capabilities."}
         </p>
         {status === "error" ? (
-          <div className="mt-5 rounded-[8px] border border-[#efc0b8] bg-[#fff5f3] p-3 text-[11px] leading-5 text-[#8d3d34]">
+          <div className="mt-5 rounded-control border border-[color-mix(in oklab, var(--accent-coral) 28%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] p-3 text-micro leading-5 text-[var(--danger)]">
             {error}
           </div>
         ) : null}
@@ -94,7 +94,7 @@ function JoinSchoolContent() {
           type="button"
           onClick={() => void accept()}
           disabled={!token || status === "accepting" || status === "accepted"}
-          className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-[8px] bg-[var(--text-primary)] text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-50"
+          className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-control bg-[var(--text-primary)] text-caption font-medium text-[var(--bg-primary)] disabled:opacity-50"
         >
           {status === "accepting" ? (
             <LoaderCircle size={15} className="animate-spin" />

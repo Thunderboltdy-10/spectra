@@ -131,10 +131,10 @@ export function AnalyticsShell() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             {overallState.kind !== "available" ? <CapabilityTruthBadge state={overallState} /> : null}
-            <h1 className="font-display text-[32px] font-semibold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
+            <h1 className="font-display text-display font-semibold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
               Analytics
             </h1>
-            <p className="mt-2 max-w-2xl text-[12px] leading-5 text-[var(--text-secondary)]">
+            <p className="mt-2 max-w-2xl text-caption leading-5 text-[var(--text-secondary)]">
               A date-bounded view of your work and AI activity, derived without reading private content.
             </p>
           </div>
@@ -145,7 +145,7 @@ export function AnalyticsShell() {
                   key={windowDays}
                   type="button"
                   onClick={() => setDays(windowDays)}
-                  className={`h-7 rounded-md px-3 text-[11px] font-semibold ${days === windowDays ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                  className={`h-7 rounded-md px-3 text-micro font-semibold ${days === windowDays ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                 >
                   {windowDays}d
                 </button>
@@ -155,7 +155,7 @@ export function AnalyticsShell() {
               type="button"
               onClick={() => void refresh()}
               disabled={loading}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold disabled:opacity-45"
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border-default)] px-3 text-micro font-semibold disabled:opacity-45"
             >
               <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
               Refresh
@@ -186,7 +186,7 @@ export function AnalyticsShell() {
           ))}
           {!payload
             ? Array.from({ length: 6 }, (_, index) => (
-                <div key={index} className="h-28 animate-pulse rounded-[10px] bg-[var(--bg-secondary)]" />
+                <div key={index} className="h-28 animate-pulse rounded-card bg-[var(--bg-secondary)]" />
               ))
             : null}
         </div>
@@ -201,11 +201,11 @@ export function AnalyticsShell() {
                     const maximum = byType[0]?.value ?? 1;
                     return (
                       <div key={row.key} className="grid grid-cols-[112px_1fr_32px] items-center gap-3">
-                        <span className="truncate text-[12px] font-medium text-[var(--text-secondary)]">{row.label}</span>
+                        <span className="truncate text-caption font-medium text-[var(--text-secondary)]">{row.label}</span>
                         <div className="h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
                           <div className="h-full rounded-full" style={{ width: `${Math.max(5, (row.value / maximum) * 100)}%`, background: row.color }} />
                         </div>
-                        <span className="text-right text-[12px] font-semibold tabular-nums">{row.value}</span>
+                        <span className="text-right text-caption font-semibold tabular-nums">{row.value}</span>
                       </div>
                     );
                   }) : <EmptyLine label="No work was created in this range." />}
@@ -221,9 +221,9 @@ export function AnalyticsShell() {
                     ["Failed", payload.runOutcomes.failed, "#b45309"],
                     ["Cancelled", payload.runOutcomes.cancelled, "#64748b"],
                   ] as const).map(([label, value, color]) => (
-                    <div key={label} className="rounded-[10px] p-4 transition-colors hover:bg-[var(--bg-secondary)]">
+                    <div key={label} className="rounded-card p-4 transition-colors hover:bg-[var(--bg-secondary)]">
                       <p className="text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">{label}</p>
-                      <p className="mt-2 font-display text-[26px] font-semibold tabular-nums" style={{ color }}>{value}</p>
+                      <p className="mt-2 font-display text-metric font-semibold tabular-nums" style={{ color }}>{value}</p>
                     </div>
                   ))}
                 </div>
@@ -239,8 +239,8 @@ export function AnalyticsShell() {
               <div className="flex items-start gap-3">
                 <ShieldCheck className="mt-0.5 size-5 shrink-0 text-emerald-800" />
                 <div>
-                  <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">Privacy and source boundary</h2>
-                  <p className="mt-1 max-w-3xl text-[12px] leading-6 text-[var(--text-secondary)]">{payload.privacy}</p>
+                  <h2 className="text-ui font-semibold text-[var(--text-primary)]">Privacy and source boundary</h2>
+                  <p className="mt-1 max-w-3xl text-caption leading-6 text-[var(--text-secondary)]">{payload.privacy}</p>
                   <p className="mt-2 text-micro text-[var(--text-tertiary)]">Indexed sources: work created, workspace activity, AI run metadata, and daily account usage meters.</p>
                 </div>
               </div>
@@ -254,27 +254,27 @@ export function AnalyticsShell() {
 
 function MetricCard({ definition, metric, icon, format }: { definition: SpectraMetricDefinition; metric: MetricValue; icon: React.ReactNode; format: "number" | "percent" | "compact" | "bytes" }) {
   return (
-    <article className="rounded-[10px] p-4 transition-colors hover:bg-[var(--bg-secondary)]" title={`Source: ${metricSourceLabel(definition)}. ${definition.aggregation}`}>
+    <article className="rounded-card p-4 transition-colors hover:bg-[var(--bg-secondary)]" title={`Source: ${metricSourceLabel(definition)}. ${definition.aggregation}`}>
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 text-[var(--text-secondary)]">{icon}<span className="text-[11px] font-medium">{definition.label}</span></div>
+        <div className="flex items-center gap-2 text-[var(--text-secondary)]">{icon}<span className="text-micro font-medium">{definition.label}</span></div>
         {metric.state.kind !== "available" ? <CapabilityTruthBadge state={metric.state} className="min-h-5 px-2 text-micro" /> : null}
       </div>
-      <p className="mt-3 font-display text-[28px] font-semibold tabular-nums text-[var(--text-primary)]">{formatMetric(metric.value, format)}</p>
+      <p className="mt-3 font-display text-display font-semibold tabular-nums text-[var(--text-primary)]">{formatMetric(metric.value, format)}</p>
       {metric.state.kind === "partial" || metric.value === 0 || metric.value === null ? <p className="mt-2 text-micro leading-4 text-[var(--text-secondary)]">{metric.state.kind === "partial" ? metric.state.details : definition.zeroMeaning}</p> : null}
     </article>
   );
 }
 
 function SectionHeading({ title, detail }: { title: string; detail: string }) {
-  return <div><h2 className="font-display text-[17px] font-semibold text-[var(--text-primary)]">{title}</h2><p className="mt-1 text-[11px] text-[var(--text-tertiary)]">{detail}</p></div>;
+  return <div><h2 className="font-display text-title font-semibold text-[var(--text-primary)]">{title}</h2><p className="mt-1 text-micro text-[var(--text-tertiary)]">{detail}</p></div>;
 }
 
 function RecentList({ title, detail, empty, rows }: { title: string; detail: string; empty: string; rows: Array<{ id: string; title: string; detail: string; timestamp: number }> }) {
-  return <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><SectionHeading title={title} detail={detail} /><div className="mt-3 divide-y divide-[var(--border-subtle)]">{rows.length ? rows.map((row) => <div key={row.id} className="flex items-start gap-3 py-3"><Clock3 className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" /><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{row.title}</p><p className="mt-1 text-micro capitalize text-[var(--text-tertiary)]">{row.detail} · {formatDate(row.timestamp)}</p></div></div>) : <EmptyLine label={empty} />}</div></section>;
+  return <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><SectionHeading title={title} detail={detail} /><div className="mt-3 divide-y divide-[var(--border-subtle)]">{rows.length ? rows.map((row) => <div key={row.id} className="flex items-start gap-3 py-3"><Clock3 className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" /><div className="min-w-0 flex-1"><p className="truncate text-caption font-semibold text-[var(--text-primary)]">{row.title}</p><p className="mt-1 text-micro capitalize text-[var(--text-tertiary)]">{row.detail} · {formatDate(row.timestamp)}</p></div></div>) : <EmptyLine label={empty} />}</div></section>;
 }
 
 function EmptyLine({ label }: { label: string }) {
-  return <p className="py-6 text-center text-[11px] text-[var(--text-tertiary)]">{label}</p>;
+  return <p className="py-6 text-center text-micro text-[var(--text-tertiary)]">{label}</p>;
 }
 
 function formatMetric(value: number | null, format: "number" | "percent" | "compact" | "bytes") {

@@ -163,7 +163,7 @@ export function ProgressTrace({
         >
           <span
             className={cn(
-              "text-[12.5px] font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70",
+              "text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70",
               thinking && "thinking-wave",
             )}
           >
@@ -188,7 +188,7 @@ export function ProgressTrace({
             className="overflow-hidden"
           >
             {orderedSteps.length === 0 && thinking ? (
-              <div className="flex items-center gap-2 py-1 text-[12px] text-[var(--text-tertiary)]">
+              <div className="flex items-center gap-2 py-1 text-caption text-[var(--text-tertiary)]">
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
                 <span className="thinking-wave opacity-80">Getting ready</span>
               </div>
@@ -234,7 +234,7 @@ export function ProgressTrace({
                           )}
                           <span
                             className={cn(
-                              "min-w-0 flex-1 truncate text-[11px] font-semibold text-[var(--text-secondary)]",
+                              "min-w-0 flex-1 truncate text-micro font-semibold text-[var(--text-secondary)]",
                               step.status === "running" && "thinking-wave",
                             )}
                           >
@@ -247,7 +247,7 @@ export function ProgressTrace({
                             <button
                               type="button"
                               onClick={() => toggleStep(step.id)}
-                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] hover:bg-[var(--bg-hover)]"
+                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-chip hover:bg-[var(--bg-hover)]"
                               aria-expanded={open}
                               aria-label={`${open ? "Hide" : "Show"} details for ${step.title}`}
                             >
@@ -300,7 +300,7 @@ export function ProgressTrace({
       {finished && summary?.trim() ? (
         <p
           className={cn(
-            "text-[12px] leading-5 text-[var(--text-secondary)]",
+            "text-caption leading-5 text-[var(--text-secondary)]",
             showTraceToggle && "mt-2",
           )}
         >

@@ -86,7 +86,7 @@ export function CommandBarMenuItem({
       type="button"
       {...props}
       className={cn(
-        "flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45",
+        "flex w-full items-center gap-2 rounded-chip px-2.5 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45",
         className,
       )}
     >
@@ -147,7 +147,7 @@ export function CommandBarSubmenu({
       {open ? (
         <div
           role="menu"
-          className="absolute bottom-0 left-[calc(100%+6px)] z-30 max-h-[min(420px,70vh)] min-w-[220px] overflow-y-auto rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_10px_28px_rgba(0,0,0,0.12)]"
+          className="absolute bottom-0 left-[calc(100%+6px)] z-chrome max-h-[min(420px,70vh)] min-w-[220px] overflow-y-auto rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-card"
           onMouseEnter={clearClose}
           onMouseLeave={scheduleClose}
         >
@@ -174,7 +174,7 @@ function AttachmentBubbles({
       {attachments.map((attachment) => (
         <div
           key={attachment.id}
-          className={`flex max-w-[280px] items-center gap-2 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-micro shadow-[0_4px_14px_-10px_rgba(20,26,32,0.35)] ${attachment.error ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`}
+          className={`flex max-w-[280px] items-center gap-2 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-micro shadow-card ${attachment.error ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`}
           title={attachment.error ?? attachment.name}
         >
           {attachment.handling === "image" &&
@@ -184,7 +184,7 @@ function AttachmentBubbles({
             <img
               src={attachment.data}
               alt=""
-              className="h-9 w-9 shrink-0 rounded-[6px] object-cover"
+              className="h-9 w-9 shrink-0 rounded-chip object-cover"
             />
           ) : attachment.handling === "image" ? (
             <ImageIcon className="h-3.5 w-3.5 shrink-0" />
@@ -203,7 +203,7 @@ function AttachmentBubbles({
           </span>
           <button
             type="button"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] hover:bg-[var(--bg-hover)]"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-chip hover:bg-[var(--bg-hover)]"
             onClick={() => onRemove(attachment.id)}
             aria-label={`Remove ${attachment.name}`}
           >
@@ -529,7 +529,7 @@ export function CommandBar({
         <div
           ref={menuPanelRef}
           role="menu"
-          className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[240px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]"
+          className="absolute bottom-[calc(100%+8px)] left-0 z-chrome min-w-[240px] rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-card"
           onClick={(event) => {
             const target = event.target as HTMLElement | null;
             if (!target) return;
@@ -558,7 +558,7 @@ export function CommandBar({
       <button
         ref={menuTriggerRef}
         type="button"
-        className="mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] text-[var(--text-secondary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35"
+        className="mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-control border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35"
         onClick={() => hasMenu && setMenuOpen((open) => !open)}
         disabled={!hasMenu}
         aria-expanded={menuOpen}
@@ -567,7 +567,7 @@ export function CommandBar({
       >
         <Plus className="h-4 w-4" />
       </button>
-      <div className="spectra-command-surface flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
+      <div className="spectra-command-surface flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-card">
         {showInlineBubbles ? bubbles : null}
         <div className="flex items-center gap-2">
           {context ? (
@@ -577,7 +577,7 @@ export function CommandBar({
             {autocomplete.suggestion ? (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words px-2 py-1.5 text-[13.5px] leading-5"
+                className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words px-2 py-1.5 text-ui leading-5"
               >
                 <span className="invisible">{value}</span>
                 <span className="text-[var(--text-tertiary)] opacity-70">
@@ -627,7 +627,7 @@ export function CommandBar({
                 }
               }}
               placeholder={placeholder}
-              className="relative z-[1] max-h-32 min-h-8 w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+              className="relative z-base max-h-32 min-h-8 w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-ui leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
             />
             {autocomplete.suggestion ? (
               <span id={autocompleteHintId} className="sr-only">
@@ -640,7 +640,7 @@ export function CommandBar({
             <button
               type="button"
               onClick={() => onStop()}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
               aria-label="Stop active response"
               title="Stop active response"
             >
@@ -657,7 +657,7 @@ export function CommandBar({
             onClick={() => {
               void submit();
             }}
-            className={`flex h-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)] ${busy && !allowConcurrent ? "min-w-14 px-3 text-micro font-semibold" : "w-9"}`}
+            className={`flex h-9 shrink-0 items-center justify-center rounded-control bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)] ${busy && !allowConcurrent ? "min-w-14 px-3 text-micro font-semibold" : "w-9"}`}
             aria-label={
               busy && !allowConcurrent ? "Steer active run" : "Send command"
             }

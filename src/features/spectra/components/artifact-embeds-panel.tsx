@@ -407,7 +407,7 @@ export function ArtifactEmbedsPanel({
                 <div className="min-w-0">
                   <h2
                     id="artifact-embeds-title"
-                    className="font-display text-[18px] font-semibold text-[var(--text-primary)]"
+                    className="font-display text-heading font-semibold text-[var(--text-primary)]"
                   >
                     References
                   </h2>
@@ -430,7 +430,7 @@ export function ArtifactEmbedsPanel({
                       }
                       setCreating((value) => !value);
                     }}
-                    className="flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)]"
+                    className="flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)]"
                     title={
                       compatibilityProfile === "strict-native"
                         ? "Live references need Enhanced compatibility."
@@ -444,7 +444,7 @@ export function ArtifactEmbedsPanel({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                   aria-label="Close references"
                 >
                   <X className="h-4 w-4" />
@@ -472,11 +472,11 @@ export function ArtifactEmbedsPanel({
                         value={search}
                         onChange={(event) => setSearch(event.target.value)}
                         placeholder="Search accessible work"
-                        className="h-9 w-full rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-9 pr-3 text-[11px] text-[var(--text-primary)] outline-none"
+                        className="h-9 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-9 pr-3 text-micro text-[var(--text-primary)] outline-none"
                       />
                     </div>
                   </label>
-                  <div className="sm:col-span-2 max-h-32 overflow-y-auto rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1">
+                  <div className="sm:col-span-2 max-h-32 overflow-y-auto rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1">
                     {candidates.map((artifact) => {
                       const meta = workTypeMeta[artifact.blueprintKey];
                       const Icon = meta.icon;
@@ -490,13 +490,13 @@ export function ArtifactEmbedsPanel({
                             setVersions([]);
                             setPinnedVersionId("");
                           }}
-                          className={`flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-left ${sourceArtifactId === artifact._id ? "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-hover))]" : "hover:bg-[var(--bg-hover)]"}`}
+                          className={`flex w-full items-center gap-2.5 rounded-chip px-2.5 py-2 text-left ${sourceArtifactId === artifact._id ? "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-hover))]" : "hover:bg-[var(--bg-hover)]"}`}
                         >
                           <Icon
                             className="h-3.5 w-3.5"
                             style={{ color: meta.color }}
                           />
-                          <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-[var(--text-primary)]">
+                          <span className="min-w-0 flex-1 truncate text-micro font-medium text-[var(--text-primary)]">
                             {artifact.title}
                           </span>
                           {sourceArtifactId === artifact._id ? (
@@ -580,7 +580,7 @@ export function ArtifactEmbedsPanel({
                   <button
                     type="button"
                     onClick={() => setCreating(false)}
-                    className="h-8 rounded-[7px] px-3 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    className="h-8 rounded-control px-3 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                   >
                     Cancel
                   </button>
@@ -593,7 +593,7 @@ export function ArtifactEmbedsPanel({
                       busy === "create"
                     }
                     onClick={() => void createEmbed()}
-                    className="flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35"
+                    className="flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35"
                   >
                     {busy === "create" ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -613,10 +613,10 @@ export function ArtifactEmbedsPanel({
                 </div>
               ) : embeds.length === 0 ? (
                 <div className="mx-auto flex max-w-[300px] flex-col items-center py-16 text-center">
-                  <span className="flex h-12 w-12 items-center justify-center rounded-[12px] border border-dashed border-[var(--border-strong)] text-[var(--text-tertiary)]">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-surface border border-dashed border-[var(--border-strong)] text-[var(--text-tertiary)]">
                     <Link2 className="h-4 w-4" />
                   </span>
-                  <h3 className="mt-4 text-[13px] font-semibold text-[var(--text-primary)]">
+                  <h3 className="mt-4 text-ui font-semibold text-[var(--text-primary)]">
                     {canConfigure
                       ? "Compose with live references"
                       : "No references"}

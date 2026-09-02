@@ -73,7 +73,7 @@ export const SHARED_FONT_SIZES: readonly number[] = [
  * depth without clutter (D34).
  */
 export const SHARED_TEXT_COLORS: readonly string[] = [
-  "#101828", "#344054", "#667085", "#98a2b3", "#ffffff",
+  "#101828", "#344054", "#667085", "#98a2b3", "var(--bg-elevated)",
   "#b42318", "#c4320a", "#b54708", "#a15c07", "#3538cd",
   "#175cd3", "#026aa2", "#027a48", "#5925dc", "#c11574",
 ];

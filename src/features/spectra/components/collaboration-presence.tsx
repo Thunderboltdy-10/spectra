@@ -521,7 +521,7 @@ export function CollaborationCursorLayer({
   return (
     <div
       ref={layerRef}
-      className="pointer-events-none absolute inset-0 z-[66] overflow-hidden"
+      className="pointer-events-none absolute inset-0 z-dropdown overflow-hidden"
       aria-hidden="true"
     >
       {collaborators.map((person) => {
@@ -530,7 +530,7 @@ export function CollaborationCursorLayer({
         return rects.map((rect, index) => (
           <div
             key={`${person.clientId}:sel:${index}`}
-            className="absolute rounded-[2px]"
+            className="absolute rounded-chip"
             style={{
               left: rect.left,
               top: rect.top,
@@ -550,7 +550,7 @@ export function CollaborationCursorLayer({
         return (
           <div
             key={`${person.clientId}:menu`}
-            className="absolute z-[2] min-w-[148px] overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] py-1 shadow-[0_12px_32px_rgba(20,18,15,.18)] transition-[left,top] duration-300 ease-out"
+            className="absolute z-chrome min-w-[148px] overflow-hidden rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] py-1 shadow-card transition-[left,top] duration-300 ease-out"
             style={{
               left: Math.max(8, position.left),
               top: position.top + 22,
@@ -568,7 +568,7 @@ export function CollaborationCursorLayer({
               return (
                 <div
                   key={option.value}
-                  className={`px-2.5 py-1.5 text-[12px] ${active ? "font-semibold text-white" : "text-[var(--text-primary)]"}`}
+                  className={`px-2.5 py-1.5 text-caption ${active ? "font-semibold text-white" : "text-[var(--text-primary)]"}`}
                   style={
                     active
                       ? {
@@ -639,7 +639,7 @@ export function CollaborationCursorLayer({
             {person.actorKind === "ai" &&
             (mode === "typing" || mode === "selecting") ? null : (
               <span
-                className="ml-2 -mt-0.5 inline-flex max-w-48 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-micro font-semibold text-white shadow-[0_5px_18px_rgba(20,18,15,.18)]"
+                className="ml-2 -mt-0.5 inline-flex max-w-48 items-center gap-1.5 whitespace-nowrap rounded-chip px-2 py-1 text-micro font-semibold text-white shadow-card"
                 style={{ backgroundColor: color }}
               >
                 {person.actorKind === "ai" ? (
@@ -785,7 +785,7 @@ export function CollaborationPresenceIndicator({
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-label={`${collaborators.length} collaborator${collaborators.length === 1 ? "" : "s"} present`}
-        className={`group flex h-9 items-center gap-2 rounded-[8px] border px-2 shadow-[0_2px_8px_rgba(27,20,12,.04)] transition ${activeAi ? "" : "border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,transparent)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+        className={`group flex h-9 items-center gap-2 rounded-control border px-2 shadow-[var(--shadow-sm)] transition ${activeAi ? "" : "border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,transparent)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
         style={
           activeAiColor
             ? {
@@ -817,22 +817,22 @@ export function CollaborationPresenceIndicator({
           ))}
         </span>
         <Users className="h-3.5 w-3.5 text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]" />
-        <span className="pr-1 text-[11px] font-medium text-[var(--text-secondary)]">
+        <span className="pr-1 text-micro font-medium text-[var(--text-secondary)]">
           {activeAiName
             ? `${activeAiName}${activeAiPlace ? ` · ${activeAiPlace}` : ""}`
             : `${activeCount || collaborators.length} here`}
         </span>
       </button>
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-[70] w-64 overflow-hidden rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_18px_48px_rgba(20,18,15,.16)]">
+        <div className="absolute right-0 top-[calc(100%+8px)] z-panel w-64 overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-hover">
           <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
-            <span className="text-[11px] font-semibold text-[var(--text-primary)]">
+            <span className="text-micro font-semibold text-[var(--text-primary)]">
               In this artifact
             </span>
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="rounded-[6px] p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="rounded-chip p-1 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               aria-label="Close collaborators"
             >
               <X className="h-3.5 w-3.5" />
@@ -880,7 +880,7 @@ export function CollaborationPresenceIndicator({
                 >
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-[12px]"
+                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-caption"
                     onClick={() => {
                       onFocusPresence?.(person);
                       setOpen(false);
@@ -918,7 +918,7 @@ export function CollaborationPresenceIndicator({
                     <button
                       type="button"
                       data-spectra-follow-control=""
-                      className={`spectra-follow-row-action mx-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border transition ${
+                      className={`spectra-follow-row-action mx-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-control border transition ${
                         isFollowed
                           ? "border-[color-mix(in_oklab,var(--brand-primary)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-primary))] text-[var(--brand-primary)]"
                           : "border-transparent text-[var(--text-tertiary)] hover:border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] max-lg:opacity-100 lg:opacity-0 lg:group-hover/row:opacity-100 lg:group-focus-within/row:opacity-100"
@@ -970,7 +970,7 @@ export function CollaborationPresenceIndicator({
           onClick={() => {
             resumeFollow();
           }}
-          className="spectra-return-pill spectra-composer-above fixed left-1/2 z-panel flex -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--brand-primary)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] py-1.5 pl-2.5 pr-3 text-caption font-medium text-[var(--text-secondary)] shadow-[0_10px_32px_rgba(20,18,15,.14)] backdrop-blur-md transition hover:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] hover:text-[var(--text-primary)]"
+          className="spectra-return-pill spectra-composer-above fixed left-1/2 z-panel flex -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--brand-primary)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] py-1.5 pl-2.5 pr-3 text-caption font-medium text-[var(--text-secondary)] shadow-card backdrop-blur-md transition hover:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] hover:text-[var(--text-primary)]"
         >
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[color-mix(in_oklab,var(--brand-primary)_12%,transparent)] text-[var(--brand-primary)]">
             <CornerUpLeft className="h-3 w-3" />

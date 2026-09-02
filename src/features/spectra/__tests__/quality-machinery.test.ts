@@ -20,10 +20,10 @@ import {
   evaluateArtifactQuality,
 } from "../quality/rubrics";
 
-const CALM_BACKGROUND = "#f7f9fd";
-const CALM_HEADING = "#183f35";
-const CALM_BODY = "#2f3e39";
-const LOW_CONTRAST_BACKGROUND = "#ffffff";
+const CALM_BACKGROUND = "var(--bg-secondary)";
+const CALM_HEADING = "var(--accent-mint)";
+const CALM_BODY = "var(--text-primary)";
+const LOW_CONTRAST_BACKGROUND = "var(--bg-elevated)";
 const LOW_CONTRAST_TEXT = "#999999";
 
 function textObject(id: string, value: string) {
@@ -476,7 +476,7 @@ describe("P4.I4 quality machinery", () => {
           objects: [
             {
               ...textObject("title-1", "Three practical moves"),
-              style: { color: "#e8eee9", fill: "#f4f7f5", fontSize: 36 },
+              style: { color: "var(--bg-secondary)", fill: "var(--bg-secondary)", fontSize: 36 },
             },
             shapeObject("idea-1", "Space"),
             shapeObject("idea-2", "Retrieve"),

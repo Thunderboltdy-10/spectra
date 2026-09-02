@@ -104,11 +104,11 @@ const cardIcons: LucideIcon[] = [
   ShieldCheck,
 ];
 const cardTones = [
-  { color: "#139b72", soft: "#e8f7f1" },
-  { color: "#ed7a2c", soft: "#fff1e7" },
-  { color: "#6d55ea", soft: "#eeeaff" },
-  { color: "#168bc5", soft: "#e7f5fb" },
-  { color: "#bf5c7e", soft: "#faedf2" },
+  { color: "var(--accent-mint)", soft: "color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))" },
+  { color: "var(--accent-orange)", soft: "#fff1e7" },
+  { color: "var(--brand-primary)", soft: "#eeeaff" },
+  { color: "var(--accent-cyan)", soft: "#e7f5fb" },
+  { color: "var(--accent-coral)", soft: "#faedf2" },
 ];
 
 function hash(value: string) {
@@ -239,12 +239,12 @@ function AgentCard({
         onClick={onOpen}
       >
         <span className="flex min-w-0 items-start gap-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-[var(--agent-soft)] text-[var(--agent-color)] transition-transform duration-300 group-hover:-rotate-2 group-hover:scale-[1.04]">
+          <span className="grid size-10 shrink-0 place-items-center rounded-card bg-[var(--agent-soft)] text-[var(--agent-color)] transition-transform duration-300 group-hover:-rotate-2 group-hover:scale-[1.04]">
             <Icon className="size-[19px]" strokeWidth={1.8} />
           </span>
           <span className="min-w-0 flex-1 text-left">
             <span className="flex items-center gap-2">
-              <span className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
+              <span className="truncate text-ui font-semibold text-[var(--text-primary)]">
                 {card.title}
               </span>
               {card.section === "yours" && card.releaseNumber ? (
@@ -254,12 +254,12 @@ function AgentCard({
                 />
               ) : null}
             </span>
-            <span className="mt-0.5 block truncate text-[11px] text-[var(--text-tertiary)]">
+            <span className="mt-0.5 block truncate text-micro text-[var(--text-tertiary)]">
               {card.subject}
             </span>
           </span>
         </span>
-        <span className="mt-4 line-clamp-2 min-h-10 text-left text-[11px] leading-5 text-[var(--text-secondary)]">
+        <span className="mt-4 line-clamp-2 min-h-10 text-left text-micro leading-5 text-[var(--text-secondary)]">
           {card.summary}
         </span>
         <span className="mt-4 flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
@@ -279,7 +279,7 @@ function AgentCard({
             {formatRelativeTime(card.updatedAt)}
           </span>
           {card.section === "discover" && typeof card.rating === "number" ? (
-            <span className="ml-auto shrink-0 font-semibold text-[#b87618]">
+            <span className="ml-auto shrink-0 font-semibold text-[var(--accent-gold)]">
               ★ {card.rating.toFixed(1)} ({card.ratingCount})
             </span>
           ) : null}
@@ -349,7 +349,7 @@ function LibrarySectionBlock({
         <div>
           <h2
             id={`agent-section-${title.replaceAll(" ", "-").toLowerCase()}`}
-            className="font-display text-[19px] font-semibold text-[var(--text-primary)]"
+            className="font-display text-heading font-semibold text-[var(--text-primary)]"
           >
             {title}
           </h2>
@@ -361,7 +361,7 @@ function LibrarySectionBlock({
           <button
             type="button"
             onClick={onViewAll}
-            className="shrink-0 text-[11px] font-semibold text-[var(--brand-primary)] hover:underline"
+            className="shrink-0 text-micro font-semibold text-[var(--brand-primary)] hover:underline"
           >
             View all ({cards.length})
           </button>
@@ -372,7 +372,7 @@ function LibrarySectionBlock({
           {cards.slice(0, limit).map(children)}
         </div>
       ) : (
-        <p className="flex items-center gap-2 py-4 text-[12px] text-[var(--text-secondary)]"><Sparkles className="size-4 text-[var(--text-tertiary)]" />No agents in this collection yet.</p>
+        <p className="flex items-center gap-2 py-4 text-caption text-[var(--text-secondary)]"><Sparkles className="size-4 text-[var(--text-tertiary)]" />No agents in this collection yet.</p>
       )}
     </section>
   );
@@ -803,7 +803,7 @@ export function AgentLibraryShell({
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search agents by name, subject, or capability…"
-                className="min-w-0 flex-1 bg-transparent text-[11px] outline-none placeholder:text-[var(--text-tertiary)]"
+                className="min-w-0 flex-1 bg-transparent text-micro outline-none placeholder:text-[var(--text-tertiary)]"
               />
               {search ? (
                 <button
@@ -817,7 +817,7 @@ export function AgentLibraryShell({
             </label>
             <button
               type="button"
-              className={`relative grid size-10 shrink-0 place-items-center rounded-[8px] border transition ${filtersOpen ? "border-[var(--text-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+              className={`relative grid size-10 shrink-0 place-items-center rounded-control border transition ${filtersOpen ? "border-[var(--text-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
               onClick={() => setFiltersOpen((value) => !value)}
               aria-label="Filter and sort agents"
               aria-expanded={filtersOpen}
@@ -863,7 +863,7 @@ export function AgentLibraryShell({
                 triggerClassName="min-w-[160px] bg-[var(--bg-elevated)]"
               />
               {subject !== "all" || capability !== "all" || sortMode !== "relevance" ? (
-                <button type="button" className="h-10 px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]" onClick={() => { setSubject("all"); setCapability("all"); setSortMode("relevance"); }}>
+                <button type="button" className="h-10 px-2 text-micro font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]" onClick={() => { setSubject("all"); setCapability("all"); setSortMode("relevance"); }}>
                   Clear filters
                 </button>
               ) : null}
@@ -871,7 +871,7 @@ export function AgentLibraryShell({
           ) : null}
 
           {loading ? (
-            <div className="mt-8 flex items-center gap-2 text-[12px] text-[var(--text-secondary)]"><Loader2 className="size-4 animate-spin" /> Loading agents…</div>
+            <div className="mt-8 flex items-center gap-2 text-caption text-[var(--text-secondary)]"><Loader2 className="size-4 animate-spin" /> Loading agents…</div>
           ) : (
             <>
               <LibrarySectionBlock
@@ -969,7 +969,7 @@ export function AgentLibraryShell({
                 <button
                   type="button"
                   onClick={() => void createAgent()}
-                  className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  className="flex w-full items-center gap-2 rounded-chip px-2.5 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
                   <Plus className="h-4 w-4" />
                   New agent
@@ -995,11 +995,11 @@ export function AgentLibraryShell({
               <div>
                 <h2
                   id="agent-place-title"
-                  className="font-display text-[22px] font-semibold"
+                  className="font-display text-metric font-semibold"
                 >
                   Add to a workspace
                 </h2>
-                <p className="mt-1 text-[12px] leading-5 text-[var(--text-secondary)]">
+                <p className="mt-1 text-caption leading-5 text-[var(--text-secondary)]">
                   Choose where {placementTarget.title} should appear. This
                   personal placement does not re-share it with the workspace.
                 </p>
@@ -1007,7 +1007,7 @@ export function AgentLibraryShell({
               <button
                 type="button"
                 onClick={() => setPlacementTarget(null)}
-                className="grid size-8 place-items-center rounded-[8px] hover:bg-[var(--bg-hover)]"
+                className="grid size-8 place-items-center rounded-control hover:bg-[var(--bg-hover)]"
                 aria-label="Close"
               >
                 <X className="size-4" />
@@ -1027,16 +1027,16 @@ export function AgentLibraryShell({
                       busyKey === `place:${placementTarget._id}`
                     }
                     onClick={() => void placeAgent(placementTarget, workspace)}
-                    className="flex min-h-12 w-full items-center gap-3 rounded-[9px] px-3 text-left hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                    className="flex min-h-12 w-full items-center gap-3 rounded-card px-3 text-left hover:bg-[var(--bg-hover)] disabled:opacity-45"
                   >
-                    <span className="grid size-8 place-items-center rounded-[8px] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
+                    <span className="grid size-8 place-items-center rounded-control bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
                       <Grid3X3 className="size-4" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12px] font-semibold">
+                      <span className="block truncate text-caption font-semibold">
                         {workspace.title}
                       </span>
-                      <span className="text-[11px] text-[var(--text-tertiary)]">
+                      <span className="text-micro text-[var(--text-tertiary)]">
                         {alreadyPlaced
                           ? "Already added"
                           : workspace.ownership === "shared"
@@ -1051,7 +1051,7 @@ export function AgentLibraryShell({
                 );
               })}
               {!workspaces.length ? (
-                <div className="rounded-[9px] border border-dashed border-[var(--border-default)] p-6 text-center text-[12px] text-[var(--text-secondary)]">
+                <div className="rounded-card border border-dashed border-[var(--border-default)] p-6 text-center text-caption text-[var(--text-secondary)]">
                   Create a workspace before placing this agent.
                 </div>
               ) : null}
@@ -1073,17 +1073,17 @@ export function AgentLibraryShell({
             aria-labelledby="public-agent-title"
           >
             <header className="flex items-start gap-3">
-              <span className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-[#e8f7f1] text-[#149a72]">
+              <span className="grid size-10 shrink-0 place-items-center rounded-card bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]">
                 <Bot className="size-5" />
               </span>
               <div className="min-w-0 flex-1">
                 <h2
                   id="public-agent-title"
-                  className="truncate font-display text-[23px] font-semibold"
+                  className="truncate font-display text-metric font-semibold"
                 >
                   {publicPreview.title}
                 </h2>
-                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                <p className="mt-1 text-micro text-[var(--text-secondary)]">
                   Published release {publicPreview.releaseNumber} by{" "}
                   {publicPreview.owner.name}
                 </p>
@@ -1091,21 +1091,21 @@ export function AgentLibraryShell({
               <button
                 type="button"
                 onClick={() => setPublicPreview(null)}
-                className="grid size-8 place-items-center rounded-[8px] hover:bg-[var(--bg-hover)]"
+                className="grid size-8 place-items-center rounded-control hover:bg-[var(--bg-hover)]"
                 aria-label="Close"
               >
                 <X className="size-4" />
               </button>
             </header>
-            <p className="mt-5 text-[13px] leading-6 text-[var(--text-secondary)]">
+            <p className="mt-5 text-ui leading-6 text-[var(--text-secondary)]">
               {publicPreview.summary || publicPreview.purpose}
             </p>
-            <div className="mt-4 rounded-[10px] bg-[var(--bg-secondary)] p-4">
-              <div className="flex items-center gap-2 text-[11px] font-semibold">
+            <div className="mt-4 rounded-card bg-[var(--bg-secondary)] p-4">
+              <div className="flex items-center gap-2 text-micro font-semibold">
                 <ShieldCheck className="size-4 text-[var(--success)]" />
                 What adding loads
               </div>
-              <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">
+              <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
                 Only this immutable published release, its allowed skills and
                 tools, and permissioned resource bindings. The creator cannot
                 see your prompts, memory, threads, or outputs.
@@ -1127,7 +1127,7 @@ export function AgentLibraryShell({
               <button
                 type="button"
                 onClick={() => setPublicPreview(null)}
-                className="h-9 rounded-[8px] px-3 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                className="h-9 rounded-control px-3 text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               >
                 Cancel
               </button>
@@ -1135,7 +1135,7 @@ export function AgentLibraryShell({
                 type="button"
                 disabled={busyKey === `public:${publicPreview.agentId}`}
                 onClick={() => void installAgent(publicPreview)}
-                className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+                className="inline-flex h-9 items-center gap-2 rounded-control bg-[var(--text-primary)] px-4 text-caption font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
                 {busyKey === `public:${publicPreview.agentId}` ? (
                   <Loader2 className="size-4 animate-spin" />

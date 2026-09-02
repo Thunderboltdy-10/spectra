@@ -35,7 +35,7 @@ function enzymeInhibitionBoard() {
         rotation: 0,
         zIndex: 1,
         content: { text: "Competitive Inhibition", shape: "rounded-rectangle" },
-        style: { fill: "#f4f1ff", stroke: "#8874ee", color: "#4938af" },
+        style: { fill: "var(--bg-user-bubble)", stroke: "var(--brand-primary)", color: "var(--brand-primary)" },
       },
       {
         id: "node-non",
@@ -52,7 +52,7 @@ function enzymeInhibitionBoard() {
           text: "Non-competitive Inhibition",
           shape: "rounded-rectangle",
         },
-        style: { fill: "#fff3c9", stroke: "#e9c965", color: "#3f3823" },
+        style: { fill: "color-mix(in oklab, var(--accent-gold) 28%, var(--bg-elevated))", stroke: "var(--accent-gold)", color: "var(--text-primary)" },
       },
       {
         id: "node-un",
@@ -69,7 +69,7 @@ function enzymeInhibitionBoard() {
           text: "Uncompetitive Inhibition",
           shape: "rounded-rectangle",
         },
-        style: { fill: "#e8f5e9", stroke: "#81c784", color: "#1b5e20" },
+        style: { fill: "color-mix(in oklab, var(--success) 12%, var(--bg-elevated))", stroke: "var(--success)", color: "var(--success)" },
       },
     ],
     edges: [],
@@ -138,8 +138,8 @@ describe("whiteboard contentPatch recolor coerce", () => {
     };
 
     expect(next.nodes[0]?.style?.fill).toBe("#2563eb");
-    expect(next.nodes[1]?.style?.fill).toBe("#fff3c9");
-    expect(next.nodes[2]?.style?.fill).toBe("#e8f5e9");
+    expect(next.nodes[1]?.style?.fill).toBe("color-mix(in oklab, var(--accent-gold) 28%, var(--bg-elevated))");
+    expect(next.nodes[2]?.style?.fill).toBe("color-mix(in oklab, var(--success) 12%, var(--bg-elevated))");
   });
 
   it("lets propose_operation-shaped updates with op + missing nulls parse after coerce", () => {

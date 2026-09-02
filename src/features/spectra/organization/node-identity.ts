@@ -44,8 +44,8 @@ const REFERENCE: NodeIdentity = {
 
 const THREAD: NodeIdentity = {
   icon: MessageSquare,
-  color: "#8b6ff0",
-  soft: "color-mix(in oklab, #8b6ff0 10%, var(--bg-elevated))",
+  color: "var(--brand-primary)",
+  soft: "color-mix(in oklab, var(--brand-primary) 10%, var(--bg-elevated))",
   label: "Thread",
 };
 

@@ -80,7 +80,7 @@ const types: Array<{ key: "all" | ObjectType; label: string }> = [
 const threadMeta = {
   label: "Conversation",
   icon: MessageSquare,
-  color: "#8b6ff0",
+  color: "var(--brand-primary)",
 };
 
 function objectId(entry: ObjectLibraryEntry) {
@@ -524,7 +524,7 @@ export function ObjectLibrary({
             {onMoveToInbox && hasVisiblePlacement ? (
               <button
                 type="button"
-                className="mb-1 flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[13px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                className="mb-1 flex w-full items-center gap-2 rounded-control px-2.5 py-2 text-left text-ui text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                 onClick={() => {
                   setPlacementMenuId(null);
                   onMoveToInbox(entry);
@@ -544,7 +544,7 @@ export function ObjectLibrary({
                 <button
                   key={workspace._id}
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[13px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                  className="flex w-full items-center gap-2 rounded-control px-2.5 py-2 text-left text-ui text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
                   disabled={alreadyPlaced}
                   onClick={() => {
                     setPlacementMenuId(null);
@@ -577,14 +577,14 @@ export function ObjectLibrary({
       <div className="relative">
         <button
           type="button"
-          className="flex h-8 items-center gap-2 rounded-[7px] px-1 text-[12px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          className="flex h-8 items-center gap-2 rounded-control px-1 text-caption font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           onClick={() => setCreateMenuKey(open ? null : groupKey)}
         >
           <Plus className="h-3.5 w-3.5" />
           New work
         </button>
         {open ? (
-          <div className="absolute bottom-[calc(100%+7px)] left-0 z-30 w-[210px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
+          <div className="absolute bottom-[calc(100%+7px)] left-0 z-chrome w-[210px] rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-card">
             {types
               .slice(1)
               .filter(
@@ -597,7 +597,7 @@ export function ObjectLibrary({
                   <button
                     key={type.key}
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                    className="flex w-full items-center gap-2 rounded-control px-2.5 py-2 text-left text-caption text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                     onClick={() => {
                       setCreateMenuKey(null);
                       onCreateArtifact(
@@ -653,7 +653,7 @@ export function ObjectLibrary({
       >
         {selectionMode ? (
           <span
-            className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-[6px] border transition ${selected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}
+            className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-chip border transition ${selected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}
           >
             <Check className="h-3.5 w-3.5" />
           </span>
@@ -666,13 +666,13 @@ export function ObjectLibrary({
         >
           <CardTypeIcon icon={Icon} color={meta.color} className="h-8 w-8" />
           <div className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]" title={objectTitle(entry)}>
+            <span className="block truncate text-ui font-semibold text-[var(--text-primary)]" title={objectTitle(entry)}>
               {objectTitle(entry)}
             </span>
             <CompactSummary
               value={objectSummary(entry)}
               fallback={meta.label}
-              className="mt-0.5 block truncate text-[11px]"
+              className="mt-0.5 block truncate text-micro"
             />
             <span className="mt-1 block text-micro text-[var(--text-tertiary)]">
               {meta.label} · {formatRelativeTime(objectUpdatedAt(entry))}
@@ -693,11 +693,11 @@ export function ObjectLibrary({
     <section>
       {showHeader ? (
         <div>
-          <h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
+          <h2 className="font-display text-heading font-semibold text-[var(--text-primary)]">
             {title}
           </h2>
           {subtitle ? (
-            <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
+            <p className="mt-1 text-ui text-[var(--text-secondary)]">
               {subtitle}
             </p>
           ) : null}
@@ -724,14 +724,14 @@ export function ObjectLibrary({
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-9 pr-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                className="h-9 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-9 pr-3 text-ui text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                 placeholder="Search objects"
               />
             </div>
             <div className="relative shrink-0" ref={sortRef}>
               <button
                 type="button"
-                className="flex h-9 min-w-[164px] items-center justify-between gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)]"
+                className="flex h-9 min-w-[164px] items-center justify-between gap-3 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-caption font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] hover:bg-[var(--bg-hover)]"
                 onClick={() => setSortOpen((open) => !open)}
               >
                 <span>
@@ -754,7 +754,7 @@ export function ObjectLibrary({
                 />
               </button>
               {sortOpen ? (
-                <div className="absolute right-0 top-[calc(100%+7px)] z-30 w-[190px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
+                <div className="absolute right-0 top-[calc(100%+7px)] z-chrome w-[190px] rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-card">
                   {(
                     [
                       ["updated", "Recently updated"],
@@ -769,7 +769,7 @@ export function ObjectLibrary({
                     <button
                       key={key}
                       type="button"
-                      className="flex w-full items-center justify-between rounded-[7px] px-2.5 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                      className="flex w-full items-center justify-between rounded-control px-2.5 py-2 text-left text-caption text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                       onClick={() => {
                         setSort(key);
                         setSortOpen(false);
@@ -787,7 +787,7 @@ export function ObjectLibrary({
             {showModeSwitcher ? (
               <div className="flex shrink-0 items-center gap-1.5">
                 {flatTable ? (
-                  <span className="mr-0.5 text-[11px] text-[var(--text-tertiary)]">
+                  <span className="mr-0.5 text-micro text-[var(--text-tertiary)]">
                     View
                   </span>
                 ) : null}
@@ -809,7 +809,7 @@ export function ObjectLibrary({
                         aria-label={option.label}
                         aria-pressed={active}
                         title={option.label}
-                        className={`grid size-8 place-items-center rounded-[7px] transition ${active ? "border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.06)]" : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+                        className={`grid size-8 place-items-center rounded-control transition ${active ? "border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.06)]" : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
                         onClick={() => setMode(option.key)}
                       >
                         <Icon className="h-3.5 w-3.5" />
@@ -833,13 +833,13 @@ export function ObjectLibrary({
             <ChevronDown
               className={`h-4 w-4 text-[var(--text-tertiary)] transition ${generalOpen ? "" : "-rotate-90"}`}
             />
-            <h3 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
+            <h3 className="font-display text-heading font-semibold text-[var(--text-primary)]">
               General
             </h3>
-            <span className="rounded-[6px] bg-[var(--bg-secondary)] px-1.5 text-[12px] text-[var(--text-secondary)]">
+            <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 text-caption text-[var(--text-secondary)]">
               {generalEntries.length}
             </span>
-            <span className="ml-1 text-[12px] text-[var(--text-tertiary)]">
+            <span className="ml-1 text-caption text-[var(--text-tertiary)]">
               Not placed in a workspace
             </span>
           </button>
@@ -862,7 +862,7 @@ export function ObjectLibrary({
             >
               {generalEntries.slice(0, 6).map(renderGeneralCard)}
               {generalEntries.length === 0 ? (
-                <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-7 text-[13px] text-[var(--text-secondary)]">
+                <div className="rounded-control border border-dashed border-[var(--border-default)] px-4 py-7 text-ui text-[var(--text-secondary)]">
                   General is clear.
                 </div>
               ) : null}
@@ -872,9 +872,9 @@ export function ObjectLibrary({
       ) : null}
 
       {showGroups && mode === "list" && flatTable ? (
-        <div className="spectra-object-flat-table mt-4 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <div className="grid h-11 grid-cols-[28px_minmax(250px,1.45fr)_140px_130px_105px_92px_28px] items-center gap-3 border-b border-[var(--border-default)] px-3 text-[12px] font-medium text-[var(--text-secondary)]">
-            <span className="size-3.5 rounded-[3px] border border-[var(--border-default)]" />
+        <div className="spectra-object-flat-table mt-4 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <div className="grid h-11 grid-cols-[28px_minmax(250px,1.45fr)_140px_130px_105px_92px_28px] items-center gap-3 border-b border-[var(--border-default)] px-3 text-caption font-medium text-[var(--text-secondary)]">
+            <span className="size-3.5 rounded-chip border border-[var(--border-default)]" />
             <span>Name</span>
             <span>Type</span>
             <span>Workspace</span>
@@ -907,13 +907,13 @@ export function ObjectLibrary({
                 onClick={() => activateEntry(entry)}
               >
                 <span
-                  className={`grid size-3.5 place-items-center rounded-[3px] border ${selected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-white" : "border-[var(--border-default)]"}`}
+                  className={`grid size-3.5 place-items-center rounded-chip border ${selected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-white" : "border-[var(--border-default)]"}`}
                 >
                   {selected ? <Check className="size-2.5" /> : null}
                 </span>
                 <span className="flex min-w-0 items-center gap-2.5">
                   <span
-                    className="grid size-7 shrink-0 place-items-center rounded-[7px]"
+                    className="grid size-7 shrink-0 place-items-center rounded-control"
                     style={{
                       background: `color-mix(in oklab, ${meta.color} 10%, white)`,
                       color: meta.color,
@@ -921,7 +921,7 @@ export function ObjectLibrary({
                   >
                     <Icon className="size-3.5" />
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--text-primary)]">
+                  <span className="min-w-0 flex-1 truncate text-ui font-medium text-[var(--text-primary)]">
                     {objectTitle(entry)}
                   </span>
                   {entry.artifact?.tags?.length ? (
@@ -929,7 +929,7 @@ export function ObjectLibrary({
                       {entry.artifact.tags.slice(0, 2).map((tag) => (
                         <span
                           key={tag}
-                          className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                          className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-secondary)]"
                         >
                           {tag}
                         </span>
@@ -937,9 +937,9 @@ export function ObjectLibrary({
                     </span>
                   ) : null}
                 </span>
-                <span className="flex items-center gap-2 truncate text-[13px] text-[var(--text-primary)]">
+                <span className="flex items-center gap-2 truncate text-ui text-[var(--text-primary)]">
                   <span
-                    className="grid size-5 shrink-0 place-items-center rounded-[5px]"
+                    className="grid size-5 shrink-0 place-items-center rounded-chip"
                     style={{
                       background: `color-mix(in oklab, ${meta.color} 10%, white)`,
                       color: meta.color,
@@ -949,13 +949,13 @@ export function ObjectLibrary({
                   </span>
                   {meta.label}
                 </span>
-                <span className="truncate text-[13px] text-[var(--text-secondary)]">
+                <span className="truncate text-ui text-[var(--text-secondary)]">
                   {workspaceName}
                 </span>
-                <span className="text-[13px] text-[var(--text-secondary)]">
+                <span className="text-ui text-[var(--text-secondary)]">
                   {formatRelativeTime(objectUpdatedAt(entry))}
                 </span>
-                <span className="flex items-center gap-1.5 text-[13px] text-[var(--text-primary)]">
+                <span className="flex items-center gap-1.5 text-ui text-[var(--text-primary)]">
                   <span className="grid size-6 place-items-center rounded-full bg-[color-mix(in_oklab,var(--brand-primary)_18%,var(--bg-secondary))] text-micro font-semibold text-[var(--brand-primary)]">
                     You
                   </span>
@@ -966,7 +966,7 @@ export function ObjectLibrary({
             );
           })}
           {visible.length === 0 ? (
-            <div className="px-4 py-10 text-center text-[11px] text-[var(--text-secondary)]">
+            <div className="px-4 py-10 text-center text-micro text-[var(--text-secondary)]">
               No work matches these filters.
             </div>
           ) : null}
@@ -977,10 +977,10 @@ export function ObjectLibrary({
         <main className="mt-8">
           <section>
             <div className="mb-4">
-              <h3 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
+              <h3 className="font-display text-heading font-semibold text-[var(--text-primary)]">
                 {groupBy === "workspace" ? "In workspaces" : "By type"}
               </h3>
-              <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
+              <p className="mt-1 text-ui text-[var(--text-secondary)]">
                 {groupBy === "workspace"
                   ? "Objects grouped by their workspace."
                   : "Objects grouped by artifact type."}
@@ -994,7 +994,7 @@ export function ObjectLibrary({
                   data-card-state={
                     dropTargetKey === group.key ? "drop-target" : "normal"
                   }
-                  className="overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
+                  className="overflow-hidden rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)]"
                   onDragOver={(event) => allowDrop(event, group.key)}
                   onDragLeave={(event) => {
                     if (
@@ -1012,18 +1012,18 @@ export function ObjectLibrary({
                     className="flex h-11 items-center justify-between border-b border-[var(--border-default)] px-4"
                     style={{ background: group.soft }}
                   >
-                    <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]">
+                    <div className="flex items-center gap-2 text-ui font-semibold text-[var(--text-primary)]">
                       <span
                         className="h-2 w-2 rounded-full"
                         style={{ background: group.color }}
                       />
                       {group.label}
-                      <span className="rounded-[5px] bg-[color-mix(in_oklab,var(--bg-elevated)_70%,transparent)] px-1.5 text-[11px] text-[var(--text-secondary)]">
+                      <span className="rounded-chip bg-[color-mix(in_oklab,var(--bg-elevated)_70%,transparent)] px-1.5 text-micro text-[var(--text-secondary)]">
                         {group.entries.length}
                       </span>
                     </div>
                     {group.workspace ? (
-                      <span className="text-[12px] text-[var(--text-secondary)]">
+                      <span className="text-caption text-[var(--text-secondary)]">
                         Workspace <ExternalLink className="inline h-3 w-3" />
                       </span>
                     ) : null}
@@ -1087,7 +1087,7 @@ export function ObjectLibrary({
                           <div className="flex min-w-0 items-center gap-3">
                             {selectionMode ? (
                               <span
-                                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}
+                                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-chip border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}
                               >
                                 <Check className="h-3 w-3" />
                               </span>
@@ -1097,15 +1097,15 @@ export function ObjectLibrary({
                               style={{ color: meta.color }}
                             />
                             <div className="min-w-0">
-                              <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
+                              <div className="truncate text-ui font-semibold text-[var(--text-primary)]">
                                 {objectTitle(entry)}
                               </div>
-                              <div className="text-[11px] text-[var(--text-secondary)]">
+                              <div className="text-micro text-[var(--text-secondary)]">
                                 {meta.label}
                               </div>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+                          <div className="flex items-center gap-2 text-caption text-[var(--text-secondary)]">
                             {groupBy === "workspace" ? (
                               <>
                                 <span
@@ -1120,7 +1120,7 @@ export function ObjectLibrary({
                               </span>
                             )}
                           </div>
-                          <div className="text-[12px] text-[var(--text-secondary)]">
+                          <div className="text-caption text-[var(--text-secondary)]">
                             Updated {formatRelativeTime(objectUpdatedAt(entry))}
                           </div>
                           <div onClick={(event) => event.stopPropagation()}>
@@ -1140,7 +1140,7 @@ export function ObjectLibrary({
                           return next;
                         })
                       }
-                      className="flex h-9 w-full items-center justify-center text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                      className="flex h-9 w-full items-center justify-center text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
                     >
                       {expandedGroups.has(group.key)
                         ? "Show less"
@@ -1176,7 +1176,7 @@ export function ObjectLibrary({
               return (
                 <section
                   key={group.key}
-                  className="self-start rounded-[10px] border p-2.5 shadow-[0_10px_28px_rgba(27,20,12,0.04)]"
+                  className="self-start rounded-card border p-2.5 shadow-soft"
                   data-board-column={group.key}
                   style={
                     {
@@ -1187,13 +1187,13 @@ export function ObjectLibrary({
                   }
                 >
                   <div className="mb-2 flex h-8 items-center justify-between px-1">
-                    <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]">
+                    <div className="flex items-center gap-2 text-ui font-semibold text-[var(--text-primary)]">
                       <span
                         className="h-2 w-2 rounded-full"
                         style={{ background: group.color }}
                       />
                       {group.label}
-                      <span className="text-[12px] text-[var(--text-tertiary)]">
+                      <span className="text-caption text-[var(--text-tertiary)]">
                         {group.entries.length}
                       </span>
                     </div>
@@ -1230,7 +1230,7 @@ export function ObjectLibrary({
                           >
                             {selectionMode ? (
                               <span
-                                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}
+                                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-chip border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}
                               >
                                 <Check className="h-3 w-3" />
                               </span>
@@ -1240,7 +1240,7 @@ export function ObjectLibrary({
                               style={{ color: meta.color }}
                             />
                             <div className="min-w-0 flex-1">
-                              <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">
+                              <span className="block truncate text-ui font-semibold text-[var(--text-primary)]">
                                 {objectTitle(entry)}
                               </span>
                               <CompactSummary
@@ -1259,7 +1259,7 @@ export function ObjectLibrary({
                   {group.entries.length > 6 ? (
                     <button
                       type="button"
-                      className="mt-2 h-8 px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      className="mt-2 h-8 px-2 text-micro font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                       onClick={() =>
                         setExpandedGroups((current) => {
                           const next = new Set(current);

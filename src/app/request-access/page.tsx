@@ -4,7 +4,7 @@ export default function RequestAccessPage() {
   return (
     <main className="grid min-h-screen place-items-center bg-[var(--bg-primary)] px-4 py-10">
       <div className="w-full max-w-2xl rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 shadow-[var(--shadow-soft)]">
-        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+        <p className="text-micro font-medium uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
           Spectra access
         </p>
         <h1 className="mt-2 font-display text-3xl text-[var(--text-primary)]">

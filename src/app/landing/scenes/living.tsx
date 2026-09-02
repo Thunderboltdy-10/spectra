@@ -177,7 +177,7 @@ function Block({
         <SpectraRichContent
           content={markdown}
           verifiedSourceIds={verified}
-          className="text-[15px] leading-[1.7]"
+          className="text-subhead leading-[1.7]"
         />
       </div>
     </div>
@@ -325,7 +325,7 @@ export function LivingScene() {
           <Chip tone="cyan" dot>
             Week 6 slides, verified
           </Chip>
-          <span className="text-[12px] text-[var(--text-tertiary)]">
+          <span className="text-caption text-[var(--text-tertiary)]">
             Attached by Pablo&rsquo;s AI
           </span>
         </div>

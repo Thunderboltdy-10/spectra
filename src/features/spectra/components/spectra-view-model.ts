@@ -24,11 +24,11 @@ export type WorkspaceAccent = {
 };
 
 const accents: Record<string, WorkspaceAccent> = {
-  green: { color: "#2fa66f", soft: "color-mix(in oklab, #2fa66f 10%, var(--bg-elevated))", border: "color-mix(in oklab, #2fa66f 24%, var(--border-default))", icon: "leaf" },
-  purple: { color: "#8b6ff0", soft: "color-mix(in oklab, #8b6ff0 10%, var(--bg-elevated))", border: "color-mix(in oklab, #8b6ff0 24%, var(--border-default))", icon: "plus" },
-  blue: { color: "#2f95d8", soft: "color-mix(in oklab, #2f95d8 9%, var(--bg-elevated))", border: "color-mix(in oklab, #2f95d8 22%, var(--border-default))", icon: "spark" },
-  orange: { color: "#d88922", soft: "color-mix(in oklab, #d88922 10%, var(--bg-elevated))", border: "color-mix(in oklab, #d88922 24%, var(--border-default))", icon: "bar" },
-  coral: { color: "#e2703a", soft: "color-mix(in oklab, #e2703a 10%, var(--bg-elevated))", border: "color-mix(in oklab, #e2703a 24%, var(--border-default))", icon: "book" },
+  green: { color: "var(--success)", soft: "color-mix(in oklab, var(--success) 10%, var(--bg-elevated))", border: "color-mix(in oklab, var(--success) 24%, var(--border-default))", icon: "leaf" },
+  purple: { color: "var(--brand-primary)", soft: "color-mix(in oklab, var(--brand-primary) 10%, var(--bg-elevated))", border: "color-mix(in oklab, var(--brand-primary) 24%, var(--border-default))", icon: "plus" },
+  blue: { color: "var(--accent-cyan)", soft: "color-mix(in oklab, var(--accent-cyan) 9%, var(--bg-elevated))", border: "color-mix(in oklab, var(--accent-cyan) 22%, var(--border-default))", icon: "spark" },
+  orange: { color: "var(--accent-gold)", soft: "color-mix(in oklab, var(--accent-gold) 10%, var(--bg-elevated))", border: "color-mix(in oklab, var(--accent-gold) 24%, var(--border-default))", icon: "bar" },
+  coral: { color: "var(--accent-orange)", soft: "color-mix(in oklab, var(--accent-orange) 10%, var(--bg-elevated))", border: "color-mix(in oklab, var(--accent-orange) 24%, var(--border-default))", icon: "book" },
 };
 
 export function workspaceAccent(workspace?: Pick<SpectraWorkspace, "color" | "title"> | null, index = 0): WorkspaceAccent {

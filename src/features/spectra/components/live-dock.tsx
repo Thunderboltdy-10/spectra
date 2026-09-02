@@ -748,7 +748,7 @@ export function LiveDock({
           <button
             type="button"
             onClick={onStartNewThread}
-            className="spectra-live-dock-slot flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="spectra-live-dock-slot flex h-11 w-11 shrink-0 items-center justify-center rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-hover hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             aria-label="Start a new thread"
             title="New thread"
           >
@@ -761,12 +761,12 @@ export function LiveDock({
         >
         {showOptimistic ? (
           <article
-            className="flex h-11 min-w-[240px] flex-1 items-center gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 shadow-[inset_3px_0_var(--accent-cyan)]"
+            className="flex h-11 min-w-[240px] flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 border-l-[3px] border-cyan"
             data-run-status="starting"
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
             <span className="min-w-0">
-              <span className="block truncate text-[11px] font-semibold text-[var(--text-primary)]">
+              <span className="block truncate text-micro font-semibold text-[var(--text-primary)]">
                 Starting run
               </span>
               <span className="block truncate text-micro text-[var(--text-tertiary)]">
@@ -821,7 +821,7 @@ export function LiveDock({
               <motion.article
                 layout
                 key={tab.runId}
-                className={`spectra-live-dock-tab group relative max-w-full snap-start overflow-visible rounded-[9px] border bg-[var(--bg-elevated)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] shadow-[inset_3px_0_var(--accent-cyan)]" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-composer-dock max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
+                className={`spectra-live-dock-tab group relative max-w-full snap-start overflow-visible rounded-card border bg-[var(--bg-elevated)] shadow-hover ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] border-l-[3px] border-cyan" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-composer-dock max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
                 style={
                   {
                     anchorName: disclosureAnchor,
@@ -918,7 +918,7 @@ export function LiveDock({
                   <button
                     type="button"
                     onClick={() => openQuickChat(tab)}
-                    className="dock-tab-icon ml-auto flex h-8 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    className="dock-tab-icon ml-auto flex h-8 w-7 shrink-0 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     aria-label={`Open conversation for ${model.title}`}
                     title="Open conversation"
                   >
@@ -928,7 +928,7 @@ export function LiveDock({
                     <button
                       type="button"
                       onClick={() => onRetry(tab.runId)}
-                      className="dock-tab-icon flex h-8 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      className="dock-tab-icon flex h-8 w-7 shrink-0 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                       aria-label={`Retry ${model.title}`}
                       title="Retry"
                     >
@@ -940,7 +940,7 @@ export function LiveDock({
                       type="button"
                       disabled={stopping.has(tab.runId)}
                       onClick={() => void stopTab(tab.runId)}
-                      className="dock-tab-icon flex h-8 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                      className="dock-tab-icon flex h-8 w-7 shrink-0 items-center justify-center rounded-chip text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                       aria-label={`Stop ${model.title}`}
                       title="Stop"
                     >
@@ -995,7 +995,7 @@ export function LiveDock({
 
                 {!expanded && hoverOpen ? (
                   <div
-                    className={`spectra-live-dock-hover ${LAYER_CLASS.toast} fixed w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)]`}
+                    className={`spectra-live-dock-hover ${LAYER_CLASS.toast} fixed w-[min(360px,calc(100vw-24px))] rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-hover`}
                     style={
                       {
                         positionAnchor: disclosureAnchor,
@@ -1007,7 +1007,7 @@ export function LiveDock({
                     onPointerEnter={() => openTabHover(tab.runId)}
                     onPointerLeave={closeTabHover}
                   >
-                    <p className="text-[13px] font-semibold leading-5 text-[var(--text-primary)]">
+                    <p className="text-ui font-semibold leading-5 text-[var(--text-primary)]">
                       {model.title}
                     </p>
                     <ProgressTrace
@@ -1036,7 +1036,7 @@ export function LiveDock({
                       <button
                         type="button"
                         onClick={() => openQuickChat(tab)}
-                        className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                        className="inline-flex h-7 items-center gap-1 rounded-chip px-2 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                       >
                           <SquareArrowOutUpRight className="h-3 w-3" /> Open
                           conversation
@@ -1045,7 +1045,7 @@ export function LiveDock({
                         <button
                           type="button"
                           onClick={() => continueThread(tab)}
-                          className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          className="inline-flex h-7 items-center gap-1 rounded-chip px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                         >
                           Continue here
                         </button>
@@ -1061,7 +1061,7 @@ export function LiveDock({
                             });
                             setExpandedInputRunId(tab.runId);
                           }}
-                          className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)]"
+                          className="inline-flex h-7 items-center gap-1 rounded-chip px-2 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)]"
                         >
                           <CircleHelp className="h-3 w-3" /> Respond
                         </button>
@@ -1070,7 +1070,7 @@ export function LiveDock({
                         <button
                           type="button"
                           onClick={() => onRetry?.(tab.runId)}
-                          className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          className="inline-flex h-7 items-center gap-1 rounded-chip px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                         >
                           <RotateCcw className="h-3 w-3" /> Retry
                         </button>
@@ -1079,7 +1079,7 @@ export function LiveDock({
                         <button
                           type="button"
                           onClick={() => void onAction?.(card, "revert")}
-                          className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          className="inline-flex h-7 items-center gap-1 rounded-chip px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                         >
                           <Undo2 className="h-3 w-3" /> Undo this run
                         </button>
@@ -1089,7 +1089,7 @@ export function LiveDock({
                           type="button"
                           disabled={stopping.has(tab.runId)}
                           onClick={() => void stopTab(tab.runId)}
-                          className="ml-auto inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                          className="ml-auto inline-flex h-7 items-center gap-1 rounded-chip px-2 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                         >
                           <Square className="h-3 w-3" /> Stop
                         </button>
@@ -1100,7 +1100,7 @@ export function LiveDock({
 
                 {expanded ? (
                   <motion.div
-                    className="fixed z-40 w-[min(480px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_18px_50px_-20px_rgba(20,26,32,.5)]"
+                    className="fixed z-chrome w-[min(480px,calc(100vw-24px))] rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]"
                     style={
                       {
                         positionAnchor: disclosureAnchor,
@@ -1136,7 +1136,7 @@ export function LiveDock({
                             );
                             setExpandedInputRunId(null);
                           }}
-                          className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                          className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
                           aria-label="Collapse required input"
                         >
                           <ChevronDown className="h-3 w-3" />
@@ -1170,7 +1170,7 @@ export function LiveDock({
                                             },
                                           }))
                                         }
-                                        className={`rounded-[6px] border px-2 py-1.5 text-left text-micro font-semibold ${selected === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
+                                        className={`rounded-chip border px-2 py-1.5 text-left text-micro font-semibold ${selected === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
                                       >
                                         {option.title}
                                       </button>
@@ -1187,7 +1187,7 @@ export function LiveDock({
                                           },
                                         }))
                                       }
-                                      className="rounded-[6px] px-2 py-1.5 text-left text-micro text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                                      className="rounded-chip px-2 py-1.5 text-left text-micro text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
                                     >
                                       Skip this question
                                     </button>
@@ -1215,7 +1215,7 @@ export function LiveDock({
                                 if (response)
                                   void respondToInput(tab, response);
                             }}
-                            className="sticky bottom-0 h-9 w-full rounded-[7px] bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+                            className="sticky bottom-0 h-9 w-full rounded-control bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
                           >
                             Continue with these answers
                           </button>
@@ -1230,7 +1230,7 @@ export function LiveDock({
                                 onClick={() =>
                                   void respondToInput(tab, option.title)
                                 }
-                                className="rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-2 text-left hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
+                                className="rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-2 text-left hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
                               >
                                 <span className="block text-micro font-semibold text-[var(--text-primary)]">
                                   {option.title}
@@ -1248,7 +1248,7 @@ export function LiveDock({
                               onClick={() =>
                                 void respondToInput(tab, "Skipped")
                               }
-                            className="mt-1.5 h-7 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
+                            className="mt-1.5 h-7 rounded-chip px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
                           >
                             Skip for now
                           </button>
@@ -1271,7 +1271,7 @@ export function LiveDock({
                               if (answer) void respondToInput(tab, answer);
                             }}
                             placeholder="Your answer…"
-                            className="h-9 min-w-0 flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0 text-micro leading-9 outline-none focus:border-[var(--accent-cyan)]"
+                            className="h-9 min-w-0 flex-1 rounded-chip border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0 text-micro leading-9 outline-none focus:border-[var(--accent-cyan)]"
                           />
                           <button
                             type="button"
@@ -1281,7 +1281,7 @@ export function LiveDock({
                               if (!answer) return;
                               void respondToInput(tab, answer);
                             }}
-                            className="h-9 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+                            className="h-9 rounded-chip bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
                           >
                             Continue
                           </button>
@@ -1290,13 +1290,13 @@ export function LiveDock({
                               onClick={() =>
                                 void respondToInput(tab, "Skipped")
                               }
-                            className="h-9 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                            className="h-9 rounded-chip px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
                           >
                             Skip
                           </button>
                         </div>
                       ) : model.inputRequest?.kind === "file" ? (
-                        <label className="mt-2 flex min-h-10 cursor-pointer items-center justify-center rounded-[7px] border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro font-semibold text-[var(--text-secondary)] hover:border-[var(--accent-cyan)]">
+                        <label className="mt-2 flex min-h-10 cursor-pointer items-center justify-center rounded-control border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro font-semibold text-[var(--text-secondary)] hover:border-[var(--accent-cyan)]">
                             <FileText className="mr-1.5 h-3.5 w-3.5" /> Attach
                             the requested file
                           <input
@@ -1330,7 +1330,7 @@ export function LiveDock({
                             <button
                               type="button"
                               onClick={() => void onAction?.(card, "confirm")}
-                              className="h-8 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
+                              className="h-8 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
                             >
                               Apply changes
                             </button>
@@ -1341,14 +1341,14 @@ export function LiveDock({
                                   current === tab.runId ? null : tab.runId,
                                 )
                               }
-                              className="h-8 rounded-[7px] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                              className="h-8 rounded-control px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                             >
                               Ask for changes
                             </button>
                             <button
                               type="button"
                               onClick={() => void onAction?.(card, "cancel")}
-                              className="h-8 rounded-[7px] px-2.5 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                              className="h-8 rounded-control px-2.5 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                             >
                               Reject
                             </button>
@@ -1362,7 +1362,7 @@ export function LiveDock({
                                   setRevision(event.target.value)
                                 }
                                 placeholder="What should change?"
-                                className="h-9 min-w-0 flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0 text-micro leading-9 outline-none focus:border-[var(--accent-cyan)]"
+                                className="h-9 min-w-0 flex-1 rounded-chip border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0 text-micro leading-9 outline-none focus:border-[var(--accent-cyan)]"
                               />
                               <button
                                 type="button"
@@ -1373,7 +1373,7 @@ export function LiveDock({
                                   setRevision("");
                                   setRevisionRunId(null);
                                 }}
-                                className="h-8 rounded-[6px] bg-[var(--accent-cyan)] px-2.5 text-micro font-semibold text-white disabled:opacity-40"
+                                className="h-8 rounded-chip bg-[var(--accent-cyan)] px-2.5 text-micro font-semibold text-white disabled:opacity-40"
                               >
                                 Revise
                               </button>

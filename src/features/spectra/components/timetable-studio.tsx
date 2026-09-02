@@ -932,7 +932,7 @@ export function TimetableStudio({
                   <EventCard
                     key={event.occurrenceKey}
                     event={event}
-                    color={layerMap.get(event.layerId)?.color ?? "#7865ea"}
+                    color={layerMap.get(event.layerId)?.color ?? "var(--brand-primary)"}
                     compact
                     readOnly={readOnly && !privateLayerIds.has(event.layerId)}
 changed={eventAiChanged(event.id)}
@@ -1010,7 +1010,7 @@ path={eventPath(event.id)}
                     >
                       <EventCard
                         event={event}
-                        color={layerMap.get(event.layerId)?.color ?? "#7865ea"}
+                        color={layerMap.get(event.layerId)?.color ?? "var(--brand-primary)"}
                         compact={eventHeight < 48}
                         readOnly={
                           readOnly && !privateLayerIds.has(event.layerId)
@@ -1091,7 +1091,7 @@ path={eventPath(event.id)}
                 <EventCard
                   key={event.occurrenceKey}
                   event={event}
-                  color={layerMap.get(event.layerId)?.color ?? "#7865ea"}
+                  color={layerMap.get(event.layerId)?.color ?? "var(--brand-primary)"}
                   compact
                   readOnly={readOnly && !privateLayerIds.has(event.layerId)}
 changed={eventAiChanged(event.id)}
@@ -1153,7 +1153,7 @@ path={eventPath(event.id)}
               >
                 <i
                   style={{
-                    background: layerMap.get(event.layerId)?.color ?? "#7865ea",
+                    background: layerMap.get(event.layerId)?.color ?? "var(--brand-primary)",
                   }}
                 />
                 <time suppressHydrationWarning>
@@ -1371,7 +1371,7 @@ path={eventPath(event.id)}
                   name: `Calendar ${draft.layers.length + 1}`,
                   kind: "personal",
                   visible: true,
-                  color: "#4a91de",
+                  color: "var(--accent-cyan)",
                   authority: "user",
                   private: true,
                 }),
@@ -1390,7 +1390,7 @@ path={eventPath(event.id)}
                     name: `Shared calendar ${draft.layers.filter((layer) => !privateLayerIds.has(layer.id)).length + 1}`,
                     kind: "class",
                     visible: true,
-                    color: "#26a879",
+                    color: "var(--accent-mint)",
                     authority: "workspace",
                   }),
                 )
@@ -1815,7 +1815,7 @@ path={eventPath(event.id)}
                 value={
                   selectedEvent.overlay?.color ||
                   layerMap.get(selectedEvent.layerId)?.color ||
-                  "#4a91de"
+                  "var(--accent-cyan)"
                 }
                 disabled={!selectedCanPersonalize}
                 onChange={(event) =>

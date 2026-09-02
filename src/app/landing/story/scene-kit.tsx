@@ -37,10 +37,10 @@ import type { SceneId } from "./timeline";
 export const TYPE = {
   hero: "text-[94px] leading-[0.94] tracking-[-0.045em] font-semibold",
   section: "text-[64px] leading-[1.02] tracking-[-0.035em] font-semibold",
-  support: "text-[42px] leading-[1.08] tracking-[-0.025em] font-semibold",
-  body: "text-[19px] leading-[1.6] tracking-[-0.006em]",
+  support: "text-display leading-[1.08] tracking-[-0.025em] font-semibold",
+  body: "text-heading leading-[1.6] tracking-[-0.006em]",
   micro:
-    "text-[11px] leading-[1.3] tracking-[0.16em] font-semibold uppercase",
+    "text-micro leading-[1.3] tracking-[0.16em] font-semibold uppercase",
 } as const;
 
 /** A small eyebrow marker. Typed by an actor, like everything else. */

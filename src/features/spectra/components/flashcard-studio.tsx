@@ -2554,7 +2554,7 @@ export function FlashcardStudio({
                 {activeDeckMedia?.downloadUrl ? (
                   <>
                     <div
-                      className={`relative mx-auto max-h-[440px] w-fit touch-none select-none overflow-hidden rounded-control border border-[var(--border-default)] bg-[#17191d] ${canEdit ? "cursor-crosshair" : ""}`}
+                      className={`relative mx-auto max-h-[440px] w-fit touch-none select-none overflow-hidden rounded-control border border-[var(--border-default)] bg-[var(--text-primary)] ${canEdit ? "cursor-crosshair" : ""}`}
                       onPointerDown={canEdit ? beginMask : undefined}
                       onPointerMove={canEdit ? moveMask : undefined}
                       onPointerUp={canEdit ? finishMask : undefined}
@@ -2573,7 +2573,7 @@ export function FlashcardStudio({
                         <button
                           key={mask.id}
                           type="button"
-                          className="absolute grid place-items-center border border-white/65 bg-[#252a32]/90 text-micro font-bold text-white shadow-[0_2px_8px_rgba(0,0,0,0.24)] hover:bg-[var(--danger)]/90"
+                          className="absolute grid place-items-center border border-white/65 bg-[var(--text-primary)]/90 text-micro font-bold text-white shadow-card hover:bg-[var(--danger)]/90"
                           style={{
                             left: `${mask.x * 100}%`,
                             top: `${mask.y * 100}%`,
@@ -2596,7 +2596,7 @@ export function FlashcardStudio({
                       ))}
                       {maskDraft ? (
                         <span
-                          className="pointer-events-none absolute border border-white/75 bg-[#4997e8]/75"
+                          className="pointer-events-none absolute border border-white/75 bg-[var(--accent-cyan)]/75"
                           style={{
                             left: `${Math.min(maskDraft.x, maskDraft.currentX) * 100}%`,
                             top: `${Math.min(maskDraft.y, maskDraft.currentY) * 100}%`,
@@ -2641,7 +2641,7 @@ export function FlashcardStudio({
                             key={mask.id}
                             className="flex items-center gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-1.5"
                           >
-                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-chip bg-[#252a32] text-micro font-bold text-white">
+                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-chip bg-[var(--text-primary)] text-micro font-bold text-white">
                               {index + 1}
                             </span>
                             <input
@@ -3333,7 +3333,7 @@ export function FlashcardStudio({
                     ) : null}
                     {activeStudyCard.variant === "image_occlusion" &&
                     activeStudyMedia?.downloadUrl ? (
-                      <div className="relative mx-auto mt-4 w-fit max-w-full overflow-hidden rounded-card border border-[var(--border-default)] bg-[#17191d]">
+                      <div className="relative mx-auto mt-4 w-fit max-w-full overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--text-primary)]">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={activeStudyMedia.downloadUrl}
@@ -3350,7 +3350,7 @@ export function FlashcardStudio({
                               className={`absolute grid place-items-center border text-micro font-bold transition-[background-color,border-color,color] ${
                                 studyRevealed
                                   ? "border-[var(--success)] bg-[color-mix(in_oklab,var(--success)_12%,transparent)] text-[var(--success)]"
-                                  : "border-white/65 bg-[#252a32] text-white shadow-[0_2px_8px_rgba(0,0,0,0.24)]"
+                                  : "border-white/65 bg-[var(--text-primary)] text-white shadow-card"
                               }`}
                               style={{
                                 left: `${mask.x * 100}%`,
@@ -3748,7 +3748,7 @@ function CardFace({
           <span className="mb-1 block text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
             Study preview
           </span>
-          <p className="font-serif text-[15px] leading-6 text-[var(--text-secondary)]">
+          <p className="font-serif text-subhead leading-6 text-[var(--text-secondary)]">
             {clozePrompt(value)}
           </p>
         </div>

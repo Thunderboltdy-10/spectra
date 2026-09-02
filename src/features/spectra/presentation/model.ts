@@ -263,7 +263,7 @@ export function createPresentationObject(
       style: {
         fontSize: 48,
         fontWeight: 650,
-        color: "#183f35",
+        color: "var(--accent-mint)",
         align: "left",
       },
     };
@@ -271,7 +271,7 @@ export function createPresentationObject(
     return {
       ...base,
       content: { shape: "rounded-rectangle", text: "" },
-      style: { fill: "#dcefe4", stroke: "#84b79a", radius: 24 },
+      style: { fill: "color-mix(in oklab, var(--accent-mint) 16%, var(--bg-elevated))", stroke: "var(--accent-mint)", radius: 24 },
     };
   if (type === "chart")
     return {

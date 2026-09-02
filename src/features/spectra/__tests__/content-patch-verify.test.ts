@@ -93,7 +93,7 @@ describe("content patch verification", () => {
                 name: "Classes",
                 kind: "class",
                 visible: true,
-                color: "#26a879",
+                color: "var(--accent-mint)",
                 authority: "school",
               },
             ],

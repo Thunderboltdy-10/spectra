@@ -2664,7 +2664,7 @@ export function AgentFoundry({
                         <dd>
                           <MetricValue
                             reading={entry.reading}
-                            valueClassName="text-[16px]"
+                            valueClassName="text-editor"
                           />
                         </dd>
                       </div>

@@ -611,7 +611,7 @@ export function StudioSplitShell({
       mutations?.disconnect();
       window.removeEventListener("resize", fitPanel);
     };
-  }, [contentReserve, minWidth, onWidthChange, width]);
+  }, [contentReserve, controlledOverlay, minWidth, onWidthChange, width]);
   useEffect(() => {
     function onMove(event: globalThis.PointerEvent) {
       if (!resizingRef.current || !onWidthChange) return;
@@ -812,7 +812,7 @@ export function StudioTabRail({
   }, []);
 
   const tabClass = (active: boolean) =>
-    `group flex h-8 min-w-[120px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-chip border px-2.5 text-[12px] font-medium transition ${
+    `group flex h-8 min-w-[120px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-chip border px-2.5 text-caption font-medium transition ${
       active
         ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
         : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"

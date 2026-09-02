@@ -31,7 +31,7 @@ export function AuxiliaryRail({
         {navigation ? (
           <div className="min-w-0 flex-1">{navigation}</div>
         ) : (
-          <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-[var(--text-secondary)]">{label}</span>
+          <span className="min-w-0 flex-1 truncate text-micro font-medium text-[var(--text-secondary)]">{label}</span>
         )}
         <button
           type="button"

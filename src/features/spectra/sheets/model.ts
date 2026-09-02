@@ -767,7 +767,7 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                     fillColor:
                       typeof rule.fillColor === "string"
                         ? rule.fillColor
-                        : "#d9f4e8",
+                        : "color-mix(in oklab, var(--success) 16%, var(--bg-elevated))",
                     textColor:
                       typeof rule.textColor === "string"
                         ? rule.textColor
@@ -788,7 +788,7 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                     fillColor:
                       typeof rule.fillColor === "string"
                         ? rule.fillColor
-                        : "#d9f4e8",
+                        : "color-mix(in oklab, var(--success) 16%, var(--bg-elevated))",
                     textColor:
                       typeof rule.textColor === "string"
                         ? rule.textColor

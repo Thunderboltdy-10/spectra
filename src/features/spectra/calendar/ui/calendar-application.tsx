@@ -175,7 +175,7 @@ function CalendarDatePicker({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="spectra-calendar-week-label max-w-[16rem] rounded-[8px] px-2 py-1 text-left hover:bg-[var(--bg-hover)]"
+          className="spectra-calendar-week-label max-w-[16rem] rounded-control px-2 py-1 text-left hover:bg-[var(--bg-hover)]"
           aria-label="Choose a date"
           title="Choose a date"
         >
@@ -202,7 +202,7 @@ function CalendarDatePicker({
           </button>
           <button
             type="button"
-            className="min-w-0 flex-1 truncate rounded-[8px] px-2 py-1 text-center text-[13px] font-semibold hover:bg-[var(--bg-hover)]"
+            className="min-w-0 flex-1 truncate rounded-control px-2 py-1 text-center text-ui font-semibold hover:bg-[var(--bg-hover)]"
             onClick={() =>
               setLevel((current) => (current === "days" ? "months" : "years"))
             }
@@ -233,7 +233,7 @@ function CalendarDatePicker({
                 key={entry}
                 type="button"
                 className={cn(
-                  "h-9 rounded-[8px] text-[12px] font-semibold hover:bg-[var(--bg-hover)]",
+                  "h-9 rounded-control text-caption font-semibold hover:bg-[var(--bg-hover)]",
                   entry === year && "bg-[var(--text-primary)] text-[var(--bg-primary)]",
                 )}
                 onClick={() => {
@@ -252,7 +252,7 @@ function CalendarDatePicker({
                 key={name}
                 type="button"
                 className={cn(
-                  "h-9 rounded-[8px] text-[12px] font-semibold hover:bg-[var(--bg-hover)]",
+                  "h-9 rounded-control text-caption font-semibold hover:bg-[var(--bg-hover)]",
                   index === month && "bg-[var(--text-primary)] text-[var(--bg-primary)]",
                 )}
                 onClick={() => {
@@ -1023,7 +1023,7 @@ export function CalendarApplication() {
             <>
               <button
                 type="button"
-                className={`relative grid size-10 shrink-0 place-items-center rounded-[8px] border transition ${layersOpen ? "border-[var(--text-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                className={`relative grid size-10 shrink-0 place-items-center rounded-control border transition ${layersOpen ? "border-[var(--text-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                 data-active={layersOpen || undefined}
                 aria-pressed={layersOpen}
                 aria-label={layersOpen ? "Hide layers" : "Show layers"}
@@ -1036,7 +1036,7 @@ export function CalendarApplication() {
                 type="button"
                 onClick={() => void load("merge", visibleRange.from, visibleRange.to, true)}
                 disabled={refreshing}
-                className="grid size-10 shrink-0 place-items-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                className="grid size-10 shrink-0 place-items-center rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
                 aria-label="Refresh calendar"
                 title="Refresh calendar"
               >
@@ -1174,12 +1174,12 @@ export function CalendarApplication() {
           }
           footer={
             loading ? (
-              <div className="flex items-center gap-2 px-1 py-3 text-[11px] text-[var(--text-tertiary)]">
+              <div className="flex items-center gap-2 px-1 py-3 text-micro text-[var(--text-tertiary)]">
                 <LoaderCircle className="size-3.5 animate-spin" />
                 Loading plans
               </div>
             ) : !unscheduledPlans.length ? (
-              <p className="px-1 py-3 text-[11px] leading-5 text-[var(--text-tertiary)]">
+              <p className="px-1 py-3 text-micro leading-5 text-[var(--text-tertiary)]">
                 {planQuery
                   ? `No plans match “${planQuery}”.`
                   : "No unscheduled plans. Create one from Library, then drag it onto a day."}
@@ -1191,17 +1191,17 @@ export function CalendarApplication() {
         <section className="relative min-h-0 min-w-0 flex-1">
           {layersOpen ? (
             <aside
-              className="spectra-studio-inspector-overlay absolute right-3 top-3 z-20 w-[240px] rounded-[10px] border border-[var(--border-default)] bg-[var(--wave-paper,var(--bg-primary))] p-3 shadow-[0_18px_40px_-28px_rgba(31,27,22,0.35)]"
+              className="spectra-studio-inspector-overlay absolute right-3 top-3 z-chrome w-[240px] rounded-card border border-[var(--border-default)] bg-[var(--wave-paper,var(--bg-primary))] p-3 shadow-hover"
               aria-label="Calendar layers"
             >
-              <p className="px-1 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+              <p className="px-1 pb-2 text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
                 Layers
               </p>
               <div className="space-y-1">
                 {CALENDAR_LAYERS.filter((layer) => layer.key !== "shared").map((layer) => (
                   <label
                     key={layer.key}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-[11px] hover:bg-[var(--bg-hover)]"
+                    className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-micro hover:bg-[var(--bg-hover)]"
                   >
                     <input
                       type="checkbox"
@@ -1232,7 +1232,7 @@ export function CalendarApplication() {
                   <button
                     type="button"
                     onClick={() => void load("replace", visibleRange.from, visibleRange.to, true)}
-                    className="h-9 rounded-lg bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-primary)]"
+                    className="h-9 rounded-lg bg-[var(--text-primary)] px-3.5 text-caption font-semibold text-[var(--bg-primary)]"
                   >
                     Try again
                   </button>
@@ -1439,7 +1439,7 @@ function WeekGrid({
               ))}
               {nowTop !== null ? (
                 <span
-                  className="pointer-events-none absolute inset-x-0 z-20 h-px bg-emerald-700"
+                  className="pointer-events-none absolute inset-x-0 z-chrome h-px bg-emerald-700"
                   style={{ top: nowTop }}
                 />
               ) : null}
@@ -1478,7 +1478,7 @@ function PreviewBlock({
   const height = Math.max(24, ((preview.endAt - preview.startAt) / HOUR) * HOUR_PX);
   return (
     <div
-      className="pointer-events-none absolute inset-x-1 z-30 overflow-hidden rounded-lg border-2 border-dashed px-2 py-1.5 text-left shadow-lg"
+      className="pointer-events-none absolute inset-x-1 z-chrome overflow-hidden rounded-lg border-2 border-dashed px-2 py-1.5 text-left shadow-lg"
       style={{
         top,
         height,
@@ -1537,7 +1537,7 @@ function TimedBlock({
       onDragEnd={onDragEnd}
       onClick={onOpen}
       className={cn(
-        "group absolute inset-x-1 z-10 overflow-hidden rounded-lg border px-2 py-1.5 text-left shadow-sm transition hover:z-20 hover:shadow-md",
+        "group absolute inset-x-1 z-chrome overflow-hidden rounded-lg border px-2 py-1.5 text-left shadow-sm transition hover:z-chrome hover:shadow-md",
         previewing && "opacity-25",
         pending && "animate-pulse",
       )}
@@ -1553,7 +1553,7 @@ function TimedBlock({
         <span
           role="presentation"
           onPointerDown={(event) => onResizeStart(event, "start")}
-          className="absolute inset-x-1 top-0 z-20 h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
+          className="absolute inset-x-1 top-0 z-chrome h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
         />
       ) : null}
       <span className="flex items-center gap-1 text-micro font-bold">
@@ -1570,7 +1570,7 @@ function TimedBlock({
         <span
           role="presentation"
           onPointerDown={(event) => onResizeStart(event, "end")}
-          className="absolute inset-x-1 bottom-0 z-20 h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
+          className="absolute inset-x-1 bottom-0 z-chrome h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100"
         />
       ) : null}
     </button>
@@ -1591,7 +1591,7 @@ function CalendarItemPanel({
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
   return (
     <aside
-      className="fixed inset-y-0 right-0 z-[87] w-full max-w-[390px] border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[-20px_0_60px_rgba(31,38,34,.12)]"
+      className="fixed inset-y-0 right-0 z-panel w-full max-w-[390px] border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[var(--shadow-lg)]"
       aria-label={`${item.title} details`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -1603,7 +1603,7 @@ function CalendarItemPanel({
             {item.sourceLocked ? <LockKeyhole className="size-3" /> : null}
             {layer.label}
           </span>
-          <h2 className="mt-3 font-display text-[23px] font-semibold tracking-[-0.02em]">
+          <h2 className="mt-3 font-display text-metric font-semibold tracking-[-0.02em]">
             {item.title}
           </h2>
         </div>
@@ -1616,7 +1616,7 @@ function CalendarItemPanel({
           <X className="size-4" />
         </button>
       </div>
-      <dl className="mt-5 space-y-3 text-[12px]">
+      <dl className="mt-5 space-y-3 text-caption">
         <div>
           <dt className="text-micro font-bold uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
             Time
@@ -1664,7 +1664,7 @@ function CalendarItemPanel({
                   expectedRevision: item.revision,
                 })
               }
-              className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold"
+              className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-micro font-semibold"
             >
               − 30 min
             </button>
@@ -1678,7 +1678,7 @@ function CalendarItemPanel({
                   expectedRevision: item.revision,
                 })
               }
-              className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold"
+              className="h-8 rounded-lg border border-[var(--border-default)] px-3 text-micro font-semibold"
             >
               + 30 min
             </button>
@@ -1696,7 +1696,7 @@ function CalendarItemPanel({
                 key={workId}
                 type="button"
                 onClick={() => void spectraBus.command("work.open", { workId, surface: "panel" })}
-                className="flex w-full items-center gap-2 rounded-xl border border-[var(--border-default)] px-3 py-2 text-left text-[11px] font-semibold hover:bg-[var(--bg-hover)]"
+                className="flex w-full items-center gap-2 rounded-xl border border-[var(--border-default)] px-3 py-2 text-left text-micro font-semibold hover:bg-[var(--bg-hover)]"
               >
                 <Link2 className="size-3.5" />
                 Open linked work
@@ -1708,7 +1708,7 @@ function CalendarItemPanel({
       ) : null}
       {item.source ? (
         <section className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 p-3">
-          <p className="flex items-center gap-2 text-[11px] font-semibold">
+          <p className="flex items-center gap-2 text-micro font-semibold">
             <LockKeyhole className="size-3.5" />
             Official source
           </p>
@@ -1731,7 +1731,7 @@ function CalendarItemPanel({
       <div className="absolute bottom-5 left-5 right-5">
         <button
           type="button"
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-default)] py-2.5 text-[11px] font-semibold hover:bg-[var(--bg-hover)]"
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border-default)] py-2.5 text-micro font-semibold hover:bg-[var(--bg-hover)]"
         >
           <Sparkles className="size-3.5" />
           Ask Spectra about this time
@@ -1756,7 +1756,7 @@ function CalendarComposer({
   const [busy, setBusy] = useState(false);
   return (
     <div
-      className="fixed inset-0 z-[100] grid place-items-center bg-black/25 p-4"
+      className="fixed inset-0 z-modal grid place-items-center bg-black/25 p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Add personal event"
@@ -1782,7 +1782,7 @@ function CalendarComposer({
         className="w-full max-w-[460px] rounded-2xl border border-white/50 bg-[var(--bg-elevated)] p-5 shadow-2xl"
       >
         <div className="flex items-center justify-between">
-          <h2 className="font-display text-[21px] font-semibold">Add personal event</h2>
+          <h2 className="font-display text-heading font-semibold">Add personal event</h2>
           <button
             type="button"
             onClick={onClose}
@@ -1792,35 +1792,35 @@ function CalendarComposer({
             <X className="size-4" />
           </button>
         </div>
-        <label className="mt-5 block text-[11px] font-semibold">
+        <label className="mt-5 block text-micro font-semibold">
           Title
           <input
             autoFocus
             required
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] outline-none focus:border-[var(--brand-primary)]"
+            className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-ui outline-none focus:border-[var(--brand-primary)]"
           />
         </label>
         <div className="mt-3 grid grid-cols-2 gap-3">
-          <label className="text-[11px] font-semibold">
+          <label className="text-micro font-semibold">
             Starts
             <input
               type="datetime-local"
               required
               value={start}
               onChange={(event) => setStart(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[11px]"
+              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
             />
           </label>
-          <label className="text-[11px] font-semibold">
+          <label className="text-micro font-semibold">
             Ends
             <input
               type="datetime-local"
               required
               value={end}
               onChange={(event) => setEnd(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[11px]"
+              className="mt-1.5 h-10 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
             />
           </label>
         </div>
@@ -1828,14 +1828,14 @@ function CalendarComposer({
           <button
             type="button"
             onClick={onClose}
-            className="h-9 rounded-lg px-3 text-[12px] font-semibold hover:bg-[var(--bg-hover)]"
+            className="h-9 rounded-lg px-3 text-caption font-semibold hover:bg-[var(--bg-hover)]"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={busy || !title.trim()}
-            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-caption font-semibold text-[var(--bg-primary)] disabled:opacity-40"
           >
             {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
             Add event

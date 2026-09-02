@@ -533,7 +533,7 @@ function ShellNavigation() {
               sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
             }
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="grid size-8 shrink-0 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="grid size-8 shrink-0 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             {sidebarCollapsed ? (
               <PanelLeftOpen size={14} />
@@ -543,14 +543,14 @@ function ShellNavigation() {
           </button>
           <Link
             href="/workspace?home=1"
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-chip px-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
             aria-label="Spectra home"
           >
             <SpectraLogo size={20} />
             <span
               data-sidebar-expanded=""
               className={cn(
-                "font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513] transition-opacity",
+                "font-[family-name:var(--font-display)] text-title font-semibold tracking-[-.025em] text-[var(--text-primary)] transition-opacity",
                 sidebarCollapsed && "pointer-events-none opacity-0",
               )}
             >
@@ -572,9 +572,9 @@ function ShellNavigation() {
             value={sidebarSearch}
             onChange={(event) => setSidebarSearch(event.target.value)}
             placeholder="Search"
-            className="h-8 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-[11px] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]"
+            className="h-8 w-full rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-micro outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]"
           />
-          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--text-tertiary)]">
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-tertiary)]">
             ⌘ K
           </span>
         </label>
@@ -618,10 +618,10 @@ function ShellNavigation() {
                     : undefined
                 }
                 className={cn(
-                  "relative flex h-9 items-center gap-2.5 rounded-[6px] text-[13px] font-medium transition-colors",
+                  "relative flex h-9 items-center gap-2.5 rounded-chip text-ui font-medium transition-colors",
                   sidebarCollapsed ? "justify-center px-0" : "px-2.5",
                   active
-                    ? "bg-[#eeece9] text-[#171513]"
+                    ? "bg-[var(--bg-tertiary)] text-[var(--text-primary)]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                 )}
               >
@@ -639,7 +639,7 @@ function ShellNavigation() {
         <Link
           href="/chat"
           className={cn(
-            "mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-[7px] bg-[var(--brand-primary)] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.16)] transition hover:brightness-95",
+            "mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-control bg-[var(--brand-primary)] text-micro font-semibold text-white shadow-soft transition hover:brightness-95",
             sidebarCollapsed && "mx-auto w-10",
           )}
         >
@@ -680,7 +680,7 @@ function ShellNavigation() {
                         <Link
                           key={thread._id}
                           href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
-                          className="group flex h-8 items-center gap-2 rounded-[5px] px-1.5 text-[12px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                          className="group flex h-8 items-center gap-2 rounded-chip px-1.5 text-caption text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         >
                           <span className="min-w-0 flex-1 truncate">
                             {thread.title}
@@ -713,7 +713,7 @@ function ShellNavigation() {
               type="button"
               aria-label="Share current page"
               onClick={() => void spectraBus.command("surface.share", {})}
-              className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+              className="grid size-8 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
             >
               <Share2 size={15} />
             </button>
@@ -724,7 +724,7 @@ function ShellNavigation() {
                 setNotificationsOpen((open) => !open);
                 void refreshNotifications();
               }}
-              className="relative grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+              className="relative grid size-8 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
             >
               <Bell size={15} />
               {unreadCount ? (
@@ -737,7 +737,7 @@ function ShellNavigation() {
               type="button"
               aria-label="Settings"
               onClick={() => router.push("/settings")}
-              className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
+              className="grid size-8 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
             >
               <Settings2 size={15} />
             </button>
@@ -748,12 +748,12 @@ function ShellNavigation() {
               type="button"
               onClick={() => openUserProfile()}
               className={cn(
-                "mt-2 flex w-full items-center gap-2 rounded-[7px] px-1 py-1 text-left hover:bg-[var(--bg-secondary)]",
+                "mt-2 flex w-full items-center gap-2 rounded-control px-1 py-1 text-left hover:bg-[var(--bg-secondary)]",
                 sidebarCollapsed && "justify-center",
               )}
               aria-label="Manage account"
             >
-              <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[7px] bg-[#d8d0fa] text-micro font-semibold text-[#3e327f]">
+              <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-control bg-[var(--bg-user-bubble)] text-micro font-semibold text-[var(--brand-primary)]">
                 {administrationIdentity.account.avatarUrl ? (
                   // External Clerk avatar URLs; next/image would need a broad remotePatterns allowlist.
                   // eslint-disable-next-line @next/next/no-img-element
@@ -785,10 +785,10 @@ function ShellNavigation() {
             </button>
           ) : null}
           {notificationsOpen ? (
-            <section className="fixed right-4 top-4 z-panel w-[340px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.18)]">
+            <section className="fixed right-4 top-4 z-panel w-[340px] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]">
               <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
                 <div>
-                  <strong className="text-[12px]">Notifications</strong>
+                  <strong className="text-caption">Notifications</strong>
                   <p className="text-micro text-[var(--text-tertiary)]">
                     Shares, comments, tasks, and reminders
                   </p>
@@ -797,7 +797,7 @@ function ShellNavigation() {
                   type="button"
                   disabled={!unreadCount}
                   onClick={() => void markAllNotificationsRead()}
-                  className="flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                  className="flex h-7 items-center gap-1 rounded-chip px-2 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
                 >
                   <CheckCheck size={12} />
                   Mark read
@@ -816,7 +816,7 @@ function ShellNavigation() {
                       setNotificationsOpen(false);
                       void markNotificationRead(item);
                     }}
-                    className="flex gap-2.5 rounded-[7px] px-2.5 py-2 hover:bg-[var(--bg-hover)]"
+                    className="flex gap-2.5 rounded-control px-2.5 py-2 hover:bg-[var(--bg-hover)]"
                   >
                     <span className="min-w-0 flex-1">
                       <strong className="block truncate text-micro font-semibold">
@@ -845,28 +845,28 @@ function ShellNavigation() {
         <>
           <button
             type="button"
-            className="fixed inset-0 z-50 bg-[rgba(18,23,34,.24)] backdrop-blur-[1px] md:hidden"
+            className="fixed inset-0 z-modal bg-[var(--bg-overlay)] backdrop-blur-[1px] md:hidden"
             onClick={() => setMobileWorkspaceOpen(false)}
             aria-label="Close workspace navigation"
           />
           <section
             aria-label="Choose a workspace"
-            className="fixed inset-x-3 bottom-[84px] z-panel max-h-[min(70dvh,560px)] overflow-hidden rounded-[20px] border bg-[var(--bg-elevated)] shadow-[0_24px_70px_rgba(18,23,34,.24)] md:hidden"
+            className="fixed inset-x-3 bottom-[84px] z-panel max-h-[min(70dvh,560px)] overflow-hidden rounded-surface border bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)] md:hidden"
             style={{ borderColor: "var(--border-default)" }}
           >
             <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
               <div>
-                <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
+                <h2 className="text-body font-semibold text-[var(--text-primary)]">
                   Workspaces
                 </h2>
-                <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">
+                <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                   Open any shared or personal workspace
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setMobileWorkspaceOpen(false)}
-                className="grid size-9 place-items-center rounded-[10px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
+                className="grid size-9 place-items-center rounded-card text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
                 aria-label="Close"
               >
                 <X size={17} />
@@ -879,10 +879,10 @@ function ShellNavigation() {
                   <Link
                     key={workspace._id}
                     href={workspaceHref(workspace._id)}
-                    className="flex min-h-12 items-center gap-3 rounded-[12px] px-3 py-2 text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
+                    className="flex min-h-12 items-center gap-3 rounded-surface px-3 py-2 text-ui font-medium text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
                   >
                     <span
-                      className="grid size-8 shrink-0 place-items-center rounded-[9px] text-white"
+                      className="grid size-8 shrink-0 place-items-center rounded-card text-white"
                       style={{ background: workspaceColor(workspace, index) }}
                     >
                       <Icon size={15} />
@@ -901,9 +901,9 @@ function ShellNavigation() {
               })}
               <Link
                 href="/workspace?create=1"
-                className="mt-1 flex min-h-12 items-center gap-3 rounded-[12px] px-3 py-2 text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                className="mt-1 flex min-h-12 items-center gap-3 rounded-surface px-3 py-2 text-ui font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
               >
-                <span className="grid size-8 place-items-center rounded-[9px] border border-dashed border-[var(--border-default)]">
+                <span className="grid size-8 place-items-center rounded-card border border-dashed border-[var(--border-default)]">
                   <Plus size={15} />
                 </span>
                 Create workspace
@@ -917,20 +917,20 @@ function ShellNavigation() {
         <>
           <button
             type="button"
-            className="fixed inset-0 z-50 bg-[rgba(18,23,34,.24)] backdrop-blur-[1px] md:hidden"
+            className="fixed inset-0 z-modal bg-[var(--bg-overlay)] backdrop-blur-[1px] md:hidden"
             onClick={() => setNotificationsOpen(false)}
             aria-label="Close notifications"
           />
           <section
             aria-label="Notifications"
-            className="fixed inset-x-3 bottom-[84px] z-panel max-h-[min(72dvh,620px)] overflow-hidden rounded-[20px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_24px_70px_rgba(18,23,34,.24)] md:hidden"
+            className="fixed inset-x-3 bottom-[84px] z-panel max-h-[min(72dvh,620px)] overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)] md:hidden"
           >
             <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
               <div>
-                <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
+                <h2 className="text-body font-semibold text-[var(--text-primary)]">
                   Notifications
                 </h2>
-                <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">
+                <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                   Shares, comments, tasks, and reminders
                 </p>
               </div>
@@ -938,7 +938,7 @@ function ShellNavigation() {
                 type="button"
                 disabled={!unreadCount}
                 onClick={() => void markAllNotificationsRead()}
-                className="inline-flex h-9 items-center gap-1.5 rounded-[9px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                className="inline-flex h-9 items-center gap-1.5 rounded-card px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
               >
                 <CheckCheck size={15} /> Mark read
               </button>
@@ -965,21 +965,21 @@ function ShellNavigation() {
                       setNotificationsOpen(false);
                       void markNotificationRead(item);
                     }}
-                    className="flex gap-3 rounded-[12px] px-3 py-3 hover:bg-[var(--bg-hover)]"
+                    className="flex gap-3 rounded-surface px-3 py-3 hover:bg-[var(--bg-hover)]"
                   >
-                    <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-primary))] text-[var(--brand-primary)]">
+                    <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-primary))] text-[var(--brand-primary)]">
                       <Icon size={16} />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
-                        <strong className="min-w-0 flex-1 truncate text-[12px] text-[var(--text-primary)]">
+                        <strong className="min-w-0 flex-1 truncate text-caption text-[var(--text-primary)]">
                           {item.title}
                         </strong>
                         {!item.readAt ? (
                           <i className="size-1.5 shrink-0 rounded-full bg-[var(--brand-primary)]" />
                         ) : null}
                       </span>
-                      <span className="mt-0.5 block line-clamp-2 text-[11px] leading-4 text-[var(--text-secondary)]">
+                      <span className="mt-0.5 block line-clamp-2 text-micro leading-4 text-[var(--text-secondary)]">
                         {item.detail}
                       </span>
                     </span>
@@ -987,7 +987,7 @@ function ShellNavigation() {
                 );
               })}
               {!notifications.length && !notificationsLoading ? (
-                <div className="px-5 py-10 text-center text-[12px] text-[var(--text-tertiary)]">
+                <div className="px-5 py-10 text-center text-caption text-[var(--text-tertiary)]">
                   You are all caught up.
                 </div>
               ) : null}
@@ -998,7 +998,7 @@ function ShellNavigation() {
 
       <nav
         aria-label="Spectra navigation"
-        className="spectra-thin-scrollbar fixed inset-x-3 bottom-3 z-chrome flex h-16 items-center gap-1 overflow-x-auto rounded-[22px] border px-2 shadow-[0_18px_60px_-22px_rgba(11,18,36,.55)] backdrop-blur-xl md:hidden"
+        className="spectra-thin-scrollbar fixed inset-x-3 bottom-3 z-chrome flex h-16 items-center gap-1 overflow-x-auto rounded-surface border px-2 shadow-[var(--shadow-lg)] backdrop-blur-xl md:hidden"
         style={{
           borderColor: "var(--border-default)",
           background:

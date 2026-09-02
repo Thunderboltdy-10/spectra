@@ -74,10 +74,36 @@ function channel(component: number) {
   return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
 }
 
+/**
+ * Light-scheme paints from `spectra-app.css` `:root`, used only when a deck
+ * colour is a `var(--token)` and there is no computed style (audit, Node).
+ * Dark remaps stay in CSS; slide paper is authored against this table.
+ */
+const TOKEN_PAINT: Record<string, string> = {
+  "bg-primary": "#fbfaf8",
+  "bg-secondary": "#f6f4f0",
+  "bg-tertiary": "#efede8",
+  "bg-elevated": "#fffefd",
+  "text-primary": "#211f1c",
+  "text-secondary": "#65615b",
+  "text-tertiary": "#716d67",
+  "accent-mint": "#159b76",
+  "border-strong": "#d4d0c8",
+};
+
+function resolvePaint(color: string | undefined) {
+  if (!color) return undefined;
+  const trimmed = color.trim();
+  const token = /^var\(--([\w-]+)\)$/.exec(trimmed);
+  if (!token) return trimmed;
+  return TOKEN_PAINT[token[1]];
+}
+
 /** Relative luminance for a `#rgb` or `#rrggbb` colour, or undefined. */
 export function relativeLuminance(color: string | undefined) {
-  if (!color) return undefined;
-  const hex = color.trim().replace("#", "");
+  const resolved = resolvePaint(color);
+  if (!resolved) return undefined;
+  const hex = resolved.replace("#", "");
   const full =
     hex.length === 3
       ? hex
@@ -94,7 +120,7 @@ export function relativeLuminance(color: string | undefined) {
   );
 }
 
-/** WCAG contrast ratio, or undefined when either colour is not a plain hex. */
+/** WCAG contrast ratio, or undefined when either colour is not a plain hex or known token. */
 export function contrastRatio(foreground?: string, background?: string) {
   const first = relativeLuminance(foreground);
   const second = relativeLuminance(background);
@@ -105,7 +131,7 @@ export function contrastRatio(foreground?: string, background?: string) {
 }
 
 function slideBackground(slide: PresentationSlide, deck: PresentationContent) {
-  return slide.background ?? deck.theme.tokens?.background ?? "#ffffff";
+  return slide.background ?? deck.theme.tokens?.background ?? "var(--bg-elevated)";
 }
 
 /** Objects that carry meaning a screen reader cannot get from their text. */

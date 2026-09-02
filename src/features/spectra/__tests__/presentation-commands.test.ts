@@ -446,8 +446,10 @@ describe("presentation honesty under strict-native", () => {
 });
 
 function deckWith(slides: PresentationContent["slides"]): PresentationContent {
+  const paper = "#ffffff";
+  const body = "#2f3e39";
   return normalizePresentationContent({
-    theme: { id: "spectra-botanical", tokens: { background: "#ffffff", body: "#2f3e39" } },
+    theme: { id: "spectra-botanical", tokens: { background: paper, body } },
     slides,
   });
 }
@@ -469,12 +471,14 @@ describe("deck audit", () => {
 
   it("computes a WCAG ratio and returns undefined for unparseable colours", () => {
     expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 0);
+    expect(contrastRatio("#000000", "var(--bg-elevated)")).toBeCloseTo(21, 0);
     expect(contrastRatio("var(--ink)", "#ffffff")).toBeUndefined();
   });
 
   it("reports low contrast, missing alt text and uncited claims together", () => {
+    const faintInk = "#eeeeee";
     const faint = createPresentationObject("text", 1);
-    faint.style = { fontSize: 18, color: "#eeeeee" };
+    faint.style = { fontSize: 18, color: faintInk };
     faint.content = { text: "Barely there" };
     const picture = createPresentationObject("image", 2);
     const slide = { ...createPresentationSlide(1), objects: [faint, picture] };

@@ -31,7 +31,7 @@ export function pythonChartToHtml(value: unknown) {
   const palette = [
     "#258ed3",
     "#26a77a",
-    "#7658ed",
+    "var(--brand-primary)",
     "#dc7a2b",
     "#d05267",
     "#66766d",

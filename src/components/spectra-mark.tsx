@@ -44,7 +44,7 @@ export type MarkColors = {
   accent: string;
 };
 
-const DEFAULT_COLORS: MarkColors = { primary: "#7b5cf5", accent: "#2e8fd4" };
+const DEFAULT_COLORS: MarkColors = { primary: "#7b5cf5", accent: "var(--accent-cyan)" };
 
 export function SpectraMark({
   size = 32,

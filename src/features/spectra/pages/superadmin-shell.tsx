@@ -214,7 +214,7 @@ function PlatformUsageChart({
   data: PlatformAdministrationOverview;
 }) {
   const categories = [
-    ["Model input", "model_input_tokens", "#765cff"],
+    ["Model input", "model_input_tokens", "var(--brand-primary)"],
     ["Model output", "model_output_tokens", "#ff8a32"],
     ["Collaboration", "collaboration_bytes", "#26a47c"],
     ["Bandwidth", "bandwidth_bytes", "#9b78ff"],
@@ -225,10 +225,10 @@ function PlatformUsageChart({
         {categories.map(([label, key, color]) => (
           <div
             key={key}
-            className="flex items-center gap-3 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2"
+            className="flex items-center gap-3 rounded-control border border-[var(--border-subtle)] px-3 py-2"
           >
             <span
-              className="size-2 rounded-[2px]"
+              className="size-2 rounded-chip"
               style={{ backgroundColor: color }}
             />
             <span className="flex-1 text-micro text-[var(--text-secondary)]">
@@ -358,17 +358,17 @@ function PlatformOverviewSurface({
           <PlatformUsageChart data={data} />
         </section>
         <div className="grid gap-8 md:grid-cols-2">
-        <section className="rounded-[10px] px-4 py-3 hover:bg-[var(--bg-secondary)]">
-          <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+        <section className="rounded-card px-4 py-3 hover:bg-[var(--bg-secondary)]">
+          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
             Storage & compute
           </h2>
           <p className="mt-1 text-micro text-[var(--text-tertiary)]">
             Metered platform consumption for the selected range
           </p>
-          <div className="mt-5 space-y-3 text-[11px]">
+          <div className="mt-5 space-y-3 text-micro">
             <div className="flex items-baseline justify-between gap-3">
               <span className="text-[var(--text-secondary)]">Storage</span>
-              <strong className="font-sans text-[21px] font-normal">
+              <strong className="font-sans text-heading font-normal">
                 {formatBytes(data.storageBytes)}
               </strong>
             </div>
@@ -387,14 +387,14 @@ function PlatformOverviewSurface({
             View usage & finance
           </AdminButton>
         </section>
-        <section className="rounded-[10px] px-4 py-3 hover:bg-[var(--bg-secondary)]">
-          <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+        <section className="rounded-card px-4 py-3 hover:bg-[var(--bg-secondary)]">
+          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
             Seats & access
           </h2>
           <p className="mt-1 text-micro text-[var(--text-tertiary)]">
             No commercial seat enforcement
           </p>
-          <strong className="mt-6 block font-sans text-[28px] font-normal">
+          <strong className="mt-6 block font-sans text-display font-normal">
             {formatCompact(data.metrics.totalUsers)}
           </strong>
           <span className="text-micro text-[var(--text-tertiary)]">
@@ -402,7 +402,7 @@ function PlatformOverviewSurface({
           </span>
           <div className="mt-5 h-1.5 rounded-full bg-[var(--bg-secondary)]">
             <div
-              className="h-full rounded-full bg-[#765cff]"
+              className="h-full rounded-full bg-[var(--brand-primary)]"
               style={{
                 width: `${Math.max(2, Math.min(100, data.metrics.retentionPercent))}%`,
               }}
@@ -430,7 +430,7 @@ function PlatformOverviewSurface({
           <div className="space-y-8 p-4">
           <section>
             <div className="flex items-center justify-between gap-3">
-              <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+              <h2 className="font-[var(--font-serif)] text-subhead font-medium">
                 Service health
               </h2>
               <InlineLink onClick={() => onTab("operations")}>
@@ -447,9 +447,9 @@ function PlatformOverviewSurface({
                     className={cn(
                       "size-1.5 rounded-full",
                       service.status === "operational"
-                        ? "bg-[#1b9b75]"
+                        ? "bg-[var(--accent-mint)]"
                         : service.status === "degraded"
-                          ? "bg-[#e39a34]"
+                          ? "bg-[var(--accent-gold)]"
                           : "bg-[var(--text-placeholder)]",
                     )}
                   />
@@ -464,7 +464,7 @@ function PlatformOverviewSurface({
             </div>
           </section>
           <section>
-            <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+            <h2 className="font-[var(--font-serif)] text-subhead font-medium">
               Feedback overview
             </h2>
             <p className="mt-1 text-micro text-[var(--text-tertiary)]">
@@ -512,7 +512,7 @@ function PlatformOverviewSurface({
                   <strong>{formatCompact(value as number | undefined)}</strong>
                 </div>
                 <div className="mt-1 h-1 rounded-full bg-[var(--bg-secondary)]">
-                  <div className="h-full w-2/3 rounded-full bg-[#eea4a0]" />
+                  <div className="h-full w-2/3 rounded-full bg-[color-mix(in oklab, var(--accent-coral) 32%, var(--bg-elevated))]" />
                 </div>
               </div>
             ))}
@@ -544,7 +544,7 @@ function PlatformOverviewSurface({
                       : "operations",
                   )
                 }
-                className="flex w-full items-center justify-between rounded-[8px] px-3 py-2 text-micro hover:bg-[var(--bg-secondary)]"
+                className="flex w-full items-center justify-between rounded-control px-3 py-2 text-micro hover:bg-[var(--bg-secondary)]"
               >
                 <span>{label}</span>
                 <StatusBadge tone={tone as StatusTone}>
@@ -581,17 +581,17 @@ function PlatformOverviewSurface({
           />
           <div className="space-y-3 px-4 pb-4 text-micro leading-4">
             <div className="flex gap-2">
-              <Sparkles size={13} className="mt-0.5 text-[#7b63ef]" />
+              <Sparkles size={13} className="mt-0.5 text-[var(--brand-primary)]" />
               {formatCompact(totalTokens)} model tokens were metered this
               period.
             </div>
             <div className="flex gap-2">
-              <Network size={13} className="mt-0.5 text-[#1b9b75]" />
+              <Network size={13} className="mt-0.5 text-[var(--accent-mint)]" />
               {data.integrations.degraded} of {data.integrations.total} school
               integrations are degraded.
             </div>
             <div className="flex gap-2">
-              <AlertTriangle size={13} className="mt-0.5 text-[#e49332]" />
+              <AlertTriangle size={13} className="mt-0.5 text-[var(--accent-gold)]" />
               {data.incidents.length} unresolved platform incidents require
               monitoring.
             </div>
@@ -640,7 +640,7 @@ function PlatformOverviewSurface({
                 .map((row) => (
                   <tr
                     key={row.id}
-                    className="rounded-[10px] transition-colors hover:bg-[var(--bg-secondary)]"
+                    className="rounded-card transition-colors hover:bg-[var(--bg-secondary)]"
                   >
                     <td className="py-2.5 font-medium">{row.label}</td>
                     <td className="py-2.5 capitalize text-[var(--text-secondary)]">
@@ -1063,7 +1063,7 @@ function SchoolsSurface({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <strong className="text-[11px] font-medium">
+                      <strong className="text-micro font-medium">
                         {saga.schoolName}
                       </strong>
                       <StatusBadge tone={statusToneFor(saga.status)}>
@@ -1075,7 +1075,7 @@ function SchoolsSurface({
                       setup steps · {formatRelative(saga.updatedAt)}
                     </p>
                     {saga.errorSummary ? (
-                      <p className="mt-1 text-micro text-[#a24538]">
+                      <p className="mt-1 text-micro text-[var(--danger)]">
                         {saga.errorSummary}
                       </p>
                     ) : null}
@@ -1116,7 +1116,7 @@ function SchoolsSurface({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search schools, slugs, and domains"
-              className="h-9 w-full rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-3 text-[11px] outline-none"
+              className="h-9 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-3 text-micro outline-none"
             />
           </label>
         </div>
@@ -1143,7 +1143,7 @@ function SchoolsSurface({
                   >
                     <td className="py-3">
                       <div className="flex items-center gap-2">
-                        <span className="grid size-8 place-items-center rounded-[8px] bg-[#eaf6f0] text-[#16805f]">
+                        <span className="grid size-8 place-items-center rounded-control bg-[color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))] text-[var(--accent-mint)]">
                           <School size={14} />
                         </span>
                         <span>
@@ -1301,7 +1301,7 @@ function SchoolsSurface({
           </>
         }
       >
-        <div className="break-all rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 font-mono text-micro leading-5">
+        <div className="break-all rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 font-mono text-micro leading-5">
           {manualInvitationUrl}
         </div>
       </AdminDialog>
@@ -1376,7 +1376,7 @@ function SchoolsSurface({
             {limitRules.map((rule, index) => (
               <div
                 key={`${rule.category}-${index}`}
-                className="grid gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 sm:grid-cols-[1.3fr_.8fr_1fr_1fr_auto]"
+                className="grid gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 sm:grid-cols-[1.3fr_.8fr_1fr_1fr_auto]"
               >
                 <SelectField
                   label="Meter"
@@ -1488,7 +1488,7 @@ function SchoolsSurface({
             </AdminButton>
           </div>
           {limitSimulation ? (
-            <div className="rounded-[8px] border border-[var(--border-default)] p-3">
+            <div className="rounded-control border border-[var(--border-default)] p-3">
               <p className="mb-2 text-micro font-semibold">
                 Current policy impact
               </p>
@@ -1736,16 +1736,16 @@ function OperationsSurface({
                 >
                   <span
                     className={cn(
-                      "grid size-8 place-items-center rounded-[8px]",
+                      "grid size-8 place-items-center rounded-control",
                       incident.severity === "critical"
-                        ? "bg-[#fff0ed] text-[#b54a3d]"
-                        : "bg-[#fff5e6] text-[#b06f20]",
+                        ? "bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] text-[var(--accent-coral)]"
+                        : "bg-[color-mix(in oklab, var(--accent-gold) 12%, var(--bg-elevated))] text-[var(--accent-gold)]",
                     )}
                   >
                     <AlertTriangle size={14} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <strong className="block text-[11px]">
+                    <strong className="block text-micro">
                       {incident.title}
                     </strong>
                     <span className="mt-1 block text-micro leading-4 text-[var(--text-tertiary)]">
@@ -1808,7 +1808,7 @@ function OperationsSurface({
             {overview.serviceHealth.map((service) => (
               <div
                 key={service.service}
-                className="flex items-center justify-between gap-3 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2.5 text-micro"
+                className="flex items-center justify-between gap-3 rounded-control border border-[var(--border-subtle)] px-3 py-2.5 text-micro"
               >
                 <span>{service.service}</span>
                 <StatusBadge tone={statusToneFor(service.status)}>
@@ -1912,7 +1912,7 @@ function PlatformUsageSurface({
             {rows.map(([category, quantity]) => (
               <div
                 key={category}
-                className="flex items-center justify-between gap-3 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2.5 text-micro"
+                className="flex items-center justify-between gap-3 rounded-control border border-[var(--border-subtle)] px-3 py-2.5 text-micro"
               >
                 <span className="capitalize">
                   {category.replaceAll("_", " ")}
@@ -1985,16 +1985,16 @@ function RequestsSurface({
               >
                 <span
                   className={cn(
-                    "grid size-8 shrink-0 place-items-center rounded-[8px]",
+                    "grid size-8 shrink-0 place-items-center rounded-control",
                     request.priority === "urgent"
-                      ? "bg-[#fff0ed] text-[#b54a3d]"
+                      ? "bg-[color-mix(in oklab, var(--accent-coral) 10%, var(--bg-elevated))] text-[var(--accent-coral)]"
                       : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]",
                   )}
                 >
                   <LifeBuoy size={14} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <strong className="block truncate text-[11px]">
+                  <strong className="block truncate text-micro">
                     {request.subject}
                   </strong>
                   <span className="mt-1 block line-clamp-2 text-micro leading-4 text-[var(--text-tertiary)]">
@@ -2074,7 +2074,7 @@ function RequestsSurface({
       >
         {selected ? (
           <div className="space-y-4">
-            <div className="rounded-[7px] bg-[var(--bg-secondary)] p-3 text-[11px] leading-5">
+            <div className="rounded-control bg-[var(--bg-secondary)] p-3 text-micro leading-5">
               {selected.detail}
             </div>
             <SelectField
@@ -2139,15 +2139,15 @@ function PlatformGovernanceSurface() {
           {guarantees.map(({ icon: Icon, title, detail }) => (
             <div
               key={title}
-              className="rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5"
+              className="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5"
             >
               <div className="flex items-start justify-between gap-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[#eef8f4] text-[#16805f]">
+                <span className="grid size-8 shrink-0 place-items-center rounded-control bg-[color-mix(in oklab, var(--accent-mint) 8%, var(--bg-primary))] text-[var(--accent-mint)]">
                   <Icon size={15} />
                 </span>
                 <StatusBadge tone="healthy">Platform guarantee</StatusBadge>
               </div>
-              <strong className="mt-3 block text-[11px]">{title}</strong>
+              <strong className="mt-3 block text-micro">{title}</strong>
               <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                 {detail}
               </p>
@@ -2157,7 +2157,7 @@ function PlatformGovernanceSurface() {
       </AdminCard>
       <div className="space-y-3">
         <AdminCard className="p-4">
-          <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
             Operational boundaries
           </h2>
           <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
@@ -2566,7 +2566,7 @@ function SecuritySurface({
           />
           {type === "offboard" || type === "purge" ? (
             <>
-              <div className="rounded-[7px] border border-[#efc0b8] bg-[#fff5f3] p-3 text-micro leading-4 text-[#8d3d34]">
+              <div className="rounded-control border border-[color-mix(in oklab, var(--accent-coral) 28%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] p-3 text-micro leading-4 text-[var(--danger)]">
                 This operation affects school access, integrations, and retained
                 data. It remains blocked until a different platform operator
                 approves it.

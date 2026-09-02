@@ -483,7 +483,7 @@ export function ChatShell() {
           <button
             type="button"
             onClick={() => selectThread(null)}
-            className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            className="flex w-full items-center gap-2 rounded-chip px-2.5 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
           >
             <Plus className="h-4 w-4" />
             New conversation
@@ -495,7 +495,7 @@ export function ChatShell() {
                 clearExplicitContext();
                 setFocusModeOverride(null);
               }}
-              className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              className="flex w-full items-center gap-2 rounded-chip px-2.5 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             >
               <X className="h-4 w-4" />
               Clear selected context
@@ -507,7 +507,7 @@ export function ChatShell() {
               key={workspace._id}
               type="button"
               onClick={() => selectWorkspaceContext(workspace._id)}
-              className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              className="flex w-full items-center gap-2 rounded-chip px-2.5 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             >
               <FolderPlus className="h-4 w-4" />
               <span className="min-w-0 flex-1 truncate">
@@ -549,7 +549,7 @@ export function ChatShell() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -3 }}
                 transition={{ duration: 0.18 }}
-                className="truncate font-display text-[18px] font-semibold text-[var(--text-primary)]"
+                className="truncate font-display text-heading font-semibold text-[var(--text-primary)]"
               >
                 {visibleTitle}
               </motion.div>
@@ -575,7 +575,7 @@ export function ChatShell() {
                   setTitleDraft(visibleTitle);
                   setRenaming(true);
                 }}
-                className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
                 aria-label="Rename thread"
                 title="Rename thread"
               >
@@ -592,7 +592,7 @@ export function ChatShell() {
                     pinned: !detail?.thread.pinned,
                   }).then(() => refresh(threadId))
                 }
-                className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
                 aria-label={
                   detail?.thread.pinned ? "Unpin thread" : "Pin thread"
                 }
@@ -606,7 +606,7 @@ export function ChatShell() {
             <button
               type="button"
               onClick={() => selectThread(null)}
-              className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               aria-label="New chat"
               title="New chat"
             >
@@ -632,7 +632,7 @@ export function ChatShell() {
                     limit: 50,
                   }).then((result) => setHistory(result.resultCards));
               }}
-              className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               aria-label="Open runs"
               title="Runs"
             >
@@ -641,7 +641,7 @@ export function ChatShell() {
           </div>
         </header>
         {renaming && threadId ? (
-          <div className="absolute left-5 top-12 z-50 flex w-[min(420px,calc(100vw-40px))] items-center gap-1.5 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[0_16px_40px_rgba(27,20,12,0.14)] sm:left-7">
+          <div className="absolute left-5 top-12 z-modal flex w-[min(420px,calc(100vw-40px))] items-center gap-1.5 rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-hover sm:left-7">
             <input
               autoFocus
               value={titleDraft}
@@ -658,7 +658,7 @@ export function ChatShell() {
                     .then(() => refresh(threadId))
                     .then(() => setRenaming(false));
               }}
-              className="h-9 min-w-0 flex-1 bg-transparent px-2 text-[13px] font-medium text-[var(--text-primary)] outline-none"
+              className="h-9 min-w-0 flex-1 bg-transparent px-2 text-ui font-medium text-[var(--text-primary)] outline-none"
             />
             <button
               type="button"
@@ -671,7 +671,7 @@ export function ChatShell() {
                   .then(() => refresh(threadId))
                   .then(() => setRenaming(false))
               }
-              className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--success)] hover:bg-[var(--bg-hover)]"
+              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--success)] hover:bg-[var(--bg-hover)]"
               aria-label="Save title"
             >
               <Check className="h-4 w-4" />
@@ -679,7 +679,7 @@ export function ChatShell() {
             <button
               type="button"
               onClick={() => setRenaming(false)}
-              className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
               aria-label="Cancel rename"
             >
               <X className="h-4 w-4" />
@@ -687,7 +687,7 @@ export function ChatShell() {
           </div>
         ) : null}
         {threadId && composerThread?.id !== threadId ? (
-          <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)] sm:px-7">
+          <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)] sm:px-7">
             <span className="font-semibold text-[var(--text-primary)]">
               {composerThread
                 ? `Continuing ${composerThread.title}.`
@@ -730,13 +730,13 @@ export function ChatShell() {
           onRetryRun={runEngine.retry}
           empty={
             <div className="mx-auto flex min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px] flex-col justify-center py-8 text-left">
-              <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-[14px] border border-[color-mix(in_oklab,var(--brand-primary)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-elevated))] shadow-[0_10px_30px_color-mix(in_oklab,var(--brand-primary)_14%,transparent)]">
+              <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-surface border border-[color-mix(in_oklab,var(--brand-primary)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-elevated))] shadow-soft">
                 <SpectraMark size={28} />
               </div>
-              <h1 className="max-w-[820px] font-display text-[42px] font-semibold leading-[1.08] tracking-[-0.03em] text-[var(--text-primary)]">
+              <h1 className="max-w-[820px] font-display text-display font-semibold leading-[1.08] tracking-[-0.03em] text-[var(--text-primary)]">
                 {welcome}
               </h1>
-              <p className="mt-3 max-w-[640px] text-[15px] leading-7 text-[var(--text-secondary)]">
+              <p className="mt-3 max-w-[640px] text-subhead leading-7 text-[var(--text-secondary)]">
                 Bring a half-formed question, a difficult topic, or a whole
                 workspace. Spectra can explain, build, and revise alongside you.
               </p>
@@ -773,13 +773,13 @@ export function ChatShell() {
                             <FolderPlus className="h-4 w-4" />
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-2 text-[14px] font-semibold text-[var(--text-primary)]">
+                            <span className="flex items-center gap-2 text-body font-semibold text-[var(--text-primary)]">
                               {workspace.title}
                               {selected ? (
                                 <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
                               ) : null}
                             </span>
-                            <span className="mt-1 line-clamp-2 text-[11px] leading-5 text-[var(--text-secondary)]">
+                            <span className="mt-1 line-clamp-2 text-micro leading-5 text-[var(--text-secondary)]">
                               {workspace.description ??
                                 `${count} objects ready as context`}
                             </span>
@@ -818,7 +818,7 @@ export function ChatShell() {
           onDirtyChange={studio.setDirty}
         />
       ) : null}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-transparent px-5 pb-5 pt-2 sm:px-8">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-modal bg-transparent px-5 pb-5 pt-2 sm:px-8">
         <div className="pointer-events-auto mx-auto max-w-[820px] spectra-live-stack">
           <ComposerArtifactDock
             artifacts={artifacts}
@@ -847,18 +847,18 @@ export function ChatShell() {
       ) : null}
 
       {historyOpen ? (
-        <aside className="absolute inset-y-14 right-0 z-40 w-[min(360px,92vw)] overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-primary)] p-4 shadow-[-12px_0_30px_rgba(22,18,13,0.08)]">
+        <aside className="absolute inset-y-14 right-0 z-chrome w-[min(360px,92vw)] overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-primary)] p-4 shadow-soft">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="text-[13px] font-semibold">Run & thread hub</h2>
-              <p className="text-[11px] text-[var(--text-tertiary)]">
+              <h2 className="text-ui font-semibold">Run & thread hub</h2>
+              <p className="text-micro text-[var(--text-tertiary)]">
                 Hidden results remain inspectable.
               </p>
             </div>
             <button
               type="button"
               onClick={() => setHistoryOpen(false)}
-              className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               aria-label="Close runs"
               title="Close"
             >
@@ -874,10 +874,10 @@ export function ChatShell() {
                   selectThread(thread._id);
                   setHistoryOpen(false);
                 }}
-                className="flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
+                className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
               >
                 <MessageSquare className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-                <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+                <span className="min-w-0 flex-1 truncate text-micro font-medium">
                   {thread.title}
                 </span>
                 <span className="text-micro text-[var(--text-tertiary)]">
@@ -893,9 +893,9 @@ export function ChatShell() {
             {history.map((card) => (
               <div
                 key={card._id}
-                className="rounded-[7px] border border-[var(--border-default)] px-3 py-2"
+                className="rounded-control border border-[var(--border-default)] px-3 py-2"
               >
-                <div className="flex items-center gap-2 text-[11px] font-medium">
+                <div className="flex items-center gap-2 text-micro font-medium">
                   <Clock3 className="h-3 w-3" />
                   {card.title}
                 </div>

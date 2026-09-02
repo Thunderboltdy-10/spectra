@@ -58,8 +58,8 @@ import {
 const STATUS_TONE: Record<PlanStatus, string> = {
   backlog: "var(--text-tertiary)",
   todo: "var(--text-secondary)",
-  doing: "#7560e8",
-  blocked: "#d88922",
+  doing: "var(--brand-primary)",
+  blocked: "var(--accent-gold)",
   done: "var(--success)",
 };
 

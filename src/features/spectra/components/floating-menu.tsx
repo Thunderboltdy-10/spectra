@@ -53,7 +53,7 @@ export function FloatingMenu({
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[120] overflow-y-auto rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_18px_44px_rgba(27,20,12,0.18)]"
+      className="fixed z-composer-dock overflow-y-auto rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-hover"
       style={{ left, top, width, maxHeight: placeAbove ? Math.min(maxHeight, anchor.top - viewportPadding - gap) : Math.min(maxHeight, spaceBelow) }}
       role="menu"
     >

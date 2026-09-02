@@ -198,10 +198,10 @@ export function ArtifactCard({
       className={cn(
         "spectra-artifact-card min-w-0 overflow-hidden text-left",
         size === "large"
-          ? "min-h-[216px] rounded-[9px] p-4"
-          : "rounded-[8px] p-3.5",
+          ? "min-h-[216px] rounded-card p-4"
+          : "rounded-control p-3.5",
         interactive ? "cursor-pointer" : "",
-        quiet ? "shadow-none" : "shadow-[0_1px_2px_rgba(27,20,12,0.03)]",
+        quiet ? "shadow-none" : "shadow-[var(--shadow-sm)]",
         className,
       )}
       onClick={(event) => {
@@ -241,7 +241,7 @@ export function ArtifactCard({
             event.stopPropagation();
             onToggleContext?.();
           }}
-          className={`absolute right-2.5 top-2.5 z-20 flex h-6 w-6 items-center justify-center rounded-[6px] border transition-all duration-200 ${contextSelected ? "scale-100 border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-transparent hover:border-[var(--text-primary)]"}`}
+          className={`absolute right-2.5 top-2.5 z-chrome flex h-6 w-6 items-center justify-center rounded-chip border transition-all duration-200 ${contextSelected ? "scale-100 border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-transparent hover:border-[var(--text-primary)]"}`}
           aria-label={
             contextSelected ? "Remove from selection" : "Add to selection"
           }
@@ -249,7 +249,7 @@ export function ArtifactCard({
           <Check className="h-3.5 w-3.5" />
         </button>
       ) : null}
-      <div className="relative z-[1] flex min-w-0 items-start gap-2.5">
+      <div className="relative z-base flex min-w-0 items-start gap-2.5">
         <CardTypeIcon icon={Icon} color={meta.color} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5 overflow-hidden pr-4">
@@ -293,7 +293,7 @@ export function ArtifactCard({
                 <span className="spectra-artifact-card-meta shrink-0 text-micro text-[var(--text-tertiary)]">
                   •
                 </span>
-                <span className="spectra-artifact-card-meta min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
+                <span className="spectra-artifact-card-meta min-w-0 truncate text-micro text-[var(--text-tertiary)]">
                   {artifact.meta}
                 </span>
               </>
@@ -309,10 +309,10 @@ export function ArtifactCard({
                 else onSelect?.();
               }}
               className={cn(
-                "mt-2 block max-w-full rounded-[4px] text-left text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]",
+                "mt-2 block max-w-full rounded-chip text-left text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]",
                 size === "large"
-                  ? "line-clamp-2 break-words text-[20px] font-semibold leading-[1.12] font-display"
-                  : "line-clamp-2 break-words text-[14px] font-semibold leading-[1.25]",
+                  ? "line-clamp-2 break-words text-heading font-semibold leading-[1.12] font-display"
+                  : "line-clamp-2 break-words text-body font-semibold leading-[1.25]",
               )}
             >
               {artifact.title}
@@ -323,8 +323,8 @@ export function ArtifactCard({
               className={cn(
                 "mt-2 text-[var(--text-primary)]",
                 size === "large"
-                  ? "line-clamp-2 break-words text-[20px] font-semibold leading-[1.12] font-display"
-                  : "line-clamp-2 break-words text-[14px] font-semibold leading-[1.25]",
+                  ? "line-clamp-2 break-words text-heading font-semibold leading-[1.12] font-display"
+                  : "line-clamp-2 break-words text-body font-semibold leading-[1.25]",
               )}
             >
               {artifact.title}
@@ -332,7 +332,7 @@ export function ArtifactCard({
           )}
           <p
             className={cn(
-              "mt-1.5 text-[11px] leading-4 text-[var(--text-secondary)]",
+              "mt-1.5 text-micro leading-4 text-[var(--text-secondary)]",
               size === "large" ? "line-clamp-3" : "line-clamp-2",
             )}
           >
@@ -390,7 +390,7 @@ export function ArtifactCard({
                   className="min-w-0 overflow-hidden border-l border-[var(--card-border-soft)] px-2 py-0.5 first:border-l-0 first:pl-0"
                 >
                   <div
-                    className="truncate font-sans text-[12px] font-normal text-[var(--text-primary)]"
+                    className="truncate font-sans text-caption font-normal text-[var(--text-primary)]"
                     title={String(value)}
                   >
                     {value}
@@ -406,7 +406,7 @@ export function ArtifactCard({
             </div>
           ) : null}
           <div className="mt-2.5 flex min-h-7 min-w-0 items-end justify-between gap-2">
-            <div className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
+            <div className="min-w-0 truncate text-micro text-[var(--text-tertiary)]">
               {artifact.footer ??
                 (artifact.placement === "workspace"
                   ? "In workspace"
@@ -420,7 +420,7 @@ export function ArtifactCard({
               >
                 <button
                   type="button"
-                  className="grid size-7 place-items-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  className="grid size-7 place-items-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   aria-label={`More actions for ${artifact.title}`}
                   aria-expanded={actionsOpen}
                   onClick={() => setActionsOpen((open) => !open)}
@@ -428,7 +428,7 @@ export function ArtifactCard({
                   <MoreHorizontal className="h-4 w-4" />
                 </button>
                 {actionsOpen ? (
-                  <div className="absolute bottom-[calc(100%+6px)] right-0 z-40 flex items-center gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
+                  <div className="absolute bottom-[calc(100%+6px)] right-0 z-chrome flex items-center gap-1 rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-card">
                     {actions}
                   </div>
                 ) : null}

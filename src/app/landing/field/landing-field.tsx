@@ -16,7 +16,7 @@
  *
  * Two things are allowed to disturb the field: the one true prism, which has a
  * body and therefore casts a shadow into the lattice, and whoever is currently
- * working, who does not.
+ * working, who does not. Both travel through the shared field input.
  */
 
 import { useEffect, useMemo, useRef } from "react";
@@ -24,7 +24,7 @@ import { onStoryFrame } from "../story/story-clock";
 import { channelFor, type SceneId } from "../story/timeline";
 import { heroState } from "../scene/heroState";
 import { storyActor } from "./story-actor";
-import { GrainField } from "@/features/spectra/field/grain-field";
+import { EnvironmentField } from "@/features/spectra/field/surface-field";
 import {
   resolveVar,
   type GrainInfluence,
@@ -52,31 +52,31 @@ type Mood = {
 
 const MOOD: Record<SceneId, Mood> = {
   /* Barely awake: a held breath in the corner, almost nothing moving. */
-  wake: { rest: 0.2, spacing: 10, bias: [0.84, 0.86, 0.36], wave: 0.5, speed: 0.55, wash: 0.03 },
+  wake: { rest: 0.2, spacing: 10, bias: [0.72, 0.76, 0.78], wave: 0.5, speed: 0.55, wash: 0.022 },
   /* The signature resting state: gathered lower-right, behind the headline. */
-  hero: { rest: 0.34, spacing: 9.2, bias: [0.8, 0.78, 0.44], wave: 0.8, speed: 0.8, wash: 0.055 },
+  hero: { rest: 0.3, spacing: 9.2, bias: [0.7, 0.72, 0.88], wave: 0.8, speed: 0.8, wash: 0.04 },
   /* Drawing in toward the work about to happen. */
-  prepare: { rest: 0.4, spacing: 8.6, bias: [0.7, 0.72, 0.46], wave: 0.95, speed: 0.95, wash: 0.07 },
+  prepare: { rest: 0.36, spacing: 8.6, bias: [0.64, 0.68, 0.9], wave: 0.95, speed: 0.95, wash: 0.055 },
   /* Charged. The densest and most liquid the field ever gets. */
-  transform: { rest: 0.54, spacing: 7.6, bias: [0.56, 0.6, 0.52], wave: 1.35, speed: 1.25, wash: 0.1 },
+  transform: { rest: 0.48, spacing: 7.6, bias: [0.56, 0.6, 0.98], wave: 1.35, speed: 1.25, wash: 0.085 },
   /* Alive: the work runs on its own, so the pool loosens and slows. */
-  living: { rest: 0.42, spacing: 8.4, bias: [0.66, 0.7, 0.52], wave: 1, speed: 0.9, wash: 0.075 },
+  living: { rest: 0.38, spacing: 8.4, bias: [0.62, 0.68, 0.96], wave: 1, speed: 0.9, wash: 0.06 },
   /* Tightened. Two actors want the same thing. */
-  contention: { rest: 0.38, spacing: 8, bias: [0.56, 0.66, 0.42], wave: 0.7, speed: 0.7, wash: 0.05 },
+  contention: { rest: 0.36, spacing: 8, bias: [0.56, 0.66, 0.82], wave: 0.7, speed: 0.7, wash: 0.048 },
   /* Back toward the dock's corner, where the work is handed over. */
-  dock: { rest: 0.4, spacing: 8.8, bias: [0.82, 0.8, 0.44], wave: 0.9, speed: 0.85, wash: 0.065 },
+  dock: { rest: 0.36, spacing: 8.8, bias: [0.72, 0.74, 0.88], wave: 0.9, speed: 0.85, wash: 0.052 },
   /* Focused on one surface. */
-  workbench: { rest: 0.36, spacing: 8.6, bias: [0.74, 0.74, 0.46], wave: 0.85, speed: 0.8, wash: 0.055 },
+  workbench: { rest: 0.34, spacing: 8.6, bias: [0.68, 0.7, 0.92], wave: 0.85, speed: 0.8, wash: 0.048 },
   /* Leaning toward the sources on the left. */
-  references: { rest: 0.34, spacing: 9, bias: [0.28, 0.7, 0.46], wave: 0.8, speed: 0.75, wash: 0.05 },
+  references: { rest: 0.32, spacing: 9, bias: [0.34, 0.68, 0.9], wave: 0.8, speed: 0.75, wash: 0.044 },
   /* Ordered and fine, like the grid it sits under. */
-  calendar: { rest: 0.32, spacing: 8, bias: [0.78, 0.76, 0.44], wave: 0.55, speed: 0.6, wash: 0.045 },
+  calendar: { rest: 0.3, spacing: 8, bias: [0.7, 0.72, 0.88], wave: 0.55, speed: 0.6, wash: 0.04 },
   /* Generative, lifting up out of the corner. */
-  foundry: { rest: 0.48, spacing: 8.2, bias: [0.64, 0.54, 0.54], wave: 1.15, speed: 1.05, wash: 0.088 },
+  foundry: { rest: 0.43, spacing: 8.2, bias: [0.62, 0.56, 0.98], wave: 1.15, speed: 1.05, wash: 0.072 },
   /* Opening out as the camera starts to leave. */
-  scale: { rest: 0.36, spacing: 10.4, bias: [0.72, 0.72, 0.62], wave: 0.9, speed: 0.8, wash: 0.055 },
+  scale: { rest: 0.32, spacing: 10.4, bias: [0.66, 0.7, 1], wave: 0.9, speed: 0.8, wash: 0.046 },
   /* Resolved. Settled back into the corner it started in, and quieter. */
-  reveal: { rest: 0.26, spacing: 11.4, bias: [0.84, 0.84, 0.52], wave: 0.6, speed: 0.6, wash: 0.04 },
+  reveal: { rest: 0.22, spacing: 11.4, bias: [0.72, 0.76, 0.9], wave: 0.6, speed: 0.6, wash: 0.03 },
 };
 
 /** Per-frame damping toward a target, frame-rate independent. */
@@ -100,6 +100,7 @@ const FULL_RECT: [number, number, number, number] = [0, 0, 1, 1];
 export function LandingField() {
   const rootRef = useRef<HTMLSpanElement>(null);
   const prismRef = useRef<HTMLSpanElement>(null);
+  const actorRef = useRef<HTMLSpanElement>(null);
 
   /* The renderer reads these every frame and React never sees them change. */
   const source = useMemo(() => {
@@ -135,7 +136,8 @@ export function LandingField() {
   useEffect(() => {
     const root = rootRef.current;
     const prismNode = prismRef.current;
-    if (!root || !prismNode) return;
+    const actorNode = actorRef.current;
+    if (!root || !prismNode || !actorNode) return;
     const { mood, influences } = source.write;
     const prismWake = influences[0]!;
     const actorWake = influences[1]!;
@@ -258,7 +260,7 @@ export function LandingField() {
           `${Math.round(target.bias[2] * 240)}%`,
         );
       }
-      write(root, "--field-rest", (mood.rest * 0.42).toFixed(4));
+      write(root, "--field-rest", mood.rest.toFixed(4));
       write(prismNode, "--wake-tx", `${Math.round(prismWake.x)}px`);
       write(prismNode, "--wake-ty", `${Math.round(prismWake.y)}px`);
       write(
@@ -267,6 +269,19 @@ export function LandingField() {
         (prismWake.radius / PRISM_WAKE_R).toFixed(3),
       );
       write(prismNode, "--wake-strength", prismWake.strength.toFixed(3));
+      write(actorNode, "--wake-tx", `${Math.round(actorWake.x)}px`);
+      write(actorNode, "--wake-ty", `${Math.round(actorWake.y)}px`);
+      write(
+        actorNode,
+        "--wake-scale",
+        (actorWake.radius / PRISM_WAKE_R).toFixed(3),
+      );
+      write(actorNode, "--wake-strength", actorWake.strength.toFixed(3));
+      write(
+        actorNode,
+        "--wake-hue",
+        `rgb(${actorWake.color.map((channel) => Math.round(channel * 255)).join(" ")})`,
+      );
     });
 
     return () => {
@@ -285,7 +300,7 @@ export function LandingField() {
       data-depth="true"
       aria-hidden="true"
     >
-      <GrainField source={source} subscribe={onStoryFrame} maxDpr={1.5}>
+      <EnvironmentField source={source} subscribe={onStoryFrame} maxDpr={1.5}>
         {/* The CSS field. Drawn until the GPU field's first real frame lands,
             and kept as the whole field on a machine that cannot run one. */}
         <span className="spectra-field-rest" />
@@ -301,8 +316,25 @@ export function LandingField() {
               "--wake-r": `${PRISM_WAKE_R}px`,
             } as React.CSSProperties
           }
-        />
-      </GrainField>
+        >
+          <span className="spectra-field-wake-fringe" />
+        </span>
+        <span
+          ref={actorRef}
+          className="spectra-field-wake"
+          data-drive="frame"
+          data-state="typing"
+          style={
+            {
+              "--wake-hue": "var(--brand-primary)",
+              "--wake-strength": 0,
+              "--wake-r": `${PRISM_WAKE_R}px`,
+            } as React.CSSProperties
+          }
+        >
+          <span className="spectra-field-wake-fringe" />
+        </span>
+      </EnvironmentField>
     </span>
   );
 }

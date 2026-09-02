@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, LoaderCircle, School, ShieldCheck } from "lucide-react";
 import { SpectraLogo } from "@/components/spectra-logo";
+import { SurfaceField } from "@/features/spectra/field/surface-field";
 import { mutateAdministration } from "@/features/spectra/administration/api";
 import {
   clearJoinTokenCookie,
@@ -64,7 +65,8 @@ function JoinSchoolContent() {
   }
 
   return (
-    <main className="grid min-h-dvh place-items-center bg-[radial-gradient(circle_at_50%_0%,color-mix(in_oklab,var(--accent-mint)_11%,transparent),transparent_42%),var(--bg-primary)] p-5 text-[var(--text-primary)]">
+    <main className="relative isolate grid min-h-dvh place-items-center bg-[radial-gradient(circle_at_50%_0%,color-mix(in_oklab,var(--accent-mint)_11%,transparent),transparent_42%),var(--bg-primary)] p-5 text-[var(--text-primary)]">
+      <SurfaceField scale="stage" behind />
       <section className="w-full max-w-[470px] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-7 shadow-[var(--shadow-lg)]">
         <div className="flex items-center gap-2">
           <SpectraLogo size={28} />

@@ -65,6 +65,7 @@ import {
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { ResourceSurface } from "../bridge/resource-surface";
 import { headerSyncMessage } from "../bridge/status";
+import { CrossfadeText } from "../motion";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useSyncPresentation } from "../bridge/use-sync-presentation";
 import { BRIDGE_SETTINGS_HREF } from "../bridge/client";
@@ -160,6 +161,7 @@ import {
 } from "./native-office-draft";
 import {
   UnsavedCloseDialog,
+  claimCloseAction,
   decideClose,
   persistableTitle,
 } from "./artifact-persistence";
@@ -203,6 +205,7 @@ import {
 } from "./artifact-content-model";
 export { tagsFromDraft } from "./artifact-studio-value-utils";
 import {
+  StudioActivityField,
   StudioInteractionLayer,
   StudioLegacyCursorLayer,
   StudioPresenceIndicator,
@@ -1529,7 +1532,7 @@ function HistoryComparisonOverlay({
                   !selected?.after || readOnly || Boolean(busyVersionId)
                 }
                 onClick={() => selected?.after && onRestore(selected)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-control bg-[var(--brand-primary)] px-3 text-micro font-semibold text-white disabled:opacity-35"
+                className="inline-flex h-8 items-center gap-1.5 rounded-control bg-[var(--brand-primary)] px-3 text-micro font-semibold text-[var(--text-inverse)] disabled:opacity-35"
               >
                 {busyVersionId ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -3102,6 +3105,8 @@ function ArtifactStudioEditor({
   >(null);
   const [nativeRecoveryError, setNativeRecoveryError] = useState<string>();
   const [unsavedCloseOpen, setUnsavedCloseOpen] = useState(false);
+  const [closeActionBusy, setCloseActionBusy] = useState(false);
+  const closeActionRef = useRef(false);
   const meta = workTypeMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const dirtyRef = useRef(dirty);
@@ -4894,16 +4899,30 @@ function ArtifactStudioEditor({
   }
 
   async function saveAndClose() {
-    const synchronized = await save();
-    if (!synchronized) return;
-    setUnsavedCloseOpen(false);
-    onClose();
+    if (!claimCloseAction(closeActionRef)) return;
+    setCloseActionBusy(true);
+    try {
+      const synchronized = await save();
+      if (!synchronized) return;
+      setUnsavedCloseOpen(false);
+      onClose();
+    } finally {
+      closeActionRef.current = false;
+      setCloseActionBusy(false);
+    }
   }
 
   async function discardAndClose() {
-    await discardQueuedDraft();
-    setUnsavedCloseOpen(false);
-    onClose();
+    if (!claimCloseAction(closeActionRef)) return;
+    setCloseActionBusy(true);
+    try {
+      await discardQueuedDraft();
+      setUnsavedCloseOpen(false);
+      onClose();
+    } finally {
+      closeActionRef.current = false;
+      setCloseActionBusy(false);
+    }
   }
 
   async function discardQueuedDraft() {
@@ -5448,7 +5467,13 @@ function ArtifactStudioEditor({
                 data-sync-state={presentation.state}
                 title={presentation.detail || artifactSyncMessage}
               >
-                {artifactSyncMessage}
+                {/* State changes crossfade on the completion grammar instead
+                    of snapping — the transition saving → saved is a resolve,
+                    not a swap. */}
+                <CrossfadeText
+                  value={artifactSyncMessage}
+                  primitive="completion"
+                />
               </span>
             ) : null}
             {presentation.action?.kind === "reconnect" ? (
@@ -5820,6 +5845,14 @@ function ArtifactStudioEditor({
             scroll viewport instead of scrolling away with the content. It must
             stay the first child of the scroll container. */}
         <StudioInteractionLayer transport={live.transport} />
+        {/* The surface field sits behind the work (the section isolates) and
+            wakes only for real events: a collaborator's or run's published
+            activity, and the one-shot completion of a save. */}
+        <StudioActivityField
+          transport={live.transport}
+          surfaceRef={presenceSurfaceRef}
+          syncState={presentation.state}
+        />
         <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
             <StudioContractProvider value={studioContract}>
@@ -6004,7 +6037,7 @@ function ArtifactStudioEditor({
       <UnsavedCloseDialog
         open={unsavedCloseOpen}
         title={title}
-        busy={syncBusy}
+        busy={syncBusy || closeActionBusy}
         onSave={() => void saveAndClose()}
         onDiscard={() => void discardAndClose()}
         onKeepEditing={() => setUnsavedCloseOpen(false)}

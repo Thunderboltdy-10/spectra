@@ -696,8 +696,8 @@ export function StudioSplitShell({
       data-split-overlay={overlay ? "" : undefined}
       className={
         overlay
-          ? "spectra-studio-split-panel spectra-studio-split-panel--overlay absolute inset-y-0 left-0 z-panel flex h-full min-w-0 overflow-hidden bg-[var(--wave-paper,var(--bg-primary))]"
-          : "spectra-studio-split-panel relative z-chrome flex h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
+          ? "spectra-studio-split-panel spectra-studio-split-panel--overlay spectra-panel-enter absolute inset-y-0 left-0 z-panel flex h-full min-w-0 overflow-hidden bg-[var(--wave-paper,var(--bg-primary))]"
+          : "spectra-studio-split-panel spectra-panel-enter relative z-chrome flex h-full min-w-0 overflow-hidden border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--wave-paper,var(--bg-primary))]"
       }
       style={
         overlay

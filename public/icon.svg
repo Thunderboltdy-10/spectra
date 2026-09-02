@@ -1,31 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <defs>
-    <linearGradient id="front" gradientUnits="userSpaceOnUse" x1="45" y1="16.2" x2="41" y2="44.5">
-      <stop offset="0" stop-color="#f7f3ff"/>
-      <stop offset="0.52" stop-color="#c4b3fb"/>
-      <stop offset="1" stop-color="#7b5cf5"/>
+    <linearGradient id="front" gradientUnits="userSpaceOnUse" x1="35" y1="8" x2="43" y2="55">
+      <stop offset="0" stop-color="#fbf9ff" stop-opacity=".96"/>
+      <stop offset=".45" stop-color="#d8cdf8" stop-opacity=".92"/>
+      <stop offset="1" stop-color="#8068de" stop-opacity=".92"/>
     </linearGradient>
-    <linearGradient id="left" gradientUnits="userSpaceOnUse" x1="18.8" y1="11.5" x2="35" y2="44.5">
-      <stop offset="0" stop-color="#fdfbff"/>
-      <stop offset="1" stop-color="#e0d7fb"/>
+    <linearGradient id="left" gradientUnits="userSpaceOnUse" x1="9" y1="18" x2="34" y2="52">
+      <stop offset="0" stop-color="#f5f1ff" stop-opacity=".82"/>
+      <stop offset="1" stop-color="#b7a6ee" stop-opacity=".74"/>
     </linearGradient>
-    <linearGradient id="top" gradientUnits="userSpaceOnUse" x1="45" y1="16.2" x2="28.8" y2="39.9">
-      <stop offset="0" stop-color="#b49df8"/>
-      <stop offset="1" stop-color="#6b50e6"/>
+    <linearGradient id="top" gradientUnits="userSpaceOnUse" x1="17" y1="13" x2="58" y2="47">
+      <stop offset="0" stop-color="#c9bbf4" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#7155da" stop-opacity=".9"/>
     </linearGradient>
-    <linearGradient id="disp" gradientUnits="userSpaceOnUse" x1="35" y1="44.5" x2="55" y2="44.5">
-      <stop offset="0" stop-color="#7b5cf5"/>
-      <stop offset="1" stop-color="#2e8fd4"/>
-    </linearGradient>
+    <radialGradient id="pool" gradientUnits="userSpaceOnUse" cx="38.5" cy="36" r="18">
+      <stop offset="0" stop-color="#a99af5" stop-opacity=".72"/>
+      <stop offset=".48" stop-color="#9075ed" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#8267e3" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="body"><path d="M39.5 7.5L59 50.5L27.5 55.5L7 49.5L18.5 13.5Z"/></clipPath>
   </defs>
-  <polygon points="45,16.2 55,44.5 28.8,39.9 18.8,11.5" fill="url(#top)"/>
-  <polygon points="45,16.2 35,44.5 8.7,39.9 18.8,11.5" fill="url(#left)"/>
-  <polygon points="45,16.2 35,44.5 55,44.5" fill="url(#front)"/>
-  <line x1="35" y1="44.5" x2="55" y2="44.5" stroke="url(#disp)" stroke-width="1.6" stroke-linecap="round" opacity="0.55"/>
+  <polygon points="39.5,7.5 59,50.5 37.5,45.5 18.5,13.5" fill="url(#top)"/>
+  <polygon points="39.5,7.5 27.5,55.5 7,49.5 18.5,13.5" fill="url(#left)"/>
+  <polygon points="39.5,7.5 27.5,55.5 59,50.5" fill="url(#front)"/>
+  <g clip-path="url(#body)" fill="none" stroke-linecap="round" stroke-width=".9">
+    <path d="M20 19L52 46" stroke="#ff647f"/><path d="M17 24L49 47" stroke="#ffab4a"/>
+    <path d="M15 29L46 48" stroke="#f6d75d"/><path d="M13 34L43 49" stroke="#48c997"/>
+    <path d="M11 39L40 50" stroke="#4f9fe6"/><path d="M9 44L37 51" stroke="#9176e8"/>
+    <circle cx="38.5" cy="36" r="18" fill="url(#pool)"/>
+  </g>
   <g fill="none" stroke-linejoin="round" stroke-linecap="round">
-    <polygon points="45,16.2 35,44.5 55,44.5" stroke="rgba(76,52,186,0.34)" stroke-width="1.3"/>
-    <polyline points="8.7,39.9 18.8,11.5 28.8,39.9" stroke="rgba(76,52,186,0.22)" stroke-width="1.15"/>
-    <line x1="18.8" y1="11.5" x2="45" y2="16.2" stroke="rgba(76,52,186,0.26)" stroke-width="1.15"/>
-    <polyline points="35,44.5 45,16.2 55,44.5" stroke="rgba(255,255,255,0.75)" stroke-width="1.15"/>
+    <polygon points="39.5,7.5 27.5,55.5 59,50.5" stroke="rgba(73,49,166,.36)" stroke-width="1.05"/>
+    <polyline points="7,49.5 18.5,13.5 37.5,45.5" stroke="rgba(73,49,166,.22)" stroke-width=".9"/>
+    <line x1="18.5" y1="13.5" x2="39.5" y2="7.5" stroke="rgba(73,49,166,.28)" stroke-width=".95"/>
+    <polyline points="27.5,55.5 39.5,7.5 59,50.5" stroke="rgba(255,255,255,.82)" stroke-width="1.05"/>
   </g>
 </svg>

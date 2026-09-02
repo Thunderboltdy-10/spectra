@@ -8,6 +8,7 @@ import { Environment } from "@react-three/drei";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { heroState, damp, phases, smoothstep } from "../scene/heroState";
+import { onStoryFrame } from "../story/story-clock";
 import { Prism, type PrismQuality } from "./Prism";
 
 /** Distance the story camera holds, so slot → world stays a fixed mapping. */
@@ -33,9 +34,11 @@ const PRISM_WORLD_WIDTH = 2.24;
 function SceneDriver({
   progressRef,
   reduced,
+  paused,
 }: {
   progressRef: { current: number };
   reduced: boolean;
+  paused: boolean;
 }) {
   const invalidate = useThree((s) => s.invalidate);
   const pointer = useRef({ x: 0, y: 0 });
@@ -45,7 +48,7 @@ function SceneDriver({
     if (reduced) {
       // One composed moment, frozen deterministically.
       heroState.fixedTime = 12.6;
-      invalidate();
+      if (!paused) invalidate();
     } else {
       heroState.fixedTime = null;
     }
@@ -53,7 +56,15 @@ function SceneDriver({
       heroState.fixedTime = null;
       heroState.reducedMotion = false;
     };
-  }, [reduced, invalidate]);
+  }, [reduced, paused, invalidate]);
+
+  useEffect(() => {
+    if (paused) return;
+    /* R3F shares the landing's one heartbeat. Scroll, pointer movement and
+       the finite settle coast invalidate a frame; once the story clock goes
+       quiet this demand canvas schedules nothing of its own. */
+    return onStoryFrame(() => invalidate());
+  }, [invalidate, paused]);
 
   useEffect(() => {
     if (reduced) return;
@@ -226,9 +237,7 @@ function PlacementRig({ children }: { children: React.ReactNode }) {
 
     node.position.x = damp(node.position.x, targetX, lambda, d);
     node.position.y = damp(node.position.y, targetY, lambda, d);
-    node.scale.setScalar(
-      damp(node.scale.x, targetScale, lambda * 0.85, d),
-    );
+    node.scale.setScalar(damp(node.scale.x, targetScale, lambda * 0.85, d));
   });
 
   return <group ref={rig}>{children}</group>;
@@ -260,8 +269,6 @@ export default function PrismCanvas({
       quality === "high" ? [1, 2] : quality === "medium" ? [1, 1.5] : [0.75, 1],
     [quality],
   );
-  const frameloop = reduced || paused ? "demand" : "always";
-
   return (
     <Canvas
       dpr={dpr}
@@ -273,7 +280,7 @@ export default function PrismCanvas({
         preserveDrawingBuffer: false,
       }}
       camera={{ position: [0, 0.05, CAMERA_Z], fov: 35, near: 0.1, far: 40 }}
-      frameloop={frameloop}
+      frameloop="demand"
       onCreated={({ gl }) => {
         gl.setClearColor(0x000000, 0);
         if (!painted) {
@@ -283,7 +290,11 @@ export default function PrismCanvas({
       }}
       style={{ background: "transparent" }}
     >
-      <SceneDriver progressRef={progressRef} reduced={reduced} />
+      <SceneDriver
+        progressRef={progressRef}
+        reduced={reduced}
+        paused={Boolean(paused)}
+      />
       <CameraRig reduced={reduced} staged={staged} />
 
       {/* procedural environment for the transmission glass — no network HDR.

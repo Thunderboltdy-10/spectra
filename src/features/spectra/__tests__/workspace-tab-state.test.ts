@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
+import { artifactIdFromSpectraLocation } from "../pages/shell-location";
 
 describe("workspace hub tab persistence", () => {
+  it("reads the synchronous browser location across close and work-to-work navigation", () => {
+    expect(
+      artifactIdFromSpectraLocation("/library", "?artifactId=work-a"),
+    ).toBe("work-a");
+    expect(artifactIdFromSpectraLocation("/library", "")).toBeUndefined();
+    expect(
+      artifactIdFromSpectraLocation("/library", "?artifactId=work-b"),
+    ).toBe("work-b");
+    expect(
+      artifactIdFromSpectraLocation(
+        "/library/work%2Flegacy",
+        "?artifactId=work-b",
+      ),
+    ).toBe("work/legacy");
+  });
   it("drops wrong-table and stale workspace ids before activation", () => {
     const result = parseWorkspaceHubTabs(
       {

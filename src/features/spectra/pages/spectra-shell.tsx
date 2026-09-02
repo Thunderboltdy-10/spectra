@@ -69,6 +69,7 @@ import {
   type ComposerFocusMode,
 } from "../components/context-controls";
 import { InvitationStrip } from "../components/invitation-strip";
+import { ShellActivityField } from "../components/shell-activity-field";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
@@ -165,6 +166,7 @@ import {
   writeSharedWorkbenchSession,
 } from "../workbench";
 import {
+  artifactIdFromSpectraLocation,
   artifactIdFromSpectraPath,
   spectraShellHref,
   workspaceIdFromSpectraPath,
@@ -1894,7 +1896,7 @@ export function SpectraShell({
 
   useEffect(() => {
     const removeSettings = spectraBus.handle("settings.change", ({ patch }) => {
-        replacePreferences(applyPreferencePatch(preferences, patch));
+      replacePreferences(applyPreferencePatch(preferences, patch));
     });
     const removeSync = spectraBus.handle(
       "sync.policy.change",
@@ -1947,12 +1949,9 @@ export function SpectraShell({
         });
       }
     });
-    const removeManageBac = spectraBus.handle(
-      "managebac.sync",
-      async () => {
-        await syncSpectraManageBac("manual");
-      },
-    );
+    const removeManageBac = spectraBus.handle("managebac.sync", async () => {
+      await syncSpectraManageBac("manual");
+    });
     return () => {
       removeSettings();
       removeSync();
@@ -2760,7 +2759,11 @@ export function SpectraShell({
     const refresh = () => {
       void loadOverview(selectedWorkspaceId, true);
     };
-    const refreshActivatedArtifact = ({ artifactId }: { artifactId: string }) => {
+    const refreshActivatedArtifact = ({
+      artifactId,
+    }: {
+      artifactId: string;
+    }) => {
       if (!artifactId) return;
       void getSpectraArtifact(artifactId)
         .then(({ artifact }) => {
@@ -2884,7 +2887,14 @@ export function SpectraShell({
    * once per id, so dismissing the toast does not summon it again.
    */
   useEffect(() => {
-    if (!requestedArtifactId) {
+    /* A native history write is synchronous, while Next's hook snapshot can
+       lag it by one render. Read the browser here so closing A or opening B
+       cannot be undone by the stale `artifactId=A` snapshot. */
+    const routeArtifactId = artifactIdFromSpectraLocation(
+      window.location.pathname,
+      window.location.search,
+    );
+    if (!routeArtifactId) {
       if (previousRequestedArtifactIdRef.current && studio.isOpen) {
         studio.closeStudio();
         setSelection(null);
@@ -2893,18 +2903,16 @@ export function SpectraShell({
       openedDeepLinkRef.current = null;
       return;
     }
-    previousRequestedArtifactIdRef.current = requestedArtifactId;
-    if (openedDeepLinkRef.current === requestedArtifactId) return;
-    const artifact = allArtifacts.find(
-      (item) => item._id === requestedArtifactId,
-    );
+    previousRequestedArtifactIdRef.current = routeArtifactId;
+    if (openedDeepLinkRef.current === routeArtifactId) return;
+    const artifact = allArtifacts.find((item) => item._id === routeArtifactId);
     if (artifact) {
-      openedDeepLinkRef.current = requestedArtifactId;
+      openedDeepLinkRef.current = routeArtifactId;
       openArtifactPanel(artifact, "replace");
       return;
     }
     if (!overview) return;
-    openedDeepLinkRef.current = requestedArtifactId;
+    openedDeepLinkRef.current = routeArtifactId;
     toast.error("That work is not available.", {
       description:
         "It may have been deleted, or it may not be shared with your account.",
@@ -3329,7 +3337,6 @@ export function SpectraShell({
         ? studio.tabs.filter((tab) => tab.artifactId !== artifactId).at(-1)
             ?.artifactId
         : (studio.activeArtifactId ?? undefined);
-    openedDeepLinkRef.current = fallbackArtifactId ?? null;
     studio.closeTab(artifactId);
     replaceWorkspaceLocation(selectedWorkspaceId, fallbackArtifactId);
     if (closesFinalArtifact && hubTabs.length === 0) {
@@ -3503,8 +3510,8 @@ export function SpectraShell({
             scope: portable ? "package" : "original",
             level: "exact",
             message: portable
-                ? "Spectra restored the package content and preserved the uploaded package bytes exactly."
-                : "Original file preserved for the work editor import pipeline.",
+              ? "Spectra restored the package content and preserved the uploaded package bytes exactly."
+              : "Original file preserved for the work editor import pipeline.",
           },
         ],
         unsupportedFeatures: [],
@@ -4063,514 +4070,538 @@ export function SpectraShell({
             data-split-host
             className="relative flex min-h-0 min-w-0 flex-1"
           >
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {workSetIsolated && tiledArtifacts.length > 0 ? (
-            <ArtifactTileSurface
-              isolated
-              artifacts={tiledArtifacts}
-              allArtifacts={allArtifacts}
-              dirtyIds={studio.dirtyIds}
-              busyArtifactId={
-                busyKey?.startsWith("artifact:update:")
-                  ? busyKey.replace("artifact:update:", "")
-                  : null
-              }
-              sourceLabel={workspace?.title ?? surfaceLabel}
-              continuedThreadId={composerThread?.id}
-              onCloseArtifact={closeTileArtifact}
-              onCloseAll={closeTileSet}
-              onAddArtifact={addArtifactTile}
-              onFocusSet={() => setWorkSetIsolated(true)}
-              onExitFocusSet={() => setWorkSetIsolated(false)}
-              onArchive={archiveArtifact}
-              onDirtyChange={studio.setDirty}
-              onContinueThread={(threadId, title) =>
-                toggleContinuedThread(threadId, title)
-              }
-              executeApplicationCommand={applicationCommandDispatcher}
-            />
-          ) : studio.mode === "tab" && studio.activeArtifact ? (
-            <ArtifactStudio
-              mode="tab"
-              artifact={studio.activeArtifact}
-              artifacts={allArtifacts}
-              tabs={studio.tabs}
-              dirtyIds={studio.dirtyIds}
-              busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
-              sourceLabel={workspace?.title ?? surfaceLabel}
-              onClose={returnToHub}
-              onExpand={openArtifactTab}
-              onActivateTab={activateArtifactTab}
-              onCloseTab={closeArtifactTab}
-              onArchive={archiveArtifact}
-              onShare={
-                studio.activeArtifact.ownership !== "shared"
-                  ? (artifact) => setArtifactShareTarget(artifact)
-                  : undefined
-              }
-              onDirtyChange={studio.setDirty}
-              executeApplicationCommand={applicationCommandDispatcher}
-              compact={false}
-            />
-          ) : (
-            <section
-              data-split-host
-              className="relative flex min-h-0 min-w-0 flex-1"
-            >
-              <>
-                <div className="relative flex min-w-0 flex-1 flex-col">
-                  {shareInvitations.length > 0 ? (
-                    <InvitationStrip
-                      invitations={shareInvitations}
-                      open={invitationsOpen}
-                      busyKey={busyKey}
-                      onToggle={() => setInvitationsOpen((open) => !open)}
-                      onRespond={(invitationId, response) =>
-                        void respondToShareInvitation(invitationId, response)
-                      }
-                    />
-                  ) : null}
-                  {surfaceLoading ? (
-                    <WorkspaceHeaderSkeleton />
-                  ) : surfaceFailure ? null : workspace ? (
-                    <WorkspaceHeader
-                      workspace={workspaceHeader}
-                      items={entries.map((entry) => entry.item)}
-                      runs={workspaceRuns}
-                      optimisticActive={Boolean(
-                        runEngine.liveExchange &&
-                        runEngine.liveExchange.status !== "failed",
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              {workSetIsolated && tiledArtifacts.length > 0 ? (
+                <ArtifactTileSurface
+                  isolated
+                  artifacts={tiledArtifacts}
+                  allArtifacts={allArtifacts}
+                  dirtyIds={studio.dirtyIds}
+                  busyArtifactId={
+                    busyKey?.startsWith("artifact:update:")
+                      ? busyKey.replace("artifact:update:", "")
+                      : null
+                  }
+                  sourceLabel={workspace?.title ?? surfaceLabel}
+                  continuedThreadId={composerThread?.id}
+                  onCloseArtifact={closeTileArtifact}
+                  onCloseAll={closeTileSet}
+                  onAddArtifact={addArtifactTile}
+                  onFocusSet={() => setWorkSetIsolated(true)}
+                  onExitFocusSet={() => setWorkSetIsolated(false)}
+                  onArchive={archiveArtifact}
+                  onDirtyChange={studio.setDirty}
+                  onContinueThread={(threadId, title) =>
+                    toggleContinuedThread(threadId, title)
+                  }
+                  executeApplicationCommand={applicationCommandDispatcher}
+                />
+              ) : studio.mode === "tab" && studio.activeArtifact ? (
+                <ArtifactStudio
+                  mode="tab"
+                  artifact={studio.activeArtifact}
+                  artifacts={allArtifacts}
+                  tabs={studio.tabs}
+                  dirtyIds={studio.dirtyIds}
+                  busy={
+                    busyKey === `artifact:update:${studio.activeArtifact._id}`
+                  }
+                  sourceLabel={workspace?.title ?? surfaceLabel}
+                  onClose={returnToHub}
+                  onExpand={openArtifactTab}
+                  onActivateTab={activateArtifactTab}
+                  onCloseTab={closeArtifactTab}
+                  onArchive={archiveArtifact}
+                  onShare={
+                    studio.activeArtifact.ownership !== "shared"
+                      ? (artifact) => setArtifactShareTarget(artifact)
+                      : undefined
+                  }
+                  onDirtyChange={studio.setDirty}
+                  executeApplicationCommand={applicationCommandDispatcher}
+                  compact={false}
+                />
+              ) : (
+                <section
+                  data-split-host
+                  className="relative flex min-h-0 min-w-0 flex-1"
+                >
+                  <>
+                    <div className="relative flex min-w-0 flex-1 flex-col">
+                      {shareInvitations.length > 0 ? (
+                        <InvitationStrip
+                          invitations={shareInvitations}
+                          open={invitationsOpen}
+                          busyKey={busyKey}
+                          onToggle={() => setInvitationsOpen((open) => !open)}
+                          onRespond={(invitationId, response) =>
+                            void respondToShareInvitation(
+                              invitationId,
+                              response,
+                            )
+                          }
+                        />
+                      ) : null}
+                      {surfaceLoading ? (
+                        <WorkspaceHeaderSkeleton />
+                      ) : surfaceFailure ? null : workspace ? (
+                        <WorkspaceHeader
+                          workspace={workspaceHeader}
+                          items={entries.map((entry) => entry.item)}
+                          runs={workspaceRuns}
+                          optimisticActive={Boolean(
+                            runEngine.liveExchange &&
+                            runEngine.liveExchange.status !== "failed",
+                          )}
+                          optimisticRunId={runEngine.liveExchange?.runId}
+                          onEditWorkspace={openWorkspaceEdit}
+                          onShareWorkspace={() => setWorkspaceShareOpen(true)}
+                          onExportWorkspace={() =>
+                            void exportWorkspaceManifest()
+                          }
+                          onDeleteWorkspace={() => {
+                            setWorkspaceDeleteConfirmation("");
+                            setWorkspaceDeleteOpen(true);
+                          }}
+                        />
+                      ) : (
+                        <RootHeader
+                          surface={surface}
+                          workspaceCount={workspaces.length}
+                        />
                       )}
-                      optimisticRunId={runEngine.liveExchange?.runId}
-                      onEditWorkspace={openWorkspaceEdit}
-                      onShareWorkspace={() => setWorkspaceShareOpen(true)}
-                      onExportWorkspace={() => void exportWorkspaceManifest()}
-                      onDeleteWorkspace={() => {
-                        setWorkspaceDeleteConfirmation("");
-                        setWorkspaceDeleteOpen(true);
-                      }}
-                    />
-                  ) : (
-                    <RootHeader
-                      surface={surface}
-                      workspaceCount={workspaces.length}
-                    />
-                  )}
-                  {surfaceFailure ? (
-                    <OverviewLoadFailure
-                      message={surfaceFailure.message}
-                      onRetry={() => void loadOverview(requestedWorkspaceId)}
-                    />
-                  ) : surfaceLoading || !scopeReady ? (
-                    <main className="spectra-workspace-content spectra-composer-clearance relative z-chrome min-h-0 flex-1 overflow-y-auto px-3 pt-2 sm:px-5 lg:px-8">
-                      <WorkspaceContentSkeleton />
-                    </main>
-                  ) : (
-                    /* One surface, two shapes. The Library scoped to whatever is
+                      {surfaceFailure ? (
+                        <OverviewLoadFailure
+                          message={surfaceFailure.message}
+                          onRetry={() =>
+                            void loadOverview(requestedWorkspaceId)
+                          }
+                        />
+                      ) : surfaceLoading || !scopeReady ? (
+                        <main className="spectra-workspace-content spectra-composer-clearance relative z-chrome min-h-0 flex-1 overflow-y-auto px-3 pt-2 sm:px-5 lg:px-8">
+                          <WorkspaceContentSkeleton />
+                        </main>
+                      ) : (
+                        /* One surface, two shapes. The Library scoped to whatever is
                        open owns the location, the search, the filter, the create
                        menu, the rail and the view switch — for the List and the
                        Board alike (CANON D41). This route used to render a second
                        toolbar with a second search and a second type filter above
                        the board; that row is gone. */
-                    <main className="spectra-workspace-content relative z-chrome flex min-h-0 flex-1 flex-col overflow-hidden">
-                      <LibraryOrganizer
-                        key={`${scopeNodeId ?? "root"}:${boardFolderNodeId ?? ""}`}
-                        scope={
-                          scopeNodeId && workspace
-                            ? { nodeId: scopeNodeId, label: workspace.title }
+                        <main className="spectra-workspace-content relative isolate z-chrome flex min-h-0 flex-1 flex-col overflow-hidden">
+                          <ShellActivityField
+                            liveExchange={runEngine.liveExchange}
+                          />
+                          <LibraryOrganizer
+                            key={`${scopeNodeId ?? "root"}:${boardFolderNodeId ?? ""}`}
+                            scope={
+                              scopeNodeId && workspace
+                                ? {
+                                    nodeId: scopeNodeId,
+                                    label: workspace.title,
+                                  }
+                                : null
+                            }
+                            firstRun={firstRun}
+                            initialNodeId={
+                              boardFolderNodeId ??
+                              requestedNodeId ??
+                              scopeNodeId
+                            }
+                            view={viewMode}
+                            onViewChange={setViewMode}
+                            boardGroupBy={boardGroupBy}
+                            onBoardGroupByChange={setBoardGroupBy}
+                            selectionMode={multiSelectMode}
+                            selectedObjectKeys={selectedObjectKeys}
+                            activeWorkId={studio.activeArtifact?._id}
+                            busy={Boolean(busyKey?.startsWith("artifact:"))}
+                            importing={busyKey === "library:import"}
+                            onImportFile={(file) =>
+                              void importLibraryFile(file)
+                            }
+                            onNewWorkspace={(parentNodeId) => {
+                              setWorkspaceCreateParentNodeId(parentNodeId);
+                              setWorkspaceCreateOpen(true);
+                            }}
+                            toolbarTrail={surfaceActions}
+                            contextIds={selectedContextIds}
+                            onOpenWork={openArtifactById}
+                            onOpenContainer={openBoardContainerById}
+                            onLocationChange={(nodeId) => {
+                              setCurrentLibraryNodeId(nodeId);
+                              setBoardFolderNodeId(null);
+                            }}
+                            onOpenThread={(threadId, title) =>
+                              setLiveThread({ id: threadId, title })
+                            }
+                            onShareWork={(artifactId) => {
+                              const found = allArtifacts.find(
+                                (item) => item._id === artifactId,
+                              );
+                              if (found) setArtifactShareTarget(found);
+                            }}
+                            onToggleContext={(artifactId) => {
+                              const found = allArtifacts.find(
+                                (item) => item._id === artifactId,
+                              );
+                              if (found) toggleContextArtifact(found);
+                            }}
+                            onSelectWork={(ids) => {
+                              setMultiSelectMode(true);
+                              setSelectedContextIds(new Set(ids));
+                              setFocusModeOverride("selection");
+                            }}
+                          />
+                        </main>
+                      )}
+                    </div>
+                    {!studio.isOpen &&
+                    !liveThread &&
+                    tiledArtifacts.length === 0 ? (
+                      <Inspector
+                        artifacts={allArtifacts}
+                        selectedArtifact={selectedArtifact}
+                        selectedRun={selectedRun}
+                        onClose={() => setSelection(null)}
+                        onHide={() => {
+                          if (selection?.type === "artifact")
+                            void moveItemToGeneral(selection.itemId);
+                        }}
+                        onOpenArtifact={openArtifactPanel}
+                      />
+                    ) : null}
+                    {studio.mode === "tab" && studio.activeArtifact ? (
+                      <ArtifactStudio
+                        mode="tab"
+                        artifact={studio.activeArtifact}
+                        artifacts={allArtifacts}
+                        tabs={studio.tabs}
+                        dirtyIds={studio.dirtyIds}
+                        busy={
+                          busyKey ===
+                          `artifact:update:${studio.activeArtifact._id}`
+                        }
+                        sourceLabel={workspace?.title ?? surfaceLabel}
+                        onClose={returnToHub}
+                        onExpand={openArtifactTab}
+                        onActivateTab={activateArtifactTab}
+                        onCloseTab={closeArtifactTab}
+                        onArchive={archiveArtifact}
+                        onShare={
+                          studio.activeArtifact.ownership !== "shared"
+                            ? (artifact) => setArtifactShareTarget(artifact)
+                            : undefined
+                        }
+                        onDirtyChange={studio.setDirty}
+                        executeApplicationCommand={applicationCommandDispatcher}
+                        compact={false}
+                      />
+                    ) : null}
+                    {studio.mode === "split" && studio.activeArtifact ? (
+                      <ArtifactStudio
+                        mode="split"
+                        artifact={studio.activeArtifact}
+                        artifacts={allArtifacts}
+                        tabs={studio.tabs}
+                        dirtyIds={studio.dirtyIds}
+                        busy={
+                          busyKey ===
+                          `artifact:update:${studio.activeArtifact._id}`
+                        }
+                        panelWidth={paneWidths.studio ?? studioPanelWidth}
+                        panelOverlay={paneOverlay.studio ?? false}
+                        sourceLabel={workspace?.title ?? surfaceLabel}
+                        onPanelWidthChange={(next) =>
+                          notePaneIntent("studio", next)
+                        }
+                        onClose={closeActiveStudio}
+                        onExpand={openArtifactTab}
+                        onActivateTab={activateArtifactTab}
+                        onCloseTab={closeArtifactTab}
+                        onArchive={archiveArtifact}
+                        onShare={
+                          studio.activeArtifact.ownership !== "shared"
+                            ? (artifact) => setArtifactShareTarget(artifact)
+                            : undefined
+                        }
+                        onDirtyChange={studio.setDirty}
+                        executeApplicationCommand={applicationCommandDispatcher}
+                        compact={false}
+                      />
+                    ) : null}
+                    {!workSetIsolated && tiledArtifacts.length > 0 ? (
+                      <ArtifactTileSurface
+                        artifacts={tiledArtifacts}
+                        allArtifacts={allArtifacts}
+                        dirtyIds={studio.dirtyIds}
+                        busyArtifactId={
+                          busyKey?.startsWith("artifact:update:")
+                            ? busyKey.replace("artifact:update:", "")
                             : null
                         }
-                        firstRun={firstRun}
-                        initialNodeId={
-                          boardFolderNodeId ?? requestedNodeId ?? scopeNodeId
+                        sourceLabel={workspace?.title ?? surfaceLabel}
+                        continuedThreadId={composerThread?.id}
+                        onCloseArtifact={closeTileArtifact}
+                        onCloseAll={closeTileSet}
+                        onAddArtifact={addArtifactTile}
+                        onFocusSet={() => setWorkSetIsolated(true)}
+                        onExitFocusSet={() => setWorkSetIsolated(false)}
+                        onArchive={archiveArtifact}
+                        onDirtyChange={studio.setDirty}
+                        onContinueThread={(threadId, title) =>
+                          toggleContinuedThread(threadId, title)
                         }
-                        view={viewMode}
-                        onViewChange={setViewMode}
-                        boardGroupBy={boardGroupBy}
-                        onBoardGroupByChange={setBoardGroupBy}
-                        selectionMode={multiSelectMode}
-                        selectedObjectKeys={selectedObjectKeys}
-                        busy={Boolean(busyKey?.startsWith("artifact:"))}
-                        importing={busyKey === "library:import"}
-                        onImportFile={(file) => void importLibraryFile(file)}
-                        onNewWorkspace={(parentNodeId) => {
-                          setWorkspaceCreateParentNodeId(parentNodeId);
-                          setWorkspaceCreateOpen(true);
-                        }}
-                        toolbarTrail={surfaceActions}
-                        contextIds={selectedContextIds}
-                        onOpenWork={openArtifactById}
-                        onOpenContainer={openBoardContainerById}
-                        onLocationChange={(nodeId) => {
-                          setCurrentLibraryNodeId(nodeId);
-                          setBoardFolderNodeId(null);
-                        }}
-                        onOpenThread={(threadId, title) =>
-                          setLiveThread({ id: threadId, title })
-                        }
-                        onShareWork={(artifactId) => {
-                          const found = allArtifacts.find(
-                            (item) => item._id === artifactId,
-                          );
-                          if (found) setArtifactShareTarget(found);
-                        }}
-                        onToggleContext={(artifactId) => {
-                          const found = allArtifacts.find(
-                            (item) => item._id === artifactId,
-                          );
-                          if (found) toggleContextArtifact(found);
-                        }}
-                        onSelectWork={(ids) => {
-                          setMultiSelectMode(true);
-                          setSelectedContextIds(new Set(ids));
-                          setFocusModeOverride("selection");
-                        }}
+                        executeApplicationCommand={applicationCommandDispatcher}
                       />
-                    </main>
-                  )}
-                </div>
-                {!studio.isOpen &&
-                !liveThread &&
-                tiledArtifacts.length === 0 ? (
-                  <Inspector
-                    artifacts={allArtifacts}
-                    selectedArtifact={selectedArtifact}
-                    selectedRun={selectedRun}
-                    onClose={() => setSelection(null)}
-                    onHide={() => {
-                      if (selection?.type === "artifact")
-                        void moveItemToGeneral(selection.itemId);
+                    ) : null}
+                  </>
+                </section>
+              )}
+            </div>
+            <WorkbenchDockShell
+              attachmentsHostRef={setAttachmentsHost}
+              dock={{
+                workspaceId: selectedWorkspaceId,
+                optimistic: runEngine.liveExchange,
+                openThreadId: liveThread?.id,
+                onStartNewThread: startFreshComposerThread,
+                onOpen: (_runId, threadId, title, artifactId) => {
+                  skipAutoContinueThreadIdRef.current = null;
+                  setActiveRunPanelId(null);
+                  setLiveThread({ id: threadId, title });
+                  setComposerThread({
+                    id: threadId,
+                    title,
+                    runId: _runId,
+                    workspaceId: selectedWorkspaceId,
+                  });
+                  if (artifactId) {
+                    const artifact = allArtifacts.find(
+                      (item) => item._id === artifactId,
+                    );
+                    if (artifact) openArtifactPanel(artifact);
+                  }
+                },
+                onContinue: (_runId, threadId, title) => {
+                  skipAutoContinueThreadIdRef.current = null;
+                  setComposerThread({
+                    id: threadId,
+                    title,
+                    runId: _runId,
+                    workspaceId: selectedWorkspaceId,
+                  });
+                },
+                onDeselect: () => {
+                  if (liveThread)
+                    skipAutoContinueThreadIdRef.current = liveThread.id;
+                  setComposerThread(null);
+                },
+                onStop: (runId) => runEngine.stop(runId),
+                onRetry: (runId) => void runEngine.retry(runId),
+                onAction: (card, action) =>
+                  void runEngine.onCardAction(card, action, card.runId),
+                onRevise: (card, revision) =>
+                  void runEngine.revise(card, revision),
+                onInput: (threadId, response, attachments) =>
+                  runEngine.run(response, attachments ?? [], { threadId }),
+              }}
+              selection={
+                multiSelectMode ? (
+                  <SelectionActionBar
+                    count={selectionCount}
+                    onClear={clearSelection}
+                    onExit={() => {
+                      clearSelection();
+                      setMultiSelectMode(false);
                     }}
-                    onOpenArtifact={openArtifactPanel}
-                  />
-                ) : null}
-                {studio.mode === "tab" && studio.activeArtifact ? (
-                  <ArtifactStudio
-                    mode="tab"
-                    artifact={studio.activeArtifact}
-                    artifacts={allArtifacts}
-                    tabs={studio.tabs}
-                    dirtyIds={studio.dirtyIds}
-                    busy={
-                      busyKey === `artifact:update:${studio.activeArtifact._id}`
-                    }
-                    sourceLabel={workspace?.title ?? surfaceLabel}
-                    onClose={returnToHub}
-                    onExpand={openArtifactTab}
-                    onActivateTab={activateArtifactTab}
-                    onCloseTab={closeArtifactTab}
-                    onArchive={archiveArtifact}
-                    onShare={
-                      studio.activeArtifact.ownership !== "shared"
-                        ? (artifact) => setArtifactShareTarget(artifact)
+                    onAddToContext={() => {
+                      const count = selectionCount;
+                      commitSelection();
+                      setFocusModeOverride("selection");
+                      setMultiSelectMode(false);
+                      toast.success(
+                        `${count} object${count === 1 ? "" : "s"} added to context.`,
+                      );
+                    }}
+                    onTile={
+                      selectedContextIds.size
+                        ? openSelectedArtifactsInTiles
                         : undefined
                     }
-                    onDirtyChange={studio.setDirty}
-                    executeApplicationCommand={applicationCommandDispatcher}
-                    compact={false}
                   />
-                ) : null}
-                {studio.mode === "split" && studio.activeArtifact ? (
-                  <ArtifactStudio
-                    mode="split"
-                    artifact={studio.activeArtifact}
-                    artifacts={allArtifacts}
-                    tabs={studio.tabs}
-                    dirtyIds={studio.dirtyIds}
-                    busy={
-                      busyKey === `artifact:update:${studio.activeArtifact._id}`
+                ) : undefined
+              }
+              composer={
+                <div className="flex items-center gap-1">
+                  <CommandBar
+                    className="min-w-0 flex-1"
+                    allowAttachments
+                    attachmentsPortalTarget={attachmentsHost}
+                    placeholder={
+                      composerThread
+                        ? `Continue ${composerThread.title}...`
+                        : commandFocusArtifact
+                          ? `Ask Spectra about ${commandFocusArtifact.title}`
+                          : workspace
+                            ? `Ask Spectra anything about this workspace...`
+                            : "Ask Spectra anything..."
                     }
-                    panelWidth={paneWidths.studio ?? studioPanelWidth}
-                    panelOverlay={paneOverlay.studio ?? false}
-                    sourceLabel={workspace?.title ?? surfaceLabel}
-                    onPanelWidthChange={(next) => notePaneIntent("studio", next)}
-                    onClose={closeActiveStudio}
-                    onExpand={openArtifactTab}
-                    onActivateTab={activateArtifactTab}
-                    onCloseTab={closeArtifactTab}
-                    onArchive={archiveArtifact}
-                    onShare={
-                      studio.activeArtifact.ownership !== "shared"
-                        ? (artifact) => setArtifactShareTarget(artifact)
-                        : undefined
+                    onSubmit={(prompt, attachments) =>
+                      runEngine.run(prompt, attachments, {
+                        threadId: composerThread?.id ?? null,
+                      })
                     }
-                    onDirtyChange={studio.setDirty}
-                    executeApplicationCommand={applicationCommandDispatcher}
-                    compact={false}
+                    busy={runEngine.submitting}
+                    allowConcurrent={!composerThread}
+                    onStop={runEngine.stop}
+                    activeRunId={runEngine.activeRunId}
+                    onSteer={runEngine.steer}
+                    onStartNewThread={startFreshComposerThread}
+                    context={
+                      <ContextFocusControl
+                        mode={effectiveFocusMode}
+                        onModeChange={setFocusModeOverride}
+                        workspace={workspace}
+                        artifact={commandFocusArtifact}
+                        selectedCount={contextualArtifactIds.length}
+                        threadTitle={composerThread?.title}
+                      />
+                    }
+                    menu={
+                      <div>
+                        <CommandBarMenuItem onClick={startFreshComposerThread}>
+                          <MessageSquare className="h-4 w-4" />
+                          New chat
+                        </CommandBarMenuItem>
+                        <CommandBarSubmenu label="New work" icon={Plus}>
+                          {createTypes.map((type) => {
+                            const Icon = type.icon;
+                            return (
+                              <CommandBarMenuItem
+                                key={type.key}
+                                disabled={busyKey === `artifact:${type.key}`}
+                                onClick={() => openCreateArtifact(type.key)}
+                              >
+                                {busyKey === `artifact:${type.key}` ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Icon className="h-4 w-4" />
+                                )}
+                                {type.label}
+                              </CommandBarMenuItem>
+                            );
+                          })}
+                        </CommandBarSubmenu>
+                        <CommandBarMenuItem
+                          onClick={() => {
+                            setMultiSelectMode(true);
+                            if (selectionCount === 0) restoreLatestSelection();
+                            if (selectionCount)
+                              setFocusModeOverride("selection");
+                          }}
+                        >
+                          <Files className="h-4 w-4" />
+                          Select objects
+                        </CommandBarMenuItem>
+                        {!selectedWorkspaceId ? (
+                          <CommandBarMenuItem
+                            onClick={() => setWorkspaceCreateOpen(true)}
+                          >
+                            <Plus className="h-4 w-4" />
+                            New workspace
+                          </CommandBarMenuItem>
+                        ) : null}
+                      </div>
+                    }
                   />
-                ) : null}
-                {!workSetIsolated && tiledArtifacts.length > 0 ? (
-                  <ArtifactTileSurface
-                    artifacts={tiledArtifacts}
-                    allArtifacts={allArtifacts}
-                    dirtyIds={studio.dirtyIds}
-                    busyArtifactId={
-                      busyKey?.startsWith("artifact:update:")
-                        ? busyKey.replace("artifact:update:", "")
-                        : null
+                </div>
+              }
+            />
+            {liveThread ? (
+              <LiveThreadPanel
+                threadId={liveThread.id}
+                title={liveThread.title}
+                overlay={paneOverlay.thread ?? false}
+                liveExchange={
+                  runEngine.liveExchange &&
+                  runEngine.liveExchange.threadId === liveThread.id
+                    ? runEngine.liveExchange
+                    : null
+                }
+                width={paneWidths.thread ?? liveThreadPanelWidth}
+                onWidthChange={(next) => notePaneIntent("thread", next)}
+                continuing={composerThread?.id === liveThread.id}
+                onContinue={() => {
+                  void (async () => {
+                    if (composerThread?.id === liveThread.id) {
+                      skipAutoContinueThreadIdRef.current = liveThread.id;
+                      setComposerThread(null);
+                      return;
                     }
-                    sourceLabel={workspace?.title ?? surfaceLabel}
-                    continuedThreadId={composerThread?.id}
-                    onCloseArtifact={closeTileArtifact}
-                    onCloseAll={closeTileSet}
-                    onAddArtifact={addArtifactTile}
-                    onFocusSet={() => setWorkSetIsolated(true)}
-                    onExitFocusSet={() => setWorkSetIsolated(false)}
-                    onArchive={archiveArtifact}
-                    onDirtyChange={studio.setDirty}
-                    onContinueThread={(threadId, title) =>
-                      toggleContinuedThread(threadId, title)
+                    skipAutoContinueThreadIdRef.current = null;
+                    try {
+                      const result = await postSpectra<{
+                        runId?: string;
+                        selected?: boolean;
+                      }>({
+                        action: "selectRunTab",
+                        threadId: liveThread.id,
+                      });
+                      if (!result.selected || !result.runId) {
+                        setComposerThread(null);
+                        return;
+                      }
+                      setComposerThread({
+                        id: liveThread.id,
+                        title: liveThread.title,
+                        runId: result.runId,
+                        workspaceId: selectedWorkspaceId,
+                      });
+                      spectraBus.emit("threads.changed", {});
+                    } catch (error) {
+                      toast.message(
+                        describeFailure(error, {
+                          fallback:
+                            "Could not select this thread for continuation.",
+                        }).message,
+                      );
                     }
-                    executeApplicationCommand={applicationCommandDispatcher}
-                  />
-                ) : null}
-              </>
-            </section>
-          )}
-          </div>
-          <WorkbenchDockShell
-            attachmentsHostRef={setAttachmentsHost}
-            dock={{
-              workspaceId: selectedWorkspaceId,
-              optimistic: runEngine.liveExchange,
-              openThreadId: liveThread?.id,
-              onStartNewThread: startFreshComposerThread,
-              onOpen: (_runId, threadId, title, artifactId) => {
-                skipAutoContinueThreadIdRef.current = null;
-                setActiveRunPanelId(null);
-                setLiveThread({ id: threadId, title });
-                setComposerThread({
-                  id: threadId,
-                  title,
-                  runId: _runId,
-                  workspaceId: selectedWorkspaceId,
-                });
-                if (artifactId) {
+                  })();
+                }}
+                onClose={() => {
+                  setLiveThread(null);
+                  // Closing the side panel does not force-deselect continuation;
+                  // the run-tab icon remains the source of truth for QC.
+                }}
+                onOpenArtifact={(artifactId) => {
                   const artifact = allArtifacts.find(
                     (item) => item._id === artifactId,
                   );
                   if (artifact) openArtifactPanel(artifact);
+                }}
+                onOpenWorkspace={goToWorkspaceHub}
+              />
+            ) : null}
+            {activeRunPanelId ? (
+              <RunDetailPanel
+                runId={activeRunPanelId}
+                overlay={paneOverlay.run ?? false}
+                width={paneWidths.run ?? runPanelWidth}
+                onWidthChange={(next) => notePaneIntent("run", next)}
+                card={runEngine.cards.find(
+                  (card) => card.runId === activeRunPanelId,
+                )}
+                onClose={() => setActiveRunPanelId(null)}
+                onAction={(card, action, targetId) => {
+                  if (action === "open") runEngine.closeDetails();
+                  void runEngine.onCardAction(card, action, targetId);
+                }}
+                onUseThread={(id, title) =>
+                  toggleContinuedThread(id, title, activeRunPanelId)
                 }
-              },
-              onContinue: (_runId, threadId, title) => {
-                skipAutoContinueThreadIdRef.current = null;
-                setComposerThread({
-                  id: threadId,
-                  title,
-                  runId: _runId,
-                  workspaceId: selectedWorkspaceId,
-                });
-              },
-              onDeselect: () => {
-                if (liveThread)
-                  skipAutoContinueThreadIdRef.current = liveThread.id;
-                setComposerThread(null);
-              },
-              onStop: (runId) => runEngine.stop(runId),
-              onRetry: (runId) => void runEngine.retry(runId),
-              onAction: (card, action) =>
-                void runEngine.onCardAction(card, action, card.runId),
-              onRevise: (card, revision) =>
-                void runEngine.revise(card, revision),
-              onInput: (threadId, response, attachments) =>
-                runEngine.run(response, attachments ?? [], { threadId }),
-            }}
-            selection={
-              multiSelectMode ? (
-                <SelectionActionBar
-                  count={selectionCount}
-                  onClear={clearSelection}
-                  onExit={() => {
-                    clearSelection();
-                    setMultiSelectMode(false);
-                  }}
-                  onAddToContext={() => {
-                    const count = selectionCount;
-                    commitSelection();
-                    setFocusModeOverride("selection");
-                    setMultiSelectMode(false);
-                    toast.success(
-                      `${count} object${count === 1 ? "" : "s"} added to context.`,
-                    );
-                  }}
-                  onTile={
-                    selectedContextIds.size
-                      ? openSelectedArtifactsInTiles
-                      : undefined
-                  }
-                />
-              ) : undefined
-            }
-            composer={
-              <div className="flex items-center gap-1">
-                <CommandBar
-                  className="min-w-0 flex-1"
-                  allowAttachments
-                  attachmentsPortalTarget={attachmentsHost}
-                  placeholder={
-                    composerThread
-                      ? `Continue ${composerThread.title}...`
-                      : commandFocusArtifact
-                        ? `Ask Spectra about ${commandFocusArtifact.title}`
-                        : workspace
-                          ? `Ask Spectra anything about this workspace...`
-                          : "Ask Spectra anything..."
-                  }
-                  onSubmit={(prompt, attachments) =>
-                    runEngine.run(prompt, attachments, {
-                      threadId: composerThread?.id ?? null,
-                    })
-                  }
-                  busy={runEngine.submitting}
-                  allowConcurrent={!composerThread}
-                  onStop={runEngine.stop}
-                  activeRunId={runEngine.activeRunId}
-                  onSteer={runEngine.steer}
-                  onStartNewThread={startFreshComposerThread}
-                  context={
-                    <ContextFocusControl
-                      mode={effectiveFocusMode}
-                      onModeChange={setFocusModeOverride}
-                      workspace={workspace}
-                      artifact={commandFocusArtifact}
-                      selectedCount={contextualArtifactIds.length}
-                      threadTitle={composerThread?.title}
-                    />
-                  }
-                  menu={
-                    <div>
-                      <CommandBarMenuItem onClick={startFreshComposerThread}>
-                        <MessageSquare className="h-4 w-4" />
-                        New chat
-                      </CommandBarMenuItem>
-                      <CommandBarSubmenu label="New work" icon={Plus}>
-                        {createTypes.map((type) => {
-                          const Icon = type.icon;
-                          return (
-                            <CommandBarMenuItem
-                              key={type.key}
-                              disabled={busyKey === `artifact:${type.key}`}
-                              onClick={() => openCreateArtifact(type.key)}
-                            >
-                              {busyKey === `artifact:${type.key}` ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Icon className="h-4 w-4" />
-                              )}
-                              {type.label}
-                            </CommandBarMenuItem>
-                          );
-                        })}
-                      </CommandBarSubmenu>
-                      <CommandBarMenuItem
-                        onClick={() => {
-                          setMultiSelectMode(true);
-                          if (selectionCount === 0) restoreLatestSelection();
-                            if (selectionCount)
-                              setFocusModeOverride("selection");
-                        }}
-                      >
-                        <Files className="h-4 w-4" />
-                        Select objects
-                      </CommandBarMenuItem>
-                      {!selectedWorkspaceId ? (
-                        <CommandBarMenuItem
-                          onClick={() => setWorkspaceCreateOpen(true)}
-                        >
-                          <Plus className="h-4 w-4" />
-                          New workspace
-                        </CommandBarMenuItem>
-                      ) : null}
-                    </div>
-                  }
-                />
-              </div>
-            }
-          />
-          {liveThread ? (
-            <LiveThreadPanel
-              threadId={liveThread.id}
-              title={liveThread.title}
-              overlay={paneOverlay.thread ?? false}
-              liveExchange={
-                runEngine.liveExchange &&
-                runEngine.liveExchange.threadId === liveThread.id
-                  ? runEngine.liveExchange
-                  : null
-              }
-              width={paneWidths.thread ?? liveThreadPanelWidth}
-              onWidthChange={(next) => notePaneIntent("thread", next)}
-              continuing={composerThread?.id === liveThread.id}
-              onContinue={() => {
-                void (async () => {
-                  if (composerThread?.id === liveThread.id) {
-                    skipAutoContinueThreadIdRef.current = liveThread.id;
-                    setComposerThread(null);
-                    return;
-                  }
-                  skipAutoContinueThreadIdRef.current = null;
-                  try {
-                    const result = await postSpectra<{
-                      runId?: string;
-                      selected?: boolean;
-                    }>({
-                      action: "selectRunTab",
-                      threadId: liveThread.id,
-                    });
-                    if (!result.selected || !result.runId) {
-                      setComposerThread(null);
-                      return;
-                    }
-                    setComposerThread({
-                      id: liveThread.id,
-                      title: liveThread.title,
-                      runId: result.runId,
-                      workspaceId: selectedWorkspaceId,
-                    });
-                    spectraBus.emit("threads.changed", {});
-                  } catch (error) {
-                    toast.message(
-                      describeFailure(error, {
-                        fallback:
-                          "Could not select this thread for continuation.",
-                      }).message,
-                    );
-                  }
-                })();
-              }}
-              onClose={() => {
-                setLiveThread(null);
-                // Closing the side panel does not force-deselect continuation;
-                // the run-tab icon remains the source of truth for QC.
-              }}
-              onOpenArtifact={(artifactId) => {
-                const artifact = allArtifacts.find(
-                  (item) => item._id === artifactId,
-                );
-                if (artifact) openArtifactPanel(artifact);
-              }}
-              onOpenWorkspace={goToWorkspaceHub}
-            />
-          ) : null}
-          {activeRunPanelId ? (
-            <RunDetailPanel
-              runId={activeRunPanelId}
-              overlay={paneOverlay.run ?? false}
-              width={paneWidths.run ?? runPanelWidth}
-              onWidthChange={(next) => notePaneIntent("run", next)}
-              card={runEngine.cards.find(
-                (card) => card.runId === activeRunPanelId,
-              )}
-              onClose={() => setActiveRunPanelId(null)}
-              onAction={(card, action, targetId) => {
-                if (action === "open") runEngine.closeDetails();
-                void runEngine.onCardAction(card, action, targetId);
-              }}
-              onUseThread={(id, title) =>
-                toggleContinuedThread(id, title, activeRunPanelId)
-              }
-            />
-          ) : null}
+              />
+            ) : null}
           </div>
         </div>
       </div>

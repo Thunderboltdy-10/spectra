@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { SpectraMark } from "@/components/spectra-mark";
+import { PrismLoader } from "@/components/spectra-prism-optic";
 import { SpectraRichContent } from "./spectra-rich-content";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
 import { spectraBus } from "../events";
@@ -550,7 +551,7 @@ function ArtifactConflictResolution({
         </div>
       ) : (
         <div className="flex items-center gap-2 px-3 py-4 text-micro text-[var(--text-tertiary)]">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <PrismLoader size={14} optics="working" />
           Loading current and proposed states
         </div>
       )}
@@ -2129,7 +2130,7 @@ export function ConversationSurface({
                     <div className="flex items-center gap-2 text-micro font-semibold text-[var(--text-secondary)]">
                       {trace.run.status === "running" ||
                       trace.run.status === "queued" ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+                        <PrismLoader size={14} optics="working" />
                       ) : trace.run.status === "awaiting_resolution" ? (
                         <GitCompareArrows className="h-3.5 w-3.5 text-[var(--warning)]" />
                       ) : (

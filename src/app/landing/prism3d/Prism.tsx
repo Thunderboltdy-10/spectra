@@ -7,7 +7,7 @@
 
 import { useFrame, useThree } from "@react-three/fiber";
 import { MeshTransmissionMaterial } from "@react-three/drei";
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, useState } from "react";
 import * as THREE from "three";
 import {
   heroState,
@@ -289,6 +289,23 @@ type Props = { quality: PrismQuality };
 export function Prism({ quality }: Props) {
   const group = useRef<THREE.Group>(null!);
   const { gl } = useThree();
+  const [surfaceColor, setSurfaceColor] = useState("#fbfaf7");
+
+  useEffect(() => {
+    const read = () => {
+      const value = getComputedStyle(document.documentElement)
+        .getPropertyValue("--bg-elevated")
+        .trim();
+      if (value) setSurfaceColor(value);
+    };
+    read();
+    const themes = new MutationObserver(read);
+    themes.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    });
+    return () => themes.disconnect();
+  }, []);
 
   const shell = useMemo(() => buildShellGeometry(), []);
   const volumeGeo = useMemo(() => new THREE.BoxGeometry(1.9, 1.9, 1.9), []);
@@ -590,7 +607,7 @@ export function Prism({ quality }: Props) {
           temporalDistortion={0.06}
           attenuationDistance={6.5}
           attenuationColor={"#d9d0ff" as unknown as THREE.Color}
-          color={"var(--bg-elevated)" as unknown as THREE.Color}
+          color={surfaceColor as unknown as THREE.Color}
           clearcoat={1}
           clearcoatRoughness={0.08}
           backside

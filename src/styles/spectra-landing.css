@@ -1140,7 +1140,7 @@ html[data-spectra-motion="none"]
 .landing-btn[data-tone="primary"] {
   border-color: transparent;
   background: var(--brand-primary);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .landing-btn[data-size="compact"] {

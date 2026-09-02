@@ -144,6 +144,18 @@ void main() {
     offset += normalize(delta + 1e-4) * near * cell * 0.85;
     lit += near;
     ink = mix(ink, uInfColor[i].rgb, clamp(near * 1.35, 0.0, 0.92));
+    /* Rim dispersion: the ring around an influence splits toward the
+       spectrum's edges — cyan on one side, warm on the other — the same
+       chromatic fringe the CSS field draws at a wake's rim. */
+    float ring =
+      smoothstep(radius * 0.35, radius * 0.7, distance) *
+      (1.0 - smoothstep(radius * 0.85, radius * 1.3, distance)) *
+      strength;
+    vec3 fringe =
+      delta.x > 0.0
+        ? mix(uInfColor[i].rgb, vec3(0.18, 0.56, 0.83), 0.55)
+        : mix(uInfColor[i].rgb, vec3(1.0, 0.79, 0.54), 0.55);
+    ink = mix(ink, fringe, clamp(ring * 1.2, 0.0, 0.6));
     /* A solid object shades the lattice directly under it. Without this the
        prism reads as a decal; with it, the field is behind the glass. */
     shade *= mix(

@@ -81,6 +81,7 @@ export type ArtifactCardView = {
 export function ArtifactCard({
   artifact,
   selected = false,
+  active = false,
   actions,
   onSelect,
   className,
@@ -94,6 +95,8 @@ export function ArtifactCard({
 }: {
   artifact: ArtifactCardView;
   selected?: boolean;
+  /** This work is open in the adjacent studio. Distinct from picker context. */
+  active?: boolean;
   actions?: ReactNode;
   onSelect?: () => void;
   className?: string;
@@ -172,17 +175,19 @@ export function ArtifactCard({
     ? selectionMode
       ? "multi-selected"
       : "context"
-    : selected
-      ? "focused"
-      : liveAiActivity
-        ? "updating"
-        : liveAiState === "updating"
+    : active
+      ? "selected"
+      : selected
+        ? "focused"
+        : liveAiActivity
           ? "updating"
-          : liveAiState === "creating"
-            ? "creating"
-            : liveAiState === "edited" || liveAiState === "generated"
-              ? "edited"
-              : "normal";
+          : liveAiState === "updating"
+            ? "updating"
+            : liveAiState === "creating"
+              ? "creating"
+              : liveAiState === "edited" || liveAiState === "generated"
+                ? "edited"
+                : "normal";
 
   return (
     <SpectraCard

@@ -59,23 +59,51 @@ export function StoryCanvas({
     return () => window.removeEventListener("resize", apply);
   }, []);
 
+  /* The clock loop is self-stopping: when the page is still and the coast
+     frames have run out, `advanceStory` reports idle and no further rAF is
+     scheduled — idle costs zero frames. Any real input (scroll, resize,
+     pointer, tab becoming visible) wakes the loop immediately. A hidden tab
+     gets no rAF from the browser at all, and repaints on return. */
   useEffect(() => {
     let raf = 0;
+    let running = false;
     const tick = () => {
-      advanceStory(window.scrollY, window.innerWidth, window.innerHeight);
-      raf = window.requestAnimationFrame(tick);
+      raf = 0;
+      const active = advanceStory(
+        window.scrollY,
+        window.innerWidth,
+        window.innerHeight,
+      );
+      if (active) {
+        raf = window.requestAnimationFrame(tick);
+      } else {
+        running = false;
+      }
     };
+    const wake = () => {
+      wakeStory();
+      if (!running) {
+        running = true;
+        raf = window.requestAnimationFrame(tick);
+      }
+    };
+    const onVisible = () => {
+      if (!document.hidden) wake();
+    };
+    running = true;
     raf = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(raf);
-  }, []);
-
-  /* The camera drives on scroll; the rest of the loop wakes on it. Scroll
-     events are one gesture, so a couple of wake calls per frame at worst, and
-     the clock's idle deadband swallows the rest. */
-  useEffect(() => {
-    const onScroll = () => wakeStory();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    window.addEventListener("scroll", wake, { passive: true });
+    window.addEventListener("resize", wake);
+    window.addEventListener("pointermove", wake, { passive: true });
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      running = false;
+      if (raf) window.cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", wake);
+      window.removeEventListener("resize", wake);
+      window.removeEventListener("pointermove", wake);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   /* The camera writes one transform, and — only at the very end — one clip.

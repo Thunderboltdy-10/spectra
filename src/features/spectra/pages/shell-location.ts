@@ -25,6 +25,24 @@ export function artifactIdFromSpectraPath(pathname: string) {
   return decodePathSegment(pathname.slice("/library/".length).split("/", 1)[0]);
 }
 
+/**
+ * Read the work named by the browser's actual location.
+ *
+ * Next's search-param snapshot may trail a native history write by one render.
+ * Close and in-editor navigation both need the synchronous browser value during
+ * that gap, or the old query is mistaken for a fresh deep link and re-opened.
+ */
+export function artifactIdFromSpectraLocation(
+  pathname: string,
+  search: string,
+) {
+  return (
+    artifactIdFromSpectraPath(pathname) ??
+    new URLSearchParams(search).get("artifactId") ??
+    undefined
+  );
+}
+
 /** Canonical URL for the long-lived Library/Workspace shell. */
 export function spectraShellHref({
   surface,

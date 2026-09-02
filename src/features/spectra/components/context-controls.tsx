@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import { transitionFor, useSpectraMotion } from "../motion";
 import {
   BookOpen,
   Bot,
@@ -110,6 +111,8 @@ export function ContextFocusControl({
   threadTitle?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const motionLevel = useSpectraMotion();
+  const revealTransition = transitionFor("reveal", motionLevel.level);
   const [dialogPosition, setDialogPosition] = useState({
     left: 12,
     bottom: 76,
@@ -369,7 +372,7 @@ export function ContextFocusControl({
                 initial={{ opacity: 0, y: 6, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 4, scale: 0.98 }}
-                transition={{ duration: 0.16 }}
+                transition={revealTransition}
                 className="fixed z-toast w-[min(400px,calc(100vw-24px))] overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-hover"
                 style={dialogPosition}
               >
@@ -724,6 +727,8 @@ export function GlobalSearch({
   trigger?: "button" | "icon";
 }) {
   const [open, setOpen] = useState(false);
+  const motionLevel = useSpectraMotion();
+  const morphTransition = transitionFor("morph", motionLevel.level);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -826,7 +831,7 @@ export function GlobalSearch({
               initial={{ y: -14, opacity: 0, scale: 0.985 }}
               animate={{ y: 0, opacity: 1, scale: 1 }}
               exit={{ y: -8, opacity: 0, scale: 0.99 }}
-              transition={{ type: "spring", stiffness: 420, damping: 34 }}
+              transition={morphTransition}
               className="w-full max-w-[680px] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-hover"
               onPointerDown={(event) => event.stopPropagation()}
             >

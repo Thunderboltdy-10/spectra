@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Check, ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { transitionFor, useSpectraMotion } from "../motion";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import { pastTenseProgressTitle } from "./progress-title";
 
@@ -27,7 +28,13 @@ export function ProgressTrace({
   /** Remember open/closed across remounts (dock hover, thread traces). */
   persistKey?: string;
 }) {
-  const reduceMotion = useReducedMotion();
+  /* The trace is run feedback, so it runs on the completion/reveal grammar:
+     steps entering are `reveal`, the group opening is `morph`, and the whole
+     thing honours the product motion preference, not just the OS one. */
+  const motionLevel = useSpectraMotion();
+  const reduceMotion = motionLevel.reduced;
+  const revealTransition = transitionFor("reveal", motionLevel.level);
+  const morphTransition = transitionFor("morph", motionLevel.level);
   const thinking = active && !hasOutput;
   const [groupOpen, setGroupOpen] = useState(() => {
     if (persistKey && groupOpenByKey.has(persistKey)) {
@@ -184,7 +191,7 @@ export function ProgressTrace({
             initial={reduceMotion ? false : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
-            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+            transition={morphTransition}
             className="overflow-hidden"
           >
             {orderedSteps.length === 0 && thinking ? (
@@ -215,12 +222,9 @@ export function ProgressTrace({
                         animate={{ opacity: 1, y: 0 }}
                         exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
                         transition={{
-                          layout: {
-                            duration: 0.45,
-                            ease: [0.22, 1, 0.36, 1],
-                          },
-                          opacity: { duration: 0.28 },
-                          y: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
+                          layout: morphTransition,
+                          opacity: revealTransition,
+                          y: revealTransition,
                         }}
                         className="py-1.5"
                       >
@@ -273,10 +277,7 @@ export function ProgressTrace({
                                   ? undefined
                                   : { height: 0, opacity: 0 }
                               }
-                              transition={{
-                                duration: 0.28,
-                                ease: [0.22, 1, 0.36, 1],
-                              }}
+                              transition={revealTransition}
                               className="overflow-hidden"
                             >
                               <span className="ml-5 mt-1 block text-micro leading-4 text-[var(--text-tertiary)]">

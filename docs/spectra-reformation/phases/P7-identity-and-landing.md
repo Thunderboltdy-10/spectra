@@ -55,3 +55,17 @@ Screenshots at supported desktop widths, both themes, 200% zoom and reduced moti
 ## Exit gate
 
 Field/motion budgets met; reveal works from a cold load; landing meaning survives without motion; V1 PASS closes P7 without an owner-acceptance request.
+
+### P7.UI1 implementation log — 2026-09-02
+
+- Design read: preserve-and-complete Spectra's warm-paper violet system; variance/density stay matched, with motion +1 only for AI, sync, presence and selection.
+- SYSTEMIC field class: `surface-field` is the one event-fed renderer; duplicate grain/landing engines and ribbon assets were migrated and deleted.
+- The landing, shell, auth and panel surfaces now share bounded typed field signals, static reduced/low-power fallbacks and visibility cleanup.
+- One projected-glass prism geometry now drives the landing mark, app/sidebar marks, loaders, favicon and app icon; loaders communicate waiting/working/completion without decorative churn.
+- SYSTEMIC animation class: the R3F prism uses demand rendering plus the story clock; measured after coast at 0 rAF callbacks/1.5 s, versus 303 callbacks/1.2 s while actively scrolling.
+- SYSTEMIC navigation class: artifact close and in-editor work-to-work navigation read synchronous browser route truth, so a stale framework query snapshot cannot reopen the prior work.
+- Open work is now visibly distinct from picker/context selection in both Library rows and board cards; folder collapse and close/save single-flight were repaired at their shared seams.
+- DS-4 closed in implementation with brand violet `#6a4de8` (5.47:1 against white); independent P7.V1 still owns visual acceptance.
+- Evidence: `.shots/reformation/P7.UI1/before/00-current-entry-1440.png` through `03-landing-prism-reference.png`; `.shots/reformation/P7.UI1/after/04-field-prism-top-1440.png`, `05-field-prism-hero-1440.png`.
+- Checks: Vitest 9 files/94 tests; TypeScript; scoped ESLint 0 warnings; architecture, copy, design-token and secret gates all pass.
+- Status: IMPLEMENTED, not verified.

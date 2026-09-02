@@ -15,9 +15,11 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useLocalAutocomplete } from "@/features/spectra/compute/autocomplete";
 import { useSpectraPreferences } from "@/features/spectra/settings/preference-store";
+import { transitionFor, useSpectraMotion } from "../motion";
 
 type CommandBarProps = {
   placeholder: string;
@@ -233,6 +235,10 @@ export function CommandBar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachments, setAttachments] = useState<CommandAttachment[]>([]);
   const [sending, setSending] = useState(false);
+  /* Command feedback resolves on the completion grammar: the action control
+     crossfades between send / steer / stop instead of snapping. */
+  const motionLevel = useSpectraMotion();
+  const commandTransition = transitionFor("completion", motionLevel.level);
   const [queuedSubmissions, setQueuedSubmissions] = useState<
     Array<{ value: string; attachments: CommandAttachment[] }>
   >([]);
@@ -663,13 +669,34 @@ export function CommandBar({
             }
             title={busy && !allowConcurrent ? "Steer the active run" : "Send"}
           >
-            {sending && !busy ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : busy && !allowConcurrent ? (
-              "Steer"
-            ) : (
-              <ArrowUp className="h-4 w-4" />
-            )}
+            {(() => {
+              const commandState =
+                sending && !busy
+                  ? "sending"
+                  : busy && !allowConcurrent
+                    ? "steer"
+                    : "send";
+              return (
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={commandState}
+                    initial={{ opacity: 0, scale: 0.85 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.85 }}
+                    transition={commandTransition}
+                    className="flex items-center justify-center"
+                  >
+                    {commandState === "sending" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : commandState === "steer" ? (
+                      "Steer"
+                    ) : (
+                      <ArrowUp className="h-4 w-4" />
+                    )}
+                  </motion.span>
+                </AnimatePresence>
+              );
+            })()}
           </button>
         </div>
       </div>

@@ -375,6 +375,11 @@ export function useSpectraRun({
   const dismissedCardIds = useRef(new Set<string>());
   const activeRequests = useRef(new Map<AbortController, string | null>());
   const activeRunIds = useRef(new Set<string>());
+  /* Publish the live-run set as a typed bus query so ambient surfaces (the
+     favicon, shell fields) can reflect activity without polling. */
+  const publishActiveRuns = useCallback(() => {
+    spectraBus.setQuery("run.active", { runIds: [...activeRunIds.current] });
+  }, []);
   const eventCursors = useRef(new Map<string, number>());
   // A streamed patch can arrive while the user is inside another artifact or
   // a thread panel, before the newly-created shell exists in this view's
@@ -709,6 +714,7 @@ export function useSpectraRun({
                 : current,
             );
             activeRunIds.current.add(event.runId);
+            publishActiveRuns();
             requestRunId = event.runId;
             activeRequests.current.set(controller, event.runId);
             onAcknowledged?.(event.runId);
@@ -937,9 +943,19 @@ export function useSpectraRun({
             : current,
         );
       activeRequests.current.delete(controller);
-      if (requestRunId) activeRunIds.current.delete(requestRunId);
+      if (requestRunId) {
+        activeRunIds.current.delete(requestRunId);
+        publishActiveRuns();
+      }
     },
-    [dispatchArtifactPatch, onDataChanged, onFinal, onThreadReady, upsert],
+    [
+      dispatchArtifactPatch,
+      onDataChanged,
+      onFinal,
+      onThreadReady,
+      publishActiveRuns,
+      upsert,
+    ],
   );
 
   const run = useCallback(
@@ -953,10 +969,10 @@ export function useSpectraRun({
       const continuedThreadId =
         options?.threadId === null
           ? undefined
-          : options?.threadId ??
+          : (options?.threadId ??
             (preferences.ai.continueCurrentConversation
               ? durableThreadId.current
-              : undefined);
+              : undefined));
       toast.dismiss();
       return new Promise<boolean>((resolve) => {
         const exchangeId = crypto.randomUUID();
@@ -1251,9 +1267,7 @@ export function useSpectraRun({
           await onDataChanged?.();
         } catch (error) {
           toast.error(
-            error instanceof Error
-              ? error.message
-              : "Could not undo this run.",
+            error instanceof Error ? error.message : "Could not undo this run.",
           );
         }
         return;
@@ -1338,7 +1352,10 @@ export function useSpectraRun({
           activeRequests.current.delete(controller);
         }
       });
-      if (targetRunId) activeRunIds.current.delete(targetRunId);
+      if (targetRunId) {
+        activeRunIds.current.delete(targetRunId);
+        publishActiveRuns();
+      }
       setActiveRequestCount((count) => Math.max(0, count - 1));
       setLiveExchange((current) =>
         current &&
@@ -1415,6 +1432,7 @@ export function useSpectraRun({
       liveExchange?.runId,
       observedContinuationRunId,
       onDataChanged,
+      publishActiveRuns,
     ],
   );
 

@@ -62,26 +62,54 @@ let nextId = 1;
  */
 export const prismVisibility = { onScreen: true };
 
-/** Highest-priority live claim wins; ties go to the most recent claimant. */
-function leadClaim(): Claim | null {
-  let best: Claim | null = null;
-  let bestId = -1;
-  for (const [id, claim] of claims) {
-    if (!claim.element.isConnected) continue;
-    /* A claimant that is not on the canvas yet does not hold the object. This
-       is the cheap version of the check — `offsetWidth` is zero for anything
-       display:none, and costs no rect allocation. */
-    if (claim.element.offsetWidth === 0) continue;
+export type PrismClaimCandidate<T> = {
+  id: number;
+  priority: number;
+  rect: Pick<DOMRect, "left" | "right" | "top" | "bottom" | "width" | "height">;
+  value: T;
+};
+
+/** Pick among claims the visitor can actually see; priority is local to view. */
+export function choosePrismClaim<T>(
+  candidates: readonly PrismClaimCandidate<T>[],
+  viewport: { width: number; height: number },
+): T | null {
+  const margin = 160;
+  let best: PrismClaimCandidate<T> | null = null;
+  for (const candidate of candidates) {
+    const { rect } = candidate;
+    if (rect.width <= 0.5 || rect.height <= 0.5) continue;
+    const near =
+      rect.right >= -margin &&
+      rect.bottom >= -margin &&
+      rect.left <= viewport.width + margin &&
+      rect.top <= viewport.height + margin;
+    if (!near) continue;
     if (
       !best ||
-      claim.priority > best.priority ||
-      (claim.priority === best.priority && id > bestId)
-    ) {
-      best = claim;
-      bestId = id;
-    }
+      candidate.priority > best.priority ||
+      (candidate.priority === best.priority && candidate.id > best.id)
+    )
+      best = candidate;
   }
-  return best;
+  return best?.value ?? null;
+}
+
+function leadClaim(): Claim | null {
+  const candidates: PrismClaimCandidate<Claim>[] = [];
+  for (const [id, claim] of claims) {
+    if (!claim.element.isConnected || claim.element.offsetWidth === 0) continue;
+    candidates.push({
+      id,
+      priority: claim.priority,
+      rect: claim.element.getBoundingClientRect(),
+      value: claim,
+    });
+  }
+  return choosePrismClaim(candidates, {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  });
 }
 
 function measure() {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  expandedAncestorsForPath,
+  isOpenWorkNode,
   opensOnPlainClick,
   selectRow,
   selectedWorkSourceIds,
@@ -25,6 +27,13 @@ function workRow(nodeId: string, sourceId: string): TreeNode {
 }
 
 describe("Library row interactions", () => {
+  it("keeps ancestors open without forcing the current folder open", () => {
+    expect(
+      expandedAncestorsForPath({
+        ancestors: [{ nodeId: "school" }, { nodeId: "class" }],
+      }),
+    ).toEqual(["school", "class"]);
+  });
   it("opens folders and work on an ordinary click", () => {
     expect(
       opensOnPlainClick(
@@ -32,6 +41,16 @@ describe("Library row interactions", () => {
         false,
       ),
     ).toBe(true);
+  });
+
+  it("keeps open-work presentation separate from picker selection", () => {
+    const row = workRow("n1", "work-a");
+    expect(isOpenWorkNode(row, "work-a")).toBe(true);
+    expect(isOpenWorkNode(row, "work-b")).toBe(false);
+    expect(isOpenWorkNode(row)).toBe(false);
+    expect(
+      isOpenWorkNode({ kind: "thread", sourceId: "work-a" }, "work-a"),
+    ).toBe(false);
   });
 
   it("preserves explicit selection gestures", () => {
@@ -76,8 +95,8 @@ describe("Library windowRange density", () => {
     expect(range.end - range.start).toBeLessThan(80);
     expect(range.start).toBeGreaterThan(4_900);
     expect(range.end).toBeLessThan(5_100);
-    expect(range.padTop + range.padBottom + (range.end - range.start) * ROW_HEIGHT).toBe(
-      10_000 * ROW_HEIGHT,
-    );
+    expect(
+      range.padTop + range.padBottom + (range.end - range.start) * ROW_HEIGHT,
+    ).toBe(10_000 * ROW_HEIGHT);
   });
 });

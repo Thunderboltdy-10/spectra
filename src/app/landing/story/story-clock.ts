@@ -229,11 +229,18 @@ export function wakeStory(frames = COAST_FRAMES) {
   if (coast < frames) coast = frames;
 }
 
+/**
+ * Advance the clock one frame.
+ *
+ * Returns `false` when the page is still and the coast frames have run out —
+ * the caller should stop scheduling frames at that point and wake the loop on
+ * the next real input instead. Idle costs no rAF at all.
+ */
 export function advanceStory(
   scrollY: number,
   width: number,
   height: number,
-) {
+): boolean {
   const camera = cameraFor(scrollY, height);
   const still =
     camera.y === storyFrame.y &&
@@ -243,7 +250,7 @@ export function advanceStory(
     width === storyFrame.viewport.width &&
     height === storyFrame.viewport.height;
   if (still) {
-    if (coast <= 0) return;
+    if (coast <= 0) return false;
     coast -= 1;
   } else {
     coast = COAST_FRAMES;
@@ -269,4 +276,5 @@ export function advanceStory(
     storyFrame.velocity * 0.82 + (camera.y - previousY) * 0.18;
   emitStoryFrame();
   commitStoryStep(storyFrame);
+  return true;
 }

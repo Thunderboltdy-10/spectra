@@ -1,9 +1,17 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
-import { ChevronRight, Check, MoreHorizontal, Share2, Star } from "lucide-react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  ChevronRight,
+  Check,
+  MoreHorizontal,
+  Share2,
+  Star,
+} from "lucide-react";
 import { StatusBadge, type StatusTone } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { MOTION_DURATIONS, MOTION_EASINGS } from "../motion/tokens";
+import { getSpectraMotionSnapshot } from "../motion/motion-level";
 import type { TreeNode } from "./tree-client";
 import { nodeIdentity, relativeTime } from "./node-identity";
 
@@ -30,6 +38,7 @@ export const OrganizerRow = memo(function OrganizerRow({
   node,
   top,
   selected,
+  active,
   cursor,
   renaming,
   dropRing,
@@ -45,6 +54,7 @@ export const OrganizerRow = memo(function OrganizerRow({
   node: TreeNode;
   top: number;
   selected: boolean;
+  active: boolean;
   cursor: boolean;
   renaming: boolean;
   dropRing: boolean;
@@ -61,21 +71,52 @@ export const OrganizerRow = memo(function OrganizerRow({
   const Icon = identity.icon;
   const working =
     node.source?.aiState === "creating" || node.source?.aiState === "updating";
-  const missing = node.source?.available === false || node.target?.available === false;
+  const missing =
+    node.source?.available === false || node.target?.available === false;
+
+  /* Reorder settle (the org-tree motion grammar). Rows are absolutely
+     positioned by their index, so a drop, expand/collapse or filter change
+     would otherwise teleport them. When the measured position of a row that
+     stays mounted changes, it travels from where it was — one transform
+     animation on the compositor, on the shared motion tokens, skipped under
+     reduced motion. WAAPI keeps this off inline styles, so the row's own
+     color transitions are untouched. */
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const previousTop = useRef(top);
+  useLayoutEffect(() => {
+    const delta = previousTop.current - top;
+    previousTop.current = top;
+    const row = rowRef.current;
+    if (!row || delta === 0) return;
+    if (getSpectraMotionSnapshot().reduced) return;
+    const animation = row.animate(
+      [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }],
+      {
+        duration: MOTION_DURATIONS.base * 1000,
+        easing: `cubic-bezier(${MOTION_EASINGS.standard.join(",")})`,
+      },
+    );
+    return () => animation.cancel();
+  }, [top]);
 
   return (
     <div
+      ref={rowRef}
       role="row"
       aria-selected={selected}
+      aria-current={active ? "true" : undefined}
+      data-active-work={active ? "true" : undefined}
       data-drop-node={node.nodeId}
       data-drop-kind={node.isContainer ? "container" : "item"}
       data-node-row={node.nodeId}
       style={{ top, height: ROW_HEIGHT }}
       className={cn(
-        "group absolute inset-x-0 flex cursor-default items-center gap-2 rounded-chip pl-2 pr-1.5 text-ui transition-colors",
-        selected
-          ? "bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-elevated))] text-[var(--text-primary)]"
-          : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
+        "spectra-organizer-row group absolute inset-x-0 flex cursor-default items-center gap-2 rounded-chip pl-2 pr-1.5 text-ui transition-colors",
+        active
+          ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--text-primary)]"
+          : selected
+            ? "bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-elevated))] text-[var(--text-primary)]"
+            : "text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
         cursor &&
           "ring-1 ring-[color-mix(in_oklab,var(--brand-primary)_45%,transparent)]",
         dropRing &&
@@ -117,7 +158,11 @@ export const OrganizerRow = memo(function OrganizerRow({
         className="flex size-[22px] shrink-0 items-center justify-center rounded-chip"
         style={{ backgroundColor: identity.soft }}
       >
-        <Icon className="size-[13px]" style={{ color: identity.color }} strokeWidth={1.9} />
+        <Icon
+          className="size-[13px]"
+          style={{ color: identity.color }}
+          strokeWidth={1.9}
+        />
       </span>
 
       {renaming ? (
@@ -128,7 +173,11 @@ export const OrganizerRow = memo(function OrganizerRow({
         />
       ) : (
         <span className="min-w-0 flex-1 truncate">
-          <span className={cn(missing && "text-[var(--text-tertiary)] line-through")}>
+          <span
+            className={cn(
+              missing && "text-[var(--text-tertiary)] line-through",
+            )}
+          >
             {node.name}
           </span>
           {node.kind === "link" ? (
@@ -139,7 +188,9 @@ export const OrganizerRow = memo(function OrganizerRow({
           {node.source?.shared ? (
             <Share2
               className="ml-1.5 inline size-3 -translate-y-px text-[var(--text-tertiary)]"
-              aria-label={node.source.owned ? "Shared by you" : "Shared with you"}
+              aria-label={
+                node.source.owned ? "Shared by you" : "Shared with you"
+              }
             />
           ) : null}
           {working ? (
@@ -198,7 +249,10 @@ export const OrganizerRow = memo(function OrganizerRow({
               : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
           )}
         >
-          <Star className="size-3.5" fill={node.pinned ? "currentColor" : "none"} />
+          <Star
+            className="size-3.5"
+            fill={node.pinned ? "currentColor" : "none"}
+          />
         </button>
         <button
           type="button"

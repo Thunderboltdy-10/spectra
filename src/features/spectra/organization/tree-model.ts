@@ -27,6 +27,13 @@ export const EMPTY_SELECTION: RowSelection = {
   cursorId: null,
 };
 
+/** The selected folder stays visible; only its ancestors must stay expanded. */
+export function expandedAncestorsForPath(path: {
+  ancestors: readonly { nodeId: string }[];
+}): string[] {
+  return path.ancestors.map((node) => node.nodeId);
+}
+
 export type ClickIntent = "replace" | "toggle" | "range";
 
 export function clickIntent(event: {
@@ -39,11 +46,14 @@ export function clickIntent(event: {
   return "replace";
 }
 
-export function opensOnPlainClick(event: {
-  shiftKey: boolean;
-  metaKey: boolean;
-  ctrlKey: boolean;
-}, selectionMode: boolean) {
+export function opensOnPlainClick(
+  event: {
+    shiftKey: boolean;
+    metaKey: boolean;
+    ctrlKey: boolean;
+  },
+  selectionMode: boolean,
+) {
   return !selectionMode && !event.shiftKey && !event.metaKey && !event.ctrlKey;
 }
 
@@ -102,6 +112,16 @@ export function selectedWorkSourceIds(
   );
 }
 
+/** The open studio is presentation state, not part of the organizer picker. */
+export function isOpenWorkNode(
+  node: Pick<TreeNode, "kind" | "sourceId">,
+  activeWorkId?: string,
+) {
+  return Boolean(
+    activeWorkId && node.kind === "work" && node.sourceId === activeWorkId,
+  );
+}
+
 /** Keep only ids that still exist, so a live delete cannot strand a selection. */
 export function pruneSelection(
   selection: RowSelection,
@@ -148,28 +168,42 @@ export function resolveKey(
   const cursorIndex = selection.cursorId
     ? rows.findIndex((row) => row.nodeId === selection.cursorId)
     : -1;
-  const at = (index: number) => rows[Math.max(0, Math.min(rows.length - 1, index))];
+  const at = (index: number) =>
+    rows[Math.max(0, Math.min(rows.length - 1, index))];
   const cursor = cursorIndex === -1 ? undefined : rows[cursorIndex];
 
   if (key === "ArrowDown") {
     const next = cursorIndex === -1 ? rows[0] : at(cursorIndex + 1);
-    return next ? { type: "move", nodeId: next.nodeId, extend: modifiers.shiftKey } : null;
+    return next
+      ? { type: "move", nodeId: next.nodeId, extend: modifiers.shiftKey }
+      : null;
   }
   if (key === "ArrowUp") {
     const next = cursorIndex === -1 ? rows[0] : at(cursorIndex - 1);
-    return next ? { type: "move", nodeId: next.nodeId, extend: modifiers.shiftKey } : null;
+    return next
+      ? { type: "move", nodeId: next.nodeId, extend: modifiers.shiftKey }
+      : null;
   }
   if (key === "Home")
-    return rows[0] ? { type: "move", nodeId: rows[0].nodeId, extend: modifiers.shiftKey } : null;
+    return rows[0]
+      ? { type: "move", nodeId: rows[0].nodeId, extend: modifiers.shiftKey }
+      : null;
   if (key === "End") {
     const last = rows[rows.length - 1];
-    return last ? { type: "move", nodeId: last.nodeId, extend: modifiers.shiftKey } : null;
+    return last
+      ? { type: "move", nodeId: last.nodeId, extend: modifiers.shiftKey }
+      : null;
   }
   if (key === "ArrowRight")
-    return cursor?.isContainer ? { type: "enter", nodeId: cursor.nodeId } : null;
+    return cursor?.isContainer
+      ? { type: "enter", nodeId: cursor.nodeId }
+      : null;
   if (key === "ArrowLeft") return { type: "leave" };
   /* Checked before plain Enter, or the rename shortcut would never be reached. */
-  if (key === "F2" || (key === "Enter" && (modifiers.metaKey || modifiers.ctrlKey)))
+  if (
+    key === "F2" ||
+    (key === "Enter" && (modifiers.metaKey || modifiers.ctrlKey))
+  )
     return cursor ? { type: "rename", nodeId: cursor.nodeId } : null;
   if (key === "Enter") {
     if (!cursor) return null;
@@ -178,7 +212,12 @@ export function resolveKey(
       : { type: "open", nodeId: cursor.nodeId };
   }
   if (key === "Delete" || key === "Backspace") {
-    const ids = selection.ids.size > 0 ? [...selection.ids] : cursor ? [cursor.nodeId] : [];
+    const ids =
+      selection.ids.size > 0
+        ? [...selection.ids]
+        : cursor
+          ? [cursor.nodeId]
+          : [];
     return ids.length > 0 ? { type: "trash", nodeIds: ids } : null;
   }
   if (key === "a" && (modifiers.metaKey || modifiers.ctrlKey))
@@ -190,8 +229,7 @@ export function resolveKey(
 /* --------------------------------------------------------------- drop rules */
 
 export type DropVerdict =
-  | { allowed: true }
-  | { allowed: false; reason: string };
+  { allowed: true } | { allowed: false; reason: string };
 
 /**
  * Whether a drag may land here, decided the same way the server decides it so a
@@ -203,7 +241,8 @@ export function canDrop(
   destination: TreeNode | null,
   ancestorIdsOf: (nodeId: string) => readonly string[],
 ): DropVerdict {
-  if (dragged.length === 0) return { allowed: false, reason: "Nothing to move." };
+  if (dragged.length === 0)
+    return { allowed: false, reason: "Nothing to move." };
   if (destination && !destination.isContainer)
     return {
       allowed: false,
@@ -216,9 +255,15 @@ export function canDrop(
     return { allowed: false, reason: "That destination is in the trash." };
   for (const node of dragged) {
     if (destination && node.nodeId === destination.nodeId)
-      return { allowed: false, reason: "A folder cannot be moved inside itself." };
+      return {
+        allowed: false,
+        reason: "A folder cannot be moved inside itself.",
+      };
     if (destination && ancestorIdsOf(destination.nodeId).includes(node.nodeId))
-      return { allowed: false, reason: "A folder cannot be moved inside itself." };
+      return {
+        allowed: false,
+        reason: "A folder cannot be moved inside itself.",
+      };
     if (node.parentId === (destination?.nodeId ?? null))
       return { allowed: false, reason: "Already here." };
   }
@@ -247,7 +292,9 @@ export function sortRows(
        have to read past forty documents to find it. */
     if (a.isContainer !== b.isContainer) return a.isContainer ? -1 : 1;
     if (key === "name")
-      return factor * a.name.localeCompare(b.name, undefined, { numeric: true });
+      return (
+        factor * a.name.localeCompare(b.name, undefined, { numeric: true })
+      );
     if (key === "updated") return factor * (activity(a) - activity(b));
     if (KIND_RANK[a.kind] !== KIND_RANK[b.kind])
       return factor * (KIND_RANK[a.kind] - KIND_RANK[b.kind]);

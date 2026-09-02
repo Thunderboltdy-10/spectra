@@ -59,6 +59,8 @@ import {
 import {
   EMPTY_SELECTION,
   clickIntent,
+  expandedAncestorsForPath,
+  isOpenWorkNode,
   opensOnPlainClick,
   filterRows,
   pruneSelection,
@@ -161,6 +163,8 @@ export type LibraryOrganizerProps = {
   /** Turns rows and cards into a picker for the composer's context. */
   selectionMode?: boolean;
   selectedObjectKeys?: Set<string>;
+  /** Work currently open in the adjacent studio, independent of picker state. */
+  activeWorkId?: string;
   /** A create is in flight somewhere on the surface. */
   busy?: boolean;
   /** Open a container the reader clicked on the board. */
@@ -230,6 +234,7 @@ export function LibraryOrganizer({
   onBoardGroupByChange,
   selectionMode = false,
   selectedObjectKeys,
+  activeWorkId,
   busy: hostBusy = false,
   onOpenContainer,
   firstRun = false,
@@ -415,14 +420,13 @@ export function LibraryOrganizer({
     });
   }, [inFolder, currentParentId, searching, children.status, scope]);
 
-  /* Opening a folder opens its branch in the rail, so the two panes always
-     agree about where the reader is. */
+  /* Keep the path to the current folder visible, but do not force the current
+     folder's own children open. A selected tree item and an expanded tree item
+     are separate states; conflating them made the current folder impossible
+     to collapse. */
   useEffect(() => {
     if (!path) return;
-    const ids = [
-      ...path.ancestors.map((node) => node.nodeId),
-      path.node.nodeId,
-    ];
+    const ids = expandedAncestorsForPath(path);
     setExpanded((current) => {
       if (ids.every((id) => current.has(id))) return current;
       return new Set([...current, ...ids]);
@@ -462,19 +466,19 @@ export function LibraryOrganizer({
     label: string,
     operation: () => Promise<unknown>,
   ) {
-      setBusy(true);
-      try {
-        await operation();
-      } catch (error) {
+    setBusy(true);
+    try {
+      await operation();
+    } catch (error) {
       toast.error(treeFailureMessage(error, label), {
         action: {
           label: "Retry",
           onClick: () => void execute(label, operation),
         },
       });
-      } finally {
-        setBusy(false);
-      }
+    } finally {
+      setBusy(false);
+    }
   }, []);
 
   /* Application commands and visible Library gestures share these exact tree
@@ -484,32 +488,32 @@ export function LibraryOrganizer({
     const removeOrganize = spectraBus.handle(
       "library.organize",
       async (input) => {
-      if (input.action === "create_folder") {
+        if (input.action === "create_folder") {
           if (!input.name?.trim())
             throw new Error("LIBRARY_FOLDER_NAME_REQUIRED");
           await actionsRef.current.createFolder(
             input.name.trim(),
             input.destinationId ?? currentParentRef.current,
           );
-        return;
-      }
+          return;
+        }
         if (input.targetIds.length === 0)
           throw new Error("LIBRARY_TARGETS_REQUIRED");
-      if (input.action === "rename") {
+        if (input.action === "rename") {
           if (input.targetIds.length !== 1 || !input.name?.trim())
             throw new Error("LIBRARY_RENAME_PARAMS_REQUIRED");
           await actionsRef.current.rename(
             input.targetIds[0]!,
             input.name.trim(),
           );
-        return;
-      }
+          return;
+        }
         if (!input.destinationId)
           throw new Error("LIBRARY_DESTINATION_REQUIRED");
-      if (input.action === "move") {
-        await actionsRef.current.move(input.targetIds, input.destinationId);
-        return;
-      }
+        if (input.action === "move") {
+          await actionsRef.current.move(input.targetIds, input.destinationId);
+          return;
+        }
         for (const nodeId of input.targetIds)
           await actionsRef.current.createReference(nodeId, input.destinationId);
       },
@@ -517,8 +521,8 @@ export function LibraryOrganizer({
     const removeDelete = spectraBus.handle(
       "library.delete",
       async ({ targetIds }) => {
-      if (!targetIds.length) throw new Error("LIBRARY_TARGETS_REQUIRED");
-      await actionsRef.current.trash(targetIds);
+        if (!targetIds.length) throw new Error("LIBRARY_TARGETS_REQUIRED");
+        await actionsRef.current.trash(targetIds);
       },
     );
     return () => {
@@ -617,17 +621,14 @@ export function LibraryOrganizer({
     [actions, run],
   );
 
-  const requestPurge = useCallback(
-    (nodes: TreeNode[], emptying = false) => {
-      if (nodes.length === 0) return;
-      setPurgeConfirm({
-        nodeIds: nodes.map((node) => node.nodeId),
-        names: nodes.map((node) => node.name),
-        emptying,
-      });
-    },
-    [],
-  );
+  const requestPurge = useCallback((nodes: TreeNode[], emptying = false) => {
+    if (nodes.length === 0) return;
+    setPurgeConfirm({
+      nodeIds: nodes.map((node) => node.nodeId),
+      names: nodes.map((node) => node.name),
+      emptying,
+    });
+  }, []);
 
   const confirmPurge = useCallback(() => {
     if (!purgeConfirm) return;
@@ -1034,9 +1035,7 @@ export function LibraryOrganizer({
             importing={importing}
             onNewFolder={createFolderHere}
             onNewWorkspace={
-              onNewWorkspace
-                ? () => onNewWorkspace(currentParentId)
-                : undefined
+              onNewWorkspace ? () => onNewWorkspace(currentParentId) : undefined
             }
             onNewWork={createWorkHere}
             onImport={
@@ -1099,6 +1098,7 @@ export function LibraryOrganizer({
               typeFilter={filter}
               selectionMode={selectionMode}
               selectedObjectKeys={selectedObjectKeys}
+              activeWorkId={activeWorkId}
               busy={busy || hostBusy}
               onOpen={openNode}
               onOpenContainer={(target) => {
@@ -1145,13 +1145,13 @@ export function LibraryOrganizer({
             />
           </section>
         ) : (
-        <section className="@container/rows flex min-w-0 flex-1 flex-col">
-          <div className="flex h-7 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4 pr-3.5 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-            <span className="w-[22px] shrink-0" />
-            <ColumnLabel
-              label="Name"
-              className="min-w-0 flex-1"
-              sorted={sortKey === "name" ? sortDirection : null}
+          <section className="@container/rows flex min-w-0 flex-1 flex-col">
+            <div className="flex h-7 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4 pr-3.5 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+              <span className="w-[22px] shrink-0" />
+              <ColumnLabel
+                label="Name"
+                className="min-w-0 flex-1"
+                sorted={sortKey === "name" ? sortDirection : null}
                 onClick={() =>
                   cycleSort(
                     "name",
@@ -1161,16 +1161,16 @@ export function LibraryOrganizer({
                     setSortDirection,
                   )
                 }
-            />
-            {flat ? (
+              />
+              {flat ? (
                 <span className="hidden w-[190px] shrink-0 @3xl/rows:block">
                   Location
                 </span>
-            ) : null}
-            <ColumnLabel
-              label="Type"
-              className="hidden w-[104px] shrink-0 @xl/rows:block"
-              sorted={sortKey === "type" ? sortDirection : null}
+              ) : null}
+              <ColumnLabel
+                label="Type"
+                className="hidden w-[104px] shrink-0 @xl/rows:block"
+                sorted={sortKey === "type" ? sortDirection : null}
                 onClick={() =>
                   cycleSort(
                     "type",
@@ -1180,11 +1180,11 @@ export function LibraryOrganizer({
                     setSortDirection,
                   )
                 }
-            />
-            <ColumnLabel
-              label="Updated"
-              className="hidden w-[76px] shrink-0 justify-end text-right @lg/rows:flex"
-              sorted={sortKey === "updated" ? sortDirection : null}
+              />
+              <ColumnLabel
+                label="Updated"
+                className="hidden w-[76px] shrink-0 justify-end text-right @lg/rows:flex"
+                sorted={sortKey === "updated" ? sortDirection : null}
                 onClick={() =>
                   cycleSort(
                     "updated",
@@ -1194,129 +1194,130 @@ export function LibraryOrganizer({
                     setSortDirection,
                   )
                 }
-            />
-            <span className="w-[52px] shrink-0" />
-          </div>
+              />
+              <span className="w-[52px] shrink-0" />
+            </div>
 
-          <div
-            ref={scrollRef}
-            data-organizer-scroll
-            role="grid"
-            aria-label="Library items"
-            aria-rowcount={rows.length}
-            tabIndex={0}
-            onScroll={onScroll}
-            onKeyDown={onKeyDown}
-            onClick={(event) => {
+            <div
+              ref={scrollRef}
+              data-organizer-scroll
+              role="grid"
+              aria-label="Library items"
+              aria-rowcount={rows.length}
+              tabIndex={0}
+              onScroll={onScroll}
+              onKeyDown={onKeyDown}
+              onClick={(event) => {
                 if (event.target === event.currentTarget)
                   setSelection(EMPTY_SELECTION);
-            }}
-            onContextMenu={(event) => {
-              if (!(event.target as HTMLElement).closest("[data-node-row]")) {
-                event.preventDefault();
-                setMenu({ x: event.clientX, y: event.clientY, nodeIds: [] });
-              }
-            }}
-            data-drop-node={currentParentId ?? "root"}
-            data-drop-kind={flat ? "none" : "surface"}
-            className={cn(
-              /* The command composer floats over the bottom of every surface,
+              }}
+              onContextMenu={(event) => {
+                if (!(event.target as HTMLElement).closest("[data-node-row]")) {
+                  event.preventDefault();
+                  setMenu({ x: event.clientX, y: event.clientY, nodeIds: [] });
+                }
+              }}
+              data-drop-node={currentParentId ?? "root"}
+              data-drop-kind={flat ? "none" : "surface"}
+              className={cn(
+                /* The command composer floats over the bottom of every surface,
                  so the list keeps a lane beneath the last row rather than
                  hiding it. */
-              "spectra-composer-clearance min-h-0 flex-1 overflow-y-auto px-2 pt-1 outline-none",
-              "focus-visible:shadow-[inset_0_0_0_2px_color-mix(in_oklab,var(--brand-primary)_30%,transparent)]",
-              drag && "select-none",
-            )}
-          >
-            {loading ? (
-              <RowSkeleton />
-            ) : rows.length === 0 ? (
-              <EmptyState
-                location={location}
-                searching={searching}
-                term={term}
+                "spectra-composer-clearance min-h-0 flex-1 overflow-y-auto px-2 pt-1 outline-none",
+                "focus-visible:shadow-[inset_0_0_0_2px_color-mix(in_oklab,var(--brand-primary)_30%,transparent)]",
+                drag && "select-none",
+              )}
+            >
+              {loading ? (
+                <RowSkeleton />
+              ) : rows.length === 0 ? (
+                <EmptyState
+                  location={location}
+                  searching={searching}
+                  term={term}
                   scopeLabel={floorLabel}
                   firstRun={
                     firstRun &&
                     location.kind === "folder" &&
                     location.nodeId === floorId
                   }
-                filtered={filter !== "all"}
-                onNewFolder={createFolderHere}
-                onClearFilter={() => setFilter("all")}
-              />
-            ) : (
-              <div
-                className="relative"
-                style={{ height: rows.length * ROW_HEIGHT }}
-              >
-                {visible.map((node, index) => (
-                  <OrganizerRow
-                    key={node.nodeId}
-                    node={node}
-                    top={(range.start + index) * ROW_HEIGHT}
-                    selected={selection.ids.has(node.nodeId)}
-                    cursor={selection.cursorId === node.nodeId}
-                    renaming={renamingId === node.nodeId}
-                    dropRing={dropRingId === node.nodeId}
-                    insertion={
-                      drag?.target?.type === "between" &&
-                      drag.target.indicatorNodeId === node.nodeId
-                        ? drag.target.edge
-                        : null
-                    }
-                    inContext={
+                  filtered={filter !== "all"}
+                  onNewFolder={createFolderHere}
+                  onClearFilter={() => setFilter("all")}
+                />
+              ) : (
+                <div
+                  className="relative"
+                  style={{ height: rows.length * ROW_HEIGHT }}
+                >
+                  {visible.map((node, index) => (
+                    <OrganizerRow
+                      key={node.nodeId}
+                      node={node}
+                      top={(range.start + index) * ROW_HEIGHT}
+                      selected={selection.ids.has(node.nodeId)}
+                      active={isOpenWorkNode(node, activeWorkId)}
+                      cursor={selection.cursorId === node.nodeId}
+                      renaming={renamingId === node.nodeId}
+                      dropRing={dropRingId === node.nodeId}
+                      insertion={
+                        drag?.target?.type === "between" &&
+                        drag.target.indicatorNodeId === node.nodeId
+                          ? drag.target.edge
+                          : null
+                      }
+                      inContext={
                         node.sourceId
                           ? (contextIds?.has(node.sourceId) ?? false)
                           : false
-                    }
-                    showLocation={flat}
-                    picking={selectionMode}
-                    now={now}
-                    callbacks={rowCallbacks}
-                    syncLabel={
-                      node.sourceId
-                        ? syncByWorkId.get(node.sourceId)?.label
-                        : undefined
-                    }
-                    syncTone={
-                      node.sourceId
-                        ? syncByWorkId.get(node.sourceId)?.tone
-                        : undefined
-                    }
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+                      }
+                      showLocation={flat}
+                      picking={selectionMode}
+                      now={now}
+                      callbacks={rowCallbacks}
+                      syncLabel={
+                        node.sourceId
+                          ? syncByWorkId.get(node.sourceId)?.label
+                          : undefined
+                      }
+                      syncTone={
+                        node.sourceId
+                          ? syncByWorkId.get(node.sourceId)?.tone
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
 
-          <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-[var(--border-subtle)] px-4 text-micro text-[var(--text-tertiary)]">
-            <span>
-              {rows.length} {rows.length === 1 ? "item" : "items"}
-              {children.status === "CanLoadMore" && !flat ? "+" : ""}
-            </span>
-            {selection.ids.size > 0 ? (
-              <span className="text-[var(--text-secondary)]">
-                {selection.ids.size} selected
-              </span>
-            ) : null}
-            {settling ? (
-              <span className="flex items-center gap-1.5">
-                <Loader2 className="size-3 animate-spin" />
-                Loading the whole folder to sort it
-              </span>
-            ) : null}
-            {location.kind === "trash" && rows.length > 0 ? (
+            <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-[var(--border-subtle)] px-4 text-micro text-[var(--text-tertiary)]">
               <span>
-                Trashed items stay until you restore them or delete them
-                forever.
+                {rows.length} {rows.length === 1 ? "item" : "items"}
+                {children.status === "CanLoadMore" && !flat ? "+" : ""}
               </span>
-            ) : null}
-            <span className="ml-auto hidden @3xl/rows:block">
-              Drag to move · hold Alt to leave a reference · F2 renames
-            </span>
-          </footer>
-        </section>
+              {selection.ids.size > 0 ? (
+                <span className="text-[var(--text-secondary)]">
+                  {selection.ids.size} selected
+                </span>
+              ) : null}
+              {settling ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="size-3 animate-spin" />
+                  Loading the whole folder to sort it
+                </span>
+              ) : null}
+              {location.kind === "trash" && rows.length > 0 ? (
+                <span>
+                  Trashed items stay until you restore them or delete them
+                  forever.
+                </span>
+              ) : null}
+              <span className="ml-auto hidden @3xl/rows:block">
+                Drag to move · hold Alt to leave a reference · F2 renames
+              </span>
+            </footer>
+          </section>
         )}
       </div>
 
@@ -1389,7 +1390,7 @@ export function LibraryOrganizer({
       ) : null}
       {selectedNodes.length > 1 ? (
         <div className="spectra-composer-above pointer-events-none fixed left-1/2 z-toast -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-caption text-[var(--text-secondary)] shadow-[var(--shadow-lg)]">
-            {selectedNodes.length} selected · drag them anywhere
+          {selectedNodes.length} selected · drag them anywhere
         </div>
       ) : null}
     </div>
@@ -1741,25 +1742,25 @@ function EmptyState({
               title: "Start with one piece of work",
               body: "Use New above to create a document, quiz, study deck, or another kind of work. Add folders when you want more structure.",
             }
-        : location.kind === "quick"
-          ? {
-              recent: {
-                title: "Nothing opened yet",
-                body: "Work you touch will show up here, newest first.",
-              },
-              favorites: {
-                title: "No favorites yet",
-                body: "Star anything to keep it one click away.",
-              },
-              shared: {
-                title: "Nothing shared",
-                body: "Work you share, and work shared with you, collects here.",
-              },
-            }[location.view]
-          : {
-              title: "This folder is empty",
-              body: "Make a folder, or start something new here.",
-            };
+          : location.kind === "quick"
+            ? {
+                recent: {
+                  title: "Nothing opened yet",
+                  body: "Work you touch will show up here, newest first.",
+                },
+                favorites: {
+                  title: "No favorites yet",
+                  body: "Star anything to keep it one click away.",
+                },
+                shared: {
+                  title: "Nothing shared",
+                  body: "Work you share, and work shared with you, collects here.",
+                },
+              }[location.view]
+            : {
+                title: "This folder is empty",
+                body: "Make a folder, or start something new here.",
+              };
 
   return (
     <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 px-6 text-center">

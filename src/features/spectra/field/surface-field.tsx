@@ -27,6 +27,12 @@ import {
   resolvePlacement,
   resolveSurfaceFrame,
 } from "../collaboration/interaction-geometry";
+import {
+  createGrainRenderer,
+  type GrainInfluence,
+  type GrainMood,
+  type GrainRenderer,
+} from "./grain-renderer";
 
 /** How long one lattice drift cycle takes; must match the CSS keyframes. */
 const DRIFT_PERIOD_MS = 58_000;
@@ -56,6 +62,12 @@ export type FieldInfluence = {
 
 export type FieldScale = "card" | "panel" | "stage";
 export type FieldGrain = "wave" | "grid" | "line" | "segment";
+
+/** Environment-scale input for the same field system. */
+export type EnvironmentFieldSource = {
+  mood: { current: GrainMood };
+  influences: { current: readonly GrainInfluence[] };
+};
 
 export function SurfaceField({
   influences,
@@ -130,9 +142,130 @@ export function SurfaceField({
               "--wake-hue": influence.hue ?? "var(--brand-primary)",
             } as React.CSSProperties
           }
-        />
+        >
+          {/* the rim of a wake refracts: two hue-shifted lattices offset
+              against each other, so activity reads as light through glass */}
+          <span className="spectra-field-wake-fringe" />
+        </span>
       ))}
     </span>
+  );
+}
+
+/**
+ * The shared field at viewport scale.
+ *
+ * Card and panel fields use the CSS lattice above. A viewport needs enough
+ * grain that WebGL is cheaper, but it does not get a second lifecycle or
+ * clock: the host supplies its existing event heartbeat. This component owns
+ * only rendering resources and paints one static frame in reduced motion.
+ */
+export function EnvironmentField({
+  source,
+  subscribe,
+  className,
+  maxDpr,
+  children,
+}: {
+  source: EnvironmentFieldSource;
+  subscribe: (listener: () => void) => () => void;
+  className?: string;
+  maxDpr?: number;
+  children?: React.ReactNode;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    let renderer: GrainRenderer | null = null;
+    try {
+      renderer = createGrainRenderer(canvas, { maxDpr: reduced ? 1 : maxDpr });
+    } catch {
+      renderer = null;
+    }
+    if (!renderer) return;
+    const engine = renderer;
+    const host = canvas.parentElement ?? canvas;
+    let onScreen = true;
+    let painted = false;
+    let reducedPainted = false;
+    const started = performance.now();
+
+    const draw = () => {
+      if (!onScreen || document.hidden || (reduced && reducedPainted)) return;
+      engine.frame(
+        source.mood.current,
+        source.influences.current,
+        reduced ? 0 : (performance.now() - started) / 1000,
+      );
+      if (reduced) reducedPainted = true;
+      if (!painted) {
+        painted = true;
+        canvas.dataset.live = "true";
+        host.dataset.gpu = "true";
+      }
+    };
+
+    const size = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      engine.resize(box.width, box.height);
+      reducedPainted = false;
+      draw();
+    });
+    size.observe(host);
+    engine.resize(host.clientWidth, host.clientHeight);
+
+    const view = new IntersectionObserver(
+      (entries) => {
+        onScreen = entries[0]?.isIntersecting ?? true;
+        if (onScreen) {
+          reducedPainted = false;
+          draw();
+        }
+      },
+      { rootMargin: "120px" },
+    );
+    view.observe(host);
+
+    const onVisibility = () => {
+      if (!document.hidden) {
+        reducedPainted = false;
+        draw();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    const stop = subscribe(draw);
+    draw();
+
+    return () => {
+      stop();
+      size.disconnect();
+      view.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
+      engine.dispose();
+      delete host.dataset.gpu;
+    };
+  }, [maxDpr, source, subscribe]);
+
+  return (
+    <>
+      {children}
+      <canvas
+        ref={canvasRef}
+        className={
+          className
+            ? `spectra-field-canvas ${className}`
+            : "spectra-field-canvas"
+        }
+        aria-hidden="true"
+      />
+    </>
   );
 }
 
@@ -210,6 +343,10 @@ export function useActivityField(
     const measure = () => {
       frame = 0;
       lastMeasurement = performance.now();
+      /* A hidden tab keeps its last influences frozen; visibilitychange
+         re-measures on return. rAF also stops firing while hidden, so this
+         guard is what keeps a stale wake from outliving a hidden session. */
+      if (document.hidden) return;
       if (!states.length) {
         commit(EMPTY);
         return;
@@ -264,15 +401,27 @@ export function useActivityField(
 
     const resize = new ResizeObserver(scheduleMeasure);
     resize.observe(surface);
-    surface.addEventListener("scroll", scheduleMeasure, { passive: true });
+    /* Capture phase: the surface itself rarely scrolls — the editors inside
+       it do, and a non-capturing listener would never hear them. */
+    surface.addEventListener("scroll", scheduleMeasure, {
+      passive: true,
+      capture: true,
+    });
     window.addEventListener("resize", scheduleMeasure, { passive: true });
+    const onVisibility = () => {
+      if (!document.hidden) scheduleMeasure();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     scheduleMeasure();
     return () => {
       if (frame) cancelAnimationFrame(frame);
       if (delayTimer !== null) window.clearTimeout(delayTimer);
       resize.disconnect();
-      surface.removeEventListener("scroll", scheduleMeasure);
+      surface.removeEventListener("scroll", scheduleMeasure, {
+        capture: true,
+      } as EventListenerOptions);
       window.removeEventListener("resize", scheduleMeasure);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [commit, enabled, localClientId, states, surfaceRef]);
 

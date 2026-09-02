@@ -15,6 +15,7 @@ import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
 import { ProductSectionNav } from "../../components/product-section-nav";
 import { ProductPageHeader } from "../../components/product-page-header";
+import { SurfaceField } from "../../field/surface-field";
 import { COMMAND_TABS } from "../../commands";
 import { BridgeSettings } from "../../bridge/bridge-settings";
 
@@ -259,7 +260,8 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     privacy: <PrivacySettings />,
   };
   return (
-    <main className="spectra-wave-y min-h-0 flex-1 overflow-auto bg-[var(--bg-primary)]">
+    <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-auto bg-[var(--bg-primary)]">
+      <SurfaceField scale="stage" behind />
       <div className="w-full px-4 pb-36 pt-6 sm:px-6 lg:px-8 lg:pt-8">
         <ProductPageHeader
           eyebrow="Preferences"

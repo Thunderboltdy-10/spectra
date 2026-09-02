@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SignUp } from "@clerk/nextjs";
 import { SpectraMark } from "@/components/spectra-mark";
+import { SurfaceField } from "@/features/spectra/field/surface-field";
 import { SignedInContinue } from "@/components/signed-in-continue";
 
 function getSearchParam(value: string | string[] | undefined) {
@@ -11,7 +12,8 @@ function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
   const invitationFlow = redirectUrl?.includes("/join?token=") ?? false;
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[var(--bg-primary)] px-4 py-8">
+    <main className="relative isolate grid min-h-screen place-items-center bg-[var(--bg-primary)] px-4 py-8">
+      <SurfaceField scale="stage" behind />
       <div className="w-full max-w-4xl">
         <div className="mx-auto mb-6 flex w-fit rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
           <Link

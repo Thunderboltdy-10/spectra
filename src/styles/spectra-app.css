@@ -4079,7 +4079,7 @@ body {
 
    This is the ONLY `:root` token block. The previous duplicate `:root` blocks
    near the old cascade boundary were merged here: the near-white paper surface,
-   violet `#7b5cf5` brand and 44px header / 292px rail won the cascade, so they
+   violet `#6a4de8` brand and 44px header / 292px rail won the cascade, so they
    are the canonical values. Do not add another `:root` token override later in
    the file — the design-token static check forbids it.
 
@@ -4088,8 +4088,12 @@ body {
    properties directly; TSX should prefer the generated utilities.
    --------------------------------------------------------------------------- */
 :root {
-  /* Brand identity */
-  --brand-primary: #7b5cf5;
+  /* Brand identity. The violet is deepened one step from #7b5cf5 so white
+     text on it clears WCAG AA (5.5:1, was 4.5:1 — the DS-4 remainder): the
+     hue is unchanged, only the lightness moved. Fills that pair text with
+     the brand colour use `--text-inverse`, which flips to near-black in dark
+     mode where the violet lightens to #9a87ff. */
+  --brand-primary: #6a4de8;
   --brand-accent: #159b76;
 
   /* Surfaces — near-white warm paper, calm layered elevation */
@@ -4124,7 +4128,7 @@ body {
   /* Accents */
   --accent: var(--brand-primary);
   --accent-cyan: #2e8fd4;
-  --accent-violet: #7b5cf5;
+  --accent-violet: #6a4de8;
   --accent-gold: #d89a28;
   --accent-orange: #e8703c;
   --accent-coral: #ef684f;
@@ -4136,7 +4140,7 @@ body {
   --warning: #b67616;
   --status-info: var(--accent-cyan);
   --mode-document: #159b76;
-  --mode-quiz: #7b5cf5;
+  --mode-quiz: #6a4de8;
 
   /* Collaboration identity — mirrors PRESENCE_PALETTE in
      collaboration/interaction-model.ts; keep values in sync. */
@@ -16094,7 +16098,8 @@ body {
   padding: 0 !important;
 }
 
-.spectra-artifact-studio[data-canvas-extent="infinite"] .spectra-editor-workbar {
+.spectra-artifact-studio[data-canvas-extent="infinite"]
+  .spectra-editor-workbar {
   margin: 8px var(--spectra-studio-inline-inset) 0 !important;
 }
 
@@ -16141,7 +16146,9 @@ body {
 }
 
 .spectra-artifact-studio[data-canvas-extent="infinite"] .whiteboard-shell,
-.spectra-artifact-studio[data-canvas-extent="infinite"] .whiteboard-shell > main,
+.spectra-artifact-studio[data-canvas-extent="infinite"]
+  .whiteboard-shell
+  > main,
 .spectra-artifact-studio[data-canvas-extent="infinite"] .code-studio {
   height: 100%;
   min-height: 0;
@@ -16230,6 +16237,11 @@ body {
 .spectra-library-content,
 .spectra-workspace-content {
   background-color: var(--wave-paper, var(--bg-primary));
+}
+
+.spectra-organizer-row[data-active-work="true"] {
+  box-shadow: inset 3px 0
+    color-mix(in oklab, var(--brand-primary) 62%, transparent);
 }
 
 .spectra-library-content {
@@ -17312,7 +17324,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
 .spectra-follow-toggle[data-following="true"] {
   border-color: transparent;
   background: var(--brand-primary);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 @container (max-width: 420px) {
@@ -19484,10 +19496,9 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
  * was unreadable the moment there were more than a dozen commands. */
 .spectra-command-custom-row {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(
-      74px,
-      88px
-    ) 54px 26px 54px 54px;
+  grid-template-columns:
+    minmax(150px, 1fr) minmax(74px, 88px)
+    54px 26px 54px 54px;
   align-items: center;
   gap: 3px;
   padding: 2px 6px;
@@ -19567,10 +19578,9 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
   top: 38px;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(
-      74px,
-      88px
-    ) 54px 26px 54px 54px;
+  grid-template-columns:
+    minmax(150px, 1fr) minmax(74px, 88px)
+    54px 26px 54px 54px;
   gap: 3px;
   padding: 0 6px 4px;
   background: var(--bg-elevated, var(--bg-primary));

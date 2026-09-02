@@ -1,26 +1,28 @@
 /* ================================================================== *
  * THE FIELD — Spectra's ambient intelligence layer.
  *
- * Every bounded Spectra surface can carry a quiet dot field. The grain is
- * fine — single-digit pixels between dots — so it reads as the material a
- * surface is made of rather than as a grid drawn on top of one. Two
+ * Every bounded Spectra surface can carry a quiet optical grain. The grain
+ * is fine — single-digit pixels between marks — so it reads as the material
+ * a surface is made of rather than as a grid drawn on top of one. Two
  * lattices at an irrational ratio are layered so the pattern never visibly
- * repeats; what you see is texture, not tiling.
+ * repeats, and a static spectral sheen (violet into cyan into warm, a few
+ * percent strong) falls across it like light through the prism's glass.
  *
  * At rest it is almost invisible and costs nothing: periodic radial
  * gradients, masked toward the surface's lower-right, drifting on the
  * compositor via a transform that loops on exactly one lattice cell.
  * No component owns a requestAnimationFrame.
  *
- * When someone acts, the surface wakes *locally*. A document is never
- * covered in a glow because AI is working somewhere; the region around
- * the actual edit brightens, picks up the actor's colour, and relaxes.
- * A surface can hold several influences at once, which is what makes
- * two simultaneous edits in one document legible.
+ * When someone acts, the surface wakes *locally* and the wake *refracts*:
+ * the region around the actual edit brightens in the actor's colour while
+ * its rim splits into a spectral fringe — two hue-shifted lattices offset
+ * against each other, the way the prism's edge splits light. A surface can
+ * hold several influences at once, which is what makes two simultaneous
+ * edits in one document legible.
  *
  * At environment scale — a whole window — CSS runs out: the field wants
  * tens of thousands of dots that move individually. There the same
- * primitive is drawn by `GrainField` on the GPU, and this lattice is what
+ * primitive is drawn by `EnvironmentField` on the GPU, and this lattice is what
  * shows underneath it while the context starts and on machines without
  * one.
  * ================================================================== */
@@ -37,15 +39,36 @@
   /* Lattice geometry. Cards keep the finest grain; large surfaces open up
      a little, because a fixed dot size at a fixed density reads heavier
      the more of it you can see at once. */
-  --field-cell: 7px;
-  --field-dot: 0.58px;
-  --field-rest: 0.11;
-  --field-ink: color-mix(in oklab, var(--text-primary) 46%, transparent);
+  --field-cell: 7.5px;
+  --field-dot: 0.55px;
+  --field-rest: 0.09;
+  /* the ink carries a whisper of the brand violet: optical, not grey */
+  --field-ink: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--text-primary) 88%, var(--brand-primary)) 42%,
+    transparent
+  );
 
   /* Where the resting field gathers. Cards: lower-right. */
   --field-bias-x: 100%;
   --field-bias-y: 100%;
   --field-bias-spread: 132%;
+}
+
+/* The spectral sheen: light that has already passed through the prism,
+   falling across the grain. Static — the lattice supplies the motion. */
+.spectra-field::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    118deg,
+    transparent 30%,
+    color-mix(in oklab, var(--brand-primary) 4.5%, transparent) 44%,
+    color-mix(in oklab, var(--accent-cyan) 3.5%, transparent) 53%,
+    color-mix(in oklab, #ffd9a0 3%, transparent) 62%,
+    transparent 76%
+  );
 }
 
 /* Behind the host's own content. Only inside a surface that isolates. */
@@ -54,15 +77,15 @@
 }
 
 .spectra-field[data-scale="panel"] {
-  --field-cell: 8px;
-  --field-dot: 0.62px;
-  --field-rest: 0.105;
+  --field-cell: 8.5px;
+  --field-dot: 0.6px;
+  --field-rest: 0.085;
 }
 
 .spectra-field[data-scale="stage"] {
-  --field-cell: 9px;
-  --field-dot: 0.68px;
-  --field-rest: 0.1;
+  --field-cell: 9.5px;
+  --field-dot: 0.65px;
+  --field-rest: 0.08;
   --field-bias-spread: 160%;
 }
 
@@ -80,8 +103,12 @@
 }
 
 .dark .spectra-field {
-  --field-ink: color-mix(in oklab, var(--text-primary) 34%, transparent);
-  --field-rest: 0.15;
+  --field-ink: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--text-primary) 84%, var(--brand-primary)) 34%,
+    transparent
+  );
+  --field-rest: 0.13;
 }
 
 /* --- resting lattice ---------------------------------------------- */
@@ -156,7 +183,7 @@
 /* Environment scale only. It fades in over the lattice once its first
    frame lands, so a slow context start is never a flash of nothing. */
 
-.spectra-grain-canvas {
+.spectra-field-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -167,7 +194,7 @@
   transition: opacity var(--motion-slow) var(--ease-standard);
 }
 
-.spectra-grain-canvas[data-live="true"] {
+.spectra-field-canvas[data-live="true"] {
   opacity: 1;
 }
 
@@ -252,6 +279,48 @@
   );
   animation: spectra-field-breathe 3.6s var(--ease-in-out) infinite;
   animation-delay: var(--field-phase, 0s);
+}
+
+/* The rim of a wake refracts. Two lattices, each hue-shifted off the actor's
+   colour toward the spectrum's edges and offset against each other by a
+   pixel, appear only in the ring around the core — the same chromatic split
+   the prism's bevel produces. Activity on Spectra reads as light through
+   glass, never as a highlighter. */
+.spectra-field-wake-fringe {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in oklab, var(--wake-hue) 42%, var(--accent-cyan))
+        calc(var(--field-dot) * 0.85),
+      transparent calc(var(--field-dot) * 0.85 + 0.5px)
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      color-mix(in oklab, var(--wake-hue) 42%, #ffc98a)
+        calc(var(--field-dot) * 0.85),
+      transparent calc(var(--field-dot) * 0.85 + 0.5px)
+    );
+  background-size:
+    calc(var(--field-cell) * 0.92) calc(var(--field-cell) * 0.92),
+    calc(var(--field-cell) * 0.92) calc(var(--field-cell) * 0.92);
+  background-position:
+    1px 0.5px,
+    -1px -0.5px;
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 50%,
+    transparent 24%,
+    rgba(0, 0, 0, 0.75) 52%,
+    transparent 76%
+  );
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    transparent 24%,
+    rgba(0, 0, 0, 0.75) 52%,
+    transparent 76%
+  );
+  opacity: 0.55;
 }
 
 /* A soft optical lift under the dots — never a glow, never a full tint. */
@@ -364,6 +433,15 @@
   z-index: 1;
 }
 
+/* The work surface hosts the activity field behind its content
+   (`StudioActivityField` mounts with `behind`). Isolation keeps the field's
+   negative z-index inside the section — without it the lattice would slip
+   behind the studio root's own background and disappear. The section's own
+   background stays transparent so the material shows. */
+.spectra-artifact-main {
+  isolation: isolate;
+}
+
 /* ==================================================================
    THE PRODUCT PRISM FAMILY.
 
@@ -376,97 +454,107 @@
    ================================================================== */
 
 .spectra-prism-optic {
-  --band-hue: #ffffff;
-  --band-tail: color-mix(in oklab, var(--accent-cyan) 70%, transparent);
-  --dispersion-a: var(--brand-primary);
-  --dispersion-b: var(--accent-cyan);
+  overflow: visible;
 }
 
-.spectra-prism-band {
+.spectra-mark-body,
+.spectra-prism-body {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.spectra-prism-pool {
+  opacity: 0.58;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity var(--motion-slow) var(--ease-standard);
+}
+
+.spectra-prism-refractions {
+  opacity: 0.68;
+  transition: opacity var(--motion-base) var(--ease-standard);
+}
+
+.spectra-prism-fault {
   opacity: 0;
-  transform: translateX(-22px);
+  transition: opacity var(--motion-base) var(--ease-standard);
 }
 
-.spectra-prism-dispersion {
-  stroke: var(--dispersion-a);
-  opacity: 0.4;
-  transition:
-    stroke var(--motion-slow) var(--ease-standard),
-    opacity var(--motion-slow) var(--ease-standard);
+/* A linked static mark answers by lifting its internal light, not moving the
+   identity itself. */
+a:hover .spectra-mark .spectra-prism-refractions,
+button:hover .spectra-mark .spectra-prism-refractions,
+.spectra-mark:hover .spectra-prism-refractions {
+  opacity: 0.92;
 }
 
-/* Working: light keeps entering the glass. */
-.spectra-prism-optic[data-optics="working"] .spectra-prism-band {
-  opacity: 1;
-  animation: spectra-prism-band 1.65s var(--ease-in-out) infinite;
+/* Working turns the same solid object, slowly enough to remain legible. */
+.spectra-prism-optic[data-optics="working"] .spectra-prism-body {
+  animation: spectra-prism-turn calc(var(--motion-slow) * 14) var(--ease-in-out) infinite;
 }
-.spectra-prism-optic[data-optics="working"] .spectra-prism-dispersion {
-  opacity: 0.72;
-  animation: spectra-prism-disperse 1.65s var(--ease-in-out) infinite;
+.spectra-prism-optic[data-optics="working"] .spectra-prism-ray {
+  animation: spectra-prism-refract calc(var(--motion-slow) * 5) var(--ease-in-out) infinite;
+  animation-delay: calc(var(--ray-i) * var(--motion-fast));
 }
-
-/* Waiting: the band holds inside the glass. Tension, not failure. */
-.spectra-prism-optic[data-optics="waiting"] .spectra-prism-band {
-  opacity: 0.5;
-  transform: translateX(4px);
-  transition:
-    opacity 600ms var(--ease-standard),
-    transform 900ms var(--ease-out-expo);
-}
-.spectra-prism-optic[data-optics="waiting"] .spectra-prism-dispersion {
-  opacity: 0.24;
+.spectra-prism-optic[data-optics="working"] .spectra-prism-pool {
+  animation: spectra-prism-pool calc(var(--motion-slow) * 7) var(--ease-in-out) infinite;
 }
 
-/* Completed: one pass resolves, then the base edge settles warm. */
-.spectra-prism-optic[data-optics="completed"] .spectra-prism-band {
-  opacity: 1;
-  animation: spectra-prism-band 900ms var(--ease-out-expo) 1 both;
-}
-.spectra-prism-optic[data-optics="completed"] .spectra-prism-dispersion {
-  --dispersion-a: var(--success);
-  opacity: 0.82;
+/* Waiting holds its pose and breathes much more slowly. */
+.spectra-prism-optic[data-optics="waiting"] .spectra-prism-pool {
+  animation: spectra-prism-pool calc(var(--motion-slow) * 18) var(--ease-in-out) infinite;
 }
 
-.spectra-prism-optic[data-optics="failed"] .spectra-prism-dispersion {
-  --dispersion-a: var(--danger);
-  opacity: 0.6;
+/* Completion resolves once to the familiar three-quarter pose. */
+.spectra-prism-optic[data-optics="completed"] .spectra-prism-body {
+  animation: spectra-prism-resolve calc(var(--motion-slow) * 3) var(--ease-out-expo) 1 both;
+}
+.spectra-prism-optic[data-optics="completed"] .spectra-prism-pool {
+  opacity: 0.9;
 }
 
-.spectra-prism-optic[data-optics="dormant"] .spectra-prism-dispersion {
-  opacity: 0.22;
+.spectra-prism-optic[data-optics="failed"] .spectra-prism-fault {
+  opacity: 0.75;
 }
 
-@keyframes spectra-prism-band {
-  0% {
-    transform: translateX(-22px);
-    opacity: 0;
+.spectra-prism-optic[data-optics="dormant"] .spectra-prism-refractions {
+  opacity: 0.34;
+}
+
+@keyframes spectra-prism-turn {
+  0%, 100% {
+    transform: perspective(90px) rotateY(-5deg) rotateZ(-0.5deg);
   }
-  22% {
-    opacity: 0.95;
-  }
-  78% {
-    opacity: 0.85;
-  }
-  100% {
-    transform: translateX(26px);
-    opacity: 0;
+  50% {
+    transform: perspective(90px) rotateY(18deg) rotateZ(1deg);
   }
 }
 
-@keyframes spectra-prism-disperse {
+@keyframes spectra-prism-pool {
   0%,
-  40% {
-    stroke: var(--dispersion-a);
-    opacity: 0.42;
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
   }
-  72% {
-    stroke: var(--dispersion-b);
+  50% {
+    opacity: 0.95;
+    transform: scale(1.1);
+  }
+}
+
+@keyframes spectra-prism-refract {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
     opacity: 0.95;
   }
-  100% {
-    stroke: var(--dispersion-a);
-    opacity: 0.42;
-  }
+}
+
+@keyframes spectra-prism-resolve {
+  from { transform: perspective(90px) rotateY(14deg) scale(0.94); }
+  to { transform: perspective(90px) rotateY(0deg) scale(1); }
 }
 
 .spectra-prism-slot {
@@ -484,19 +572,28 @@
   transition: opacity 320ms var(--ease-standard);
 }
 
-html[data-spectra-motion="none"] .spectra-prism-band,
-html[data-spectra-motion="none"] .spectra-prism-dispersion {
+/* Static but communicative: refraction and state colour remain. */
+html[data-spectra-motion="reduced"] .spectra-prism-body,
+html[data-spectra-motion="reduced"] .spectra-prism-pool,
+html[data-spectra-motion="reduced"] .spectra-prism-ray,
+html[data-spectra-motion="none"] .spectra-prism-body,
+html[data-spectra-motion="none"] .spectra-prism-pool,
+html[data-spectra-motion="none"] .spectra-prism-ray {
   animation: none;
+}
+html[data-spectra-motion="reduced"] .spectra-prism-optic[data-optics="working"] .spectra-prism-pool,
+html[data-spectra-motion="none"] .spectra-prism-optic[data-optics="working"] .spectra-prism-pool {
+  opacity: 0.8;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spectra-prism-band {
+  .spectra-prism-body,
+  .spectra-prism-pool,
+  .spectra-prism-ray {
     animation: none;
-    opacity: 0.55;
-    transform: translateX(2px);
   }
-  .spectra-prism-dispersion {
-    animation: none;
+  .spectra-prism-optic[data-optics="working"] .spectra-prism-pool {
+    opacity: 0.8;
   }
 }
 

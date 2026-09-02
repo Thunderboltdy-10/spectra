@@ -1,9 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  grammarFor,
+  transitionFor,
+  useSpectraMotion,
+} from "@/features/spectra/motion";
+import { SurfaceField } from "@/features/spectra/field/surface-field";
 
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 680;
@@ -21,51 +27,14 @@ type RightSidePanelProps = {
 };
 
 /**
- * Panel slide-in animation:
- * - The panel slides in from the right edge with a smooth spring easing
- * - Content inside fades in with a slight upward shift after the panel lands
- * - On exit, content fades out first, then the panel slides away
+ * Panel slide-in animation, on the Spectra motion grammar:
+ * - The panel itself is a `morph` — one surface becoming another (the
+ *   route-crossing Follow AI panel is exactly that).
+ * - Content inside is a `reveal` — it enters after the panel lands.
+ * - On exit, content fades first, then the panel slides away.
+ * Reduced motion keeps the state change legible without travel; "none"
+ * resolves every transition to instant.
  */
-const panelVariants: import("framer-motion").Variants = {
-  hidden: {
-    width: 0,
-    opacity: 0,
-  },
-  visible: (width: number) => ({
-    width,
-    opacity: 1,
-    transition: {
-      width: { duration: 0.3, ease: [0.22, 1, 0.36, 1] as const },
-      opacity: { duration: 0.2, delay: 0.05 },
-    },
-  }),
-  exit: {
-    width: 0,
-    opacity: 0,
-    transition: {
-      opacity: { duration: 0.15 },
-      width: { duration: 0.25, ease: "easeIn", delay: 0.05 },
-    },
-  },
-};
-
-const contentVariants: import("framer-motion").Variants = {
-  hidden: { opacity: 0, y: 8 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: {
-      duration: 0.25,
-      delay: 0.15,
-      ease: [0.22, 1, 0.36, 1] as const,
-    },
-  },
-  exit: {
-    opacity: 0,
-    y: -6,
-    transition: { duration: 0.15, ease: "easeIn" },
-  },
-};
 
 export function RightSidePanel({
   width: defaultWidth,
@@ -78,6 +47,58 @@ export function RightSidePanel({
   panelType,
   contentKey,
 }: RightSidePanelProps) {
+  const motionLevel = useSpectraMotion();
+
+  const panelVariants = useMemo<import("framer-motion").Variants>(() => {
+    const morph = transitionFor("morph", motionLevel.level);
+    const reveal = transitionFor("reveal", motionLevel.level);
+    const delay = motionLevel.disabled ? 0 : 0.05;
+    return {
+      hidden: { width: 0, opacity: 0 },
+      visible: (width: number) => ({
+        width,
+        opacity: 1,
+        transition: {
+          width: morph,
+          opacity: { ...reveal, delay },
+        },
+      }),
+      exit: {
+        width: 0,
+        opacity: 0,
+        transition: {
+          opacity: { ...reveal },
+          width: { ...morph, delay },
+        },
+      },
+    };
+  }, [motionLevel.level, motionLevel.disabled]);
+
+  const contentVariants = useMemo<import("framer-motion").Variants>(() => {
+    const reveal = grammarFor("reveal", motionLevel.level);
+    const transition = transitionFor("reveal", motionLevel.level);
+    const delay = motionLevel.disabled ? 0 : 0.12;
+    return {
+      hidden: { opacity: 0, y: reveal.distance },
+      visible: {
+        opacity: 1,
+        y: 0,
+        transition: { ...transition, delay },
+      },
+      exit: {
+        opacity: 0,
+        y: -reveal.distance,
+        transition,
+      },
+    };
+  }, [motionLevel.level, motionLevel.disabled]);
+
+  const headerTransition = useMemo(() => {
+    const reveal = transitionFor("reveal", motionLevel.level);
+    return { ...reveal, delay: motionLevel.disabled ? 0 : 0.1 };
+  }, [motionLevel.level, motionLevel.disabled]);
+
+  const headerDistance = grammarFor("reveal", motionLevel.level).distance * 2;
   const storageKey = panelType ? `workspace:panel-width:${panelType}` : undefined;
 
   const [width, setWidth] = useState(() => {
@@ -144,12 +165,14 @@ export function RightSidePanel({
       exit="exit"
       custom={width}
       className={cn(
-        "relative h-full w-full shrink-0 overflow-hidden",
+        "relative isolate h-full w-full shrink-0 overflow-hidden",
         "bg-[var(--bg-elevated)]/80 border-l border-[var(--border-default)]/40 backdrop-blur-[40px]",
         "shadow-[var(--shadow-lg)]",
         className,
       )}
     >
+      {/* the panel is made of the same material as every other surface */}
+      <SurfaceField scale="panel" behind />
       {/* Resize handle — invisible 6px drag strip on left edge */}
       <div
         className="absolute inset-y-0 left-0 z-chrome w-1.5 cursor-col-resize hover:bg-[var(--accent-cyan)]/10 active:bg-[var(--accent-cyan)]/15 transition-colors"
@@ -159,9 +182,9 @@ export function RightSidePanel({
       <div className="flex h-full w-full flex-col">
         {/* Header with fly-in animation */}
         <motion.div
-          initial={{ opacity: 0, x: 12 }}
+          initial={{ opacity: 0, x: headerDistance }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.2, delay: 0.12 }}
+          transition={headerTransition}
           className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-default)]/60 px-4 backdrop-blur-md"
         >
           <div className="flex min-w-0 items-center gap-2">

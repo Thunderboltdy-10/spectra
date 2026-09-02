@@ -29,6 +29,13 @@ export function decideClose(dirty: boolean): CloseIntent {
   return dirty ? "confirm" : "close";
 }
 
+/** Atomically admit one close action before React can paint `busy`. */
+export function claimCloseAction(lock: { current: boolean }): boolean {
+  if (lock.current) return false;
+  lock.current = true;
+  return true;
+}
+
 export function UnsavedCloseDialog({
   open,
   title,

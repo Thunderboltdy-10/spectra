@@ -50,8 +50,20 @@ export function spectraCardClass(variant: SpectraCardVariant, className?: string
  * the colour of whatever is actually happening to it.
  */
 const CARD_FIELD: Partial<
-  Record<SpectraCardState, { state: FieldInfluence["state"]; hue: string }>
+  Record<
+    SpectraCardState,
+    { state: FieldInfluence["state"]; hue: string; strength?: number }
+  >
 > = {
+  selected: { state: "active", hue: "var(--brand-primary)", strength: 0.2 },
+  active: { state: "active", hue: "var(--brand-primary)", strength: 0.26 },
+  focused: { state: "active", hue: "var(--accent-cyan)", strength: 0.22 },
+  context: { state: "active", hue: "var(--brand-primary)", strength: 0.16 },
+  "multi-selected": {
+    state: "active",
+    hue: "var(--brand-primary)",
+    strength: 0.24,
+  },
   creating: { state: "typing", hue: "var(--brand-primary)" },
   updating: { state: "typing", hue: "var(--accent-cyan)" },
   edited: { state: "success", hue: "var(--success)" },
@@ -86,7 +98,8 @@ export function SpectraCard({
               x: 0.72,
               y: 0.74,
               radius: 0.78,
-              strength: wake.state === "typing" ? 0.8 : 0.62,
+              strength:
+                wake.strength ?? (wake.state === "typing" ? 0.8 : 0.62),
               hue: wake.hue,
               state: wake.state,
             },

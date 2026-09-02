@@ -642,7 +642,7 @@ function ShellNavigation() {
           href="/chat"
           prefetch={false}
           className={cn(
-            "mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-control bg-[var(--brand-primary)] text-micro font-semibold text-white shadow-soft transition hover:brightness-95",
+            "mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-control bg-[var(--brand-primary)] text-micro font-semibold text-[var(--text-inverse)] shadow-soft transition hover:brightness-95",
             sidebarCollapsed && "mx-auto w-10",
           )}
         >

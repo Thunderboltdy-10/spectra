@@ -25,6 +25,7 @@ import {
   type BoardGroupBy,
   type TreeNode,
 } from "./tree-client";
+import { isOpenWorkNode } from "./tree-model";
 import { nodeIdentity, relativeTime } from "./node-identity";
 import { SurfaceNewMenu, type BlueprintChoiceKey } from "./surface-chrome";
 
@@ -146,6 +147,7 @@ export function WorkBoard({
   typeFilter = "all",
   selectionMode = false,
   selectedObjectKeys,
+  activeWorkId,
   busy = false,
   onOpen,
   onOpenContainer,
@@ -162,6 +164,7 @@ export function WorkBoard({
   typeFilter?: string;
   selectionMode?: boolean;
   selectedObjectKeys?: Set<string>;
+  activeWorkId?: string;
   busy?: boolean;
   onOpen: (node: TreeNode) => void;
   onOpenContainer: (target: ContainerTarget) => void;
@@ -243,6 +246,7 @@ export function WorkBoard({
             busy={busy}
             selectionMode={selectionMode}
             selectedObjectKeys={selectedObjectKeys}
+            activeWorkId={activeWorkId}
             onOpen={onOpen}
             onOpenContainer={onOpenContainer}
             onToggleContext={onToggleContext}
@@ -269,6 +273,7 @@ function BoardColumnView({
   busy,
   selectionMode,
   selectedObjectKeys,
+  activeWorkId,
   onOpen,
   onOpenContainer,
   onToggleContext,
@@ -288,6 +293,7 @@ function BoardColumnView({
   busy: boolean;
   selectionMode: boolean;
   selectedObjectKeys?: Set<string>;
+  activeWorkId?: string;
   onOpen: (node: TreeNode) => void;
   onOpenContainer: (target: ContainerTarget) => void;
   onToggleContext?: (node: TreeNode) => void;
@@ -438,6 +444,7 @@ function BoardColumnView({
             <ArtifactCard
               key={card.nodeId}
               artifact={cardViewOf(card, now, label)}
+              active={isOpenWorkNode(card, activeWorkId)}
               quiet
               className="spectra-card--board"
               onSelect={() => onOpen(card)}

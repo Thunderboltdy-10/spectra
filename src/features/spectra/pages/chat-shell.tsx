@@ -24,7 +24,6 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { AnimatePresence, motion } from "framer-motion";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { SpectraMark } from "@/components/spectra-mark";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -32,6 +31,8 @@ import { useSpectraContext } from "../hooks/use-spectra-context";
 import { spectraBus } from "../events";
 import { ConversationSurface } from "../components/conversation-surface";
 import { CommandBar } from "../components/command-bar";
+import { ShellActivityField } from "../components/shell-activity-field";
+import { CrossfadeText } from "../motion";
 import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import {
   ContextFocusControl,
@@ -534,7 +535,8 @@ export function ChatShell() {
   );
 
   return (
-    <div className="spectra-wave-y relative flex h-full min-h-0 bg-[var(--bg-primary)]">
+    <div className="spectra-wave-y relative isolate flex h-full min-h-0 bg-[var(--bg-primary)]">
+      <ShellActivityField liveExchange={runEngine.liveExchange} />
       <section
         className={
           studio.mode === "tab" ? "hidden" : "flex min-w-0 flex-1 flex-col"
@@ -542,18 +544,11 @@ export function ChatShell() {
       >
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 sm:px-7">
           <div className="min-w-0">
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.div
-                key={visibleTitle}
-                initial={{ opacity: 0, y: 3 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -3 }}
-                transition={{ duration: 0.18 }}
-                className="truncate font-display text-heading font-semibold text-[var(--text-primary)]"
-              >
-                {visibleTitle}
-              </motion.div>
-            </AnimatePresence>
+            <CrossfadeText
+              value={visibleTitle}
+              primitive="reveal"
+              className="truncate font-display text-heading font-semibold text-[var(--text-primary)]"
+            />
             <div className="text-micro uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               Thread · Shared Spectra conversation
             </div>

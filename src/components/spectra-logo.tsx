@@ -1,96 +1,79 @@
 "use client";
 
 import { useEffect } from "react";
-import { MARK, SpectraMark } from "@/components/spectra-mark";
-
-// ── Brand colours ────────────────────────────────────────────────────────────
-const DEFAULT_PRIMARY = "#7b5cf5";
-const DEFAULT_ACCENT = "var(--accent-cyan)";
-
-function readBrandColors() {
-  if (typeof window === "undefined")
-    return { primary: DEFAULT_PRIMARY, accent: DEFAULT_ACCENT };
-  const styles = getComputedStyle(document.documentElement);
-  return {
-    primary:
-      styles.getPropertyValue("--brand-primary").trim() || DEFAULT_PRIMARY,
-    accent: styles.getPropertyValue("--brand-accent").trim() || DEFAULT_ACCENT,
-  };
-}
+import { MARK, REFRACTIONS, SpectraMark } from "@/components/spectra-mark";
+import { spectraBus } from "@/features/spectra/events";
 
 // ── Canvas rendering (favicon) ───────────────────────────────────────────────
 // Mirrors the SVG geometry in spectra-mark.tsx exactly (viewBox 0 0 64 64).
-function face(
-  ctx: CanvasRenderingContext2D,
-  S: number,
-  points: ReadonlyArray<readonly [number, number]>,
-) {
+function drawMark(ctx: CanvasRenderingContext2D, S: number, active = false) {
   const k = S / 64;
-  ctx.beginPath();
-  points.forEach(([x, y], i) => {
-    if (i === 0) ctx.moveTo(x * k, y * k);
-    else ctx.lineTo(x * k, y * k);
-  });
-  ctx.closePath();
-}
-
-function drawMark(
-  ctx: CanvasRenderingContext2D,
-  S: number,
-  primary: string,
-  accent: string,
-) {
-  const k = S / 64;
-  const g = (x1: number, y1: number, x2: number, y2: number) =>
+  const gradient = (x1: number, y1: number, x2: number, y2: number) =>
     ctx.createLinearGradient(x1 * k, y1 * k, x2 * k, y2 * k);
+  const polygon = (points: ReadonlyArray<readonly [number, number]>) => {
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point[0] * k, point[1] * k);
+      else ctx.lineTo(point[0] * k, point[1] * k);
+    });
+    ctx.closePath();
+  };
 
-  // upper-right sloped face (turned from the light)
-  const top = g(MARK.A1[0], MARK.A1[1], MARK.C2[0], MARK.C2[1]);
-  top.addColorStop(0, "#b49df8");
-  top.addColorStop(1, "#6b50e6");
-  face(ctx, S, [MARK.A1, MARK.C1, MARK.C2, MARK.A2]);
+  const top = gradient(17, 13, 58, 47);
+  top.addColorStop(0, "rgba(201,187,244,.72)");
+  top.addColorStop(1, "rgba(113,85,218,.9)");
+  polygon([MARK.A1, MARK.C1, MARK.C2, MARK.A2]);
   ctx.fillStyle = top;
   ctx.fill();
-
-  // long left face, receding (environment-lit glass)
-  const left = g(MARK.A2[0], MARK.A2[1], MARK.B1[0], MARK.B1[1]);
-  left.addColorStop(0, "#fdfbff");
-  left.addColorStop(1, "#e0d7fb");
-  face(ctx, S, [MARK.A1, MARK.B1, MARK.B2, MARK.A2]);
+  const left = gradient(9, 18, 34, 52);
+  left.addColorStop(0, "rgba(245,241,255,.82)");
+  left.addColorStop(1, "rgba(183,166,238,.74)");
+  polygon([MARK.A1, MARK.B1, MARK.B2, MARK.A2]);
   ctx.fillStyle = left;
   ctx.fill();
-
-  // dominant front triangular face with the dispersion gradient
-  const front = g(MARK.A1[0], MARK.A1[1], MARK.B1[0] + 6, MARK.B1[1]);
-  front.addColorStop(0, "#f7f3ff");
-  front.addColorStop(0.52, "#c4b3fb");
-  front.addColorStop(1, primary);
-  face(ctx, S, [MARK.A1, MARK.B1, MARK.C1]);
+  const front = gradient(35, 8, 43, 55);
+  front.addColorStop(0, "rgba(251,249,255,.96)");
+  front.addColorStop(0.45, "rgba(216,205,248,.92)");
+  front.addColorStop(1, "rgba(128,104,222,.92)");
+  polygon([MARK.A1, MARK.B1, MARK.C1]);
   ctx.fillStyle = front;
   ctx.fill();
 
-  // dispersion accent along the front base edge
-  const disp = g(MARK.B1[0], MARK.B1[1], MARK.C1[0], MARK.C1[1]);
-  disp.addColorStop(0, primary);
-  disp.addColorStop(1, accent);
-  ctx.strokeStyle = disp;
-  ctx.lineWidth = 1.6 * k;
+  ctx.save();
+  polygon([MARK.A1, MARK.C1, MARK.B1, MARK.B2, MARK.A2]);
+  ctx.clip();
   ctx.lineCap = "round";
-  ctx.globalAlpha = 0.55;
-  ctx.beginPath();
-  ctx.moveTo(MARK.B1[0] * k, MARK.B1[1] * k);
-  ctx.lineTo(MARK.C1[0] * k, MARK.C1[1] * k);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
+  ctx.lineWidth = (active ? 1.3 : 0.95) * k;
+  for (const ray of REFRACTIONS) {
+    ctx.strokeStyle = ray.color;
+    ctx.beginPath();
+    ctx.moveTo(ray.from[0] * k, ray.from[1] * k);
+    ctx.lineTo(ray.to[0] * k, ray.to[1] * k);
+    ctx.stroke();
+  }
+  const pool = ctx.createRadialGradient(
+    MARK.GLOW.cx * k,
+    MARK.GLOW.cy * k,
+    0,
+    MARK.GLOW.cx * k,
+    MARK.GLOW.cy * k,
+    MARK.GLOW.r * k,
+  );
+  pool.addColorStop(0, active ? "rgba(164,143,251,0.95)" : "rgba(164,143,251,0.62)");
+  pool.addColorStop(0.6, active ? "rgba(154,124,255,0.4)" : "rgba(154,124,255,0.22)");
+  pool.addColorStop(1, "rgba(154,124,255,0)");
+  ctx.fillStyle = pool;
+  ctx.fillRect(0, 0, S, S);
+  ctx.restore();
 
-  // glass edges
+  // Glass edges preserve the three-quarter volume at 16px.
   ctx.lineJoin = "round";
-  ctx.strokeStyle = "rgba(76,52,186,0.34)";
-  ctx.lineWidth = 1.3 * k;
-  face(ctx, S, [MARK.A1, MARK.B1, MARK.C1]);
+  ctx.strokeStyle = "rgba(76,52,186,0.30)";
+  ctx.lineWidth = 1.05 * k;
+  polygon([MARK.A1, MARK.B1, MARK.C1]);
   ctx.stroke();
-  ctx.strokeStyle = "rgba(255,255,255,0.75)";
-  ctx.lineWidth = 1.15 * k;
+  ctx.strokeStyle = "rgba(255,255,255,0.85)";
+  ctx.lineWidth = 1.05 * k;
   ctx.beginPath();
   ctx.moveTo(MARK.B1[0] * k, MARK.B1[1] * k);
   ctx.lineTo(MARK.A1[0] * k, MARK.A1[1] * k);
@@ -123,17 +106,17 @@ export function SpectraLogo({
 }
 
 // ── DynamicFavicon ───────────────────────────────────────────────────────────
+/* While a run is live the tab prism's internal light strengthens. */
 export function DynamicFavicon() {
   useEffect(() => {
-    function update() {
-      const { primary, accent } = readBrandColors();
+    const render = (active: boolean) => {
       const S = 64;
       const canvas = document.createElement("canvas");
       canvas.width = S;
       canvas.height = S;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      drawMark(ctx, S, primary, accent);
+      drawMark(ctx, S, active);
 
       const url = canvas.toDataURL("image/png");
       let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
@@ -144,24 +127,12 @@ export function DynamicFavicon() {
       }
       link.type = "image/png";
       link.href = url;
-    }
+    };
 
-    update();
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        if (
-          m.type === "attributes" &&
-          (m.attributeName === "style" ||
-            m.attributeName === "class" ||
-            m.attributeName === "data-spectra-brand")
-        ) {
-          update();
-          break;
-        }
-      }
+    render((spectraBus.getQuery("run.active")?.runIds.length ?? 0) > 0);
+    return spectraBus.subscribe("run.active", (value) => {
+      render(value.runIds.length > 0);
     });
-    observer.observe(document.documentElement, { attributes: true });
-    return () => observer.disconnect();
   }, []);
 
   return null;

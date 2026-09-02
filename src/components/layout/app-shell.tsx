@@ -543,6 +543,7 @@ function ShellNavigation() {
           </button>
           <Link
             href="/workspace?home=1"
+            prefetch={false}
             className="flex min-w-0 flex-1 items-center gap-2 rounded-chip px-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
             aria-label="Spectra home"
           >
@@ -599,6 +600,7 @@ function ShellNavigation() {
               <Link
                 key={href}
                 href={href === "/workspace" ? "/workspace?home=1" : href}
+                prefetch={false}
                 onClick={(event) => {
                   if (
                     href === "/workspace" &&
@@ -638,6 +640,7 @@ function ShellNavigation() {
         </nav>
         <Link
           href="/chat"
+          prefetch={false}
           className={cn(
             "mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-control bg-[var(--brand-primary)] text-micro font-semibold text-white shadow-soft transition hover:brightness-95",
             sidebarCollapsed && "mx-auto w-10",
@@ -680,6 +683,7 @@ function ShellNavigation() {
                         <Link
                           key={thread._id}
                           href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
+                          prefetch={false}
                           className="group flex h-8 items-center gap-2 rounded-chip px-1.5 text-caption text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         >
                           <span className="min-w-0 flex-1 truncate">
@@ -1011,6 +1015,7 @@ function ShellNavigation() {
             <Link
               key={href}
               href={href}
+              prefetch={false}
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-micro font-semibold",

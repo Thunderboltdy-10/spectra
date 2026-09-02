@@ -207,6 +207,15 @@ Run full Vitest, typecheck, production build, lint zero-warning, architecture/co
 - Convex: CLI 30s, 300s, then direct `convex-local-backend` (~15 GB) never bound `127.0.0.1:3002`. No reset, no `convex push`. 10k is unit-tested (`windowRange`); live density/workbars/admin-vs-member/B limits/D42 unproved.
 - DS-4 stays P7.UI1. Mutation `toast.error(error.message)` dumps are a remaining copy class, not started here. No acceptance claimed.
 
+### P6.V1 verification log — 2026-09-02 (live remainder)
+
+- Verdict: **VERIFIED**. Convex was not talking to a down cloud; the CLI gave up before the 6.4 GB SQLite finished index bootstrap (~5 min). Direct backend `--disable-beacon` bound `127.0.0.1:3002`.
+- Live A (school admin): workspace, School ManageBac, Calendar week, Admin, Library List General `150 items+` windowed; document workbar at 1440 and 1024 with overflow (Share work, References, details, history). Dark + 1024/200% html scrollWidth=clientWidth; Skip to content.
+- Live B (student): invitation-gated empty Library, no School Admin nav. Super Admin still shows because the local seed marks `platformOperator`; `/admin` did not mount school administration.
+- D42: sidebar/recents/home `prefetch={false}`. Library first paint 14 fetch/document, largest overview 129 KB, 0 over 300 KB. Duplicate threads 40+200 and token/invite pairs remain for P8.
+- 10k live nodes were not inserted. `windowRange` unit tests cover 10k; live folder proves the window at 150+.
+- Evidence: `.shots/reformation/P6.V1/live/`. DS-4 stays P7.UI1. No acceptance claimed.
+
 ## Exit gate
 
 Token and lint rules cover all product source; a11y checks green; V1 PASS with zero launch-blocking SYSTEMIC findings open; verifier closes P6 without requesting owner acceptance.

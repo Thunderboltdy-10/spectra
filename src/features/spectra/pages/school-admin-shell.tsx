@@ -78,6 +78,7 @@ import {
   TextAreaField,
   TextField,
 } from "@/features/spectra/administration/shared";
+import { describeFailure } from "@/components/ui/truthful-state";
 
 const MEMBER_ROLE_OPTIONS = [
   { value: "student", label: "Student" },
@@ -576,9 +577,10 @@ export function SchoolAdminShell() {
       );
     } catch (nextError) {
       setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "School administration could not load.",
+        describeFailure(nextError, {
+          fallback:
+            "Check your connection, then try loading school administration again.",
+        }).message,
       );
     } finally {
       setLoading(false);

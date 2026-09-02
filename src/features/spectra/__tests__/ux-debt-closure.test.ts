@@ -63,6 +63,28 @@ describe("P6.I1 UX debt closure", () => {
     expect(dock).toContain("Running in ${workspaceLabel}");
     expect(shell).toContain("<SheetContent");
     expect(shell).toContain("<OverviewLoadFailure");
+    expect(shell).toContain("<ProductErrorState");
+    expect(shell).not.toContain("Unexpected server error");
+  });
+
+  it("maps load failures through ProductErrorState without server jargon", () => {
+    const school = read("src/features/spectra/pages/school-data-shell.tsx");
+    const calendar = read(
+      "src/features/spectra/calendar/ui/calendar-application.tsx",
+    );
+    const routes = read("src/lib/route-handler.ts");
+    expect(school).toContain("<ProductErrorState");
+    expect(school).toContain("describeFailure");
+    expect(school).toContain("School records could not be read just now.");
+    expect(school).not.toContain("Unexpected server error");
+    expect(calendar).toContain("<ProductErrorState");
+    expect(calendar).toContain("describeFailure");
+    expect(calendar).toContain("Plans could not be read just now.");
+    expect(calendar).not.toContain("Unexpected server error");
+    expect(routes).toContain("PUBLIC_SERVER_FAILURE");
+    expect(routes).toContain(
+      "Spectra could not finish this request. Check your connection, then try again.",
+    );
   });
 
   it("advertises only registered shortcuts and keeps navigation client-side", () => {

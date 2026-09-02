@@ -197,6 +197,16 @@ Run full Vitest, typecheck, production build, lint zero-warning, architecture/co
 - Visual: `.shots/reformation/P6.V1/repair/before/` and `after/` — chrome still Spectra (sidebar, tokens, type, composer, failure card). Dark School, 1024 School, keyboard Try again, and 200% zoom with no html scrollWidth overflow. Signed-in `/` stays the shell.
 - Convex `127.0.0.1:3002` still down. Account A/B, 10k Library density, live workbars, and network budget remain for the independent verifier rerun. DS-4 white-on-violet stays P7.UI1.
 
+### P6.V1 verification log — 2026-09-02 (independent rerun)
+
+- Verdict: **REJECTED**. Token/lint class independently green; live A/B, 10k Library, workbars, and D42 remain env-blocked.
+- TRIAGE · SYSTEMIC R13: 500 JSON used "Unexpected server error"; School/Calendar printed `error.message`. `PUBLIC_SERVER_FAILURE` now owns ≥500 copy; those shells use `describeFailure` + `ProductErrorState` + shared Button.
+- School no longer claims "No school source is connected" when records were not read; Calendar no longer claims "No unscheduled plans" on that path. Rail still shows `PLANS · 0`.
+- After: `.shots/reformation/P6.V1/rerun/after/` (workspace, School light/dark, Calendar, 1024/200%, account B). Live 500 message is the public sentence, not CONVEX jargon. 1024+200% html scrollWidth=clientWidth.
+- Gates: lint 0 warnings; `tsc` via production build; focused Vitest (route-handler, ux-debt, windowRange); copy/secrets/capabilities; `git diff --check`. Full Vitest 165/1,552, architecture/token/fidelity/200k/120 were green at `178557dc` before this repair.
+- Convex: CLI 30s, 300s, then direct `convex-local-backend` (~15 GB) never bound `127.0.0.1:3002`. No reset, no `convex push`. 10k is unit-tested (`windowRange`); live density/workbars/admin-vs-member/B limits/D42 unproved.
+- DS-4 stays P7.UI1. Mutation `toast.error(error.message)` dumps are a remaining copy class, not started here. No acceptance claimed.
+
 ## Exit gate
 
 Token and lint rules cover all product source; a11y checks green; V1 PASS with zero launch-blocking SYSTEMIC findings open; verifier closes P6 without requesting owner acceptance.

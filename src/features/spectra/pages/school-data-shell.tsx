@@ -26,8 +26,11 @@ import {
   AuxiliaryRail,
   AuxiliaryRailTrigger,
 } from "../components/auxiliary-rail";
+import { ProductErrorState } from "../components/product-state";
 import { ProductPageHeader } from "../components/product-page-header";
 import { ProductSectionNav } from "../components/product-section-nav";
+import { describeFailure } from "@/components/ui/truthful-state";
+import { Button } from "@/components/ui/button";
 import type { CapabilityState } from "../core/capability-truth";
 import {
   CapabilityTruthBadge,
@@ -340,9 +343,9 @@ export function SchoolDataShell() {
       });
     } catch (nextError) {
       setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "Could not load School.",
+        describeFailure(nextError, {
+          fallback: "Check your connection, then try loading School again.",
+        }).message,
       );
     } finally {
       setLoading(false);
@@ -361,9 +364,9 @@ export function SchoolDataShell() {
       await load();
     } catch (nextError) {
       setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "School action failed.",
+        describeFailure(nextError, {
+          fallback: "School could not finish this action. Try again.",
+        }).message,
       );
     } finally {
       setBusy("");
@@ -410,9 +413,11 @@ export function SchoolDataShell() {
               </h2>
               </div>
               <p className="mt-1 text-micro text-[var(--text-secondary)]">
-                {payload?.integration
-                  ? `ManageBac · last success ${formatDate(payload.integration.lastSyncAt)}`
-                  : "No school source is connected"}
+                {error && !payload
+                  ? "School records could not be read just now."
+                  : payload?.integration
+                    ? `ManageBac · last success ${formatDate(payload.integration.lastSyncAt)}`
+                    : "No school source is connected"}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -428,7 +433,7 @@ export function SchoolDataShell() {
               ) : null}
               <button
                 type="button"
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || Boolean(error && !payload)}
                 onClick={() => void run("sync", () => syncSpectraManageBac())}
                 className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-3.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
@@ -444,12 +449,16 @@ export function SchoolDataShell() {
 
           <div>
             {error ? (
-              <div
-                role="alert"
-                className="mb-4 rounded-xl border border-rose-600/20 bg-rose-500/8 px-4 py-3 text-micro text-rose-800"
-              >
-                {error}
-              </div>
+              <ProductErrorState
+                className="mb-4 min-h-0"
+                title="School could not load"
+                detail={error}
+                action={
+                  <Button variant="primary" size="sm" onClick={() => void load()}>
+                    Try again
+                  </Button>
+                }
+              />
             ) : null}
             {loading ? (
               <div className="flex min-h-[360px] items-center justify-center gap-2 text-micro text-[var(--text-tertiary)]">

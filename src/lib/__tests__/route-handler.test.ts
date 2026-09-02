@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { describe, expect, it, vi } from "vitest";
-import { withRouteErrorHandling } from "@/lib/route-handler";
+import {
+  PUBLIC_SERVER_FAILURE,
+  withRouteErrorHandling,
+} from "@/lib/route-handler";
 import * as logging from "@/lib/logging";
 
 describe("withRouteErrorHandling", () => {
@@ -39,5 +42,19 @@ describe("withRouteErrorHandling", () => {
     expect(logSpy).toHaveBeenCalledWith(expect.objectContaining({ status: 409 }));
 
     logSpy.mockRestore();
+  });
+
+  it("never puts Unexpected server error on a 500 user message", async () => {
+    const response = await withRouteErrorHandling(async () => {
+      throw new Error("CONVEX_UNREACHABLE: fetch failed");
+    });
+    const payload = (await response.json()) as {
+      error?: { code?: string; message?: string; status?: number };
+    };
+
+    expect(response.status).toBe(500);
+    expect(payload.error?.message).toBe(PUBLIC_SERVER_FAILURE);
+    expect(payload.error?.message).not.toMatch(/Unexpected server error/i);
+    expect(payload.error?.message).not.toMatch(/CONVEX_UNREACHABLE/);
   });
 });

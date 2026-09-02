@@ -36,6 +36,10 @@ function normalizeErrorStatus(message: string) {
   return 500;
 }
 
+/** User-facing 500 copy. Internal details stay in logs, never in `error.message`. */
+export const PUBLIC_SERVER_FAILURE =
+  "Spectra could not finish this request. Check your connection, then try again.";
+
 function parseCodeAndMessage(rawMessage: string) {
   const [prefix, ...rest] = rawMessage.split(":");
   if (/^[A-Z0-9_]+$/.test(prefix) && rest.length > 0) {
@@ -79,10 +83,10 @@ export async function withRouteErrorHandling<T>(
     return result;
   } catch (error) {
     const rawMessage =
-      error instanceof Error ? error.message : "Unexpected server error";
+      error instanceof Error ? error.message : PUBLIC_SERVER_FAILURE;
     const status = normalizeErrorStatus(rawMessage);
     const { code, message } = parseCodeAndMessage(rawMessage);
-    const safeMessage = status >= 500 ? "Unexpected server error" : message;
+    const safeMessage = status >= 500 ? PUBLIC_SERVER_FAILURE : message;
     const requestId = logger.context.requestId || randomUUID().slice(0, 8);
 
     // Log the error with structured logger

@@ -4,7 +4,6 @@ import {
   BookOpen,
   CalendarCheck2,
   CheckCircle2,
-  CircleAlert,
   Download,
   ExternalLink,
   FileText,
@@ -43,6 +42,7 @@ import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { toast } from "sonner";
 import { describeFailure } from "@/components/ui/truthful-state";
+import { ProductErrorState } from "@/features/spectra/components/product-state";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -873,20 +873,15 @@ function OverviewLoadFailure({
 }) {
   return (
     <main className="grid min-h-0 flex-1 place-items-center overflow-y-auto px-6 py-12">
-      <div className="max-w-md text-center">
-        <span className="mx-auto grid size-10 place-items-center rounded-control bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-primary))] text-[var(--danger)]">
-          <CircleAlert className="size-5" aria-hidden="true" />
-        </span>
-        <h1 className="mt-4 text-heading font-semibold text-[var(--text-primary)]">
-          Spectra did not load
-        </h1>
-        <p className="mt-2 text-caption leading-6 text-[var(--text-secondary)]">
-          {message}
-        </p>
-        <Button className="mt-5" variant="primary" size="sm" onClick={onRetry}>
-          Try again
-        </Button>
-      </div>
+      <ProductErrorState
+        title="Spectra did not load"
+        detail={message}
+        action={
+          <Button variant="primary" size="sm" onClick={onRetry}>
+            Try again
+          </Button>
+        }
+      />
     </main>
   );
 }

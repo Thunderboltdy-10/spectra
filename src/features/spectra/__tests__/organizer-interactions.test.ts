@@ -3,7 +3,9 @@ import {
   opensOnPlainClick,
   selectRow,
   selectedWorkSourceIds,
+  windowRange,
 } from "../organization/tree-model";
+import { ROW_HEIGHT } from "../organization/organizer-row";
 import type { TreeNode } from "../organization/tree-client";
 
 function workRow(nodeId: string, sourceId: string): TreeNode {
@@ -57,5 +59,25 @@ describe("Library row interactions", () => {
     );
     const ranged = selectRow(first, rows, "n3", "range");
     expect(selectedWorkSourceIds(ranged, rows)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("Library windowRange density", () => {
+  it("windows 10k rows to a viewport plus overscan instead of mounting them all", () => {
+    const range = windowRange(0, 800, ROW_HEIGHT, 10_000);
+    expect(range.start).toBe(0);
+    expect(range.end).toBeLessThan(80);
+    expect(range.end - range.start).toBeLessThan(80);
+    expect(range.padBottom).toBe((10_000 - range.end) * ROW_HEIGHT);
+  });
+
+  it("keeps the mounted window bounded after scrolling deep into 10k rows", () => {
+    const range = windowRange(ROW_HEIGHT * 5_000, 800, ROW_HEIGHT, 10_000);
+    expect(range.end - range.start).toBeLessThan(80);
+    expect(range.start).toBeGreaterThan(4_900);
+    expect(range.end).toBeLessThan(5_100);
+    expect(range.padTop + range.padBottom + (range.end - range.start) * ROW_HEIGHT).toBe(
+      10_000 * ROW_HEIGHT,
+    );
   });
 });

@@ -21,6 +21,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { describeFailure } from "@/components/ui/truthful-state";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -495,7 +497,11 @@ export function CalendarApplication() {
         const data = await fetchOverview(from ?? visibleRange.from, to ?? visibleRange.to);
         applyOverview(data, mode);
       } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Could not load Calendar.");
+        setError(
+          describeFailure(nextError, {
+            fallback: "Check your connection, then try loading Calendar again.",
+          }).message,
+        );
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -1178,6 +1184,10 @@ export function CalendarApplication() {
                 <LoaderCircle className="size-3.5 animate-spin" />
                 Loading plans
               </div>
+            ) : error ? (
+              <p className="px-1 py-3 text-micro leading-5 text-[var(--text-tertiary)]">
+                Plans could not be read just now.
+              </p>
             ) : !unscheduledPlans.length ? (
               <p className="px-1 py-3 text-micro leading-5 text-[var(--text-tertiary)]">
                 {planQuery
@@ -1229,13 +1239,13 @@ export function CalendarApplication() {
                 title="Calendar could not be loaded"
                 detail={error}
                 action={
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={() => void load("replace", visibleRange.from, visibleRange.to, true)}
-                    className="h-9 rounded-lg bg-[var(--text-primary)] px-3.5 text-caption font-semibold text-[var(--bg-primary)]"
                   >
                     Try again
-                  </button>
+                  </Button>
                 }
               />
             </div>

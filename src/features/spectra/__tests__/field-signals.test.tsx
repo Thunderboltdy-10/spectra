@@ -520,4 +520,16 @@ describe("DS-4 brand violet contrast", () => {
       );
     }
   });
+
+  it("keeps shared card and Wave Y surfaces semantic in dark mode", () => {
+    expect(appCss).toContain("--card-sheen-start:");
+    expect(appCss).toMatch(
+      /\.dark\s*\{[\s\S]*?--card-sheen-start:\s*color-mix\([\s\S]*?var\(--text-primary\) 7%/,
+    );
+    expect(appCss.match(/rgba\(255, 255, 255, 0\.56\)/g)).toHaveLength(1);
+    expect(appCss).not.toContain("color: #1b1917");
+    expect(appCss).not.toContain("background-color: #fbfaf9");
+    expect(appCss).toContain("color: var(--text-primary)");
+    expect(appCss).toContain("background-color: var(--bg-elevated)");
+  });
 });

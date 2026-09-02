@@ -172,11 +172,6 @@ body {
   background: var(--bg-primary) !important;
 }
 
-.spectra-wave-y :where(.font-display, h1, h2, h3) {
-  color: #1b1917;
-  text-rendering: geometricPrecision;
-}
-
 .spectra-wave-y .text-\[8px\],
 .spectra-wave-y .text-\[8\.5px\] {
   font-size: 11px !important;
@@ -202,28 +197,8 @@ body {
   font-size: 14.5px !important;
 }
 
-.spectra-card,
-[data-spectra-card] {
-  border-color: var(--card-border);
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.56),
-      rgba(255, 255, 255, 0.08) 52%
-    ),
-    var(--card-paper);
-}
-
 .spectra-wave-y :where(button, input, select, textarea) {
   accent-color: var(--brand-primary);
-}
-
-.spectra-wave-y :where(input, select, textarea):not([class*="bg-transparent"]) {
-  background-color: #fbfaf9;
-}
-
-.spectra-artifact-header {
-  border-color: #dfdcd8 !important;
 }
 
 /* The reference editors use one quiet persistence indicator in the global
@@ -4171,6 +4146,8 @@ body {
   --card-paper-quiet: #faf9f6;
   --card-border: #e7e4de;
   --card-border-soft: #efede8;
+  --card-sheen-start: rgba(255, 255, 255, 0.56);
+  --card-sheen-end: rgba(255, 255, 255, 0.08);
   --card-shadow:
     0 1px 2px rgba(41, 34, 27, 0.025), 0 10px 28px -25px rgba(41, 34, 27, 0.24);
   --card-shadow-hover:
@@ -4407,6 +4384,12 @@ body {
   --card-paper-quiet: #191918;
   --card-border: color-mix(in oklab, #cfc1ac 22%, transparent);
   --card-border-soft: color-mix(in oklab, #cfc1ac 13%, transparent);
+  --card-sheen-start: color-mix(
+    in oklab,
+    var(--text-primary) 7%,
+    transparent
+  );
+  --card-sheen-end: transparent;
   --card-shadow: 0 12px 28px -18px rgba(0, 0, 0, 0.72);
   --card-shadow-hover: 0 18px 40px -20px rgba(0, 0, 0, 0.88);
   --card-focus: #4bc8a4;
@@ -6228,8 +6211,8 @@ button:not(:disabled),
   background:
     linear-gradient(
       180deg,
-      color-mix(in oklab, white 30%, transparent),
-      transparent 44%
+      var(--card-sheen-start),
+      var(--card-sheen-end) 52%
     ),
     var(--card-paper);
   box-shadow: var(--card-shadow);
@@ -15377,7 +15360,7 @@ body {
 }
 
 .spectra-wave-y :where(.font-display, h1, h2, h3) {
-  color: #1b1917;
+  color: var(--text-primary);
   text-rendering: geometricPrecision;
 }
 
@@ -15397,28 +15380,16 @@ body {
   font-size: 13px !important;
 }
 
-.spectra-card,
-[data-spectra-card] {
-  border-color: var(--card-border);
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.56),
-      rgba(255, 255, 255, 0.08) 52%
-    ),
-    var(--card-paper);
-}
-
 .spectra-wave-y :where(button, input, select, textarea) {
   accent-color: var(--brand-primary);
 }
 
 .spectra-wave-y :where(input, select, textarea):not([class*="bg-transparent"]) {
-  background-color: #fbfaf9;
+  background-color: var(--bg-elevated);
 }
 
 .spectra-artifact-header {
-  border-color: #dfdcd8 !important;
+  border-color: var(--border-subtle) !important;
 }
 
 .spectra-document-studio,

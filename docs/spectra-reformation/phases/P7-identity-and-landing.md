@@ -69,3 +69,18 @@ Field/motion budgets met; reveal works from a cold load; landing meaning survive
 - Evidence: `.shots/reformation/P7.UI1/before/00-current-entry-1440.png` through `03-landing-prism-reference.png`; `.shots/reformation/P7.UI1/after/04-field-prism-top-1440.png`, `05-field-prism-hero-1440.png`.
 - Checks: Vitest 9 files/94 tests; TypeScript; scoped ESLint 0 warnings; architecture, copy, design-token and secret gates all pass.
 - Status: IMPLEMENTED, not verified.
+
+### P7.V1 verification log — 2026-09-02
+
+- Owner scope override: P7.UI2 and all landing/auth verification were skipped; Pablo is handling that isolated surface independently, so P8 must not relaunch it or infer landing acceptance from this PASS.
+- Product matrix began fresh on the production build at 1440x900: light/dark, full/reduced motion, keyboard opening/closing, selection activity and four-times CPU throttle.
+- SYSTEMIC finding: fixed white card sheen plus hard-coded Wave Y heading/input colours broke every dark bounded surface; this was a shared theme/material class, not a Board-card symptom.
+- Class repair: one light/dark `--card-sheen-*` token pair now feeds the canonical card material; duplicate card overrides were deleted; Wave Y uses semantic text, input and border tokens.
+- Before/after evidence: `.shots/reformation/P7.V1/01-workspace-dark-idle.png` and `03-workspace-dark-repaired-settled.png`.
+- A real multi-select transition produced exactly one localized `active` wake; light hierarchy and focus ring held.
+- Reduced motion computed both field and prism animations to `0s`; keyboard open/close cleared synchronous route truth back to `/workspace`.
+- Settled idle measured 0 JavaScript rAF callbacks/1.5 s; cold-load CLS was 0.0328; four-times CPU-throttled navigation was 322 ms on localhost.
+- Clean reload console: 0 errors; the sole warning was Clerk's development-key notice.
+- Phase sweep: Vitest 166 files/1,585 tests; build+TypeScript; lint 0 warnings; architecture/copy/token/capability/secret/diff checks all PASS.
+- Evidence: `.shots/reformation/P7.V1/manifest.md` and screenshots `00`-`06`.
+- Verdict: **P7.UI1 VERIFIED / PASS** after class-wide repair; P7.UI2 remains owner-isolated and unverified.

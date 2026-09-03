@@ -30,17 +30,25 @@ One dev user generated ~34 GB/period; the causes are patterns, so the rules are 
 - **God-file seams** (P1 does the load-bearing ones because sync truth depends on them): `artifact-persistence.ts` (save/close/dirty), `artifact-native-sync.ts` (lens refresh/reconcile), `useSyncPresentation` (ARCHITECTURE-TRUTH §5), then chrome/adapters/history splits in P6. The `refreshToolbar` re-render counter and per-keystroke `getJSON`+stringify die in P5's render work (PERF-1/2).
 - **Interaction language** (R16): state chips on rows, inline fills, motion-token transitions — not toast chains. One dialog voice, one empty-state voice, one skeleton. Copy follows R13 (plain words).
 
-## 4. Budgets (L4 gate table — initial values, tightened at P8)
+## 4. Budgets (L4 gate table — tightened for terminal P8.V1)
 
 | Budget | Value |
 |---|---|
 | First paint, any primary surface | ≤ 15 requests, largest payload ≤ 300 KB, no collection fetches (D42) |
 | Convex bytes read per user action | ≤ 1 MB typical action; opening an artifact ≤ its content + fixed overhead |
-| Idle product, per minute | ≤ 5 queries, 0 cron table scans attributable to this user |
+| Idle Library, per minute | ≤ 5 non-cron executions, ≤ 250 KB database I/O, ≤ 250 KB egress; 0 writes attributable to the idle user |
+| Idle collaborative artifact, per minute | ≤ 8 non-cron executions, ≤ 2 `collaborationGatewayBridge.exchange` calls, ≤ 500 KB database I/O, ≤ 64 KB egress; no full projection churn |
+| Scheduled empty/due-window work | Every invocation is indexed and bounded to ≤ 100 documents and ≤ 128 KB database I/O; no table scan |
 | Keystroke main-thread (fixture densities: 40-page doc / 200k-cell book / 120-slide deck) | ≤ 8 ms |
 | Remote presence frame cost | cursor-layer render only; 0 studio-body renders |
 | Bridge quiet 10k-file mount | 0 cloud mutations steady-state; < 1% CPU |
 | Collaboration: 30 clients one doc | typing latency < 100 ms p95; gateway stable > 1 h |
+
+P8 measures action, idle Library, idle collaboration, and scheduled windows
+separately from local Convex completion logs. Cached calls still count as calls;
+shared cron activity is reported by caller rather than hidden inside a user
+action. A historical dashboard total is a lead, not a pass or failure for the
+current candidate.
 
 ## 5. Security posture (P0 items, restated)
 

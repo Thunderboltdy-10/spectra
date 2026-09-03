@@ -1,12 +1,12 @@
 # P8 — School Launch Release Gate
 
-**Goal:** decide whether this exact commit can be launched in a school environment. P8 adds no planned product expansion. It prepares a production-like local composition, runs the completed real-corpus gate beside the final chaos/multiplayer gate, repairs every launch-blocking class, reruns affected gates, and produces a plain go/no-go verdict.
+**Goal:** decide whether this exact commit can be launched in a school environment. P8 prepares a production-like local composition, runs the completed real-corpus gate, then keeps one terminal verifier program active through first-person onboarding, combined chaos/multiplayer/AI/Bridge verification, perceptual and cost gates, every class-wide repair, clean reruns, and a plain GO or NO-GO verdict.
 
-**Prerequisites:** P5.V1, P6.V1 and P7.V1 VERIFIED. P1–P4 are closed historical foundations. **Explicit exclusion:** no P9–P15 expansion feature chain, connector expansion, broad artifact-depth expansion, memory/soul system, or school-assessment expansion is imported during P8. Self-contained reliability foundations already on the stable line remain in scope.
+**Prerequisites:** P5.V1, P6.V1 and P7.V1 VERIFIED. P1–P4 are closed historical foundations. **Explicit exclusion:** no P9–P15 expansion feature chain, connector expansion, broad artifact-depth expansion, memory/soul system, assignment/grading slice, or timetable retirement is imported during P8. ManageBac first-run class selection and later editability are explicitly included launch entry behavior, not assessment expansion.
 
-**Serial order:** P8.P1 → RC.V1 → P8.V1 → P8.I1.* as needed → targeted RC/V1 reruns → full final rerun → P8.V2.
+**Serial order:** P8.P1 → RC.V1 → P8.V1. P8.V1 is resumable across replacement agents but remains one serial unit and one evidence ledger through repairs and verdict.
 
-**Model routing:** P8.P1 and ordinary P8.I1 fix cards = Grok 4.6 High with the detailed packets below. RC.V1 and P8.V1 = GPT 5.6 Sol xhigh. P8.V2 = GPT 5.6 Sol high. A fix escalates Grok → Sol high only when it crosses several established seams or Grok leaves a precise blocked packet; Sol xhigh is reserved for architecture/release classes that still fail.
+**Model routing:** P8.P1 = Grok 4.6 High. RC.V1 and P8.V1 = GPT 5.6 Sol xhigh. P8.V1 does not fan out or route repair cards elsewhere. If its agent is replaced, the new verifier rereads the governed stack and resumes the same unit from `final-verification/PROMPT.md` and `.shots/reformation/P8.V1/run-state.json`.
 
 ## P8.P1 — Frozen-candidate production preflight (MT)
 
@@ -83,45 +83,40 @@ Triage each failure LOCAL/SYSTEMIC, repair holdable classes, add a real-corpus-d
 - **Status: VERIFIED (Pablo owner-closed 2026-09-03).** Three format cards proven on frozen production build.
 - **Deferred to P8.V1:** xlsx-run3 Bridge `file.write` + Excel package readback hash (70s poll showed no on-disk write; Spectra Keep Excel path already durable). Original-tree integrity card and PPTX R2 timed exit also remain P8.V1 scope.
 
-## P8.V1 — Chaos, multiplayer, endurance and scale finale (H)
+## P8.V1 — Terminal school-launch verification and repair program (H)
 
-**Model: GPT 5.6 Sol xhigh.** Use the same frozen candidate and evidence manifest as RC.V1.
+**Model: GPT 5.6 Sol xhigh.** Use the same candidate lineage and evidence manifest as RC.V1. Read `../final-verification/` in its mandatory order; that folder is the executable context, matrix, process, evidence contract, scripts, and continuation packet for this section.
 
-### Required matrix
+### Required coverage
 
-0. **RC.V1 carryover:** xlsx-run3 Bridge `file.write` + Excel package readback hash on the sacrificial corpus copy (Spectra Keep Excel Y1+B1+durable reload already green from RC.V1). Original-tree integrity card (IBDP1 before/after hashes; EE 4 lock) and PPTX R2 timed exit for `Updating presentation content.`
-1. **Actors:** both signed-in humans and two distinct AI runs edit the same artifact and the same region; Follow AI route crossing; claims, authorship, stop/retry/undo and revocation truth.
-2. **Failures:** gateway kill mid-write, Bridge kill mid-native write, browser crash, network partition, Convex latency, failed checkpoint, stale token, permission change and device revoke. Every entered state must have the R2 exit.
-3. **Recovery:** restart from clean processes and profiles; replay journals/updates once; no duplicate operation, false saved/current label, manual DB surgery or reinstall.
-4. **Endurance:** multi-hour realistic session; memory, handles, timers, animation loops, IndexedDB and update-log growth remain bounded.
-5. **Scale:** 10k-node Library, 40-page document, 200k-cell workbook, 120-slide deck, many Dock tabs, and the unchanged 30-client/65-minute classroom soak.
-6. **School journeys:** invite/accept, operator school session, admin member management, teacher/student/member basics in launch scope, reminder delivery, Bridge pairing/mount, Library organization, collaboration and AI help. Deferred assessment/connectors must be absent or honestly labelled, never half-wired.
-7. **Security and privacy:** secret scan, authorization matrix, signed URLs, sandbox/network boundaries, audit visibility, expired/revoked access, and no internal token/code in user copy.
-8. **Full machine floor:** full Vitest, typecheck, production build, zero-warning lint, architecture/copy/capability/token/secrets gates, DOCX/Office/seam fidelity, Bridge tests/build, and local-stack tests.
+0. **Do not repeat closed work.** RC.V1 contributes only xlsx-run3 Bridge `file.write` + Excel package readback hash, original-tree read-only integrity (including the live EE 4 lock), and the PPTX R2 timed exit. P5.V1's unchanged 30-client/65-minute soak is inherited unless a repair reaches that load path.
+1. **First person:** a fresh database and real sign-in reach useful work; explicit ManageBac class selection handles noise, empty/degraded/disconnected states, reload and double-submit; the selection remains editable from School or ManageBac without deleting work; every other onboarding choice remains editable in Settings.
+2. **Actors:** both signed-in humans and two distinct AI runs edit the same artifact and the same region; Follow AI route crossing; claims, authorship, stop/retry/undo and revocation truth.
+3. **Failures:** gateway kill mid-write, Bridge kill mid-native write, browser crash, network partition, Convex latency, failed checkpoint, stale token, permission change and device revoke. Every entered state must have the R2 exit.
+4. **Recovery:** restart from clean processes and profiles; replay journals/updates once; no duplicate operation, false saved/current label, manual DB surgery or reinstall.
+5. **Endurance:** multi-hour realistic session; memory, handles, timers, animation loops, IndexedDB and update-log growth remain bounded.
+6. **Scale:** 10k-node Library, 40-page document, 200k-cell workbook, 120-slide deck, many Dock tabs, and the inherited 30-client/65-minute classroom result unless a repair reaches that path.
+7. **School journeys:** invite/accept, operator school session, admin member management, teacher/student/member basics in launch scope, reminder delivery, Bridge pairing/mount, Library organization, collaboration and AI help. Deferred assessment/connectors must be absent or honestly labelled, never half-wired.
+8. **Security and privacy:** secret scan, authorization matrix, signed URLs, sandbox/network boundaries, audit visibility, expired/revoked access, and no internal token/code in user copy.
+9. **Perceptual seams:** complete-viewport screenshot analysis catches unreadable endings behind the Dock, panes that blur/cover instead of share width, competing action clusters, misaligned/poorly overflowing chrome, effects larger than their subject, formatting/control disagreement, robotic copy, and all related sibling surfaces. Repair the shared geometry, state, or projection class rather than the screenshot.
+10. **Cost:** measure current per-action, idle Library, idle collaboration, scheduled, first-paint, Bridge, and AI windows. Close polling, scan, fat projection, lifecycle, and egress classes against ARCHITECTURE-PLATFORM §4; historical dashboard leaders are leads, not current verdicts.
+11. **Full machine floor:** full Vitest, typecheck, production build, zero-warning lint, architecture/copy/capability/token/secrets gates, DOCX/Office/seam fidelity, Bridge tests/build, local-stack/foundation tests, and every focused suite introduced by repairs.
 
-PASS requires every card with evidence. Hosting remains a named operational risk until Pablo performs the production deploy; do not pretend local composition proves Fly.io.
+PASS requires every matrix card with real evidence. A failure is triaged and repaired inside this verifier session under R12/R17, then the whole affected sequence and its consumers are rerun on a rebuilt production candidate. A replacement agent may continue the same P8.V1 only for a truly unholdable multi-independent-seam class. Hosting remains a named operational risk until the production deployment is actually exercised; local composition must not claim otherwise.
 
-## P8.I1.* — Serial finale fix cards (MT by default)
+### P8.V1 foundation log — 2026-09-03
 
-Create one sub-card per finding (`P8.I1.1`, `.2`, …), never a miscellaneous mega-diff. Default model is **Grok 4.6 High** and its prompt must contain:
-
-- exact failed card, commit/environment, reproduction and evidence;
-- LOCAL/SYSTEMIC classification and suspected blast radius;
-- invariants that must survive and prohibited shortcuts;
-- owning files/functions plus read-first questions;
-- red test or harness assertion to add;
-- focused checks and every downstream card to rerun.
-
-Grok inspects all named seams, fixes the class, searches for siblings, runs focused checks, and leaves one coherent commit. Escalate to Sol high only with a precise explanation of the cross-seam blocker; escalate to Sol xhigh only after the class remains release-critical and architecture-bearing. After a fix, rerun the failed card and every consumer card. After the final fix, rerun RC.V1, P8.V1's representative chaos/scale cards, and the full machine floor from clean state.
-
-## P8.V2 — School launch verdict (MT)
-
-**Model: GPT 5.6 Sol high, fresh session.** Produce a written go/no-go against PRODUCT §6, item by item: corruption/silent loss, sync truth, durable success, Bridge recovery, collaboration, AI usefulness/authority, Office fidelity, performance, backend budgets, auth/security/privacy, accessibility, operational recovery and school-scope completeness.
-
-The verdict cites P5.V1, P6.V1, P7.V1, final RC.V1, P8.V1, every P8.I1 repair/rerun, the exact candidate commit, and the expansion exclusion/archive. Include measured budgets, open risks with severity/owner, deferred scope, deployment/runback/incident runbooks, and the one manual production-deploy checklist. No vague “mostly green” verdict.
-
-`GO` means the frozen commit is technically launchable when Pablo completes the named production-secret/deploy steps. `NO-GO` names the blocking cards and the next fix packet. Pablo decides whether to launch; agents do not ask him to accept prior units.
+- Recast P8.V1 as the terminal, serial, resumable verifier/repair/release program; removed the extra P8 lanes from operational truth and evidence schema.
+- Preserved independent verification: this verifier starts after earlier implementation/RC sessions; a replacement agent resumes from files, never inherited chat.
+- Built `final-verification/` with mandatory context, RC dedup map, covering matrix, execution/evidence contracts, and one paste-ready continuation.
+- Added first-person onboarding and explicit ManageBac class selection/later editability; assessment/grading remains excluded.
+- Promoted Pablo's screenshots into perceptual-seam cards for safe-area, shared pane allocation, action hierarchy, row pressure, bounded effects, and style fidelity.
+- Added playwright-cli observers/checkpoints plus onboarding, close, Follow, perception, and selected-style probes as single function-expression scripts.
+- Added non-destructive fresh-instance allocation and a resumable card ledger that protects passed cards unless a repair explicitly invalidates them.
+- Added sanitized Convex usage windows with action/idle/collaboration/scheduled gates; arguments and user content are discarded.
+- RC.V1 feature inventories and the unchanged P5.V1 soak are explicitly not repeated; only the three recorded RC carryovers remain.
+- Foundation checks and current governance/static evidence are recorded in the closeout commit; product verification remains OPEN.
 
 ## Exit gate
 
-P8.V2 exists against one immutable candidate and is internally consistent with its evidence. A GO has zero launch-blocking failures and a tested rollback/incident path. A NO-GO remains honest active work; expansion does not begin until the school-launch line reaches GO or Pablo explicitly changes scope.
+P8.V1 ends against one clean, immutable candidate whose manifest and STATE row agree. GO has zero launch-blocking failures, every numeric budget met, and a tested rollback/incident path. NO-GO names exact failed cards and remains honest resumable P8.V1 work; expansion does not begin until the school-launch line reaches GO or Pablo explicitly changes scope.

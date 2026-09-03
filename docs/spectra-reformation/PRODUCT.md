@@ -13,7 +13,7 @@ Spectra is one live workspace where students, teachers, and AI do real work toge
 
 ## 3. Users and launch scope
 
-First audience: schools (students, teachers; ManageBac-connected), releasable, no developer chrome. **This program's launch scope excludes** the assessment slice (class-scoped assignment, grading queues, timetable retirement, ManageBac onboarding) — deferred by decision 2026-08-25 to a follow-up program. The launch bar for this program is: the core workspace, the Bridge, the artifacts, the AI, and collaboration are production-real for individual and shared work.
+First audience: schools (students, teachers; ManageBac-connected), releasable, no developer chrome. **This program's launch scope excludes** class-scoped assignment, grading queues, and timetable retirement. ManageBac onboarding class choice moved into launch scope by decision 2026-09-03: because the provider retains old and irrelevant classes, Spectra never imports every candidate by default. A person explicitly chooses what appears, may skip when the provider is unavailable, and can revise the selection later from School or ManageBac without losing work. Every other first-run choice has one editable home in Settings. The launch bar is: a new person reaches useful work naturally, and the core workspace, Bridge, artifacts, AI, and collaboration are production-real for individual and shared work.
 
 ## 4. The artifact world
 
@@ -29,6 +29,8 @@ These are the rules that keep agents from re-inventing interaction patterns:
 4. **Every dead end has a door.** No state may trap the user (the blank-title close trap, unresolvable conflicts, eternal "Saving…"). Close always works (with an explicit choice when work would be lost — a discard path exists). Errors always name a next step. Empty states teach.
 5. **AI work is legible.** The dock names the real target of every operation ("Editing *Pendulum Lab Report*", never "the focused artifact"), shows what changed, and offers revert at run level. When Follow AI is on, the user sees navigation, cursor, and edits happen; when off, background work stays background but leaves honest traces.
 6. **Nothing lies, including copy.** "Archive" must not permanently delete. "Search everywhere" must search everywhere or say what it searches. A count is a real count. A disabled control states why in a tooltip-length sentence.
+7. **The viewport is a shared resource.** Dock, composer, panels, inspectors, comments, embeds, workbars, and content participate in one layout budget. Final content can always scroll clear; auxiliary panes do not make the work unreadable by covering or blurring it; overflow is intentional; one corner does not carry competing controls for the same moment.
+8. **Simple fidelity is the canary.** A font name, size, bold state, highlight, or region effect shown by a control must agree with what is rendered, saved, reloaded, and written natively. A visually present control is not proof that its style exists.
 
 ## 6. What "production-ready" means here (acceptance vocabulary)
 

@@ -41,7 +41,7 @@ For the truth engine and Bridge (Tier-R work):
 
 Executed by verifier agents who receive **only**: the Reformation docs, a goal card, and a browser. No implementation knowledge, no file paths, no "click the third button". This is deliberate: the agent must experience the product the way a person does — not knowing where features live, what the app expects, or which state it is in.
 
-Browser journeys use Chrome; keep one claimed tab for a sequence when same-tab continuity matters. If a verification requires Windows desktop or app UI control, use the `computer-use:computer-use` skill and follow its `SKILL.md`, guidance, API, and confirmation rules before acting.
+Browser journeys use Chrome through the `playwright-cli` skill; keep one named session/tab for a sequence when same-tab continuity matters. If verification requires Windows desktop or Office/app UI control that Playwright cannot provide, use the `lowlevel-computer-use` skill, follow its `SKILL.md`, and clean up every desktop/process created for the card.
 
 **Goal cards** are written per phase (examples): *"You have a folder of last year's schoolwork on this PC. Get it into Spectra without changing anything. Then improve the conclusion of one essay and make sure the change is really in the Word file."* — *"Your teacher shared a deck with you. Study it, then make your own copy with three extra cards."* — *"Ask the AI to reorganize your Biology workspace. Confirm you can tell exactly what it did and undo one thing it did."*
 

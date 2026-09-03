@@ -3,7 +3,6 @@ export const REFORMATION_EVIDENCE_UNITS = Object.freeze([
   "P8.P1",
   "RC.V1",
   "P8.V1",
-  "P8.V2",
 ]);
 export const REFORMATION_EVIDENCE_VERDICTS = Object.freeze([
   "open",

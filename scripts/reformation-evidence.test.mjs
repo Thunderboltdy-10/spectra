@@ -44,4 +44,12 @@ describe("reformation evidence manifest", () => {
       ),
     ).toThrow(/secret field/i);
   });
+
+  it("treats P8.V1 as the terminal evidence unit", () => {
+    expect(() =>
+      validateEvidenceManifest(
+        createEvidenceManifest({ unit: "P8.V2", commit: "abc123" }),
+      ),
+    ).toThrow(/unknown evidence unit/i);
+  });
 });

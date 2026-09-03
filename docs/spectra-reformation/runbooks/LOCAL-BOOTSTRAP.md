@@ -1,6 +1,6 @@
 # LOCAL-BOOTSTRAP — seed and finish a fresh local school
 
-P9.I4 turns an empty local instance into the smallest honest Spectra school:
+The local bootstrap turns an empty instance into the smallest honest Spectra school:
 account B is the membershipless platform operator, account A becomes The Global
 College's `school_admin`, ManageBac is connected, and an explicitly sacrificial
 folder is imported through the Bridge. This runbook never targets cloud Convex.
@@ -137,6 +137,13 @@ local dry run discovered seven official personal capabilities, verified all
 seven readable, failed none, and truthfully retained four quarantined projection
 records; that is an acceptable baseline, not a reason to relabel the connection.
 
+After identity/bootstrap, P8.V1's first-run flow must show the authenticated
+person's class candidates and ask which current classes should appear. It never
+auto-selects every historical provider class. Search, keyboard selection, Skip,
+double-submit idempotency, and hard-reload resume are required. The same choice
+must remain available from School or ManageBac; removing an auto-created class
+shelf moves its work to General rather than deleting it.
+
 ## 6. Pair the Bridge and import only the copy
 
 Run a Bridge built from the same checkout as the local Convex functions. Point
@@ -172,5 +179,6 @@ Convex or by mounting the original `IBDP1` folder.
 - Stop the Bridge, web server, collaboration gateway, and local Convex process.
 - Preserve `.spectra-local/instances/1/`, including its Convex data, Bridge
   journal, private invitation, and bootstrap summary. Do not run `local:reset`.
-- A later verifier may restart the same instance and re-check the sequence. This
-  implementation run is onboarding evidence only; it is not P9.V1 acceptance.
+- A later P8.V1 verifier may restart the same instance and inspect the sequence.
+  Use `final-verification/scripts/fresh-instance.mjs` to allocate another empty
+  database for a clean first-person replay; never reset this evidence instance.

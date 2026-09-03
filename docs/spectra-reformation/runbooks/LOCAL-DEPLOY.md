@@ -1,6 +1,6 @@
 # LOCAL-DEPLOY — isolated Convex + Next.js + collaboration stacks
 
-P9.I1 replaces the shared cloud development backend for verification. Each
+The isolated local stack replaces the shared cloud development backend for verification. Each
 numeric instance id owns a deterministic port block, its own Convex SQLite and
 object-storage directory, its own environment file, and its own process record.
 Instances do not share application state.
@@ -84,8 +84,8 @@ issuer, app callback URL, OpenRouter key, collaboration/connector/secret bridge
 keys, optional agent-eval and analysis keys, and `SUPER_ADMIN_EMAILS` when set.
 Clerk's publishable and secret keys remain only in Next.js. Optional
 `MANAGEBAC_BASE_URL`, `MANAGEBAC_API_KEY`, and
-`SPECTRA_MANAGEBAC_WORKER_HTTP_KEY` stay in the app environment; P9.I4 owns
-seed/bootstrap behavior.
+`SPECTRA_MANAGEBAC_WORKER_HTTP_KEY` stay in the app environment; the bootstrap
+runbook and terminal P8.V1 own seed/first-person behavior.
 
 Every supported optional variable is named and commented in
 `.env.local.example`, including email, observability, provider-routing,
@@ -170,8 +170,8 @@ npm run local:reset -- --instance 2 --yes
 npm run dev:local -- --instance 2
 ```
 
-Never reset an instance holding a live `local-deploy-n` lease. A reset is not a
-seed operation; P9.I4 owns all seed and first-run bootstrap logic.
+P8.V1 never uses reset to replay a first-person journey. A reset is not a seed
+operation; allocate a new disposable instance and preserve the old evidence.
 
 ## Bridge on local Convex
 
@@ -188,18 +188,24 @@ Use `3022` for instance 2, `3042` for instance 3, or read the generated
 `env.local`. The Bridge remains an exclusive physical resource: pointing it at
 a local instance does not grant a `bridge` lease.
 
-## Verification lease protocol
+## Serial disposable-instance protocol
 
-1. The orchestrator chooses an unused `local-deploy-n` row and records the VU
-   as holder in `docs/spectra-reformation/orchestration/LOCKS.md`. Agents do not
-   self-assign or rewrite that ledger.
-2. The VU starts only that numeric instance and cites the instance id in its
-   evidence manifest. No other verifier may use the same id concurrently.
-3. `playwright-a`, `playwright-b`, `office-com`, and `bridge` remain separate
-   exclusive leases. A local deployment lease grants none of them.
-4. At close-out the VU stops the instance and reports that it is down. The
-   orchestrator verifies the process is gone, then clears the lease row.
+The orchestration lease ledger is retired. Only one verifier works in the
+primary checkout. Existing instances are evidence and are never reset merely to
+replay onboarding. Plan and create a fresh one with:
 
-If a port is occupied, the harness fails instead of moving silently. Stop the
-recorded holder or add another instance; never aim a VU at the shared cloud dev
-deployment.
+```powershell
+node docs/spectra-reformation/final-verification/scripts/fresh-instance.mjs plan
+node docs/spectra-reformation/final-verification/scripts/fresh-instance.mjs create --source-instance 1
+```
+
+The helper copies only the credential template and derives a new port block; it
+does not copy or delete a database. Record the chosen id in the P8.V1 manifest,
+start only that stack, and isolate its Bridge directory. Account A/B browser
+profiles, Office automation, and Bridge remain exclusive test resources inside
+the serial session. At closeout stop every process created for the card and keep
+the instance for inspection.
+
+If a port is occupied, the harness fails instead of moving silently. Inspect the
+recorded `runtime.json`, stop only its exact process tree when it belongs to the
+current card, or allocate another instance. Never aim P8 at shared cloud Convex.

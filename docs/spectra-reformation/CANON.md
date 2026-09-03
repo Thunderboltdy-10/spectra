@@ -11,7 +11,7 @@ Decisions **D1–D44** (`docs/spectra-nova/CANON.md`, incorporating HQ D1–D23)
 - **D26 (extended by R2).** Truthful states are now a mechanical property, not a discipline: no state may exist without a compensating exit.
 - **D42 (extended by R10).** Bounded reads now carry numeric budgets checked by the owning unit and at phase gates.
 
-## 1. New binding decisions (R1–R19)
+## 1. New binding decisions (R1–R21)
 
 ### Truth
 
@@ -28,7 +28,7 @@ Decisions **D1–D44** (`docs/spectra-nova/CANON.md`, incorporating HQ D1–D23)
 
 ### Process
 
-- **R8. The implementer never verifies its own work.** Closure requires a verification unit executed by a different agent in a different session with no shared context beyond the Reformation docs. A verifier PASS changes the unit to VERIFIED and closes it mechanically; no agent requests a later owner-acceptance ceremony. The verifier may repair product code during that VU (R17). Tests altered merely to pass (constants bent, assertions weakened, gates deleted) are treated as data corruption of the evidence system. Pablo's only required sign-off is the P8.V2 launch/no-launch decision.
+- **R8. The implementer never verifies its own work.** Closure requires a verification unit executed by a different agent in a different session with no shared context beyond the Reformation docs. A verifier PASS changes the unit to VERIFIED and closes it mechanically; no agent requests a later owner-acceptance ceremony. The verifier may repair product code during that VU (R17). Tests altered merely to pass (constants bent, assertions weakened, gates deleted) are treated as data corruption of the evidence system.
 - **R9. Per-unit evidence is canon.** A rule that is not exercised by the owning unit or a phase gate is advisory. Relevant tests, fidelity harnesses, seam contract tests, secret scans, token rules, and budgets are run and recorded with the unit that owns them. This program has no automated test lane; the entire repository sweep happens only after paired verification. Bridge compilation may be added later as a separate gate.
 - **R10. Budgets are gates.** Convex I/O per user action, first-paint request count and largest payload per surface, keystroke main-thread cost, and presence render cost carry numeric budgets (ARCHITECTURE-PLATFORM §4). Exceeding a budget is a defect now, not at scale.
 - **R11. Sequences are the unit of verification for sync and fidelity.** Edit → external save → reopen; offline → edit → reconnect; queue → crash → replay; concurrent edits both sides. Single-checkpoint evidence (one screenshot of one state) cannot verify any Tier-R claim.
@@ -50,6 +50,10 @@ Decisions **D1–D44** (`docs/spectra-nova/CANON.md`, incorporating HQ D1–D23)
 - **R18. Temporary orchestrated execution (retired by R20).** This decision governed the short parallel campaign and remains only to explain its historical delegated acceptances and evidence. It no longer authorizes an orchestrator, worktrees, parallel launches, or new delegated acceptance.
 - **R19. The real-corpus bar.** The product is not release-ready until Pablo's actual documents — the Extended Essay (equations, tables, images, footnotes, TOC), a complex real presentation, and the Physics IA data-collection workbook — render faithfully, survive editing, and round-trip through real Office without loss, with every offered capability either working or refusing honestly. Fixture suites passing while the real corpus fails is the definition of theater. "It opened" is not the bar; the corpus gate uses the copy-safe protocol preserved in archived ORCHESTRATION §8, never the originals, and re-runs on the production build inside P8. Known red at adoption (finding RC-1: EE equations missing, tables broken).
 - **R20. Serial single-checkout execution supersedes R18.** The temporary orchestrated/worktree campaign is retired. New work runs one unit at a time in the primary checkout on `main`; no standing orchestrator, parallel implementation lane, or extra worktree is part of the active process. Existing evidence and delegated acceptances remain historical facts; future units close at independent VU PASS under R8. `ORCHESTRATION.md` and `orchestration/` are retained as an archive and evidence trail, not active instructions.
+
+### Release process (amended 2026-09-03)
+
+- **R21. P8.V1 is the terminal, resumable verifier program.** After P8.P1 and RC.V1, one independent verifier session starts P8.V1 and may continue across replacement agents by re-reading the governed evidence ledger. It discovers, triages, repairs, rebuilds, and retests every launch class under R12/R17, however many related files it spans. It creates no P8 implementation sub-units and delegates no parallel lanes. Only a genuinely unholdable class spanning multiple independent seams produces a paste-ready continuation prompt for another P8.V1 verifier. P8.V1 runs the final clean candidate and machine floor, records GO or NO-GO itself, and is the last Reformation unit.
 
 ## 2. How Spectra must feel (unchanged, plus one line)
 

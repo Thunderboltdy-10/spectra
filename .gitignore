@@ -48,8 +48,17 @@ next-env.d.ts
 
 /ai-education-workspace-landing-page
 opencode*.json
+
+# Browser automation runtime and generated output. Reusable P8 probes live in
+# docs/spectra-reformation/final-verification/scripts/playwright/ and remain tracked.
 .playwright-cli/
 .playwright/
+playwright-report/
+test-results/
+traces/
+recordings/
+*.auth-state.json
+storage-state-*.json
 .shots/
 
 # Local-only: pre-migration Convex snapshots and scratch working files.

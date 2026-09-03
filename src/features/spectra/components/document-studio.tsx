@@ -1490,7 +1490,9 @@ export function DocumentStudio({
     // filterTransaction.
     const missingNativeNodes = collaborationDocument
       ? (incomingEditorJson.content ?? []).filter((node) => {
-          const blockId = record(node?.attrs).blockId;
+          // Use bracket access to satisfy TS configs that disallow dot-access on
+          // index-signature types (the attrs object is intentionally untyped).
+          const blockId = record(node?.attrs)["blockId"];
           if (typeof blockId !== "string" || !blockId) return false;
           let found = false;
           editor.state.doc.descendants((candidate) => {

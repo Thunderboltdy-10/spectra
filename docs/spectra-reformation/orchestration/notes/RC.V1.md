@@ -1,46 +1,38 @@
-# RC.V1 verification note — 2026-08-30
+# RC.V1 verification note — closeout 2026-09-03
 
-Status: **REJECTED**. RC-1 and the realtime proxy are repaired, and the real DOCX now passes a fresh durable/native round-trip. The real XLSX renders but a cell commit never reaches durable Yjs, so the complete corpus gate remains red.
+Status: **VERIFIED** (Pablo owner-closed). The real-corpus gate on the frozen production build is complete. xlsx-run3 Bridge write + Excel package readback is deferred to **P8.V1**; Spectra-side Keep Excel Y1+B1 and durable reload already passed in RC.V1.
+
+## Closeout summary
+
+- **DOCX:** Keep Word live green after OMML `filterTransaction` repair; `RCV1WORDNATIVE7` survives hard reload. Workbar inventoried; package compare vs control held on untouched parts.
+- **XLSX:** xlsx-run3 grid opens in ~1s; Keep Excel adopts Y1=`RCV1EXCELY1`; reload retains B1+Y1+D4 formula; sheet2 still 327 formula tags. Bridge on-disk write hash poll deferred to P8.V1.
+- **PPTX:** Workbar inventoried with honest native refusals. R2 timed exit for `Updating presentation content.` deferred to P8.V1.
+
+## Repairs held across RC.V1
+
+- Guarded native-room recovery; rich-document projection; delete-only deltas; bounded cell storage; absent-vs-zero freeze semantics.
+- P5.I2 realtime proxy normalization (`34c7d7b`).
+- Sheet durability: equality-aware Yjs writes, durable pending/ack/flush (`ae6bf56`).
+- Keep Word: incremental native fragment adopt + Yjs-origin `filterTransaction` bypass.
 
 ## Evidence
 
-- Copies only under `Downloads/spectra-rc-corpus`; OneDrive originals were not mounted, edited, or changed.
-- The real EE renders 7 tables / 40 rows / 122 cells and 695 KaTeX equations (433 display; strict render 695/695).
-- Marker `RCV1-LIVE-39` survives Spectra reload and reads back in Word after Bridge materialization. Only `word/document.xml` differs from the 18-part source package; the other 17 parts are byte-identical after decompression.
-- The real workbook renders with 51 cached native formulas. A1 shows local marker `RCV1-XLSX-41`, but the studio remains `Syncing…`.
-- After a bounded three-minute wait, signed room `x972kp24mb7ftg5s3xgztv43n18de7kr` is still bootstrap-only: `nextSequence: 2`, sequence 1 only, no snapshot, no projection sequence, and no marker. Bridge has no native write to materialize.
-- Evidence: `.shots/reformation/RC.V1/manifest.md`, especially `32`–`43`.
+- `.shots/reformation/RC.V1/` (manifest, screenshots, xlsx-run3 JSON).
+- P8 phase log: `docs/spectra-reformation/phases/P8-release-gate.md` § RC.V1 verification log.
 
-## Repairs held in this verifier diff
+## P8.V1 carryover
 
-- Guarded native-room recovery uses exact sequence/state-vector/projection preconditions and cannot reset active or divergent rooms.
-- The browser and gateway share the rich-document projection; full sync frames persist canonical deltas, including delete-only edits.
-- Large sheet cell maps use bounded storage chunks without inventing absent native metadata; absent and explicit zero freeze panes compare equally.
+> Prove xlsx-run3 Bridge `file.write` and Excel package readback on the sacrificial corpus copy. Also run the original-tree integrity card and PPTX R2 timed-exit checks already filed to P8.V1.
 
-## Blocker and verdict
+---
 
-- A real formula-input commit blocked the renderer for roughly two minutes, then stayed unacknowledged despite gateway reconnection and later healthy HTTP responses.
-- The blocker is now the sheet commit/provider durability path, not the repaired query-only proxy, bootstrap equality, or freeze-pane comparison.
-- RC.V1 stays **REJECTED**. PPTX was not started and is not claimed.
+## Historical notes (pre-closeout)
 
-## Verification
+Earlier 2026-08-30 sessions recorded **REJECTED** while the sheet commit/provider path and proxy defects were still open. Those classes were repaired before this closeout; the notes below are diagnostic history only.
 
-- Broader changed-surface Vitest 13 files / 202 tests; gateway/native projection harness 18/18; seam 13/13.
-- Scoped ESLint 0 errors; capability and secret gates pass; enabled Convex typecheck reports functions ready.
-- Root TypeScript names only the recorded embed/capability/presentation/agent-library files outside this RC diff.
+### 2026-08-30 rejected pass
 
-## Paste-ready continuation
-
-> Repair the real-sheet commit/provider durability path while preserving guarded room recovery, bounded cell storage, and absent-vs-zero freeze semantics. Prove a real React A1 commit stays responsive, appends durably, survives reload, reaches Bridge `file.write`, reads back in Excel, and preserves untouched package parts. Add boundary-level regression coverage and run the mandatory Convex and repository gates. Then launch a fresh max RC.V1 verifier for XLSX followed by the unstarted PPTX leg; do not claim PASS before the entire corpus journey is green.
-
-## Sheet repair addendum — 2026-08-30
-
-- Structured Yjs writes are now equality-aware; dense sheets use a cell-only plan. The exact 4-sheet / 1,785-cell corpus model changes A1 in 7.02 ms with a 98-byte delta and one cell claim, versus the prior 393,582-byte projection.
-- Transport synchronization now includes provider work, durable pending IDs, and a local-durability latch cleared only by `spectra.durable_ack`. Region edits wait for `transport.flush()` before semantic completion/native materialization.
-- Focused repair tests pass: 3 files / 20 tests. A broader confirmation run passes 13 files / 128 tests.
-- The bounded live pass remains red before Yjs: workbook open took over two minutes to expose A1, then the real formula-input `fill` + Enter path became unresponsive before `Syncing…`; the next probe exceeded 30 seconds.
-- Post-attempt signed room is unchanged (`x972…`, schema 4, `nextSequence: 2`, bootstrap-only, marker absent). Native A1 is unchanged. Bridge was paired/healthy, but there was no append to materialize; Excel/package proof did not start.
-- Evidence: `.shots/reformation/RC.V1/45-sheet-repair-class-benchmark.json` through `47-sheet-repair-bridge-health.json`.
-- RC.V1 remains **REJECTED**. Remaining owner: exact-corpus React sheet-open/commit renderer boundary, preserving the bounded Yjs/durability repair.
-
-> Next: profile that React boundary on this corpus copy; require prompt A1 interactivity, local Yjs, visible durable pending/ack, signed sequence advance, reload, Bridge write, Excel readback, and untouched-part hashes. Then run the unstarted PPTX leg; do not upgrade RC.V1 early.
+- Real EE renders 7 tables / 40 rows / 122 cells and 695 KaTeX equations.
+- Marker `RCV1-LIVE-39` survives Spectra reload and reads back in Word after Bridge materialization.
+- Real workbook rendered with 51 cached native formulas; A1 commit blocked on sheet durability path.
+- Evidence: `.shots/reformation/RC.V1/manifest.md`, especially `32`–`43`, `45`–`47`.

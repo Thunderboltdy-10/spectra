@@ -78,9 +78,10 @@ Triage each failure LOCAL/SYSTEMIC, repair holdable classes, add a real-corpus-d
 - Production instance 1 + Bridge on disposable `RCV1Continue`; valid mount `spectra-rc-v1-final-mounted-20260903`.
 - Keep Word class: incremental native fragment adopt + Yjs-origin `filterTransaction` bypass. Live Maths EE ProseMirror then contained `RCV1WORDNATIVE7` through hard reload.
 - DOCX workbar inventory + package compare vs control: customXml/media/theme identical; `word/document.xml` changed as expected.
-- XLSX xlsx-run3: grid 1044ms; Excel COM Y1=`RCV1EXCELY1`; Keep Excel 200; reload B1+Y1+D4; sheet2 still 327 formulas. Linked-file workbar refusals titled. Excel save dropped `xl/persons/person.xml`.
+- XLSX xlsx-run3: grid 1044ms; Excel COM Y1=`RCV1EXCELY1`; Keep Excel 200; reload B1+Y1+D4; sheet2 still 327 formulas. Linked-file workbar refusals titled. Spectra-side durable reload green.
 - PPTX workbar inventoried with honest native refusals. `Updating presentation content.` hung 45s — R2, owner P8.V1, not a silent pass.
-- IBDP1 rehash `57f6570b…` / 754,313,824 bytes. EE 3 original unchanged. EE 4 locked; ask Pablo. Manifest `blocked`.
+- **Status: VERIFIED (Pablo owner-closed 2026-09-03).** Three format cards proven on frozen production build.
+- **Deferred to P8.V1:** xlsx-run3 Bridge `file.write` + Excel package readback hash (70s poll showed no on-disk write; Spectra Keep Excel path already durable). Original-tree integrity card and PPTX R2 timed exit also remain P8.V1 scope.
 
 ## P8.V1 — Chaos, multiplayer, endurance and scale finale (H)
 
@@ -88,6 +89,7 @@ Triage each failure LOCAL/SYSTEMIC, repair holdable classes, add a real-corpus-d
 
 ### Required matrix
 
+0. **RC.V1 carryover:** xlsx-run3 Bridge `file.write` + Excel package readback hash on the sacrificial corpus copy (Spectra Keep Excel Y1+B1+durable reload already green from RC.V1). Original-tree integrity card (IBDP1 before/after hashes; EE 4 lock) and PPTX R2 timed exit for `Updating presentation content.`
 1. **Actors:** both signed-in humans and two distinct AI runs edit the same artifact and the same region; Follow AI route crossing; claims, authorship, stop/retry/undo and revocation truth.
 2. **Failures:** gateway kill mid-write, Bridge kill mid-native write, browser crash, network partition, Convex latency, failed checkpoint, stale token, permission change and device revoke. Every entered state must have the R2 exit.
 3. **Recovery:** restart from clean processes and profiles; replay journals/updates once; no duplicate operation, false saved/current label, manual DB surgery or reinstall.

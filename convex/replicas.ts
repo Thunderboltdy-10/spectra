@@ -1339,9 +1339,16 @@ export const recordExternalReconciliation = mutation({
       const openConflicts = await ctx.db.query("syncConflicts")
         .withIndex("by_work_state", (q) => q.eq("workId", args.workId).eq("state", "open"))
         .take(50);
+      // Keep Office is an explicit whole-file choice. Overlapping-region
+      // conflicts must close even when merge region ids are a superset of
+      // the native-changed set (PowerPoint remapped shape identity).
       const resolved = openConflicts.filter((conflict) =>
         conflict.localRevision === local.revision &&
-        (conflict.regionIds.length === 0 || conflict.regionIds.every((regionId) => changedRegions.has(regionId))),
+        (
+          args.resolution === "local" ||
+          conflict.regionIds.length === 0 ||
+          conflict.regionIds.every((regionId) => changedRegions.has(regionId))
+        ),
       );
       await Promise.all(resolved.map((conflict) => ctx.db.patch(conflict._id, {
         state: args.resolution === "local" ? "resolved-local" : "resolved-merged",

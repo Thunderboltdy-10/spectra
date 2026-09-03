@@ -117,6 +117,7 @@ import {
   normalizeSheetsContent,
   parseRange,
 } from "../sheets/model";
+import { pptxNativeMediaUrl } from "../lenses/office-content";
 
 /**
  * Slides and Notes are the deck's two views; both come from `work/registry`
@@ -158,6 +159,26 @@ const IMAGE_FIT_OPTIONS = [
   { value: "contain", label: "Fit inside" },
   { value: "cover", label: "Crop to fill" },
 ] as const;
+
+function nativePptxImageAsset(
+  source: Record<string, unknown>,
+  binding: PresentationContent["nativeBinding"],
+): SpectraArtifactAsset | undefined {
+  if (typeof source.assetId === "string") return undefined;
+  const partName =
+    typeof source.nativeMediaPart === "string" ? source.nativeMediaPart : "";
+  const downloadUrl = pptxNativeMediaUrl(binding, partName);
+  if (!downloadUrl) return undefined;
+  return {
+    assetId: partName,
+    status: "active",
+    downloadUrl,
+    mediaType:
+      typeof source.nativeMediaType === "string"
+        ? source.nativeMediaType
+        : undefined,
+  };
+}
 const IMAGE_MASK_OPTIONS = [
   { value: "none", label: "None" },
   { value: "rounded", label: "Rounded" },
@@ -1019,7 +1040,7 @@ function SlideCanvas({
               asset={
                 typeof source.assetId === "string"
                   ? assetById.get(source.assetId)
-                  : undefined
+                  : nativePptxImageAsset(source, deck.nativeBinding)
               }
               linkedValues={linkedChartValues(object, artifacts)}
               linkedArtifact={

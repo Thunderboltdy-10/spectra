@@ -497,6 +497,39 @@ describe("DOCX preservation lens", () => {
     expect(reopened.projection.blocks.some((block) => block.text === "Foreign insertion")).toBe(true);
   });
 
+  it("Keep Word uses the native Word projection, including Word-only insertions", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    const target = opened.projection.blocks.find(
+      (block) => block.type !== "table" && block.text.trim().length > 0,
+    )!;
+    const ours = structuredClone(opened.projection);
+    ours.blocks.find((block) => block.id === target.id)!.text = "Spectra version";
+    const externalBytes = await docxLens.mutate(opened.preservedCarry, {
+      kind: "ai-edit",
+      operations: [
+        { kind: "replace-paragraph", regionId: target.id, text: "Word version" },
+        { kind: "insert-paragraph", regionId: "docx:paragraph:abcddcba", text: "Foreign insertion" },
+      ],
+    });
+    const external = await docxLens.open(externalBytes);
+    const kept = mergeDocxProjections(
+      opened.projection,
+      ours,
+      external.projection,
+      "word",
+    );
+    expect(kept.projection.blocks.find((block) => block.id === target.id)?.text).toBe(
+      "Word version",
+    );
+    expect(
+      kept.projection.blocks.some((block) => block.text === "Foreign insertion"),
+    ).toBe(true);
+    expect(kept.projection.blocks.map((block) => block.id)).toEqual(
+      external.projection.blocks.map((block) => block.id),
+    );
+  });
+
   it("changes an editable paragraph without losing tracked changes elsewhere", async () => {
     const source = await fixture("tracked-changes.docx");
     const opened = await docxLens.open(source);

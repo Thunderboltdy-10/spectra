@@ -156,6 +156,34 @@ describe("decomposeArtifactContent", () => {
     ]);
   });
 
+  it("treats a Word-only trailing paragraph as a structural document change", () => {
+    const stored = {
+      blocks: [{ id: "intro", type: "paragraph", text: "Spectra paragraph" }],
+      outline: [],
+      tiptap: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { blockId: "intro" },
+            content: [{ type: "text", text: "Spectra paragraph" }],
+          },
+        ],
+      },
+    };
+    const nativeProjection = {
+      blocks: [
+        { id: "intro", type: "paragraph", text: "Spectra paragraph" },
+        { id: "docx:paragraph:native", type: "paragraph", text: "RCV1WORDNATIVE4" },
+      ],
+      outline: [],
+    };
+
+    expect(changedArtifactRegionIds("document", stored, nativeProjection)).toEqual(
+      ["artifact:structure"],
+    );
+  });
+
   it("decomposes sheets that omit optional identity maps without throwing", () => {
     // Schema allows missing rowIdentities/columnIdentities, but region paths
     // still address them. Decompose must materialize those parents.

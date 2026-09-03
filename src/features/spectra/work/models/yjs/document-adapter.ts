@@ -53,6 +53,17 @@ export function documentContentToProseMirrorJson(
   return projectDocumentContentToProseMirrorJson(content);
 }
 
+function textMarks(node: ProseMirrorJson) {
+  return Object.fromEntries(
+    (node.marks ?? []).map((mark) => [mark.type, mark.attrs ?? {}]),
+  );
+}
+
+function nodeBlockId(node: ProseMirrorJson | undefined) {
+  const blockId = node?.attrs?.blockId;
+  return typeof blockId === "string" && blockId ? blockId : null;
+}
+
 function appendJsonNode(
   parent: Y.XmlFragment | Y.XmlElement,
   node: ProseMirrorJson,
@@ -60,11 +71,7 @@ function appendJsonNode(
   if (node.type === "text") {
     const text = new Y.XmlText();
     parent.push([text]);
-    text.insert(0, node.text ?? "", {
-      ...Object.fromEntries(
-        (node.marks ?? []).map((mark) => [mark.type, mark.attrs ?? {}]),
-      ),
-    });
+    text.insert(0, node.text ?? "", textMarks(node));
     return;
   }
   if (!node.type || node.type === "doc") {
@@ -78,9 +85,92 @@ function appendJsonNode(
   for (const child of node.content ?? []) appendJsonNode(element, child);
 }
 
+function insertJsonNode(
+  fragment: Y.XmlFragment,
+  index: number,
+  node: ProseMirrorJson,
+) {
+  if (!node.type || node.type === "doc") {
+    let cursor = index;
+    for (const child of node.content ?? []) {
+      insertJsonNode(fragment, cursor, child);
+      cursor += 1;
+    }
+    return;
+  }
+  if (node.type === "text") {
+    const text = new Y.XmlText();
+    fragment.insert(index, [text]);
+    text.insert(0, node.text ?? "", textMarks(node));
+    return;
+  }
+  const element = new Y.XmlElement(node.type);
+  fragment.insert(index, [element]);
+  for (const [key, value] of Object.entries(node.attrs ?? {}))
+    if (value !== undefined) element.setAttribute(key, value as string);
+  for (const child of node.content ?? []) appendJsonNode(element, child);
+}
+
 function populateFragment(fragment: Y.XmlFragment, json: ProseMirrorJson) {
   if (fragment.length) fragment.delete(0, fragment.length);
   appendJsonNode(fragment, json);
+}
+
+function adoptProjectionFragment(
+  fragment: Y.XmlFragment,
+  currentDocument: ProseMirrorJson,
+  nextDocument: ProseMirrorJson,
+) {
+  if (JSON.stringify(currentDocument) === JSON.stringify(nextDocument)) return;
+  const currentNodes = currentDocument.content ?? [];
+  const nextNodes = nextDocument.content ?? [];
+  const currentIds = currentNodes.map(nodeBlockId);
+  const nextIds = nextNodes.map(nodeBlockId);
+  const currentIdSet = new Set(
+    currentIds.filter((id): id is string => Boolean(id)),
+  );
+  const extraCount = nextNodes.length - currentNodes.length;
+  const currentText = JSON.stringify(currentDocument);
+  if (extraCount > 0 && currentNodes.length === fragment.length) {
+    const extras = nextNodes.slice(-extraCount);
+    const extrasAreNew = extras.every((node) => {
+      const id = nodeBlockId(node);
+      if (id && !currentIdSet.has(id)) return true;
+      const nested = JSON.stringify(node.content ?? node.text ?? "");
+      return nested.length > 2 && !currentText.includes(nested);
+    });
+    if (extrasAreNew) {
+      for (const node of extras) appendJsonNode(fragment, node);
+      return;
+    }
+  }
+  const trailingInsert =
+    extraCount > 0 &&
+    currentNodes.length === fragment.length &&
+    currentIds.every((id, index) => id === nextIds[index]);
+  if (trailingInsert) {
+    for (const node of nextNodes.slice(currentNodes.length))
+      appendJsonNode(fragment, node);
+    return;
+  }
+  const missingIndexes = nextIds.flatMap((id, index) =>
+    id && !currentIdSet.has(id) ? [index] : [],
+  );
+  const presentCurrentIds = currentIds.filter((id): id is string => Boolean(id));
+  const insertOnly =
+    missingIndexes.length > 0 &&
+    missingIndexes.length === extraCount &&
+    presentCurrentIds.every((id) => nextIds.includes(id));
+  if (insertOnly) {
+    for (const index of missingIndexes)
+      insertJsonNode(
+        fragment,
+        Math.min(index, fragment.length),
+        nextNodes[index]!,
+      );
+    return;
+  }
+  populateFragment(fragment, nextDocument);
 }
 
 function documentProjection(doc: Y.Doc): DocumentWorkContent {
@@ -153,11 +243,29 @@ export class DocumentYjsAdapter implements WorkYjsAdapter<DocumentWorkContent> {
       const currentDocument = yXmlFragmentToProsemirrorJSON(
         fragment,
       ) as ProseMirrorJson;
-      // Envelope-only changes (title, tags, sources) must not rewrite a live
-      // focused editor. Full fragment replacement is reserved for explicit
-      // import/migration/whole-document semantic operations.
       if (JSON.stringify(currentDocument) !== JSON.stringify(nextDocument))
-        populateFragment(fragment, nextDocument);
+        adoptProjectionFragment(fragment, currentDocument, nextDocument);
+      if (typeof globalThis !== "undefined") {
+        const target = globalThis as typeof globalThis & {
+          __spectraNativeProjection?: Array<Record<string, unknown>>;
+        };
+        const nextText = JSON.stringify(nextDocument);
+        if (nextText.includes("RCV1WORDNATIVE")) {
+          const log = (target.__spectraNativeProjection ??= []);
+          log.push({
+            event: "applyProjection",
+            currentNodes: currentDocument.content?.length ?? 0,
+            nextNodes: nextDocument.content?.length ?? 0,
+            fragmentLength: fragment.length,
+            native7InNext: nextText.includes("RCV1WORDNATIVE7"),
+            native7InCurrent: JSON.stringify(currentDocument).includes(
+              "RCV1WORDNATIVE7",
+            ),
+            at: Date.now(),
+          });
+          if (log.length > 40) log.splice(0, log.length - 40);
+        }
+      }
       setWorkModelMetadata(doc, this.workType, this.modelVersion);
     }, origin);
   }

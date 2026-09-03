@@ -1,6 +1,7 @@
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { isYjsOriginDocumentTransaction } from "./collaboration-change";
 
 const REGION_NODE_TYPES = [
   "paragraph",
@@ -86,6 +87,10 @@ export const StableBlockId = Extension.create({
         key: new PluginKey("spectraStableBlockId"),
         filterTransaction: (transaction, state) => {
           if (!transaction.docChanged) return true;
+          // External bytes are canonical. A Keep Word Yjs hydration that
+          // rewrites protected OMML/table JSON must reach the canvas; this
+          // filter only blocks local authoring of those regions.
+          if (isYjsOriginDocumentTransaction(transaction)) return true;
           const protectedBlocks = new Map<string, string>();
           state.doc.descendants((node) => {
             if (

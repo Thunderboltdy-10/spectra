@@ -2030,6 +2030,19 @@ export function documentJsonFromContent(
     return node;
   };
   if (tiptap && typeof tiptap === "object" && record(tiptap).type === "doc") {
+    const existingIds = new Set(
+      arrayOfRecords(record(tiptap).content).flatMap((node) => {
+        const blockId = record(node.attrs).blockId;
+        return typeof blockId === "string" && blockId ? [blockId] : [];
+      }),
+    );
+    const missingNativeBlocks = blocks.some(
+      (block) =>
+        typeof block.id === "string" &&
+        block.id &&
+        !existingIds.has(block.id),
+    );
+    if (!missingNativeBlocks) {
     const protectedIds = new Set(
       blocks.flatMap((block) =>
         record(block.attrs).nativeReadOnly === true &&
@@ -2057,6 +2070,7 @@ export function documentJsonFromContent(
           : node,
       ),
     };
+    }
   }
   const contentNodes =
     blocks.length > 0

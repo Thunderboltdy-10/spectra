@@ -518,6 +518,24 @@ export function documentContentToProseMirrorJson(contentValue) {
     const existingContent = Array.isArray(existing.content)
       ? existing.content
       : [];
+    const existingIds = new Set(
+      existingContent.flatMap((node) => {
+        const blockId = node?.attrs?.blockId;
+        return typeof blockId === "string" && blockId ? [blockId] : [];
+      }),
+    );
+    const missingNativeBlocks = blocks.some(
+      (block) => typeof block.id === "string" && block.id && !existingIds.has(block.id),
+    );
+    if (missingNativeBlocks) {
+      return {
+        type: "doc",
+        content: (blocks.length
+          ? blocks
+          : [{ id: "intro", type: "paragraph", text: "" }]
+        ).map((block, index) => blockToJson(block, index, content.nativeBinding)),
+      };
+    }
     return {
       ...existing,
       content: existingContent.map((node) => {

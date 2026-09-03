@@ -51,7 +51,36 @@ function shapeGeometry(
     rotation: emu(sourceXfrm?.getAttribute("rot")) / 60000,
   };
 }
-function slideObjects(root: XmlElement, slideId: string, layoutRoot?: XmlElement, canvas?: { width: number; height: number }): PresentationObject[] {
+function pictureMedia(
+  deck: Presentation,
+  slidePartName: string,
+  shape: XmlElement,
+) {
+  const blip = firstDescendant(shape, DRAWINGML_NAMESPACE, "blip");
+  if (!blip) return {};
+  const relationshipId = blip.getAttributeNs(
+    OFFICE_RELATIONSHIPS_NAMESPACE,
+    "embed",
+  );
+  if (!relationshipId) return {};
+  const slidePart = deck.office.package.getPart(slidePartName);
+  if (!slidePart) return {};
+  const part = deck.office.package.relatedPart(slidePart, relationshipId);
+  if (!part || !/^\/ppt\/media\//i.test(part.name)) return {};
+  return {
+    nativeMediaPart: part.name,
+    nativeMediaType: part.contentType.toLowerCase(),
+  };
+}
+
+function slideObjects(
+  deck: Presentation,
+  slidePartName: string,
+  root: XmlElement,
+  slideId: string,
+  layoutRoot?: XmlElement,
+  canvas?: { width: number; height: number },
+): PresentationObject[] {
   const layoutPlaceholders = new Map<string, XmlElement>();
   if (layoutRoot) descendants(layoutRoot).filter((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "sp").forEach((shape) => {
     const key = placeholderKey(shape);
@@ -66,7 +95,7 @@ function slideObjects(root: XmlElement, slideId: string, layoutRoot?: XmlElement
     // `descr` is PowerPoint's own alt text, so reading it here is what lets a
     // Spectra description round-trip instead of being invented alongside one.
     const descr = firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("descr")?.trim();
-    return [{ id: `${slideId}:shape:${nativeShapeId}`, type, ...shapeGeometry(shape, layoutPlaceholders.get(placeholderKey(shape) ?? ""), canvas), content: { text: shapeText(shape), nativeShapeId, nativeParagraphIndex: 0 }, ...(descr ? { altText: descr } : {}), locked: isTitle, readingOrder: index } satisfies PresentationObject];
+    return [{ id: `${slideId}:shape:${nativeShapeId}`, type, ...shapeGeometry(shape, layoutPlaceholders.get(placeholderKey(shape) ?? ""), canvas), content: { text: shapeText(shape), nativeShapeId, nativeParagraphIndex: 0, ...(type === "image" ? pictureMedia(deck, slidePartName, shape) : {}) }, ...(descr ? { altText: descr } : {}), locked: isTitle, readingOrder: index } satisfies PresentationObject];
   });
 }
 
@@ -93,7 +122,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     const hidden = ["0", "false", "off"].includes(
       (root.getAttribute("show") ?? "").toLowerCase(),
     );
-    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: slideObjects(root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
+    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: slideObjects(deck, slide.partName, root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
   }));
   const partNames = deck.office.package.parts().map((part) => part.name);
   for (const [feature, pattern] of [["master", /\/slideMasters\//i], ["layout", /\/slideLayouts\//i], ["media", /\/media\//i], ["smartArt", /\/diagrams\//i], ["chart", /\/charts\//i], ["notes", /\/notesSlides\//i], ["unknown-extension", /unknown|future|extension/i]] as const) {
@@ -461,7 +490,17 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       continue;
     }
     const slide = slideFor(deck, resolveSlideId(operation.slideId));
-    if (operation.kind === "set-title") slide.setTitle(operation.text);
+    if (operation.kind === "set-title") {
+      try {
+        slide.setTitle(operation.text);
+      } catch {
+        // Picture-only layouts have no title placeholder. A text box is the
+        // same native write add-slide already uses, so the title does not
+        // surface as an uncoded library exception.
+        addTextBox(slide.root(), operation.text);
+        deck.office.markDirty(slide.partName);
+      }
+    }
     else if (operation.kind === "set-text") { const owner = operation.shapeId ? descendants(slide.root()).find((node) => node.namespaceUri() === PML_NAMESPACE && ["sp", "pic", "graphicFrame"].includes(node.localName) && shapeId(node) === operation.shapeId) : undefined; const nodes = owner ? textNodes(owner) : textNodes(slide.root()); const node = nodes[operation.paragraphIndex]; if (!node) throw new PptxLensError("PPTX_TEXT_MISSING", "The target PowerPoint text run no longer exists."); replaceNodeText(node, operation.text); deck.office.markDirty(slide.partName); }
     else if (operation.kind === "set-notes") {
       // Only the notes part is marked dirty, so the slide itself — with its

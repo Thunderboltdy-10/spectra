@@ -55,6 +55,33 @@ export function isPreservedFormula(cell: SheetCell | undefined) {
   return Boolean(cell?.formula) && cell?.nativeFormulaSupport === "cached-only";
 }
 
+/** Lens/API code for a value write that would destroy formula text. */
+export const XLSX_FORMULA_LITERALIZATION_BLOCKED =
+  "XLSX_FORMULA_LITERALIZATION_BLOCKED";
+
+export const FORMULA_LITERALIZATION_MESSAGE =
+  "A formula cell cannot be replaced by a literal through a value edit. Edit its formula text instead.";
+
+/** True when `incoming` is a value/clear write onto a cell that still holds a formula. */
+export function isFormulaLiteralization(
+  existing: SheetCell | undefined,
+  incoming: Pick<SheetCell, "formula">,
+) {
+  return Boolean(existing?.formula) && !incoming.formula;
+}
+
+/** Addresses whose formula text would disappear between two cell maps. */
+export function formulaLiteralizationAddresses(
+  before: Record<string, SheetCell>,
+  after: Record<string, SheetCell>,
+) {
+  const lost: string[] = [];
+  for (const address of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (before[address]?.formula && !after[address]?.formula) lost.push(address);
+  }
+  return lost;
+}
+
 /** The border edges a preset writes, and the edges it clears. */
 function presetEdges(preset: string) {
   switch (preset) {

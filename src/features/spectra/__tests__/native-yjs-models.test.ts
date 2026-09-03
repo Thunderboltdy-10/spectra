@@ -458,6 +458,127 @@ describe("native fine-grained Yjs models", () => {
     document.destroy();
   });
 
+  it("adopts a Word-only trailing paragraph without rewriting existing fragment nodes", () => {
+    const adapter = documentYjsAdapter;
+    const initial = {
+      blocks: [
+        {
+          id: "docx:paragraph:protected",
+          type: "paragraph",
+          text: "Protected OMML host",
+          attrs: { nativeReadOnly: true },
+        },
+        {
+          id: "docx:paragraph:one",
+          type: "paragraph",
+          text: "Spectra paragraph",
+        },
+      ],
+    };
+    const document = adapter.createDocument(initial);
+    const fragment = document.getXmlFragment("spectra:document-v2");
+    const [protectedNode, spectraNode] = fragment.toArray();
+    adapter.applyProjection(
+      document,
+      {
+        blocks: [
+          ...initial.blocks,
+          {
+            id: "docx:paragraph:native",
+            type: "paragraph",
+            text: "RCV1WORDNATIVE7",
+          },
+        ],
+      },
+      workTransactionOrigin(
+        { clientId: "keep-word", kind: "human" },
+        "source_update",
+      ),
+    );
+    const projected = adapter.project(document);
+    expect(fragment.toArray()[0]).toBe(protectedNode);
+    expect(fragment.toArray()[1]).toBe(spectraNode);
+    expect(fragment.length).toBe(3);
+    expect(JSON.stringify(projected.blocks)).toContain("RCV1WORDNATIVE7");
+    expect(JSON.stringify(projected.tiptap)).toContain("RCV1WORDNATIVE7");
+    document.destroy();
+  });
+
+  it("adopts a Word-only trailing paragraph into the live document fragment", async () => {
+    const adapter = documentYjsAdapter;
+    const initial = {
+      blocks: [{ id: "intro", type: "paragraph", text: "Spectra paragraph" }],
+      outline: [],
+      tiptap: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { blockId: "intro" },
+            content: [{ type: "text", text: "Spectra paragraph" }],
+          },
+        ],
+      },
+    };
+    const document = adapter.createDocument(initial);
+    const liveMeta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+    liveMeta.set("title", "Maths EE 3.docx");
+    liveMeta.set("summary", "");
+    liveMeta.set("tags", []);
+    const model = new NativeArtifactYjsModel("document", {
+      clientId: "docx-keep-word-client",
+      document,
+      getSnapshot: () => ({
+        state: "synchronized" as const,
+        level: "modify" as const,
+        accountId: "account-1",
+        displayName: "Pablo",
+        unsynchronizedChanges: 0,
+        presence: [],
+      }),
+    } as unknown as ConstructorParameters<typeof NativeArtifactYjsModel>[1]);
+    const nativeProjection = {
+      blocks: [
+        { id: "intro", type: "paragraph", text: "Spectra paragraph" },
+        {
+          id: "docx:paragraph:native",
+          type: "paragraph",
+          text: "RCV1WORDNATIVE5",
+        },
+      ],
+      outline: [],
+    };
+    await model.replaceSnapshot(
+      {
+        title: "Maths EE 3.docx",
+        tags: [],
+        content: nativeProjection,
+      },
+      {
+        editMany: async (
+          _regions: Array<{ regionId: string; overlapDomains: string[] }>,
+          change: () => void,
+        ) => {
+          document.transact(change);
+          return { applied: true as const, claims: [] };
+        },
+        edit: async (
+          _regionId: string,
+          _overlap: string[],
+          change: () => void,
+        ) => {
+          document.transact(change);
+          return { applied: true as const };
+        },
+      } as unknown as Parameters<typeof model.replaceSnapshot>[1],
+    );
+    const projected = adapter.project(document);
+    expect(JSON.stringify(projected.blocks)).toContain("RCV1WORDNATIVE5");
+    expect(JSON.stringify(projected.tiptap)).toContain("RCV1WORDNATIVE5");
+    model.destroy();
+    document.destroy();
+  });
+
   it("projects a dense live model once and reuses its semantic descriptor index", () => {
     const adapter = workYjsAdapter("sheets");
     const document = adapter.createDocument(denseWorkbook());
@@ -806,7 +927,13 @@ describe("native fine-grained Yjs models", () => {
       new URL("../components/document-studio.tsx", import.meta.url),
       "utf8",
     );
-    expect(source).toContain("contentChanged && !collaborationDocument");
+    const blockIdSource = await readFile(
+      new URL("../editor/stable-block-id.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("missingNativeBlockIds");
+    expect(source).toContain("NATIVE_PROJECTION_TRANSACTION_META");
     expect(source).toContain("Collaboration.configure");
+    expect(blockIdSource).toContain("isYjsOriginDocumentTransaction");
   });
 });

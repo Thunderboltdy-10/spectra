@@ -9,7 +9,9 @@ import { dateToSerial } from "../sheets/excel-serial";
 import { xlsxLens } from "../lenses/xlsx-lens";
 import { pptxLens } from "../lenses/pptx-lens";
 import {
+  bindPptxProjectionSource,
   pptxArtifactContent,
+  pptxNativeMediaUrl,
   pptxOperationsBetween,
   pptxProjectionFromContent,
   xlsxArtifactContent,
@@ -119,6 +121,24 @@ describe("XLSX and PPTX fidelity lenses", () => {
     expect(preserved.formula).toBe("XLOOKUP(A2,A2:A2,B2:B2)");
     expect(preserved.formulaSupport).toBe("cached-only");
     expect(preserved.value).toBe(5);
+  });
+
+  it("reports the stable refusal code when editor content drops a formula for a value", async () => {
+    const opened = await xlsxLens.open(await workbookFixture());
+    const content = xlsxArtifactContent(opened.projection);
+    const sheet = content.sheets[0]!;
+    sheet.cells.C2 = { value: 999 };
+
+    expect(() => xlsxProjectionFromContent(content, opened.projection)).toThrow(
+      /cannot be replaced by a literal/,
+    );
+    try {
+      xlsxProjectionFromContent(content, opened.projection);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "XLSX_FORMULA_LITERALIZATION_BLOCKED",
+      });
+    }
   });
 
   it("reports the stable refusal code when a formula would become a literal", async () => {
@@ -386,6 +406,65 @@ describe("PPTX native promotions", () => {
       .filter((part) => part.verdict !== "identical")
       .map((part) => part.name.replace(/^\//, ""));
   }
+
+  it("projects native pictures as hash-pinned media parts, not embedded bytes", async () => {
+    const opened = await pptxLens.open(await fixture("media-preservation"));
+    const images = opened.projection.slides.flatMap((slide) =>
+      slide.objects.filter((object) => object.type === "image"),
+    );
+    expect(images.length).toBeGreaterThan(0);
+    for (const image of images) {
+      const content = image.content as Record<string, unknown>;
+      expect(content.nativeMediaPart).toMatch(/^\/ppt\/media\//);
+      expect(JSON.stringify(content)).not.toMatch(/base64|data:/);
+    }
+    const bound = bindPptxProjectionSource(
+      opened.projection,
+      "artifact-pptx-media",
+      "c".repeat(64),
+    );
+    const partName = (images[0]!.content as { nativeMediaPart: string })
+      .nativeMediaPart;
+    const url = pptxNativeMediaUrl(bound.nativeBinding, partName);
+    expect(url).toContain("/api/spectra/lenses/office/media?");
+    expect(url).toContain("artifactId=artifact-pptx-media");
+    expect(url).toContain(`partName=${encodeURIComponent(partName)}`);
+    expect(url).not.toContain("base64");
+    const content = pptxArtifactContent(bound);
+    expect(validateArtifactContent("presentation", content).success).toBe(true);
+    const projected = presentationYjsAdapter.project(
+      presentationYjsAdapter.createDocument(content),
+    );
+    expect(projected.nativeBinding).toMatchObject({
+      sourceArtifactId: "artifact-pptx-media",
+      sourcePayloadHash: "c".repeat(64),
+    });
+    expect(
+      projected.slides.flatMap((slide) => slide.objects).find(
+        (object) => object.type === "image",
+      )?.content,
+    ).toMatchObject({
+      nativeMediaPart: expect.stringMatching(/^\/ppt\/media\//),
+    });
+  });
+
+  it("writes a title as a text box when the slide has no title placeholder", async () => {
+    const opened = await pptxLens.open(await fixture("media-preservation"));
+    const slide = opened.projection.slides[0]!;
+    const saved = await pptxLens.mutate(opened.preservedCarry, {
+      kind: "ai-edit",
+      operations: [
+        { kind: "set-title", slideId: slide.id, text: "A title this layout can hold" },
+      ],
+    });
+    expect(saved.byteLength).toBeGreaterThan(0);
+    const reopened = await pptxLens.open(saved);
+    expect(
+      JSON.stringify(reopened.projection.slides[0]).includes(
+        "A title this layout can hold",
+      ),
+    ).toBe(true);
+  });
 
   it("writes a speaker note into the notes page and leaves the slide alone", async () => {
     const source = await fixture("chart-notes-preservation");

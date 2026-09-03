@@ -442,6 +442,9 @@ export async function POST(request: Request) {
     ]);
     if (cloud.truth.hash === local.truth.hash) {
       if (input.resolution === "spectra" || input.resolution === "word") {
+        // Hash equality means the bytes already agree. It does not mean the
+        // editor projection is current — Keep Word must still replace the
+        // live canvas with the native file.
         await convexMutation<
           { workId: Id<"spectraArtifacts">; resolution: "spectra" | "local" },
           unknown
@@ -449,8 +452,33 @@ export async function POST(request: Request) {
           workId,
           resolution: input.resolution === "word" ? "local" : "spectra",
         });
+        const opened = await docxLens.open(local.payload, "strict-native");
+        const projection = bindDocxProjectionSource(
+          opened.projection,
+          String(workId),
+          local.truth.hash,
+        );
+        await convexMutation<
+          {
+            workId: Id<"spectraArtifacts">;
+            payloadHash: string;
+            content: DocxProjection;
+            fidelityMap: unknown;
+            semanticDigest: string;
+            nativeFormat: string;
+          },
+          unknown
+        >("replicas:activateLens", {
+          workId,
+          payloadHash: local.truth.hash,
+          content: projection,
+          fidelityMap: opened.fidelityMap,
+          semanticDigest: projection.nativeBinding.semanticDigest,
+          nativeFormat: projection.nativeBinding.format,
+        });
         return NextResponse.json({
-          state: "current",
+          state: "applied",
+          projection,
           attribution:
             input.resolution === "spectra"
               ? "Kept your Spectra version"
@@ -570,13 +598,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ state: "conflicted", conflict: { regionIds: conflictRegionIds, previews, message: "The Word file and Spectra changed the same regions. Choose which version to keep." } });
     }
     const merged = bindDocxProjectionSource(
-      mergeDocxProjections(
-        baseOpened.projection,
-        current,
-        externalOpened.projection,
-        "word",
-        true,
-      ).projection,
+      input.resolution === "word"
+        ? externalOpened.projection
+        : mergeDocxProjections(
+            baseOpened.projection,
+            current,
+            externalOpened.projection,
+            "word",
+            true,
+          ).projection,
       String(workId),
       local.truth.hash,
     );

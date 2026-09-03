@@ -291,6 +291,11 @@ export const pptxProjectionSchema = z
       .object({
         ...nativeBindingBase,
         format: z.enum(["pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam"]),
+        // Bound by the authenticated route, never by the format lens. These
+        // two small values let the client resolve native picture parts without
+        // duplicating package bytes into artifact content.
+        sourceArtifactId: z.string().min(1).optional(),
+        sourcePayloadHash: semanticDigestSchema.optional(),
       })
       .strict(),
   })

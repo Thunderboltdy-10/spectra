@@ -86,6 +86,10 @@ export type PresentationContent = {
     profile: "strict-native" | "enhanced" | "spectra-native";
     macroEnabled: boolean;
     semanticDigest: string;
+    canvasWidthEmu?: number;
+    canvasHeightEmu?: number;
+    sourceArtifactId?: string;
+    sourcePayloadHash?: string;
   };
 };
 
@@ -638,6 +642,13 @@ export function normalizePresentationContent(
           semanticDigest: nativeBindingSource.semanticDigest,
           ...(typeof nativeBindingSource.canvasWidthEmu === "number" ? { canvasWidthEmu: nativeBindingSource.canvasWidthEmu } : {}),
           ...(typeof nativeBindingSource.canvasHeightEmu === "number" ? { canvasHeightEmu: nativeBindingSource.canvasHeightEmu } : {}),
+          ...(typeof nativeBindingSource.sourceArtifactId === "string"
+            ? { sourceArtifactId: nativeBindingSource.sourceArtifactId }
+            : {}),
+          ...(typeof nativeBindingSource.sourcePayloadHash === "string" &&
+          /^[a-f0-9]{64}$/.test(nativeBindingSource.sourcePayloadHash)
+            ? { sourcePayloadHash: nativeBindingSource.sourcePayloadHash }
+            : {}),
         }
       : undefined;
   return {

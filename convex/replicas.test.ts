@@ -1537,6 +1537,66 @@ describe("replica truth machine", () => {
     expect(truth.work?.contentHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("resolves overlapping-region Keep Office conflicts for the same local revision", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const conflictId = await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch(fixture.localId, {
+        payloadRef: String(fixture.nextPayloadId),
+        revision: nextHash,
+        contentHash: nextHash,
+        state: "ahead",
+        updatedAt: now,
+      });
+      await ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaId: fixture.localId,
+        idempotencyKey: "external-overlap",
+        direction: "external",
+        revisionBefore: baseHash,
+        revisionAfter: nextHash,
+        state: "applied",
+        actorKind: "external-edit",
+        createdAt: now,
+        updatedAt: now,
+      });
+      return await ctx.db.insert("syncConflicts", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        replicaIds: [fixture.localId, fixture.cloudId],
+        regionIds: ["pptx:slide:/ppt/slides/slide1.xml", "pptx:slide:/ppt/slides/slide31.xml"],
+        partNames: ["ppt/slides/slide1.xml", "ppt/slides/slide31.xml"],
+        localRevision: nextHash,
+        spectraRevision: baseHash,
+        localPayloadRef: String(fixture.nextPayloadId),
+        spectraPayloadRef: String(fixture.basePayloadId),
+        state: "open",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+
+    const result = await t
+      .withIdentity(identity)
+      .mutation(api.replicas.recordExternalReconciliation, {
+        workId: fixture.workId,
+        localReplicaId: fixture.localId,
+        localPayloadRef: String(fixture.nextPayloadId),
+        localRevision: nextHash,
+        content: { slides: [{ id: "slide-1", speakerNotes: "native" }] },
+        fidelityMap: { entries: [] },
+        regionIds: ["pptx:slide:/ppt/slides/slide1.xml"],
+        partNames: ["ppt/notesSlides/notesSlide1.xml"],
+        conflictRegionIds: [],
+        resolution: "local",
+      });
+    expect(result.state).toBe("applied");
+    const truth = await t.run(async (ctx) => ctx.db.get(conflictId));
+    expect(truth).toMatchObject({ state: "resolved-local" });
+  });
+
   it("persists precise conflict previews for reload", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

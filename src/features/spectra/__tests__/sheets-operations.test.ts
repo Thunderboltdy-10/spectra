@@ -8,6 +8,8 @@ import {
   duplicateRowIndices,
   fillRange,
   fillSeries,
+  formulaLiteralizationAddresses,
+  isFormulaLiteralization,
   isPreservedFormula,
   offsetCellToRow,
   offsetFormula,
@@ -61,6 +63,32 @@ function live(formula: string, value: number): SheetCell {
 function cached(formula: string, value: number): SheetCell {
   return { formula, value, nativeFormulaSupport: "cached-only" };
 }
+
+describe("formula literalization detection", () => {
+  it("treats a value write onto a formula cell as literalization", () => {
+    expect(
+      isFormulaLiteralization(live("=ABS(C4-B4)", 1), { value: 999 }),
+    ).toBe(true);
+    expect(
+      formulaLiteralizationAddresses(
+        { D4: live("=ABS(C4-B4)", 1) },
+        { D4: { value: 999 } },
+      ),
+    ).toEqual(["D4"]);
+  });
+
+  it("does not treat a formula rewrite or a format-only cell as literalization", () => {
+    expect(
+      isFormulaLiteralization(live("=ABS(C4-B4)", 1), { formula: "=ABS(C4-B4)*1" }),
+    ).toBe(false);
+    expect(
+      formulaLiteralizationAddresses(
+        { D4: live("=ABS(C4-B4)", 1) },
+        { D4: live("=ABS(C4-B4)", 1) },
+      ),
+    ).toEqual([]);
+  });
+});
 
 describe("formula reference offsetting", () => {
   it("shifts relative references and pins locked ones", () => {

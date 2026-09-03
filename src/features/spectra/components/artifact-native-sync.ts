@@ -133,6 +133,25 @@ export function useArtifactNativeSync({
       nativeProjectionOverrideRef.current = projection;
       const nextValue = { ...live.liveValue, content: projection };
       const applied = await live.synchronize(nextValue);
+      if (typeof window !== "undefined") {
+        const target = window as Window & {
+          __spectraNativeProjection?: Array<Record<string, unknown>>;
+        };
+        const log = (target.__spectraNativeProjection ??= []);
+        log.push({
+          event: "applyExternalProjection",
+          applied: !syncRejected(applied),
+          rejected: syncRejected(applied),
+          blockCount: Array.isArray(
+            (projection as { blocks?: unknown[] } | null)?.blocks,
+          )
+            ? (projection as { blocks: unknown[] }).blocks.length
+            : null,
+          hasWordMarker: JSON.stringify(projection).includes("RCV1WORDNATIVE"),
+          at: Date.now(),
+        });
+        if (log.length > 40) log.splice(0, log.length - 40);
+      }
       if (syncRejected(applied))
         throw new Error(
           `The ${nativeOfficeApplication} edit overlaps an active collaborator region.`,
@@ -488,11 +507,19 @@ export function useArtifactNativeSync({
           result?.message ??
             `The ${nativeOfficeApplication} edit could not be reconciled safely.`,
         );
-      if (result?.state === "applied" && result.projection)
+      if (result?.state === "applied" && result.projection) {
         await applyExternalProjection(
           result.projection,
           result.attribution ?? `Edited in ${nativeOfficeApplication}`,
         );
+        setNativeConflict(null);
+      } else if (result?.state === "current" && result.projection && resolution) {
+        await applyExternalProjection(
+          result.projection,
+          result.attribution ?? `Edited in ${nativeOfficeApplication}`,
+        );
+        setNativeConflict(null);
+      }
       else if (result?.state === "conflicted")
         setNativeConflict({
           regionIds: result.conflict?.regionIds ?? [],

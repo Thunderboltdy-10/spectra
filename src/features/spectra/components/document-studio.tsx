@@ -4,7 +4,10 @@ import { uniqueToken } from "@/lib/unique-token";
 import { cn } from "@/lib/utils";
 import type { JSONContent } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
-import { isLocalCollaborativeDocumentChange } from "../editor/collaboration-change";
+import {
+  isLocalCollaborativeDocumentChange,
+  NATIVE_PROJECTION_TRANSACTION_META,
+} from "../editor/collaboration-change";
 import Highlight from "@tiptap/extension-highlight";
 import TiptapLink from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -1482,8 +1485,61 @@ export function DocumentStudio({
     // Native Y.XmlFragment collaboration is already bound directly to the
     // editor. Reapplying a projected JSON snapshot here would reset selection,
     // corrupt IME composition, and turn a remote delta into a full replace.
+    // Keep Word trailing inserts are the exception: adopt only the missing
+    // native nodes so protected OMML/tables are not rewritten through
+    // filterTransaction.
+    const missingNativeNodes = collaborationDocument
+      ? (incomingEditorJson.content ?? []).filter((node) => {
+          const blockId = record(node?.attrs).blockId;
+          if (typeof blockId !== "string" || !blockId) return false;
+          let found = false;
+          editor.state.doc.descendants((candidate) => {
+            if (candidate.attrs?.blockId === blockId) found = true;
+            return !found;
+          });
+          return !found;
+        })
+      : [];
+    const missingNativeBlockIds = missingNativeNodes.length > 0;
+    if (typeof window !== "undefined" && contentChanged) {
+      const target = window as Window & {
+        __spectraNativeProjection?: Array<Record<string, unknown>>;
+      };
+      const log = (target.__spectraNativeProjection ??= []);
+      log.push({
+        event: "document-studio",
+        contentChanged,
+        missingNativeBlockIds,
+        missingCount: missingNativeNodes.length,
+        incomingNodes: incomingEditorJson.content?.length ?? 0,
+        editorChildCount: editor.state.doc.childCount,
+        editorLength: editor.state.doc.textContent.length,
+        native7InIncoming: JSON.stringify(incomingEditorJson).includes(
+          "RCV1WORDNATIVE7",
+        ),
+        native7InEditor: editor.state.doc.textContent.includes("RCV1WORDNATIVE7"),
+        at: Date.now(),
+      });
+      if (log.length > 40) log.splice(0, log.length - 40);
+    }
     if (contentChanged && !collaborationDocument)
       editor.commands.setContent(incomingEditorJson, { emitUpdate: false });
+    else if (contentChanged && missingNativeBlockIds) {
+      const nodes = missingNativeNodes.flatMap((json) => {
+        try {
+          return [editor.schema.nodeFromJSON(json)];
+        } catch {
+          return [];
+        }
+      });
+      if (nodes.length)
+        editor.view.dispatch(
+          editor.state.tr
+            .insert(editor.state.doc.content.size, nodes)
+            .setMeta(NATIVE_PROJECTION_TRANSACTION_META, true)
+            .setMeta("addToHistory", false),
+        );
+    }
     const decorationKey = JSON.stringify(target);
     if (lastDecorationKeyRef.current === decorationKey) return;
     lastDecorationKeyRef.current = decorationKey;

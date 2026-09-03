@@ -205,6 +205,46 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
   };
 }
 
+export function bindPptxProjectionSource(
+  projection: PptxProjection,
+  artifactId: string,
+  payloadHash: string,
+): PptxProjection {
+  return pptxProjectionSchema.parse({
+    ...projection,
+    nativeBinding: {
+      ...projection.nativeBinding,
+      sourceArtifactId: artifactId,
+      sourcePayloadHash: payloadHash,
+    },
+  });
+}
+
+export function pptxNativeMediaUrl(
+  binding: unknown,
+  partName: string,
+) {
+  const source = record(binding);
+  const artifactId =
+    typeof source.sourceArtifactId === "string" ? source.sourceArtifactId : "";
+  const payloadHash =
+    typeof source.sourcePayloadHash === "string"
+      ? source.sourcePayloadHash
+      : "";
+  if (
+    !artifactId ||
+    !/^[a-f0-9]{64}$/.test(payloadHash) ||
+    !/^\/ppt\/media\/[^/\\\u0000-\u001f]{1,400}$/u.test(partName)
+  )
+    return "";
+  const query = new URLSearchParams({
+    artifactId,
+    payloadHash,
+    partName,
+  });
+  return `/api/spectra/lenses/office/media?${query.toString()}`;
+}
+
 export function pptxArtifactContent(
   projection: PptxProjection,
 ): PresentationContent {
@@ -302,9 +342,10 @@ export function xlsxProjectionFromContent(
         if (
           previous?.formula &&
           !value.formula &&
-          JSON.stringify(nextValue) !== JSON.stringify(previous.value)
+          Object.prototype.hasOwnProperty.call(value, "value")
         )
-          throw new Error(
+          throw codedOfficeContentError(
+            "XLSX_FORMULA_LITERALIZATION_BLOCKED",
             `Formula ${sheet.name}!${ref} cannot be replaced by a literal through a value edit. Edit its formula text instead.`,
           );
         return {

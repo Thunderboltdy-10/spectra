@@ -73,6 +73,15 @@ Use copies of Pablo's Extended Essay, complex real presentation, and Physics IA 
 
 Triage each failure LOCAL/SYSTEMIC, repair holdable classes, add a real-corpus-derived minimal fixture where legally/safely possible, and rerun the entire format card. Never shrink the offered capability matrix, flatten a preserved construct, regenerate a package wholesale, weaken part comparisons, or call “opened” a pass. RC.V1 passes only when all three format cards and original-integrity hashes pass on the frozen production build.
 
+### RC.V1 verification log — 2026-09-03
+
+- Production instance 1 + Bridge on disposable `RCV1Continue`; valid mount `spectra-rc-v1-final-mounted-20260903`.
+- Keep Word class: incremental native fragment adopt + Yjs-origin `filterTransaction` bypass. Live Maths EE ProseMirror then contained `RCV1WORDNATIVE7` through hard reload.
+- DOCX workbar inventory + package compare vs control: customXml/media/theme identical; `word/document.xml` changed as expected.
+- XLSX xlsx-run3: grid 1044ms; Excel COM Y1=`RCV1EXCELY1`; Keep Excel 200; reload B1+Y1+D4; sheet2 still 327 formulas. Linked-file workbar refusals titled. Excel save dropped `xl/persons/person.xml`.
+- PPTX workbar inventoried with honest native refusals. `Updating presentation content.` hung 45s — R2, owner P8.V1, not a silent pass.
+- IBDP1 rehash `57f6570b…` / 754,313,824 bytes. EE 3 original unchanged. EE 4 locked; ask Pablo. Manifest `blocked`.
+
 ## P8.V1 — Chaos, multiplayer, endurance and scale finale (H)
 
 **Model: GPT 5.6 Sol xhigh.** Use the same frozen candidate and evidence manifest as RC.V1.

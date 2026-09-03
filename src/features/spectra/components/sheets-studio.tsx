@@ -121,6 +121,8 @@ import {
   duplicateRowIndices,
   fillRange,
   fillSeries,
+  formulaLiteralizationAddresses,
+  isFormulaLiteralization,
   isPreservedFormula,
   offsetCellToRow,
   offsetFormula,
@@ -129,6 +131,7 @@ import {
   replaceInCells,
   sortRows,
   splitColumn,
+  FORMULA_LITERALIZATION_MESSAGE,
   type CellsResult,
   type ClipboardBlock,
   type SortKey,
@@ -1225,6 +1228,8 @@ export function SheetsStudio({
    * a fullscreen tab have identical capabilities (D4).
    */
   const contract = useShellContract();
+  const protectNativeFormulas =
+    contract?.compatibilityProfile === "strict-native";
   const rootRef = useRef<HTMLDivElement>(null);
   const canEditCells = contract ? contract.can("edit") : !readOnly;
   const grantLocked = readOnly || !canEditCells;
@@ -1354,6 +1359,21 @@ export function SheetsStudio({
     (message: string | null, tone: "info" | "warning" = "info") =>
       setNotice(message ? { tone, message } : null),
     [setNotice],
+  );
+  const refuseFormulaLiteralization = useCallback(
+    (speculative: SheetsContent) => {
+      setNotice({ tone: "warning", message: FORMULA_LITERALIZATION_MESSAGE });
+      void fetch("/api/spectra/lenses/office", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "materialize",
+          artifactId,
+          content: speculative,
+        }),
+      });
+    },
+    [artifactId],
   );
   const [importing, setImporting] = useState(false);
   const [viewport, setViewport] = useState<Viewport>({
@@ -1954,13 +1974,34 @@ export function SheetsStudio({
   }, [updateActiveSheet]);
 
   function setCell(address: string, cell: SheetCell, remember = true) {
+    const existing = activeSheet.cells[address];
+    if (
+      protectNativeFormulas &&
+      isFormulaLiteralization(existing, cell)
+    ) {
+      refuseFormulaLiteralization({
+        ...workbook,
+        sheets: workbook.sheets.map((sheet) =>
+          sheet.id !== activeSheet.id
+            ? sheet
+            : {
+                ...sheet,
+                cells: {
+                  ...sheet.cells,
+                  [address]: { value: cell.value ?? null },
+                },
+              },
+        ),
+      });
+      return;
+    }
     updateActiveSheet((sheet) => {
       const cells = { ...sheet.cells };
-      const existing = cells[address];
+      const current = cells[address];
       const merged = {
-        ...existing,
+        ...current,
         ...cell,
-        format: cell.format ?? existing?.format,
+        format: cell.format ?? current?.format,
       };
       if (
         !merged.formula &&
@@ -2210,25 +2251,62 @@ export function SheetsStudio({
   async function pasteSelection() {
     if (locked) return;
     const rows = parseDelimited(await navigator.clipboard.readText(), "\t");
+    const origin = normalizedSelection.start;
+    const blocked: string[] = [];
+    const parsedByAddress: Record<string, SheetCell> = {};
+    const writes: Array<{ address: string; cell: SheetCell }> = [];
+    rows.forEach((values, rowOffset) =>
+      values.forEach((value, columnOffset) => {
+        const address = coordinateToAddress({
+          row: origin.row + rowOffset,
+          column: origin.column + columnOffset,
+        });
+        const parsed = parseCellInput(
+          value,
+          workbook.workbook.locale,
+          workbook.workbook.date1904,
+        );
+        parsedByAddress[address] = parsed;
+        const existing = activeSheet.cells[address];
+        if (protectNativeFormulas && isFormulaLiteralization(existing, parsed)) {
+          blocked.push(address);
+          return;
+        }
+        writes.push({
+          address,
+          cell: {
+            ...parsed,
+            format: existing?.format,
+            provenance: { source: "clipboard", importedAt: Date.now() },
+          },
+        });
+      }),
+    );
+    if (blocked.length) {
+      refuseFormulaLiteralization({
+        ...workbook,
+        sheets: workbook.sheets.map((sheet) =>
+          sheet.id !== activeSheet.id
+            ? sheet
+            : {
+                ...sheet,
+                cells: {
+                  ...sheet.cells,
+                  ...Object.fromEntries(
+                    blocked.map((address) => [
+                      address,
+                      { value: parsedByAddress[address]?.value ?? null },
+                    ]),
+                  ),
+                },
+              },
+        ),
+      });
+    }
+    if (!writes.length) return;
     updateActiveSheet((sheet) => {
       const cells = { ...sheet.cells };
-      rows.forEach((values, rowOffset) =>
-        values.forEach((value, columnOffset) => {
-          const address = coordinateToAddress({
-            row: range.end.row + rowOffset,
-            column: range.end.column + columnOffset,
-          });
-          cells[address] = {
-            ...cells[address],
-            ...parseCellInput(
-              value,
-              workbook.workbook.locale,
-              workbook.workbook.date1904,
-            ),
-            provenance: { source: "clipboard", importedAt: Date.now() },
-          };
-        }),
-      );
+      for (const write of writes) cells[write.address] = write.cell;
       return { ...sheet, cells };
     });
   }
@@ -3535,6 +3613,23 @@ export function SheetsStudio({
   }
 
   function applyCells(result: CellsResult, verb: string) {
+    if (protectNativeFormulas) {
+      const lost = formulaLiteralizationAddresses(
+        activeSheet.cells,
+        result.cells,
+      );
+      if (lost.length) {
+        refuseFormulaLiteralization({
+          ...workbook,
+          sheets: workbook.sheets.map((sheet) =>
+            sheet.id !== activeSheet.id
+              ? sheet
+              : { ...sheet, cells: result.cells },
+          ),
+        });
+        return;
+      }
+    }
     if (result.blocked.length) {
       const shown = result.blocked.slice(0, 3).join(", ");
       setImportNotice(

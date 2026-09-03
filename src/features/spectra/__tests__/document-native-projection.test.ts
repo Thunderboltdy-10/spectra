@@ -144,6 +144,44 @@ describe("native document projection", () => {
     });
   });
 
+  it("adopts Word-only trailing paragraphs instead of remapping the stale TipTap tree", () => {
+    const content = {
+      blocks: [
+        {
+          id: "docx:paragraph:one",
+          type: "paragraph",
+          text: "Spectra paragraph",
+        },
+        {
+          id: "docx:paragraph:native",
+          type: "paragraph",
+          text: "RCV1WORDNATIVE3",
+        },
+      ],
+      tiptap: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { blockId: "docx:paragraph:one" },
+            content: [{ type: "text", text: "Spectra paragraph" }],
+          },
+        ],
+      },
+    };
+    const yjsJson = documentContentToProseMirrorJson(content);
+    expect(yjsJson.content?.map((node) => node.attrs?.blockId)).toEqual([
+      "docx:paragraph:one",
+      "docx:paragraph:native",
+    ]);
+    expect(documentJsonFromContent(content, "fixture").content?.at(-1)).toMatchObject({
+      attrs: { blockId: "docx:paragraph:native" },
+    });
+    expect(
+      JSON.stringify(documentJsonFromContent(content, "fixture")),
+    ).toContain("RCV1WORDNATIVE3");
+  });
+
   it("applies table-cell and paragraph mutations onto a stale TipTap tree", () => {
     const json = documentContentToProseMirrorJson({
       blocks: [

@@ -16,10 +16,12 @@ import {
 } from "@/features/spectra/lenses/native-reconciliation";
 import {
   xlsxLens,
+  XlsxLensError,
   type XlsxProjection,
 } from "@/features/spectra/lenses/xlsx-lens";
 import {
   pptxLens,
+  PptxLensError,
   type PptxProjection,
 } from "@/features/spectra/lenses/pptx-lens";
 import type {
@@ -27,6 +29,7 @@ import type {
   XlsxOperation,
 } from "@/features/spectra/lenses/projection-contracts";
 import {
+  bindPptxProjectionSource,
   pptxArtifactContent,
   pptxProjectionUpdateFromContent,
   pptxProjectionFromContent,
@@ -98,16 +101,45 @@ const _mediaTypes: Record<string, string> = {
 function id(value: string) {
   return value as Id<"spectraArtifacts">;
 }
-function contentFor(projection: OfficeProjection, isSheet: boolean) {
-  return isSheet
-    ? xlsxArtifactContent(projection as XlsxProjection)
-    : pptxArtifactContent(projection as PptxProjection);
+type NativeSource = { artifactId: string; payloadHash: string };
+
+function contentFor(
+  projection: OfficeProjection,
+  isSheet: boolean,
+  source: NativeSource,
+) {
+  if (isSheet) return xlsxArtifactContent(projection as XlsxProjection);
+  return pptxArtifactContent(
+    bindPptxProjectionSource(
+      projection as PptxProjection,
+      source.artifactId,
+      source.payloadHash,
+    ),
+  );
 }
-function contentForStorage(projection: OfficeProjection, isSheet: boolean) {
+function contentForStorage(
+  projection: OfficeProjection,
+  isSheet: boolean,
+  source: NativeSource,
+) {
   return encodeArtifactContentForStorage(
     isSheet ? "sheets" : "presentation",
-    contentFor(projection, isSheet),
+    contentFor(projection, isSheet, source),
   );
+}
+
+export function officeLensErrorCode(error: unknown) {
+  if (error instanceof XlsxLensError || error instanceof PptxLensError)
+    return error.code;
+  if (
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof (error as { code: unknown }).code === "string" &&
+    /^[A-Z][A-Z0-9_]{2,80}$/.test((error as { code: string }).code)
+  )
+    return (error as { code: string }).code;
+  return "OFFICE_LENS_FAILED";
 }
 export function projectionFor(
   content: unknown,
@@ -190,7 +222,10 @@ async function materializeOfficeArtifactAttempt(
         localReplicaId: local.truth.replicaId as Id<"workReplicas">,
         localPayloadRef: local.truth.payloadRef,
         localRevision: local.truth.revision,
-        content: contentForStorage(ours as OfficeProjection, isSheet),
+        content: contentForStorage(ours as OfficeProjection, isSheet, {
+          artifactId: String(workId),
+          payloadHash: local.truth.hash,
+        }),
         fidelityMap: latest.fidelityMap,
         regionIds: rebased.externalChanged,
         partNames: [],
@@ -289,11 +324,15 @@ async function materializeOfficeArtifactAttempt(
         .filter((part) => part.verdict !== "identical")
         .map((part) => `/${part.name}`),
       localReplicaId: local._id as Id<"workReplicas">,
-      baseContent: contentForStorage(baseProjection, isSheet),
+      baseContent: contentForStorage(baseProjection, isSheet, {
+        artifactId: String(workId),
+        payloadHash: materializationTruth.hash,
+      }),
       baseContentHash: baseProjection.nativeBinding.semanticDigest,
       projectionContent: contentForStorage(
         next.projection as OfficeProjection,
         isSheet,
+        { artifactId: String(workId), payloadHash: hash },
       ),
       projectionContentHash: (next.projection as OfficeProjection).nativeBinding
         .semanticDigest,
@@ -422,7 +461,10 @@ export async function POST(request: Request) {
               localReplicaId: local.truth.replicaId as Id<"workReplicas">,
               localPayloadRef: local.truth.payloadRef,
               localRevision: local.truth.revision,
-              content: contentForStorage(current, isSheet),
+              content: contentForStorage(current, isSheet, {
+                artifactId: String(workId),
+                payloadHash: local.truth.hash,
+              }),
               fidelityMap: externalOpened.fidelityMap,
               regionIds: mergedResult.externalChanged,
               partNames: [],
@@ -454,7 +496,10 @@ export async function POST(request: Request) {
             localReplicaId: local.truth.replicaId as Id<"workReplicas">,
             localPayloadRef: local.truth.payloadRef,
             localRevision: local.truth.revision,
-            content: contentForStorage(merged, isSheet),
+            content: contentForStorage(merged, isSheet, {
+              artifactId: String(workId),
+              payloadHash: local.truth.hash,
+            }),
             fidelityMap: externalOpened.fidelityMap,
             regionIds: changedRegions(
               ancestorOpened.projection as OfficeProjection,
@@ -478,7 +523,10 @@ export async function POST(request: Request) {
           throw error;
       }
       const baseProjection = baseOpened.projection as OfficeProjection;
-      const content = contentFor(baseProjection, isSheet);
+      const content = contentFor(baseProjection, isSheet, {
+        artifactId: String(workId),
+        payloadHash: cloud.truth.hash,
+      });
       await convexMutation("replicas:activateLens", {
         workId,
         payloadHash: cloud.truth.hash,
@@ -527,12 +575,43 @@ export async function POST(request: Request) {
     ]);
     if (cloud.truth.hash === local.truth.hash) {
       if (input.resolution === "spectra" || input.resolution === "local") {
+        // Hash equality means the bytes already agree. It does not mean the
+        // editor projection is current — Keep Excel/PowerPoint must still
+        // replace the live canvas with the native file.
         await convexMutation("replicas:resolveExternalConflict", {
           workId,
           resolution: input.resolution === "local" ? "local" : "spectra",
         });
+        const projection = contentFor(baseProjection, isSheet, {
+          artifactId: String(workId),
+          payloadHash: local.truth.hash,
+        });
+        await convexMutation("replicas:activateLens", {
+          workId,
+          payloadHash: local.truth.hash,
+          content: encodeArtifactContentForStorage(
+            isSheet ? "sheets" : "presentation",
+            projection,
+          ),
+          fidelityMap: baseOpened.fidelityMap,
+          semanticDigest: baseProjection.nativeBinding.semanticDigest,
+          nativeFormat: baseProjection.nativeBinding.format,
+          blueprintKey: isSheet ? "sheets" : "presentation",
+          textIndex: isSheet
+            ? (baseProjection as XlsxProjection).sheets
+                .flatMap((sheet) =>
+                  sheet.cells.map((cell) => String(cell.value ?? "")),
+                )
+                .join("\n")
+                .slice(0, 200_000)
+            : (baseProjection as PptxProjection).slides
+                .flatMap((slide) => slide.text)
+                .join("\n")
+                .slice(0, 200_000),
+        });
         return NextResponse.json({
-          state: "current",
+          state: "applied",
+          projection,
           attribution:
             input.resolution === "local"
               ? `Kept the ${isSheet ? "Excel" : "PowerPoint"} version`
@@ -615,6 +694,7 @@ export async function POST(request: Request) {
         projectionContent: contentForStorage(
           next.projection as OfficeProjection,
           isSheet,
+          { artifactId: String(workId), payloadHash: hash },
         ),
         projectionContentHash: (next.projection as OfficeProjection)
           .nativeBinding.semanticDigest,
@@ -631,7 +711,10 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({
         state: "applied",
-        projection: contentFor(next.projection as OfficeProjection, isSheet),
+        projection: contentFor(next.projection as OfficeProjection, isSheet, {
+          artifactId: String(workId),
+          payloadHash: hash,
+        }),
         attribution: "Kept your Spectra version",
         requestId: (queued as { requestId: string }).requestId,
         status: "Waiting to save your Spectra version locally",
@@ -644,7 +727,10 @@ export async function POST(request: Request) {
         localReplicaId: local.truth.replicaId as Id<"workReplicas">,
         localPayloadRef: local.truth.payloadRef,
         localRevision: local.truth.revision,
-        content: contentForStorage(currentProjection, isSheet),
+        content: contentForStorage(currentProjection, isSheet, {
+          artifactId: String(workId),
+          payloadHash: local.truth.hash,
+        }),
         fidelityMap: externalOpened.fidelityMap,
         regionIds: [...externalChanged],
         partNames: diff.preservedPartChanges,
@@ -664,7 +750,10 @@ export async function POST(request: Request) {
       input.resolution === "local"
         ? externalProjection
         : mergedResult.projection;
-    const mergedContent = contentFor(mergedProjection, isSheet);
+    const mergedContent = contentFor(mergedProjection, isSheet, {
+      artifactId: String(workId),
+      payloadHash: local.truth.hash,
+    });
     const recorded = await convexMutation(
       "replicas:recordExternalReconciliation",
       {
@@ -697,10 +786,14 @@ export async function POST(request: Request) {
           }),
     });
   } catch (error) {
+    const code = officeLensErrorCode(error);
     return NextResponse.json(
       {
-        error: "OFFICE_LENS_FAILED",
-        message: humanizePublicFailure(error, application),
+        error: code,
+        message:
+          code !== "OFFICE_LENS_FAILED" && error instanceof Error
+            ? error.message
+            : humanizePublicFailure(error, application),
       },
       { status: 400 },
     );

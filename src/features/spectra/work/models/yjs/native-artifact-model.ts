@@ -10,6 +10,7 @@ import {
   type StoredArtifactRegionDescriptor,
   type ArtifactYjsMutationPlan,
 } from "../../../collaboration/artifact-yjs-model";
+import { documentContentToProseMirrorJson } from "../../../lenses/document-projection";
 import { workYjsAdapter } from "./registry";
 import { workMeta } from "./shared";
 import { workYjsOrigins } from "./origins";
@@ -39,13 +40,6 @@ function actorFor(
     ...(snapshot.accountId ? { accountId: snapshot.accountId } : {}),
     ...(snapshot.displayName ? { name: snapshot.displayName } : {}),
   };
-}
-
-function regionClaims(regions: readonly SemanticRegion[]) {
-  return regions.map((region) => ({
-    regionId: region.regionId,
-    overlapDomains: [region.overlapDomain],
-  }));
 }
 
 export class NativeArtifactYjsModel {
@@ -327,13 +321,17 @@ export class NativeArtifactYjsModel {
     value: ArtifactLiveValue,
     controller: ArtifactRegionController,
   ) {
-    if (!this.snapshot.initialized) return this.initialize(value, controller);
+    if (!this.snapshot.initialized) {
+      if (workMeta(this.transport.document).get("initialized") === true)
+        this.rebuildSnapshotImmediately();
+      else return this.initialize(value, controller);
+    }
     const current = this.snapshot.value;
     const sheetPlan =
       this.typeKey === "sheets" && current
         ? planSheetsCellProjection(current.content, value.content)
         : null;
-    const contentChanged = sheetPlan
+    let contentChanged = sheetPlan
       ? sheetPlan.changes.length > 0
       : current
         ? changedArtifactRegionIds(
@@ -342,18 +340,34 @@ export class NativeArtifactYjsModel {
             value.content,
           ).length > 0
         : true;
+    if (
+      !contentChanged &&
+      this.typeKey === "document" &&
+      current &&
+      JSON.stringify(
+        documentContentToProseMirrorJson(
+          current.content as Record<string, unknown>,
+        ),
+      ) !==
+        JSON.stringify(
+          documentContentToProseMirrorJson(
+            value.content as Record<string, unknown>,
+          ),
+        )
+    )
+      contentChanged = true;
     const regions = contentChanged
       ? sheetPlan
         ? sheetPlan.changes.map((change) => ({
             regionId: change.regionId,
             overlapDomains: [change.regionId],
           }))
-        : regionClaims(
-            this.adapter.deriveSemanticRegions(
-              this.transport.document,
-              current?.content,
-            ),
-          )
+        : [
+            {
+              regionId: "artifact:structure",
+              overlapDomains: ["artifact:structure"],
+            },
+          ]
       : [];
     const metadataClaims = [
       ...(current?.title !== value.title
@@ -372,7 +386,29 @@ export class NativeArtifactYjsModel {
         : []),
     ];
     const claims = [...regions, ...metadataClaims];
-    if (!claims.length) return { applied: true as const, claims: [] };
+    const traceNativeProjection = (detail: Record<string, unknown>) => {
+      if (typeof globalThis === "undefined") return;
+      const target = globalThis as typeof globalThis & {
+        __spectraNativeProjection?: Array<Record<string, unknown>>;
+      };
+      const log = (target.__spectraNativeProjection ??= []);
+      log.push({
+        event: "replaceSnapshot",
+        typeKey: this.typeKey,
+        contentChanged,
+        claimCount: claims.length,
+        claimIds: claims.map((claim) => claim.regionId),
+        hasWordMarker: JSON.stringify(value.content).includes("RCV1WORDNATIVE"),
+        ...detail,
+        at: Date.now(),
+      });
+      if (log.length > 40) log.splice(0, log.length - 40);
+    };
+    if (!claims.length) {
+      traceNativeProjection({ applyProjectionRan: false });
+      return { applied: true as const, claims: [] };
+    }
+    let applyProjectionRan = false;
     const result = await controller.editMany(claims.slice(0, 128), () => {
       if (contentChanged && sheetPlan)
         applySheetsCellProjection(
@@ -380,18 +416,26 @@ export class NativeArtifactYjsModel {
           sheetPlan,
           workYjsOrigins(this.actor).localHuman,
         );
-      else if (contentChanged)
+      else if (contentChanged) {
+        applyProjectionRan = true;
         this.adapter.applyProjection(
           this.transport.document,
           value.content,
-          workYjsOrigins(this.actor).localHuman,
+          this.typeKey === "document"
+            ? workYjsOrigins(this.actor).sourceUpdate
+            : workYjsOrigins(this.actor).localHuman,
         );
+      }
       this.writeMetadata(value);
     });
     if (result.applied) {
       if (sheetPlan) this.exposeAppliedSheetSnapshot(value, sheetPlan);
       else this.rebuildSnapshotImmediately();
     }
+    traceNativeProjection({
+      applyProjectionRan,
+      applied: result.applied,
+    });
     return result;
   }
 

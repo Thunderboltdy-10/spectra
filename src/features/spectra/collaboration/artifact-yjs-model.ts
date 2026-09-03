@@ -417,6 +417,14 @@ export function changedArtifactRegionIds(
   for (const [regionId, encoded] of next.regionValues)
     if (previous.regionValues.get(regionId) !== encoded) changed.add(regionId);
   if (typeKey === "document") {
+    const previousBlockIds = documentBlockIds(before);
+    const nextBlockIds = documentBlockIds(after);
+    if (
+      previousBlockIds.size !== nextBlockIds.size ||
+      [...nextBlockIds].some((regionId) => !previousBlockIds.has(regionId)) ||
+      [...previousBlockIds].some((regionId) => !nextBlockIds.has(regionId))
+    )
+      return ["artifact:structure"];
     const previousNodes = documentTiptapRegionSignatures(before);
     const nextNodes = documentTiptapRegionSignatures(after);
     if (
@@ -428,6 +436,18 @@ export function changedArtifactRegionIds(
       if (previousNodes.get(regionId) !== signature) changed.add(regionId);
   }
   return [...changed];
+}
+
+function documentBlockIds(content: unknown) {
+  const blocks = (content as { blocks?: unknown } | null)?.blocks;
+  const ids = new Set<string>();
+  if (!Array.isArray(blocks)) return ids;
+  for (const block of blocks) {
+    if (!block || typeof block !== "object" || Array.isArray(block)) continue;
+    const id = (block as { id?: unknown }).id;
+    if (typeof id === "string" && id) ids.add(id);
+  }
+  return ids;
 }
 
 function documentDescriptorSignature(value: DecomposedArtifact) {

@@ -23,6 +23,8 @@ const officeNativeBindingBase = {
   semanticDigest: z.string().regex(/^[a-f0-9]{64}$/),
   canvasWidthEmu: z.number().positive().optional(),
   canvasHeightEmu: z.number().positive().optional(),
+  sourceArtifactId: z.string().min(1).optional(),
+  sourcePayloadHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 };
 
 export {

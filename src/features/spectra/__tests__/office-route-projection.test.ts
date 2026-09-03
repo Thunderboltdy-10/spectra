@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { POST, contentToPptx } from "@/app/api/spectra/lenses/office/route";
+import { POST, contentToPptx, officeLensErrorCode } from "@/app/api/spectra/lenses/office/route";
 import {
   pptxProjectionUpdateFromContent,
   xlsxProjectionUpdateFromContent,
 } from "../lenses/office-content";
 import { hasUnreconciledExternalRevision } from "../lenses/native-reconciliation";
+import { sniffOfficeRasterMedia } from "../lenses/office-media";
+import { XlsxLensError } from "../lenses/xlsx-lens";
 
 describe("Office lens route projection boundary", () => {
   it("returns the Office error envelope when parsing fails before format detection", async () => {
@@ -20,6 +22,30 @@ describe("Office lens route projection boundary", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: "OFFICE_LENS_FAILED",
     });
+  });
+
+  it("surfaces coded lens refusals instead of collapsing them", () => {
+    expect(
+      officeLensErrorCode(
+        new XlsxLensError(
+          "XLSX_FORMULA_LITERALIZATION_BLOCKED",
+          "A formula cell cannot be replaced by a literal through a value edit.",
+        ),
+      ),
+    ).toBe("XLSX_FORMULA_LITERALIZATION_BLOCKED");
+    expect(officeLensErrorCode(new Error("expected array"))).toBe(
+      "OFFICE_LENS_FAILED",
+    );
+  });
+
+  it("sniffs JPEG bytes even when Office labelled the part as PNG", () => {
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+    const png = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00,
+    ]);
+    expect(sniffOfficeRasterMedia(jpeg)).toBe("image/jpeg");
+    expect(sniffOfficeRasterMedia(png)).toBe("image/png");
+    expect(sniffOfficeRasterMedia(Uint8Array.from([0x00, 0x01]))).toBeUndefined();
   });
 
   it("does not reconcile an external operation after it is verified", () => {

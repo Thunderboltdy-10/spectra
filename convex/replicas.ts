@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
-import { getAuthenticatedActor } from "./identityShared";
+import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { placeSourceNode, subtreeNodes } from "./orgTreeShared";
 import { z } from "zod";
 import {
@@ -356,7 +356,7 @@ export const cancelMaterialization = mutation({
 export const presentationsForAccount = query({
   args: {},
   handler: async (ctx) => {
-    const actor = await getAuthenticatedActor(ctx);
+    const actor = await getOptionalAuthenticatedActor(ctx);
     if (!actor) return [];
     const replicaStates = ["diverged", "error", "pending", "unavailable"] as const;
     const [openConflicts, ...replicaBatches] = await Promise.all([
@@ -1614,15 +1614,126 @@ async function failWriteRequest(
   if (replica?.state === "pending") await ctx.db.patch(replica._id, { state: "error", errorCode, errorAt: now, updatedAt: now });
 }
 
-/** Indexed compensation for actor death, expired transitions and unreferenced bytes. */
+/** Indexed compensation for actor death, expired transitions and unreferenced bytes.
+ * One invocation stays inside the scheduled 100-document / 128 KB gate; leftover
+ * due rows wait for the next tick instead of scanning the whole table. */
+export const SWEEP_DOCUMENT_BUDGET = 100;
+
+type SweepDocumentBudget = ReturnType<typeof createDocumentBudget>;
+
+async function payloadHasRemainingRefs(
+  ctx: MutationCtx,
+  payloadRef: string,
+  budget: SweepDocumentBudget,
+) {
+  const probes = [
+    () =>
+      ctx.db
+        .query("workReplicas")
+        .withIndex("by_payload_ref", (q) => q.eq("payloadRef", payloadRef))
+        .take(budget.cap(1)),
+    () =>
+      ctx.db
+        .query("workReplicas")
+        .withIndex("by_pending_payload_ref", (q) =>
+          q.eq("pendingPayloadRef", payloadRef),
+        )
+        .take(budget.cap(1)),
+    () =>
+      ctx.db
+        .query("workReplicas")
+        .withIndex("by_projection_base_payload_ref", (q) =>
+          q.eq("projectionBasePayloadRef", payloadRef),
+        )
+        .take(budget.cap(1)),
+    () =>
+      ctx.db
+        .query("spectraArtifacts")
+        .withIndex("by_pending_payload_ref", (q) =>
+          q.eq("pendingPayloadRef", payloadRef),
+        )
+        .take(budget.cap(1)),
+    () =>
+      ctx.db
+        .query("bridgeWriteRequests")
+        .withIndex("by_payload_state", (q) =>
+          q.eq("payloadRef", payloadRef).eq("state", "pending"),
+        )
+        .take(budget.cap(1)),
+    () =>
+      ctx.db
+        .query("bridgeWriteRequests")
+        .withIndex("by_payload_state", (q) =>
+          q.eq("payloadRef", payloadRef).eq("state", "claimed"),
+        )
+        .take(budget.cap(1)),
+    () =>
+      ctx.db
+        .query("syncConflicts")
+        .withIndex("by_local_payload_ref", (q) =>
+          q.eq("localPayloadRef", payloadRef),
+        )
+        .filter((q) =>
+          q.or(
+            q.eq(q.field("state"), "open"),
+            q.eq(q.field("state"), "resolving-spectra"),
+          ),
+        )
+        .take(budget.cap(1)),
+    () =>
+      ctx.db
+        .query("syncConflicts")
+        .withIndex("by_spectra_payload_ref", (q) =>
+          q.eq("spectraPayloadRef", payloadRef),
+        )
+        .filter((q) =>
+          q.or(
+            q.eq(q.field("state"), "open"),
+            q.eq(q.field("state"), "resolving-spectra"),
+          ),
+        )
+        .take(budget.cap(1)),
+  ];
+  for (const probe of probes) {
+    if (budget.exhausted()) return true;
+    const rows = await probe();
+    budget.note(rows.length);
+    if (rows.length > 0) return true;
+  }
+  return false;
+}
+
+function createDocumentBudget(limit = SWEEP_DOCUMENT_BUDGET) {
+  let remaining = limit;
+  return {
+    cap(requested: number) {
+      return Math.max(0, Math.min(requested, remaining));
+    },
+    note(count: number) {
+      remaining = Math.max(0, remaining - count);
+    },
+    remaining() {
+      return remaining;
+    },
+    exhausted() {
+      return remaining <= 0;
+    },
+  };
+}
+
 export const sweepReplicaTruth = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
+    const budget = createDocumentBudget();
     const claimCutoff = now - BRIDGE_CLAIM_REDRIVE_MS;
-    const claimed = await ctx.db.query("bridgeWriteRequests")
-      .withIndex("by_state_updated", (q) => q.eq("state", "claimed").lt("updatedAt", claimCutoff))
-      .take(100);
+    const claimedLimit = budget.cap(100);
+    const claimed = claimedLimit
+      ? await ctx.db.query("bridgeWriteRequests")
+          .withIndex("by_state_updated", (q) => q.eq("state", "claimed").lt("updatedAt", claimCutoff))
+          .take(claimedLimit)
+      : [];
+    budget.note(claimed.length);
     let redriven = 0;
     let failedWrites = 0;
     for (const request of claimed) {
@@ -1634,9 +1745,13 @@ export const sweepReplicaTruth = internalMutation({
         redriven += 1;
       }
     }
-    const pending = await ctx.db.query("bridgeWriteRequests")
-      .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", now))
-      .take(200);
+    const pendingLimit = budget.cap(100);
+    const pending = pendingLimit
+      ? await ctx.db.query("bridgeWriteRequests")
+          .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", now))
+          .take(pendingLimit)
+      : [];
+    budget.note(pending.length);
     for (const request of pending) {
       if ((request.expiresAt ?? request.createdAt + BRIDGE_WRITE_EXPIRES_MS) > now) continue;
       await failWriteRequest(ctx, request, "write-expired", now);
@@ -1644,15 +1759,23 @@ export const sweepReplicaTruth = internalMutation({
     }
 
     const orphanCutoff = now - BRIDGE_WRITE_EXPIRES_MS;
-    const pendingReplicas = await ctx.db.query("workReplicas")
-      .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", orphanCutoff))
-      .take(100);
+    const pendingReplicaLimit = budget.cap(100);
+    const pendingReplicas = pendingReplicaLimit
+      ? await ctx.db.query("workReplicas")
+          .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", orphanCutoff))
+          .take(pendingReplicaLimit)
+      : [];
+    budget.note(pendingReplicas.length);
     let orphanedReplicas = 0;
     for (const replica of pendingReplicas) {
-      const requests = await ctx.db.query("bridgeWriteRequests")
-        .withIndex("by_work_created", (q) => q.eq("workId", replica.workId))
-        .order("desc")
-        .take(50);
+      const requestLimit = budget.cap(50);
+      const requests = requestLimit
+        ? await ctx.db.query("bridgeWriteRequests")
+            .withIndex("by_work_created", (q) => q.eq("workId", replica.workId))
+            .order("desc")
+            .take(requestLimit)
+        : [];
+      budget.note(requests.length);
       if (requests.some((request) => request.replicaId === replica._id && (request.state === "pending" || request.state === "claimed"))) continue;
       await ctx.db.patch(replica._id, {
         state: "error",
@@ -1662,14 +1785,19 @@ export const sweepReplicaTruth = internalMutation({
       });
       orphanedReplicas += 1;
     }
-    const pendingOperations = await ctx.db.query("syncOperations")
-      .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", orphanCutoff))
-      .take(100);
+    const pendingOperationLimit = budget.cap(100);
+    const pendingOperations = pendingOperationLimit
+      ? await ctx.db.query("syncOperations")
+          .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", orphanCutoff))
+          .take(pendingOperationLimit)
+      : [];
+    budget.note(pendingOperations.length);
     let orphanedOperations = 0;
     for (const operation of pendingOperations) {
       const request = await ctx.db.query("bridgeWriteRequests")
         .withIndex("by_account_key", (q) => q.eq("accountId", operation.accountId).eq("idempotencyKey", operation.idempotencyKey))
         .unique();
+      if (request) budget.note(1);
       if (request && (request.state === "pending" || request.state === "claimed")) continue;
       await ctx.db.patch(operation._id, {
         state: "failed",
@@ -1680,13 +1808,17 @@ export const sweepReplicaTruth = internalMutation({
     }
 
     const externalReconciliationCutoff = now - BRIDGE_WRITE_EXPIRES_MS;
-    const stalledExternalOperations = await ctx.db.query("syncOperations")
-      .withIndex("by_state_updated", (q) => q.eq("state", "applied").lt("updatedAt", externalReconciliationCutoff))
-      .filter((q) => q.and(
-        q.eq(q.field("direction"), "external"),
-        q.eq(q.field("actorKind"), "external-edit"),
-      ))
-      .take(100);
+    const stalledLimit = budget.cap(100);
+    const stalledExternalOperations = stalledLimit
+      ? await ctx.db.query("syncOperations")
+          .withIndex("by_state_updated", (q) => q.eq("state", "applied").lt("updatedAt", externalReconciliationCutoff))
+          .filter((q) => q.and(
+            q.eq(q.field("direction"), "external"),
+            q.eq(q.field("actorKind"), "external-edit"),
+          ))
+          .take(stalledLimit)
+      : [];
+    budget.note(stalledExternalOperations.length);
     for (const operation of stalledExternalOperations) {
       await ctx.db.patch(operation._id, {
         state: "failed",
@@ -1696,9 +1828,13 @@ export const sweepReplicaTruth = internalMutation({
     }
     const expiredExternalOperations = stalledExternalOperations.length;
 
-    const transitions = await ctx.db.query("storageStrategyTransitions")
-      .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", now))
-      .take(100);
+    const transitionLimit = budget.cap(100);
+    const transitions = transitionLimit
+      ? await ctx.db.query("storageStrategyTransitions")
+          .withIndex("by_state_updated", (q) => q.eq("state", "pending").lt("updatedAt", now))
+          .take(transitionLimit)
+      : [];
+    budget.note(transitions.length);
     let failedTransitions = 0;
     let verifiedTransitions = 0;
     for (const transition of transitions) {
@@ -1706,12 +1842,17 @@ export const sweepReplicaTruth = internalMutation({
         const cloud = await ctx.db.query("workReplicas")
           .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "cloud"))
           .unique();
+        if (cloud) budget.note(1);
         const payload = cloud ? await verifiedReplicaPayload(ctx, cloud) : null;
         if (payload) {
           if (transition.toPreset === "spectra") {
-            const locals = await ctx.db.query("workReplicas")
-              .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "local"))
-              .take(20);
+            const localLimit = budget.cap(20);
+            const locals = localLimit
+              ? await ctx.db.query("workReplicas")
+                  .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "local"))
+                  .take(localLimit)
+              : [];
+            budget.note(locals.length);
             for (const local of locals) {
               if (local.state === "unavailable") continue;
               await ctx.db.patch(local._id, {
@@ -1734,9 +1875,13 @@ export const sweepReplicaTruth = internalMutation({
           verifiedTransitions += 1;
           continue;
         }
-        const locals = await ctx.db.query("workReplicas")
-          .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "local"))
-          .take(20);
+        const localLimit = budget.cap(20);
+        const locals = localLimit
+          ? await ctx.db.query("workReplicas")
+              .withIndex("by_work_kind", (q) => q.eq("workId", transition.workId).eq("kind", "local"))
+              .take(localLimit)
+          : [];
+        budget.note(locals.length);
         if (locals.some((local) => local.errorCode === "office-locked" && local.state !== "unavailable")) {
           continue;
         }
@@ -1746,6 +1891,7 @@ export const sweepReplicaTruth = internalMutation({
         String((transition.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? ""),
       );
       const request = requestId ? await ctx.db.get(requestId) : null;
+      if (request) budget.note(1);
       const liveWrite = request && (request.state === "pending" || request.state === "claimed");
       const stalled = (transition.updatedAt ?? transition.createdAt) + STRATEGY_TRANSITION_STALL_MS <= now;
       const expired = (transition.expiresAt ?? transition.createdAt + STRATEGY_TRANSITION_EXPIRES_MS) <= now;
@@ -1760,56 +1906,63 @@ export const sweepReplicaTruth = internalMutation({
       failedTransitions += 1;
     }
 
-    const resolving = await ctx.db.query("syncConflicts")
-      .withIndex("by_state_updated", (q) => q.eq("state", "resolving-spectra"))
-      .take(100);
+    const resolvingLimit = budget.cap(100);
+    const resolving = resolvingLimit
+      ? await ctx.db.query("syncConflicts")
+          .withIndex("by_state_updated", (q) => q.eq("state", "resolving-spectra"))
+          .take(resolvingLimit)
+      : [];
+    budget.note(resolving.length);
     let reopenedConflicts = 0;
     for (const conflict of resolving) {
       if ((conflict.updatedAt ?? conflict.createdAt) >= claimCutoff) continue;
       const request = conflict.resolutionRequestId ? await ctx.db.get(conflict.resolutionRequestId) : null;
+      if (request) budget.note(1);
       if (request && (request.state === "pending" || request.state === "claimed")) continue;
       const work = await ctx.db.get(conflict.workId);
+      if (work) budget.note(1);
       await ctx.db.patch(conflict._id, work
         ? { state: "open", resolutionRequestId: undefined, errorCode: "resolution-write-did-not-finish", updatedAt: now }
         : { state: "abandoned", resolutionRequestId: undefined, errorCode: "work-no-longer-exists", resolvedAt: now, updatedAt: now });
       reopenedConflicts += 1;
     }
-    const openConflicts = await ctx.db.query("syncConflicts")
-      .withIndex("by_state_updated", (q) => q.eq("state", "open"))
-      .take(100);
+    const openLimit = budget.cap(100);
+    const openConflicts = openLimit
+      ? await ctx.db.query("syncConflicts")
+          .withIndex("by_state_updated", (q) => q.eq("state", "open"))
+          .take(openLimit)
+      : [];
+    budget.note(openConflicts.length);
     let abandonedConflicts = 0;
     for (const conflict of openConflicts) {
-      if (await ctx.db.get(conflict.workId)) continue;
+      const work = await ctx.db.get(conflict.workId);
+      if (work) {
+        budget.note(1);
+        continue;
+      }
+      budget.note(1);
       await ctx.db.patch(conflict._id, { state: "abandoned", errorCode: "work-no-longer-exists", resolvedAt: now, updatedAt: now });
       abandonedConflicts += 1;
     }
 
-    const payloads = await ctx.db.query("payloadObjects")
-      .withIndex("by_state_verified", (q) => q.eq("state", "active").lt("verifiedAt", now - PAYLOAD_RELEASE_GRACE_MS))
-      .take(100);
+    const payloadLimit = budget.cap(100);
+    const payloads = payloadLimit
+      ? await ctx.db.query("payloadObjects")
+          .withIndex("by_state_verified", (q) => q.eq("state", "active").lt("verifiedAt", now - PAYLOAD_RELEASE_GRACE_MS))
+          .take(payloadLimit)
+      : [];
+    budget.note(payloads.length);
     let releasedPayloads = 0;
     for (const payload of payloads) {
+      if (budget.exhausted()) break;
       const payloadRef = String(payload._id);
-      const [replicas, pendingReplicas, projectionBases, pendingWorks, pendingWrites, claimedWrites, localConflicts, spectraConflicts] = await Promise.all([
-        ctx.db.query("workReplicas").withIndex("by_payload_ref", (q) => q.eq("payloadRef", payloadRef)).take(1_000),
-        ctx.db.query("workReplicas").withIndex("by_pending_payload_ref", (q) => q.eq("pendingPayloadRef", payloadRef)).take(1_000),
-        ctx.db.query("workReplicas").withIndex("by_projection_base_payload_ref", (q) => q.eq("projectionBasePayloadRef", payloadRef)).take(1_000),
-        ctx.db.query("spectraArtifacts").withIndex("by_pending_payload_ref", (q) => q.eq("pendingPayloadRef", payloadRef)).take(1_000),
-        ctx.db.query("bridgeWriteRequests").withIndex("by_payload_state", (q) => q.eq("payloadRef", payloadRef).eq("state", "pending")).take(1_000),
-        ctx.db.query("bridgeWriteRequests").withIndex("by_payload_state", (q) => q.eq("payloadRef", payloadRef).eq("state", "claimed")).take(1_000),
-        ctx.db.query("syncConflicts").withIndex("by_local_payload_ref", (q) => q.eq("localPayloadRef", payloadRef)).filter((q) => q.or(q.eq(q.field("state"), "open"), q.eq(q.field("state"), "resolving-spectra"))).take(1_000),
-        ctx.db.query("syncConflicts").withIndex("by_spectra_payload_ref", (q) => q.eq("spectraPayloadRef", payloadRef)).filter((q) => q.or(q.eq(q.field("state"), "open"), q.eq(q.field("state"), "resolving-spectra"))).take(1_000),
-      ]);
-      const refCount = replicas.length + pendingReplicas.length + projectionBases.length + pendingWorks.length + pendingWrites.length + claimedWrites.length + localConflicts.length + spectraConflicts.length;
-      if (refCount > 0) {
-        if (payload.refCount !== refCount) await ctx.db.patch(payload._id, { refCount });
-        continue;
-      }
+      const referenced = await payloadHasRemainingRefs(ctx, payloadRef, budget);
+      if (referenced) continue;
       await ctx.storage.delete(payload.storageId);
       await ctx.db.patch(payload._id, { refCount: 0, state: "released", releasedAt: now });
       releasedPayloads += 1;
     }
-    const repairs = { redriven, failedWrites, orphanedReplicas, orphanedOperations, expiredExternalOperations, failedTransitions, verifiedTransitions, reopenedConflicts, abandonedConflicts, releasedPayloads };
+    const repairs = { redriven, failedWrites, orphanedReplicas, orphanedOperations, expiredExternalOperations, failedTransitions, verifiedTransitions, reopenedConflicts, abandonedConflicts, releasedPayloads, documentsRead: SWEEP_DOCUMENT_BUDGET - budget.remaining() };
     if (Object.values(repairs).some((count) => count > 0))
       console.info("replica-truth-sweeper", repairs);
     return repairs;
@@ -1984,3 +2137,4 @@ export const reconcileReplicaTruthMigration = internalMutation({
     return { state: page.isDone ? "complete" as const : "running" as const, scanned: page.page.length, repaired, conflicts };
   },
 });
+

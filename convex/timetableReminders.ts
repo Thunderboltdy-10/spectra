@@ -2,9 +2,13 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { evaluateAccessForActor } from "./authorityShared";
-import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
+import {
+  getActorForAccountId,
+  getAuthenticatedActor,
+  type AuthenticatedActor,
+} from "./identityShared";
 import { compactReminderSourceGeneration } from "./reminderSource";
 
 const MINUTE = 60_000;
@@ -709,6 +713,38 @@ export const safetySweep = internalMutation({
   },
 });
 
+export async function loadTimetableReminderNotifications(
+  ctx: QueryCtx,
+  actor: AuthenticatedActor,
+  args: { unreadOnly?: boolean; limit?: number },
+) {
+  const limit = Math.max(1, Math.min(args.limit ?? 50, 100));
+  const rows = await ctx.db
+    .query("timetableReminderDeliveries")
+    .withIndex("by_recipient_created", (q) =>
+      q.eq("recipientAccountId", actor.accountId),
+    )
+    .order("desc")
+    .take(limit * 3);
+  const visible = [];
+  for (const row of rows) {
+    if (row.status !== "delivered" || (args.unreadOnly && row.readAt))
+      continue;
+    const artifact = await ctx.db.get(row.artifactId);
+    if (!artifact || artifact.status !== "active") continue;
+    const access = await evaluateAccessForActor(
+      ctx,
+      actor,
+      "artifact",
+      artifact._id,
+    );
+    if (!access.allowed || !access.capabilities.includes("read")) continue;
+    visible.push({ ...row, artifactTitle: artifact.title });
+    if (visible.length >= limit) break;
+  }
+  return visible;
+}
+
 export const listMine = query({
   args: { unreadOnly: v.optional(v.boolean()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
@@ -717,31 +753,7 @@ export const listMine = query({
       throw new Error(
         "AUTH_NO_SCHOOL: An active school membership is required.",
       );
-    const limit = Math.max(1, Math.min(args.limit ?? 50, 100));
-    const rows = await ctx.db
-      .query("timetableReminderDeliveries")
-      .withIndex("by_recipient_created", (q) =>
-        q.eq("recipientAccountId", actor.accountId),
-      )
-      .order("desc")
-      .take(limit * 3);
-    const visible = [];
-    for (const row of rows) {
-      if (row.status !== "delivered" || (args.unreadOnly && row.readAt))
-        continue;
-      const artifact = await ctx.db.get(row.artifactId);
-      if (!artifact || artifact.status !== "active") continue;
-      const access = await evaluateAccessForActor(
-        ctx,
-        actor,
-        "artifact",
-        artifact._id,
-      );
-      if (!access.allowed || !access.capabilities.includes("read")) continue;
-      visible.push({ ...row, artifactTitle: artifact.title });
-      if (visible.length >= limit) break;
-    }
-    return visible;
+    return loadTimetableReminderNotifications(ctx, actor, args);
   },
 });
 

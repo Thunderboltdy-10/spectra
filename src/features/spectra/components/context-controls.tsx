@@ -160,9 +160,10 @@ export function ContextFocusControl({
                 : "global",
       );
       setOpen(false);
-      void postSpectra({ action: "selectRunTab", runId: next?.runId }).catch(
-        () => undefined,
-      );
+      if (next?.runId)
+        void postSpectra({ action: "selectRunTab", runId: next.runId }).catch(
+          () => undefined,
+        );
     },
     [artifact, explicit.length, onModeChange, setContinuation, workspace],
   );

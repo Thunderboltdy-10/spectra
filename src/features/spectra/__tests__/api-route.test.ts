@@ -246,10 +246,13 @@ describe("Spectra API route", () => {
   it("loads the notification center in one authenticated request", async () => {
     const convexMutation = vi.fn();
     const convexQuery = vi.fn().mockImplementation(async (name: string) => {
-      if (name === "artifactComments:listNotifications") return [{ _id: "comment_1" }];
-      if (name === "plannerReminders:listMine") return [{ _id: "planner_1" }];
-      if (name === "timetableReminders:listMine") return [{ _id: "timetable_1" }];
-      if (name === "authority:listIncomingInvitations") return [{ invitationId: "invite_1" }];
+      if (name === "notificationCenter:listMine")
+        return {
+          comments: [{ _id: "comment_1" }],
+          planner: [{ _id: "planner_1" }],
+          timetable: [{ _id: "timetable_1" }],
+          invitations: [{ invitationId: "invite_1" }],
+        };
       throw new Error(`unexpected query ${name}`);
     });
     vi.doMock("@/lib/auth-server", () => mockAuth());
@@ -271,7 +274,11 @@ describe("Spectra API route", () => {
     expect(payload.planner).toEqual([{ _id: "planner_1" }]);
     expect(payload.timetable).toEqual([{ _id: "timetable_1" }]);
     expect(payload.invitations).toEqual([{ invitationId: "invite_1" }]);
-    expect(convexQuery).toHaveBeenCalledTimes(4);
+    expect(convexQuery).toHaveBeenCalledTimes(1);
+    expect(convexQuery).toHaveBeenCalledWith("notificationCenter:listMine", {
+      unreadOnly: false,
+      limit: 30,
+    });
   });
 
   it("returns an empty overview for a signed-in account without a school", async () => {

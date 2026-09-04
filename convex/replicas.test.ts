@@ -850,6 +850,7 @@ describe("replica truth machine", () => {
     });
 
     const result = await t.mutation(internal.replicas.sweepReplicaTruth, {});
+    expect(result.documentsRead).toBeLessThanOrEqual(100);
     expect(result.expiredExternalOperations).toBe(1);
     const operation = await t.run(async (ctx) => ctx.db.get(operationId));
     expect(operation).toMatchObject({

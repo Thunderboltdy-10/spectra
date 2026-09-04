@@ -256,15 +256,27 @@ describe("Live Dock V2", () => {
   it("does not poll idle run tabs or notifications faster than one minute", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
     expect(dock).toContain(
-      "pollTimer = window.setInterval(() => void refreshRunTabs(), 60_000);",
+      "pollTimer = window.setInterval(() => void refreshRunTabs(), 180_000);",
     );
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
-    expect(runHook).toContain("Date.now() - tabsFetchedAt >= 60_000");
-    expect(runHook).toContain(": 60_000");
+    expect(runHook).toContain("Date.now() - tabsFetchedAt >=");
+    expect(runHook).toContain("180_000");
     expect(runHook).not.toContain(": 12_000");
     const shell = read("src/components/layout/app-shell.tsx");
     expect(shell).toContain("getSpectraNotificationCenter(false, 30)");
-    expect(shell).toContain("}, 60_000);");
+    expect(shell).toContain("}, 180_000);");
+    expect(shell).not.toContain("}, 60_000);");
+    const context = read("src/features/spectra/hooks/use-spectra-context.ts");
+    expect(context).toContain("if (!next?.runId && !next?.id) return;");
+    const controls = read(
+      "src/features/spectra/components/context-controls.tsx",
+    );
+    expect(controls).toContain("if (next?.runId)");
+    const bridge = read("src/features/spectra/bridge/use-bridge.ts");
+    expect(bridge).toContain("}, 15_000);");
+    expect(bridge).toContain(
+      'if (document.visibilityState === "visible") void refresh();',
+    );
   });
 
   it("never shows machine tokens in dock failure copy", () => {

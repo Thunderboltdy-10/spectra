@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { evaluateAccessForActor } from "./authorityShared";
-import { getAuthenticatedActor } from "./identityShared";
+import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { requireArtifactCapability } from "./spectraShared";
 import { loadVersionAfter } from "./artifactSnapshots";
 import {
@@ -827,7 +827,8 @@ export const listForContainer = query({
     containerId: v.string(),
   },
   handler: async (ctx, args) => {
-    const actorValue = await actor(ctx);
+    const actorValue = await getOptionalAuthenticatedActor(ctx);
+    if (!actorValue) return { canConfigure: false, embeds: [] };
     const container = await requireContainer(
       ctx,
       actorValue,

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { knownCapabilityIds } from "../capabilities/catalog";
 import { swapWorkbarCommandOrders } from "../commands/registry";
 import {
@@ -240,5 +242,21 @@ describe("preference merge (P3.I4)", () => {
     );
     expect(next.commands?.["document.format.bold"]).toEqual({ order: 4, tab: "Format" });
     expect(next.commands?.["document.format.italic"]).toEqual({ order: 1 });
+  });
+
+  it("parks preference-layer subscriptions after the first snapshot", () => {
+    const idle = readFileSync(
+      path.join(process.cwd(), "src/features/spectra/data/idle-surface.ts"),
+      "utf8",
+    );
+    const store = readFileSync(
+      path.join(process.cwd(), "src/features/spectra/settings/preference-store.ts"),
+      "utf8",
+    );
+    expect(idle).toContain("export const IDLE_SURFACE_REFRESH_MS = 180_000");
+    expect(idle).toContain("document.visibilityState !== \"visible\"");
+    expect(store).toContain("subscribeIdleSurfaceRefresh");
+    expect(store).toContain("unsub?.()");
+    expect(store).toContain("refreshLayersRef.current()");
   });
 });

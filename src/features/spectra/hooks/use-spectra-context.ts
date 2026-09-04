@@ -151,17 +151,10 @@ export function useSpectraContext(
     (action: SetStateAction<SpectraContinuation | null>) => {
       const next = typeof action === "function" ? action(continuation) : action;
       setContinuation(next);
-      // Opening a side panel is display state; this explicit continuation alone
-      // selects which conversation history the composer inherits. Saved thread
-      // artifacts commonly lack a local run id, so their canonical thread id
-      // restores the latest run to the Live Dock.
+      if (!next?.runId && !next?.id) return;
       void postSpectra({
         action: "selectRunTab",
-        ...(next?.runId
-          ? { runId: next.runId }
-          : next?.id
-            ? { threadId: next.id }
-            : {}),
+        ...(next.runId ? { runId: next.runId } : { threadId: next.id }),
       }).catch(() => undefined);
     },
     [continuation, setContinuation],

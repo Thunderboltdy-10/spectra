@@ -69,6 +69,10 @@ export async function getAuthenticatedActor(ctx: IdentityCtx) {
   };
 }
 
+export type AuthenticatedActor = NonNullable<
+  Awaited<ReturnType<typeof getAuthenticatedActor>>
+>;
+
 /** Product queries must not crash the tree when the browser is offline. */
 export async function getOptionalAuthenticatedActor(ctx: IdentityCtx) {
   const identity = await ctx.auth.getUserIdentity();

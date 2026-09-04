@@ -92,12 +92,16 @@ export function SurfaceSearch({
   onChange,
   scopeLabel,
   className,
+  onMoveToResults,
+  onOpenFirstResult,
 }: {
   value: string;
   onChange: (next: string) => void;
   /** What is being searched, so the placeholder tells the truth about scope. */
   scopeLabel: string;
   className?: string;
+  onMoveToResults?: () => void;
+  onOpenFirstResult?: () => void;
 }) {
   return (
     <div className={cn("relative min-w-9 w-[240px] max-w-full shrink", className)}>
@@ -107,6 +111,17 @@ export function SurfaceSearch({
         onChange={(event) => onChange(event.target.value)}
         placeholder={`Search ${scopeLabel}`}
         aria-label={`Search ${scopeLabel}`}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" && onMoveToResults) {
+            event.preventDefault();
+            onMoveToResults();
+            return;
+          }
+          if (event.key === "Enter" && onOpenFirstResult) {
+            event.preventDefault();
+            onOpenFirstResult();
+          }
+        }}
         className="h-8 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-7 text-ui text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--brand-primary)]"
       />
       {value ? (

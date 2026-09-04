@@ -103,6 +103,7 @@ export const OrganizerRow = memo(function OrganizerRow({
     <div
       ref={rowRef}
       role="row"
+      tabIndex={cursor ? 0 : -1}
       aria-selected={selected}
       aria-current={active ? "true" : undefined}
       data-active-work={active ? "true" : undefined}
@@ -126,6 +127,14 @@ export const OrganizerRow = memo(function OrganizerRow({
       onClick={(event) => callbacks.onClick(event, node)}
       onDoubleClick={(event) => callbacks.onDoubleClick(event, node)}
       onContextMenu={(event) => callbacks.onContextMenu(event, node)}
+      onKeyDown={(event) => {
+        if (renaming) return;
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        callbacks.onOpen(node);
+      }}
     >
       {insertion ? (
         <span

@@ -14,6 +14,7 @@ import {
   getActiveMembership,
   getActorForAccountId,
   getAuthenticatedActor,
+  type AuthenticatedActor,
 } from "./identityShared";
 import { writeAuditEvent } from "./auditShared";
 import {
@@ -220,6 +221,58 @@ export const invite = mutation({
   },
 });
 
+export async function loadIncomingShareInvitations(
+  ctx: QueryCtx,
+  actor: AuthenticatedActor,
+) {
+  const now = Date.now();
+  const invitations = await ctx.db
+    .query("shareInvitations")
+    .withIndex("by_invitee_status", (q) =>
+      q.eq("inviteeAccountId", actor.accountId).eq("status", "pending"),
+    )
+    .order("desc")
+    .collect();
+  return Promise.all(
+    invitations
+      .filter(
+        (invitation) => !invitation.expiresAt || invitation.expiresAt > now,
+      )
+      .map(async (invitation) => {
+        const [resource, inviter] = await Promise.all([
+          loadResource(ctx, invitation.resourceType, invitation.resourceId),
+          ctx.db.get(invitation.inviterAccountId),
+        ]);
+        if (!resource || resource.schoolId !== actor.schoolId) return null;
+        return {
+          invitationId: invitation._id,
+          resourceType: invitation.resourceType,
+          resourceId: invitation.resourceId,
+          level: invitation.level,
+          message: invitation.message,
+          expiresAt: invitation.expiresAt,
+          createdAt: invitation.createdAt,
+          inviter: inviter
+            ? {
+                accountId: inviter._id,
+                name: inviter.name,
+                avatarUrl: inviter.avatarUrl,
+              }
+            : null,
+          resource: {
+            title: resource.resource.title,
+            typeKey:
+              "blueprintKey" in resource.resource
+                ? resource.resource.blueprintKey
+                : "workspace",
+          },
+        };
+      }),
+  ).then((rows) =>
+    rows.filter((row): row is NonNullable<typeof row> => Boolean(row)),
+  );
+}
+
 export const listIncomingInvitations = query({
   args: {},
   handler: async (ctx) => {
@@ -228,52 +281,7 @@ export const listIncomingInvitations = query({
       throw new Error(
         "AUTH_NO_SCHOOL: An active school membership is required.",
       );
-    const now = Date.now();
-    const invitations = await ctx.db
-      .query("shareInvitations")
-      .withIndex("by_invitee_status", (q) =>
-        q.eq("inviteeAccountId", actor.accountId).eq("status", "pending"),
-      )
-      .order("desc")
-      .collect();
-    return Promise.all(
-      invitations
-        .filter(
-          (invitation) => !invitation.expiresAt || invitation.expiresAt > now,
-        )
-        .map(async (invitation) => {
-          const [resource, inviter] = await Promise.all([
-            loadResource(ctx, invitation.resourceType, invitation.resourceId),
-            ctx.db.get(invitation.inviterAccountId),
-          ]);
-          if (!resource || resource.schoolId !== actor.schoolId) return null;
-          return {
-            invitationId: invitation._id,
-            resourceType: invitation.resourceType,
-            resourceId: invitation.resourceId,
-            level: invitation.level,
-            message: invitation.message,
-            expiresAt: invitation.expiresAt,
-            createdAt: invitation.createdAt,
-            inviter: inviter
-              ? {
-                  accountId: inviter._id,
-                  name: inviter.name,
-                  avatarUrl: inviter.avatarUrl,
-                }
-              : null,
-            resource: {
-              title: resource.resource.title,
-              typeKey:
-                "blueprintKey" in resource.resource
-                  ? resource.resource.blueprintKey
-                  : "workspace",
-            },
-          };
-        }),
-    ).then((rows) =>
-      rows.filter((row): row is NonNullable<typeof row> => Boolean(row)),
-    );
+    return loadIncomingShareInvitations(ctx, actor);
   },
 });
 

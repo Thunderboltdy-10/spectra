@@ -1,9 +1,10 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { evaluateAccessForActor } from "./authorityShared";
-import { getActiveMembership, getAuthenticatedActor } from "./identityShared";
+import { getActiveMembership, getAuthenticatedActor, type AuthenticatedActor } from "./identityShared";
 import { requireArtifactCapability } from "./spectraShared";
 import type { Id } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
 import { isSensitiveQuizRegion } from "./quizPrivacy";
 
 const anchor = v.object({
@@ -223,6 +224,66 @@ export const setNotificationPreference = mutation({
   },
 });
 
+export async function loadArtifactCommentNotifications(
+  ctx: QueryCtx,
+  actor: AuthenticatedActor,
+  args: { limit?: number; unreadOnly?: boolean },
+) {
+  const limit = Math.max(1, Math.min(args.limit ?? 50, 100));
+  const rows = await ctx.db
+    .query("artifactCommentNotifications")
+    .withIndex("by_recipient_created", (q) =>
+      q.eq("recipientAccountId", actor.accountId),
+    )
+    .order("desc")
+    .take(limit * 3);
+  const visible = [];
+  for (const notification of rows) {
+    if (args.unreadOnly && notification.readAt) continue;
+    const [comment, artifact] = await Promise.all([
+      ctx.db.get(notification.commentId),
+      ctx.db.get(notification.artifactId),
+    ]);
+    if (!comment || !artifact || comment.status === "deleted") continue;
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      artifact.blueprintKey === "agent" ? "agent" : "artifact",
+      notification.artifactId,
+    );
+    if (!decision.allowed) continue;
+    if (
+      artifact.blueprintKey === "quiz" &&
+      decision.level !== "modify" &&
+      isSensitiveQuizRegion(comment.anchor.regionId)
+    ) {
+      continue;
+    }
+    const author = await ctx.db.get(comment.authorAccountId);
+    visible.push({
+      ...notification,
+      artifact: {
+        artifactId: artifact._id,
+        title: artifact.title,
+        blueprintKey: artifact.blueprintKey,
+      },
+      comment: {
+        body: comment.body.slice(0, 240),
+        regionId: comment.anchor.regionId,
+      },
+      author: author
+        ? {
+            accountId: author._id,
+            name: author.name,
+            avatarUrl: author.avatarUrl,
+          }
+        : null,
+    });
+    if (visible.length >= limit) break;
+  }
+  return visible;
+}
+
 export const listNotifications = query({
   args: { limit: v.optional(v.number()), unreadOnly: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
@@ -231,59 +292,7 @@ export const listNotifications = query({
       throw new Error(
         "AUTH_NO_SCHOOL: An active school membership is required.",
       );
-    const limit = Math.max(1, Math.min(args.limit ?? 50, 100));
-    const rows = await ctx.db
-      .query("artifactCommentNotifications")
-      .withIndex("by_recipient_created", (q) =>
-        q.eq("recipientAccountId", actor.accountId),
-      )
-      .order("desc")
-      .take(limit * 3);
-    const visible = [];
-    for (const notification of rows) {
-      if (args.unreadOnly && notification.readAt) continue;
-      const [comment, artifact] = await Promise.all([
-        ctx.db.get(notification.commentId),
-        ctx.db.get(notification.artifactId),
-      ]);
-      if (!comment || !artifact || comment.status === "deleted") continue;
-      const decision = await evaluateAccessForActor(
-        ctx,
-        actor,
-        artifact.blueprintKey === "agent" ? "agent" : "artifact",
-        notification.artifactId,
-      );
-      if (!decision.allowed) continue;
-      if (
-        artifact.blueprintKey === "quiz" &&
-        decision.level !== "modify" &&
-        isSensitiveQuizRegion(comment.anchor.regionId)
-      ) {
-        continue;
-      }
-      const author = await ctx.db.get(comment.authorAccountId);
-      visible.push({
-        ...notification,
-        artifact: {
-          artifactId: artifact._id,
-          title: artifact.title,
-          blueprintKey: artifact.blueprintKey,
-        },
-        comment: {
-          body: comment.body.slice(0, 240),
-          regionId: comment.anchor.regionId,
-        },
-        author: author
-          ? {
-              accountId: author._id,
-              name: author.name,
-              avatarUrl: author.avatarUrl,
-            }
-          : null,
-      });
-      if (visible.length >= limit) break;
-    }
-    return visible;
+    return loadArtifactCommentNotifications(ctx, actor, args);
   },
 });
 

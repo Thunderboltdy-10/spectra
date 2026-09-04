@@ -253,16 +253,11 @@ export async function GET(request: NextRequest) {
     if (action === "notificationCenter") {
       const unreadOnly = params.get("unreadOnly") === "true";
       const limit = params.has("limit") ? Number(params.get("limit")) : 30;
-      const [comments, planner, timetable, invitations] = await Promise.all([
-        spectraQuery("artifactComments:listNotifications", {
-          unreadOnly,
-          limit,
-        }),
-        spectraQuery("plannerReminders:listMine", { unreadOnly, limit }),
-        spectraQuery("timetableReminders:listMine", { unreadOnly, limit }),
-        spectraQuery("authority:listIncomingInvitations", {}),
-      ]);
-      return ok({ comments, planner, timetable, invitations });
+      const center = await spectraQuery("notificationCenter:listMine", {
+        unreadOnly,
+        limit,
+      });
+      return ok(center);
     }
 
     if (action === "schoolMembers") {
@@ -672,7 +667,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    const _actor = await requireActor();
+    const _actor = await requireActor({ fresh: true });
     const body = (await request.json()) as Record<string, unknown>;
     const action = requireString(body.action, "action");
 

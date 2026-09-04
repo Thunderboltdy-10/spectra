@@ -2,9 +2,13 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { evaluateAccessForActor } from "./authorityShared";
-import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
+import {
+  getActorForAccountId,
+  getAuthenticatedActor,
+  type AuthenticatedActor,
+} from "./identityShared";
 import { compactReminderSourceGeneration } from "./reminderSource";
 
 const DAY = 24 * 60 * 60_000;
@@ -395,6 +399,28 @@ export const safetySweep = internalMutation({
   },
 });
 
+export async function loadPlannerReminderNotifications(
+  ctx: QueryCtx,
+  actor: AuthenticatedActor,
+  args: { unreadOnly?: boolean; limit?: number },
+) {
+  const limit = Math.max(1, Math.min(args.limit ?? 50, 100));
+  const rows = await ctx.db
+    .query("plannerReminderDeliveries")
+    .withIndex("by_recipient_created", (q) =>
+      q.eq("recipientAccountId", actor.accountId),
+    )
+    .order("desc")
+    .take(limit * 3);
+  return rows
+    .filter(
+      (row) =>
+        row.status === "delivered" &&
+        (!args.unreadOnly || row.readAt === undefined),
+    )
+    .slice(0, limit);
+}
+
 export const listMine = query({
   args: {
     unreadOnly: v.optional(v.boolean()),
@@ -406,21 +432,7 @@ export const listMine = query({
       throw new Error(
         "AUTH_NO_SCHOOL: An active school membership is required.",
       );
-    const limit = Math.max(1, Math.min(args.limit ?? 50, 100));
-    const rows = await ctx.db
-      .query("plannerReminderDeliveries")
-      .withIndex("by_recipient_created", (q) =>
-        q.eq("recipientAccountId", actor.accountId),
-      )
-      .order("desc")
-      .take(limit * 3);
-    return rows
-      .filter(
-        (row) =>
-          row.status === "delivered" &&
-          (!args.unreadOnly || row.readAt === undefined),
-      )
-      .slice(0, limit);
+    return loadPlannerReminderNotifications(ctx, actor, args);
   },
 });
 

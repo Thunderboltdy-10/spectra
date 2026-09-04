@@ -17,6 +17,7 @@ import {
   type SpectraPreferences,
 } from "./schema";
 import { spectraBus } from "../events";
+import { subscribeIdleSurfaceRefresh } from "../data/idle-surface";
 
 export const PREFERENCE_SAVE_FAILURE =
   "Settings could not be saved. Your last change was undone.";
@@ -160,6 +161,7 @@ export function useSpectraPreferences({
   const confirmedRef = useRef(DEFAULT_SPECTRA_PREFERENCES);
   const writeGeneration = useRef(0);
   const inflightWrites = useRef(0);
+  const refreshLayersRef = useRef<() => void>(() => {});
   preferencesRef.current = preferences;
 
   const commitLocal = useCallback((next: SpectraPreferences) => {
@@ -183,21 +185,39 @@ export function useSpectraPreferences({
 
   useEffect(() => {
     if (!convex || !currentDeviceId || !signedIn) return;
-    const watch = convex.watchQuery(api.accountPreferences.layers, {
-      deviceId: currentDeviceId,
-      workspaceId,
-      workType,
-    });
-    const publish = () => {
-      try {
-        const value = watch.localQueryResult();
-        if (value) setRemoteLayers(value);
-      } catch (error) {
-        console.warn("[spectra:preferences] subscription unavailable", error);
-      }
+    let cancelled = false;
+    let unsub: (() => void) | null = null;
+    const subscribe = () => {
+      if (cancelled) return;
+      unsub?.();
+      const watch = convex.watchQuery(api.accountPreferences.layers, {
+        deviceId: currentDeviceId,
+        workspaceId,
+        workType,
+      });
+      const publish = () => {
+        try {
+          const value = watch.localQueryResult();
+          if (!value) return;
+          setRemoteLayers(value);
+          unsub?.();
+          unsub = null;
+        } catch (error) {
+          console.warn("[spectra:preferences] subscription unavailable", error);
+        }
+      };
+      publish();
+      unsub = watch.onUpdate(publish);
     };
-    publish();
-    return watch.onUpdate(publish);
+    refreshLayersRef.current = subscribe;
+    subscribe();
+    const stopIdle = subscribeIdleSurfaceRefresh(subscribe);
+    return () => {
+      cancelled = true;
+      unsub?.();
+      stopIdle();
+      refreshLayersRef.current = () => {};
+    };
   }, [convex, currentDeviceId, workspaceId, workType, signedIn]);
 
   const resolvedRemote = useMemo(() => {
@@ -279,6 +299,7 @@ export function useSpectraPreferences({
         revertFailedWrite(generation);
       } finally {
         inflightWrites.current = Math.max(0, inflightWrites.current - 1);
+        if (inflightWrites.current === 0) refreshLayersRef.current();
       }
     },
     [currentDeviceId, revertFailedWrite, signedIn, writeLayer],
@@ -315,6 +336,7 @@ export function useSpectraPreferences({
         () => revertFailedWrite(generation),
       ).finally(() => {
         inflightWrites.current = Math.max(0, inflightWrites.current - 1);
+        if (inflightWrites.current === 0) refreshLayersRef.current();
       });
     },
     [commitLocal, currentDeviceId, revertFailedWrite, signedIn, writeLayer],

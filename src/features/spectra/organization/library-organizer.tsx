@@ -79,6 +79,7 @@ import { OrganizerRail, type OrganizerLocation } from "./organizer-rail";
 import { OrganizerRow, ROW_HEIGHT, type RowCallbacks } from "./organizer-row";
 import { WorkBoard } from "./work-board";
 import { spectraBus } from "../events";
+import { subscribeIdleSurfaceRefresh } from "../data/idle-surface";
 import { LIBRARY_IMPORT_ACCEPT } from "./library-import";
 import {
   SurfaceGroupBy,
@@ -195,13 +196,25 @@ function ReplicaPresentationLoader({
   ) => void;
 }) {
   const { isAuthenticated } = useConvexAuth();
+  const [live, setLive] = useState(true);
   const rows = useQuery(
     api.replicas.presentationsForAccount,
-    isAuthenticated ? {} : "skip",
+    isAuthenticated && live ? {} : "skip",
   );
   useEffect(() => {
+    if (rows === undefined) return;
     onRows(rows);
+    setLive(false);
   }, [onRows, rows]);
+  useEffect(() => {
+    const refresh = () => setLive(true);
+    const stopIdle = subscribeIdleSurfaceRefresh(refresh);
+    const stopBus = spectraBus.on("workspace.refreshRequested", refresh);
+    return () => {
+      stopIdle();
+      stopBus();
+    };
+  }, []);
   return null;
 }
 
@@ -745,7 +758,7 @@ export function LibraryOrganizer({
             action.nodeId,
             action.extend ? "range" : "replace",
           );
-          publishWorkSelection(next);
+          if (selectionMode) publishWorkSelection(next);
           return next;
         });
       else if (action.type === "selectAll") {
@@ -777,6 +790,7 @@ export function LibraryOrganizer({
       renamingId,
       rows,
       selection,
+      selectionMode,
       trashNodes,
       publishWorkSelection,
     ],
@@ -1011,6 +1025,19 @@ export function LibraryOrganizer({
             onChange={setTerm}
             scopeLabel={floorLabel}
             className="min-w-[140px] flex-1 basis-[180px]"
+            onMoveToResults={() => {
+              const first = rows[0];
+              if (first) {
+                setSelection(
+                  selectRow(EMPTY_SELECTION, rows, first.nodeId, "replace"),
+                );
+              }
+              scrollRef.current?.focus();
+            }}
+            onOpenFirstResult={() => {
+              const first = rows[0];
+              if (first) openNode(first);
+            }}
           />
 
           <SurfaceTypeFilter filter={filter} onChange={setFilter} />

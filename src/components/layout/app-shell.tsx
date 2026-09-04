@@ -346,7 +346,7 @@ function ShellNavigation() {
     // fallback poll is intentionally sparse and never fetches in a hidden tab.
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void refreshNotifications();
-    }, 60_000);
+    }, 180_000);
     const refreshVisible = () => {
       if (document.visibilityState === "visible") void refreshNotifications();
     };

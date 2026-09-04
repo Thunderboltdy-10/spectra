@@ -130,6 +130,20 @@ PASS requires every matrix card with real evidence. A failure is triaged and rep
 - Z1 machine floor: Vitest 172/1635, tsc, lint 0, production BUILD_ID `4vQuvfR7D03KLpUOXRVfB`, DOCX 16/177, Office xlsx/pptx, seam, secrets/architecture/copy/tokens, Bridge cargo check.
 - Z2 **NO-GO**. Failed: D2 D3 E0 E1 E3–E8 E10 F0 F1 F2 G1 G2 T0 Z0. P8.V1 stays OPEN.
 
+### P8.V1 continuation log — 2026-09-04
+
+- Instance 1 production BUILD_ID `71iO9VC6rSDWaIMccQinY`. Original IBDP1 unmounted. Instance 2 untouched.
+- F0: parked Library replica + preference subscriptions; 180s/focus refresh. Idle **3.8** exec/min, 45.3 KB/min I/O, sweep 100/45287.
+- G1: List Search → ArrowDown → Enter opened Card7-Quiz; no picker; Escape to Library. 200%/reduced-motion inherited.
+- D2: A revoked B from CARD9; B Library lost the row; work not deleted; pending invite restored after invitation-inbox refresh. Markers intact.
+- F1: one CARD9 checkpoint CLS 0.383 / 23 animations; covering first-paint/Sheets/deck family unrun.
+- G2: live pending/accepted/revoked proven via D2; expired public URL and operator session unrun.
+- E0 diagnosed: `scripts/local/stack.mjs` treats gateway child exit as instance death. Not patched this closeout.
+- D3/T0 still blocked (Bridge not running). E1, E3–E8, E10, F2 uninjected.
+- Z0 failed: remaining launch cards open; not a no-edit freeze.
+- Z1: Vitest 173/1643, tsc, lint 0, Office xlsx/pptx, DOCX 16/177, seam 13/13, Bridge cargo check.
+- Z2 **NO-GO**. Failed: D3 E0 E1 E3–E8 E10 F1 F2 G2 T0 Z0. P8.V1 stays OPEN.
+
 ## Exit gate
 
 P8.V1 ends against one clean, immutable candidate whose manifest and STATE row agree. GO has zero launch-blocking failures, every numeric budget met, and a tested rollback/incident path. NO-GO names exact failed cards and remains honest resumable P8.V1 work; expansion does not begin until the school-launch line reaches GO or Pablo explicitly changes scope.

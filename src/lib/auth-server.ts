@@ -61,11 +61,48 @@ export function isPlatformOperatorEmail(email: string) {
   return operatorEmails().has(email.trim().toLowerCase());
 }
 
+const ACTOR_IDENTITY_TTL_MS = 30_000;
+const actorIdentityCache = new Map<
+  string,
+  { actor: SessionActor; expiresAt: number }
+>();
+
+export function clearActorIdentityCache() {
+  actorIdentityCache.clear();
+}
+
 async function readIdentity() {
   return convexQuery<Record<string, never>, IdentityContext | null>(
     "identity:me",
     {},
   );
+}
+
+function cachedActor(clerkId: string) {
+  const cached = actorIdentityCache.get(clerkId);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    actorIdentityCache.delete(clerkId);
+    return null;
+  }
+  return cached.actor;
+}
+
+function rememberActor(clerkId: string, actor: SessionActor) {
+  if (actorIdentityCache.size >= 500) {
+    const now = Date.now();
+    for (const [key, value] of actorIdentityCache) {
+      if (value.expiresAt <= now) actorIdentityCache.delete(key);
+    }
+    if (actorIdentityCache.size >= 500) {
+      const oldestKey = actorIdentityCache.keys().next().value;
+      if (oldestKey) actorIdentityCache.delete(oldestKey);
+    }
+  }
+  actorIdentityCache.set(clerkId, {
+    actor,
+    expiresAt: Date.now() + ACTOR_IDENTITY_TTL_MS,
+  });
 }
 
 async function ensureVerifiedClerkAccount() {
@@ -123,7 +160,9 @@ export function isAuthNoSchool(error: unknown) {
   return message.startsWith("AUTH_NO_SCHOOL");
 }
 
-export async function requireActor(): Promise<SessionActor> {
+export async function requireActor(
+  options: { fresh?: boolean } = {},
+): Promise<SessionActor> {
   if (!hasClerkServerConfig())
     throw new Error("AUTH_MISCONFIGURED: Clerk authentication is required.");
 
@@ -135,6 +174,11 @@ export async function requireActor(): Promise<SessionActor> {
     throw new Error("AUTH_MISCONFIGURED: Clerk authentication failed.");
   }
   if (!clerkId) throw new Error("AUTH_NOT_SIGNED_IN: Sign in to continue.");
+
+  if (!options.fresh) {
+    const cached = cachedActor(clerkId);
+    if (cached) return cached;
+  }
 
   let identity = await readIdentity();
   if (!identity) {
@@ -150,7 +194,7 @@ export async function requireActor(): Promise<SessionActor> {
     throw new Error(
       "AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.",
     );
-  return {
+  const actor = {
     clerkId,
     accountId: identity.accountId,
     email: identity.email,
@@ -159,6 +203,8 @@ export async function requireActor(): Promise<SessionActor> {
     schoolRole: identity.schoolRole,
     membershipId: identity.membershipId,
   };
+  rememberActor(clerkId, actor);
+  return actor;
 }
 
 export async function requirePlatformOperator(): Promise<PlatformOperatorAccount> {

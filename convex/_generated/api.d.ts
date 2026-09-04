@@ -45,6 +45,7 @@ import type * as memberships from "../memberships.js";
 import type * as memory from "../memory.js";
 import type * as memoryEmbedding from "../memoryEmbedding.js";
 import type * as metering from "../metering.js";
+import type * as notificationCenter from "../notificationCenter.js";
 import type * as operationalCounters from "../operationalCounters.js";
 import type * as operatorSessions from "../operatorSessions.js";
 import type * as orgNodeAggregates from "../orgNodeAggregates.js";
@@ -120,6 +121,7 @@ declare const fullApi: ApiFromModules<{
   memory: typeof memory;
   memoryEmbedding: typeof memoryEmbedding;
   metering: typeof metering;
+  notificationCenter: typeof notificationCenter;
   operationalCounters: typeof operationalCounters;
   operatorSessions: typeof operatorSessions;
   orgNodeAggregates: typeof orgNodeAggregates;

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   REPLICA_COMPENSATION_TABLE,
   canonicalSyncIntent,
@@ -46,5 +48,26 @@ describe("replica truth contracts", () => {
       expect(entry.failureExits.length).toBeGreaterThan(0);
       expect(entry.sweeper).toBe("replicas.sweepReplicaTruth");
     }
+  });
+
+  it("keeps replica truth sweeps inside the scheduled 100-document probe budget", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "convex/replicas.ts"),
+      "utf8",
+    );
+    expect(source).toContain("export const SWEEP_DOCUMENT_BUDGET = 100");
+    expect(source).toContain("if (budget.exhausted()) return true;");
+    expect(source).toContain(".take(budget.cap(1))");
+    expect(source).toContain("documentsRead: SWEEP_DOCUMENT_BUDGET - budget.remaining()");
+    const presentationsStart = source.indexOf(
+      "export const presentationsForAccount",
+    );
+    const presentationsEnd = source.indexOf("export const", presentationsStart + 1);
+    expect(
+      source.slice(presentationsStart, presentationsEnd),
+    ).toContain("getOptionalAuthenticatedActor");
+    const sweep = source.slice(source.indexOf("export const sweepReplicaTruth"));
+    expect(sweep).not.toContain(".take(1_000)");
+    expect(sweep).not.toContain(".take(200)");
   });
 });

@@ -60,12 +60,18 @@ export function useBridgeHealth() {
         setChecked(true);
       });
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 3_000);
-    const onFocus = () => void refresh();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 15_000);
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onFocus);
     window.addEventListener("focus", onFocus);
     return () => {
       controller.abort();
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onFocus);
       window.removeEventListener("focus", onFocus);
     };
   }, []);

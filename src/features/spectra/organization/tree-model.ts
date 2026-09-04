@@ -206,10 +206,11 @@ export function resolveKey(
   )
     return cursor ? { type: "rename", nodeId: cursor.nodeId } : null;
   if (key === "Enter") {
-    if (!cursor) return null;
-    return cursor.isContainer
-      ? { type: "enter", nodeId: cursor.nodeId }
-      : { type: "open", nodeId: cursor.nodeId };
+    const target = cursor ?? rows[0];
+    if (!target) return null;
+    return target.isContainer
+      ? { type: "enter", nodeId: target.nodeId }
+      : { type: "open", nodeId: target.nodeId };
   }
   if (key === "Delete" || key === "Backspace") {
     const ids =

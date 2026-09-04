@@ -1,4 +1,6 @@
 import { createHash } from "crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ARTIFACT_EMBED_CONTEXT_POLICIES,
@@ -225,5 +227,16 @@ describe("P5.I3 embed convergence", () => {
       x: 10,
       y: 20,
     });
+  });
+
+  it("lists embeds as empty when the reader is not yet signed in", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "convex/artifactEmbeds.ts"),
+      "utf8",
+    );
+    expect(source).toContain("getOptionalAuthenticatedActor");
+    expect(source).toContain(
+      "if (!actorValue) return { canConfigure: false, embeds: [] };",
+    );
   });
 });

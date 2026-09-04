@@ -19,6 +19,7 @@ vi.mock("@/lib/convex-server", () => ({
 }));
 
 import {
+  clearActorIdentityCache,
   isAuthNoSchool,
   requireAccessPrincipal,
   requireActor,
@@ -55,6 +56,7 @@ describe("server authorization principals", () => {
     });
     convex.mutation.mockReset();
     convex.query.mockReset();
+    clearActorIdentityCache();
   });
 
   afterEach(() => {
@@ -132,5 +134,45 @@ describe("server authorization principals", () => {
       name: "Ordinary User",
       avatarUrl: undefined,
     });
+  });
+
+  it("reuses a successful actor for 30s and never caches AUTH_NO_SCHOOL", async () => {
+    clerk.auth.mockResolvedValue({ userId: schoolIdentity.clerkId });
+    convex.query.mockImplementation(async (name: string) => {
+      if (name === "identity:me") return schoolIdentity;
+      throw new Error(`Unexpected query: ${name}`);
+    });
+
+    await requireActor();
+    await requireActor();
+    expect(
+      convex.query.mock.calls.filter(([name]) => name === "identity:me"),
+    ).toHaveLength(1);
+
+    await requireActor({ fresh: true });
+    expect(
+      convex.query.mock.calls.filter(([name]) => name === "identity:me"),
+    ).toHaveLength(2);
+
+    clearActorIdentityCache();
+    convex.query.mockResolvedValue(null);
+    clerk.currentUser.mockResolvedValue({
+      fullName: "Ordinary User",
+      firstName: "Ordinary",
+      imageUrl: "",
+      primaryEmailAddressId: "email-1",
+      emailAddresses: [
+        {
+          id: "email-1",
+          emailAddress: "ordinary@example.test",
+          verification: { status: "verified" },
+        },
+      ],
+    });
+    await expect(requireActor()).rejects.toThrow("AUTH_NO_SCHOOL");
+    await expect(requireActor()).rejects.toThrow("AUTH_NO_SCHOOL");
+    expect(
+      convex.query.mock.calls.filter(([name]) => name === "identity:me").length,
+    ).toBeGreaterThanOrEqual(4);
   });
 });

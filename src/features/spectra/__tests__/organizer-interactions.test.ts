@@ -3,12 +3,15 @@ import {
   expandedAncestorsForPath,
   isOpenWorkNode,
   opensOnPlainClick,
+  resolveKey,
   selectRow,
   selectedWorkSourceIds,
   windowRange,
 } from "../organization/tree-model";
 import { ROW_HEIGHT } from "../organization/organizer-row";
 import type { TreeNode } from "../organization/tree-client";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 function workRow(nodeId: string, sourceId: string): TreeNode {
   return {
@@ -98,5 +101,57 @@ describe("Library windowRange density", () => {
     expect(
       range.padTop + range.padBottom + (range.end - range.start) * ROW_HEIGHT,
     ).toBe(10_000 * ROW_HEIGHT);
+  });
+});
+
+describe("Library keyboard open", () => {
+  const none = { shiftKey: false, metaKey: false, ctrlKey: false };
+  const empty = { ids: new Set<string>(), anchorId: null, cursorId: null };
+
+  it("opens the first visible row when Enter arrives with no cursor", () => {
+    const rows = [workRow("n1", "a"), workRow("n2", "b")];
+    expect(resolveKey("Enter", none, rows, empty)).toEqual({
+      type: "open",
+      nodeId: "n1",
+    });
+  });
+
+  it("moves onto the first row from Search with ArrowDown", () => {
+    const rows = [workRow("n1", "a"), workRow("n2", "b")];
+    expect(resolveKey("ArrowDown", none, rows, empty)).toEqual({
+      type: "move",
+      nodeId: "n1",
+      extend: false,
+    });
+  });
+
+  it("keeps Search ArrowDown/Enter and cursor-row Enter on the shared keyboard path", () => {
+    const search = readFileSync(
+      path.join(process.cwd(), "src/features/spectra/organization/surface-chrome.tsx"),
+      "utf8",
+    );
+    const row = readFileSync(
+      path.join(process.cwd(), "src/features/spectra/organization/organizer-row.tsx"),
+      "utf8",
+    );
+    const organizer = readFileSync(
+      path.join(
+        process.cwd(),
+        "src/features/spectra/organization/library-organizer.tsx",
+      ),
+      "utf8",
+    );
+    expect(search).toContain("onMoveToResults");
+    expect(search).toContain("onOpenFirstResult");
+    expect(search).toContain('event.key === "ArrowDown"');
+    expect(row).toContain("tabIndex={cursor ? 0 : -1}");
+    expect(row).toContain("callbacks.onOpen(node)");
+    expect(organizer).toContain("onMoveToResults=");
+    expect(organizer).toContain("onOpenFirstResult=");
+    expect(organizer).toContain("scrollRef.current?.focus()");
+    expect(organizer).toContain("if (selectionMode) publishWorkSelection(next);");
+    expect(organizer).toContain("isAuthenticated && live ? {} : \"skip\"");
+    expect(organizer).toContain("setLive(false)");
+    expect(organizer).toContain("subscribeIdleSurfaceRefresh");
   });
 });

@@ -1195,12 +1195,11 @@ export function SpectraShell({
     useState<SpectraArtifact | null>(null);
   const [artifactShareTarget, setArtifactShareTarget] =
     useState<SpectraArtifact | null>(null);
+  const invitationCollection = searchParams.get("collection") === "invitations";
   const [shareInvitations, setShareInvitations] = useState<
     SpectraShareInvitation[]
   >([]);
-  const [invitationsOpen, setInvitationsOpen] = useState(
-    searchParams.get("collection") === "invitations",
-  );
+  const [invitationsOpen, setInvitationsOpen] = useState(invitationCollection);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   /**
@@ -1246,13 +1245,22 @@ export function SpectraShell({
    * have — and the overview reloads on every workspace switch, which is no
    * reason to re-ask the server about invitations.
    */
-  const refreshInvitations = useCallback(async () => {
-    const result = await getSpectraShareInvitations().catch(() => null);
+  const refreshInvitations = useCallback(async (force = false) => {
+    const result = await getSpectraShareInvitations({ force }).catch(() => null);
     if (result) setShareInvitations(result.invitations);
   }, []);
   useEffect(() => {
     void refreshInvitations();
+    const stop = spectraBus.on("notifications.changed", () => {
+      void refreshInvitations(true);
+    });
+    return stop;
   }, [refreshInvitations]);
+  useEffect(() => {
+    if (!invitationCollection) return;
+    setInvitationsOpen(true);
+    void refreshInvitations(true);
+  }, [invitationCollection, refreshInvitations]);
   const [workspaceDeleteConfirmation, setWorkspaceDeleteConfirmation] =
     useState("");
   const workspaceCreateRef = useOutsideClick<HTMLDivElement>(

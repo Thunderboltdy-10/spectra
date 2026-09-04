@@ -10,7 +10,7 @@ export type AdministrationIdentity = {
     schoolId: string;
     role: "student" | "teacher" | "school_admin";
     membershipId: string;
-  };
+  } | null;
 };
 
 export type UsageSeriesPoint = {

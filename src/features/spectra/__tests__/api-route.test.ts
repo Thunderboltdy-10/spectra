@@ -18,9 +18,20 @@ function mockActor() {
   };
 }
 
+function mockAuth(
+  requireActor = vi.fn().mockResolvedValue(mockActor()),
+) {
+  return {
+    requireActor,
+    isAuthNoSchool: (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return message.startsWith("AUTH_NO_SCHOOL");
+    },
+  };
+}
+
 describe("Spectra API route", () => {
   it("loads overview data from new Spectra tables", async () => {
-    const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexMutation = vi.fn();
     const convexQuery = vi
       .fn()
@@ -29,7 +40,7 @@ describe("Spectra API route", () => {
       .mockResolvedValueOnce([{ _id: "run_1", status: "completed" }])
       .mockResolvedValueOnce([{ _id: "card_1", status: "completed" }]);
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => mockAuth());
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
@@ -52,14 +63,13 @@ describe("Spectra API route", () => {
   });
 
   it("creates and archives workspaces through Spectra CRUD functions", async () => {
-    const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexQuery = vi.fn();
     const convexMutation = vi
       .fn()
       .mockResolvedValueOnce("workspace_new")
       .mockResolvedValueOnce({ workspaceId: "workspace_new" });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => mockAuth());
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
@@ -86,10 +96,9 @@ describe("Spectra API route", () => {
   });
 
   it("rejects a wrong-table workspace id through the public normalization boundary", async () => {
-    const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexMutation = vi.fn();
     const convexQuery = vi.fn().mockResolvedValue(null);
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => mockAuth());
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
@@ -101,14 +110,13 @@ describe("Spectra API route", () => {
   });
 
   it("creates and archives artifacts through Spectra CRUD functions", async () => {
-    const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexQuery = vi.fn();
     const convexMutation = vi
       .fn()
       .mockResolvedValueOnce({ artifactId: "artifact_1" })
       .mockResolvedValueOnce({ artifactId: "artifact_1" });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => mockAuth());
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
@@ -144,14 +152,13 @@ describe("Spectra API route", () => {
   });
 
   it("files artifacts in workspaces and moves them back to General without deleting them", async () => {
-    const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexQuery = vi.fn();
     const convexMutation = vi
       .fn()
       .mockResolvedValueOnce({ nodeId: "node_1", created: true })
       .mockResolvedValueOnce({ nodeId: "node_1", sourceId: "artifact_1", artifactStillExists: true });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => mockAuth());
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
@@ -185,13 +192,12 @@ describe("Spectra API route", () => {
   });
 
   it("routes permanent artifact and strongly confirmed workspace deletion", async () => {
-    const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexQuery = vi.fn();
     const convexMutation = vi.fn()
       .mockResolvedValueOnce({ artifactId: "artifact_1" })
       .mockResolvedValueOnce({ workspaceId: "workspace_1" });
 
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => mockAuth());
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
@@ -214,10 +220,9 @@ describe("Spectra API route", () => {
   });
 
   it("lists durable artifact versions", async () => {
-    const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexQuery = vi.fn().mockResolvedValue([{ _id: "version_1", artifactId: "artifact_1", source: "ai" }]);
     const convexMutation = vi.fn();
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => mockAuth());
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
@@ -228,15 +233,71 @@ describe("Spectra API route", () => {
   });
 
   it("assigns a permanent chat thread only when a workspace is explicitly selected", async () => {
-    const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexQuery = vi.fn();
     const convexMutation = vi.fn().mockResolvedValue({ threadId: "thread_1" });
-    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/auth-server", () => mockAuth());
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
     const route = await import("@/app/api/spectra/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra", { method: "POST", body: JSON.stringify({ action: "updateThread", threadId: "thread_1", workspaceId: "workspace_1" }) }));
     expect(response.status).toBe(200);
     expect(convexMutation).toHaveBeenCalledWith("spectraThreads:update", { threadId: "thread_1", title: undefined, pinned: undefined, workspaceId: "workspace_1", status: undefined });
+  });
+
+  it("loads the notification center in one authenticated request", async () => {
+    const convexMutation = vi.fn();
+    const convexQuery = vi.fn().mockImplementation(async (name: string) => {
+      if (name === "artifactComments:listNotifications") return [{ _id: "comment_1" }];
+      if (name === "plannerReminders:listMine") return [{ _id: "planner_1" }];
+      if (name === "timetableReminders:listMine") return [{ _id: "timetable_1" }];
+      if (name === "authority:listIncomingInvitations") return [{ invitationId: "invite_1" }];
+      throw new Error(`unexpected query ${name}`);
+    });
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(
+      new NextRequest("http://localhost/api/spectra?action=notificationCenter&limit=30"),
+    );
+    const payload = (await response.json()) as {
+      comments: Array<{ _id: string }>;
+      planner: Array<{ _id: string }>;
+      timetable: Array<{ _id: string }>;
+      invitations: Array<{ invitationId: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.comments).toEqual([{ _id: "comment_1" }]);
+    expect(payload.planner).toEqual([{ _id: "planner_1" }]);
+    expect(payload.timetable).toEqual([{ _id: "timetable_1" }]);
+    expect(payload.invitations).toEqual([{ invitationId: "invite_1" }]);
+    expect(convexQuery).toHaveBeenCalledTimes(4);
+  });
+
+  it("returns an empty overview for a signed-in account without a school", async () => {
+    const requireActor = vi.fn().mockRejectedValue(
+      new Error("AUTH_NO_SCHOOL: This account does not have an active school membership."),
+    );
+    const convexQuery = vi.fn();
+    const convexMutation = vi.fn();
+    vi.doMock("@/lib/auth-server", () => mockAuth(requireActor));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(
+      new NextRequest("http://localhost/api/spectra?action=overview"),
+    );
+    const payload = (await response.json()) as {
+      needsSchool?: boolean;
+      workspaces: unknown[];
+      artifacts: unknown[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.needsSchool).toBe(true);
+    expect(payload.workspaces).toEqual([]);
+    expect(payload.artifacts).toEqual([]);
+    expect(convexQuery).not.toHaveBeenCalled();
   });
 });
 

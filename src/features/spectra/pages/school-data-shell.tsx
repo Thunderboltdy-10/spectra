@@ -3,9 +3,7 @@
 import Link from "next/link";
 import {
   Archive,
-  BookOpen,
   CalendarDays,
-  CheckCircle2,
   ChevronRight,
   ClipboardCheck,
   Clock3,
@@ -37,6 +35,11 @@ import {
   CapabilityTruthState,
 } from "../integrations/status/capability-truth";
 import { syncSpectraManageBac } from "../data/api";
+import { ClassShelfEditor } from "../components/class-shelf-editor";
+import {
+  fetchMyClassCandidates,
+  type ClassShelfCandidate,
+} from "../components/class-shelf-picker";
 
 type Capability = {
   _id: string;
@@ -80,14 +83,6 @@ type SyncRun = {
   completedAt?: number;
 };
 
-type ClassCandidate = {
-  recordId: string;
-  title: string;
-  program: string;
-  grade: string;
-  workspaceId: string | null;
-};
-
 type SchoolPayload = {
   admin: boolean;
   integration: null | {
@@ -97,11 +92,13 @@ type SchoolPayload = {
     freshnessSlaMinutes: number;
   };
   mapping: null | { status: string; updatedAt?: number };
+  identityRequired: boolean;
+  classLoadError: string;
   capabilities: Capability[];
   syncRuns: SyncRun[];
   records: RecordRow[];
   conflicts: unknown[];
-  classes: ClassCandidate[];
+  classes: ClassShelfCandidate[];
 };
 
 type SectionKey =
@@ -216,18 +213,6 @@ function formatDate(value?: number) {
   }).format(value);
 }
 
-async function manageBacPost(body: Record<string, unknown>) {
-  const response = await fetch("/api/spectra/managebac", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(payload?.error?.message ?? "School refresh failed.");
-  return payload.data ?? payload;
-}
-
 function stateFor(
   payload: SchoolPayload,
   section: (typeof sections)[number],
@@ -320,12 +305,20 @@ export function SchoolDataShell() {
     setLoading(true);
     setError("");
     try {
-      const [overviewResponse, classesResponse] = await Promise.all([
+      const [overviewResponse, classResult] = await Promise.all([
         fetch("/api/spectra/managebac"),
-        fetch("/api/spectra/managebac?action=myClasses"),
+        fetchMyClassCandidates().then(
+          (result) => ({ ok: true as const, result }),
+          (caught) => ({
+            ok: false as const,
+            message:
+              caught instanceof Error
+                ? caught.message
+                : "Classes could not load.",
+          }),
+        ),
       ]);
       const overview = await overviewResponse.json();
-      const classes = await classesResponse.json();
       if (!overviewResponse.ok)
         throw new Error(overview?.error?.message ?? "Could not load School.");
       const data = overview.data ?? {};
@@ -337,9 +330,11 @@ export function SchoolDataShell() {
         syncRuns: Array.isArray(data.syncRuns) ? data.syncRuns : [],
         records: Array.isArray(data.records) ? data.records : [],
         conflicts: Array.isArray(data.conflicts) ? data.conflicts : [],
-        classes: Array.isArray(classes?.data?.classes)
-          ? classes.data.classes
-          : [],
+        classes: classResult.ok ? classResult.result.classes : [],
+        identityRequired: classResult.ok
+          ? classResult.result.identityRequired
+          : false,
+        classLoadError: classResult.ok ? "" : classResult.message,
       });
     } catch (nextError) {
       setError(
@@ -389,7 +384,7 @@ export function SchoolDataShell() {
 
   return (
     <main className="spectra-wave-y h-full min-h-0 overflow-y-auto bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      <div className="w-full px-4 py-6 sm:px-6 lg:px-8 xl:px-10">
+      <div className="w-full px-4 py-6 pb-36 sm:px-6 lg:px-8 xl:px-10">
         <ProductPageHeader
           title="School"
           description="Classes, deadlines, resources, and synchronization state from your school."
@@ -499,7 +494,13 @@ export function SchoolDataShell() {
                     onSelect={setActive}
                   />
                 ) : active === "classes" ? (
-                  <Classes payload={payload} busy={busy} run={run} />
+                  <ClassShelfEditor
+                    integration={payload.integration}
+                    identityRequired={payload.identityRequired}
+                    classes={payload.classes}
+                    classLoadError={payload.classLoadError}
+                    onSaved={load}
+                  />
                 ) : active === "sync" ? (
                   <SyncStatus payload={payload} />
                 ) : (
@@ -665,82 +666,6 @@ function Overview({
         </AuxiliaryRail>
       ) : null}
     </div>
-  );
-}
-
-function Classes({
-  payload,
-  busy,
-  run,
-}: {
-  payload: SchoolPayload;
-  busy: string;
-  run: (key: string, action: () => Promise<unknown>) => Promise<void>;
-}) {
-  return (
-    <section className="mt-5">
-      <header className="flex items-center justify-between px-1 py-3">
-        <div>
-          <h2 className="font-display text-heading font-semibold">
-            Current classes
-          </h2>
-          <p className="mt-1 text-micro text-[var(--text-tertiary)]">
-            Creating a workspace is explicit, stable by source course ID, and
-            safe across renames.
-          </p>
-        </div>
-        <BookOpen className="size-4 text-[var(--text-tertiary)]" />
-      </header>
-      {payload.classes.length ? (
-        <ul className="space-y-1">
-          {payload.classes.map((item) => (
-            <li
-              key={item.recordId}
-              className="flex items-center gap-3 rounded-card px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]"
-            >
-              <GraduationCap className="size-4 shrink-0 text-emerald-800" />
-              <div className="min-w-0 flex-1">
-                <strong className="block truncate text-caption">
-                  {item.title}
-                </strong>
-                <span className="text-micro text-[var(--text-tertiary)]">
-                  {[item.program, item.grade].filter(Boolean).join(" · ") ||
-                    "Class source"}
-                </span>
-              </div>
-              {item.workspaceId ? (
-                <span className="inline-flex items-center gap-1 text-micro font-semibold text-emerald-700">
-                  <CheckCircle2 className="size-3.5" />
-                  Workspace linked
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  disabled={Boolean(busy)}
-                  onClick={() =>
-                    void run(`class:${item.recordId}`, () =>
-                      manageBacPost({
-                        action: "materializeClasses",
-                        recordIds: [item.recordId],
-                      }),
-                    )
-                  }
-                  className="rounded-control border border-[var(--border-default)] px-3 py-1.5 text-micro font-semibold hover:bg-[var(--bg-hover)] disabled:opacity-40"
-                >
-                  {busy === `class:${item.recordId}`
-                    ? "Creating…"
-                    : "Create workspace"}
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="px-5 py-12 text-center text-micro text-[var(--text-tertiary)]">
-          The class route completed with zero current records.
-        </p>
-      )}
-    </section>
   );
 }
 

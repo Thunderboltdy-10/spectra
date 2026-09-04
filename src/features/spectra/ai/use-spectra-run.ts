@@ -459,7 +459,7 @@ export function useSpectraRun({
         // The cursor endpoint is the live transport. Refresh the tab index only
         // for discovery/recovery; polling the full tab projection per cursor
         // tick re-reads every run's summary while progress is streaming.
-        if (!tabSnapshot.length || Date.now() - tabsFetchedAt >= 10_000) {
+        if (!tabSnapshot.length || Date.now() - tabsFetchedAt >= 60_000) {
           const result = await getSpectraRunTabs({ limit: 120 });
           tabSnapshot = result.runTabs;
           tabsFetchedAt = Date.now();
@@ -634,7 +634,7 @@ export function useSpectraRun({
             document.visibilityState === "visible"
               ? observedActive
                 ? 750
-                : 12_000
+                : 60_000
               : 20_000,
           );
       }

@@ -13,6 +13,19 @@ import {
   resolveJoinToken,
 } from "@/lib/invitation-session";
 
+function roleLabel(role: string) {
+  if (role === "school_admin") return "school administrator";
+  if (role === "teacher") return "teacher";
+  return "student";
+}
+
+type InvitationPreview = {
+  schoolName: string;
+  role: "student" | "teacher" | "school_admin";
+  emailMatches: boolean;
+  alreadyMember: boolean;
+};
+
 function JoinSchoolContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -24,9 +37,25 @@ function JoinSchoolContent() {
     "ready" | "accepting" | "accepted" | "error"
   >("ready");
   const [error, setError] = useState("");
+  const [preview, setPreview] = useState<InvitationPreview | null>(null);
 
   useEffect(() => {
     if (token) persistJoinTokenCookie(token, document);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    void mutateAdministration<InvitationPreview>("previewInvitation", { token })
+      .then((next) => {
+        if (active) setPreview(next);
+      })
+      .catch(() => {
+        if (active) setPreview(null);
+      });
+    return () => {
+      active = false;
+    };
   }, [token]);
 
   async function accept() {
@@ -64,6 +93,30 @@ function JoinSchoolContent() {
     }
   }
 
+  const schoolName = preview?.schoolName;
+  const heading =
+    status === "accepted"
+      ? schoolName
+        ? `You joined ${schoolName}`
+        : "Welcome to your school"
+      : schoolName
+        ? `Join ${schoolName}`
+        : "Accept your school invitation";
+  const detail =
+    status === "accepted"
+      ? "Spectra is opening your workspace."
+      : preview?.emailMatches === false
+        ? "Sign in with the invited email, then return to this page."
+        : schoolName
+          ? `This invitation is for a ${roleLabel(preview?.role ?? "student")} at ${schoolName}.`
+          : "Sign in with the invited email, then accept to join this school.";
+  const buttonLabel =
+    status === "accepted"
+      ? "Accepted"
+      : status === "accepting"
+        ? "Checking invitation"
+        : "Join school";
+
   return (
     <main className="relative isolate grid min-h-dvh place-items-center bg-[radial-gradient(circle_at_50%_0%,color-mix(in_oklab,var(--accent-mint)_11%,transparent),transparent_42%),var(--bg-primary)] p-5 text-[var(--text-primary)]">
       <SurfaceField scale="stage" behind />
@@ -78,14 +131,10 @@ function JoinSchoolContent() {
           {status === "accepted" ? <Check size={22} /> : <School size={22} />}
         </span>
         <h1 className="mt-5 font-[var(--font-serif)] text-display font-medium tracking-[-.025em]">
-          {status === "accepted"
-            ? "Welcome to your school"
-            : "Accept your school invitation"}
+          {heading}
         </h1>
         <p className="mt-2 text-caption leading-5 text-[var(--text-tertiary)]">
-          {status === "accepted"
-            ? "Your single school membership is active. Spectra is opening your workspace."
-            : "Sign in with the exact verified email that received this invitation. Joining never changes your ordinary artifact or agent capabilities."}
+          {detail}
         </p>
         {status === "error" ? (
           <div className="mt-5 rounded-control border border-[color-mix(in oklab, var(--accent-coral) 28%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] p-3 text-micro leading-5 text-[var(--danger)]">
@@ -103,11 +152,7 @@ function JoinSchoolContent() {
           ) : (
             <ShieldCheck size={15} />
           )}
-          {status === "accepted"
-            ? "Accepted"
-            : status === "accepting"
-              ? "Checking invitation"
-              : "Accept invitation"}
+          {buttonLabel}
         </button>
         <div className="mt-5 border-t border-[var(--border-subtle)] pt-4 text-micro leading-4 text-[var(--text-tertiary)]">
           If Spectra asks you to sign in, use the invited address and return to

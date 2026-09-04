@@ -1373,7 +1373,7 @@ export function SheetsStudio({
         }),
       });
     },
-    [artifactId],
+    [artifactId, setNotice],
   );
   const [importing, setImporting] = useState(false);
   const [viewport, setViewport] = useState<Viewport>({

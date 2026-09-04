@@ -15,6 +15,7 @@ import {
   MessageSquare,
   PencilLine,
   Plus,
+  School,
   Share2,
   Sprout,
   Trash2,
@@ -42,7 +43,12 @@ import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { toast } from "sonner";
 import { describeFailure } from "@/components/ui/truthful-state";
-import { ProductErrorState } from "@/features/spectra/components/product-state";
+import {
+  ProductEmptyState,
+  ProductErrorState,
+} from "@/features/spectra/components/product-state";
+import { ClassShelfOnboarding } from "../components/class-shelf-onboarding";
+import Link from "next/link";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -593,9 +599,11 @@ function RootHeader({
             <p className="mt-1.5 max-w-[52ch] text-body leading-relaxed text-[var(--text-secondary)]">
               {surface === "library"
                 ? "Everything you have made, filed where you put it."
-                : workspaceCount === 1
-                  ? "One workspace, and everything filed across it."
-                  : `${workspaceCount} workspaces, and everything filed across them.`}
+                : workspaceCount === 0
+                  ? "Your work lives here."
+                  : workspaceCount === 1
+                    ? "One workspace, and everything filed across it."
+                    : `${workspaceCount} workspaces, and everything filed across them.`}
             </p>
           </div>
         </div>
@@ -881,6 +889,23 @@ function OverviewLoadFailure({
         action={
           <Button variant="primary" size="sm" onClick={onRetry}>
             Try again
+          </Button>
+        }
+      />
+    </main>
+  );
+}
+
+function NeedsSchoolEmpty() {
+  return (
+    <main className="grid min-h-0 flex-1 place-items-center overflow-y-auto px-6 py-12">
+      <ProductEmptyState
+        icon={School}
+        title="Join your school to open Spectra"
+        detail="You are signed in. Accept the invitation for this school, then your workspace will load."
+        action={
+          <Button variant="primary" size="sm" asChild>
+            <Link href="/join">Open invitation</Link>
           </Button>
         }
       />
@@ -3853,9 +3878,20 @@ export function SpectraShell({
     Boolean(selectedWorkspaceId && workspaceLoading && !workspace);
   const surfaceFailure =
     overviewLoadState.status === "error" ? overviewLoadState : null;
+  const needsSchool = overview?.needsSchool === true;
+  const showClassOnboarding =
+    overviewLoadState.status === "ready" &&
+    !needsSchool &&
+    preferences.integrations.classShelvesStatus === "pending" &&
+    atRoot &&
+    !studio.activeArtifact;
 
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 bg-[var(--bg-primary)]">
+      <ClassShelfOnboarding
+        open={showClassOnboarding}
+        onCompleted={() => void loadOverview(selectedWorkspaceId, true)}
+      />
       <input
         ref={workspaceImportInputRef}
         type="file"
@@ -4144,7 +4180,7 @@ export function SpectraShell({
                       ) : null}
                       {surfaceLoading ? (
                         <WorkspaceHeaderSkeleton />
-                      ) : surfaceFailure ? null : workspace ? (
+                      ) : needsSchool || surfaceFailure ? null : workspace ? (
                         <WorkspaceHeader
                           workspace={workspaceHeader}
                           items={entries.map((entry) => entry.item)}
@@ -4170,7 +4206,9 @@ export function SpectraShell({
                           workspaceCount={workspaces.length}
                         />
                       )}
-                      {surfaceFailure ? (
+                      {needsSchool ? (
+                        <NeedsSchoolEmpty />
+                      ) : surfaceFailure ? (
                         <OverviewLoadFailure
                           message={surfaceFailure.message}
                           onRetry={() =>

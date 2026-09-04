@@ -1,6 +1,10 @@
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { getActiveMembership, resolveActorContext } from "./identityShared";
+import {
+  getActiveMembership,
+  getAuthenticatedAccount,
+  resolveActorContext,
+} from "./identityShared";
 import { writeAuditEvent } from "./auditShared";
 import type { Id } from "./_generated/dataModel";
 
@@ -151,6 +155,41 @@ export const acceptInvitation = mutation({
       membershipId,
       schoolId: invitation.schoolId,
       alreadyMember: false,
+    };
+  },
+});
+
+export const previewInvitation = query({
+  args: { tokenHash: v.string() },
+  handler: async (ctx, args) => {
+    const account = await getAuthenticatedAccount(ctx);
+    if (!account)
+      throw new Error("AUTH_ACCOUNT_REQUIRED: Complete account registration first.");
+    const invitation = await ctx.db
+      .query("membershipInvitations")
+      .withIndex("by_token_hash", (q) => q.eq("tokenHash", args.tokenHash))
+      .unique();
+    if (!invitation)
+      throw new Error("INVITATION_INVALID: This invitation is unavailable.");
+    const school = await ctx.db.get(invitation.schoolId);
+    if (!school || school.status !== "active")
+      throw new Error(
+        "INVITATION_SCHOOL_UNAVAILABLE: The school is unavailable.",
+      );
+    const now = Date.now();
+    if (invitation.status === "revoked")
+      throw new Error("INVITATION_INVALID: This invitation is unavailable.");
+    if (invitation.status === "expired" || invitation.expiresAt <= now)
+      throw new Error("INVITATION_EXPIRED: This invitation has expired.");
+    const emailMatches = normalizeEmail(invitation.email) === account.email;
+    const existing = await getActiveMembership(ctx, account._id);
+    return {
+      schoolName: school.name,
+      role: invitation.role,
+      emailMatches,
+      alreadyMember:
+        invitation.status === "accepted" &&
+        existing?.schoolId === invitation.schoolId,
     };
   },
 });

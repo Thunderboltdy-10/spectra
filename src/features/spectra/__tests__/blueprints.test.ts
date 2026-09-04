@@ -5,10 +5,17 @@ import {
   requireBlueprint,
   validateBlueprintContent,
 } from "@/features/spectra/artifacts/blueprint-catalog";
+import { blueprintChoices } from "@/features/spectra/components/artifact-blueprint-sheet";
 
 describe("Spectra blueprint registry", () => {
   it("registers only creatable first-class work blueprints", () => {
     expect(listBlueprints().map((blueprint) => blueprint.key)).toEqual([
+      ...WORK_TYPE_KEYS,
+    ]);
+  });
+
+  it("offers every creatable type from Library New and empty-board New work here", () => {
+    expect(blueprintChoices.map((choice) => choice.key)).toEqual([
       ...WORK_TYPE_KEYS,
     ]);
   });

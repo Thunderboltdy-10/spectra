@@ -1560,7 +1560,7 @@ function NodeMenu({
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>New work here</DropdownMenuLabel>
-            {blueprintChoices.slice(0, 6).map((choice) => (
+            {blueprintChoices.map((choice) => (
               <DropdownMenuItem
                 key={choice.key}
                 onSelect={() => onNewWork(choice.key)}

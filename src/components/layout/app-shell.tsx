@@ -49,10 +49,7 @@ import { SpectraLogo } from "@/components/spectra-logo";
 import { SignedInContinue } from "@/components/signed-in-continue";
 import { cn } from "@/lib/utils";
 import {
-  getSpectraArtifactCommentNotifications,
-  getSpectraPlannerReminderNotifications,
-  getSpectraTimetableReminderNotifications,
-  getSpectraShareInvitations,
+  getSpectraNotificationCenter,
   getSpectraWorkspaces,
   getSpectraThreads,
   markSpectraArtifactCommentNotificationsRead,
@@ -252,7 +249,7 @@ function ShellNavigation() {
       label: string;
       icon: LucideIcon;
     }> = [...ordinaryDestinations];
-    if (administrationIdentity?.membership.role === "school_admin")
+    if (administrationIdentity?.membership?.role === "school_admin")
       destinations.push({ href: "/admin", label: "Admin", icon: Building2 });
     if (administrationIdentity?.account.platformOperator)
       destinations.push({
@@ -307,15 +304,11 @@ function ShellNavigation() {
   const refreshNotifications = useCallback(async () => {
     setNotificationsLoading(true);
     try {
-      const [comments, planner, timetable, shares] = await Promise.all([
-        getSpectraArtifactCommentNotifications(false, 30),
-        getSpectraPlannerReminderNotifications(false, 30),
-        getSpectraTimetableReminderNotifications(false, 30),
-        getSpectraShareInvitations(),
-      ]);
-      setCommentNotifications(comments.notifications);
-      setPlannerNotifications(planner.notifications);
-      setTimetableNotifications(timetable.notifications);
+      const center = await getSpectraNotificationCenter(false, 30);
+      setCommentNotifications(center.comments);
+      setPlannerNotifications(center.planner);
+      setTimetableNotifications(center.timetable);
+      const shares = { invitations: center.invitations };
       const nextShareIds = new Set(
         shares.invitations.map((invitation) => invitation.invitationId),
       );
@@ -353,7 +346,7 @@ function ShellNavigation() {
     // fallback poll is intentionally sparse and never fetches in a hidden tab.
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void refreshNotifications();
-    }, 30_000);
+    }, 60_000);
     const refreshVisible = () => {
       if (document.visibilityState === "visible") void refreshNotifications();
     };
@@ -783,7 +776,8 @@ function ShellNavigation() {
                   {administrationIdentity.account.name}
                 </strong>
                 <span className="block truncate text-micro capitalize text-[var(--text-tertiary)]">
-                  {administrationIdentity.membership.role.replace("_", " ")}
+                  {administrationIdentity.membership?.role.replace("_", " ") ??
+                    "Signed in"}
                 </span>
               </span>
             </button>

@@ -8,6 +8,7 @@ import {
   pruneWorkbarCommandOverrides,
   remotePreferenceLayersAreReady,
   resolvePreferences,
+  restoreDefaultPreferences,
   updatePreference,
 } from "../settings/schema";
 
@@ -82,6 +83,40 @@ describe("preference merge (P3.I4)", () => {
     expect(resolved.appearance.theme).toBe("dark");
     expect(resolved.workbar.document?.commands?.["document.format.bold"]).toEqual({ pinned: true });
     expect(resolved.workbar.document?.commands?.["document.format.italic"]).toEqual({ hidden: true });
+  });
+
+  it("keeps class shelf choice on the integrations preference layer", () => {
+    expect(DEFAULT_SPECTRA_PREFERENCES.integrations.classShelvesStatus).toBe(
+      "pending",
+    );
+    const next = applyPreferencePatch(DEFAULT_SPECTRA_PREFERENCES, {
+      integrations: {
+        classShelvesStatus: "skipped",
+        classShelfRecordIds: [],
+      },
+    });
+    expect(next.integrations.classShelvesStatus).toBe("skipped");
+    expect(next.integrations.schoolDataEnabled).toBe(true);
+  });
+
+  it("keeps class shelf choice when restoring Settings defaults", () => {
+    const current = applyPreferencePatch(DEFAULT_SPECTRA_PREFERENCES, {
+      appearance: { theme: "dark", reducedMotion: true },
+      ai: { continueCurrentConversation: false },
+      integrations: {
+        classShelvesStatus: "chosen",
+        classShelfRecordIds: ["class-econ", "class-tok"],
+      },
+    });
+    const next = restoreDefaultPreferences(current);
+    expect(next.appearance.theme).toBe("system");
+    expect(next.appearance.reducedMotion).toBe(false);
+    expect(next.ai.continueCurrentConversation).toBe(true);
+    expect(next.integrations.classShelvesStatus).toBe("chosen");
+    expect(next.integrations.classShelfRecordIds).toEqual([
+      "class-econ",
+      "class-tok",
+    ]);
   });
 
   it("prunes zombie command ids against the IR", () => {

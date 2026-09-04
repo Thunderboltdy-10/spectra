@@ -23,10 +23,16 @@ export function isBlankTitle(title: string): boolean {
 
 /**
  * Close is never a silent no-op (UX-1/UX-2). Clean work closes. Dirty work
- * asks. Saving with an empty name uses Untitled instead of trapping the file.
+ * asks. Queued live changes that have not reached the server are the same
+ * as a dirty React draft: closing without a choice would hide the only door
+ * to stay, retry, or discard. Saving with an empty name uses Untitled
+ * instead of trapping the file.
  */
-export function decideClose(dirty: boolean): CloseIntent {
-  return dirty ? "confirm" : "close";
+export function decideClose(
+  dirty: boolean,
+  queuedChangeCount = 0,
+): CloseIntent {
+  return dirty || queuedChangeCount > 0 ? "confirm" : "close";
 }
 
 /** Atomically admit one close action before React can paint `busy`. */

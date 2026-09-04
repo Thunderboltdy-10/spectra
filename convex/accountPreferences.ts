@@ -35,7 +35,7 @@ export const layers = query({
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
-    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    if (!actor) return [];
     const rows = await ctx.db
       .query("accountPreferences")
       .withIndex("by_account", (q) => q.eq("accountId", actor.accountId))

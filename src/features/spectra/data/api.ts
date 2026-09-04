@@ -840,6 +840,7 @@ export type SpectraArtifactAccessRequest = {
 };
 
 export type SpectraOverview = {
+  needsSchool?: boolean;
   workspaces: SpectraWorkspace[];
   selectedWorkspaceId?: string;
   workspace: {
@@ -1533,6 +1534,18 @@ const shareInvitationRequests = new Map<
   string,
   { at: number; promise: Promise<{ invitations: SpectraShareInvitation[] }> }
 >();
+const notificationCenterRequests = new Map<
+  string,
+  {
+    at: number;
+    promise: Promise<{
+      comments: SpectraArtifactCommentNotification[];
+      planner: SpectraPlannerReminderNotification[];
+      timetable: SpectraTimetableReminderNotification[];
+      invitations: SpectraShareInvitation[];
+    }>;
+  }
+>();
 const threadIndexRequests = new Map<
   string,
   { at: number; promise: Promise<{ threads: SpectraThread[] }> }
@@ -1573,6 +1586,34 @@ export async function getSpectraShareInvitations(options: { force?: boolean } = 
       fetch("/api/spectra?action=shareInvitations", { cache: "no-store" }).then(
         (response) =>
           readJson<{ invitations: SpectraShareInvitation[] }>(response),
+      ),
+    { force: options.force },
+  );
+}
+
+export async function getSpectraNotificationCenter(
+  unreadOnly = false,
+  limit = 30,
+  options: { force?: boolean } = {},
+) {
+  const qs = new URLSearchParams({
+    action: "notificationCenter",
+    unreadOnly: String(unreadOnly),
+    limit: String(limit),
+  });
+  return coalesceInFlight(
+    notificationCenterRequests,
+    qs.toString(),
+    FIRST_PAINT_FETCH_TTL_MS,
+    () =>
+      fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }).then(
+        (response) =>
+          readJson<{
+            comments: SpectraArtifactCommentNotification[];
+            planner: SpectraPlannerReminderNotification[];
+            timetable: SpectraTimetableReminderNotification[];
+            invitations: SpectraShareInvitation[];
+          }>(response),
       ),
     { force: options.force },
   );

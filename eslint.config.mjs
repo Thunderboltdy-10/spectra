@@ -64,6 +64,7 @@ const eslintConfig = defineConfig([
     ".playwright-cli/**",
     ".shots/**",
     ".spectra-local/**",
+    "docs/spectra-reformation/final-verification/scripts/playwright/**",
   ]),
 ]);
 

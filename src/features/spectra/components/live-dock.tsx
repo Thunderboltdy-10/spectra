@@ -85,7 +85,7 @@ function syncPollingVisibility() {
   const shouldPoll =
     pollConsumers > 0 && document.visibilityState === "visible";
   if (shouldPoll && pollTimer === null) {
-    pollTimer = window.setInterval(() => void refreshRunTabs(), 30_000);
+    pollTimer = window.setInterval(() => void refreshRunTabs(), 60_000);
   } else if (!shouldPoll && pollTimer !== null) {
     window.clearInterval(pollTimer);
     pollTimer = null;

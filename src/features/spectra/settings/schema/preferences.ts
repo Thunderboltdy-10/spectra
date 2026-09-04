@@ -112,6 +112,8 @@ const integrationsSchema = z.object({
   schoolDataEnabled: z.boolean().default(true),
   allowFutureProviders: z.boolean().default(true),
   connectionNotifications: z.boolean().default(true),
+  classShelvesStatus: z.enum(["pending", "chosen", "skipped"]).default("pending"),
+  classShelfRecordIds: z.array(z.string().min(1).max(128)).max(100).default([]),
 });
 
 const accessibilitySchema = z.object({
@@ -392,4 +394,17 @@ export function updatePreference<K extends PreferenceSection>(
   options: PreferenceMergeOptions = {},
 ): SpectraPreferences {
   return applyPreferencePatch(preferences, { [section]: patch }, options);
+}
+
+export function restoreDefaultPreferences(
+  current: SpectraPreferences,
+): SpectraPreferences {
+  return {
+    ...DEFAULT_SPECTRA_PREFERENCES,
+    integrations: {
+      ...DEFAULT_SPECTRA_PREFERENCES.integrations,
+      classShelvesStatus: current.integrations.classShelvesStatus,
+      classShelfRecordIds: [...current.integrations.classShelfRecordIds],
+    },
+  };
 }

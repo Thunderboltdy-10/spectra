@@ -4776,7 +4776,7 @@ function ArtifactStudioEditor({
     };
     // requestStudioClose reads latest dirty/panel flags via this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close handler closes over latest studio state
-  }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen]);
+  }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen, live.unsynchronizedChanges]);
 
   useEffect(() => {
     if (
@@ -4905,7 +4905,7 @@ function ArtifactStudioEditor({
   }
 
   function requestStudioClose() {
-    if (decideClose(dirty) === "close") {
+    if (decideClose(dirty, live.unsynchronizedChanges) === "close") {
       onClose();
       return;
     }
@@ -5630,7 +5630,11 @@ function ArtifactStudioEditor({
               </WorkbarMenuAction>
             </WorkbarMore>
             <IconButton
-              label={dirty ? "Save or discard before closing" : "Close"}
+              label={
+                decideClose(dirty, live.unsynchronizedChanges) === "confirm"
+                  ? "Save or discard before closing"
+                  : "Close"
+              }
               onClick={requestStudioClose}
               icon={X}
             />

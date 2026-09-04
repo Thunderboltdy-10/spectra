@@ -3,7 +3,9 @@ async (page) => {
     () => sessionStorage.getItem("spectra.p8.followInput") || "wheel",
   );
   const follow = page
-    .getByRole("button", { name: /follow|following/i })
+    .getByRole("button", {
+      name: /Follow the AI as it works|Stop following the AI/i,
+    })
     .filter({ visible: true })
     .first();
   if ((await follow.count()) === 0)

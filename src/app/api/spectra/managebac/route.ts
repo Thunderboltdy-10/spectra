@@ -1850,6 +1850,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (action === "releaseClasses") {
+      const recordIds = Array.isArray(body.recordIds)
+        ? body.recordIds.filter(
+            (item): item is string => typeof item === "string" && item.length > 0,
+          )
+        : [];
+      return ok(
+        await convexMutation("managebac:releaseClassWorkspaces", {
+          recordIds,
+        }),
+      );
+    }
+
     if (action === "requestAiRefresh") {
       return ok(
         await convexMutation("managebac:requestAiRefresh", {

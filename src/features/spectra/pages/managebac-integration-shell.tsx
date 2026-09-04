@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { ProductSectionNav } from "../components/product-section-nav";
 import { AuxiliaryRail, AuxiliaryRailTrigger } from "../components/auxiliary-rail";
 import { ProductPageHeader } from "../components/product-page-header";
+import { ClassShelfEditor } from "../components/class-shelf-editor";
 import {
   configureSpectraManageBac,
   disconnectSpectraManageBac,
@@ -612,7 +613,7 @@ export function ManageBacIntegrationShell() {
               className="pb-5 pt-1 sm:pt-2"
               eyebrow="ManageBac · Admin setup"
               title="ManageBac connection"
-              description="Manage the school connection, synchronization, and verified provider records. Class workspaces are created explicitly from School data."
+              description="Manage the school connection and synchronization. Choose which classes get their own workspace from this page or from School."
               actions={
                 <>
                   <button type="button" onClick={() => void refresh()} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Refresh connection data" title="Refresh connection data"><RefreshCw size={13} /></button>
@@ -622,6 +623,40 @@ export function ManageBacIntegrationShell() {
                 </>
               }
             />
+
+            {integration &&
+            overview?.admin &&
+            data?.mapping?.status !== "verified" ? (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-card border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
+                <div className="min-w-0">
+                  <strong className="block text-ui font-semibold">
+                    Match your verified school account
+                  </strong>
+                  <p className="mt-1 max-w-xl text-micro leading-5 text-[var(--text-secondary)]">
+                    Disconnecting ManageBac clears identity mappings. Spectra
+                    searches only for your authenticated school email and never
+                    reveals a selectable student ID.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={Boolean(busy)}
+                  onClick={() =>
+                    void runAction("identity", () =>
+                      resolveSpectraManageBacIdentity(),
+                    )
+                  }
+                  className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3.5 text-micro font-medium text-[var(--bg-primary)] disabled:opacity-60"
+                >
+                  {busy === "identity" ? (
+                    <LoaderCircle className="animate-spin" size={13} />
+                  ) : (
+                    <Fingerprint size={13} />
+                  )}
+                  Resolve my school identity
+                </button>
+              </div>
+            ) : null}
 
             {!integration && (
               <div className="mb-1 rounded-card border border-dashed border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-secondary)_45%,transparent)] px-5 py-5">
@@ -741,11 +776,16 @@ export function ManageBacIntegrationShell() {
                   </section>
                 </div>
               ) : tab === "classes" ? (
-                <RecordsList
-                  records={classes}
-                  emptyTitle="No classes synchronized"
-                  emptyDetail="Verified class capabilities will create one idempotent workspace per current class and academic period."
-                />
+                <div>
+                  <ClassShelfEditor onSaved={() => void refresh()} />
+                  <div className="mt-8">
+                    <RecordsList
+                      records={classes}
+                      emptyTitle="No classes in the latest sync"
+                      emptyDetail="When ManageBac is connected, current class records appear here after a successful sync."
+                    />
+                  </div>
+                </div>
               ) : tab === "calendar" ? (
                 <RecordsList
                   records={timetable}

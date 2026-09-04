@@ -19,6 +19,7 @@ vi.mock("@/lib/convex-server", () => ({
 }));
 
 import {
+  isAuthNoSchool,
   requireAccessPrincipal,
   requireActor,
   requirePlatformOperator,
@@ -124,6 +125,9 @@ describe("server authorization principals", () => {
     });
 
     await expect(requireActor()).rejects.toThrow("AUTH_NO_SCHOOL");
+    expect(isAuthNoSchool(new Error("AUTH_NO_SCHOOL: missing membership"))).toBe(
+      true,
+    );
     expect(convex.mutation).toHaveBeenCalledWith("identity:registerSelf", {
       name: "Ordinary User",
       avatarUrl: undefined,

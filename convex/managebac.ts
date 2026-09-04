@@ -547,15 +547,37 @@ export const configure = mutation({
       conflictMode:
         args.conflictMode ?? current?.syncPolicy.conflictMode ?? "review",
     } as const;
+    let nextStatus:
+      | "disconnected"
+      | "validating"
+      | "connected"
+      | "degraded"
+      | "blocked"
+      | "revoked" = "validating";
+    if (current && !connectionContractChanged) {
+      if (current.status === "revoked" || current.status === "validating") {
+        const existingCapabilities = await ctx.db
+          .query("integrationCapabilities")
+          .withIndex("by_integration", (q) =>
+            q.eq("integrationId", current._id),
+          )
+          .collect();
+        const verifiedReadable = existingCapabilities.some(
+          (item) =>
+            item.permissionState === "read_only" &&
+            item.verificationStatus === "verified",
+        );
+        nextStatus = verifiedReadable ? "connected" : "validating";
+      } else {
+        nextStatus = current.status;
+      }
+    }
     const patch = {
       baseUrl,
       referenceUrl: args.referenceUrl?.trim().slice(0, 2_000),
       authHeaderName,
       authScheme: args.authScheme,
-      status:
-        current && !connectionContractChanged && current.status !== "revoked"
-          ? current.status
-          : ("validating" as const),
+      status: nextStatus,
       tokenMode: "read_only" as const,
       credentialFingerprint:
         args.credentialFingerprint ?? current?.credentialFingerprint,
@@ -3687,5 +3709,81 @@ export const purgeAutoCreatedClassWorkspaces = mutation({
       retentionClass: "security",
     });
     return { removed };
+  },
+});
+
+export const releaseClassWorkspaces = mutation({
+  args: {
+    recordIds: v.array(v.id("externalRecords")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor)
+      throw new Error("AUTH_REQUIRED: Sign in to update class workspaces.");
+    const integration = await ctx.db
+      .query("schoolIntegrations")
+      .withIndex("by_school_provider", (q) =>
+        q.eq("schoolId", actor.schoolId).eq("provider", "managebac"),
+      )
+      .unique();
+    const selected = args.recordIds.slice(0, 100);
+    const now = Date.now();
+    let removed = 0;
+    let skipped = 0;
+    for (const recordId of selected) {
+      const source = await ctx.db.get(recordId);
+      if (
+        !source ||
+        source.schoolId !== actor.schoolId ||
+        source.recordType !== "class" ||
+        (integration && source.integrationId !== integration._id)
+      ) {
+        skipped += 1;
+        continue;
+      }
+      const providerKey = `class:${source.providerClassId ?? source.providerRecordId}:${source.academicPeriodKey ?? "current"}`;
+      const projection = integration
+        ? await ctx.db
+            .query("externalProjections")
+            .withIndex("by_provider_key", (q) =>
+              q
+                .eq("integrationId", integration._id)
+                .eq("providerKey", providerKey),
+            )
+            .unique()
+        : null;
+      const workspaceId =
+        projection?.projectionType === "workspace"
+          ? ctx.db.normalizeId("spectraWorkspaces", projection.projectionId)
+          : null;
+      const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
+      if (!workspace || workspace.starterKey !== "managebac-class") {
+        skipped += 1;
+        continue;
+      }
+      if (workspace.ownerAccountId !== actor.accountId) {
+        skipped += 1;
+        continue;
+      }
+      await dissolveWorkspaceNode(ctx, workspace);
+      await ctx.db.delete(workspace._id);
+      if (projection) {
+        await ctx.db.patch(projection._id, {
+          state: "detached",
+          updatedAt: now,
+        });
+      }
+      removed += 1;
+    }
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: "integration.managebac.class_workspaces_released",
+      targetType: "school_integration",
+      targetId: integration?._id ?? actor.schoolId,
+      metadata: { removed, skipped, requested: selected.length },
+      retentionClass: "security",
+    });
+    return { removed, skipped, requested: selected.length };
   },
 });

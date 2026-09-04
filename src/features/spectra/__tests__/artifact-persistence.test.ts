@@ -24,4 +24,9 @@ describe("artifact persistence (P1.I3)", () => {
     expect(decideClose(true)).toBe("confirm");
     expect(decideClose(false)).toBe("close");
   });
+
+  it("asks before closing work that still has unsynchronized live changes", () => {
+    expect(decideClose(false, 1)).toBe("confirm");
+    expect(decideClose(false, 0)).toBe("close");
+  });
 });

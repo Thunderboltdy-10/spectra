@@ -71,4 +71,58 @@ describe("school invitation accept is idempotent", () => {
     );
     expect(invitation?.status).toBe("accepted");
   });
+
+  it("previews school name and role without accepting", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const schoolId = await ctx.db.insert("schools", {
+        name: "The Global College",
+        slug: `preview-${crypto.randomUUID()}`,
+        verifiedDomains: [],
+        status: "active",
+        timezone: "Europe/Madrid",
+        policyVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: identity.subject,
+        email: identity.email,
+        emailVerified: true,
+        name: "Invitee",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("membershipInvitations", {
+        schoolId,
+        email: identity.email,
+        role: "school_admin",
+        tokenHash: "preview-hash",
+        status: "pending",
+        invitedByAccountId: accountId,
+        expiresAt: now + 86_400_000,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    const asUser = t.withIdentity(identity);
+    const preview = await asUser.query(api.memberships.previewInvitation, {
+      tokenHash: "preview-hash",
+    });
+    expect(preview).toMatchObject({
+      schoolName: "The Global College",
+      role: "school_admin",
+      emailMatches: true,
+      alreadyMember: false,
+    });
+    const invitation = await t.run(async (ctx) =>
+      ctx.db
+        .query("membershipInvitations")
+        .withIndex("by_token_hash", (q) => q.eq("tokenHash", "preview-hash"))
+        .unique(),
+    );
+    expect(invitation?.status).toBe("pending");
+  });
 });

@@ -118,6 +118,11 @@ export async function requireAccount(): Promise<AccountIdentity> {
   return account;
 }
 
+export function isAuthNoSchool(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.startsWith("AUTH_NO_SCHOOL");
+}
+
 export async function requireActor(): Promise<SessionActor> {
   if (!hasClerkServerConfig())
     throw new Error("AUTH_MISCONFIGURED: Clerk authentication is required.");

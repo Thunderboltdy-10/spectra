@@ -5,6 +5,7 @@
  *   lastPersistenceFailure?: null | { code: string, at: number, attempt: number },
  *   startedAt?: number,
  *   now?: number,
+ *   convex?: { status?: string, detail?: string },
  * }} options
  */
 export function gatewayHealthPayload({

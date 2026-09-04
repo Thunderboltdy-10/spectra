@@ -7,11 +7,13 @@ import {
   ArrowUp,
   Bold,
   BookOpen,
+  Bot,
   CalendarCheck2,
   Check,
   CheckCircle2,
   Circle,
   Clock3,
+  Code2,
   Copy,
   Eye,
   FileText,
@@ -23,10 +25,13 @@ import {
   Loader2,
   MessageSquare,
   Plus,
+  Presentation,
   Quote,
   RotateCcw,
   Sparkles,
+  Table2,
   Trash2,
+  Workflow,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -106,6 +111,11 @@ export const blueprintChoices: Array<{ key: EditableBlueprintKey; label: string;
   { key: "flashcard_deck", label: "Flashcard deck", icon: BookOpen, description: "A real deck with editable cards." },
   { key: "quiz", label: "Quiz", icon: HelpCircle, description: "Questions, answers, and review notes." },
   { key: "planner_task", label: "Planner task", icon: CalendarCheck2, description: "Status, due date, and priority." },
+  { key: "agent", label: "Agent", icon: Bot, description: "A specialist with a purpose, skills, and sources." },
+  { key: "presentation", label: "Presentation", icon: Presentation, description: "Slides for a talk or explanation." },
+  { key: "sheets", label: "Sheets", icon: Table2, description: "A workbook with cells, formulas, and charts." },
+  { key: "code", label: "Code", icon: Code2, description: "Source and a preview you can run." },
+  { key: "whiteboard", label: "Whiteboard", icon: Workflow, description: "A spatial board for notes and diagrams." },
 ];
 
 function record(value: unknown): Record<string, unknown> {

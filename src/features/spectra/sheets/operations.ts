@@ -65,7 +65,7 @@ export const FORMULA_LITERALIZATION_MESSAGE =
 /** True when `incoming` is a value/clear write onto a cell that still holds a formula. */
 export function isFormulaLiteralization(
   existing: SheetCell | undefined,
-  incoming: Pick<SheetCell, "formula">,
+  incoming: Partial<Pick<SheetCell, "formula" | "value">>,
 ) {
   return Boolean(existing?.formula) && !incoming.formula;
 }

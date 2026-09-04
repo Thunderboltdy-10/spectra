@@ -57,4 +57,46 @@ describe("withRouteErrorHandling", () => {
     expect(payload.error?.message).not.toMatch(/Unexpected server error/i);
     expect(payload.error?.message).not.toMatch(/CONVEX_UNREACHABLE/);
   });
+
+  it("maps AUTH_NO_SCHOOL to 403 instead of a connection failure", async () => {
+    const response = await withRouteErrorHandling(async () => {
+      throw new Error(
+        "AUTH_NO_SCHOOL: This account does not have an active school membership.",
+      );
+    });
+    const payload = (await response.json()) as {
+      error?: { code?: string; message?: string; status?: number };
+    };
+
+    expect(response.status).toBe(403);
+    expect(payload.error).toEqual(
+      expect.objectContaining({
+        code: "AUTH_NO_SCHOOL",
+        status: 403,
+      }),
+    );
+    expect(payload.error?.message).not.toBe(PUBLIC_SERVER_FAILURE);
+  });
+
+  it("maps INTEGRATION_NOT_READY to 409 instead of a connection failure", async () => {
+    const response = await withRouteErrorHandling(async () => {
+      throw new Error(
+        "INTEGRATION_NOT_READY: ManageBac must be connected with verified readable capabilities.",
+      );
+    });
+    const payload = (await response.json()) as {
+      error?: { code?: string; message?: string; status?: number };
+    };
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toEqual(
+      expect.objectContaining({
+        code: "INTEGRATION_NOT_READY",
+        status: 409,
+        message:
+          "ManageBac must be connected with verified readable capabilities.",
+      }),
+    );
+    expect(payload.error?.message).not.toBe(PUBLIC_SERVER_FAILURE);
+  });
 });

@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
-import { requireAccount, requireAccessPrincipal } from "@/lib/auth-server";
+import {
+  isAuthNoSchool,
+  requireAccount,
+  requireAccessPrincipal,
+  requireActor,
+} from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
@@ -88,27 +93,30 @@ export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const params = request.nextUrl.searchParams;
     const action = params.get("action") ?? "identity";
+    if (action === "identity") {
+      const account = await requireAccount();
+      let membership: {
+        schoolId: string;
+        role: "student" | "teacher" | "school_admin";
+        membershipId: string;
+      } | null = null;
+      try {
+        const actor = await requireActor();
+        membership = {
+          schoolId: actor.schoolId,
+          role: actor.schoolRole,
+          membershipId: actor.membershipId,
+        };
+      } catch (error) {
+        if (!isAuthNoSchool(error)) throw error;
+      }
+      return ok({ account, membership });
+    }
     const operatorSessionId = operatorSession(params.get("operatorSessionId"));
-    const principal = await requireAccessPrincipal(
+    await requireAccessPrincipal(
       PLATFORM_READS.has(action) || operatorSessionId ? "platform" : "school",
     );
     const range = dateRange(params);
-
-    if (action === "identity") {
-      if (principal.kind !== "school")
-        throw new Error(
-          "AUTH_SCHOOL_CONTEXT_REQUIRED: A school identity is required.",
-        );
-      const account = await convexQuery("identity:account", {});
-      return ok({
-        account,
-        membership: {
-          schoolId: principal.actor.schoolId,
-          role: principal.actor.schoolRole,
-          membershipId: principal.actor.membershipId,
-        },
-      });
-    }
     if (action === "schoolOverview")
       return ok(
         await convexMutation("administration:schoolOverview", {
@@ -253,6 +261,16 @@ export async function POST(request: NextRequest) {
       const tokenHash = createHash("sha256").update(token).digest("base64url");
       return ok(
         await convexMutation("memberships:acceptInvitation", { tokenHash }),
+      );
+    }
+    if (action === "previewInvitation") {
+      await requireAccount();
+      const token = text(body.token, 500);
+      if (!token)
+        return badRequest("This invitation link is missing its token.");
+      const tokenHash = createHash("sha256").update(token).digest("base64url");
+      return ok(
+        await convexQuery("memberships:previewInvitation", { tokenHash }),
       );
     }
     const operatorSessionId = operatorSession(body.operatorSessionId);

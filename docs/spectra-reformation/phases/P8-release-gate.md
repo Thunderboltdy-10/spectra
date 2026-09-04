@@ -117,6 +117,19 @@ PASS requires every matrix card with real evidence. A failure is triaged and rep
 - RC.V1 feature inventories and the unchanged P5.V1 soak are explicitly not repeated; only the three recorded RC carryovers remain.
 - Foundation checks and current governance/static evidence are recorded in the closeout commit; product verification remains OPEN.
 
+### P8.V1 closeout log — 2026-09-04
+
+- Serial instance 1 production; instance 2 used only for no-ManageBac first-run. Never mounted original IBDP1.
+- B1–B3: empty class picker, live Econ/Phys/TOK shelves, disconnect/reconnect, Restore defaults no longer wipes shelves.
+- C1–C5: nine blueprints; dirty close uses unsynchronizedChanges; workbar under 1440/1024 pressure; safe-area 154px; document style canary.
+- D0 live A/B CARD9 modify; D1 Follow AI on New Document with native wheel + explicit Stop; D2 B-leave only; D3/T0 blocked (Bridge not running).
+- E2 offline banner inherited; E9 clean rebuild recovered A Library and B Chat; other E cards not injected (gateway kill stops the whole local supervisor).
+- F0 idle 59.2→33.8 exec/min after notificationCenter batch + 60s observers; still over 5. SweepReplicaTruth over cron 100-doc/128KB budgets.
+- G0/G3 passed; G1 List is dblclick-only; G2 revoke/expiry incomplete.
+- T1 original digest unchanged; T2 PPTX exited to actionable Bridge failure.
+- Z1 machine floor: Vitest 172/1635, tsc, lint 0, production BUILD_ID `4vQuvfR7D03KLpUOXRVfB`, DOCX 16/177, Office xlsx/pptx, seam, secrets/architecture/copy/tokens, Bridge cargo check.
+- Z2 **NO-GO**. Failed: D2 D3 E0 E1 E3–E8 E10 F0 F1 F2 G1 G2 T0 Z0. P8.V1 stays OPEN.
+
 ## Exit gate
 
 P8.V1 ends against one clean, immutable candidate whose manifest and STATE row agree. GO has zero launch-blocking failures, every numeric budget met, and a tested rollback/incident path. NO-GO names exact failed cards and remains honest resumable P8.V1 work; expansion does not begin until the school-launch line reaches GO or Pablo explicitly changes scope.

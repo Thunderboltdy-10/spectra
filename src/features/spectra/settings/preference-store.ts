@@ -9,6 +9,7 @@ import {
   migratePreferences,
   remotePreferenceLayersAreReady,
   resolvePreferences,
+  restoreDefaultPreferences,
   updatePreference,
   type PreferenceSection,
   type PreferenceLayerValues,
@@ -333,7 +334,7 @@ export function useSpectraPreferences({
   );
 
   const reset = useCallback(
-    () => replace(DEFAULT_SPECTRA_PREFERENCES),
+    () => replace(restoreDefaultPreferences(preferencesRef.current)),
     [replace],
   );
   return { preferences, hydrated, saveError, update, replace, reset };

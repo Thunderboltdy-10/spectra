@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { createHash, randomBytes } from "crypto";
-import { requireActor } from "@/lib/auth-server";
+import { isAuthNoSchool, requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
@@ -134,11 +134,55 @@ function requireFlashcardDirection(value: unknown) {
   return candidate;
 }
 
+function emptySchoolRead(action: string) {
+  if (action === "overview") {
+    return ok({
+      actor: null,
+      needsSchool: true,
+      workspaces: [],
+      selectedWorkspaceId: undefined,
+      workspace: null,
+      artifacts: [],
+      runs: [],
+      resultCards: [],
+    });
+  }
+  if (action === "workspaces") return ok({ workspaces: [] });
+  if (action === "artifacts") return ok({ artifacts: [] });
+  if (action === "threads") return ok({ threads: [] });
+  if (action === "shareInvitations") return ok({ invitations: [] });
+  if (action === "notificationCenter")
+    return ok({
+      comments: [],
+      planner: [],
+      timetable: [],
+      invitations: [],
+    });
+  if (action === "schoolMembers") return ok({ members: [] });
+  if (action === "search") return ok({ artifacts: [], workspaces: [] });
+  if (action === "resultCards") return ok({ resultCards: [] });
+  if (
+    action === "timetableReminderNotifications" ||
+    action === "plannerReminderNotifications" ||
+    action === "artifactCommentNotifications"
+  )
+    return ok({ notifications: [] });
+  throw new Error(
+    "AUTH_NO_SCHOOL: This account does not have an active school membership.",
+  );
+}
+
 export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    const actor = await requireActor();
     const params = request.nextUrl.searchParams;
     const action = params.get("action") ?? "overview";
+    let actor;
+    try {
+      actor = await requireActor();
+    } catch (error) {
+      if (isAuthNoSchool(error)) return emptySchoolRead(action);
+      throw error;
+    }
 
     if (action === "workspaces") {
       const workspaces = await spectraQuery("spectraWorkspaces:list", {
@@ -204,6 +248,21 @@ export async function GET(request: NextRequest) {
         {},
       );
       return ok({ invitations });
+    }
+
+    if (action === "notificationCenter") {
+      const unreadOnly = params.get("unreadOnly") === "true";
+      const limit = params.has("limit") ? Number(params.get("limit")) : 30;
+      const [comments, planner, timetable, invitations] = await Promise.all([
+        spectraQuery("artifactComments:listNotifications", {
+          unreadOnly,
+          limit,
+        }),
+        spectraQuery("plannerReminders:listMine", { unreadOnly, limit }),
+        spectraQuery("timetableReminders:listMine", { unreadOnly, limit }),
+        spectraQuery("authority:listIncomingInvitations", {}),
+      ]);
+      return ok({ comments, planner, timetable, invitations });
     }
 
     if (action === "schoolMembers") {

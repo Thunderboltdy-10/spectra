@@ -4,6 +4,11 @@ import { NextRequest } from "next/server";
 const authServer = vi.hoisted(() => ({
   requireAccessPrincipal: vi.fn(),
   requireAccount: vi.fn(),
+  requireActor: vi.fn(),
+  isAuthNoSchool: (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.startsWith("AUTH_NO_SCHOOL");
+  },
 }));
 const convex = vi.hoisted(() => ({
   mutation: vi.fn(),
@@ -161,5 +166,36 @@ describe("operator route authorization", () => {
     await SchoolAdminPage({ searchParams: Promise.resolve({}) });
     expect(authServer.requireAccessPrincipal).toHaveBeenCalledWith("school");
     expect(navigation.redirect).not.toHaveBeenCalled();
+  });
+
+  it("returns a signed-in identity without inventing a school membership", async () => {
+    authServer.requireAccount.mockResolvedValue({
+      accountId: "account-plain",
+      email: "plain@example.test",
+      emailVerified: true,
+      name: "Plain",
+      status: "active",
+      platformOperator: false,
+    });
+    authServer.requireActor.mockRejectedValue(
+      new Error(
+        "AUTH_NO_SCHOOL: This account does not have an active school membership.",
+      ),
+    );
+
+    const response = await getAdministration(
+      new NextRequest(
+        "http://localhost/api/spectra/administration?action=identity",
+      ),
+    );
+    const payload = (await response.json()) as {
+      membership: unknown;
+      account?: { accountId?: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.membership).toBeNull();
+    expect(payload.account?.accountId).toBe("account-plain");
+    expect(authServer.requireAccessPrincipal).not.toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@
 import { Tooltip } from "@/components/ui/tooltip";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import { useAuthedArgs } from "../data/use-authed-args";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
 import type { Editor as TiptapEditor, JSONContent } from "@tiptap/core";
@@ -48,6 +49,7 @@ import {
   X,
 } from "lucide-react";
 import dynamic from "next/dynamic";
+import NextLink from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Children,
@@ -64,11 +66,21 @@ import {
 } from "react";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { ResourceSurface } from "../bridge/resource-surface";
+import { FileStorageControls } from "../bridge/file-storage-controls";
 import { headerSyncMessage } from "../bridge/status";
 import { CrossfadeText } from "../motion";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
+import { useBridgeHealth } from "../bridge/use-bridge";
 import { useSyncPresentation } from "../bridge/use-sync-presentation";
 import { BRIDGE_SETTINGS_HREF } from "../bridge/client";
+import {
+  isProtectedOriginalWork,
+  PROTECTED_ORIGINAL_TOGGLE,
+} from "../bridge/sync-toggles";
+import {
+  artifactAccessBanner,
+  sharedSessionIsReadOnly,
+} from "./artifact-access-copy";
 import { formatByteCount } from "../../../../shared/human-format";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import {
@@ -164,6 +176,7 @@ import {
   claimCloseAction,
   decideClose,
   persistableTitle,
+  restoreMayBypassHungSave,
 } from "./artifact-persistence";
 import { workTypeMeta } from "./artifact-card";
 import {
@@ -2933,13 +2946,30 @@ function ArtifactStudioEditor({
   compact: boolean;
   executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
-  const replicaTruth = useQuery(api.replicas.forWork, {
-    workId: artifact._id as never,
-  });
+  const replicaTruth = useQuery(
+    api.replicas.forWork,
+    useAuthedArgs({
+      workId: artifact._id as never,
+    }),
+  );
+  const effectivePolicy = useQuery(
+    api.syncPolicy.effective,
+    useAuthedArgs({
+      itemId: artifact._id,
+    }),
+  );
+  const bridge = useBridgeHealth();
   const workType = isArtifactTypeKey(artifact.blueprintKey)
     ? artifact.blueprintKey
     : null;
-  const sharingRole = artifact.accessLevel === "read" ? "read_only" : "edit";
+  const protectedOriginal = isProtectedOriginalWork({
+    preset: effectivePolicy?.preset,
+    replicas: replicaTruth?.replicas,
+  });
+  const sharingRole =
+    artifact.accessLevel === "read" || protectedOriginal
+      ? "read_only"
+      : "edit";
   const permissionReadOnly = workType
     ? !workCan(workType, sharingRole, "edit")
     : artifact.accessLevel === "read";
@@ -2947,12 +2977,6 @@ function ArtifactStudioEditor({
   // Owners need the identical interaction fabric for private AI work; access
   // policy still decides who else may authenticate into that room.
   const isCollaborativeArtifact = true;
-  const accessExplanation =
-    artifact.ownership === "shared"
-      ? artifact.accessReason === "workspace_inheritance"
-        ? `Access through ${artifact.placements?.map((placement) => placement.workspaceTitle).join(", ") || "a workspace"}`
-        : "Shared directly with you"
-      : null;
   const initialLiveValue = useMemo(
     () => ({
       title: artifact.title,
@@ -3046,10 +3070,26 @@ function ArtifactStudioEditor({
   );
   const livePermissionLost =
     isCollaborativeArtifact && live.state === "permission_lost";
-  // The durable access projection is the permission source of truth. A room
-  // transport can reconnect with a stale read-level token, but it cannot
-  // silently downgrade an owner/editor's open surface.
-  const readOnly = permissionReadOnly;
+  // Owners stay editable if a room token glitches to read. Shared
+  // collaborators follow the live token as soon as a downgrade arrives,
+  // even when the Library snapshot still says modify.
+  const readOnly = sharedSessionIsReadOnly({
+    ownership: artifact.ownership,
+    durableReadOnly: permissionReadOnly,
+    liveLevel: live.level,
+  });
+  const accessBanner = artifactAccessBanner({
+    ownership: artifact.ownership,
+    accessLevel: artifact.accessLevel,
+    accessReason: artifact.accessReason,
+    workspaceTitles: artifact.placements
+      ?.map((placement) => placement.workspaceTitle)
+      .filter(Boolean)
+      .join(", "),
+    liveLevel: live.level,
+    protectedOriginal,
+    protectedOriginalCopy: PROTECTED_ORIGINAL_TOGGLE.consequence,
+  });
   const [title, setTitle] = useState(artifact.title);
   const [summary, setSummary] = useState(() =>
     (artifact.summary ?? "").replace(/^(\d+) bytes$/i, (_, value: string) =>
@@ -3249,6 +3289,10 @@ function ArtifactStudioEditor({
     live,
     initialLiveValue,
     replicas: replicaTruth?.replicas,
+    recentOperations: replicaTruth?.recentOperations,
+    bridgeAvailable:
+      !replicaTruth?.replicas.some((replica) => replica.kind === "local") ||
+      bridge.reachability === "connected",
     conflicts: replicaTruth?.conflicts,
     setContent,
     setBaseline,
@@ -3447,7 +3491,8 @@ function ArtifactStudioEditor({
           });
           return false;
         }
-        const acknowledgedValue = live.model?.getSnapshot().value;
+        const acknowledgedValue =
+          live.flushSnapshot?.() ?? live.model?.getSnapshot().value;
         if (acknowledgedValue) {
           nativeFallbackEditedRef.current = false;
           const acknowledged = {
@@ -4073,24 +4118,34 @@ function ArtifactStudioEditor({
     [live.transport],
   );
 
+  const liveRegionByPathKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const regionId of live.modelSnapshot.regionIds) {
+      const entry = liveDescriptor(regionId);
+      if (!entry) continue;
+      map.set(entry.path.map(String).join("\0"), entry.regionId);
+    }
+    return map;
+  }, [live.modelSnapshot.regionIds, liveDescriptor]);
+  const regionIdForSegments = useCallback(
+    (segments: string[]) => {
+      for (let len = segments.length; len > 0; len -= 1) {
+        const hit = liveRegionByPathKey.get(segments.slice(0, len).join("\0"));
+        if (hit) return hit;
+      }
+      return undefined;
+    },
+    [liveRegionByPathKey],
+  );
   const presenceRegionForPath = useCallback(
     (path: string) => {
       const segments = pathSegments(path);
       if (segments[0] === "title") return "metadata:title";
       if (segments[0] === "summary") return "metadata:summary";
       if (segments[0] === "tags") return "metadata:tags";
-      return live.modelSnapshot.regionIds
-        .map((regionId) => liveDescriptor(regionId))
-        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-        .filter((entry) =>
-          entry.path.every(
-            (segment, index) => String(segments[index]) === String(segment),
-          ),
-        )
-        .sort((left, right) => right.path.length - left.path.length)[0]
-        ?.regionId;
+      return regionIdForSegments(segments);
     },
-    [live.modelSnapshot.regionIds, liveDescriptor],
+    [regionIdForSegments],
   );
 
   /* ---------------------------------------------------------------- *
@@ -4985,13 +5040,17 @@ function ArtifactStudioEditor({
       // milliseconds. Treat that save as part of the same ordered session
       // instead of silently dropping the restore while `syncingRef` is held.
       const syncDeadline = Date.now() + 12_000;
-      while (syncingRef.current && Date.now() < syncDeadline)
+      while (
+        syncingRef.current &&
+        Date.now() < syncDeadline &&
+        !restoreMayBypassHungSave(live.state)
+      )
         await new Promise((resolve) => window.setTimeout(resolve, 40));
-      if (syncingRef.current)
+      if (syncingRef.current && !restoreMayBypassHungSave(live.state))
         throw new Error(
           "Spectra is still saving your latest edit. The restore was not applied; try again in a moment.",
         );
-      if (dirtyRef.current) {
+      if (dirtyRef.current && !restoreMayBypassHungSave(live.state)) {
         const synchronized = await synchronizeDraft(currentSnapshotRef.current);
         if (!synchronized)
           throw new Error(
@@ -5155,8 +5214,13 @@ function ArtifactStudioEditor({
       transportState: live.state,
       dirty: dirty || syncBusy,
       nativeActivity: Boolean(nativeMaterialization),
+      nativeBridgeAvailable:
+        !replicaTruth?.replicas.some((replica) => replica.kind === "local") ||
+        bridge.reachability === "connected",
       readOnly,
+      protectedOriginal,
       collaborative: isCollaborativeArtifact,
+      transportError: live.error,
     },
   );
   const artifactSyncMessage = headerSyncMessage(presentation);
@@ -5498,6 +5562,14 @@ function ArtifactStudioEditor({
                 {presentation.action.label}
               </a>
             ) : null}
+            {presentation.action?.kind === "sign-in" ? (
+              <NextLink
+                href="/sign-in"
+                className="text-micro font-semibold text-[var(--text-primary)]"
+              >
+                {presentation.action.label}
+              </NextLink>
+            ) : null}
             <StudioPresenceIndicator
               transport={live.transport}
               currentAccountId={live.accountId}
@@ -5641,15 +5713,9 @@ function ArtifactStudioEditor({
           </div>
         </div>
       </header>
-      {readOnly && !livePermissionLost ? (
+      {accessBanner && !livePermissionLost ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-micro text-[var(--text-secondary)]">
-          Read-only access{accessExplanation ? ` · ${accessExplanation}` : ""} ·
-          You can inspect, comment, and place this work, but only a collaborator
-          with modify access can change it.
-        </div>
-      ) : accessExplanation ? (
-        <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-micro text-[var(--text-secondary)]">
-          {accessExplanation} · You can modify this work.
+          {accessBanner.text}
         </div>
       ) : null}
       {livePermissionLost ? (
@@ -5659,6 +5725,21 @@ function ArtifactStudioEditor({
         >
           Spectra is refreshing this work’s access. You can keep editing your
           local draft; it will synchronize after edit access is confirmed.
+        </div>
+      ) : null}
+      {presentation.action?.kind === "sign-in" ? (
+        <div
+          role="status"
+          className="shrink-0 border-y border-[color-mix(in_oklab,var(--accent-gold)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-gold)_6%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)]"
+        >
+          Your session ended. This draft stays on this device until you{" "}
+          <NextLink
+            href="/sign-in"
+            className="font-semibold text-[var(--text-primary)]"
+          >
+            sign in
+          </NextLink>{" "}
+          again.
         </div>
       ) : null}
       {!permissionReadOnly &&
@@ -6697,6 +6778,11 @@ function StudioDetails({
               )}
             </div>
           </SideCard>
+          <FileStorageControls
+            artifactId={artifact._id}
+            artifactTitle={artifact.title}
+            embedded
+          />
           {detailWaveStats?.length ? (
             <SideCard title={detailWaveTitle}>
               <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] text-center">

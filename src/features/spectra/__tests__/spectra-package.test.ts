@@ -5,7 +5,7 @@ import {
   openSpectraPackage,
 } from "../lenses/spectra-package";
 import { validateArtifactContent } from "../artifacts/registry";
-import { LIBRARY_IMPORT_ACCEPT } from "../organization/library-import";
+import { LIBRARY_IMPORT_ACCEPT, documentContentFromImportedHtml } from "../organization/library-import";
 
 const content = {
   settings: { shuffle: true, revealMode: "click" as const },
@@ -82,6 +82,35 @@ describe("Spectra package", () => {
 
   it("makes portable packages selectable from the Library importer", () => {
     expect(LIBRARY_IMPORT_ACCEPT.split(",")).toContain(".spectra-pkg");
+  });
+
+  it("projects imported HTML instead of leaving a blank document", () => {
+    const projected = documentContentFromImportedHtml(
+      "<h1>P8.V1 F2 page 1</h1><p>Density fixture.</p>",
+    );
+    expect(projected.blocks).toEqual([
+      {
+        id: "block-1",
+        type: "heading",
+        text: "P8.V1 F2 page 1",
+        attrs: { level: 1 },
+      },
+      { id: "block-2", type: "paragraph", text: "Density fixture." },
+    ]);
+    expect(projected.outline[0]?.title).toBe("P8.V1 F2 page 1");
+  });
+
+  it("asks Library import to project Office files instead of a blank default", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const shell = readFileSync(
+      resolve(__dirname, "../pages/spectra-shell.tsx"),
+      "utf8",
+    );
+    expect(shell).toContain("projectLibraryImportContent");
+    expect(shell).not.toMatch(
+      /importedContent = portable\?\.content \?\? fallback\.content/,
+    );
   });
 
   it("refuses traversal, unexpected entries, and invalid artifact content", () => {

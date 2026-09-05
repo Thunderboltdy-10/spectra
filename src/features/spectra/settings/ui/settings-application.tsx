@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { useTheme } from "@/components/theme-provider";
 import { knownCapabilityIds } from "../../capabilities/catalog";
 import { useSpectraPreferences } from "../preference-store";
+import { preferenceSaveStatus } from "../preference-save-status";
 import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
 import { ProductSectionNav } from "../../components/product-section-nav";
@@ -250,7 +251,8 @@ function PrivacySettings() {
 
 export function SettingsApplication({ initialSection = "ai" }: { initialSection?: string }) {
   const [active, setActive] = useState<SectionId>(isSection(initialSection) ? initialSection : "ai");
-  const { preferences, hydrated, saveError, update, reset } = useSpectraPreferences();
+  const { preferences, hydrated, saveError, saving, update, reset } = useSpectraPreferences();
+  const saveStatus = preferenceSaveStatus({ saving, saveError });
   useEffect(() => { if (isSection(initialSection)) setActive(initialSection); }, [initialSection]);
   const updateSection = <K extends PreferenceSection>(section: K) => (patch: Partial<SpectraPreferences[K]>) => update(section, patch);
   const body: Record<SectionId, ReactNode> = {
@@ -300,9 +302,9 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
                 </p>
               }
             >
-              {saveError ? (
-                <p className="pb-4 text-ui leading-5 text-[var(--text-primary)]" role="status">
-                  {saveError}
+              {saveStatus ? (
+                <p className="pb-4 text-ui leading-5 text-[var(--text-primary)]" role="status" aria-live="polite">
+                  {saveStatus}
                 </p>
               ) : null}
               {body[active]}

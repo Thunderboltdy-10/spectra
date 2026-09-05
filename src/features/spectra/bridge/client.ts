@@ -3,6 +3,19 @@ import { humanizePublicFailure } from "./humanize";
 
 export const BRIDGE_URL = "http://127.0.0.1:47615";
 export const BRIDGE_PROTOCOL_VERSION = "1.0";
+/** Health/status must not block revoke, pairing UI, or Saved/Queued truth. */
+export const BRIDGE_REQUEST_TIMEOUT_MS = 2500;
+
+export function bridgeRequestSignal(
+  signal?: AbortSignal | null,
+  timeoutMs = BRIDGE_REQUEST_TIMEOUT_MS,
+) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  if (!signal) return timeout;
+  if (typeof AbortSignal.any === "function")
+    return AbortSignal.any([signal, timeout]);
+  return timeout;
+}
 
 const healthSchema = z
   .object({
@@ -217,7 +230,7 @@ export function pairingFailureMessage(
 export async function discoverBridge(signal?: AbortSignal): Promise<BridgeDiscovery> {
   try {
     const response = await fetch(`${BRIDGE_URL}/v1/health`, {
-      signal,
+      signal: bridgeRequestSignal(signal),
       cache: "no-store",
     });
     const body = await response.json().catch(() => null);
@@ -262,6 +275,17 @@ export function persistBridgeSession(token: string) {
   window.sessionStorage.removeItem(BRIDGE_SESSION_STORAGE_KEY);
 }
 
+export function clearBridgeSession() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(BRIDGE_SESSION_STORAGE_KEY);
+  window.sessionStorage.removeItem(BRIDGE_SESSION_STORAGE_KEY);
+}
+
+export function clearBridgeStatusCache() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(BRIDGE_STATUS_CACHE_KEY);
+}
+
 export function loadBridgeStatusCache(): BridgeStatus | null {
   if (typeof window === "undefined") return null;
   try {
@@ -286,6 +310,7 @@ async function authorizedBridgeRequest(path: string, init: RequestInit = {}) {
   const response = await fetch(`${BRIDGE_URL}${path}`, {
     ...init,
     headers,
+    signal: bridgeRequestSignal(init.signal ?? undefined),
     cache: "no-store",
   });
   if (response.status === 401) return null;
@@ -308,7 +333,7 @@ export async function bridgeStatus(
       if (!token) return null;
       const resume = await fetch(`${BRIDGE_URL}/v1/session/resume`, {
         method: "POST",
-        signal,
+        signal: bridgeRequestSignal(signal),
         headers: {
           "content-type": "application/json",
           authorization: `Bearer ${token}`,

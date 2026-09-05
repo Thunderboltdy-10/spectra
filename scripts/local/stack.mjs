@@ -9,6 +9,7 @@ import {
   LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS,
   convexEnvFrom,
   derivedInstanceEnv,
+  isFatalServiceExit,
   localConvexProjectPackage,
   normalizeInstanceId,
   parseEnv,
@@ -589,10 +590,41 @@ async function startInstance(instanceId, options, environment) {
       { cwd: repositoryRoot, env: finalEnv },
     );
     children.push(collaboration, web);
+    const startedAt = new Date().toISOString();
 
-    for (const child of children) {
+    const persistRuntime = async () => {
+      await writeFile(
+        paths.runtimeState,
+        `${JSON.stringify(
+          {
+            schemaVersion: INSTANCE_SCHEMA_VERSION,
+            instanceId,
+            launcherPid: process.pid,
+            startedAt,
+            deploymentName,
+            pids: Object.fromEntries(
+              children
+                .filter((child) => child?.pid && child.exitCode === null)
+                .map((child) => [child.spectraLabel, child.pid]),
+            ),
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+    };
+
+    const attachExitHandler = (child) => {
       child.once("exit", (code, signal) => {
         if (shuttingDown) return;
+        if (!isFatalServiceExit(child.spectraLabel)) {
+          process.stderr.write(
+            `${child.spectraLabel} stopped (${signal ?? `code ${code}`}); web and Convex stay up so collaboration can recover.\n`,
+          );
+          void persistRuntime();
+          return;
+        }
         process.stderr.write(
           `${child.spectraLabel} stopped unexpectedly (${signal ?? `code ${code}`}); stopping instance ${instanceId}.\n`,
         );
@@ -600,26 +632,11 @@ async function startInstance(instanceId, options, environment) {
           process.exit(process.exitCode ?? 1),
         );
       });
-    }
+    };
 
-    await writeFile(
-      paths.runtimeState,
-      `${JSON.stringify(
-        {
-          schemaVersion: INSTANCE_SCHEMA_VERSION,
-          instanceId,
-          launcherPid: process.pid,
-          startedAt: new Date().toISOString(),
-          deploymentName,
-          pids: Object.fromEntries(
-            children.map((child) => [child.spectraLabel, child.pid]),
-          ),
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
+    for (const child of children) attachExitHandler(child);
+
+    await persistRuntime();
 
     await Promise.all([
       waitFor(

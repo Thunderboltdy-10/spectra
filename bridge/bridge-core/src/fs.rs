@@ -199,9 +199,16 @@ impl<P: Platform> SafeWriter<P> {
     }
 
     pub fn write(&self, request: WriteRequest<'_>) -> Result<String, FsError> {
-        let target = self
-            .grants
-            .resolve(request.grant_id, request.relative_path)?;
+        // The durable file is the journal resource, not a cloud relativePath
+        // that may still name a sibling copy of the same bytes.
+        let journal_path = self
+            .journal
+            .resource_by_id(request.resource_id)?
+            .map(|record| PathBuf::from(record.path_key.replace('\\', "/")));
+        let relative = journal_path
+            .as_deref()
+            .unwrap_or(request.relative_path);
+        let target = self.grants.resolve(request.grant_id, relative)?;
         let pre_hash = target.exists().then(|| sha256_file(&target)).transpose()?;
         let op = self.journal.begin_intent(
             request.idempotency_key,
@@ -418,6 +425,7 @@ fn sync_parent_directory(parent: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::journal::ResourceRecord;
     use crate::platform::{OsFileIdentity, Platform};
     use async_trait::async_trait;
     use tempfile::tempdir;
@@ -624,6 +632,52 @@ mod tests {
             fs::read(dir.path().join("paper.docx")).unwrap(),
             b"original"
         );
+    }
+
+    #[test]
+    fn write_targets_the_journal_path_not_a_sibling_relative_path() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("original.txt"), b"original").unwrap();
+        fs::write(dir.path().join("copy.txt"), b"copy").unwrap();
+        let grants = Arc::new(GrantRegistry::default());
+        let grant = grants
+            .add_native_selection("Test".into(), dir.path())
+            .unwrap();
+        let journal = Arc::new(Journal::in_memory().unwrap());
+        journal
+            .upsert_resource(&ResourceRecord {
+                local_resource_id: "lr_original".into(),
+                grant_id: grant.id.clone(),
+                path_key: "original.txt".into(),
+                volume: Some(1),
+                file_index: Some(1),
+                content_hash: Some(hex::encode(Sha256::digest(b"original"))),
+                revision: None,
+                available: true,
+                unavailable_reason: None,
+                last_seen_generation: 1,
+            })
+            .unwrap();
+        let writer = SafeWriter::new(grants, journal, Arc::new(TestPlatform::default()));
+        let bytes = b"spectra-version";
+        let hash = hex::encode(Sha256::digest(bytes));
+        writer
+            .write(WriteRequest {
+                grant_id: &grant.id,
+                relative_path: Path::new("copy.txt"),
+                resource_id: "lr_original",
+                base_revision: "1",
+                known_revision: "1",
+                bytes,
+                expected_hash: &hash,
+                idempotency_key: "path-authority",
+            })
+            .unwrap();
+        assert_eq!(
+            fs::read(dir.path().join("original.txt")).unwrap(),
+            b"spectra-version"
+        );
+        assert_eq!(fs::read(dir.path().join("copy.txt")).unwrap(), b"copy");
     }
 
     #[test]

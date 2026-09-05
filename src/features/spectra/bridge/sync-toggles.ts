@@ -79,6 +79,22 @@ export function isProtectedOriginalPreset(
   return preset === "linked";
 }
 
+export function isProtectedOriginalWork(input: {
+  preset?: SyncPolicyPreset;
+  replicas?: readonly {
+    kind: string;
+    protectedOriginal?: boolean;
+  }[];
+}): boolean {
+  if (isProtectedOriginalPreset(input.preset)) return true;
+  return Boolean(
+    input.replicas?.some(
+      (replica) =>
+        replica.kind === "local" && replica.protectedOriginal === true,
+    ),
+  );
+}
+
 /**
  * Folder progress is unknown when the Bridge is not live. Zero is never a
  * substitute for "not measured" (WC-3).

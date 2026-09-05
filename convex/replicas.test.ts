@@ -295,6 +295,83 @@ describe("replica truth machine", () => {
     expect(truth.local?.state).not.toBe("current");
   });
 
+  it("retargets materialization onto the live Bridge replica of the same path", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const staleLocalId = await t.run(async (ctx) => {
+      const now = Date.now();
+      const staleDeviceId = await ctx.db.insert("bridgeDevices", {
+        accountId: fixture.accountId,
+        name: "Silent Bridge",
+        platform: "windows",
+        credentialHash: "c".repeat(64),
+        protocolVersion: "1",
+        appVersion: "1",
+        pairedAt: now - 60 * 60_000,
+        lastSeenAt: now - 60 * 60_000,
+        state: "active",
+      });
+      const staleMountId = await ctx.db.insert("bridgeMounts", {
+        accountId: fixture.accountId,
+        deviceId: staleDeviceId,
+        rootLabel: "Old",
+        grantId: "grant_stale",
+        state: "active",
+        fileCount: 1,
+        doubleSyncRisk: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return ctx.db.insert("workReplicas", {
+        accountId: fixture.accountId,
+        workId: fixture.workId,
+        kind: "local",
+        deviceId: staleDeviceId,
+        mountId: staleMountId,
+        localResourceId: "resource-stale",
+        relativePath: "Truth.docx",
+        nativeFormat: "docx",
+        payloadRef: String(fixture.basePayloadId),
+        revision: baseHash,
+        baseRevision: baseHash,
+        contentHash: baseHash,
+        state: "current",
+        lastVerifiedAt: now,
+        updatedAt: now + 10,
+      });
+    });
+
+    const queued = await t.withIdentity(identity).mutation(
+      api.replicas.queueMaterialization,
+      {
+        workId: fixture.workId,
+        payloadRef: String(fixture.nextPayloadId),
+        contentHash: nextHash,
+        baseRevision: baseHash,
+        fidelityMap: { entries: [] },
+        regionIds: ["body"],
+        partNames: ["word/document.xml"],
+        localReplicaId: staleLocalId,
+      },
+    );
+    const request = await t.run(async (ctx) =>
+      ctx.db.get(requireWriteRequestId(queued.requestId)),
+    );
+    expect(request?.localResourceId).toBe("resource-1");
+    expect(request?.deviceId).toBe(fixture.deviceId);
+
+    const truth = await t
+      .withIdentity(identity)
+      .query(api.replicas.forWork, { workId: fixture.workId });
+    expect(
+      truth.replicas.find((replica) => replica._id === staleLocalId),
+    ).toMatchObject({
+      state: "unavailable",
+      unavailableReason: "not-on-this-computer",
+    });
+    expect(truth.pendingCount).toBe(1);
+  });
+
   it("rejects a second materialization until the first write is verified", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);

@@ -541,8 +541,7 @@ export function PublicShareShell() {
               Shared view unavailable
             </h1>
             <p className="mt-2 text-caption leading-6 text-[var(--text-secondary)]">
-              {message} It may have expired or the owner may have turned off
-              access.
+              {message}
             </p>
           </section>
         ) : null}

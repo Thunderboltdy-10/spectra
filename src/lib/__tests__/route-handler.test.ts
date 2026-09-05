@@ -99,4 +99,24 @@ describe("withRouteErrorHandling", () => {
     );
     expect(payload.error?.message).not.toBe(PUBLIC_SERVER_FAILURE);
   });
+
+  it("unwraps Convex Request ID stacks into the named AUTH code", async () => {
+    const response = await withRouteErrorHandling(async () => {
+      throw new Error(
+        "[Request ID: 778f1cc9ed400c49] Server Error\nUncaught Error: AUTH_OPERATOR_MANAGE_REQUIRED: Re-enter this school with manage access.\n    at requireSchoolManager (../../../../../convex/memberships.ts:25:6)",
+      );
+    });
+    const payload = (await response.json()) as {
+      error?: { code?: string; message?: string; status?: number };
+    };
+    expect(response.status).toBe(403);
+    expect(payload.error).toEqual(
+      expect.objectContaining({
+        code: "AUTH_OPERATOR_MANAGE_REQUIRED",
+        status: 403,
+        message: "Re-enter this school with manage access.",
+      }),
+    );
+    expect(payload.error?.message).not.toMatch(/Request ID|memberships\.ts|Uncaught/i);
+  });
 });

@@ -13,6 +13,11 @@ function normalizeErrorStatus(message: string) {
   if (message.startsWith("AUTH_NOT_SIGNED_IN")) return 401;
   if (message.startsWith("AUTH_NO_SCHOOL")) return 403;
   if (message.startsWith("AUTH_NO_ACCESS")) return 403;
+  if (message.startsWith("AUTH_OPERATOR_MANAGE_REQUIRED")) return 403;
+  if (message.startsWith("AUTH_OPERATOR_SESSION_INVALID")) return 403;
+  if (message.startsWith("AUTH_OPERATOR_REQUIRED")) return 403;
+  if (message.startsWith("AUTH_SCHOOL_ADMIN_REQUIRED")) return 403;
+  if (message.startsWith("AUTH_SECRET_MANAGE_REQUIRED")) return 403;
   if (message.startsWith("AUTH_ORG_INACTIVE")) return 403;
   if (message.startsWith("AUTH_MISCONFIGURED")) return 500;
   if (message.startsWith("AUTH_PROFILE_UNAVAILABLE")) return 500;
@@ -46,8 +51,25 @@ function normalizeErrorStatus(message: string) {
 export const PUBLIC_SERVER_FAILURE =
   "Spectra could not finish this request. Check your connection, then try again.";
 
+function unwrapConvexError(rawMessage: string) {
+  const withoutConvexId = rawMessage.replace(
+    /\[Request ID:\s*[^\]]+\]\s*/gi,
+    "",
+  );
+  const named = withoutConvexId.match(
+    /\b([A-Z][A-Z0-9_]{3,}):\s*([^\n]+)/,
+  );
+  if (named) return `${named[1]}: ${named[2].trim()}`;
+  return withoutConvexId
+    .split("\n")[0]
+    .replace(/^Uncaught Error:\s*/i, "")
+    .replace(/^Server Error:\s*/i, "")
+    .trim();
+}
+
 function parseCodeAndMessage(rawMessage: string) {
-  const [prefix, ...rest] = rawMessage.split(":");
+  const normalized = unwrapConvexError(rawMessage);
+  const [prefix, ...rest] = normalized.split(":");
   if (/^[A-Z0-9_]+$/.test(prefix) && rest.length > 0) {
     return {
       code: prefix,
@@ -56,7 +78,7 @@ function parseCodeAndMessage(rawMessage: string) {
   }
   return {
     code: "INTERNAL_ERROR",
-    message: rawMessage,
+    message: normalized,
   };
 }
 
@@ -90,8 +112,9 @@ export async function withRouteErrorHandling<T>(
   } catch (error) {
     const rawMessage =
       error instanceof Error ? error.message : PUBLIC_SERVER_FAILURE;
-    const status = normalizeErrorStatus(rawMessage);
-    const { code, message } = parseCodeAndMessage(rawMessage);
+    const unwrapped = unwrapConvexError(rawMessage);
+    const status = normalizeErrorStatus(unwrapped);
+    const { code, message } = parseCodeAndMessage(unwrapped);
     const safeMessage = status >= 500 ? PUBLIC_SERVER_FAILURE : message;
     const requestId = logger.context.requestId || randomUUID().slice(0, 8);
 

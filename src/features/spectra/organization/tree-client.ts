@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { useConvexAuth, useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
+import { useAuthedArgs } from "../data/use-authed-args";
 
 /**
  * The tree's client. Every read here is a live Convex subscription, so a rename
@@ -111,12 +112,6 @@ export type BoardCard = TreeNode & { parentName?: string };
 
 const ROOT = "root";
 const nodeArg = (parentId: string | null) => (parentId ?? ROOT) as string;
-
-/** Skip Convex tree reads until the session is actually signed in. */
-function useAuthedArgs<T>(args: T | "skip"): T | "skip" {
-  const { isAuthenticated } = useConvexAuth();
-  return isAuthenticated === true ? args : "skip";
-}
 
 /** The children of one folder, paginated so a 2k-item folder still opens fast. */
 export function useTreeChildren(

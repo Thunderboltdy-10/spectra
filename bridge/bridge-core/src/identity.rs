@@ -39,8 +39,12 @@ pub fn adopt<'a>(
                 .find(|c| c.path_key == path_key && (c.available || c.content_hash == content_hash))
         })
         .or_else(|| {
+            // Same bytes at a new path are a copy while the original is still
+            // present. Hash continuity is only a move when the prior occupant
+            // has already disappeared.
             let mut matches = candidates.iter().filter(|c| {
-                c.content_hash == content_hash
+                !c.available
+                    && c.content_hash == content_hash
                     && generation.saturating_sub(c.last_seen_generation) <= 2
             });
             let candidate = matches.next()?;
@@ -106,6 +110,24 @@ mod tests {
         let candidates = [candidate("old/a.txt", "same", None, false, 8)];
         assert!(adopt(&candidates, None, "new/a.txt", "same", 10).is_some());
         assert!(adopt(&candidates, None, "new/a.txt", "same", 20).is_none());
+    }
+
+    #[test]
+    fn copy_of_an_available_file_is_not_adopted_as_a_move() {
+        let original = candidate("Physics/GQMC.docx", "same", Some((7, 1)), true, 8);
+        let candidates = [original];
+        let copy = OsFileIdentity {
+            volume: 7,
+            file_index: 99,
+        };
+        assert!(adopt(
+            &candidates,
+            Some(&copy),
+            "Spectra/P8V1-D3-collab.docx",
+            "same",
+            10
+        )
+        .is_none());
     }
 
     #[test]

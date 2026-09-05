@@ -19,8 +19,12 @@ type PendingOperation = {
  * already have a durable exit and must not keep every surface on Syncing. */
 export function isActionablePendingOperation(
   operation: PendingOperation,
-  replicaById: ReadonlyMap<string, { revision: string }>,
+  replicaById: ReadonlyMap<string, { revision: string; state?: string }>,
 ) {
+  if (operation.replicaId) {
+    const replica = replicaById.get(String(operation.replicaId));
+    if (replica?.state === "unavailable") return false;
+  }
   if (operation.state === "pending") return true;
   if (operation.state !== "applied") return false;
   if (operation.direction !== "external" || operation.actorKind !== "external-edit")

@@ -474,6 +474,7 @@ describe("dissolving a workspace keeps its contents", () => {
       general._id as string,
     );
     expect(result.purged).toBe(1);
+    expect(result.remaining).toBe(0);
     expect((await db.get(folder._id))?.parentId).toBe(generalNode!._id);
     expect((await db.get(work._id))?.parentId).toBe(folder._id);
     expect(await contextOf(work._id)).toBe(general._id);
@@ -505,6 +506,38 @@ describe("dissolving a workspace keeps its contents", () => {
     await restoreTrashedNode(ctx, trashedWork! as never);
     expect((await db.get(work._id))?.parentId).toBe(generalNode!._id);
     expect(await contextOf(work._id)).toBe(general._id);
+  });
+
+  it("does not scan siblings to repair a missing childCount during a user write", async () => {
+    const general = await ensureGeneralNode(ctx, id(accountId));
+    for (const name of ["One", "Two", "Three"]) {
+      await createFolderNode(ctx, {
+        accountId: id(accountId),
+        name,
+        parentId: general.node._id,
+      });
+    }
+    await db.patch(general.node._id, { childCount: undefined });
+    const folders = await listChildNodes(ctx, id(accountId), general.node._id);
+    await trashNode(ctx, folders[0]!);
+    expect((await db.get(general.node._id))?.childCount).toBeUndefined();
+    expect(
+      await listChildNodes(ctx, id(accountId), general.node._id),
+    ).toHaveLength(2);
+  });
+
+  it("applies a constant-time childCount delta when the projection already exists", async () => {
+    const general = await ensureGeneralNode(ctx, id(accountId));
+    for (const name of ["One", "Two", "Three"]) {
+      await createFolderNode(ctx, {
+        accountId: id(accountId),
+        name,
+        parentId: general.node._id,
+      });
+    }
+    const folders = await listChildNodes(ctx, id(accountId), general.node._id);
+    await trashNode(ctx, folders[0]!);
+    expect((await db.get(general.node._id))?.childCount).toBe(2);
   });
 });
 
@@ -683,5 +716,43 @@ describe("permanent trash is atomic for mixed folder, thread and work", () => {
     expect(inviteeNode.deletedAt).toBeUndefined();
     const ownerNodes = await nodesFor("work", artifactId);
     expect(ownerNodes).toHaveLength(2);
+  });
+
+  it("dissolves a crowded shelf across bounded batches without deleting early", async () => {
+    const biology = await seedWorkspace(db, accountId, "Biology");
+    const workspaceNode = await ensureWorkspaceNode(ctx, biology as never);
+    for (let index = 0; index < 25; index += 1) {
+      const artifactId = await seedArtifact(db, accountId, `Note ${index}`);
+      await placeWork(artifactId, { parentId: workspaceNode._id });
+    }
+    const first = await dissolveWorkspaceNode(ctx, biology as never, {
+      limit: 10,
+    });
+    expect(first.remaining).toBe(15);
+    expect(first.purged).toBe(0);
+    expect(await nodesFor("workspace", biology._id)).toHaveLength(1);
+    const second = await dissolveWorkspaceNode(ctx, biology as never, {
+      limit: 10,
+    });
+    expect(second.remaining).toBe(5);
+    expect(second.purged).toBe(0);
+    const third = await dissolveWorkspaceNode(ctx, biology as never, {
+      limit: 10,
+    });
+    expect(third.remaining).toBe(0);
+    expect(third.purged).toBe(1);
+    expect(await nodesFor("workspace", biology._id)).toHaveLength(0);
+    const general = db
+      .all("spectraWorkspaces")
+      .find((row) => row.starterKey === GENERAL_STARTER_KEY)!;
+    const generalNode = await findPrimaryNode(
+      ctx,
+      id(accountId),
+      "workspace",
+      general._id as string,
+    );
+    expect(
+      await listChildNodes(ctx, id(accountId), generalNode!._id),
+    ).toHaveLength(25);
   });
 });

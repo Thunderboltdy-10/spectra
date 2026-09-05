@@ -17,6 +17,7 @@ import {
   refTouchesAddress,
 } from "./formula-refs";
 import { dateToSerial, isIsoDateString } from "./excel-serial";
+import { changedSheetCellAddresses } from "./cell-overlay";
 
 export { offsetFormula } from "./formula-refs";
 
@@ -654,19 +655,33 @@ export function applyCachedStaleness(
 ): SheetsContent {
   const previousById = new Map(previous.sheets.map((sheet) => [sheet.id, sheet]));
   const changedBySheet = new Map<string, Set<string>>();
+  let formulaTouched = false;
   for (const sheet of next.sheets) {
     const before = previousById.get(sheet.id);
+    const hinted = changedSheetCellAddresses(before?.cells, sheet.cells);
     const changed = new Set<string>();
-    const addresses = new Set([
-      ...Object.keys(before?.cells ?? {}),
-      ...Object.keys(sheet.cells),
-    ]);
-    for (const address of addresses) {
-      if (cellValueFormulaChanged(before?.cells[address], sheet.cells[address]))
-        changed.add(address);
+    if (hinted) {
+      for (const address of hinted) {
+        if (cellValueFormulaChanged(before?.cells[address], sheet.cells[address]))
+          changed.add(address);
+        const previousCell = before?.cells[address];
+        const nextCell = sheet.cells[address];
+        if (previousCell?.formula || nextCell?.formula) formulaTouched = true;
+      }
+    } else {
+      const addresses = new Set([
+        ...Object.keys(before?.cells ?? {}),
+        ...Object.keys(sheet.cells),
+      ]);
+      for (const address of addresses) {
+        if (cellValueFormulaChanged(before?.cells[address], sheet.cells[address]))
+          changed.add(address);
+      }
+      formulaTouched = true;
     }
     changedBySheet.set(sheet.id, changed);
   }
+  if (!formulaTouched) return next;
   return {
     ...next,
     sheets: next.sheets.map((sheet) => {

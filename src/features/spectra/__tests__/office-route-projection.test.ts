@@ -4,9 +4,11 @@ import {
   pptxProjectionUpdateFromContent,
   xlsxProjectionUpdateFromContent,
 } from "../lenses/office-content";
-import { hasUnreconciledExternalRevision } from "../lenses/native-reconciliation";
+import { hasUnreconciledExternalRevision, shouldActivateExternalNativeRevision } from "../lenses/native-reconciliation";
 import { sniffOfficeRasterMedia } from "../lenses/office-media";
 import { XlsxLensError } from "../lenses/xlsx-lens";
+
+const NATIVE_EXCEL_FILL = "#1F4E78";
 
 describe("Office lens route projection boundary", () => {
   it("returns the Office error envelope when parsing fails before format detection", async () => {
@@ -66,6 +68,34 @@ describe("Office lens route projection boundary", () => {
         [{ ...operation, state: "applied" }],
         "revision-a",
       ),
+    ).toBe(true);
+  });
+
+  it("does not treat a queued Spectra write as an external Word save", () => {
+    const queued = {
+      direction: "cloud-to-local",
+      state: "pending",
+    };
+    expect(
+      shouldActivateExternalNativeRevision({
+        operations: [queued],
+        localHash: "disk",
+        cloudHash: "spectra",
+      }),
+    ).toBe(false);
+    expect(
+      shouldActivateExternalNativeRevision({
+        operations: [
+          {
+            direction: "external",
+            actorKind: "external-edit",
+            revisionAfter: "disk",
+            state: "applied",
+          },
+        ],
+        localHash: "disk",
+        cloudHash: "spectra",
+      }),
     ).toBe(true);
   });
 
@@ -367,6 +397,72 @@ describe("Office lens route projection boundary", () => {
         sheetId: "xlsx:sheet:1",
         rows: 0,
         columns: 0,
+      },
+    ]);
+  });
+
+  it("does not treat editor format defaults as a native format write", () => {
+    const base = {
+      sheets: [
+        {
+          id: "xlsx:sheet:1",
+          name: "Sheet1",
+          cells: [
+            {
+              id: "xlsx:1:B1",
+              ref: "B1",
+              value: "RCV1XLSXRUN3",
+              format: { fontSize: 14, fillColor: NATIVE_EXCEL_FILL },
+            },
+          ],
+          merges: [] as string[],
+        },
+      ],
+      definedNames: [],
+      nativeBinding: {
+        version: 1 as const,
+        format: "xlsx" as const,
+        profile: "strict-native" as const,
+        macroEnabled: false,
+        semanticDigest: "0".repeat(64),
+        recognizedFormulaFunctions: [],
+      },
+    };
+    const editor = {
+      sheets: [
+        {
+          id: "xlsx:sheet:1",
+          cells: {
+            B1: {
+              value: "RCV1XLSXRUN3",
+              format: {
+                bold: false,
+                italic: false,
+                underline: false,
+                strike: false,
+                fontFamily: "sans",
+                fillColor: NATIVE_EXCEL_FILL,
+                align: "general",
+                verticalAlign: "bottom",
+                wrap: false,
+                rotation: 0,
+                indent: 0,
+                numberFormat: "general",
+                fontSize: 14,
+              },
+            },
+            Z1: { value: "P8V1-T0-WRITE" },
+          },
+        },
+      ],
+    };
+
+    expect(xlsxProjectionUpdateFromContent(editor, base).operations).toEqual([
+      {
+        kind: "set-cell",
+        sheetId: "xlsx:sheet:1",
+        ref: "Z1",
+        value: "P8V1-T0-WRITE",
       },
     ]);
   });

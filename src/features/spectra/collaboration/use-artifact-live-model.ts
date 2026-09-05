@@ -160,6 +160,11 @@ export function useArtifactLiveModel(
     [controller, model],
   );
 
+  const flushSnapshot = useCallback(() => {
+    if (!model) return modelSnapshot.value;
+    return model.flushSnapshot().value;
+  }, [model, modelSnapshot.value]);
+
   const restoreRegions = useCallback(
     async (next: ArtifactLiveValue, regionIds: readonly string[]) => {
       if (!model || !controller) throw new Error("COLLABORATION_NOT_AVAILABLE");
@@ -180,6 +185,7 @@ export function useArtifactLiveModel(
         : initialValue,
     synchronize,
     synchronizeMetadata,
+    flushSnapshot,
     restoreRegions,
     initializationError,
     supported,

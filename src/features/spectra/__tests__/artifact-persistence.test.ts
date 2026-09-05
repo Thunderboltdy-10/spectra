@@ -3,6 +3,7 @@ import {
   claimCloseAction,
   decideClose,
   persistableTitle,
+  restoreMayBypassHungSave,
   UNTITLED_WORK_TITLE,
 } from "../components/artifact-persistence";
 
@@ -28,5 +29,14 @@ describe("artifact persistence (P1.I3)", () => {
   it("asks before closing work that still has unsynchronized live changes", () => {
     expect(decideClose(false, 1)).toBe("confirm");
     expect(decideClose(false, 0)).toBe("close");
+  });
+
+  it("lets history restore proceed while collab is hung reconnecting", () => {
+    expect(restoreMayBypassHungSave("reconnecting")).toBe(true);
+    expect(restoreMayBypassHungSave("permission_lost")).toBe(true);
+    expect(restoreMayBypassHungSave("unsynchronized")).toBe(true);
+    expect(restoreMayBypassHungSave("connecting")).toBe(true);
+    expect(restoreMayBypassHungSave("synchronized")).toBe(false);
+    expect(restoreMayBypassHungSave("synchronizing")).toBe(false);
   });
 });

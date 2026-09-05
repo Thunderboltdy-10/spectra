@@ -144,6 +144,18 @@ PASS requires every matrix card with real evidence. A failure is triaged and rep
 - Z1: Vitest 173/1643, tsc, lint 0, Office xlsx/pptx, DOCX 16/177, seam 13/13, Bridge cargo check.
 - Z2 **NO-GO**. Failed: D3 E0 E1 E3–E8 E10 F1 F2 G2 T0 Z0. P8.V1 stays OPEN.
 
+### P8.V1 closeout log — 2026-09-05
+
+- Instance 1 production BUILD_ID `bbDz6fLUzthijWiSf_IRD`. Original IBDP1 unmounted. Instance 2 untouched. Sacrificial `IBDP1 - Copy` only.
+- Holdable classes repaired: Bridge hang/identity/Office lock, collab revoke vs generic permission, E3 class-shelf bytes, E5 sign-in door, compact Yjs sheet cells + overlay, deferred presence flush, O(1) region lookup, Library first-paint coalesce, gateway compact-cell projection, Next.js sign-in Link.
+- E3/E5/E6 re-proved; E7 revoke held the pending native write; E8 Excel lock stayed truthful; E10 compound recovery then revoked B.
+- F1: Library 14 spectra fetch+document / d42 15 including Clerk+Bridge, largest 129959 bytes; 200k insertText median 1.1ms max 2.8ms.
+- F2: 200k opened 477ms A1=1; 40-page and 120-slide covering inherited; did not copy library-10k into IBDP1-Copy.
+- G2 expired public URL + operator session already passed; T0/T1/T2 inherited from this unit’s earlier proven run.
+- Z0: A Library (P MD admin) and B Library (Pablo MD student; `P8V1-D3-unique.docx` searchable) on this build.
+- Z1: Vitest 181/1696, tsc, lint 0, DOCX 16/177, Office xlsx/pptx, seam 13/13, secrets/architecture/copy/tokens, Bridge workspace cargo check; chaos 13/13; `granted_tree` still missing the P0.I5 fixture.
+- Z2 **GO**. Named risks: Fly.io unproved, P7.UI2 landing owner-skipped, duplicate overview fetch within cap. Do not open P9–P15.
+
 ## Exit gate
 
 P8.V1 ends against one clean, immutable candidate whose manifest and STATE row agree. GO has zero launch-blocking failures, every numeric budget met, and a tested rollback/incident path. NO-GO names exact failed cards and remains honest resumable P8.V1 work; expansion does not begin until the school-launch line reaches GO or Pablo explicitly changes scope.

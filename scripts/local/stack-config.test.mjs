@@ -3,6 +3,7 @@ import {
   LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS,
   convexEnvFrom,
   derivedInstanceEnv,
+  isFatalServiceExit,
   localConvexProjectPackage,
   normalizeInstanceId,
   parseEnv,
@@ -122,6 +123,13 @@ describe("local stack instance configuration", () => {
       SPECTRA_SECRET_BRIDGE_KEY: "s".repeat(32),
     });
     expect(convexEnvFrom(env)).not.toHaveProperty("CLERK_SECRET_KEY");
+  });
+
+  it("keeps Convex up when the collaboration gateway or Next.js exits", () => {
+    expect(isFatalServiceExit("Collaboration gateway")).toBe(false);
+    expect(isFatalServiceExit("Next.js")).toBe(false);
+    expect(isFatalServiceExit("Convex")).toBe(true);
+    expect(isFatalServiceExit("")).toBe(true);
   });
 
   it("gives the Convex CLI enough time for a large local SQLite to bind", () => {

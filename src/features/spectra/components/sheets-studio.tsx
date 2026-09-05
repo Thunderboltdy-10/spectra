@@ -34,6 +34,7 @@ import {
   YAxis,
 } from "recharts";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -140,6 +141,11 @@ import {
   useStudioContract,
   type StudioContract,
 } from "./artifact-studio-shell";
+import {
+  changedSheetCellAddresses,
+  patchSheetCellRecord,
+  readSheetCellsOverlay,
+} from "../sheets/cell-overlay";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -288,6 +294,11 @@ function cellSame(left?: SheetCell, right?: SheetCell) {
   );
 }
 
+function sheetHasCells(cells: Record<string, SheetCell>) {
+  for (const key in cells) return true;
+  return false;
+}
+
 function sameContent(left: SheetsContent, right: SheetsContent) {
   if (left === right) return true;
   if (left.activeSheetId !== right.activeSheetId) return false;
@@ -297,6 +308,13 @@ function sameContent(left: SheetsContent, right: SheetsContent) {
     if (!other) return false;
     if (sheet === other) return true;
     if (sheet.id !== other.id || sheet.name !== other.name) return false;
+    if (sheet.cells === other.cells) return true;
+    const hinted = changedSheetCellAddresses(sheet.cells, other.cells);
+    if (hinted) {
+      return hinted.every((address) =>
+        cellSame(sheet.cells[address], other.cells[address]),
+      );
+    }
     const leftKeys = Object.keys(sheet.cells);
     const rightKeys = Object.keys(other.cells);
     if (leftKeys.length !== rightKeys.length) return false;
@@ -321,6 +339,18 @@ function workbookIdentityKey(content: SheetsContent) {
   for (const sheet of content.sheets) {
     mix(sheet.id);
     mix(sheet.name);
+    const overlay = readSheetCellsOverlay(sheet.cells);
+    if (overlay) {
+      mix("overlay");
+      mix(String(Object.keys(overlay.patch).length));
+      for (const address of Object.keys(overlay.patch).sort()) {
+        const cell = overlay.patch[address];
+        mix(address);
+        mix(String(cell?.value ?? ""));
+        mix(cell?.formula ?? "");
+      }
+      continue;
+    }
     const addresses = Object.keys(sheet.cells);
     mix(String(addresses.length));
     for (const address of addresses) {
@@ -369,6 +399,14 @@ function replaceSheet(
 }
 
 function usedBounds(sheet: WorkbookSheet) {
+  const declaredRows = Number(sheet.rowCount) || 0;
+  const declaredColumns = Number(sheet.columnCount) || 0;
+  if (declaredRows >= 64 && declaredColumns >= 8) {
+    return {
+      rows: Math.max(20, declaredRows),
+      columns: Math.max(9, declaredColumns),
+    };
+  }
   let maxRow = 20;
   let maxColumn = 9;
   for (const address of Object.keys(sheet.cells)) {
@@ -1197,7 +1235,7 @@ function SheetsFillHandle({
   );
 }
 
-export function SheetsStudio({
+export const SheetsStudio = memo(function SheetsStudio({
   artifactId,
   content,
   onChange,
@@ -1501,28 +1539,49 @@ export function SheetsStudio({
     () =>
       !workbook.nativeBinding
         ? 0
-        : workbook.sheets.reduce(
-            (count, sheet) =>
-              count +
-              Object.values(sheet.cells).filter(
-                (cell) => cell.nativeFormulaSupport === "cached-only",
-              ).length,
-            0,
-          ),
+        : workbook.sheets.reduce((count, sheet) => {
+            const overlay = readSheetCellsOverlay(sheet.cells);
+            const cells = overlay ? Object.values(overlay.patch) : null;
+            if (cells) {
+              return (
+                count +
+                cells.filter(
+                  (cell) => cell?.nativeFormulaSupport === "cached-only",
+                ).length
+              );
+            }
+            for (const address in sheet.cells) {
+              if (sheet.cells[address]?.nativeFormulaSupport === "cached-only")
+                count += 1;
+            }
+            return count;
+          }, 0),
     [workbook.nativeBinding, workbook.sheets],
   );
   const staleCachedFormulaCount = useMemo(
     () =>
-      workbook.sheets.reduce(
-        (count, sheet) =>
-          count +
-          Object.values(sheet.cells).filter(
-            (cell) =>
-              cell.nativeFormulaSupport === "cached-only" &&
-              cell.cachedValueStale,
-          ).length,
-        0,
-      ),
+      workbook.sheets.reduce((count, sheet) => {
+        const overlay = readSheetCellsOverlay(sheet.cells);
+        if (overlay) {
+          return (
+            count +
+            Object.values(overlay.patch).filter(
+              (cell) =>
+                cell?.nativeFormulaSupport === "cached-only" &&
+                cell.cachedValueStale,
+            ).length
+          );
+        }
+        for (const address in sheet.cells) {
+          const cell = sheet.cells[address];
+          if (
+            cell?.nativeFormulaSupport === "cached-only" &&
+            cell.cachedValueStale
+          )
+            count += 1;
+        }
+        return count;
+      }, 0),
     [workbook.sheets],
   );
   const activeSheetRef = useRef(activeSheet);
@@ -1819,6 +1878,12 @@ export function SheetsStudio({
       setFormulaDraft((current) =>
         current === nextFormula ? current : nextFormula,
       );
+      if (
+        formulaInputRef.current &&
+        formulaInputRef.current.value !== nextFormula
+      ) {
+        formulaInputRef.current.value = nextFormula;
+      }
     }
     if (!nameFocused) {
       setNameDraft((current) => (current === nextName ? current : nextName));
@@ -1996,24 +2061,25 @@ export function SheetsStudio({
       return;
     }
     updateActiveSheet((sheet) => {
-      const cells = { ...sheet.cells };
-      const current = cells[address];
+      const current = sheet.cells[address];
       const merged = {
         ...current,
         ...cell,
         format: cell.format ?? current?.format,
       };
-      if (
+      const empty =
         !merged.formula &&
         (merged.value === undefined ||
           merged.value === null ||
           merged.value === "") &&
         !merged.note &&
-        !merged.format
-      )
-        delete cells[address];
-      else cells[address] = merged;
-      return { ...sheet, cells };
+        !merged.format;
+      return {
+        ...sheet,
+        cells: patchSheetCellRecord(sheet.cells, {
+          [address]: empty ? undefined : merged,
+        }),
+      };
     }, remember);
   }
 
@@ -3455,7 +3521,7 @@ export function SheetsStudio({
     workbook.workbook.date1904,
   ]);
   const sheetIsEmpty =
-    !Object.keys(activeSheet.cells).length && !activeSheet.charts.length;
+    !sheetHasCells(activeSheet.cells) && !activeSheet.charts.length;
   /**
    * The selection readout. It used to sit in a 28px bar of its own that also
    * repeated the address already shown in the name box; it is one readout in the
@@ -3873,6 +3939,7 @@ export function SheetsStudio({
       .replaceAll("{range}", rangeText)
       .replaceAll("{cell}", activeAddress);
     setFormulaDraft(template);
+    if (formulaInputRef.current) formulaInputRef.current.value = template;
     setInspector(null);
     requestAnimationFrame(() => formulaInputRef.current?.focus());
   }
@@ -4636,7 +4703,9 @@ export function SheetsStudio({
           <input
             ref={formulaInputRef}
             aria-label={`Formula for ${activeAddress}`}
-            value={formulaDraft}
+            // Uncontrolled while focused: lifting each keystroke into studio
+            // state rebuilt the grid and missed the 8ms keystroke budget.
+            defaultValue={formulaDraft}
             readOnly={locked}
             aria-readonly={locked}
             {...targetAttrs(
@@ -4650,7 +4719,6 @@ export function SheetsStudio({
               formulaEditingRef.current = true;
               cancelFormulaCommitRef.current = false;
             }}
-            onChange={(event) => setFormulaDraft(event.target.value)}
             onBlur={(event) => {
               formulaEditingRef.current = false;
               if (cancelFormulaCommitRef.current) {
@@ -4668,7 +4736,9 @@ export function SheetsStudio({
               }
               if (event.key === "Escape") {
                 cancelFormulaCommitRef.current = true;
-                setFormulaDraft(cellInput(activeCell));
+                const restored = cellInput(activeCell);
+                setFormulaDraft(restored);
+                event.currentTarget.value = restored;
                 event.currentTarget.blur();
               }
             }}
@@ -6468,4 +6538,4 @@ export function SheetsStudio({
       </div>
     </div>
   );
-}
+});

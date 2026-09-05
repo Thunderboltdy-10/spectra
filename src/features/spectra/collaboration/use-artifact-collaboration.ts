@@ -148,9 +148,9 @@ export function useArtifactCollaboration(
     if (
       !transport ||
       recoveringRef.current ||
+      snapshot.level === "read" ||
       snapshot.unsynchronizedChanges === 0 ||
-      (snapshot.state !== "unsynchronized" &&
-        snapshot.state !== "reconnecting")
+      snapshot.state !== "unsynchronized"
     )
       return;
     // A gateway rejection closes the socket after the local Y.Doc has already
@@ -172,6 +172,7 @@ export function useArtifactCollaboration(
       recoveringRef.current = false;
     };
   }, [
+    snapshot.level,
     snapshot.state,
     snapshot.unsynchronizedChanges,
     transport,

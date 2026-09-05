@@ -68,6 +68,44 @@ export const orgNodeAggregates = [
   orgNodeCountByParent,
 ] as const;
 
+export type OrgNodeCountKind = "type" | "workspace" | "parent";
+
+/**
+ * Dimensions that change a board count. `activityAt` stays in the btree sort
+ * key so existing items keep their positions, but a timestamp-only patch must
+ * not rewrite three account-wide aggregates.
+ */
+export function orgNodeCountIdentity(
+  kind: OrgNodeCountKind,
+  node: Doc<"orgNodes">,
+) {
+  const state = stateOf(node);
+  const typeKey = typeOf(node);
+  if (kind === "type") return `${node.accountId}\0${state}\0${typeKey}`;
+  if (kind === "workspace")
+    return `${node.accountId}\0${state}\0${node.workspaceContextId ?? "root"}\0${typeKey}`;
+  return `${node.accountId}\0${state}\0${node.parentId ?? "root"}\0${typeKey}`;
+}
+
+export function skipUnchangedCountTrigger(
+  aggregate: (typeof orgNodeAggregates)[number],
+  kind: OrgNodeCountKind,
+) {
+  const inner = aggregate.idempotentTrigger();
+  return async (
+    ctx: Parameters<typeof inner>[0],
+    change: Parameters<typeof inner>[1],
+  ) => {
+    if (
+      change.operation === "update" &&
+      orgNodeCountIdentity(kind, change.oldDoc) ===
+        orgNodeCountIdentity(kind, change.newDoc)
+    )
+      return;
+    await inner(ctx, change);
+  };
+}
+
 /** Idempotent, cursor-shaped backfill for the N1 migration and later repairs. */
 export const backfill = internalMutation({
   args: { cursor: v.union(v.string(), v.null()) },

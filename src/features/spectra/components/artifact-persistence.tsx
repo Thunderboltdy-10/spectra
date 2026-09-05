@@ -35,6 +35,19 @@ export function decideClose(
   return dirty || queuedChangeCount > 0 ? "confirm" : "close";
 }
 
+/**
+ * History restore writes a Convex snapshot. A hung collab reconnect must
+ * not sit on `syncingRef` until the 12s deadline and then drop the restore.
+ */
+export function restoreMayBypassHungSave(liveState: string): boolean {
+  return (
+    liveState === "reconnecting" ||
+    liveState === "permission_lost" ||
+    liveState === "unsynchronized" ||
+    liveState === "connecting"
+  );
+}
+
 /** Atomically admit one close action before React can paint `busy`. */
 export function claimCloseAction(lock: { current: boolean }): boolean {
   if (lock.current) return false;

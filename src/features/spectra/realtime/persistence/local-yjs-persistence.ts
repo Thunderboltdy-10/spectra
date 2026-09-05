@@ -191,6 +191,20 @@ export type BoundedYjsPersistenceOptions = {
   maxWorks?: number;
 };
 
+export function shouldRefuseCollapsedLocalPersist(
+  previous: Pick<LocalYjsRecord, "bytes" | "pendingRemoteSync"> | null,
+  nextBytes: number,
+  pendingRemoteSync: boolean,
+) {
+  return Boolean(
+    previous &&
+      !previous.pendingRemoteSync &&
+      pendingRemoteSync &&
+      previous.bytes >= 4096 &&
+      nextBytes * 4 < previous.bytes,
+  );
+}
+
 export class BoundedYjsLocalPersistence {
   private readonly listeners = new Set<() => void>();
   private readonly store: LocalYjsStore | null;
@@ -294,6 +308,19 @@ export class BoundedYjsLocalPersistence {
       return;
     }
     try {
+      const previous = await this.store.get(this.options.key);
+      if (
+        shouldRefuseCollapsedLocalPersist(
+          previous,
+          update.byteLength,
+          this.snapshot.pendingRemoteSync,
+        )
+      ) {
+        // A reconnect collapse is smaller than the last durable local copy.
+        // Keep that copy so the next open can merge it with the room.
+        this.dirty = false;
+        return;
+      }
       const timestamp = this.now();
       await this.evictFor(update.byteLength);
       await this.store.put({

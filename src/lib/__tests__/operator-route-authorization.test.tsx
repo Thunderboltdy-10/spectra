@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
@@ -197,5 +199,14 @@ describe("operator route authorization", () => {
     expect(payload.membership).toBeNull();
     expect(payload.account?.accountId).toBe("account-plain");
     expect(authServer.requireAccessPrincipal).not.toHaveBeenCalled();
+  });
+
+  it("lets an inspect operator session override school-admin membership writes", () => {
+    const source = readFileSync(
+      join(process.cwd(), "convex/memberships.ts"),
+      "utf8",
+    );
+    expect(source).toMatch(/AUTH_OPERATOR_MANAGE_REQUIRED[\s\S]*localAdmin/);
+    expect(source).toContain("mode !== \"manage\"");
   });
 });

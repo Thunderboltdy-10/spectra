@@ -99,5 +99,10 @@ describe("P6.I1 UX debt closure", () => {
     expect(appShell).toContain("<SignedInContinue");
     expect(appShell).toContain('data-sidebar-recents=""');
     expect(appShell).toContain("prefetch={false}");
+    expect(appShell).toContain("window.addEventListener(\"focus\", refresh)");
+    expect(appShell).toContain("void refreshWorkspaces(true)");
+    expect(appShell).not.toContain(
+      "const refresh = () => void refreshWorkspaces(true)",
+    );
   });
 });

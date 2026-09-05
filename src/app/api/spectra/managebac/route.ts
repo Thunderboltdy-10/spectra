@@ -1856,10 +1856,21 @@ export async function POST(request: NextRequest) {
             (item): item is string => typeof item === "string" && item.length > 0,
           )
         : [];
-      return ok(
-        await convexMutation("managebac:releaseClassWorkspaces", {
+      let last: {
+        removed?: number;
+        skipped?: number;
+        requested?: number;
+        remaining?: number;
+        done?: boolean;
+      } = {};
+      for (let round = 0; round < 400; round += 1) {
+        last = await convexMutation("managebac:releaseClassWorkspaces", {
           recordIds,
-        }),
+        });
+        if (last?.done !== false) return ok(last);
+      }
+      throw new Error(
+        "Those class shelves could not be saved. Try again.",
       );
     }
 

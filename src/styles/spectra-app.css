@@ -15622,6 +15622,16 @@ body {
   right: 0 !important;
 }
 
+/* Modal dialogs share the composer-dock layer. While one is open, the dock
+   must not steal clicks from the dialog footer or paint as a competing
+   overlay. */
+body:has([role="dialog"][aria-modal="true"]) .spectra-workbench-live-stack,
+body:has([role="dialog"][aria-modal="true"]) .spectra-workbench-live-stack *,
+body:has([aria-label="Version history comparison"]) .spectra-workbench-live-stack,
+body:has([aria-label="Version history comparison"]) .spectra-workbench-live-stack * {
+  pointer-events: none !important;
+}
+
 /* One bottom clearance for every surface the floating composer/dock band can
    cover. The band measures and publishes its own height
    (`composer-safe-area.ts`); surfaces consume it here instead of each

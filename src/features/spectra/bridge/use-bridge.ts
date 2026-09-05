@@ -1,8 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
 import {
+  BRIDGE_SESSION_STORAGE_KEY,
+  BRIDGE_STATUS_CACHE_KEY,
   bridgeConnectionState,
   bridgeStatus,
+  clearBridgeSession,
+  clearBridgeStatusCache,
   discoverBridge,
   loadBridgeStatusCache,
   persistBridgeStatusCache,
@@ -68,11 +72,30 @@ export function useBridgeHealth() {
     };
     document.addEventListener("visibilitychange", onFocus);
     window.addEventListener("focus", onFocus);
+    const onStorage = (event: StorageEvent) => {
+      if (
+        event.key &&
+        event.key !== BRIDGE_SESSION_STORAGE_KEY &&
+        event.key !== BRIDGE_STATUS_CACHE_KEY
+      ) {
+        return;
+      }
+      if (!window.localStorage.getItem(BRIDGE_SESSION_STORAGE_KEY)) {
+        setStatus((previous) =>
+          previous
+            ? { ...previous, paired: false, cloudConnected: false }
+            : null,
+        );
+      }
+      void refresh();
+    };
+    window.addEventListener("storage", onStorage);
     return () => {
       controller.abort();
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onFocus);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("storage", onStorage);
     };
   }, []);
   const publicState = bridgeConnectionState(health);
@@ -95,6 +118,15 @@ export function useBridgeHealth() {
     discovery,
     online,
     reachability,
+    forgetSession: () => {
+      clearBridgeSession();
+      clearBridgeStatusCache();
+      setStatus((previous) =>
+        previous
+          ? { ...previous, paired: false, cloudConnected: false }
+          : null,
+      );
+    },
     refresh: async () => {
       const [nextDiscovery, nextStatus] = await Promise.all([
         discoverBridge(),

@@ -929,6 +929,11 @@ const workspaceCache = new Map<
 let workspacesCache: { value: SpectraWorkspace[]; cachedAt: number } | null =
   null;
 const CACHE_TTL = 5 * 60_000;
+const FIRST_PAINT_FETCH_TTL_MS = 1_100;
+const workspaceListRequests = new Map<
+  string,
+  { at: number; promise: Promise<SpectraWorkspace[]> }
+>();
 const CACHE_LOCAL_ACTIONS = new Set([
   "acquireRegionClaim",
   "renewRegionClaim",
@@ -1008,11 +1013,19 @@ export async function getSpectraWorkspaces(force = false) {
     Date.now() - workspacesCache.cachedAt < CACHE_TTL
   )
     return workspacesCache.value;
-  const value = await readJson<{ workspaces: SpectraWorkspace[] }>(
-    await fetch("/api/spectra?action=workspaces", { cache: "no-store" }),
+  return coalesceInFlight(
+    workspaceListRequests,
+    "workspaces",
+    FIRST_PAINT_FETCH_TTL_MS,
+    async () => {
+      const value = await readJson<{ workspaces: SpectraWorkspace[] }>(
+        await fetch("/api/spectra?action=workspaces", { cache: "no-store" }),
+      );
+      workspacesCache = { value: value.workspaces, cachedAt: Date.now() };
+      return value.workspaces;
+    },
+    { force },
   );
-  workspacesCache = { value: value.workspaces, cachedAt: Date.now() };
-  return value.workspaces;
 }
 
 export async function exportSpectraWorkspaceManifest(workspaceId: string) {
@@ -1552,7 +1565,6 @@ const threadIndexRequests = new Map<
 >();
 
 export const SPECTRA_THREAD_INDEX_LIMIT = 40;
-const FIRST_PAINT_FETCH_TTL_MS = 1_100;
 
 export function invalidateSpectraRunTabsCache() {
   runTabsRequests.clear();

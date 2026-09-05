@@ -155,6 +155,7 @@ import {
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { openSpectraPackage } from "../lenses/spectra-package";
+import { projectLibraryImportContent } from "../organization/library-import";
 import { getWorkDefinition } from "../work/registry";
 import {
   allocateWorkbenchPanes,
@@ -3507,7 +3508,10 @@ export function SpectraShell({
               ? "code"
               : "document";
       const fallback = createDefaultArtifactPayload(blueprintKey);
-      const importedContent = portable?.content ?? fallback.content;
+      const importedContent =
+        portable?.content ??
+        (await projectLibraryImportContent(file, blueprintKey)) ??
+        fallback.content;
       const title = file.name.replace(/\.[^.]+$/, "") || fallback.title;
       const created = await postSpectra<{ artifactId: string }>({
         action: "createArtifact",

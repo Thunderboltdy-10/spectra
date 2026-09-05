@@ -65,6 +65,25 @@ describe("layering contract", () => {
     expect(consentSource).not.toMatch(/z-(?:chrome|modal)/);
     expect(consentSource).not.toContain('className="fixed inset-0');
   });
+
+  it("mutes dock pointer events while a modal dialog or version history overlay is open", () => {
+    const appCss = readFileSync(APP_CSS_PATH, "utf8");
+    expect(appCss).toMatch(
+      /body:has\(\[role="dialog"\]\[aria-modal="true"\]\) \.spectra-workbench-live-stack/,
+    );
+    expect(appCss).toMatch(
+      /body:has\(\[role="dialog"\]\[aria-modal="true"\]\) \.spectra-workbench-live-stack \*/,
+    );
+    expect(appCss).toMatch(
+      /body:has\(\[aria-label="Version history comparison"\]\) \.spectra-workbench-live-stack/,
+    );
+    const adminDialog = readFileSync(
+      join(process.cwd(), "src/features/spectra/administration/shared.tsx"),
+      "utf8",
+    );
+    expect(adminDialog).toContain("createPortal");
+    expect(adminDialog).toContain("document.body");
+  });
 });
 
 describe("focus suppression (DS-4) stays deleted", () => {

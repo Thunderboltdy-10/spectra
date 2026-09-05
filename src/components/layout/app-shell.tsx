@@ -274,8 +274,10 @@ function ShellNavigation() {
 
   useEffect(() => {
     void refreshWorkspaces();
-    const refresh = () => void refreshWorkspaces(true);
-    const removeChanged = spectraBus.on("workspaces.changed", refresh);
+    const refresh = () => void refreshWorkspaces();
+    const removeChanged = spectraBus.on("workspaces.changed", () => {
+      void refreshWorkspaces(true);
+    });
     window.addEventListener("focus", refresh);
     return () => {
       removeChanged();

@@ -35,6 +35,7 @@ import {
   type SheetsContent,
 } from "../sheets/model";
 import { dateToSerial } from "../sheets/excel-serial";
+import { patchSheetCellRecord } from "../sheets/cell-overlay";
 
 /**
  * The workbook's operations, tested without a grid.
@@ -733,6 +734,32 @@ describe("sheets engine correctness", () => {
     expect(marked.sheets[0]!.cells.B1?.value).toBe(10);
     expect(marked.sheets[0]!.cells.B1?.cachedValueStale).toBe(true);
     expect(sheetsCalculation(marked).get("s1:B1")?.value).toBe(10);
+  });
+
+  it("patches one dense-sheet cell without cloning the workbook", () => {
+    const rows = 4_000;
+    const columns = 10;
+    const cells = Object.fromEntries(
+      Array.from({ length: rows * columns }, (_, index) => {
+        const row = Math.floor(index / columns) + 1;
+        const column = String.fromCharCode(65 + (index % columns));
+        return [`${column}${row}`, { value: index + 1 }];
+      }),
+    );
+    const previous = sheetOf(cells, { rowCount: rows, columnCount: columns });
+    const started = performance.now();
+    const nextCells = patchSheetCellRecord(previous.sheets[0]!.cells, {
+      A1: { value: "P8V1-F2-A1" },
+    });
+    const next = {
+      ...previous,
+      sheets: [{ ...previous.sheets[0]!, cells: nextCells }],
+    };
+    const marked = applyCachedStaleness(previous, next);
+    const elapsed = performance.now() - started;
+    expect(marked.sheets[0]!.cells.A1?.value).toBe("P8V1-F2-A1");
+    expect(marked.sheets[0]!.cells.J4000?.value).toBe(rows * columns);
+    expect(elapsed).toBeLessThan(40);
   });
 
   it("migrates ISO date strings to serials on normalize", () => {

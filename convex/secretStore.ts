@@ -36,13 +36,18 @@ async function authorize(
       ? await ctx.db.get(normalizedSession)
       : null;
   }
-  const operator =
+  const operatorSessionActive =
     isPlatformOperatorEmail(account.email) &&
     operatorSession?.operatorAccountId === account._id &&
     operatorSession.schoolId === normalizedSchool &&
-    operatorSession.mode === "manage" &&
     !operatorSession.revokedAt &&
     operatorSession.expiresAt > Date.now();
+  if (operatorSessionActive && operatorSession?.mode !== "manage") {
+    throw new Error(
+      "AUTH_OPERATOR_MANAGE_REQUIRED: Re-enter this school with manage access.",
+    );
+  }
+  const operator = operatorSessionActive && operatorSession?.mode === "manage";
   if (!localAdmin && !operator)
     throw new Error(
       "AUTH_SECRET_MANAGE_REQUIRED: School administrator or operational manage access is required.",

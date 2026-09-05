@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { artifactContentSchemas } from "./schemas";
-import { normalizeSheetsContent } from "../sheets/model";
+import {
+  coordinateToAddress,
+  normalizeSheetsContent,
+  type SheetsContent,
+} from "../sheets/model";
 import {
   ARTIFACT_TYPE_KEYS,
   type ArtifactSkill,
@@ -18,6 +22,10 @@ const rows = (value: unknown) =>
   Array.isArray(value) ? value.map(record) : [];
 const stringValue = (value: unknown, fallback: string) =>
   typeof value === "string" && value ? value : fallback;
+
+/** Dense workbooks keep cell identity on demand; enumerating every address
+ * allocates a region object per cell and freezes first paint / snapshot. */
+export const SHEETS_EAGER_CELL_REGION_LIMIT = 512;
 
 function region(
   regionId: string,
@@ -590,21 +598,25 @@ const regionAdapters: Record<
         1,
         Math.min(16_384, Number(sheet.columnCount) || 26),
       );
+      const cellAddresses = Object.keys(cells);
+      const dense = cellAddresses.length > SHEETS_EAGER_CELL_REGION_LIMIT;
       const usedRows = new Set<number>();
       const usedColumns = new Set<number>();
-      Object.keys(cells).forEach((address) => {
-        const match = /^([A-Z]+)([1-9][0-9]*)$/.exec(address);
-        if (!match) return;
-        usedRows.add(Number(match[2]) - 1);
-        usedColumns.add(
-          match[1]!
-            .split("")
-            .reduce(
-              (total, character) => total * 26 + character.charCodeAt(0) - 64,
-              0,
-            ) - 1,
-        );
-      });
+      if (!dense) {
+        cellAddresses.forEach((address) => {
+          const match = /^([A-Z]+)([1-9][0-9]*)$/.exec(address);
+          if (!match) return;
+          usedRows.add(Number(match[2]) - 1);
+          usedColumns.add(
+            match[1]!
+              .split("")
+              .reduce(
+                (total, character) => total * 26 + character.charCodeAt(0) - 64,
+                0,
+              ) - 1,
+          );
+        });
+      }
       return [
         region(
           sheetId,
@@ -613,7 +625,9 @@ const regionAdapters: Record<
           ["sheets", sheetIndex],
           "workbook",
         ),
-        ...[...usedRows]
+        ...(dense
+          ? []
+          : [...usedRows]
           .filter((row) => row >= 0 && row < rowCount)
           .sort((left, right) => left - right)
           .map((row) => {
@@ -628,8 +642,10 @@ const regionAdapters: Record<
               ["sheets", sheetIndex, "rowIdentities", String(row)],
               sheetId,
             );
-          }),
-        ...[...usedColumns]
+          })),
+        ...(dense
+          ? []
+          : [...usedColumns]
           .filter((column) => column >= 0 && column < columnCount)
           .sort((left, right) => left - right)
           .map((column) => {
@@ -644,8 +660,10 @@ const regionAdapters: Record<
               ["sheets", sheetIndex, "columnIdentities", String(column)],
               sheetId,
             );
-          }),
-        ...Object.keys(cells)
+          })),
+        ...(dense
+          ? []
+          : cellAddresses
           .sort()
           .flatMap((address) => {
             const match = /^([A-Z]+)([1-9][0-9]*)$/.exec(address);
@@ -709,7 +727,7 @@ const regionAdapters: Record<
                   ]
                 : []),
             ];
-          }),
+          })),
         ...rows(sheet.tables).flatMap((table, tableIndex) => {
           const tableId = stringValue(
             table.id,
@@ -1419,6 +1437,50 @@ export function enumerateArtifactRegions(typeKey: string, content: unknown) {
     ids.add(candidate.regionId);
   }
   return regions;
+}
+
+export function describeSheetsCellRegion(
+  content: unknown,
+  regionId: string,
+): SemanticRegion | undefined {
+  const workbook = normalizeSheetsContent(content) as SheetsContent;
+  for (const [sheetIndex, sheet] of workbook.sheets.entries()) {
+    const rowIdentities = sheet.rowIdentities ?? {};
+    const columnIdentities = sheet.columnIdentities ?? {};
+    const rowMatch = regionId.match(
+      new RegExp(
+        `^${escapeRegionToken(sheet.id)}:${escapeRegionToken(sheet.id)}:row:(\\d+):${escapeRegionToken(sheet.id)}:column:(\\d+)$`,
+      ),
+    );
+    if (!rowMatch) continue;
+    const row = Number(rowMatch[1]) - 1;
+    const column = Number(rowMatch[2]) - 1;
+    const address = coordinateToAddress({ row, column });
+    const cell = sheet.cells[address];
+    if (!cell) continue;
+    const rowId = rowIdentities[String(row)] ?? `${sheet.id}:row:${row + 1}`;
+    const columnId =
+      columnIdentities[String(column)] ?? `${sheet.id}:column:${column + 1}`;
+    const cellId = `${sheet.id}:${rowId}:${columnId}`;
+    if (cellId !== regionId) continue;
+    return region(
+      cellId,
+      "sheet_cell",
+      `${sheet.name} ${address}`,
+      ["sheets", sheetIndex, "cells", address],
+      sheet.id,
+      typeof cell.value === "string"
+        ? cell.value
+        : typeof cell.formula === "string"
+          ? cell.formula
+          : undefined,
+    );
+  }
+  return undefined;
+}
+
+function escapeRegionToken(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export async function loadArtifactSkill(typeKey: string) {

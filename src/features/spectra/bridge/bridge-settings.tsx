@@ -23,6 +23,7 @@ import {
 import { StorageToggleGroup } from "./storage-toggle-group";
 import {
   formatMountProgress,
+  isProtectedOriginalPreset,
   mountCountTruth,
   policyPresetFromToggles,
   storageChoiceFromPreset,
@@ -56,6 +57,7 @@ export function BridgeSettings() {
   );
   const overridePolicy = useMutation(api.syncPolicy.overrideAccount);
   const requestPairing = useMutation(api.bridge.requestPairing);
+  const revokeDevice = useMutation(api.bridge.revokeDevice);
   const [pairing, setPairing] = useState<{
     challenge: string;
     shortCode: string;
@@ -67,6 +69,7 @@ export function BridgeSettings() {
   const [folderBusy, setFolderBusy] = useState<string | null>(null);
   const [error, setError] = useState<string>();
   const [updateNote, setUpdateNote] = useState<string>();
+  const [disconnecting, setDisconnecting] = useState(false);
   const pairingTimer = useRef<number | null>(null);
   const pairingExpiry = useRef<number | null>(null);
   const stopPairingPoll = useCallback(() => {
@@ -79,6 +82,7 @@ export function BridgeSettings() {
   }, []);
   useEffect(() => stopPairingPoll, [stopPairingPoll]);
   const storageChoice = storageChoiceFromPreset(effectivePolicy?.preset);
+  const protectedOriginal = isProtectedOriginalPreset(effectivePolicy?.preset);
   const connected = local.state === "connected";
   const reachability = local.reachability;
   const discovery = local.discovery;
@@ -190,8 +194,34 @@ export function BridgeSettings() {
       };
     });
   }, [cloudOverview?.mounts, connected, local.status, reachability]);
-  async function setStorageChoice(choice: StorageChoice) {
-    const preset = policyPresetFromToggles(choice, false);
+  const thisDevice = useMemo(() => {
+    const devices = cloudOverview?.devices ?? [];
+    const liveId = local.status?.deviceId;
+    return (
+      devices.find((device) => liveId && device._id === liveId) ??
+      devices.find((device) => device.state === "active") ??
+      null
+    );
+  }, [cloudOverview?.devices, local.status?.deviceId]);
+  async function disconnectThisComputer() {
+    if (!thisDevice) return;
+    setDisconnecting(true);
+    setError(undefined);
+    try {
+      await revokeDevice({ deviceId: thisDevice._id });
+      local.forgetSession();
+      void local.refresh();
+    } catch (reason) {
+      setError(pairingFailureMessage(reason, local.discovery, local.online));
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+  async function setStorageChoice(
+    choice: StorageChoice,
+    protectedFlag = protectedOriginal,
+  ) {
+    const preset = policyPresetFromToggles(choice, protectedFlag);
     await overridePolicy({
       values: POLICY_PRESETS[preset],
       idempotencyKey: `account:${preset}:${Date.now()}`,
@@ -238,6 +268,15 @@ export function BridgeSettings() {
               >
                 {updating ? "Updating…" : "Update Bridge"}
               </Button>
+            ) : connected ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={disconnecting || !thisDevice}
+                onClick={() => void disconnectThisComputer()}
+              >
+                {disconnecting ? "Disconnecting…" : "Disconnect this computer"}
+              </Button>
             ) : !connected ? (
               <Button
                 size="sm"
@@ -276,6 +315,12 @@ export function BridgeSettings() {
               {updateNote}
             </p>
           ) : null}
+          {connected ? (
+            <p className="mt-3 text-micro leading-5 text-[var(--text-secondary)]">
+              Disconnecting stops queued file writes for this PC. Files on disk
+              stay.
+            </p>
+          ) : null}
         </div>
       </section>
       <section className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10">
@@ -290,6 +335,9 @@ export function BridgeSettings() {
         <StorageToggleGroup
           value={storageChoice}
           onChange={(choice) => void setStorageChoice(choice)}
+          showProtected
+          protectedOriginal={protectedOriginal}
+          onProtectedChange={(next) => void setStorageChoice(storageChoice, next)}
         />
       </section>
       <section className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10">

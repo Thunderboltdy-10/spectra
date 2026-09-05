@@ -112,6 +112,25 @@ class FakeQuery {
       .map((row) => ({ ...row }));
   }
 
+  async paginate({
+    cursor,
+    numItems,
+  }: {
+    cursor: string | null;
+    numItems: number;
+  }) {
+    const rows = this.sorted();
+    const start = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
+    const page = rows.slice(start, start + numItems).map((row) => ({ ...row }));
+    const next = start + numItems;
+    const isDone = next >= rows.length;
+    return {
+      page,
+      isDone,
+      continueCursor: isDone ? "" : String(next),
+    };
+  }
+
   async first() {
     return this.sorted().map((row) => ({ ...row }))[0] ?? null;
   }

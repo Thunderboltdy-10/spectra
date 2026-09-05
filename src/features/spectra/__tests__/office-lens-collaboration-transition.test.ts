@@ -48,5 +48,6 @@ describe("Office lens collaboration transition", () => {
     );
     expect(retryBranch).not.toContain("return true");
     expect(source).toContain("await queueNativeMaterialization(acknowledged)");
+    expect(source).toContain("live.flushSnapshot?.()");
   });
 });

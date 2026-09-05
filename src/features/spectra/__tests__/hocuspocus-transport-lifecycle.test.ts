@@ -7,6 +7,8 @@ const hocuspocus = vi.hoisted(() => ({
     onStateless: (event: { payload: string }) => void;
     onSynced: (event: { state: boolean }) => void;
     onUnsyncedChanges: (event: { number: number }) => void;
+    onAuthenticationFailed: (event: { reason: string }) => void;
+    onDisconnect: (event: { event: { code: number; reason: string } }) => void;
   },
   provider: null as null | {
     attach: ReturnType<typeof vi.fn>;
@@ -154,6 +156,68 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     expect(transport.getSyncSnapshot()).toMatchObject({
       state: "synchronized",
       unsynchronizedChanges: 0,
+    });
+    transport.destroy();
+  });
+
+  it("applies a live read level from a permission change without clearing access", async () => {
+    const transport = new HocuspocusArtifactTransport("artifact-share");
+    await transport.connect();
+    if (!hocuspocus.callbacks) throw new Error("HOCUSPOCUS_MOCK_NOT_READY");
+    expect(transport.getSyncSnapshot().level).toBe("modify");
+
+    vi.mocked(fetch).mockImplementationOnce(
+      async () =>
+        new Response(
+          JSON.stringify({
+            token: "read-session",
+            documentName: "artifact:root",
+            provider: "self_hosted_yjs",
+            url: "ws://localhost:3000/_spectra/realtime",
+            expiresInMs: 60_000,
+            level: "read",
+            accountId: "account-b",
+            displayName: "Account B",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    hocuspocus.callbacks.onStateless({
+      payload: JSON.stringify({ type: "spectra.permission_changed" }),
+    });
+    await vi.waitFor(() => {
+      expect(transport.getSyncSnapshot().level).toBe("read");
+    });
+    expect(transport.getSyncSnapshot().state).not.toBe("permission_lost");
+    transport.destroy();
+  });
+
+  it("reconnects through a generic Hocuspocus permission denial after a gateway restart", async () => {
+    const transport = new HocuspocusArtifactTransport("artifact-restart");
+    await transport.connect();
+    if (!hocuspocus.callbacks) throw new Error("HOCUSPOCUS_MOCK_NOT_READY");
+    hocuspocus.callbacks.onAuthenticationFailed({
+      reason: "Permission denied",
+    });
+    expect(transport.getSyncSnapshot().state).toBe("reconnecting");
+    hocuspocus.callbacks.onDisconnect({
+      event: { code: 4403, reason: "Access or permissions changed" },
+    });
+    expect(transport.getSyncSnapshot().state).toBe("reconnecting");
+    expect(transport.getSyncSnapshot().level).toBe("modify");
+    transport.destroy();
+  });
+
+  it("closes the room only for an explicit Spectra access revoke", async () => {
+    const transport = new HocuspocusArtifactTransport("artifact-revoked");
+    await transport.connect();
+    if (!hocuspocus.callbacks) throw new Error("HOCUSPOCUS_MOCK_NOT_READY");
+    hocuspocus.callbacks.onAuthenticationFailed({
+      reason: "COLLABORATION_ACCESS_REVOKED",
+    });
+    expect(transport.getSyncSnapshot()).toMatchObject({
+      state: "permission_lost",
+      error: "COLLABORATION_ACCESS_REVOKED",
     });
     transport.destroy();
   });

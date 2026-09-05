@@ -38,6 +38,11 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
       `Spectra saved your edit. The ${app} file on this computer was not updated because this file is not open as a local copy. Open it from Library while Spectra Bridge is connected, or keep working here.`,
   },
   {
+    test: /not-on-this-computer/i,
+    message: () =>
+      "This copy is not on the computer running Spectra Bridge right now.",
+  },
+  {
     test: /NATIVE_PAYLOAD_UNAVAILABLE/i,
     message: (app) =>
       `Spectra saved your edit. The original ${app} file could not be read, so the copy on disk was left unchanged.`,
@@ -63,7 +68,17 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
       "Someone else is editing this region. Your change is waiting so nothing is overwritten.",
   },
   {
-    test: /AI_ARTIFACT_SCHEMA_INVALID|invalid input|expected array|expected number/i,
+    test: /BadJsonBody|length limit exceeded|too many bytes/i,
+    message: () =>
+      "This file is too large to copy into Spectra in one step. It is still on this PC. Open a smaller region, or keep working from the original.",
+  },
+  {
+    test: /too big: expected array|array must contain at most/i,
+    message: () =>
+      "This change covers more of the workbook than one save can write. Change a smaller region and try again.",
+  },
+  {
+    test: /AI_ARTIFACT_SCHEMA_INVALID|invalid input|expected number/i,
     message: () =>
       "This draft contains an unfinished control that cannot synchronize yet. Your local work is preserved.",
   },
@@ -80,7 +95,17 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
   {
     test: /BRIDGE_CREDENTIAL_INVALID|device-revoked/i,
     message: () =>
-      "This computer is no longer connected to Spectra. Open Spectra Bridge on this PC to continue.",
+      "This computer is no longer connected to Spectra. Connect it again from Files and devices if you still want copies on this PC.",
+  },
+  {
+    test: /AUTH_OPERATOR_MANAGE_REQUIRED|Re-enter this school with manage access/i,
+    message: () =>
+      "This operator session is read-only. End it and enter again with manage access to make changes.",
+  },
+  {
+    test: /AUTH_SCHOOL_ADMIN_REQUIRED/i,
+    message: () =>
+      "School administrator access is required for this change.",
   },
   {
     test: /AUTH_NOT_SIGNED_IN|not authenticated/i,

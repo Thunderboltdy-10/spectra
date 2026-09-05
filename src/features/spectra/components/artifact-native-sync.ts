@@ -17,6 +17,11 @@ import {
   nativeMaterializationStale,
   nativeMaterializationVerified,
 } from "../bridge/native-materialization-exit";
+import {
+  nativeLiveContentKey,
+  nativeLiveNeedsPromotion,
+} from "../lenses/native-live-promotion";
+import type { RecentNativeOperation } from "../lenses/native-reconciliation";
 
 export type NativeMaterialization =
   { state: "queueing" } | { state: "pending"; hash: string };
@@ -34,6 +39,7 @@ export type NativeConflict = {
 type NativeLive = {
   liveValue: ArtifactLiveValue;
   synchronize: (next: ArtifactLiveValue) => Promise<unknown>;
+  flushSnapshot?: () => ArtifactLiveValue | null;
   modelSnapshot: {
     initialized: boolean;
     validity: string;
@@ -63,6 +69,7 @@ type ReplicaRow = ReplicaTruth & {
   contentHash?: string;
   revision: string;
   fidelityMap?: unknown;
+  protectedOriginal?: boolean;
 };
 
 /**
@@ -82,6 +89,8 @@ export function useArtifactNativeSync({
   live,
   initialLiveValue,
   replicas,
+  recentOperations,
+  bridgeAvailable,
   conflicts,
   setContent,
   setBaseline,
@@ -98,6 +107,8 @@ export function useArtifactNativeSync({
   live: NativeLive;
   initialLiveValue: ArtifactLiveValue;
   replicas: readonly ReplicaRow[] | undefined;
+  recentOperations?: readonly RecentNativeOperation[];
+  bridgeAvailable?: boolean;
   conflicts:
     | readonly {
         regionIds: string[];
@@ -124,6 +135,21 @@ export function useArtifactNativeSync({
   const nativeLocalRevisionRef = useRef<string | undefined>(undefined);
   const pendingNativeProjectionRef = useRef<unknown>(undefined);
   const nativeProjectionOverrideRef = useRef<unknown>(undefined);
+  const lastPromotedLiveKeyRef = useRef<string | undefined>(undefined);
+  const lastFailedPromotionKeyRef = useRef<string | undefined>(undefined);
+  const bridgeWasAvailableRef = useRef(bridgeAvailable !== false);
+
+  useEffect(() => {
+    lastPromotedLiveKeyRef.current = undefined;
+    lastFailedPromotionKeyRef.current = undefined;
+  }, [artifactId]);
+
+  useEffect(() => {
+    if (bridgeAvailable !== false && !bridgeWasAvailableRef.current) {
+      lastFailedPromotionKeyRef.current = undefined;
+    }
+    bridgeWasAvailableRef.current = bridgeAvailable !== false;
+  }, [bridgeAvailable]);
 
   const applyExternalProjection = useCallback(
     async (
@@ -319,10 +345,18 @@ export function useArtifactNativeSync({
               "This edit could not be written safely to the Word file.",
           );
         if (result?.state === "unchanged") {
+          lastPromotedLiveKeyRef.current = nativeLiveContentKey(
+            snapshot.content,
+          );
+          lastFailedPromotionKeyRef.current = undefined;
           setNativeMaterialization(undefined);
           return;
         }
         if (result?.state === "conflicted") {
+          lastPromotedLiveKeyRef.current = nativeLiveContentKey(
+            snapshot.content,
+          );
+          lastFailedPromotionKeyRef.current = undefined;
           setNativeMaterialization(undefined);
           setNativeConflict({
             regionIds: result.conflict?.regionIds ?? [],
@@ -337,8 +371,13 @@ export function useArtifactNativeSync({
           throw new Error(
             "The Word write was queued without a verifiable hash.",
           );
+        lastPromotedLiveKeyRef.current = nativeLiveContentKey(snapshot.content);
+        lastFailedPromotionKeyRef.current = undefined;
         setNativeMaterialization({ state: "pending", hash: result.hash });
       } catch (error) {
+        lastFailedPromotionKeyRef.current = nativeLiveContentKey(
+          snapshot.content,
+        );
         setNativeMaterialization(undefined);
         setNativeWriteError(
           error instanceof Error
@@ -559,6 +598,50 @@ export function useArtifactNativeSync({
   const nativeCloudReplica = nativeOfficeDocument
     ? replicas?.find((replica) => replica.kind === "cloud")
     : undefined;
+
+  useEffect(() => {
+    if (!nativeOfficeDocument || !nativeLocalReplica) return;
+    if (nativeMaterialization || dirty || live.unsynchronizedChanges > 0)
+      return;
+    if (
+      !live.modelSnapshot.initialized ||
+      live.modelSnapshot.validity !== "valid"
+    )
+      return;
+    if (nativeLocalReplica.state === "pending") return;
+    const liveValue = live.modelSnapshot.value;
+    if (!liveValue?.content) return;
+    const contentKey = nativeLiveContentKey(liveValue.content);
+    if (
+      !nativeLiveNeedsPromotion({
+        initialized: true,
+        dirty: false,
+        nativeActivity: false,
+        unsynchronized: false,
+        localReplicaPending: false,
+        operations: recentOperations,
+        contentKey,
+        lastAttemptedKey: lastPromotedLiveKeyRef.current,
+        bridgeAvailable,
+        lastFailedKey: lastFailedPromotionKeyRef.current,
+        protectedOriginal: nativeLocalReplica.protectedOriginal === true,
+      })
+    )
+      return;
+    void queueNativeMaterialization(liveValue);
+  }, [
+    bridgeAvailable,
+    dirty,
+    live.modelSnapshot.initialized,
+    live.modelSnapshot.validity,
+    live.modelSnapshot.value,
+    live.unsynchronizedChanges,
+    nativeLocalReplica,
+    nativeMaterialization,
+    nativeOfficeDocument,
+    queueNativeMaterialization,
+    recentOperations,
+  ]);
 
   useEffect(() => {
     if (!nativeOfficeDocument || !nativeLocalReplica) return;

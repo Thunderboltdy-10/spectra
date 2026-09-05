@@ -171,6 +171,23 @@ describe("formula bar", () => {
       (screen.getByLabelText("Formula for A1") as HTMLInputElement).value,
     ).toBe("P2V1R-A1");
   });
+
+  it("does not lift a formula-bar keystroke into the workbook", () => {
+    const onChange = vi.fn();
+    render(
+      <SheetsStudio
+        artifactId="workbook-1"
+        content={workbook()}
+        onChange={onChange}
+      />,
+    );
+    const formulaBar = screen.getByLabelText("Formula for A1");
+    formulaBar.focus();
+    fireEvent.change(formulaBar, { target: { value: "Typed in the bar" } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect((formulaBar as HTMLInputElement).value).toBe("Typed in the bar");
+    expect(screen.getByText("Input")).toBeTruthy();
+  });
 });
 
 /*

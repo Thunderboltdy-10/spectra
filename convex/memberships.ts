@@ -18,6 +18,14 @@ async function requireSchoolManager(
   operatorSessionId?: Id<"operatorSchoolSessions">,
 ) {
   const actor = await resolveActorContext(ctx, operatorSessionId);
+  if (
+    actor.operatorSession?.schoolId === schoolId &&
+    actor.operatorSession.mode !== "manage"
+  ) {
+    throw new Error(
+      "AUTH_OPERATOR_MANAGE_REQUIRED: Re-enter this school with manage access.",
+    );
+  }
   const localAdmin =
     actor.membership?.schoolId === schoolId &&
     actor.membership.role === "school_admin";

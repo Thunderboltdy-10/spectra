@@ -1,6 +1,9 @@
 import type { PresentationContent } from "../presentation/model";
 import { type SheetCellFormat, type SheetsContent } from "../sheets/model";
-import { decodeSheetsContentFromStorage } from "../../../../shared/sheet-cells";
+import {
+  decodeSheetsContentFromStorage,
+  encodeArtifactContentForStorage,
+} from "../../../../shared/sheet-cells";
 import { dateToSerial } from "../sheets/excel-serial";
 import { z } from "zod";
 import {
@@ -155,6 +158,67 @@ export function normalizedCellFormat(
   };
 }
 
+function canonicalColor(value: unknown) {
+  if (typeof value !== "string") return null;
+  const hex = value.replace(/^#/, "").toUpperCase();
+  if (hex.length === 8) return `#${hex.slice(2)}`;
+  if (hex.length === 6) return `#${hex}`;
+  return value;
+}
+
+/**
+ * The Sheets editor stores every default (false bold, 11pt, bottom align).
+ * The native projection omits those defaults. Stringifying the two objects
+ * makes every visible cell look like a format write, then the Bridge
+ * region-id cap refuses a one-cell edit on a real workbook.
+ */
+function canonicalSheetFormat(value: unknown) {
+  const format = record(value);
+  const align =
+    format.align === "left" ||
+    format.align === "center" ||
+    format.align === "right" ||
+    format.align === "justify"
+      ? format.align
+      : "general";
+  const verticalAlign =
+    format.verticalAlign === "top" ||
+    format.verticalAlign === "middle" ||
+    format.verticalAlign === "bottom"
+      ? format.verticalAlign
+      : "bottom";
+  return {
+    bold: format.bold === true,
+    italic: format.italic === true,
+    underline: format.underline === true,
+    strike: format.strike === true,
+    wrap: format.wrap === true,
+    rotation: typeof format.rotation === "number" ? format.rotation : 0,
+    indent: typeof format.indent === "number" ? format.indent : 0,
+    fontSize: typeof format.fontSize === "number" ? format.fontSize : 11,
+    fontFamily: typeof format.fontFamily === "string" ? format.fontFamily : "sans",
+    numberFormat:
+      typeof format.numberFormat === "string" ? format.numberFormat : "general",
+    align,
+    verticalAlign,
+    textColor: canonicalColor(format.textColor),
+    fillColor: canonicalColor(format.fillColor),
+    customFormat:
+      typeof format.customFormat === "string" ? format.customFormat : null,
+    currency: typeof format.currency === "string" ? format.currency : null,
+    decimals: typeof format.decimals === "number" ? format.decimals : null,
+    thousands: format.thousands !== false,
+    borders: format.borders ?? null,
+  };
+}
+
+export function sheetFormatsEquivalent(left: unknown, right: unknown) {
+  return (
+    JSON.stringify(canonicalSheetFormat(left)) ===
+    JSON.stringify(canonicalSheetFormat(right))
+  );
+}
+
 export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
   const date1904 = projection.nativeBinding.date1904 === true;
   return {
@@ -203,6 +267,147 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
     activeSheetId: projection.sheets[0]?.id ?? "",
     nativeBinding: projection.nativeBinding,
   };
+}
+
+/** Convex documents and mutation arguments cap near 1 MiB. A 200k-cell
+ * workbook's full projection cannot live on `spectraArtifacts.content`; the
+ * native payload in storage is the durable source, and open returns the live
+ * projection to the editor over HTTP. */
+export const CONVEX_ARTIFACT_CONTENT_BUDGET_BYTES = 700_000;
+
+function jsonBytes(value: unknown) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function stripSheetCellsForActivation(content: unknown) {
+  const source = record(content);
+  const workbook = record(source.workbook);
+  const sheets = Array.isArray(source.sheets) ? source.sheets : [];
+  const namedRanges = Object.fromEntries(
+    Object.entries(record(workbook.namedRanges)).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+  return {
+    ...source,
+    workbook: {
+      calculationMode:
+        workbook.calculationMode === "manual" ? "manual" : "automatic",
+      locale: typeof workbook.locale === "string" ? workbook.locale : "en-US",
+      namedRanges,
+      calculationVersion:
+        typeof workbook.calculationVersion === "number"
+          ? workbook.calculationVersion
+          : 1,
+      ...(workbook.date1904 === true ? { date1904: true } : {}),
+    },
+    sheets: sheets.map((sheet, index) => {
+      const row = record(sheet);
+      return {
+        id: typeof row.id === "string" ? row.id : `sheet-${index + 1}`,
+        name: typeof row.name === "string" ? row.name : `Sheet ${index + 1}`,
+        cells: {},
+        tables: Array.isArray(row.tables) ? row.tables : [],
+        charts: Array.isArray(row.charts) ? row.charts : [],
+        mergedRanges: Array.isArray(row.mergedRanges)
+          ? row.mergedRanges.filter(
+              (range): range is string => typeof range === "string",
+            )
+          : [],
+        frozenRows:
+          typeof row.frozenRows === "number" ? row.frozenRows : undefined,
+        frozenColumns:
+          typeof row.frozenColumns === "number" ? row.frozenColumns : undefined,
+      };
+    }),
+    activeSheetId:
+      typeof source.activeSheetId === "string"
+        ? source.activeSheetId
+        : typeof record(sheets[0]).id === "string"
+          ? String(record(sheets[0]).id)
+          : "",
+    nativeBinding: source.nativeBinding,
+  };
+}
+
+function stripPresentationObjectsForActivation(content: unknown) {
+  const source = record(content);
+  const slides = Array.isArray(source.slides) ? source.slides : [];
+  return {
+    ...source,
+    slides: slides.map((slide, index) => {
+      const row = record(slide);
+      const objects = Array.isArray(row.objects) ? row.objects : [];
+      const title =
+        typeof row.title === "string" && row.title.trim()
+          ? row.title
+          : `Slide ${index + 1}`;
+      return {
+        ...row,
+        title,
+        objects: objects.slice(0, 1).map((object) => {
+          const item = record(object);
+          return {
+            ...item,
+            content:
+              typeof item.content === "string"
+                ? item.content.slice(0, 240)
+                : item.content,
+          };
+        }),
+        speakerNotes:
+          typeof row.speakerNotes === "string"
+            ? row.speakerNotes.slice(0, 240)
+            : "",
+      };
+    }),
+  };
+}
+
+/**
+ * Activation writes identity and sheet/slide lists into Convex. Occupied cells
+ * and dense slide objects stay in the native payload and the HTTP open
+ * response so a 200k-cell book or 120-slide deck cannot blow the document cap.
+ */
+export function convexSafeFidelityMap(map: unknown) {
+  if (jsonBytes(map) <= 80_000) return map;
+  return {
+    truncated: true,
+    message:
+      "Native features Spectra cannot edit remain in the original package.",
+  };
+}
+
+export function convexSafeOfficeActivationContent(
+  typeKey: "sheets" | "presentation",
+  content: unknown,
+): unknown {
+  const encoded = encodeArtifactContentForStorage(typeKey, content);
+  if (jsonBytes(encoded) <= CONVEX_ARTIFACT_CONTENT_BUDGET_BYTES)
+    return encoded;
+  const compact =
+    typeKey === "sheets"
+      ? stripSheetCellsForActivation(content)
+      : stripPresentationObjectsForActivation(content);
+  const next = encodeArtifactContentForStorage(typeKey, compact);
+  if (jsonBytes(next) <= CONVEX_ARTIFACT_CONTENT_BUDGET_BYTES) return next;
+  return encodeArtifactContentForStorage(
+    typeKey,
+    typeKey === "sheets"
+      ? {
+          ...stripSheetCellsForActivation(content),
+          workbook: {
+            calculationMode: "automatic" as const,
+            locale: "en-US",
+            namedRanges: {},
+            calculationVersion: 1,
+          },
+        }
+      : {
+          ...record(content),
+          slides: [],
+        },
+  );
 }
 
 export function bindPptxProjectionSource(
@@ -366,11 +571,10 @@ export function xlsxProjectionFromContent(
                   formulaSupport: previous.formulaSupport,
                 }
               : {}),
-          ...("format" in value
+          ...("format" in value &&
+          !sheetFormatsEquivalent(value.format, previous?.format)
             ? { format: value.format ?? {} }
-            : previous?.format
-              ? { format: previous.format }
-              : {}),
+            : {}),
         };
       });
       return {
@@ -449,9 +653,7 @@ export function xlsxOperationsBetween(
           value: cell.value,
         });
       }
-      if (
-        JSON.stringify(cell.format ?? {}) !== JSON.stringify(old.format ?? {})
-      ) {
+      if (!sheetFormatsEquivalent(cell.format, old.format)) {
         const oldFormat = old.format ?? {};
         const nextFormat = cell.format ?? {};
         const patch = Object.fromEntries(

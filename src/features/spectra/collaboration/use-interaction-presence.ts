@@ -129,14 +129,15 @@ export function useInteractionPresence(options: {
   const send = useCallback(
     (state: InteractionState) => {
       pending.current = state;
-      const elapsed = Date.now() - lastSentAt.current;
-      if (elapsed >= PUBLISH_INTERVAL_MS) {
-        flush();
-        return;
-      }
-      if (timer.current === null) {
-        timer.current = window.setTimeout(flush, PUBLISH_INTERVAL_MS - elapsed);
-      }
+      if (timer.current !== null) return;
+      // Never flush inside the originating DOM event. A sync awareness publish
+      // re-rendered the studio during insertText and blew the 8ms keystroke
+      // budget on dense workbooks. Presence still emits within the interval.
+      const wait = Math.max(
+        0,
+        PUBLISH_INTERVAL_MS - (Date.now() - lastSentAt.current),
+      );
+      timer.current = window.setTimeout(flush, wait);
     },
     [flush],
   );
@@ -145,16 +146,17 @@ export function useInteractionPresence(options: {
     (
       path: string,
       extras?: { part?: string; regionId?: string; label?: string },
-    ): SemanticTarget =>
-      buildTarget({
+    ): SemanticTarget => {
+      const canonical = canonicalPath(path);
+      const regionId = extras?.regionId ?? resolveRegionId?.(canonical);
+      return buildTarget({
         typeKey: typeKey ?? "document",
         artifactId: artifactId ?? "",
-        path: canonicalPath(path),
-        ...(resolveRegionId?.(canonicalPath(path))
-          ? { regionId: resolveRegionId(canonicalPath(path)) }
-          : {}),
+        path: canonical,
+        ...(regionId ? { regionId } : {}),
         ...extras,
-      }),
+      });
+    },
     [artifactId, resolveRegionId, typeKey],
   );
 
@@ -257,6 +259,8 @@ export function useInteractionPresence(options: {
     /** Target currently being dragged or resized, so movement stays attributed. */
     let gesture: { kind: "drag" | "resize"; target: SemanticTarget } | null =
       null;
+    let cachedRegionPath = "";
+    let cachedRegionId: string | undefined;
     // Browsers dispatch selectionchange immediately after input. Without this
     // short causal window the caret frame overwrites the typing frame (and its
     // provisional value) before a peer can render a single character.
@@ -268,13 +272,19 @@ export function useInteractionPresence(options: {
       path: string,
       extras?: { part?: string; primitive?: SemanticTarget["primitive"] },
     ): SemanticTarget => {
+      const canonical = canonicalPath(path);
+      let regionId: string | undefined;
+      if (cachedRegionPath === canonical) regionId = cachedRegionId;
+      else {
+        regionId = resolveRegionId?.(canonical);
+        cachedRegionPath = canonical;
+        cachedRegionId = regionId;
+      }
       const built = buildTarget({
         typeKey,
         artifactId,
-        path: canonicalPath(path),
-        ...(resolveRegionId?.(canonicalPath(path))
-          ? { regionId: resolveRegionId(canonicalPath(path)) }
-          : {}),
+        path: canonical,
+        ...(regionId ? { regionId } : {}),
         ...(extras?.part ? { part: extras.part } : {}),
       });
       return extras?.primitive

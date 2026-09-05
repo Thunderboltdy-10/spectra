@@ -18,9 +18,14 @@ import {
 } from "./schema";
 import { spectraBus } from "../events";
 import { subscribeIdleSurfaceRefresh } from "../data/idle-surface";
+import { PREFERENCE_SAVE_FAILURE } from "./preference-save-status";
 
-export const PREFERENCE_SAVE_FAILURE =
-  "Settings could not be saved. Your last change was undone.";
+export {
+  PREFERENCE_SAVE_FAILURE,
+  PREFERENCE_SAVING,
+  preferenceSaveStatus,
+} from "./preference-save-status";
+
 const KNOWN_COMMAND_IDS = knownCapabilityIds();
 const MERGE_OPTIONS = { knownCommandIds: KNOWN_COMMAND_IDS };
 
@@ -126,6 +131,7 @@ export function useSpectraPreferences({
   const [preferences, setPreferences] = useState(DEFAULT_SPECTRA_PREFERENCES);
   const [hydrated, setHydrated] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const convex = useConvex() as ReturnType<typeof useConvex> | undefined;
   /*
@@ -163,6 +169,17 @@ export function useSpectraPreferences({
   const inflightWrites = useRef(0);
   const refreshLayersRef = useRef<() => void>(() => {});
   preferencesRef.current = preferences;
+
+  const beginWrite = useCallback(() => {
+    inflightWrites.current += 1;
+    setSaving(true);
+  }, []);
+
+  const endWrite = useCallback(() => {
+    inflightWrites.current = Math.max(0, inflightWrites.current - 1);
+    setSaving(inflightWrites.current > 0);
+    if (inflightWrites.current === 0) refreshLayersRef.current();
+  }, []);
 
   const commitLocal = useCallback((next: SpectraPreferences) => {
     preferencesRef.current = next;
@@ -284,7 +301,7 @@ export function useSpectraPreferences({
       if (!currentDeviceId || !signedIn) return;
       const scope = DEVICE_SECTIONS.has(section) ? "device" : "account";
       const scopeKey = scope === "device" ? currentDeviceId : "account";
-      inflightWrites.current += 1;
+      beginWrite();
       try {
         await writeLayer({
           scope,
@@ -298,11 +315,10 @@ export function useSpectraPreferences({
       } catch {
         revertFailedWrite(generation);
       } finally {
-        inflightWrites.current = Math.max(0, inflightWrites.current - 1);
-        if (inflightWrites.current === 0) refreshLayersRef.current();
+        endWrite();
       }
     },
-    [currentDeviceId, revertFailedWrite, signedIn, writeLayer],
+    [beginWrite, currentDeviceId, endWrite, revertFailedWrite, signedIn, writeLayer],
   );
 
   const replace = useCallback(
@@ -314,7 +330,7 @@ export function useSpectraPreferences({
         confirmedRef.current = pruned;
         return;
       }
-      inflightWrites.current += 1;
+      beginWrite();
       void Promise.all([
         writeLayer({
           scope: "account",
@@ -335,11 +351,10 @@ export function useSpectraPreferences({
         },
         () => revertFailedWrite(generation),
       ).finally(() => {
-        inflightWrites.current = Math.max(0, inflightWrites.current - 1);
-        if (inflightWrites.current === 0) refreshLayersRef.current();
+        endWrite();
       });
     },
-    [commitLocal, currentDeviceId, revertFailedWrite, signedIn, writeLayer],
+    [beginWrite, commitLocal, currentDeviceId, endWrite, revertFailedWrite, signedIn, writeLayer],
   );
 
   const update = useCallback(
@@ -359,5 +374,5 @@ export function useSpectraPreferences({
     () => replace(restoreDefaultPreferences(preferencesRef.current)),
     [replace],
   );
-  return { preferences, hydrated, saveError, update, replace, reset };
+  return { preferences, hydrated, saveError, saving, update, replace, reset };
 }

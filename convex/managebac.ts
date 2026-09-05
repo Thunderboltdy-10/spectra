@@ -11,6 +11,7 @@ import {
   findPrimaryNode,
   placeSourceNode,
   syncArtifactSummary,
+  DISSOLVE_CHILD_BATCH,
 } from "./orgTreeShared";
 import {
   getAccountByClerkId,
@@ -3674,8 +3675,19 @@ export const purgeAutoCreatedClassWorkspaces = mutation({
     let removed = 0;
     for (const workspace of owned) {
       /* Removing an auto-created shelf must not remove the work on it: the
-         contents move to General (D31). */
-      await dissolveWorkspaceNode(ctx, workspace);
+         contents move to General (D31). Large shelves continue on a fresh
+         mutation budget so aggregate btree writes cannot 16 MB the request. */
+      const dissolved = await dissolveWorkspaceNode(ctx, workspace, {
+        limit: DISSOLVE_CHILD_BATCH,
+      });
+      if (dissolved.remaining > 0) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.managebac.continueDissolveClassWorkspace,
+          { workspaceId: workspace._id },
+        );
+        continue;
+      }
       await ctx.db.delete(workspace._id);
       removed += 1;
     }
@@ -3765,7 +3777,18 @@ export const releaseClassWorkspaces = mutation({
         skipped += 1;
         continue;
       }
-      await dissolveWorkspaceNode(ctx, workspace);
+      const dissolved = await dissolveWorkspaceNode(ctx, workspace, {
+        limit: DISSOLVE_CHILD_BATCH,
+      });
+      if (dissolved.remaining > 0) {
+        return {
+          removed,
+          skipped,
+          requested: selected.length,
+          remaining: dissolved.remaining,
+          done: false,
+        };
+      }
       await ctx.db.delete(workspace._id);
       if (projection) {
         await ctx.db.patch(projection._id, {
@@ -3774,6 +3797,15 @@ export const releaseClassWorkspaces = mutation({
         });
       }
       removed += 1;
+      if (removed + skipped < selected.length) {
+        return {
+          removed,
+          skipped,
+          requested: selected.length,
+          remaining: 0,
+          done: false,
+        };
+      }
     }
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
@@ -3784,6 +3816,32 @@ export const releaseClassWorkspaces = mutation({
       metadata: { removed, skipped, requested: selected.length },
       retentionClass: "security",
     });
-    return { removed, skipped, requested: selected.length };
+    return {
+      removed,
+      skipped,
+      requested: selected.length,
+      remaining: 0,
+      done: true,
+    };
+  },
+});
+
+export const continueDissolveClassWorkspace = internalMutation({
+  args: { workspaceId: v.id("spectraWorkspaces") },
+  handler: async (ctx, args) => {
+    const workspace = await ctx.db.get(args.workspaceId);
+    if (!workspace || workspace.starterKey !== "managebac-class") return;
+    const dissolved = await dissolveWorkspaceNode(ctx, workspace, {
+      limit: DISSOLVE_CHILD_BATCH,
+    });
+    if (dissolved.remaining > 0) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.managebac.continueDissolveClassWorkspace,
+        { workspaceId: args.workspaceId },
+      );
+      return;
+    }
+    await ctx.db.delete(args.workspaceId);
   },
 });

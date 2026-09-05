@@ -5,6 +5,8 @@ import {
   humanizeUnavailableReason,
   isMachineToken,
 } from "./humanize";
+import { PROTECTED_ORIGINAL_TOGGLE } from "./sync-toggles";
+import { collaborationNeedsSignIn } from "../collaboration/auth-session";
 
 export type ReplicaState =
   | "current"
@@ -70,7 +72,10 @@ export type SyncPresentation = {
   label: string;
   detail: string;
   tone: SyncTruth["tone"];
-  action?: { label: string; kind: "retry" | "reconnect" | "review-conflict" };
+  action?: {
+    label: string;
+    kind: "retry" | "reconnect" | "review-conflict" | "sign-in";
+  };
   ready: boolean;
 };
 
@@ -83,8 +88,11 @@ export type PresentSyncInput = {
   transportState?: TransportPresentationState;
   dirty?: boolean;
   nativeActivity?: boolean;
+  nativeBridgeAvailable?: boolean;
   readOnly?: boolean;
+  protectedOriginal?: boolean;
   collaborative?: boolean;
+  transportError?: string;
 };
 
 export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
@@ -216,7 +224,7 @@ export function replicaDisclosure(
       replicaHasNativeLock(replica) ||
       (replica.kind === "local" && Boolean(activity?.nativeLocked));
     if (locked) {
-      return `${location} · Waiting for Word to finish saving`;
+      return `${location} · Waiting for Office to finish saving`;
     }
     if (
       replica.kind === "local" &&
@@ -278,7 +286,9 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
       key: "read-only",
       state: "read_only",
       label: "Read-only",
-      detail: "You can inspect this work, but only someone with edit access can change it.",
+      detail: input.protectedOriginal
+        ? PROTECTED_ORIGINAL_TOGGLE.consequence
+        : "You can inspect this work, but only someone with edit access can change it.",
       tone: "neutral",
       ready: false,
     };
@@ -291,6 +301,18 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
       detail:
         "Spectra is refreshing this work's access. You can keep editing your local draft.",
       tone: "warning",
+      ready: false,
+    };
+  }
+  if (collaborationNeedsSignIn(input.transportError)) {
+    return {
+      key: "access",
+      state: "offline",
+      label: "Sign in to continue",
+      detail:
+        "Your session ended. This draft stays on this device until you sign in again.",
+      tone: "warning",
+      action: { label: "Sign in", kind: "sign-in" },
       ready: false,
     };
   }
@@ -348,9 +370,23 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
       return {
         key: truth.key,
         state: "saving",
-        label: "Waiting for Word",
+        label: "Waiting for Office",
         detail:
-          "Word still has this file open. Spectra will verify it after Word finishes saving.",
+          "Office still has this file open. Spectra will verify it after Office finishes saving.",
+        tone: "warning",
+        ready: false,
+      };
+    }
+    if (input.nativeBridgeAvailable === false) {
+      const queued = queuedCount(input) || activityPending(input);
+      return {
+        key: truth.key,
+        state: "pending",
+        label: queued > 0 ? "Queued" : "Not running",
+        detail:
+          queued > 0
+            ? "This file lives on your PC. Spectra Bridge is not running. Changes remain queued safely."
+            : "This file lives on your PC. Open Spectra Bridge to use it here.",
         tone: "warning",
         ready: false,
       };

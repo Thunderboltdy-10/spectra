@@ -7,6 +7,8 @@ import { placeSourceNode, subtreeNodes } from "./orgTreeShared";
 import { z } from "zod";
 import {
   activeReplicaWriteTarget,
+  chooseLiveBridgeDeviceId,
+  chooseLiveLocalReplica,
   latestActiveWriteForReplica,
 } from "./bridgeIdentity";
 import { bumpPolicyVersion, evaluateAccessForActor, requireActorArtifactCapability } from "./authorityShared";
@@ -280,11 +282,36 @@ export const forWork = query({
     const access = await evaluateAccessForActor(ctx, actor, "artifact", workId);
     if (!access.allowed || !access.capabilities.includes("read")) throw new Error("WORK_NOT_FOUND");
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
+    const deviceIds = [
+      ...new Set(
+        replicas
+          .map((replica) => replica.deviceId)
+          .filter((id): id is Id<"bridgeDevices"> => Boolean(id)),
+      ),
+    ];
+    const devices = (
+      await Promise.all(deviceIds.map((id) => ctx.db.get(id)))
+    ).filter((device): device is Doc<"bridgeDevices"> => Boolean(device));
+    const liveDeviceId = chooseLiveBridgeDeviceId(devices, Date.now());
+    const presented = replicas.map((replica) => {
+      if (
+        replica.kind !== "local" ||
+        !liveDeviceId ||
+        replica.deviceId === liveDeviceId
+      ) {
+        return replica;
+      }
+      return {
+        ...replica,
+        state: "unavailable" as const,
+        unavailableReason: "not-on-this-computer",
+      };
+    });
     const openConflicts = await ctx.db.query("syncConflicts").withIndex("by_work_state", (q) => q.eq("workId", workId).eq("state", "open")).take(20);
     const pending = await ctx.db.query("syncOperations").withIndex("by_work_created", (q) => q.eq("workId", workId)).order("desc").take(50);
-    const replicaById = new Map(replicas.map((replica) => [String(replica._id), replica]));
+    const replicaById = new Map(presented.map((replica) => [String(replica._id), replica]));
     const pendingCount = pending.filter((operation) => isActionablePendingOperation(operation, replicaById)).length;
-    return { replicas, conflicts: openConflicts, openConflictCount: openConflicts.length, pendingCount, recentOperations: pending.slice(0, 20) };
+    return { replicas: presented, conflicts: openConflicts, openConflictCount: openConflicts.length, pendingCount, recentOperations: pending.slice(0, 20) };
   },
 });
 
@@ -703,7 +730,7 @@ export const queueMaterialization = mutation({
       payloadRef: z.string().min(1),
       contentHash: z.string().regex(/^[a-f0-9]{64}$/),
       baseRevision: z.string().min(1).max(200),
-      regionIds: z.array(z.string().min(1).max(300)).max(500),
+      regionIds: z.array(z.string().min(1).max(300)).max(10_000),
       partNames: z.array(z.string().min(1).max(500)).max(200),
       baseContentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
       baseTextIndex: z.string().max(200_000).optional(),
@@ -722,9 +749,22 @@ export const queueMaterialization = mutation({
       .withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local"))
       .take(20))
       .filter((candidate) => candidate.accountId === actor.accountId);
-    const local = args.localReplicaId
-      ? locals.find((candidate) => candidate._id === args.localReplicaId)
-      : locals.filter((candidate) => candidate.state !== "unavailable").sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    const deviceIds = [
+      ...new Set(
+        locals
+          .map((replica) => replica.deviceId)
+          .filter((id): id is Id<"bridgeDevices"> => Boolean(id)),
+      ),
+    ];
+    const devices = (
+      await Promise.all(deviceIds.map((id) => ctx.db.get(id)))
+    ).filter((device): device is Doc<"bridgeDevices"> => Boolean(device));
+    const liveDeviceId = chooseLiveBridgeDeviceId(devices, Date.now());
+    const local = chooseLiveLocalReplica(
+      locals,
+      liveDeviceId,
+      args.localReplicaId,
+    );
     if (!local?.deviceId || !local.mountId || !local.localResourceId || !local.relativePath)
       throw new Error("LOCAL_REPLICA_UNAVAILABLE");
     const [mount, device] = await Promise.all([

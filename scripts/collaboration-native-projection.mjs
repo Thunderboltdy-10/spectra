@@ -15,6 +15,7 @@ const CODE_FILES_MAP = "spectra:code-v2:files";
 const CODE_FILE_ORDER = "spectra:code-v2:file-order";
 const COLLECTION_MARKER = "$spectraCollection";
 const VALUE_MARKER = "$spectraValue";
+const SHEET_CELLS_MARKER = "$spectraSheetCells";
 const WORK_MODEL_VERSION = 2;
 
 const ATOMIC_STRING_FIELDS = new Set([
@@ -263,7 +264,46 @@ function syncArray(existing, values, path) {
   return array;
 }
 
+function isSheetCellsPath(path) {
+  return path[0] === "sheets" && path.at(-1) === "cells" && path.length >= 3;
+}
+
+function encodeSheetCellValue(cell) {
+  return JSON.stringify(cell);
+}
+
+function decodeSheetCellValue(value) {
+  if (value instanceof Y.Map) return projectMap(value);
+  if (typeof value !== "string") return projectValue(value);
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : { value };
+  } catch {
+    return { value };
+  }
+}
+
+function syncSheetCells(map, cells) {
+  map.set(SHEET_CELLS_MARKER, true);
+  const keep = new Set(Object.keys(cells));
+  keep.add(SHEET_CELLS_MARKER);
+  for (const key of [...map.keys()]) if (!keep.has(key)) map.delete(key);
+  for (const [address, cell] of Object.entries(cells)) {
+    const encoded =
+      cell && typeof cell === "object" && !Array.isArray(cell)
+        ? encodeSheetCellValue(cell)
+        : JSON.stringify({ value: cell });
+    if (map.get(address) !== encoded) map.set(address, encoded);
+  }
+}
+
 function syncRecord(map, value, path) {
+  if (isSheetCellsPath(path)) {
+    syncSheetCells(map, value);
+    return;
+  }
   const keys = new Set(Object.keys(value));
   for (const key of [...map.keys()]) if (!keys.has(key)) map.delete(key);
   for (const [key, entry] of Object.entries(value)) {
@@ -452,6 +492,13 @@ function projectValue(value) {
 }
 
 function projectMap(map) {
+  if (map.get(SHEET_CELLS_MARKER) === true) {
+    return Object.fromEntries(
+      [...map.entries()]
+        .filter(([key]) => key !== SHEET_CELLS_MARKER)
+        .map(([key, value]) => [key, decodeSheetCellValue(value)]),
+    );
+  }
   return Object.fromEntries(
     [...map.entries()].map(([key, value]) => [key, projectValue(value)]),
   );

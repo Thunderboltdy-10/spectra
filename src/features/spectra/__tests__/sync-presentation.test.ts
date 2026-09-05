@@ -103,7 +103,7 @@ describe("sync presentation (P1.I3)", () => {
       ],
       Date.now(),
     );
-    expect(lines[0]).toContain("Waiting for Word to finish saving");
+    expect(lines[0]).toContain("Waiting for Office to finish saving");
     expect(lines[0]).not.toContain("Up to date");
     const presentation = presentSync({
       replicas: [
@@ -118,7 +118,25 @@ describe("sync presentation (P1.I3)", () => {
       replicaPendingCount: 0,
       online: true,
     });
-    expect(presentation.label).toBe("Waiting for Word");
+    expect(presentation.label).toBe("Waiting for Office");
+    expect(presentation.ready).toBe(false);
+  });
+
+  it("says queued and where the file lives when Bridge is down during a native write", () => {
+    const presentation = presentSync({
+      replicas: [
+        { kind: "local", state: "pending" },
+        { kind: "cloud", state: "current", lastVerifiedAt: 1 },
+      ],
+      openConflictCount: 0,
+      replicaPendingCount: 1,
+      nativeActivity: true,
+      nativeBridgeAvailable: false,
+      online: true,
+    });
+    expect(presentation.label).toBe("Queued");
+    expect(presentation.detail).toContain("lives on your PC");
+    expect(presentation.detail).toContain("queued safely");
     expect(presentation.ready).toBe(false);
   });
 
@@ -206,5 +224,38 @@ describe("sync presentation (P1.I3)", () => {
     });
     expect(presentation.action?.kind).toBe("reconnect");
     expect(presentation.action?.label).toBe("Reconnect");
+  });
+
+  it("names Read-don't-change as a shared refusal, not share-only access", () => {
+    const presentation = presentSync({
+      replicas: [{ kind: "local", state: "current", lastVerifiedAt: 1 }],
+      openConflictCount: 0,
+      replicaPendingCount: 0,
+      online: true,
+      readOnly: true,
+      protectedOriginal: true,
+    });
+    expect(presentation.label).toBe("Read-only");
+    expect(presentation.detail).toBe(
+      "Spectra can read these files but will never change them.",
+    );
+    expect(presentation.detail).not.toMatch(/edit access/i);
+  });
+
+  it("opens a sign-in door for a stale collaboration session without machine tokens", () => {
+    const presentation = presentSync({
+      replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: 1 }],
+      openConflictCount: 0,
+      replicaPendingCount: 0,
+      online: true,
+      transportState: "unsynchronized",
+      transportError:
+        "[Request ID: 681785b0f916633b] Server Error Uncaught Error: AUTH_NOT_SIGNED_IN: Sign in to continue.",
+    });
+    expect(presentation.label).toBe("Sign in to continue");
+    expect(presentation.action).toEqual({ label: "Sign in", kind: "sign-in" });
+    expect(`${presentation.label} ${presentation.detail}`).not.toMatch(
+      /Request ID|AUTH_NOT_SIGNED_IN|681785b0f916633b/i,
+    );
   });
 });

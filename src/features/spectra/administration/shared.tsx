@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertCircle,
   ArrowUpRight,
@@ -255,8 +256,8 @@ export function AdminDialog({
   footer?: ReactNode;
   danger?: boolean;
 }) {
-  if (!open) return null;
-  return (
+  if (!open || typeof document === "undefined") return null;
+  return createPortal(
     <div
       className="fixed inset-0 z-composer-dock grid place-items-center bg-[var(--bg-overlay)] p-4 backdrop-blur-[2px]"
       role="presentation"
@@ -306,7 +307,8 @@ export function AdminDialog({
           </footer>
         ) : null}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

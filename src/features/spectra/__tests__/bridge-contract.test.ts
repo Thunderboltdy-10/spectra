@@ -31,6 +31,33 @@ describe("N3 Bridge contract", () => {
     expect(fs.readFileSync(path.join(process.cwd(), "src/features/spectra/bridge/client.ts"), "utf8")).toContain("session/resume");
   });
 
+  it("treats a hung Bridge health fetch as not running within the request budget", async () => {
+    const { discoverBridge, BRIDGE_REQUEST_TIMEOUT_MS } = await import(
+      "../bridge/client"
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((_url, init) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return;
+        if (signal.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+        signal.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      })) as typeof fetch;
+    const started = Date.now();
+    try {
+      const discovery = await discoverBridge();
+      expect(discovery.kind).toBe("not-running");
+      expect(Date.now() - started).toBeLessThan(BRIDGE_REQUEST_TIMEOUT_MS + 1500);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("selects one truthful vocabulary for cloud, local, conflict and pending states", () => {
     const now = Date.now();
     expect(selectSyncTruth({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: now }], openConflictCount: 0, pendingCount: 0 }).label).toBe("Saved");

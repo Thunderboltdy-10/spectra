@@ -6,7 +6,11 @@ import {
   internalMutation as rawInternalMutation,
   mutation as rawMutation,
 } from "./_generated/server";
-import { orgNodeAggregates } from "./orgNodeAggregates";
+import {
+  orgNodeAggregates,
+  skipUnchangedCountTrigger,
+  type OrgNodeCountKind,
+} from "./orgNodeAggregates";
 import {
   projectRunTabSummary,
   RUN_TAB_PROJECTION_VERSION,
@@ -23,8 +27,17 @@ import {
 } from "./timetableReminders";
 
 const triggers = new Triggers<DataModel>();
-for (const aggregate of orgNodeAggregates)
-  triggers.register("orgNodes", aggregate.idempotentTrigger());
+const orgNodeCountKinds = [
+  "type",
+  "workspace",
+  "parent",
+] as const satisfies readonly OrgNodeCountKind[];
+orgNodeAggregates.forEach((aggregate, index) =>
+  triggers.register(
+    "orgNodes",
+    skipUnchangedCountTrigger(aggregate, orgNodeCountKinds[index]!),
+  ),
+);
 
 triggers.register("spectraAiRuns", async (ctx, change) => {
   if (!change.newDoc) return;

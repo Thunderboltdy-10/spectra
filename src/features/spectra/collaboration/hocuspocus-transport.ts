@@ -13,24 +13,10 @@ import { resolveDocumentRelativeSelection } from "../work/models/yjs/relative-po
 import { ScopedCollaborationSnapshots } from "./scoped-snapshots";
 import { COLLAB_RECONNECT } from "./reconnect-backoff";
 import { coalesceInFlight } from "@/lib/coalesce-inflight";
-
-function authenticationActuallyRevoked(reason?: string) {
-  const value = (reason ?? "").toUpperCase();
-  if (!value) return false;
-  if (value.includes("TOKEN_EXPIRED") || value.includes("SESSION_EXPIRED"))
-    return false;
-  // The gateway closes every connection whose policy version is stale so the
-  // provider can obtain a fresh token. That close is a reauthorization prompt,
-  // not proof that access was removed: upgrades, invitation acceptance, and
-  // workspace-policy changes all use the same signal.
-  if (value.includes("ACCESS OR PERMISSIONS CHANGED")) return false;
-  return (
-    value.includes("ACCESS") ||
-    value.includes("FORBIDDEN") ||
-    value.includes("PERMISSION") ||
-    value.includes("REVOKED")
-  );
-}
+import {
+  collaborationAccessRevoked,
+  collaborationNeedsSignIn,
+} from "./auth-session";
 
 type SessionResponse = {
   token: string;
@@ -391,11 +377,15 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       // Read-only collaborators need an active recheck because an upgrade has
       // no edit message that would naturally force server reauthorization.
       // Keep the watch narrow so private and modify sessions create no polling
-      // traffic during normal editing.
+      // traffic during normal editing. A stuck permission_lost door is the
+      // exception: a gateway restart can look like a revoke until the next
+      // session proves the person still belongs in the room.
+      const needsAccessRecheck =
+        this.level === "read" || this.state === "permission_lost";
       if (
         this.destroyed ||
         this.intentionallyDisconnected ||
-        this.level !== "read" ||
+        !needsAccessRecheck ||
         this.authorizationRefreshRunning
       )
         return;
@@ -423,7 +413,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         .catch((error) => {
           const reason =
             error instanceof Error ? error.message : "Access was removed.";
-          if (!authenticationActuallyRevoked(reason)) return;
+          if (!collaborationAccessRevoked(reason)) return;
           this.update({
             state: "permission_lost",
             level: null,
@@ -452,6 +442,11 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       // is still being issued. Never resurrect a provider after its transport
       // has been destroyed; doing so creates an invisible reconnect/token loop.
       if (this.destroyed) return;
+      this.update({
+        level: initial.level,
+        accountId: initial.accountId,
+        displayName: initial.displayName,
+      });
       const websocketProvider = new HocuspocusProviderWebsocket({
         url: initial.url,
         autoConnect: false,
@@ -470,19 +465,35 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         flushDelay: 180,
         token: async () => {
           if (this.destroyed) throw new Error("COLLABORATION_CLOSED");
-          const refreshed = await session(
-            this.artifactId,
-            this.partitionKey,
-            this.clientId,
-            this.schemaVersion,
-          );
-          this.update({
-            level: refreshed.level,
-            accountId: refreshed.accountId,
-            displayName: refreshed.displayName,
-            error: undefined,
-          });
-          return refreshed.token;
+          try {
+            const refreshed = await session(
+              this.artifactId,
+              this.partitionKey,
+              this.clientId,
+              this.schemaVersion,
+            );
+            this.update({
+              level: refreshed.level,
+              accountId: refreshed.accountId,
+              displayName: refreshed.displayName,
+              error: undefined,
+            });
+            return refreshed.token;
+          } catch (error) {
+            const reason =
+              error instanceof Error
+                ? error.message
+                : "Could not start collaboration.";
+            this.update({
+              state: collaborationNeedsSignIn(reason)
+                ? "unsynchronized"
+                : this.state === "connecting"
+                  ? "connecting"
+                  : "reconnecting",
+              error: reason,
+            });
+            throw error;
+          }
         },
         onStatus: ({ status }) => {
           if (status === "connected") {
@@ -658,7 +669,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           }
         },
         onAuthenticationFailed: ({ reason }) => {
-          const revoked = authenticationActuallyRevoked(reason);
+          const revoked = collaborationAccessRevoked(reason);
           this.update({
             state: revoked ? "permission_lost" : "reconnecting",
             error: revoked ? reason || "Access was removed." : undefined,
@@ -672,11 +683,41 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               message?: unknown;
             };
             if (message?.type === "spectra.permission_changed") {
-              this.update({
-                state: "reconnecting",
-                error: undefined,
-                level: null,
-              });
+              void fetchCollaborationSession(
+                this.artifactId,
+                this.partitionKey,
+                this.clientId,
+                this.schemaVersion,
+              )
+                .then((refreshed) => {
+                  if (this.destroyed) return;
+                  this.update({
+                    level: refreshed.level,
+                    accountId: refreshed.accountId,
+                    displayName: refreshed.displayName,
+                    error: undefined,
+                  });
+                })
+                .catch((error) => {
+                  const reason =
+                    error instanceof Error
+                      ? error.message
+                      : "Access was removed.";
+                  if (this.destroyed) return;
+                  if (collaborationNeedsSignIn(reason)) {
+                    this.update({
+                      state: "unsynchronized",
+                      error: reason,
+                    });
+                    return;
+                  }
+                  if (!collaborationAccessRevoked(reason)) return;
+                  this.update({
+                    state: "permission_lost",
+                    level: null,
+                    error: reason,
+                  });
+                });
               return;
             }
             const updateIds = Array.isArray(message.updateIds)
@@ -718,16 +759,18 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           // reconnect, where it receives a fresh durable pending/ack lifecycle.
           this.durablePendingUpdateIds.clear();
           const revoked =
-            event.code === 4403 && authenticationActuallyRevoked(event.reason);
+            event.code === 4403 && collaborationAccessRevoked(event.reason);
           const pending =
             this.providerUnsynchronizedChanges +
             (this.localDurabilityPending ? 1 : 0);
           this.update({
             state: revoked
               ? "permission_lost"
-              : pending > 0
-                ? "unsynchronized"
-                : "reconnecting",
+              : event.code === 4403
+                ? "reconnecting"
+                : pending > 0
+                  ? "unsynchronized"
+                  : "reconnecting",
             unsynchronizedChanges: pending,
             error: revoked ? event.reason || "Access was removed." : undefined,
           });

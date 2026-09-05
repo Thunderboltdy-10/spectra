@@ -11,7 +11,7 @@ import {
   uploadNativePayload,
 } from "@/features/spectra/lenses/native-payload-server";
 import {
-  hasUnreconciledExternalRevision,
+  shouldActivateExternalNativeRevision,
   type RecentNativeOperation,
 } from "@/features/spectra/lenses/native-reconciliation";
 import {
@@ -30,6 +30,8 @@ import type {
 } from "@/features/spectra/lenses/projection-contracts";
 import {
   bindPptxProjectionSource,
+  convexSafeFidelityMap,
+  convexSafeOfficeActivationContent,
   pptxArtifactContent,
   pptxProjectionUpdateFromContent,
   pptxProjectionFromContent,
@@ -44,7 +46,6 @@ import {
   xlsxChangedRegions,
 } from "@/features/spectra/lenses/office-projection-merge";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
-import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
 
 // Compatibility exports for existing callers. The implementation lives in the
 // canonical office-content module; routes only re-export the shared transform.
@@ -122,7 +123,7 @@ function contentForStorage(
   isSheet: boolean,
   source: NativeSource,
 ) {
-  return encodeArtifactContentForStorage(
+  return convexSafeOfficeActivationContent(
     isSheet ? "sheets" : "presentation",
     contentFor(projection, isSheet, source),
   );
@@ -226,7 +227,7 @@ async function materializeOfficeArtifactAttempt(
           artifactId: String(workId),
           payloadHash: local.truth.hash,
         }),
-        fidelityMap: latest.fidelityMap,
+        fidelityMap: convexSafeFidelityMap(latest.fidelityMap),
         regionIds: rebased.externalChanged,
         partNames: [],
         conflictRegionIds: rebased.conflicts.map((conflict) =>
@@ -318,7 +319,7 @@ async function materializeOfficeArtifactAttempt(
       payloadRef: stored.payloadRef,
       contentHash: hash,
       baseRevision: materializationTruth.revision,
-      fidelityMap: next.fidelityMap,
+      fidelityMap: convexSafeFidelityMap(next.fidelityMap),
       regionIds,
       partNames: comparison.parts
         .filter((part) => part.verdict !== "identical")
@@ -347,6 +348,17 @@ async function materializeOfficeArtifactAttempt(
       error.message.includes("MATERIALIZATION_BASE_STALE")
     )
       return materializeOfficeArtifactAttempt(workId, content, attempt + 1, options);
+    if (
+      error instanceof Error &&
+      error.message.includes("LOCAL_REPLICA_UNAVAILABLE")
+    ) {
+      return {
+        state: "cloud_saved" as const,
+        hash,
+        status:
+          "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Office copy on this computer.",
+      };
+    }
     throw error;
   }
   return {
@@ -417,13 +429,11 @@ export async function POST(request: Request) {
           { workId: Id<"spectraArtifacts"> },
           WorkTruth
         >("replicas:forWork", { workId });
-        const externalRevision = hasUnreconciledExternalRevision(
-          workTruth.recentOperations,
-          local.truth.hash,
-        );
-        const externalNeedsActivation = Boolean(
-          local.truth.hash !== cloud.truth.hash || externalRevision,
-        );
+        const externalNeedsActivation = shouldActivateExternalNativeRevision({
+          operations: workTruth.recentOperations,
+          localHash: local.truth.hash,
+          cloudHash: cloud.truth.hash,
+        });
         if (externalNeedsActivation) {
           const [artifact, externalOpened] = await Promise.all([
             convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>(
@@ -465,7 +475,7 @@ export async function POST(request: Request) {
                 artifactId: String(workId),
                 payloadHash: local.truth.hash,
               }),
-              fidelityMap: externalOpened.fidelityMap,
+              fidelityMap: convexSafeFidelityMap(externalOpened.fidelityMap),
               regionIds: mergedResult.externalChanged,
               partNames: [],
               conflictRegionIds,
@@ -500,7 +510,7 @@ export async function POST(request: Request) {
               artifactId: String(workId),
               payloadHash: local.truth.hash,
             }),
-            fidelityMap: externalOpened.fidelityMap,
+            fidelityMap: convexSafeFidelityMap(externalOpened.fidelityMap),
             regionIds: changedRegions(
               ancestorOpened.projection as OfficeProjection,
               externalProjection,
@@ -530,11 +540,11 @@ export async function POST(request: Request) {
       await convexMutation("replicas:activateLens", {
         workId,
         payloadHash: cloud.truth.hash,
-        content: encodeArtifactContentForStorage(
+        content: convexSafeOfficeActivationContent(
           isSheet ? "sheets" : "presentation",
           content,
         ),
-        fidelityMap: baseOpened.fidelityMap,
+        fidelityMap: convexSafeFidelityMap(baseOpened.fidelityMap),
         semanticDigest: baseProjection.nativeBinding.semanticDigest,
         nativeFormat: baseProjection.nativeBinding.format,
         blueprintKey: isSheet ? "sheets" : "presentation",
@@ -553,7 +563,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         state: "opened",
         content,
-        fidelityMap: baseOpened.fidelityMap,
+        fidelityMap: convexSafeFidelityMap(baseOpened.fidelityMap),
         capabilities: baseOpened.capabilities,
       });
     }
@@ -589,11 +599,11 @@ export async function POST(request: Request) {
         await convexMutation("replicas:activateLens", {
           workId,
           payloadHash: local.truth.hash,
-          content: encodeArtifactContentForStorage(
+          content: convexSafeOfficeActivationContent(
             isSheet ? "sheets" : "presentation",
             projection,
           ),
-          fidelityMap: baseOpened.fidelityMap,
+          fidelityMap: convexSafeFidelityMap(baseOpened.fidelityMap),
           semanticDigest: baseProjection.nativeBinding.semanticDigest,
           nativeFormat: baseProjection.nativeBinding.format,
           blueprintKey: isSheet ? "sheets" : "presentation",
@@ -683,7 +693,7 @@ export async function POST(request: Request) {
         payloadRef: stored.payloadRef,
         contentHash: hash,
         baseRevision: local.truth.revision,
-        fidelityMap: next.fidelityMap,
+        fidelityMap: convexSafeFidelityMap(next.fidelityMap),
         regionIds: [
           ...new Set([...resolved.spectraChanged, ...conflictRegionIds]),
         ],
@@ -731,7 +741,7 @@ export async function POST(request: Request) {
           artifactId: String(workId),
           payloadHash: local.truth.hash,
         }),
-        fidelityMap: externalOpened.fidelityMap,
+        fidelityMap: convexSafeFidelityMap(externalOpened.fidelityMap),
         regionIds: [...externalChanged],
         partNames: diff.preservedPartChanges,
         conflictRegionIds,
@@ -761,11 +771,11 @@ export async function POST(request: Request) {
         localReplicaId: local.truth.replicaId,
         localPayloadRef: local.truth.payloadRef,
         localRevision: local.truth.revision,
-        content: encodeArtifactContentForStorage(
+        content: convexSafeOfficeActivationContent(
           isSheet ? "sheets" : "presentation",
           mergedContent,
         ),
-        fidelityMap: externalOpened.fidelityMap,
+        fidelityMap: convexSafeFidelityMap(externalOpened.fidelityMap),
         regionIds: [...externalChanged],
         partNames: diff.preservedPartChanges,
         conflictRegionIds:
@@ -790,10 +800,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: code,
-        message:
-          code !== "OFFICE_LENS_FAILED" && error instanceof Error
-            ? error.message
-            : humanizePublicFailure(error, application),
+        message: humanizePublicFailure(error, application),
       },
       { status: 400 },
     );

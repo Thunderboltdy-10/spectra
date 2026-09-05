@@ -305,9 +305,10 @@ export function isContainerKind(kind: OrgNodeKind) {
 
 /**
  * Maintain the direct-live-child projection after a structural write. Rows
- * created before P9.I3 have no projection; the first touching write repairs
- * them from the indexed child set, while migrated rows take the constant-read
- * delta path.
+ * created before the projection existed stay uncounted here: recounting
+ * General (or any large parent) inside a user mutation is a Convex byte
+ * bomb. Migrated rows take the constant-read delta path. Missing counts
+ * are repaired by `backfillChildCounts`, never by a sibling scan.
  */
 async function adjustChildCount(
   ctx: OrgWriteCtx,
@@ -317,17 +318,7 @@ async function adjustChildCount(
   if (!parentId || delta === 0) return;
   const parent = await ctx.db.get(parentId);
   if (!parent || !isContainerKind(parent.kind)) return;
-  if (parent.childCount === undefined) {
-    const children = await ctx.db
-      .query("orgNodes")
-      .withIndex("by_parent", (q) => q.eq("parentId", parentId))
-      .collect();
-    await ctx.db.patch(parentId, {
-      childCount: children.filter((child) => child.deletedAt === undefined)
-        .length,
-    });
-    return;
-  }
+  if (parent.childCount === undefined) return;
   await ctx.db.patch(parentId, {
     childCount: Math.max(0, parent.childCount + delta),
   });
@@ -1312,11 +1303,17 @@ export async function restoreTrashedNode(ctx: OrgWriteCtx, node: OrgNode) {
 /**
  * A workspace is going away for good. It organized its contents and never owned
  * them, so everything inside moves to General rather than vanishing with the
- * container. Folders move whole, so the shape a reader built survives.
+ * container. Folders move whole, so the shape a reader built survives. One
+ * mutation cannot reparent a crowded class shelf: each move rewrites
+ * TableAggregate btrees against the shared 16 MB read budget. Callers repeat
+ * until `remaining` is 0, then delete the workspace row.
  */
+export const DISSOLVE_CHILD_BATCH = 20;
+
 export async function dissolveWorkspaceNode(
   ctx: OrgWriteCtx,
   workspace: Doc<"spectraWorkspaces">,
+  options?: { limit?: number },
 ) {
   if (isGeneralWorkspace(workspace))
     throw new Error(
@@ -1328,7 +1325,7 @@ export async function dissolveWorkspaceNode(
     "workspace",
     workspace._id,
   );
-  if (!node) return { moved: 0, purged: 0 };
+  if (!node) return { moved: 0, purged: 0, remaining: 0 };
   const general = await ensureGeneralNode(
     ctx,
     workspace.ownerAccountId,
@@ -1337,7 +1334,12 @@ export async function dissolveWorkspaceNode(
   const children = await listChildNodes(ctx, node.accountId, node._id, {
     includeTrashed: true,
   });
-  for (const child of children) {
+  const limit = Math.max(
+    1,
+    Math.min(options?.limit ?? DISSOLVE_CHILD_BATCH, DISSOLVE_CHILD_BATCH),
+  );
+  const batch = children.slice(0, limit);
+  for (const child of batch) {
     if (child.deletedAt === undefined) {
       await moveNode(ctx, child, { parentId: general.node._id });
       continue;
@@ -1355,8 +1357,10 @@ export async function dissolveWorkspaceNode(
       general.workspace._id,
     );
   }
+  const remaining = children.length - batch.length;
+  if (remaining > 0) return { moved: batch.length, purged: 0, remaining };
   const purged = await purgeSourceNodes(ctx, "workspace", workspace._id);
-  return { moved: children.length, purged };
+  return { moved: children.length, purged, remaining: 0 };
 }
 
 /**

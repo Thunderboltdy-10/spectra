@@ -6,6 +6,7 @@ import {
   consequenceFor,
   formatMountProgress,
   isProtectedOriginalPreset,
+  isProtectedOriginalWork,
   mountCountTruth,
   policyPresetFromToggles,
   spectraConsequence,
@@ -33,6 +34,22 @@ const resource = fs.readFileSync(
   path.join(process.cwd(), "src/features/spectra/bridge/resource-surface.tsx"),
   "utf8",
 );
+const storage = fs.readFileSync(
+  path.join(process.cwd(), "src/features/spectra/bridge/file-storage-controls.tsx"),
+  "utf8",
+);
+const studio = fs.readFileSync(
+  path.join(process.cwd(), "src/features/spectra/components/artifact-studio.tsx"),
+  "utf8",
+);
+const healthHook = fs.readFileSync(
+  path.join(process.cwd(), "src/features/spectra/bridge/use-bridge.ts"),
+  "utf8",
+);
+const bridgeClient = fs.readFileSync(
+  path.join(process.cwd(), "src/features/spectra/bridge/client.ts"),
+  "utf8",
+);
 
 describe("sync toggles (P1.I4)", () => {
   it("exposes exactly the three storage choices and the protected original switch", () => {
@@ -57,6 +74,34 @@ describe("sync toggles (P1.I4)", () => {
     expect(policyPresetFromToggles("spectra", true)).toBe("spectra");
     expect(storageChoiceFromPreset("linked")).toBe("device");
     expect(isProtectedOriginalPreset("linked")).toBe(true);
+    expect(
+      isProtectedOriginalWork({
+        preset: "both",
+        replicas: [{ kind: "local", protectedOriginal: true }],
+      }),
+    ).toBe(true);
+    expect(
+      isProtectedOriginalWork({
+        preset: "linked",
+        replicas: [{ kind: "local", protectedOriginal: false }],
+      }),
+    ).toBe(true);
+    expect(
+      isProtectedOriginalWork({
+        preset: "both",
+        replicas: [{ kind: "local", protectedOriginal: false }],
+      }),
+    ).toBe(false);
+  });
+
+  it("exposes Read, don't change on native studios, resource files, and Devices", () => {
+    expect(storage).toContain("showProtected");
+    expect(storage).toContain("onProtectedChange");
+    expect(resource).toContain("FileStorageControls");
+    expect(studio).toContain("FileStorageControls");
+    expect(studio).toContain("isProtectedOriginalWork");
+    expect(settings).toContain("showProtected");
+    expect(settings).toContain("onProtectedChange");
   });
 
   it("never treats an offline folder as 0 of N", () => {
@@ -208,8 +253,14 @@ describe("sync toggles (P1.I4)", () => {
         reachability: "connected",
       }),
     ).toBe("Waiting for Spectra");
-    expect(settings).toContain("humanizePublicFailure");
-    expect(settings).toContain("folderChipLabel");
+    expect(humanizePublicFailure("AUTH_OPERATOR_MANAGE_REQUIRED: Re-enter this school with manage access.")).toContain(
+      "read-only",
+    );
+    expect(
+      humanizePublicFailure(
+        "AUTH_OPERATOR_MANAGE_REQUIRED: Re-enter this school with manage access.",
+      ),
+    ).not.toMatch(/AUTH_OPERATOR_MANAGE_REQUIRED/);
   });
 
   it("offers Reconnect when the replica is unavailable on this device", () => {
@@ -233,7 +284,25 @@ describe("sync toggles (P1.I4)", () => {
     expect(resource).not.toContain("Bridge can stream");
     expect(resource).not.toMatch(/Image preview/i);
     expect(settings).toContain("Update Bridge");
+    expect(settings).toContain("Disconnect this computer");
+    expect(settings).toContain("revokeDevice");
+    expect(settings).toContain("forgetSession");
+    expect(healthHook).toContain("clearBridgeSession");
+    expect(healthHook).toContain("clearBridgeStatusCache");
+    expect(healthHook).toContain('addEventListener("storage"');
     expect(settings).toContain("onClick");
+  });
+
+  it("exits Disconnecting without waiting on a hung Bridge refresh", () => {
+    const disconnect = settings.slice(
+      settings.indexOf("async function disconnectThisComputer"),
+      settings.indexOf("async function setStorageChoice"),
+    );
+    expect(disconnect).toContain("forgetSession");
+    expect(disconnect).toContain("void local.refresh()");
+    expect(disconnect).not.toContain("await local.refresh()");
+    expect(bridgeClient).toContain("BRIDGE_REQUEST_TIMEOUT_MS");
+    expect(bridgeClient).toContain("bridgeRequestSignal");
   });
 
   it("makes Location agree with the replica list", () => {
@@ -268,9 +337,9 @@ describe("sync toggles (P1.I4)", () => {
     expect(humanizePublicFailure("strategy-transition-failed")).toBe(
       "The last storage change did not finish. The file on this computer was not removed.",
     );
-    expect(resource).toMatch(
+    expect(storage).toMatch(
       /humanizePublicFailure\(\s*strategyTransition\.errorCode\s*\?\?\s*"strategy-transition-failed",?\s*\)/,
     );
-    expect(resource).not.toContain("The last storage change did not finish. {humanizePublicFailure");
+    expect(storage).not.toContain("The last storage change did not finish. {humanizePublicFailure");
   });
 });

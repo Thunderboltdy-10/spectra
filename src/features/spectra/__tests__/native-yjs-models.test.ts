@@ -27,6 +27,7 @@ import {
 import {
   BoundedYjsLocalPersistence,
   MemoryYjsStore,
+  shouldRefuseCollapsedLocalPersist,
   type LocalYjsRecord,
   type LocalYjsStore,
 } from "@/features/spectra/realtime/persistence";
@@ -374,6 +375,29 @@ describe("native fine-grained Yjs models", () => {
     expect(deck.slides[0]?.objects[0]).toMatchObject({ x: 440, y: 220 });
   });
 
+  it("stores dense sheet cells as compact strings and bounds eager semantic regions", () => {
+    const adapter = workYjsAdapter("sheets");
+    const initial = denseWorkbook(12_000);
+    const started = performance.now();
+    const document = adapter.createDocument(initial);
+    const createdMs = performance.now() - started;
+    const projected = adapter.project(document) as ReturnType<
+      typeof denseWorkbook
+    >;
+    expect(projected.sheets[0]?.cells.A1?.value).toBe("S1-1");
+    const sheets = structuredCollection(document, ["sheets"]);
+    const cells = sheets!.items.get("sheet-1")!.get("cells") as Y.Map<unknown>;
+    expect(typeof cells.get("A1")).toBe("string");
+    const regionStarted = performance.now();
+    const regions = adapter.deriveSemanticRegions(document, projected);
+    const regionMs = performance.now() - regionStarted;
+    expect(regions.some((region) => region.kind === "sheet_cell")).toBe(false);
+    expect(regions.length).toBeLessThan(80);
+    expect(createdMs).toBeLessThan(2_000);
+    expect(regionMs).toBeLessThan(250);
+    document.destroy();
+  });
+
   it("commits one dense-workbook cell as a compact native update with an immediate live snapshot", async () => {
     const adapter = workYjsAdapter("sheets");
     const initial = denseWorkbook();
@@ -577,6 +601,76 @@ describe("native fine-grained Yjs models", () => {
     expect(JSON.stringify(projected.tiptap)).toContain("RCV1WORDNATIVE5");
     model.destroy();
     document.destroy();
+  });
+
+  it("flushes Yjs-ahead document body on a metadata-only save", async () => {
+    const adapter = documentYjsAdapter;
+    const initial = {
+      blocks: [
+        {
+          id: "intro",
+          type: "paragraph",
+          text: "UNIQUE-SEED UNIQUE-A UNIQUE-B UNIQUE-AI",
+        },
+      ],
+    };
+    const ydoc = adapter.createDocument(initial);
+    const liveMeta = ydoc.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+    liveMeta.set("title", "P8V1-D3-unique.docx");
+    liveMeta.set("summary", "");
+    liveMeta.set("tags", []);
+    const model = new NativeArtifactYjsModel("document", {
+      clientId: "docx-ahead-client",
+      document: ydoc,
+      getSnapshot: () => ({
+        state: "synchronized" as const,
+        level: "modify" as const,
+        accountId: "account-1",
+        displayName: "Pablo",
+        unsynchronizedChanges: 0,
+        presence: [],
+      }),
+    } as unknown as ConstructorParameters<typeof NativeArtifactYjsModel>[1]);
+    adapter.applyProjection(
+      ydoc,
+      {
+        blocks: [
+          {
+            id: "intro",
+            type: "paragraph",
+            text: "UNIQUE-SEED UNIQUE-A UNIQUE-B UNIQUE-AI UNIQUE-AFTER-DOWN",
+          },
+        ],
+      },
+      workTransactionOrigin(
+        { clientId: "docx-ahead-client", kind: "human" },
+        "local_human",
+      ),
+    );
+    expect(JSON.stringify(model.getSnapshot().value?.content)).not.toContain(
+      "UNIQUE-AFTER-DOWN",
+    );
+    await model.replaceMetadataSnapshot(
+      {
+        title: "P8V1-D3-unique.docx",
+        tags: [],
+        content: model.getSnapshot().value?.content,
+      },
+      {
+        editMany: async (
+          _regions: Array<{ regionId: string; overlapDomains: string[] }>,
+          change: () => void,
+        ) => {
+          ydoc.transact(change);
+          return { applied: true as const, claims: [] };
+        },
+      } as unknown as Parameters<typeof model.replaceMetadataSnapshot>[1],
+    );
+    expect(JSON.stringify(model.getSnapshot().value?.content)).toContain(
+      "UNIQUE-AFTER-DOWN",
+    );
+    model.destroy();
+    ydoc.destroy();
   });
 
   it("projects a dense live model once and reuses its semantic descriptor index", () => {
@@ -885,8 +979,9 @@ describe("native fine-grained Yjs models", () => {
     const pending = persistence.persistNow();
     expect(text.toString()).toContain("offline");
     expect(persistence.getSnapshot().pendingRemoteSync).toBe(true);
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(store.release).toEqual(expect.any(Function));
+    });
     store.release?.();
     await pending;
     persistence.destroy();
@@ -908,6 +1003,31 @@ describe("native fine-grained Yjs models", () => {
       pendingRemoteSync: true,
     });
     second.destroy();
+  });
+
+  it("refuses to persist a pending collapse over a durable local copy", () => {
+    expect(
+      shouldRefuseCollapsedLocalPersist(
+        { bytes: 8000, pendingRemoteSync: false },
+        1000,
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      shouldRefuseCollapsedLocalPersist(
+        { bytes: 8000, pendingRemoteSync: false },
+        5000,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      shouldRefuseCollapsedLocalPersist(
+        { bytes: 8000, pendingRemoteSync: true },
+        1000,
+        true,
+      ),
+    ).toBe(false);
+    expect(shouldRefuseCollapsedLocalPersist(null, 1000, true)).toBe(false);
   });
 
   it("keeps native serialization bounded and statically guards focused document resets", async () => {

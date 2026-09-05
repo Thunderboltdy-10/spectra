@@ -10,6 +10,7 @@ import {
   type SheetsContent,
   type WorkbookSheet,
 } from "../../../sheets/model";
+import { changedSheetCellAddresses } from "../../../sheets/cell-overlay";
 import { sharedTimetableContent } from "../../../timetable/model";
 import { normalizeWhiteboardContent } from "../../../whiteboard/model";
 import type {
@@ -35,6 +36,7 @@ import {
 
 const COLLECTION_MARKER = "$spectraCollection";
 const VALUE_MARKER = "$spectraValue";
+const SHEET_CELLS_MARKER = "$spectraSheetCells";
 const STRUCTURED_ROLLBACK_MAP = "spectra:structured-v2:rollback";
 
 type JsonRecord = Record<string, unknown>;
@@ -251,7 +253,41 @@ function syncArray(
   return array;
 }
 
+function isSheetCellsPath(path: readonly string[]) {
+  return path[0] === "sheets" && path.at(-1) === "cells" && path.length >= 3;
+}
+
+function encodeSheetCellValue(cell: JsonRecord) {
+  return JSON.stringify(cell);
+}
+
+function decodeSheetCellValue(value: unknown): unknown {
+  if (value instanceof Y.Map) return projectMap(value);
+  if (typeof value !== "string") return projectValue(value);
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : { value };
+  } catch {
+    return { value };
+  }
+}
+
+function syncSheetCells(map: Y.Map<unknown>, cells: JsonRecord) {
+  map.set(SHEET_CELLS_MARKER, true);
+  const keep = new Set(Object.keys(cells));
+  keep.add(SHEET_CELLS_MARKER);
+  for (const key of [...map.keys()]) if (!keep.has(key)) map.delete(key);
+  for (const [address, cell] of Object.entries(cells)) {
+    const encoded = isRecord(cell) ? encodeSheetCellValue(cell) : JSON.stringify({ value: cell });
+    if (map.get(address) !== encoded) map.set(address, encoded);
+  }
+}
+
 function syncRecord(map: Y.Map<unknown>, value: JsonRecord, path: readonly string[]) {
+  if (isSheetCellsPath(path)) {
+    syncSheetCells(map, value);
+    return;
+  }
   const keys = new Set(Object.keys(value));
   for (const key of [...map.keys()]) if (!keys.has(key)) map.delete(key);
   for (const [key, entry] of Object.entries(value)) {
@@ -349,10 +385,15 @@ export function planSheetsCellProjection(
     const { cells: previousCells, ...previousStructure } = previousSheet;
     const { cells: nextCells, ...nextStructure } = nextSheet;
     if (!plainEqual(previousStructure, nextStructure)) return null;
-    const addresses = new Set([
-      ...Object.keys(previousCells),
-      ...Object.keys(nextCells),
-    ]);
+    const hinted = changedSheetCellAddresses(previousCells, nextCells);
+    const addresses = hinted
+      ? hinted
+      : [
+          ...new Set([
+            ...Object.keys(previousCells),
+            ...Object.keys(nextCells),
+          ]),
+        ];
     for (const address of addresses) {
       if (plainEqual(previousCells[address], nextCells[address])) continue;
       changes.push({
@@ -383,18 +424,10 @@ export function applySheetsCellProjection(
         if (cells.has(change.address)) cells.delete(change.address);
         continue;
       }
-      const existing = cells.get(change.address);
-      const cell =
-        existing instanceof Y.Map && !isCollection(existing)
-          ? existing
-          : new Y.Map<unknown>();
-      if (cell !== existing) cells.set(change.address, cell);
-      syncRecord(cell, change.cell as JsonRecord, [
-        "sheets",
-        change.sheetId,
-        "cells",
-        change.address,
-      ]);
+      cells.set(SHEET_CELLS_MARKER, true);
+      const encoded = encodeSheetCellValue(change.cell as JsonRecord);
+      if (cells.get(change.address) !== encoded)
+        cells.set(change.address, encoded);
     }
     setWorkModelMetadata(doc, "sheets", sheetsYjsAdapter.modelVersion);
   }, origin);
@@ -420,6 +453,13 @@ function projectValue(value: unknown): unknown {
 }
 
 function projectMap(map: Y.Map<unknown>): JsonRecord {
+  if (map.get(SHEET_CELLS_MARKER) === true) {
+    return Object.fromEntries(
+      [...map.entries()]
+        .filter(([key]) => key !== SHEET_CELLS_MARKER)
+        .map(([key, value]) => [key, decodeSheetCellValue(value)]),
+    );
+  }
   return Object.fromEntries([...map.entries()].map(([key, value]) => [key, projectValue(value)]));
 }
 

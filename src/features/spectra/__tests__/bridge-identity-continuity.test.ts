@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   activeReplicaWriteTarget,
+  chooseLiveBridgeDeviceId,
+  chooseLiveLocalReplica,
   chooseReplicaContinuity,
   latestActiveWriteForReplica,
 } from "../../../../convex/bridgeIdentity";
@@ -42,5 +44,85 @@ describe("replica-scoped Bridge writes", () => {
     expect(activeReplicaWriteTarget(replica, mount, { ...device, state: "revoked" })).toBe(false);
     expect(activeReplicaWriteTarget({ ...replica, deviceId: "other" }, mount, device)).toBe(false);
     expect(activeReplicaWriteTarget(replica, { ...mount, _id: "other" }, device)).toBe(false);
+  });
+});
+
+describe("live Bridge write targeting", () => {
+  it("writes the live device replica instead of a silent leftover device", () => {
+    const now = 1_000_000;
+    const liveId = chooseLiveBridgeDeviceId(
+      [
+        { _id: "silent", state: "active", lastSeenAt: now - 30 * 60_000 },
+        { _id: "live", state: "active", lastSeenAt: now - 1_000 },
+      ],
+      now,
+    );
+    expect(liveId).toBe("live");
+    expect(
+      chooseLiveLocalReplica(
+        [
+          {
+            _id: "ghost",
+            deviceId: "silent",
+            state: "current",
+            relativePath: "xlsx-run3/IA Data Collection.xlsx",
+            updatedAt: now,
+          },
+          {
+            _id: "here",
+            deviceId: "live",
+            state: "current",
+            relativePath: "xlsx-run3/IA Data Collection.xlsx",
+            updatedAt: now - 10,
+          },
+        ],
+        liveId,
+        "ghost",
+      )?._id,
+    ).toBe("here");
+  });
+
+  it("does not retarget onto a different relative path", () => {
+    expect(
+      chooseLiveLocalReplica(
+        [
+          {
+            _id: "ghost",
+            deviceId: "silent",
+            state: "current",
+            relativePath: "xlsx-run3/IA Data Collection.xlsx",
+          },
+          {
+            _id: "physics",
+            deviceId: "live",
+            state: "current",
+            relativePath: "Physics/IA Data Collection.xlsx",
+          },
+        ],
+        "live",
+        "ghost",
+      )?._id,
+    ).toBeUndefined();
+  });
+
+  it("refuses to queue when no Bridge has heartbeated recently", () => {
+    expect(
+      chooseLiveBridgeDeviceId(
+        [{ _id: "silent", state: "revoked", lastSeenAt: 1 }],
+        1_000_000,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("still selects the newest active device after a long Convex gap", () => {
+    expect(
+      chooseLiveBridgeDeviceId(
+        [
+          { _id: "ghost", state: "active", lastSeenAt: 1 },
+          { _id: "live", state: "active", lastSeenAt: 50_000 },
+        ],
+        1_000_000,
+      ),
+    ).toBe("live");
   });
 });

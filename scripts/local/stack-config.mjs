@@ -3,6 +3,21 @@ const DEFAULT_PORT_STRIDE = 20;
 
 export const INSTANCE_SCHEMA_VERSION = 1;
 
+/** Services whose death must not take down Convex. */
+export const RESTARTABLE_SERVICE_LABELS = Object.freeze([
+  "Collaboration gateway",
+  "Next.js",
+]);
+
+/**
+ * Collaboration is a restart-safe peer (ARCHITECTURE-PLATFORM): rooms reload
+ * from Convex. Treating its exit as instance death makes gateway-kill recovery
+ * untestable and turns a realtime outage into a whole-school outage.
+ */
+export function isFatalServiceExit(label) {
+  return !RESTARTABLE_SERVICE_LABELS.includes(String(label ?? ""));
+}
+
 /** Local SQLite can take ~5 minutes to bind after a restart (P6.V1). */
 export const LOCAL_CONVEX_BACKEND_STARTUP_TIMEOUT_SECS = 900;
 

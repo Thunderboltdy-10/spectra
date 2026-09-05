@@ -15,6 +15,7 @@ import { workYjsAdapter } from "./registry";
 import { workMeta } from "./shared";
 import { workYjsOrigins } from "./origins";
 import type { WorkActorIdentity, WorkYjsAdapter } from "./contracts";
+import { describeSheetsCellRegion } from "../../../artifacts/registry";
 import {
   applySheetsCellProjection,
   planSheetsCellProjection,
@@ -85,6 +86,17 @@ export class NativeArtifactYjsModel {
   }
 
   getSnapshot = () => this.snapshot;
+
+  /**
+   * Native document/code bodies are written straight into Yjs. The coalesced
+   * snapshot is a render/index optimization, not the promotion source. Flush
+   * before metadata-only save or Bridge recovery so materialize sees the live
+   * fragment rather than the last projected echo.
+   */
+  flushSnapshot() {
+    this.rebuildSnapshotImmediately();
+    return this.snapshot;
+  }
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -252,7 +264,11 @@ export class NativeArtifactYjsModel {
   }
 
   descriptor(regionId: string): StoredArtifactRegionDescriptor | null {
-    const region = this.regionsById.get(regionId);
+    const region =
+      this.regionsById.get(regionId) ??
+      (this.typeKey === "sheets" && this.snapshot.value
+        ? describeSheetsCellRegion(this.snapshot.value.content, regionId)
+        : undefined);
     return region
       ? {
           regionId: region.regionId,
@@ -301,7 +317,10 @@ export class NativeArtifactYjsModel {
         ? [{ regionId: "metadata:tags", overlapDomains: ["metadata:tags"] }]
         : []),
     ];
-    if (!claims.length) return { applied: true as const, claims: [] };
+    if (!claims.length) {
+      this.rebuildSnapshotImmediately();
+      return { applied: true as const, claims: [] };
+    }
     const result = await controller.editMany(claims, () =>
       this.writeMetadata(value),
     );

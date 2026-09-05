@@ -4,6 +4,7 @@ import type {
   XlsxProjection,
   XlsxSheetProjection,
 } from "./projection-contracts";
+import { sheetFormatsEquivalent } from "./office-content";
 import { mergeThreeWay, type MergeConflict } from "./three-way-merge";
 
 export type NativeConflictPreview = {
@@ -83,6 +84,20 @@ function cellId(sheetId: string, ref: string) {
   return `${sheetId}:${ref.toUpperCase()}`;
 }
 
+function xlsxCellsEquivalent(
+  left: XlsxSheetProjection["cells"][number] | undefined,
+  right: XlsxSheetProjection["cells"][number] | undefined,
+) {
+  if (!left || !right) return left === right;
+  return (
+    left.ref === right.ref &&
+    equal(left.value, right.value) &&
+    (left.formula ?? "") === (right.formula ?? "") &&
+    left.formulaSupport === right.formulaSupport &&
+    sheetFormatsEquivalent(left.format, right.format)
+  );
+}
+
 export function xlsxChangedRegions(before: XlsxProjection, after: XlsxProjection) {
   const regions: string[] = [];
   const priorSheets = new Map(before.sheets.map((sheet) => [sheet.id, sheet]));
@@ -100,7 +115,7 @@ export function xlsxChangedRegions(before: XlsxProjection, after: XlsxProjection
       const regionId = cellId(sheet.id, cell.ref);
       const previous = priorCells.get(regionId);
       priorCells.delete(regionId);
-      if (!equal(previous, cell)) regions.push(regionId);
+      if (!xlsxCellsEquivalent(previous, cell)) regions.push(regionId);
     }
     regions.push(...priorCells.keys());
   }

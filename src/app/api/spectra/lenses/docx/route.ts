@@ -20,7 +20,7 @@ import {
   uploadNativePayload,
 } from "@/features/spectra/lenses/native-payload-server";
 import {
-  hasUnreconciledExternalRevision,
+  shouldActivateExternalNativeRevision,
   type RecentNativeOperation,
 } from "@/features/spectra/lenses/native-reconciliation";
 import { mergeThreeWay, type MergeConflict } from "@/features/spectra/lenses/three-way-merge";
@@ -223,6 +223,14 @@ async function materializeDocxArtifactAttempt(
   } catch (error) {
     if (attempt === 0 && error instanceof Error && error.message.includes("MATERIALIZATION_BASE_STALE"))
       return materializeDocxArtifactAttempt(workId, content, attempt + 1, options);
+    if (error instanceof Error && error.message.includes("LOCAL_REPLICA_UNAVAILABLE")) {
+      return {
+        state: "cloud_saved" as const,
+        hash,
+        status:
+          "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
+      };
+    }
     throw error;
   }
   return {
@@ -335,13 +343,11 @@ export async function POST(request: Request) {
           "replicas:forWork",
           { workId },
         );
-        const externalRevision = hasUnreconciledExternalRevision(
-          workTruth.recentOperations,
-          local.truth.hash,
-        );
-        const externalNeedsActivation = Boolean(
-          local.truth.hash !== truth.hash || externalRevision,
-        );
+        const externalNeedsActivation = shouldActivateExternalNativeRevision({
+          operations: workTruth.recentOperations,
+          localHash: local.truth.hash,
+          cloudHash: truth.hash,
+        });
         if (externalNeedsActivation) {
           const [artifact, externalOpened] = await Promise.all([
             convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>(

@@ -79,6 +79,7 @@ import {
   TextField,
 } from "@/features/spectra/administration/shared";
 import { describeFailure } from "@/components/ui/truthful-state";
+import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 
 const MEMBER_ROLE_OPTIONS = [
   { value: "student", label: "Student" },
@@ -630,7 +631,9 @@ export function SchoolAdminShell() {
         return result;
       } catch (nextError) {
         toast.error(
-          nextError instanceof Error ? nextError.message : "Action failed.",
+          humanizePublicFailure(
+            nextError instanceof Error ? nextError.message : "Action failed.",
+          ),
         );
         throw nextError;
       } finally {

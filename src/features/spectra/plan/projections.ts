@@ -734,6 +734,7 @@ export function planFromDelimited(
       referenceIds: [],
       sourceRefs: [],
       calendarBlockIds: [],
+      reminders: [],
       checklist: [],
       order,
       ...(Number.isFinite(dueAt) ? { dueAt } : {}),

@@ -117,9 +117,10 @@ describe("Spectra package", () => {
       /importedContent = portable\?\.content \?\? fallback\.content/,
     );
     expect(shell).toContain("projectLibraryImportContent(file, blueprintKey)");
+    expect(shell).toContain("importLibraryResourceFile");
   });
 
-  it("projects plain text and PDF library imports instead of a blank default", async () => {
+  it("projects plain text library imports; PDF projection helper remains available", async () => {
     const plain = documentContentFromImportedPlainText(
       "First paragraph.\n\nSecond paragraph with enough text.",
     );

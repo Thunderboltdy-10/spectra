@@ -5,6 +5,7 @@ import { currentTimeMs, uniqueToken } from "@/lib/unique-token";
 import {
   AlertCircle,
   CalendarClock,
+  Clock3,
   Check,
   Download,
   FileSpreadsheet,
@@ -124,6 +125,7 @@ export function PlanStudio({
     action: PlanBulkAction;
   }>();
   const [draft, setDraft] = useState("");
+  const [reminderDraft, setReminderDraft] = useState("");
   const [notice, setNotice] = useState<string>();
   const [problem, setProblem] = useState<string>();
   const importRef = useRef<HTMLInputElement>(null);
@@ -268,6 +270,7 @@ export function PlanStudio({
           referenceIds: [],
           sourceRefs: [],
           calendarBlockIds: [],
+          reminders: [],
           checklist: [],
           order,
           ...(options?.sectionId ? { sectionId: options.sectionId } : {}),
@@ -1329,6 +1332,72 @@ export function PlanStudio({
               })}
             </ul>
           ) : null}
+          <div className="spectra-plan-detail-reminders">
+            <h3 className="mb-2 text-caption font-semibold text-[var(--text-secondary)]">
+              Reminders
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {openTask.reminders.map((reminder) => (
+                <button
+                  key={reminder}
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() =>
+                    patchTask(openTask.id, {
+                      reminders: openTask.reminders.filter(
+                        (item) => item !== reminder,
+                      ),
+                    })
+                  }
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro text-[var(--text-secondary)]"
+                  title="Remove reminder"
+                >
+                  <Clock3 className="h-3 w-3" />
+                  {reminder}
+                  <X className="h-3 w-3" />
+                </button>
+              ))}
+              {!readOnly ? (
+                <div className="flex h-8 items-center gap-1 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
+                  <input
+                    value={reminderDraft}
+                    onChange={(event) => setReminderDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && reminderDraft.trim()) {
+                        event.preventDefault();
+                        patchTask(openTask.id, {
+                          reminders: [
+                            ...openTask.reminders,
+                            reminderDraft.trim(),
+                          ],
+                        });
+                        setReminderDraft("");
+                      }
+                    }}
+                    className="w-28 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                    placeholder="e.g. 1 day before"
+                    aria-label="Reminder"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!reminderDraft.trim()) return;
+                      patchTask(openTask.id, {
+                        reminders: [
+                          ...openTask.reminders,
+                          reminderDraft.trim(),
+                        ],
+                      });
+                      setReminderDraft("");
+                    }}
+                    aria-label="Add reminder"
+                  >
+                    <Plus className="h-3 w-3 text-[var(--text-tertiary)]" />
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
           <div className="spectra-plan-checklist">
             <strong>Checklist</strong>
             {openTask.checklist.map((item) => (

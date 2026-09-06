@@ -54,6 +54,7 @@ import {
   createPresentationSlide,
   normalizePresentationContent,
   presentationObjectText,
+  presentationSlideLabel,
   producePresentationContent,
   withPresentationObjectText,
   type PresentationContent,
@@ -2361,11 +2362,18 @@ export function PresentationStudio({
   }
   function updateText(objectId: string, value: string) {
     mutateLocal((draft) => {
-      const object = draft.slides[activeSlideIndex]!.objects.find(
+      const slide = draft.slides[activeSlideIndex]!;
+      const object = slide.objects.find(
         (candidate) => candidate.id === objectId,
       );
-      if (object)
-        Object.assign(object, withPresentationObjectText(object, value));
+      if (!object) return;
+      Object.assign(object, withPresentationObjectText(object, value));
+      // Keep the slides rail label aligned with the text on the canvas.
+      const firstText = slide.objects.find((candidate) => candidate.type === "text");
+      if (firstText && firstText.id === objectId) {
+        const next = value.trim();
+        if (next) slide.title = next.slice(0, 300);
+      }
     });
   }
   function beginText(objectId: string) {
@@ -2822,7 +2830,7 @@ export function PresentationStudio({
   }
   const slideItems = deck.slides.map((slide, index) => ({
     value: slide.id,
-    label: slide.title || `Slide ${index + 1}`,
+    label: presentationSlideLabel(slide, index),
   }));
   /**
    * Find is a filter on the rail, not a modal. The query narrows the previews to
@@ -3589,8 +3597,10 @@ export function PresentationStudio({
                 }
                 items={railSlides.map((slide) => ({
                   id: slide.id,
-                  title:
-                    slide.title || `Slide ${deck.slides.indexOf(slide) + 1}`,
+                  title: presentationSlideLabel(
+                    slide,
+                    deck.slides.indexOf(slide),
+                  ),
                   subtitle: [
                     slide.hidden ? "Hidden in Present" : undefined,
                     slide.speakerNotes ? "Has speaker notes" : undefined,
@@ -4602,7 +4612,7 @@ export function PresentationStudio({
                     />
                   </div>
                   <strong className="truncate text-caption font-semibold text-[var(--text-primary)]">
-                    {index + 1} · {slide.title || `Slide ${index + 1}`}
+                    {index + 1} · {presentationSlideLabel(slide, index)}
                   </strong>
                 </button>
                 <label className="grid min-w-0 gap-1.5">
@@ -4681,7 +4691,7 @@ export function PresentationStudio({
                   return (
                     <li key={slide.id}>
                       <span>{index + 1}</span>
-                      <strong>{slide.title || `Slide ${index + 1}`}</strong>
+                      <strong>{presentationSlideLabel(slide, index)}</strong>
                       <small data-over={duration > target * 1.25 || undefined}>
                         {durationLabel(duration)}
                       </small>

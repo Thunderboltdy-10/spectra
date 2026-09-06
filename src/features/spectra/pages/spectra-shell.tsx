@@ -155,7 +155,11 @@ import {
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { openSpectraPackage } from "../lenses/spectra-package";
-import { projectLibraryImportContent } from "../organization/library-import";
+import {
+  classifyLibraryImport,
+  importLibraryResourceFile,
+  projectLibraryImportContent,
+} from "../organization/library-import";
 import { getWorkDefinition } from "../work/registry";
 import {
   allocateWorkbenchPanes,
@@ -3478,41 +3482,51 @@ export function SpectraShell({
   }
 
   /**
-   * Bring a file in as work, keeping the original bytes.
+   * Bring a file into the Library, keeping the original bytes.
    *
-   * The import always begins by preserving the file exactly as uploaded, before
-   * anything is parsed out of it: a lossy read of a .pptx is a guess, and a
-   * guess the reader cannot compare against the original is worse than no
-   * import at all. The parsed content is a projection of that original, and the
-   * original stays retrievable through the work's version history.
+   * Ordinary files (PDFs, images, unknown types) land as resource citizens
+   * (CANON D29) with a cloud payload — not hollow Document JSON. Native work
+   * types still project into editable studios, and the import always preserves
+   * the uploaded bytes before anything is parsed out of them.
    */
   async function importLibraryFile(file: File) {
-    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const classification = classifyLibraryImport(file);
     let importJobId: string | null = null;
     setBusyKey("library:import");
     try {
+      const titleHint = file.name.replace(/\.[^.]+$/, "") || "Untitled file";
+      // CANON D29: ordinary files land as Library resource citizens with bytes.
+      if (classification.kind === "resource") {
+        const imported = await importLibraryResourceFile(file, {
+          workspaceId: selectedWorkspaceId || undefined,
+          title: titleHint,
+        });
+        const refreshed = await loadOverview(selectedWorkspaceId, true);
+        const resource = refreshed?.artifacts.find(
+          (work) => work._id === imported.artifactId,
+        );
+        if (resource) openArtifactPanel(resource);
+        toast.success(
+          selectedWorkspaceId
+            ? `${titleHint} imported as a file in this workspace.`
+            : `${titleHint} imported as a Library file.`,
+        );
+        return;
+      }
       const originalBuffer = await file.arrayBuffer();
       const portable =
-        extension === "spectra-pkg"
+        classification.kind === "portable"
           ? openSpectraPackage(new Uint8Array(originalBuffer))
           : null;
       const blueprintKey: ArtifactTypeKey = portable
         ? portable.manifest.artifactType
-        : ["ppt", "pptx"].includes(extension)
-          ? "presentation"
-          : ["xls", "xlsx", "csv", "tsv"].includes(extension)
-            ? "sheets"
-            : ["js", "jsx", "ts", "tsx", "py", "html", "css", "json"].includes(
-                  extension,
-                )
-              ? "code"
-              : "document";
+        : classification.blueprintKey ?? "document";
       const fallback = createDefaultArtifactPayload(blueprintKey);
       const importedContent =
         portable?.content ??
         (await projectLibraryImportContent(file, blueprintKey)) ??
         fallback.content;
-      const title = file.name.replace(/\.[^.]+$/, "") || fallback.title;
+      const title = titleHint || fallback.title;
       const created = await postSpectra<{ artifactId: string }>({
         action: "createArtifact",
         blueprintKey,
@@ -3530,7 +3544,7 @@ export function SpectraShell({
       const beginning = await beginArtifactImportOriginal({
         artifactId: created.artifactId,
         typeKey: blueprintKey,
-        format: extension || file.type || "binary",
+        format: classification.nativeFormat || file.type || "binary",
         name: file.name,
         mimeType: file.type || "application/octet-stream",
         bytes: file.size,

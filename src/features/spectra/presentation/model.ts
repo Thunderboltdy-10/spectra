@@ -229,6 +229,25 @@ export function presentationObjectText(object: PresentationObject) {
   return text(content.text, text(content.label, text(content.title)));
 }
 
+const GENERIC_SLIDE_LABEL =
+  /^(?:slide \d+|title|subtitle|untitled(?: presentation)?|add a clear idea|add the supporting idea|new slide|key idea \d+)$/i;
+
+/** Rail / outline label that matches what people see on the canvas. */
+export function presentationSlideLabel(
+  slide: PresentationSlide,
+  index: number,
+): string {
+  const titled = slide.title.trim();
+  if (titled && !GENERIC_SLIDE_LABEL.test(titled)) return titled.slice(0, 120);
+  for (const object of slide.objects) {
+    if (object.type !== "text") continue;
+    const value = presentationObjectText(object).trim();
+    if (value && !GENERIC_SLIDE_LABEL.test(value)) return value.slice(0, 120);
+  }
+  return `Slide ${index + 1}`;
+}
+
+
 export function withPresentationObjectText(
   object: PresentationObject,
   value: string,

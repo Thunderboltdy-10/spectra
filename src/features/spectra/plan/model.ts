@@ -16,6 +16,8 @@ export type PlanTask = {
   dueAt?: number;
   officialDeadlineRef?: string;
   calendarBlockIds: string[];
+  /** Human-readable reminder offsets, e.g. "1 day before". */
+  reminders: string[];
   checklist: Array<{ id: string; title: string; done: boolean }>;
   order: number;
 };
@@ -129,6 +131,7 @@ export function normalizePlanContent(value: unknown): PlanContent {
           dueAt: row.dueAt,
           referenceIds: row.linkedArtifactIds,
           sourceRefs: row.sourceRefs,
+          reminders: row.reminders,
           checklist: row.subtasks,
         },
         0,
@@ -170,6 +173,7 @@ function normalizePlanTask(value: unknown, index: number): PlanTask {
         ? row.officialDeadlineRef
         : undefined,
     calendarBlockIds: strings(row.calendarBlockIds),
+    reminders: strings(row.reminders),
     checklist: Array.isArray(row.checklist)
       ? row.checklist.map((candidate, checklistIndex) => {
           const item = object(candidate);

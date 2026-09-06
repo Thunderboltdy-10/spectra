@@ -233,6 +233,35 @@ function _SummaryMetric({
   );
 }
 
+function integrationStatusLabel(status: string | undefined) {
+  switch (status) {
+    case "connected":
+      return "Connected";
+    case "validating":
+      return "Validating capabilities";
+    case "draft":
+      return "Draft — not connected yet";
+    case "degraded":
+      return "Connected with gaps";
+    case "blocked":
+      return "Blocked";
+    case "revoked":
+      return "Disconnected";
+    default:
+      return status ? status.replaceAll("_", " ") : "Not connected";
+  }
+}
+
+function integrationStatusTone(
+  status: string | undefined,
+): "good" | "warning" | "danger" | "neutral" | "blue" {
+  if (status === "connected") return "good";
+  if (status === "validating") return "blue";
+  if (status === "degraded") return "warning";
+  if (status === "blocked" || status === "revoked") return "danger";
+  return "neutral";
+}
+
 function SyncStatus({ run }: { run: SpectraManageBacSyncRun }) {
   const state =
     run.status === "completed"
@@ -617,7 +646,7 @@ export function ManageBacIntegrationShell() {
               actions={
                 <>
                   <button type="button" onClick={() => void refresh()} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Refresh connection data" title="Refresh connection data"><RefreshCw size={13} /></button>
-                  {integration ? <button type="button" disabled={Boolean(busy)} onClick={() => void runAction("sync", () => syncSpectraManageBac())} className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3 text-micro font-medium text-[var(--bg-primary)] transition hover:opacity-90 disabled:opacity-60"><RefreshCw size={13} className={busy === "sync" ? "animate-spin" : ""} />Sync now</button> : null}
+                  {integration ? <button type="button" disabled={Boolean(busy) || integration.status === "validating" || integration.status === "draft"} onClick={() => void runAction("sync", () => syncSpectraManageBac())} className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3 text-micro font-medium text-[var(--bg-primary)] transition hover:opacity-90 disabled:opacity-60" title={integration.status === "validating" ? "Sync waits until capability validation finishes." : integration.status === "draft" ? "Connect ManageBac before syncing." : "Sync now"}><RefreshCw size={13} className={busy === "sync" ? "animate-spin" : ""} />{busy === "sync" ? "Syncing…" : integration.status === "validating" ? "Validating…" : "Sync now"}</button> : null}
                   {overview?.admin ? <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="ManageBac settings" title="ManageBac settings"><Settings2 size={13} /></button> : null}
                   {!contextOpen ? <AuxiliaryRailTrigger label="ManageBac context" onOpen={() => setContextOpen(true)} /> : null}
                 </>
@@ -743,10 +772,10 @@ export function ManageBacIntegrationShell() {
                   <section className="min-w-0">
                     <p className="text-micro font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Connection</p>
                     <div className="mt-3 flex items-start gap-3">
-                      <span className={cn("mt-2 size-2.5 shrink-0 rounded-full ring-4 ring-current/10", integration.status === "connected" ? "text-emerald-600 bg-emerald-600" : "text-amber-500 bg-amber-500")} />
+                      <span className={cn("mt-2 size-2.5 shrink-0 rounded-full ring-4 ring-current/10", integration.status === "connected" ? "text-emerald-600 bg-emerald-600" : integration.status === "validating" ? "text-sky-500 bg-sky-500" : "text-amber-500 bg-amber-500")} />
                       <div>
-                        <h2 className="font-display text-metric font-semibold tracking-[-0.02em]">{integration.status === "connected" ? "ManageBac is connected" : "The connection needs attention"}</h2>
-                        <p className="mt-2 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">{integration.status === "connected" ? "Verified school records are available to Spectra." : "The last synchronization completed with partial coverage. Existing verified records remain available."}</p>
+                        <h2 className="font-display text-title font-semibold tracking-[-0.02em]">{integration.status === "connected" ? "ManageBac is connected" : integration.status === "validating" ? "Validating ManageBac capabilities" : integration.status === "draft" ? "ManageBac is not connected yet" : "The connection needs attention"}</h2>
+                        <p className="mt-2 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">{integration.status === "connected" ? "Verified school records are available to Spectra." : integration.status === "validating" ? "Spectra is checking the tenant reference and readable capabilities. Sync stays paused until validation finishes." : integration.status === "draft" ? "Finish connecting with a verified tenant token and capability manifest before syncing." : "The last synchronization completed with partial coverage. Existing verified records remain available."}</p>
                       </div>
                     </div>
                     <p className="ml-5 mt-4 text-micro text-[var(--text-tertiary)]">{data?.school?.name ?? "Your school"} · last synchronized {integration.lastSyncAt ? relative(integration.lastSyncAt) : "never"} · {data?.conflicts.length ?? 0} conflicts</p>
@@ -888,12 +917,8 @@ export function ManageBacIntegrationShell() {
                       : "Tenant-verified API"}
                   </span>
                 </div>
-                <StatusPill
-                  state={
-                    integration?.status === "connected" ? "good" : "warning"
-                  }
-                >
-                  {integration?.status ?? "Not connected"}
+                <StatusPill state={integrationStatusTone(integration?.status)}>
+                  {integrationStatusLabel(integration?.status)}
                 </StatusPill>
               </div>
             </RightCard>
@@ -916,7 +941,7 @@ export function ManageBacIntegrationShell() {
                 label="Sync frequency"
                 value={
                   integration
-                    ? `Every ${integration.syncPolicy.frequencyMinutes} min`
+                    ? `Every ${integration.syncPolicy.frequencyMinutes} minutes`
                     : "Not configured"
                 }
               />
@@ -973,14 +998,6 @@ export function ManageBacIntegrationShell() {
               </button>
             </RightCard>
             <RightCard title="Quick actions">
-              <QuickAction
-                icon={RefreshCw}
-                label="Sync now"
-                onClick={() =>
-                  void runAction("sync", () => syncSpectraManageBac())
-                }
-                disabled={!integration || Boolean(busy)}
-              />
               <QuickAction
                 icon={AlertCircle}
                 label="Review conflicts"
@@ -1472,9 +1489,10 @@ function DetailRow({
       </span>
       <span
         className={cn(
-          "shrink-0 text-micro text-[var(--text-secondary)]",
+          "max-w-[9.5rem] shrink-0 truncate text-right text-micro font-medium tabular-nums text-[var(--text-tertiary)]",
           good && "text-[var(--accent-mint)]",
         )}
+        title={value}
       >
         {value}
       </span>

@@ -5,6 +5,8 @@ import {
   reconciliationSnapshotKey,
   richTextValuesEquivalent,
   shouldEmitRichTextChange,
+  shouldRejectHollowStudioIncoming,
+  studioContentLooksHollow,
 } from "../components/artifact-studio-value-utils";
 import {
   createWhiteboardNode,
@@ -104,6 +106,40 @@ describe("remote studio incoming decisions", () => {
         isCollaborative: false,
       }),
     ).toBe("conflict");
+  });
+
+
+  it("ignores hollow incoming snapshots that would wipe populated import text", () => {
+    const populated = {
+      blocks: [{ id: "b1", type: "paragraph", text: "QA Resource Citizen body" }],
+    };
+    const hollow = { blocks: [{ id: "intro", type: "paragraph", text: "" }] };
+    expect(studioContentLooksHollow(populated)).toBe(false);
+    expect(studioContentLooksHollow(hollow)).toBe(true);
+    expect(
+      shouldRejectHollowStudioIncoming({
+        currentContent: populated,
+        incomingContent: hollow,
+      }),
+    ).toBe(true);
+    expect(
+      decideRemoteStudioIncoming({
+        ...base,
+        dirty: true,
+        userHasEdited: false,
+        currentContent: populated,
+        incomingContent: hollow,
+      }),
+    ).toBe("ignore");
+    expect(
+      decideRemoteStudioIncoming({
+        ...base,
+        dirty: false,
+        userHasEdited: false,
+        currentContent: populated,
+        incomingContent: hollow,
+      }),
+    ).toBe("ignore");
   });
 
   it("ignores same-key or dismissed incoming snapshots", () => {

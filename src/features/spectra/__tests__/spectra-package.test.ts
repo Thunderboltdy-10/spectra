@@ -5,7 +5,14 @@ import {
   openSpectraPackage,
 } from "../lenses/spectra-package";
 import { validateArtifactContent } from "../artifacts/registry";
-import { LIBRARY_IMPORT_ACCEPT, documentContentFromImportedHtml } from "../organization/library-import";
+import {
+  LIBRARY_IMPORT_ACCEPT,
+  documentContentFromImportedHtml,
+  documentContentFromImportedPlainText,
+  projectLibraryImportContent,
+} from "../organization/library-import";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const content = {
   settings: { shuffle: true, revealMode: "click" as const },
@@ -101,8 +108,6 @@ describe("Spectra package", () => {
   });
 
   it("asks Library import to project Office files instead of a blank default", async () => {
-    const { readFileSync } = await import("node:fs");
-    const { resolve } = await import("node:path");
     const shell = readFileSync(
       resolve(__dirname, "../pages/spectra-shell.tsx"),
       "utf8",
@@ -111,7 +116,33 @@ describe("Spectra package", () => {
     expect(shell).not.toMatch(
       /importedContent = portable\?\.content \?\? fallback\.content/,
     );
+    expect(shell).toContain("projectLibraryImportContent(file, blueprintKey)");
   });
+
+  it("projects plain text and PDF library imports instead of a blank default", async () => {
+    const plain = documentContentFromImportedPlainText(
+      "First paragraph.\n\nSecond paragraph with enough text.",
+    );
+    expect(plain.blocks.map((block) => block.text)).toEqual([
+      "First paragraph.",
+      "Second paragraph with enough text.",
+    ]);
+
+    const pdfBytes = readFileSync(
+      resolve("/workspace/demos/fixtures/qa-resource-citizen.pdf"),
+    );
+    const file = new File([pdfBytes], "qa-resource-citizen.pdf", {
+      type: "application/pdf",
+    });
+    const projected = await projectLibraryImportContent(file, "document");
+    expect(projected).toBeTruthy();
+    const blocks = (projected as { blocks: Array<{ text: string }> }).blocks;
+    expect(blocks.some((block) => /QA Resource Citizen/i.test(block.text))).toBe(
+      true,
+    );
+  });
+
+
 
   it("refuses traversal, unexpected entries, and invalid artifact content", () => {
     const manifest = JSON.stringify({

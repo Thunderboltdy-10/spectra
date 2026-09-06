@@ -211,6 +211,7 @@ import {
   rebaseCollaborativeSnapshot,
   reconciliationSnapshotKey,
   shouldEmitRichTextChange,
+  shouldRejectHollowStudioIncoming,
   tagsFromDraft,
 } from "./artifact-studio-value-utils";
 import {
@@ -4588,6 +4589,8 @@ function ArtifactStudioEditor({
         isLocalSyncKey: localSyncKeysRef.current.has(incomingKey),
         isCollaborative: isCollaborativeArtifact,
         nativeOfficeDocument,
+        currentContent: currentSnapshotRef.current.content,
+        incomingContent: incomingSnapshot.content,
       });
       if (decision === "ignore") {
         // Native Office bodies already live on the bound Yjs fragment. A Yjs
@@ -4664,6 +4667,17 @@ function ArtifactStudioEditor({
           reconcilingRemoteRef.current = false;
         });
       } else setRemoteConflict(incomingSnapshot);
+      return;
+    }
+    // A hollow Convex/Yjs bootstrap must not erase an already-populated studio
+    // body (Library import PDF/DOCX text that appeared, then vanished).
+    if (
+      !switchedArtifacts &&
+      shouldRejectHollowStudioIncoming({
+        currentContent: currentSnapshotRef.current.content,
+        incomingContent: incomingSnapshot.content,
+      })
+    ) {
       return;
     }
     activeArtifactIdRef.current = artifact._id;

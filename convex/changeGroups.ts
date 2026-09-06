@@ -2,7 +2,11 @@ import { internalMutation, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
-import { requireArtifactCapability } from "./spectraShared";
+import {
+  buildArtifactTextIndex,
+  isHollowDefaultContent,
+  requireArtifactCapability,
+} from "./spectraShared";
 import { getAuthenticatedActor } from "./identityShared";
 import {
   loadVersionAfter,
@@ -11,6 +15,18 @@ import {
 } from "./artifactSnapshots";
 
 export const HUMAN_CHANGE_IDLE_MS = 45_000;
+
+function preferImportContent(
+  blueprintKey: string,
+  imported: unknown,
+  live: unknown,
+) {
+  if (imported === undefined) return live;
+  if (!isHollowDefaultContent(blueprintKey, imported)) return imported;
+  if (!isHollowDefaultContent(blueprintKey, live)) return live;
+  return imported;
+}
+
 
 async function retainLiveStateAfterRecoveredImport(
   ctx: MutationCtx,
@@ -93,6 +109,28 @@ async function commitImportJob(
       group.actorAccountId === actorAccountId && group.source === "human",
   );
   for (const group of mine) {
+    // TipTap/Yjs hydrate can open a human change group on a hollow shell while
+    // Library import already projected real content onto the job. Committing
+    // that shell as the import version discards the projection and the studio
+    // then reloads empty — the "text appeared, then vanished" failure.
+    if (job.importedContent !== undefined) {
+      const finalSnapshot =
+        group.finalSnapshot &&
+        typeof group.finalSnapshot === "object" &&
+        !Array.isArray(group.finalSnapshot)
+          ? (group.finalSnapshot as { content?: unknown })
+          : null;
+      if (
+        !isHollowDefaultContent(artifact.blueprintKey, job.importedContent) &&
+        (finalSnapshot?.content === undefined ||
+          isHollowDefaultContent(
+            artifact.blueprintKey,
+            finalSnapshot.content,
+          ))
+      ) {
+        continue;
+      }
+    }
     const committed = await commitChangeGroup(ctx, group._id, {
       source: "import",
       summary,
@@ -114,10 +152,15 @@ async function commitImportJob(
   }
   const refreshed = await ctx.db.get(artifact._id);
   if (!refreshed) throw new Error("ARTIFACT_NOT_FOUND");
+  const importContent = preferImportContent(
+    refreshed.blueprintKey,
+    job.importedContent,
+    refreshed.content,
+  );
   const after = {
     title: refreshed.title,
     summary: refreshed.summary,
-    content: job.importedContent ?? refreshed.content,
+    content: importContent,
     tags: refreshed.tags,
   };
   const parent = refreshed.currentVersionId
@@ -156,7 +199,22 @@ async function commitImportJob(
     },
     createdAt: now,
   });
-  await ctx.db.patch(refreshed._id, { currentVersionId: versionId });
+  await ctx.db.patch(refreshed._id, {
+    currentVersionId: versionId,
+    ...(job.importedContent !== undefined &&
+    !isHollowDefaultContent(refreshed.blueprintKey, importContent)
+      ? {
+          content: importContent,
+          textIndex: buildArtifactTextIndex({
+            title: refreshed.title,
+            summary: refreshed.summary,
+            content: importContent,
+            tags: refreshed.tags,
+          }),
+          updatedAt: now,
+        }
+      : {}),
+  });
   await ctx.db.patch(job._id, {
     artifactVersionId: versionId,
     importedContent: undefined,

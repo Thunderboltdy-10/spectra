@@ -57,6 +57,47 @@ export function shouldEmitRichTextChange(input: {
   return !richTextValuesEquivalent(input.committedValue, input.nextHtml);
 }
 
+
+/**
+ * Lightweight hollow check for studio reconciliation. Mirrors the document
+ * half of Convex `isHollowDefaultContent` so an empty Yjs/Convex bootstrap
+ * cannot wipe a just-imported body.
+ */
+export function studioContentLooksHollow(content: unknown) {
+  if (!content || typeof content !== "object" || Array.isArray(content))
+    return true;
+  const record = content as Record<string, unknown>;
+  const blocks = Array.isArray(record.blocks) ? record.blocks : null;
+  if (blocks) {
+    return !blocks.some((block) => {
+      if (!block || typeof block !== "object" || Array.isArray(block))
+        return false;
+      const row = block as Record<string, unknown>;
+      return (
+        (typeof row.text === "string" && row.text.trim().length >= 8) ||
+        (typeof row.latex === "string" && row.latex.trim().length >= 4)
+      );
+    });
+  }
+  const slides = Array.isArray(record.slides) ? record.slides : null;
+  if (slides) return slides.length === 0;
+  const sheets = Array.isArray(record.sheets) ? record.sheets : null;
+  if (sheets) return sheets.length === 0;
+  const nodes = Array.isArray(record.nodes) ? record.nodes : null;
+  if (nodes) return nodes.length === 0;
+  return false;
+}
+
+export function shouldRejectHollowStudioIncoming(input: {
+  currentContent: unknown;
+  incomingContent: unknown;
+}) {
+  return (
+    !studioContentLooksHollow(input.currentContent) &&
+    studioContentLooksHollow(input.incomingContent)
+  );
+}
+
 export type RemoteStudioIncomingDecision =
   | "ignore"
   | "accept-local-sync"
@@ -78,7 +119,19 @@ export function decideRemoteStudioIncoming(input: {
   isLocalSyncKey: boolean;
   isCollaborative: boolean;
   nativeOfficeDocument: boolean;
+  currentContent?: unknown;
+  incomingContent?: unknown;
 }): RemoteStudioIncomingDecision {
+  if (
+    input.currentContent !== undefined &&
+    input.incomingContent !== undefined &&
+    shouldRejectHollowStudioIncoming({
+      currentContent: input.currentContent,
+      incomingContent: input.incomingContent,
+    })
+  ) {
+    return "ignore";
+  }
   if (!input.dirty) return "accept-bootstrap";
   if (
     input.incomingKey === input.baselineKey ||

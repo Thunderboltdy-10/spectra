@@ -8,6 +8,7 @@ import {
 } from "../artifacts/registry";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { WORK_TYPE_KEYS } from "../artifacts/types";
+import { createDefaultPresentationContent } from "../presentation/model";
 
 const defaultContent: Record<ArtifactTypeKey, unknown> = {
   document: {
@@ -146,10 +147,7 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
     ],
     events: [],
   },
-  presentation: {
-    theme: { id: "spectra-default" },
-    slides: [{ id: "slide-1", title: "Untitled presentation", objects: [] }],
-  },
+  presentation: createDefaultPresentationContent(),
   sheets: {
     workbook: { calculationMode: "automatic", locale: "en-US" },
     sheets: [

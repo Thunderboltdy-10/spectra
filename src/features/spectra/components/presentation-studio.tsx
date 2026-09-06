@@ -1689,7 +1689,10 @@ export function PresentationStudio({
         setRedoStack([]);
       }
       setGestureDeck(null);
-      onChange(next);
+      // Re-normalize so settings/speakerNotes/layout fields match the Yjs
+      // projection before onChange dirties the studio (same class of drift as
+      // whiteboard zOrder — otherwise first ack looks like a remote conflict).
+      onChange(normalizePresentationContent(next));
     },
     [deck, onChange, readOnly],
   );
@@ -1789,14 +1792,14 @@ export function PresentationStudio({
     if (!previous || readOnly) return;
     setUndoStack((stack) => stack.slice(0, -1));
     setRedoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
-    onChange(previous);
+    onChange(normalizePresentationContent(previous));
   }
   function redo() {
     const next = redoStack.at(-1);
     if (!next || readOnly) return;
     setRedoStack((stack) => stack.slice(0, -1));
     setUndoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
-    onChange(next);
+    onChange(normalizePresentationContent(next));
   }
   function addSlide() {
     const slide = createPresentationSlide(deck.slides.length + 1);
@@ -2352,7 +2355,7 @@ export function PresentationStudio({
     setUndoStack((stack) => [...stack.slice(-79), drag.snapshot]);
     setRedoStack([]);
     if (gestureDeckRef.current) {
-      onChange(gestureDeckRef.current);
+      onChange(normalizePresentationContent(gestureDeckRef.current));
       setGestureDeck(null);
     }
   }
@@ -2376,7 +2379,7 @@ export function PresentationStudio({
     setRedoStack([]);
     textOriginRef.current = undefined;
     if (gestureDeckRef.current) {
-      onChange(gestureDeckRef.current);
+      onChange(normalizePresentationContent(gestureDeckRef.current));
       setGestureDeck(null);
     }
   }
@@ -2536,7 +2539,7 @@ export function PresentationStudio({
       ];
       setUndoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
       setRedoStack([]);
-      onChange(next);
+      onChange(normalizePresentationContent(next));
       await completeArtifactImport({
         jobId,
         typeKey: "presentation",

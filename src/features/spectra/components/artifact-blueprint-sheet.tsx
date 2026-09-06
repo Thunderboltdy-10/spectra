@@ -42,6 +42,7 @@ import { requireBlueprint, requireArtifactTypeManifest } from "../artifacts/blue
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
+import { normalizePresentationContent } from "../presentation/model";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { SelectField } from "@/components/ui/select";
 
@@ -147,7 +148,9 @@ export function createDefaultArtifactPayload(blueprintKey: EditableBlueprintKey)
     content:
       blueprintKey === "whiteboard"
         ? normalizeWhiteboardContent(content)
-        : content,
+        : blueprintKey === "presentation"
+          ? normalizePresentationContent(content)
+          : content,
     tags: [],
   };
 }

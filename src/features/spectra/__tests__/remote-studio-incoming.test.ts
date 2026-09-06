@@ -11,6 +11,11 @@ import {
   normalizeWhiteboardContent,
   whiteboardNodeText,
 } from "../whiteboard/model";
+import {
+  createDefaultPresentationContent,
+  normalizePresentationContent,
+  producePresentationContent,
+} from "../presentation/model";
 import { workYjsAdapter } from "../work/models/yjs/registry";
 
 describe("rich text hydrate echoes", () => {
@@ -227,6 +232,95 @@ describe("whiteboard sticky reconcile stability", () => {
         userHasEdited: false,
         incomingKey: reconciliationSnapshotKey(incoming),
         baselineKey: reconciliationSnapshotKey(baseline),
+        dismissedRemoteKey: null,
+        isLocalSyncKey: false,
+        isCollaborative: true,
+        nativeOfficeDocument: false,
+      }),
+    ).toBe("accept-bootstrap");
+  });
+});
+
+describe("presentation default reconcile stability", () => {
+  it("keeps settings/speakerNotes on normalize so bootstrap hydrate matches Yjs", () => {
+    const sparse = {
+      theme: { id: "spectra-default" },
+      slides: [{ id: "slide-1", title: "Untitled presentation", objects: [] }],
+    };
+    const normalized = normalizePresentationContent(sparse);
+    expect(normalized.settings?.showSlideNumbers).toBe(true);
+    expect(normalized.slides[0]?.speakerNotes).toBe("");
+    const projected = workYjsAdapter("presentation").project(
+      workYjsAdapter("presentation").createDocument(sparse),
+    );
+    expect(projected).toEqual(normalized);
+  });
+
+  it("does not raise field-drift conflicts when a title edit echoes through Yjs", () => {
+    const baselineContent = createDefaultPresentationContent();
+    const localContent = producePresentationContent(baselineContent, (draft) => {
+      draft.slides[0]!.objects[0]!.content = { text: "Demo title" };
+    });
+    const projected = workYjsAdapter("presentation").project(
+      workYjsAdapter("presentation").createDocument(localContent),
+    ) as typeof localContent;
+    expect(projected).toEqual(normalizePresentationContent(localContent));
+
+    const baseline = {
+      title: "Deck",
+      summary: "",
+      tagDraft: "",
+      content: baselineContent,
+    };
+    const local = {
+      title: "Deck",
+      summary: "",
+      tagDraft: "",
+      content: localContent,
+    };
+    const incoming = {
+      title: "Deck",
+      summary: "",
+      tagDraft: "",
+      content: projected,
+    };
+    const rebased = rebaseCollaborativeSnapshot(baseline, local, incoming);
+    expect(rebased.conflicts).toEqual([]);
+    expect(
+      decideRemoteStudioIncoming({
+        dirty: true,
+        userHasEdited: true,
+        incomingKey: reconciliationSnapshotKey(incoming),
+        baselineKey: reconciliationSnapshotKey(baseline),
+        dismissedRemoteKey: null,
+        isLocalSyncKey: true,
+        isCollaborative: true,
+        nativeOfficeDocument: false,
+      }),
+    ).toBe("accept-local-sync");
+  });
+
+  it("accepts presentation bootstrap hydrate when dirty without a human edit", () => {
+    const sparse = {
+      theme: { id: "spectra-default" },
+      slides: [{ id: "slide-1", title: "Untitled presentation", objects: [] }],
+    };
+    expect(
+      decideRemoteStudioIncoming({
+        dirty: true,
+        userHasEdited: false,
+        incomingKey: reconciliationSnapshotKey({
+          title: "Deck",
+          summary: "",
+          tagDraft: "",
+          content: normalizePresentationContent(sparse),
+        }),
+        baselineKey: reconciliationSnapshotKey({
+          title: "Deck",
+          summary: "",
+          tagDraft: "",
+          content: sparse,
+        }),
         dismissedRemoteKey: null,
         isLocalSyncKey: false,
         isCollaborative: true,

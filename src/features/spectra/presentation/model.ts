@@ -737,3 +737,46 @@ export function normalizePresentationContent(
     ...(nativeBinding ? { nativeBinding } : {}),
   };
 }
+
+export function createDefaultPresentationContent(): PresentationContent {
+  // Layout presets ship with the product, so a brand-new deck opens on a title
+  // slide rather than an empty stage. Stable ids keep create → Yjs → reopen
+  // comparable and avoid false remote-conflict banners from bootstrap hydrate.
+  const titleObject: PresentationObject = {
+    id: "object-1",
+    type: "text",
+    x: 90,
+    y: 185.625,
+    width: 820,
+    height: 123.75,
+    rotation: 0,
+    readingOrder: 0,
+    content: { text: "Presentation title" },
+    style: {
+      fontSize: 48,
+      fontWeight: 700,
+      color: "var(--accent-mint)",
+      align: "center",
+    },
+  };
+  return normalizePresentationContent({
+    theme: { id: "spectra-default" },
+    slides: [
+      {
+        id: "slide-1",
+        title: "Untitled presentation",
+        layoutId: "title-only",
+        transition: { kind: "fade", durationMs: 350 },
+        speakerNotes: "",
+        objects: [titleObject],
+        accessibility: { readingOrder: [titleObject.id] },
+      },
+    ],
+    settings: {
+      aspectRatio: "16:9",
+      defaultTransition: "none",
+      showSlideNumbers: true,
+    },
+  });
+}
+

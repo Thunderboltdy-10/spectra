@@ -816,6 +816,10 @@ describe("Spectra run route", () => {
     expect(new Headers(request.headers).get("X-OpenRouter-Title")).toBe("Spectra AI Operation Engine");
     const completedCall = convexMutation.mock.calls.find(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed");
     expect(completedCall?.[1]).toMatchObject({ providerUsed: "OpenAI", modelUsed: "openai/gpt-5.6" });
+    const completedIdx = convexMutation.mock.calls.findIndex(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed");
+    const appendIdx = convexMutation.mock.calls.findIndex(([name, args]) => String(name).includes("spectraThreads:appendMessage") && (args as { role?: string }).role === "assistant");
+    expect(completedIdx).toBeGreaterThan(-1);
+    expect(appendIdx).toBeGreaterThan(completedIdx);
     expect(info.mock.calls.filter(([label]) => label === "[spectra.agent-loop]").map(([, entry]) => entry)).toEqual([
       { runId: "run-real", stage: "intake", status: "entered" },
       { runId: "run-real", stage: "plan", status: "entered" },

@@ -37,6 +37,7 @@ import { spectraBus } from "../events";
 import { cn } from "@/lib/utils";
 import { SelectField } from "@/components/ui/select";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
+import { isSettledAiRunStatus } from "../core";
 import { operationCounts, useRunLedger } from "../collaboration/run-ledger";
 import { ProgressTrace } from "./progress-trace";
 import {
@@ -2040,7 +2041,9 @@ export function ConversationSurface({
                           onRevise={onCardRevise}
                         />
                       ) : null}
-                      {trace?.artifacts.map((artifact) => (
+                      {trace &&
+                      isSettledAiRunStatus(trace.run.status) &&
+                      trace.artifacts.map((artifact) => (
                         <ArtifactResult
                           key={artifact._id}
                           artifact={artifact}

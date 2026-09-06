@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpectraPreferences } from "../settings/preference-store";
+import { describeFailure } from "@/components/ui/truthful-state";
 import {
   ClassShelfPicker,
   classShelfLoadState,
@@ -85,11 +86,13 @@ export function ClassShelfEditor({
       .then((result) => {
         if (!cancelled) apply(result);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
           setState({
             kind: "error",
-            message: "Check your connection, then try loading classes again.",
+            message: describeFailure(error, {
+              fallback: "Check your connection, then try loading classes again.",
+            }).message,
           });
         }
       });

@@ -221,13 +221,43 @@ export type DescribedFailure = {
  * `fallback` must say what failed and what to do next, in the interface's
  * voice. It is the only text that reaches the user.
  */
+/**
+ * AUTH_* codes are identity/account problems, never connectivity. Callers often
+ * pass "Check your connection…" as a load fallback; map those codes to plain
+ * verify/account copy so shells do not mislabel an unverified email as offline.
+ */
+function identityFailureMessage(raw: string): string | null {
+  if (/AUTH_EMAIL_UNVERIFIED/i.test(raw))
+    return "Verify your school email before using Spectra.";
+  if (/AUTH_NOT_SIGNED_IN/i.test(raw)) return "Sign in to continue.";
+  if (/AUTH_NO_SCHOOL/i.test(raw))
+    return "This account does not have an active school membership.";
+  if (/AUTH_NO_ACCESS/i.test(raw))
+    return "You do not have access to this school.";
+  if (/AUTH_SCHOOL_ADMIN_REQUIRED/i.test(raw))
+    return "School administrator access is required for this.";
+  if (/AUTH_OPERATOR_MANAGE_REQUIRED/i.test(raw))
+    return "This operator session is read-only. Enter again with manage access to make changes.";
+  if (/AUTH_OPERATOR_SESSION_INVALID/i.test(raw))
+    return "This operator session is no longer valid. Sign in again.";
+  if (/AUTH_OPERATOR_REQUIRED/i.test(raw))
+    return "Operator access is required for this.";
+  if (/AUTH_ORG_INACTIVE/i.test(raw))
+    return "This school is inactive, so Spectra cannot continue.";
+  if (/AUTH_MISCONFIGURED|AUTH_PROFILE_UNAVAILABLE|AUTH_BOOTSTRAP_FAILED/i.test(raw))
+    return "Spectra could not confirm your account just now. Try again, or contact your school admin.";
+  if (/\bAUTH_[A-Z0-9_]+\b/.test(raw))
+    return "Check your account, then try again.";
+  return null;
+}
+
 export function describeFailure(
   error: unknown,
   { fallback }: { fallback: string },
 ): DescribedFailure {
   const raw = rawText(error);
   return {
-    message: fallback,
+    message: identityFailureMessage(raw) ?? fallback,
     reference: referenceFor(raw),
     devDetail: process.env.NODE_ENV === "production" ? undefined : raw,
   };

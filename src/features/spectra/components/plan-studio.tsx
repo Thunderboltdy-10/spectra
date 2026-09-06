@@ -23,6 +23,10 @@ import { ArtifactWorkbar } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import {
+  formatMinutesBefore,
+  REMINDER_MINUTE_OPTIONS,
+} from "../reminders/minutes-before";
+import {
   normalizePlanContent,
   validatePlanDependencies,
   type PlanContent,
@@ -125,7 +129,6 @@ export function PlanStudio({
     action: PlanBulkAction;
   }>();
   const [draft, setDraft] = useState("");
-  const [reminderDraft, setReminderDraft] = useState("");
   const [notice, setNotice] = useState<string>();
   const [problem, setProblem] = useState<string>();
   const importRef = useRef<HTMLInputElement>(null);
@@ -1339,13 +1342,13 @@ export function PlanStudio({
             <div className="flex flex-wrap gap-2">
               {openTask.reminders.map((reminder) => (
                 <button
-                  key={reminder}
+                  key={reminder.id}
                   type="button"
                   disabled={readOnly}
                   onClick={() =>
                     patchTask(openTask.id, {
                       reminders: openTask.reminders.filter(
-                        (item) => item !== reminder,
+                        (item) => item.id !== reminder.id,
                       ),
                     })
                   }
@@ -1353,48 +1356,49 @@ export function PlanStudio({
                   title="Remove reminder"
                 >
                   <Clock3 className="h-3 w-3" />
-                  {reminder}
+                  {formatMinutesBefore(reminder.minutesBefore)}
                   <X className="h-3 w-3" />
                 </button>
               ))}
               {!readOnly ? (
-                <div className="flex h-8 items-center gap-1 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
-                  <input
-                    value={reminderDraft}
-                    onChange={(event) => setReminderDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && reminderDraft.trim()) {
-                        event.preventDefault();
-                        patchTask(openTask.id, {
-                          reminders: [
-                            ...openTask.reminders,
-                            reminderDraft.trim(),
-                          ],
-                        });
-                        setReminderDraft("");
-                      }
-                    }}
-                    className="w-28 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                    placeholder="e.g. 1 day before"
-                    aria-label="Reminder"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!reminderDraft.trim()) return;
-                      patchTask(openTask.id, {
-                        reminders: [
-                          ...openTask.reminders,
-                          reminderDraft.trim(),
-                        ],
-                      });
-                      setReminderDraft("");
-                    }}
-                    aria-label="Add reminder"
-                  >
-                    <Plus className="h-3 w-3 text-[var(--text-tertiary)]" />
-                  </button>
-                </div>
+                <select
+                  className="h-8 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-secondary)]"
+                  value=""
+                  aria-label="Add reminder"
+                  onChange={(event) => {
+                    const minutes = Number(event.target.value);
+                    event.target.value = "";
+                    if (!Number.isFinite(minutes) || minutes < 0) return;
+                    if (
+                      openTask.reminders.some(
+                        (item) => item.minutesBefore === minutes,
+                      )
+                    )
+                      return;
+                    patchTask(openTask.id, {
+                      reminders: [
+                        ...openTask.reminders,
+                        {
+                          id: `reminder-${crypto.randomUUID()}`,
+                          minutesBefore: minutes,
+                        },
+                      ],
+                    });
+                  }}
+                >
+                  <option value="">Add reminder…</option>
+                  {REMINDER_MINUTE_OPTIONS.map((option) => (
+                    <option
+                      key={option.minutesBefore}
+                      value={option.minutesBefore}
+                      disabled={openTask.reminders.some(
+                        (item) => item.minutesBefore === option.minutesBefore,
+                      )}
+                    >
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               ) : null}
             </div>
           </div>

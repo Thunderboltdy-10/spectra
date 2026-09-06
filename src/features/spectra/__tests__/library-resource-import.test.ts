@@ -73,4 +73,23 @@ describe("Library Import resource citizens (D29)", () => {
     const projected = await projectLibraryImportContent(file, "document");
     expect(projected).toBeTruthy();
   });
+
+  it("compensates hollow citizens when the resource payload upload fails", () => {
+    const route = readFileSync(
+      resolve(__dirname, "../../../app/api/spectra/resources/route.ts"),
+      "utf8",
+    );
+    expect(route).toContain("createImportedResource");
+    expect(route).toContain("RESOURCE_PAYLOAD_UPLOAD_FAILED");
+    expect(route).toContain("spectraArtifacts:permanentlyDelete");
+    expect(route).toContain("discardHollowImport");
+    // Create still precedes upload (issueUpload needs workId), but failure
+    // must not leave content:null artifacts in Library.
+    const createAt = route.indexOf("createImportedResource");
+    const deleteAt = route.indexOf("permanentlyDelete");
+    const failAt = route.indexOf("RESOURCE_PAYLOAD_UPLOAD_FAILED");
+    expect(createAt).toBeGreaterThan(-1);
+    expect(failAt).toBeGreaterThan(createAt);
+    expect(deleteAt).toBeGreaterThan(-1);
+  });
 });

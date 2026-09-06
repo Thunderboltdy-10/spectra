@@ -27,9 +27,22 @@ function nativeFormatFromName(name: string, mimeType: string) {
   return "bin";
 }
 
+async function discardHollowImport(artifactId: string) {
+  try {
+    await convexMutation("spectraArtifacts:permanentlyDelete", {
+      artifactId,
+    });
+  } catch {
+    // Best-effort compensation: never mask the original upload failure.
+  }
+}
+
 /**
  * Library Import for ordinary files (CANON D29).
  * Creates a resource citizen and preserves the uploaded bytes as a cloud payload.
+ * Citizen creation happens before upload (issueUpload needs workId); on any
+ * post-create failure the hollow artifact+org node are deleted so Library stays
+ * free of content:null orphans.
  */
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
@@ -83,55 +96,60 @@ export async function POST(request: NextRequest) {
     });
 
     const workId = created.artifactId as Id<"spectraArtifacts">;
-    const uploadUrl = await convexMutation<{ workId: Id<"spectraArtifacts"> }, string>(
-      "payloads:issueUpload",
-      { workId },
-    );
-    const uploaded = await fetch(uploadUrl, {
-      method: "POST",
-      headers: { "Content-Type": mimeType },
-      body: buffer,
-    });
-    const stored = (await uploaded.json().catch(() => null)) as {
-      storageId?: string;
-    } | null;
-    if (!uploaded.ok || !stored?.storageId)
-      throw new Error("RESOURCE_PAYLOAD_UPLOAD_FAILED");
+    try {
+      const uploadUrl = await convexMutation<{ workId: Id<"spectraArtifacts"> }, string>(
+        "payloads:issueUpload",
+        { workId },
+      );
+      const uploaded = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": mimeType },
+        body: buffer,
+      });
+      const stored = (await uploaded.json().catch(() => null)) as {
+        storageId?: string;
+      } | null;
+      if (!uploaded.ok || !stored?.storageId)
+        throw new Error("RESOURCE_PAYLOAD_UPLOAD_FAILED");
 
-    const payload = await convexMutation<
-      {
-        workId: Id<"spectraArtifacts">;
-        hash: string;
-        storageId: Id<"_storage">;
-        bytes: number;
-        mediaType: string;
-      },
-      { payloadRef: string; deduplicated: boolean }
-    >("payloads:put", {
-      workId,
-      hash: sha256,
-      storageId: stored.storageId as Id<"_storage">,
-      bytes: buffer.byteLength,
-      mediaType: mimeType.slice(0, 120),
-    });
-
-    await convexMutation(
-      "replicas:attachPortablePayload",
-      {
+      const payload = await convexMutation<
+        {
+          workId: Id<"spectraArtifacts">;
+          hash: string;
+          storageId: Id<"_storage">;
+          bytes: number;
+          mediaType: string;
+        },
+        { payloadRef: string; deduplicated: boolean }
+      >("payloads:put", {
         workId,
-        payloadRef: payload.payloadRef,
-        contentHash: sha256,
-        nativeFormat,
-      },
-    );
+        hash: sha256,
+        storageId: stored.storageId as Id<"_storage">,
+        bytes: buffer.byteLength,
+        mediaType: mimeType.slice(0, 120),
+      });
 
-    return NextResponse.json({
-      ok: true,
-      artifactId: created.artifactId,
-      nodeId: created.nodeId,
-      nativeFormat,
-      bytes: buffer.byteLength,
-      sha256,
-    });
+      await convexMutation(
+        "replicas:attachPortablePayload",
+        {
+          workId,
+          payloadRef: payload.payloadRef,
+          contentHash: sha256,
+          nativeFormat,
+        },
+      );
+
+      return NextResponse.json({
+        ok: true,
+        artifactId: created.artifactId,
+        nodeId: created.nodeId,
+        nativeFormat,
+        bytes: buffer.byteLength,
+        sha256,
+      });
+    } catch (error) {
+      await discardHollowImport(created.artifactId);
+      throw error;
+    }
   }, request);
 }

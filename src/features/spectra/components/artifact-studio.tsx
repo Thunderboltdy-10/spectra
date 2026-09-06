@@ -206,8 +206,10 @@ import { dispatchFormatChrome } from "../commands";
 import { fidelityRegionMap } from "../commands/office/fidelity-regions";
 import type { ApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import {
+  decideRemoteStudioIncoming,
   incomingReconciliationKey,
   reconciliationSnapshotKey,
+  shouldEmitRichTextChange,
   tagsFromDraft,
 } from "./artifact-studio-value-utils";
 import {
@@ -4677,65 +4679,91 @@ function ArtifactStudioEditor({
     }
     lastReconciledIncomingKeyRef.current = reconciliationKey;
     if (!switchedArtifacts && dirtyRef.current) {
-      if (
-        incomingKey !== snapshotKey(baseline) &&
-        incomingKey !== dismissedRemoteKey
-      ) {
-        if (localSyncKeysRef.current.delete(incomingKey)) {
-          setBaseline(incomingSnapshot);
-          setLiveConflict(null);
-          return;
-        }
-        const aiMerge = aiMergeRef.current;
-        if (aiMerge) {
-          const local = currentSnapshotRef.current;
-          setTitle(aiMerge.title ? incomingSnapshot.title : local.title);
-          setSummary(
-            aiMerge.summary ? incomingSnapshot.summary : local.summary,
-          );
-          setTagDraft(
-            aiMerge.tags ? incomingSnapshot.tagDraft : local.tagDraft,
-          );
-          setContent(
-            mergeAiRegions(
-              local.content,
-              incomingSnapshot.content,
-              aiMerge.paths,
-            ),
-          );
-          setBaseline(incomingSnapshot);
-          setRemoteConflict(null);
-          aiMergeRef.current = null;
-        } else if (isCollaborativeArtifact) {
-          const local = currentSnapshotRef.current;
-          // Native Office bodies already live on the bound Yjs fragment. A
-          // Yjs echo is not a new human draft; rebasing React here re-dirtied
-          // after every save and nested updates past React's cap.
-          if (nativeOfficeDocument) {
-            setLiveConflict(null);
-            return;
-          }
-          const rebased = rebaseCollaborativeSnapshot(
-            baseline,
-            local,
-            incomingSnapshot,
-          );
-          reconcilingRemoteRef.current = true;
-          setTitle(rebased.snapshot.title);
-          setSummary(rebased.snapshot.summary);
-          setTagDraft(rebased.snapshot.tagDraft);
-          setContent(rebased.snapshot.content);
-          setBaseline(incomingSnapshot);
-          setRemoteConflict(rebased.conflicts.length ? incomingSnapshot : null);
-          // A successful remote-only merge remains an unsaved local draft. A
-          // same-leaf collision is also preserved locally for explicit review.
-          userHasEditedRef.current = true;
-          writeStudioDirty(dirtyRef, setDirty, true);
-          window.requestAnimationFrame(() => {
-            reconcilingRemoteRef.current = false;
-          });
-        } else setRemoteConflict(incomingSnapshot);
+      const decision = decideRemoteStudioIncoming({
+        dirty: true,
+        userHasEdited: userHasEditedRef.current,
+        incomingKey,
+        baselineKey: snapshotKey(baseline),
+        dismissedRemoteKey,
+        isLocalSyncKey: localSyncKeysRef.current.has(incomingKey),
+        isCollaborative: isCollaborativeArtifact,
+        nativeOfficeDocument,
+      });
+      if (decision === "ignore") {
+        // Native Office bodies already live on the bound Yjs fragment. A Yjs
+        // echo is not a new human draft; keep React still and clear claim noise.
+        if (nativeOfficeDocument) setLiveConflict(null);
+        return;
       }
+      if (decision === "accept-local-sync") {
+        localSyncKeysRef.current.delete(incomingKey);
+        setBaseline(incomingSnapshot);
+        setLiveConflict(null);
+        return;
+      }
+      if (decision === "accept-bootstrap") {
+        // Normalize/bootstrap echoes can report dirty without a human edit.
+        // Accept the saved projection instead of raising a false conflict.
+        reconcilingRemoteRef.current = true;
+        userHasEditedRef.current = false;
+        writeStudioDirty(dirtyRef, setDirty, false);
+        setRemoteConflict(null);
+        setLiveConflict(null);
+        setTitle(incomingSnapshot.title);
+        setSummary(incomingSnapshot.summary);
+        setTagDraft(incomingSnapshot.tagDraft);
+        setContent(incomingSnapshot.content);
+        setBaseline(incomingSnapshot);
+        if (reconciliationFrameRef.current !== null)
+          window.cancelAnimationFrame(reconciliationFrameRef.current);
+        reconciliationFrameRef.current = window.requestAnimationFrame(() => {
+          reconcilingRemoteRef.current = false;
+          reconciliationFrameRef.current = null;
+        });
+        return;
+      }
+      const aiMerge = aiMergeRef.current;
+      if (aiMerge) {
+        const local = currentSnapshotRef.current;
+        setTitle(aiMerge.title ? incomingSnapshot.title : local.title);
+        setSummary(
+          aiMerge.summary ? incomingSnapshot.summary : local.summary,
+        );
+        setTagDraft(
+          aiMerge.tags ? incomingSnapshot.tagDraft : local.tagDraft,
+        );
+        setContent(
+          mergeAiRegions(
+            local.content,
+            incomingSnapshot.content,
+            aiMerge.paths,
+          ),
+        );
+        setBaseline(incomingSnapshot);
+        setRemoteConflict(null);
+        aiMergeRef.current = null;
+      } else if (decision === "rebase") {
+        const local = currentSnapshotRef.current;
+        const rebased = rebaseCollaborativeSnapshot(
+          baseline,
+          local,
+          incomingSnapshot,
+        );
+        reconcilingRemoteRef.current = true;
+        setTitle(rebased.snapshot.title);
+        setSummary(rebased.snapshot.summary);
+        setTagDraft(rebased.snapshot.tagDraft);
+        setContent(rebased.snapshot.content);
+        setBaseline(incomingSnapshot);
+        setRemoteConflict(rebased.conflicts.length ? incomingSnapshot : null);
+        // A successful remote-only merge remains an unsaved local draft. A
+        // same-leaf collision is also preserved locally for explicit review.
+        userHasEditedRef.current = true;
+        writeStudioDirty(dirtyRef, setDirty, true);
+        window.requestAnimationFrame(() => {
+          reconcilingRemoteRef.current = false;
+        });
+      } else setRemoteConflict(incomingSnapshot);
       return;
     }
     activeArtifactIdRef.current = artifact._id;
@@ -6235,13 +6263,31 @@ export function ArtifactRichTextEditor({
   collapsible?: boolean;
 }) {
   const onChangeRef = useRef(onChange);
+  const valueRef = useRef(value);
   const contentKeyRef = useRef(plannerDescriptionHtml(value));
   const focusedRef = useRef(false);
+  const typedWhileFocusedRef = useRef(false);
   const debounceRef = useRef<number | null>(null);
   const [initialContent] = useState(() => plannerDescriptionHtml(value));
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+  const emitRichTextChange = (html: string) => {
+    const next = html === "<p></p>" ? "" : html;
+    if (
+      !shouldEmitRichTextChange({
+        committedValue: valueRef.current,
+        nextHtml: next,
+        typedWhileFocused: typedWhileFocusedRef.current,
+      })
+    ) {
+      return;
+    }
+    onChangeRef.current(next);
+  };
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: false, underline: false }),
@@ -6278,15 +6324,20 @@ export function ArtifactRichTextEditor({
       }
       const html = current.getHTML();
       contentKeyRef.current = html;
-      onChangeRef.current(html === "<p></p>" ? "" : html);
+      emitRichTextChange(html);
+      typedWhileFocusedRef.current = false;
     },
     onUpdate: ({ editor: current }) => {
+      // TipTap can emit hydrate updates before focus. Only human typing while
+      // focused may dirty the parent studio.
+      if (!focusedRef.current) return;
+      typedWhileFocusedRef.current = true;
       const html = current.getHTML();
       contentKeyRef.current = html;
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
         debounceRef.current = null;
-        onChangeRef.current(html === "<p></p>" ? "" : html);
+        emitRichTextChange(html);
       }, 280);
     },
   });

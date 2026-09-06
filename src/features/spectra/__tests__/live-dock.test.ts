@@ -211,6 +211,20 @@ describe("Live Dock V2", () => {
     expect(dock).toContain("data-mobile-sheet");
   });
 
+  it("marks only the continued thread tab with a blue left-edge affordance", () => {
+    const dock = read("src/features/spectra/components/live-dock.tsx");
+    expect(dock).toContain("const active = continuation?.id === tab.threadId");
+    expect(dock).toContain("data-continued={active || undefined}");
+    // New chat clears continuation; no tab keeps data-continued without it.
+    expect(dock).not.toContain("border-l-[3px] border-cyan");
+    const shell = read("src/features/spectra/pages/spectra-shell.tsx");
+    expect(shell).toContain("function startFreshComposerThread()");
+    expect(shell).toContain("setComposerThread(null)");
+    const css = read("src/styles/spectra-app.css");
+    expect(css).toContain(".spectra-live-dock-tab[data-continued]");
+    expect(css).toContain("inset 3px 0 var(--accent-cyan)");
+  });
+
   it("keeps Live Dock tabs off /chat and on the work surfaces", () => {
     // /chat is the conversation, so a floating rail of running conversations
     // would restate the page. Library and Workspace are one shell now, and it

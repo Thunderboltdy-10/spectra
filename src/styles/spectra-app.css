@@ -11595,6 +11595,15 @@ button[data-spectra-context-trigger="true"]::after {
   max-width: 100%;
 }
 
+/* Continued / active composer thread: unmistakable blue left edge.
+   Token-lint replaced inset cyan with border-l + border-cyan, which fought the
+   muted full-border color and left no clear affordance. */
+.spectra-live-dock-tab[data-continued] {
+  box-shadow:
+    inset 3px 0 var(--accent-cyan),
+    var(--shadow-hover);
+}
+
 .spectra-live-dock-hover {
   pointer-events: auto;
   z-index: var(--z-toast);

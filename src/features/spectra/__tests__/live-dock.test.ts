@@ -131,9 +131,9 @@ describe("Live Dock V2", () => {
     expect(dock).toContain("Open conversation");
     expect(dock).toContain("dock-tab-identity min-w-0 flex-1");
     const css = read("src/styles/spectra-app.css");
-    expect(css).not.toContain("flex: 1 0 calc((100% - 12px) / 3)");
-    expect(css).toContain("min-width: 240px");
-    expect(css).toContain("flex: 1 1 240px");
+    expect(css).toContain("min-width: calc((100% - 12px) / 3)");
+    expect(css).toContain("flex: 1 1 calc((100% - 12px) / 3)");
+    expect(css).not.toContain("flex: 1 1 240px");
     expect(css).toContain(
       '[data-studio-mode="tab"][data-blueprint="document"]',
     );

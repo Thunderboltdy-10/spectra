@@ -761,7 +761,7 @@ export function LiveDock({
         >
         {showOptimistic ? (
           <article
-            className="flex h-11 min-w-[240px] flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 border-l-[3px] border-cyan"
+            className="spectra-live-dock-tab flex h-11 flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 border-l-[3px] border-cyan"
             data-run-status="starting"
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />

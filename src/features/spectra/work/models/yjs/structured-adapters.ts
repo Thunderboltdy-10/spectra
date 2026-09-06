@@ -639,22 +639,9 @@ export const presentationYjsAdapter = new StructuredWorkYjsAdapter(
 );
 export const whiteboardYjsAdapter = new StructuredWorkYjsAdapter(
   "whiteboard",
-  (value) => {
-    const normalized = normalizeWhiteboardContent(value);
-    const requested = isRecord(value) && Array.isArray(value.zOrder)
-      ? value.zOrder.filter((entry): entry is string => typeof entry === "string")
-      : [];
-    const nodeIds = new Set(normalized.nodes.map((node) => node.id));
-    const zOrder = [
-      ...requested.filter((id) => nodeIds.has(id)),
-      ...normalized.nodes
-        .slice()
-        .sort((left, right) => left.zIndex - right.zIndex)
-        .map((node) => node.id)
-        .filter((id) => !requested.includes(id)),
-    ];
-    return { ...normalized, zOrder };
-  },
+  // normalizeWhiteboardContent owns zOrder so React sticky emits and Yjs
+  // projections stay comparable (avoids false /content/zOrder conflicts).
+  normalizeWhiteboardContent,
 );
 export const quizYjsAdapter = new StructuredWorkYjsAdapter(
   "quiz",

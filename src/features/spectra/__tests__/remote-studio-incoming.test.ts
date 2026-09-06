@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   decideRemoteStudioIncoming,
+  rebaseCollaborativeSnapshot,
+  reconciliationSnapshotKey,
   richTextValuesEquivalent,
   shouldEmitRichTextChange,
 } from "../components/artifact-studio-value-utils";
+import {
+  createWhiteboardNode,
+  normalizeWhiteboardContent,
+  whiteboardNodeText,
+} from "../whiteboard/model";
+import { workYjsAdapter } from "../work/models/yjs/registry";
 
 describe("rich text hydrate echoes", () => {
   it("treats TipTap paragraph wraps of plain prompts as equivalent", () => {
@@ -111,5 +119,119 @@ describe("remote studio incoming decisions", () => {
         dismissedRemoteKey: "incoming",
       }),
     ).toBe("ignore");
+  });
+});
+
+describe("whiteboard sticky reconcile stability", () => {
+  const emptyBoard = {
+    viewport: { pageId: "page-1", x: 0, y: 0, zoom: 1 },
+    pages: [{ id: "page-1", name: "Page 1" }],
+    nodes: [] as unknown[],
+    edges: [] as unknown[],
+    layers: [
+      {
+        id: "layer-1",
+        name: "Canvas",
+        pageId: "page-1",
+        visible: true,
+        locked: false,
+      },
+    ],
+  };
+
+  it("keeps zOrder on normalize so bootstrap hydrate matches Yjs", () => {
+    const normalized = normalizeWhiteboardContent(emptyBoard);
+    expect(normalized.zOrder).toEqual([]);
+    const projected = workYjsAdapter("whiteboard").project(
+      workYjsAdapter("whiteboard").createDocument(emptyBoard),
+    );
+    expect(projected).toEqual(normalized);
+  });
+
+  it("preserves sticky text through Yjs round-trip and does not raise zOrder conflict", () => {
+    const sticky = createWhiteboardNode("note", "page-1", "layer-1", 40, 60, 1);
+    sticky.content = { text: "Demo marker" };
+    const localBoard = normalizeWhiteboardContent({
+      ...emptyBoard,
+      nodes: [sticky],
+    });
+    expect(localBoard.zOrder).toEqual([sticky.id]);
+    expect(whiteboardNodeText(localBoard.nodes[0]!)).toBe("Demo marker");
+
+    const projected = workYjsAdapter("whiteboard").project(
+      workYjsAdapter("whiteboard").createDocument(localBoard),
+    ) as typeof localBoard;
+    expect(projected).toEqual(localBoard);
+    expect(whiteboardNodeText(projected.nodes[0]!)).toBe("Demo marker");
+
+    const baseline = {
+      title: "Board",
+      summary: "",
+      tagDraft: "",
+      content: normalizeWhiteboardContent(emptyBoard),
+    };
+    const local = {
+      title: "Board",
+      summary: "",
+      tagDraft: "",
+      content: localBoard,
+    };
+    const incoming = {
+      title: "Board",
+      summary: "",
+      tagDraft: "",
+      content: projected,
+    };
+    const rebased = rebaseCollaborativeSnapshot(baseline, local, incoming);
+    expect(rebased.conflicts).toEqual([]);
+    expect(
+      whiteboardNodeText(
+        (rebased.snapshot.content as typeof localBoard).nodes[0]!,
+      ),
+    ).toBe("Demo marker");
+
+    // Matching projection keys behave as local sync acknowledgements.
+    expect(reconciliationSnapshotKey(local)).toBe(
+      reconciliationSnapshotKey(incoming),
+    );
+    expect(
+      decideRemoteStudioIncoming({
+        dirty: true,
+        userHasEdited: true,
+        incomingKey: reconciliationSnapshotKey(incoming),
+        baselineKey: reconciliationSnapshotKey(baseline),
+        dismissedRemoteKey: null,
+        isLocalSyncKey: true,
+        isCollaborative: true,
+        nativeOfficeDocument: false,
+      }),
+    ).toBe("accept-local-sync");
+  });
+
+  it("accepts whiteboard bootstrap hydrate when dirty without a human edit", () => {
+    const baseline = {
+      title: "Board",
+      summary: "",
+      tagDraft: "",
+      content: emptyBoard,
+    };
+    const incoming = {
+      title: "Board",
+      summary: "",
+      tagDraft: "",
+      content: normalizeWhiteboardContent(emptyBoard),
+    };
+    expect(
+      decideRemoteStudioIncoming({
+        dirty: true,
+        userHasEdited: false,
+        incomingKey: reconciliationSnapshotKey(incoming),
+        baselineKey: reconciliationSnapshotKey(baseline),
+        dismissedRemoteKey: null,
+        isLocalSyncKey: false,
+        isCollaborative: true,
+        nativeOfficeDocument: false,
+      }),
+    ).toBe("accept-bootstrap");
   });
 });

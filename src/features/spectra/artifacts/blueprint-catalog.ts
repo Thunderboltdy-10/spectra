@@ -184,6 +184,7 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
         locked: false,
       },
     ],
+    zOrder: [],
   },
 };
 

@@ -208,6 +208,7 @@ import type { ApplicationCommandDispatcher } from "../commands/application-dispa
 import {
   decideRemoteStudioIncoming,
   incomingReconciliationKey,
+  rebaseCollaborativeSnapshot,
   reconciliationSnapshotKey,
   shouldEmitRichTextChange,
   tagsFromDraft,
@@ -2532,107 +2533,6 @@ function snapshotKey(snapshot: {
 }
 
 type ArtifactEditorSnapshot = ReturnType<typeof artifactEditorSnapshot>;
-
-function valuesEqual(left: unknown, right: unknown) {
-  if (Object.is(left, right)) return true;
-  try {
-    return JSON.stringify(left) === JSON.stringify(right);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Rebase an unsaved local draft over a newer collaborative snapshot.
- * Yjs normally makes both views converge before this boundary, but persisted
- * artifact refreshes can race a keystroke. Preserve the local side only where
- * it actually diverged from its baseline, accept remote-only edits, and report
- * the rare same-leaf collision instead of treating every refresh as a conflict.
- */
-function rebaseCollaborativeValue(
-  baseline: unknown,
-  local: unknown,
-  incoming: unknown,
-  path = "",
-): { value: unknown; conflicts: string[] } {
-  if (valuesEqual(local, baseline)) return { value: incoming, conflicts: [] };
-  if (valuesEqual(incoming, baseline) || valuesEqual(local, incoming))
-    return { value: local, conflicts: [] };
-
-  const localRecord =
-    local && typeof local === "object" && !Array.isArray(local)
-      ? (local as Record<string, unknown>)
-      : null;
-  const incomingRecord =
-    incoming && typeof incoming === "object" && !Array.isArray(incoming)
-      ? (incoming as Record<string, unknown>)
-      : null;
-  const baselineRecord =
-    baseline && typeof baseline === "object" && !Array.isArray(baseline)
-      ? (baseline as Record<string, unknown>)
-      : null;
-
-  if (localRecord && incomingRecord && baselineRecord) {
-    const value: Record<string, unknown> = {};
-    const conflicts: string[] = [];
-    const keys = new Set([
-      ...Object.keys(baselineRecord),
-      ...Object.keys(localRecord),
-      ...Object.keys(incomingRecord),
-    ]);
-    for (const key of keys) {
-      const escaped = key.replaceAll("~", "~0").replaceAll("/", "~1");
-      const merged = rebaseCollaborativeValue(
-        baselineRecord[key],
-        localRecord[key],
-        incomingRecord[key],
-        `${path}/${escaped}`,
-      );
-      if (merged.value !== undefined) value[key] = merged.value;
-      conflicts.push(...merged.conflicts);
-    }
-    return { value, conflicts };
-  }
-
-  if (
-    Array.isArray(local) &&
-    Array.isArray(incoming) &&
-    Array.isArray(baseline) &&
-    local.length === incoming.length &&
-    local.length === baseline.length
-  ) {
-    const value: unknown[] = [];
-    const conflicts: string[] = [];
-    for (let index = 0; index < local.length; index += 1) {
-      const merged = rebaseCollaborativeValue(
-        baseline[index],
-        local[index],
-        incoming[index],
-        `${path}/${index}`,
-      );
-      value.push(merged.value);
-      conflicts.push(...merged.conflicts);
-    }
-    return { value, conflicts };
-  }
-
-  // Arrays are indivisible only when their shape changed
-  // (insert/reorder/delete). Region claims prevent normal same-list
-  // contention; retaining local here is safer than duplicating entries.
-  return { value: local, conflicts: [path || "/"] };
-}
-
-function rebaseCollaborativeSnapshot(
-  baseline: ArtifactEditorSnapshot,
-  local: ArtifactEditorSnapshot,
-  incoming: ArtifactEditorSnapshot,
-) {
-  const merged = rebaseCollaborativeValue(baseline, local, incoming);
-  return {
-    snapshot: merged.value as ArtifactEditorSnapshot,
-    conflicts: merged.conflicts,
-  };
-}
 
 function collaborationFailureMessage(error: unknown) {
   return humanizePublicFailure(error);

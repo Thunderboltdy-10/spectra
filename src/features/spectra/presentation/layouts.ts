@@ -217,7 +217,11 @@ export function applyPresentationLayout(
   const mode = options.mode ?? "preserve";
   const height = canvasHeight(deck);
   slide.layoutId = layoutId;
-  if (layoutId === "blank" || !slide.objects.length) return deck;
+  // Blank stays empty. Other layouts may still create the missing title when
+  // `createMissing` is set — otherwise an empty starter slide could never
+  // become a title slide during New Presentation / apply-layout.
+  if (layoutId === "blank") return deck;
+  if (!slide.objects.length && !createMissing) return deck;
 
   const title = ensureTitle(slide, createMissing);
   if (!title) return deck;

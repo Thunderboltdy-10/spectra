@@ -1936,12 +1936,15 @@ export const SheetsStudio = memo(function SheetsStudio({
         setCanUndo(true);
         setCanRedo(false);
       }
-      rememberEmitted(committed);
-      workbookRef.current = committed;
-      setWorkbook(committed);
+      // Mirror whiteboard/presentation: normalize before emit so field-drift
+      // cannot look like a remote conflict on the next round-trip.
+      const normalized = normalizeSheetsContent(committed);
+      rememberEmitted(normalized);
+      workbookRef.current = normalized;
+      setWorkbook(normalized);
       // Notify the parent after the local state transition has been scheduled,
       // never from inside a React state updater.
-      onChange(committed);
+      onChange(normalized);
     },
     [grantLocked, locked, onChange, rememberEmitted],
   );
@@ -1953,7 +1956,7 @@ export const SheetsStudio = memo(function SheetsStudio({
       if (grantLocked) return;
       const current = workbookRef.current;
       if (current.activeSheetId === sheetId) return;
-      const next = { ...current, activeSheetId: sheetId };
+      const next = normalizeSheetsContent({ ...current, activeSheetId: sheetId });
       rememberEmitted(next);
       workbookRef.current = next;
       setWorkbook(next);
@@ -2245,10 +2248,11 @@ export const SheetsStudio = memo(function SheetsStudio({
     redoRef.current.push(workbook);
     setCanUndo(undoRef.current.length > 0);
     setCanRedo(true);
-    workbookRef.current = previous;
-    setWorkbook(previous);
-    rememberEmitted(previous);
-    onChange(previous);
+    const normalized = normalizeSheetsContent(previous);
+    workbookRef.current = normalized;
+    setWorkbook(normalized);
+    rememberEmitted(normalized);
+    onChange(normalized);
   }
 
   function redo() {
@@ -2258,10 +2262,11 @@ export const SheetsStudio = memo(function SheetsStudio({
     undoRef.current.push(workbook);
     setCanUndo(true);
     setCanRedo(redoRef.current.length > 0);
-    workbookRef.current = next;
-    setWorkbook(next);
-    rememberEmitted(next);
-    onChange(next);
+    const normalized = normalizeSheetsContent(next);
+    workbookRef.current = normalized;
+    setWorkbook(normalized);
+    rememberEmitted(normalized);
+    onChange(normalized);
   }
 
   function moveSelection(

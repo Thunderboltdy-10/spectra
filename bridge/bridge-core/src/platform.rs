@@ -165,6 +165,13 @@ mod host {
         fn is_locked(&self, _path: &Path) -> io::Result<bool> {
             Ok(false)
         }
+        fn open_stable_reader(&self, path: &Path) -> io::Result<Option<File>> {
+            // Linux lacks Windows share-mode proof; open read-only for local QA/sync.
+            match File::options().read(true).open(path) {
+                Ok(file) => Ok(Some(file)),
+                Err(error) => Err(error),
+            }
+        }
         fn recycle(&self, path: &Path) -> anyhow::Result<()> {
             trash::delete(path)?;
             Ok(())

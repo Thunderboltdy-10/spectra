@@ -131,9 +131,9 @@ describe("Live Dock V2", () => {
     expect(dock).toContain("Open conversation");
     expect(dock).toContain("dock-tab-identity min-w-0 flex-1");
     const css = read("src/styles/spectra-app.css");
-    expect(css).not.toContain("flex: 1 0 calc((100% - 12px) / 3)");
-    expect(css).toContain("min-width: 240px");
-    expect(css).toContain("flex: 1 1 240px");
+    expect(css).toContain("min-width: calc((100% - 12px) / 3)");
+    expect(css).toContain("flex: 1 1 calc((100% - 12px) / 3)");
+    expect(css).not.toContain("flex: 1 1 240px");
     expect(css).toContain(
       '[data-studio-mode="tab"][data-blueprint="document"]',
     );
@@ -209,6 +209,20 @@ describe("Live Dock V2", () => {
     expect(dock).toContain("persistKey={tab.runId}");
     expect(dock).toContain("max-sm:fixed");
     expect(dock).toContain("data-mobile-sheet");
+  });
+
+  it("marks only the continued thread tab with a blue left-edge affordance", () => {
+    const dock = read("src/features/spectra/components/live-dock.tsx");
+    expect(dock).toContain("const active = continuation?.id === tab.threadId");
+    expect(dock).toContain("data-continued={active || undefined}");
+    // New chat clears continuation; no tab keeps data-continued without it.
+    expect(dock).not.toContain("border-l-[3px] border-cyan");
+    const shell = read("src/features/spectra/pages/spectra-shell.tsx");
+    expect(shell).toContain("function startFreshComposerThread()");
+    expect(shell).toContain("setComposerThread(null)");
+    const css = read("src/styles/spectra-app.css");
+    expect(css).toContain(".spectra-live-dock-tab[data-continued]");
+    expect(css).toContain("inset 3px 0 var(--accent-cyan)");
   });
 
   it("keeps Live Dock tabs off /chat and on the work surfaces", () => {

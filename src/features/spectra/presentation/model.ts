@@ -229,6 +229,25 @@ export function presentationObjectText(object: PresentationObject) {
   return text(content.text, text(content.label, text(content.title)));
 }
 
+const GENERIC_SLIDE_LABEL =
+  /^(?:slide \d+|title|subtitle|untitled(?: presentation)?|add a clear idea|add the supporting idea|new slide|key idea \d+)$/i;
+
+/** Rail / outline label that matches what people see on the canvas. */
+export function presentationSlideLabel(
+  slide: PresentationSlide,
+  index: number,
+): string {
+  const titled = slide.title.trim();
+  if (titled && !GENERIC_SLIDE_LABEL.test(titled)) return titled.slice(0, 120);
+  for (const object of slide.objects) {
+    if (object.type !== "text") continue;
+    const value = presentationObjectText(object).trim();
+    if (value && !GENERIC_SLIDE_LABEL.test(value)) return value.slice(0, 120);
+  }
+  return `Slide ${index + 1}`;
+}
+
+
 export function withPresentationObjectText(
   object: PresentationObject,
   value: string,
@@ -737,3 +756,46 @@ export function normalizePresentationContent(
     ...(nativeBinding ? { nativeBinding } : {}),
   };
 }
+
+export function createDefaultPresentationContent(): PresentationContent {
+  // Layout presets ship with the product, so a brand-new deck opens on a title
+  // slide rather than an empty stage. Stable ids keep create → Yjs → reopen
+  // comparable and avoid false remote-conflict banners from bootstrap hydrate.
+  const titleObject: PresentationObject = {
+    id: "object-1",
+    type: "text",
+    x: 90,
+    y: 185.625,
+    width: 820,
+    height: 123.75,
+    rotation: 0,
+    readingOrder: 0,
+    content: { text: "Presentation title" },
+    style: {
+      fontSize: 48,
+      fontWeight: 700,
+      color: "var(--accent-mint)",
+      align: "center",
+    },
+  };
+  return normalizePresentationContent({
+    theme: { id: "spectra-default" },
+    slides: [
+      {
+        id: "slide-1",
+        title: "Untitled presentation",
+        layoutId: "title-only",
+        transition: { kind: "fade", durationMs: 350 },
+        speakerNotes: "",
+        objects: [titleObject],
+        accessibility: { readingOrder: [titleObject.id] },
+      },
+    ],
+    settings: {
+      aspectRatio: "16:9",
+      defaultTransition: "none",
+      showSlideNumbers: true,
+    },
+  });
+}
+

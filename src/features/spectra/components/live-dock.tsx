@@ -761,7 +761,7 @@ export function LiveDock({
         >
         {showOptimistic ? (
           <article
-            className="flex h-11 min-w-[240px] flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 border-l-[3px] border-cyan"
+            className="spectra-live-dock-tab flex h-11 flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3"
             data-run-status="starting"
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
@@ -821,7 +821,8 @@ export function LiveDock({
               <motion.article
                 layout
                 key={tab.runId}
-                className={`spectra-live-dock-tab group relative max-w-full snap-start overflow-visible rounded-card border bg-[var(--bg-elevated)] shadow-hover ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] border-l-[3px] border-cyan" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-composer-dock max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
+                className={`spectra-live-dock-tab group relative max-w-full snap-start overflow-visible rounded-card border bg-[var(--bg-elevated)] shadow-hover ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-composer-dock max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
+                data-continued={active || undefined}
                 style={
                   {
                     anchorName: disclosureAnchor,

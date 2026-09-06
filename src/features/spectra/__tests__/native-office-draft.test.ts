@@ -54,7 +54,8 @@ describe("nativeOfficeDraftPending", () => {
     expect(source).toContain("nativeOfficeDraftPending");
     expect(source).toContain("writeStudioDirty");
     expect(source).toContain("localDraftEpoch");
-    expect(source).toContain("if (nativeOfficeDocument)");
+    expect(source).toContain("decideRemoteStudioIncoming");
+    expect(source).toContain("nativeOfficeDocument");
     expect(source).toContain("if (reconcilingRemoteRef.current) return");
     expect(source).toContain("nativeBodyBinding ? null : content");
   });

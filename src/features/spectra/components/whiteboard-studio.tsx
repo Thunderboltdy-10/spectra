@@ -834,7 +834,9 @@ export function WhiteboardStudio({
         setUndo((stack) => [...stack.slice(-79), clone(board)]);
         setRedo([]);
       }
-      onChange(next);
+      // Re-normalize so zOrder/settings match the collaborative projection
+      // before onChange dirties the studio (sticky create/edit path).
+      onChange(normalizeWhiteboardContent(next));
     },
     [board, onChange, readOnly],
   );
@@ -1655,7 +1657,7 @@ export function WhiteboardStudio({
     }
     setUndo((stack) => stack.slice(0, -1));
     setRedo((stack) => [...stack.slice(-79), clone(board)]);
-    onChange(previous);
+    onChange(normalizeWhiteboardContent(previous));
   }
   async function redoAction() {
     const next = redo.at(-1);
@@ -1672,7 +1674,7 @@ export function WhiteboardStudio({
     }
     setRedo((stack) => stack.slice(0, -1));
     setUndo((stack) => [...stack.slice(-79), clone(board)]);
-    onChange(next);
+    onChange(normalizeWhiteboardContent(next));
   }
   function updateSelected(recipe: (node: WhiteboardNode) => void) {
     if (!selectedNodeId) return;

@@ -11,6 +11,7 @@ import {
   type ArtifactYjsMutationPlan,
 } from "../../../collaboration/artifact-yjs-model";
 import { documentContentToProseMirrorJson } from "../../../lenses/document-projection";
+import { shouldRejectHollowStudioIncoming } from "../../../components/artifact-studio-value-utils";
 import { workYjsAdapter } from "./registry";
 import { workMeta } from "./shared";
 import { workYjsOrigins } from "./origins";
@@ -375,6 +376,19 @@ export class NativeArtifactYjsModel {
         )
     )
       contentChanged = true;
+    // Never project a hollow Convex/bootstrap snapshot over a populated Yjs
+    // body. That wipe is what made Library-imported PDF/DOCX text vanish after
+    // first paint.
+    if (
+      contentChanged &&
+      current &&
+      shouldRejectHollowStudioIncoming({
+        currentContent: current.content,
+        incomingContent: value.content,
+      })
+    ) {
+      contentChanged = false;
+    }
     const regions = contentChanged
       ? sheetPlan
         ? sheetPlan.changes.map((change) => ({

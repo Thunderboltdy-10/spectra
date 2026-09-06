@@ -5,6 +5,7 @@ import { currentTimeMs, uniqueToken } from "@/lib/unique-token";
 import {
   AlertCircle,
   CalendarClock,
+  Clock3,
   Check,
   Download,
   FileSpreadsheet,
@@ -21,6 +22,10 @@ import { SelectField } from "@/components/ui/select";
 import { ArtifactWorkbar } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
+import {
+  formatMinutesBefore,
+  REMINDER_MINUTE_OPTIONS,
+} from "../reminders/minutes-before";
 import {
   normalizePlanContent,
   validatePlanDependencies,
@@ -268,6 +273,7 @@ export function PlanStudio({
           referenceIds: [],
           sourceRefs: [],
           calendarBlockIds: [],
+          reminders: [],
           checklist: [],
           order,
           ...(options?.sectionId ? { sectionId: options.sectionId } : {}),
@@ -1329,6 +1335,73 @@ export function PlanStudio({
               })}
             </ul>
           ) : null}
+          <div className="spectra-plan-detail-reminders">
+            <h3 className="mb-2 text-caption font-semibold text-[var(--text-secondary)]">
+              Reminders
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {openTask.reminders.map((reminder) => (
+                <button
+                  key={reminder.id}
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() =>
+                    patchTask(openTask.id, {
+                      reminders: openTask.reminders.filter(
+                        (item) => item.id !== reminder.id,
+                      ),
+                    })
+                  }
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro text-[var(--text-secondary)]"
+                  title="Remove reminder"
+                >
+                  <Clock3 className="h-3 w-3" />
+                  {formatMinutesBefore(reminder.minutesBefore)}
+                  <X className="h-3 w-3" />
+                </button>
+              ))}
+              {!readOnly ? (
+                <select
+                  className="h-8 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-secondary)]"
+                  value=""
+                  aria-label="Add reminder"
+                  onChange={(event) => {
+                    const minutes = Number(event.target.value);
+                    event.target.value = "";
+                    if (!Number.isFinite(minutes) || minutes < 0) return;
+                    if (
+                      openTask.reminders.some(
+                        (item) => item.minutesBefore === minutes,
+                      )
+                    )
+                      return;
+                    patchTask(openTask.id, {
+                      reminders: [
+                        ...openTask.reminders,
+                        {
+                          id: `reminder-${crypto.randomUUID()}`,
+                          minutesBefore: minutes,
+                        },
+                      ],
+                    });
+                  }}
+                >
+                  <option value="">Add reminder…</option>
+                  {REMINDER_MINUTE_OPTIONS.map((option) => (
+                    <option
+                      key={option.minutesBefore}
+                      value={option.minutesBefore}
+                      disabled={openTask.reminders.some(
+                        (item) => item.minutesBefore === option.minutesBefore,
+                      )}
+                    >
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+          </div>
           <div className="spectra-plan-checklist">
             <strong>Checklist</strong>
             {openTask.checklist.map((item) => (

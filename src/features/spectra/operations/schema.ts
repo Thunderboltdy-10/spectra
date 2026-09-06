@@ -980,7 +980,19 @@ const plannerContentJsonSchema = {
         },
       },
     },
-    reminders: { type: "array", items: { type: "string" } },
+    reminders: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "minutesBefore", "enabled"],
+        properties: {
+          id: { type: "string" },
+          minutesBefore: { type: "integer", minimum: 0, maximum: 525600 },
+          enabled: { type: "boolean" },
+        },
+      },
+    },
     estimateMinutes: nullableNumber,
     progressNote: { type: "string" },
     sourceRefs: { type: "array", items: { type: "string" } },

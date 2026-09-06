@@ -412,7 +412,15 @@ export function SurfaceNewMenu({
           </span>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className="w-[240px]">
+      <DropdownMenuContent
+        align={align}
+        className="w-[240px]"
+        /* New lists every work type; the last rows sit over the live dock.
+           dropdown (60) loses to composer-dock (120), so Whiteboard was a
+           visible no-op click. Open this menu on the dock layer instead. */
+        layer="composer-dock"
+        collisionPadding={{ bottom: 16 }}
+      >
         {fixedTypeKey && placeChoices?.length ? (
           <>
             <DropdownMenuLabel>File in</DropdownMenuLabel>

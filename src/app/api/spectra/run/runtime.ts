@@ -2260,37 +2260,39 @@ async function runAttempt(
       artifactIds: provenanceArtifactIds,
     };
     loop.enter("report");
-    await Promise.all([
-      mutate("spectraRuns:updateStatus", {
-        actorClerkId: params.actorClerkId,
-        runId: params.runId,
-        executionId: params.executionId,
-        status: "completed",
-        decision: plan.decision,
-        planIntent: plan.intent,
-        finalSummary: plan.finalResponse,
-        resultTitle: "Done",
-        resultSummary: plan.finalResponse,
-        resultVariant: provenanceArtifactIds.length > 0 ? "artifact" : "status",
-        resultActions: actions,
-        provenance: mergedProvenance,
-        modelUsed: modelResult.model,
-        providerUsed: modelResult.provider,
-        usage: modelResult.usage,
-      }),
-      saveAssistantMessage({
-        actorClerkId: params.actorClerkId,
-        threadId: params.threadId,
-        runId: params.runId,
-        executionId: params.executionId,
-        content: plan.finalResponse,
-        decision: plan.decision,
-        affected: allAffected,
-        model: modelResult.model,
-        provider: modelResult.provider,
-        usage: modelResult.usage,
-      }),
-    ]);
+    // Persist terminal run status before the assistant message. Chat hides the
+    // live exchange and surfaces open-artifact cards as soon as that message
+    // appears; racing the two lets the side panel look finished while Live Dock
+    // is still on a running tab.
+    await mutate("spectraRuns:updateStatus", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      status: "completed",
+      decision: plan.decision,
+      planIntent: plan.intent,
+      finalSummary: plan.finalResponse,
+      resultTitle: "Done",
+      resultSummary: plan.finalResponse,
+      resultVariant: provenanceArtifactIds.length > 0 ? "artifact" : "status",
+      resultActions: actions,
+      provenance: mergedProvenance,
+      modelUsed: modelResult.model,
+      providerUsed: modelResult.provider,
+      usage: modelResult.usage,
+    });
+    await saveAssistantMessage({
+      actorClerkId: params.actorClerkId,
+      threadId: params.threadId,
+      runId: params.runId,
+      executionId: params.executionId,
+      content: plan.finalResponse,
+      decision: plan.decision,
+      affected: allAffected,
+      model: modelResult.model,
+      provider: modelResult.provider,
+      usage: modelResult.usage,
+    });
     await queueSilentMemoryMaintenance({
       actorClerkId: params.actorClerkId,
       runId: params.runId,
@@ -2974,51 +2976,51 @@ async function resumeOperationsAttempt(params: {
     const finalSummary =
       state.run.finalSummary || "The resolved operations are complete.";
     loop.enter("report");
-    await Promise.all([
-      mutate("spectraRuns:updateStatus", {
-        actorClerkId: params.actorClerkId,
-        runId: params.runId,
-        executionId: params.executionId,
-        status: "completed",
-        decision: state.run.decision,
-        planIntent: state.run.planIntent,
-        finalSummary,
-        resultTitle: "Done",
-        resultSummary: finalSummary,
-        resultVariant: artifact ? "artifact" : "status",
-        resultActions: [
-          ...(artifact
-            ? [
-                {
-                  key: "open" as const,
-                  label: "Open",
-                  targetType: "artifact" as const,
-                  targetId: artifact.id,
-                },
-              ]
-            : []),
-          ...(operations.some((row) => row.type === "artifact.update")
-            ? [
-                {
-                  key: "revert" as const,
-                  label: "Undo this run",
-                  targetType: "run" as const,
-                  targetId: params.runId,
-                },
-              ]
-            : []),
-        ],
-      }),
-      saveAssistantMessage({
-        actorClerkId: params.actorClerkId,
-        threadId: state.run.threadId,
-        runId: params.runId,
-        executionId: params.executionId,
-        content: finalSummary,
-        decision: state.run.decision,
-        affected: allAffected,
-      }),
-    ]);
+    // Same ordering as the primary operate path: terminal run status first so
+    // chat/Live Dock agree on "finished" before open-artifact cards appear.
+    await mutate("spectraRuns:updateStatus", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      status: "completed",
+      decision: state.run.decision,
+      planIntent: state.run.planIntent,
+      finalSummary,
+      resultTitle: "Done",
+      resultSummary: finalSummary,
+      resultVariant: artifact ? "artifact" : "status",
+      resultActions: [
+        ...(artifact
+          ? [
+              {
+                key: "open" as const,
+                label: "Open",
+                targetType: "artifact" as const,
+                targetId: artifact.id,
+              },
+            ]
+          : []),
+        ...(operations.some((row) => row.type === "artifact.update")
+          ? [
+              {
+                key: "revert" as const,
+                label: "Undo this run",
+                targetType: "run" as const,
+                targetId: params.runId,
+              },
+            ]
+          : []),
+      ],
+    });
+    await saveAssistantMessage({
+      actorClerkId: params.actorClerkId,
+      threadId: state.run.threadId,
+      runId: params.runId,
+      executionId: params.executionId,
+      content: finalSummary,
+      decision: state.run.decision,
+      affected: allAffected,
+    });
     await mutate("spectraRuns:appendEvent", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,

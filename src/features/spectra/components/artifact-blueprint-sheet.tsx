@@ -42,8 +42,14 @@ import { requireBlueprint, requireArtifactTypeManifest } from "../artifacts/blue
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
+import { normalizePresentationContent } from "../presentation/model";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { SelectField } from "@/components/ui/select";
+import {
+  formatMinutesBefore,
+  parseLegacyReminderLabel,
+  REMINDER_MINUTE_OPTIONS,
+} from "../reminders/minutes-before";
 
 type EditableBlueprintKey = ArtifactTypeKey;
 type SheetMode = "create" | "edit";
@@ -86,6 +92,7 @@ type QuizQuestion = {
   sourceRefs?: string[];
   feedback?: string;
 };
+
 type PlannerSubtask = { id: string; title: string; done: boolean };
 type PlannerAttachment = { id: string; name: string; meta?: string; url?: string };
 type PlannerTaskContent = {
@@ -100,7 +107,7 @@ type PlannerTaskContent = {
   attachments?: PlannerAttachment[];
   linkedArtifactIds?: string[];
   linkedThreadIds?: string[];
-  reminders?: string[];
+  reminders?: Array<{ id: string; minutesBefore: number; enabled?: boolean }>;
   estimateMinutes?: number;
   progressNote?: string;
   sourceRefs?: string[];
@@ -147,7 +154,9 @@ export function createDefaultArtifactPayload(blueprintKey: EditableBlueprintKey)
     content:
       blueprintKey === "whiteboard"
         ? normalizeWhiteboardContent(content)
-        : content,
+        : blueprintKey === "presentation"
+          ? normalizePresentationContent(content)
+          : content,
     tags: [],
   };
 }
@@ -257,7 +266,25 @@ function plannerTask(content: unknown): PlannerTask {
     })),
     linkedArtifactIds: Array.isArray(task.linkedArtifactIds) ? task.linkedArtifactIds.filter((value): value is string => typeof value === "string") : [],
     linkedThreadIds: Array.isArray(task.linkedThreadIds) ? task.linkedThreadIds.filter((value): value is string => typeof value === "string") : [],
-    reminders: Array.isArray(task.reminders) ? task.reminders.filter((value): value is string => typeof value === "string") : [],
+    reminders: Array.isArray(task.reminders)
+      ? task.reminders.flatMap((candidate, index) => {
+          if (typeof candidate === "string") {
+            const minutes = parseLegacyReminderLabel(candidate);
+            if (minutes === null) return [];
+            return [{ id: `reminder-${index + 1}`, minutesBefore: minutes, enabled: true }];
+          }
+          const row = record(candidate);
+          if (row.enabled === false) return [];
+          const minutesBefore = Number(row.minutesBefore);
+          if (!Number.isFinite(minutesBefore) || minutesBefore < 0 || minutesBefore > 525_600)
+            return [];
+          return [{
+            id: typeof row.id === "string" && row.id.trim() ? row.id.trim() : `reminder-${index + 1}`,
+            minutesBefore: Math.round(minutesBefore),
+            enabled: row.enabled !== false,
+          }];
+        })
+      : [],
     estimateMinutes: typeof task.estimateMinutes === "number" ? task.estimateMinutes : undefined,
     progressNote: typeof task.progressNote === "string" ? task.progressNote : "",
     sourceRefs: Array.isArray(task.sourceRefs) ? task.sourceRefs.filter((value): value is string => typeof value === "string") : [],
@@ -740,7 +767,6 @@ function TaskEditor({ task, setTask }: { task: PlannerTask; setTask: (task: Plan
   const [subtaskDraft, setSubtaskDraft] = useState("");
   const [linkName, setLinkName] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
-  const [reminderDraft, setReminderDraft] = useState("");
   const completed = task.subtasks.filter((subtask) => subtask.done).length;
   const progress = task.subtasks.length ? Math.round(completed / task.subtasks.length * 100) : task.status === "done" ? 100 : task.status === "doing" ? 50 : 0;
 
@@ -803,7 +829,61 @@ function TaskEditor({ task, setTask }: { task: PlannerTask; setTask: (task: Plan
       </section>
       <section>
         <h3 className="mb-2 text-caption font-semibold text-[var(--text-secondary)]">Reminders</h3>
-        <div className="flex flex-wrap gap-2">{task.reminders.map((reminder) => <button key={reminder} type="button" onClick={() => setTask({ ...task, reminders: task.reminders.filter((item) => item !== reminder) })} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro text-[var(--text-secondary)]" title="Remove reminder"><Clock3 className="h-3 w-3" />{reminder}<X className="h-3 w-3" /></button>)}<div className="flex h-8 items-center gap-1 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2"><input value={reminderDraft} onChange={(event) => setReminderDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && reminderDraft.trim()) { event.preventDefault(); setTask({ ...task, reminders: [...task.reminders, reminderDraft.trim()] }); setReminderDraft(""); } }} className="w-28 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="e.g. 1 day before" /><button type="button" onClick={() => { if (!reminderDraft.trim()) return; setTask({ ...task, reminders: [...task.reminders, reminderDraft.trim()] }); setReminderDraft(""); }} aria-label="Add reminder"><Plus className="h-3 w-3 text-[var(--text-tertiary)]" /></button></div></div>
+        <div className="flex flex-wrap gap-2">
+          {task.reminders.map((reminder) => (
+            <button
+              key={reminder.id}
+              type="button"
+              onClick={() =>
+                setTask({
+                  ...task,
+                  reminders: task.reminders.filter((item) => item.id !== reminder.id),
+                })
+              }
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro text-[var(--text-secondary)]"
+              title="Remove reminder"
+            >
+              <Clock3 className="h-3 w-3" />
+              {formatMinutesBefore(reminder.minutesBefore)}
+              <X className="h-3 w-3" />
+            </button>
+          ))}
+          <select
+            className="h-8 rounded-full border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-secondary)]"
+            value=""
+            aria-label="Add reminder"
+            onChange={(event) => {
+              const minutes = Number(event.target.value);
+              event.target.value = "";
+              if (!Number.isFinite(minutes) || minutes < 0) return;
+              if (task.reminders.some((item) => item.minutesBefore === minutes)) return;
+              setTask({
+                ...task,
+                reminders: [
+                  ...task.reminders,
+                  {
+                    id: id("reminder"),
+                    minutesBefore: minutes,
+                    enabled: true,
+                  },
+                ],
+              });
+            }}
+          >
+            <option value="">Add reminder…</option>
+            {REMINDER_MINUTE_OPTIONS.map((option) => (
+              <option
+                key={option.minutesBefore}
+                value={option.minutesBefore}
+                disabled={task.reminders.some(
+                  (item) => item.minutesBefore === option.minutesBefore,
+                )}
+              >
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </section>
     </section>
   );

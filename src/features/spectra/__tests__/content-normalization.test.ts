@@ -155,4 +155,46 @@ describe("model artifact content normalization", () => {
     expect(sparse.sheets[0]!.columnIdentities["0"]).toBe("sheet-1:column:1");
     expect(sparse.sheets[0]!.columnIdentities["1"]).toBe("sheet-1:column:2");
   });
+
+  it("preserves the quiz experience contract through normalize", () => {
+    const quiz = normalizeArtifactContent("quiz", {
+      questions: [
+        {
+          id: "question-1",
+          prompt: "What should this quiz check?",
+          type: "short_answer",
+          options: [],
+          correctAnswer: "A clear response",
+        },
+      ],
+      settings: {
+        showAnswersImmediately: false,
+        timed: false,
+        shuffleQuestions: false,
+        passingScore: 0,
+        experience: {
+          persistence: "personal",
+          identity: "signed_in",
+          timing: "untimed",
+          attempts: "unlimited",
+          revealAnswers: "immediate",
+          resultsVisibility: "learner",
+        },
+      },
+      published: false,
+    });
+    expect(quiz.settings).toMatchObject({
+      feedbackRelease: "on_each_response",
+      showAnswersImmediately: true,
+      experience: {
+        persistence: "personal",
+        identity: "signed_in",
+        timing: "untimed",
+        attempts: "unlimited",
+        revealAnswers: "immediate",
+        resultsVisibility: "learner",
+      },
+    });
+  });
+
 });

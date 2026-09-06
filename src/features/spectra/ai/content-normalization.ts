@@ -2,6 +2,7 @@ import type { SpectraBlueprintKey } from "../data/api";
 import { normalizeFoundryContent } from "../agents/foundry/foundry-document";
 import { normalizeCodeContent } from "../code/model";
 import { normalizePresentationContent } from "../presentation/model";
+import { normalizeQuizExperience } from "../quiz/experience";
 import { normalizeSheetsContent } from "../sheets/model";
 import { sharedTimetableContent } from "../timetable/model";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
@@ -167,10 +168,13 @@ export function normalizeQuizContent(value: unknown) {
   const content = row(value);
   if (!Array.isArray(content.questions)) return content;
   const incomingSettings = row(content.settings);
+  const experience = normalizeQuizExperience(incomingSettings);
   const feedbackRelease =
-    incomingSettings.feedbackRelease === "on_each_response"
+    experience.revealAnswers === "immediate"
       ? "on_each_response"
-      : "after_submission";
+      : incomingSettings.feedbackRelease === "on_each_response"
+        ? "on_each_response"
+        : "after_submission";
   content.settings = {
     instructions:
       typeof incomingSettings.instructions === "string"
@@ -178,7 +182,7 @@ export function normalizeQuizContent(value: unknown) {
         : "",
     feedbackRelease,
     showAnswersImmediately: feedbackRelease === "on_each_response",
-    timed: incomingSettings.timed === true,
+    timed: experience.timing !== "untimed" || incomingSettings.timed === true,
     shuffleQuestions: incomingSettings.shuffleQuestions === true,
     shuffleOptions: incomingSettings.shuffleOptions === true,
     allowResume: incomingSettings.allowResume !== false,
@@ -189,15 +193,18 @@ export function normalizeQuizContent(value: unknown) {
     targetScore:
       typeof incomingSettings.targetScore === "number"
         ? Math.max(0, Math.min(100, incomingSettings.targetScore))
-        : 70,
-    ...(typeof incomingSettings.maxAttempts === "number"
-      ? {
-          maxAttempts: Math.max(
-            1,
-            Math.min(100, Math.floor(incomingSettings.maxAttempts)),
-          ),
-        }
-      : {}),
+        : typeof incomingSettings.passingScore === "number"
+          ? Math.max(0, Math.min(100, incomingSettings.passingScore))
+          : 70,
+    ...(experience.attempts === "unlimited"
+      ? {}
+      : {
+          maxAttempts: experience.attempts,
+        }),
+    // Keep the §11C contract on the collaborative projection. Dropping it made
+    // brand-new Quiz opens rewrite settings on first Yjs normalize and race the
+    // Convex ack into a false remote-conflict banner.
+    experience,
   };
   // Normalization runs on live collaborative state as well as freshly
   // generated drafts. Missing publication state is safely unpublished, but a

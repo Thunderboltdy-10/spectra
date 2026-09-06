@@ -21,7 +21,68 @@ export const LIBRARY_IMPORT_ACCEPT = [
   ".html",
   ".css",
   ".json",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".svg",
+  ".bmp",
+  ".zip",
+  ".bin",
 ].join(",");
+
+/** Native Spectra work types that Import projects into editable studios. */
+const WORK_EXTENSIONS: Record<string, ArtifactTypeKey> = {
+  ppt: "presentation",
+  pptx: "presentation",
+  xls: "sheets",
+  xlsx: "sheets",
+  csv: "sheets",
+  tsv: "sheets",
+  doc: "document",
+  docx: "document",
+  txt: "document",
+  md: "document",
+  markdown: "document",
+  html: "code",
+  htm: "code",
+  js: "code",
+  jsx: "code",
+  ts: "code",
+  tsx: "code",
+  py: "code",
+  css: "code",
+  json: "code",
+};
+
+/**
+ * Ordinary files (PDFs, images, unknown types) are Library resource citizens
+ * (CANON D29) — not hollow Document JSON. Office/text/code stay as work.
+ */
+export function classifyLibraryImport(file: File): {
+  kind: "portable" | "work" | "resource";
+  blueprintKey?: ArtifactTypeKey;
+  nativeFormat: string;
+} {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const nativeFormat =
+    extension && /^[a-z0-9][a-z0-9._-]{0,31}$/.test(extension)
+      ? extension
+      : file.type.startsWith("image/")
+        ? file.type.slice("image/".length) || "img"
+        : file.type === "application/pdf"
+          ? "pdf"
+          : "bin";
+  if (extension === "spectra-pkg") {
+    return { kind: "portable", nativeFormat: "spectra-pkg" };
+  }
+  const blueprintKey = WORK_EXTENSIONS[extension];
+  if (blueprintKey) {
+    return { kind: "work", blueprintKey, nativeFormat };
+  }
+  return { kind: "resource", nativeFormat };
+}
 
 export function documentContentFromImportedHtml(html: string) {
   const matches = [
@@ -60,9 +121,71 @@ export function documentContentFromImportedHtml(html: string) {
   };
 }
 
+export function documentContentFromImportedPlainText(text: string) {
+  const blocks = text
+    .split(/\n{2,}/)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .map((part, index) => ({
+      id: `block-${index + 1}`,
+      type: "paragraph" as const,
+      text: part,
+    }));
+  return {
+    blocks:
+      blocks.length > 0
+        ? blocks
+        : [{ id: "intro", type: "paragraph" as const, text: "" }],
+    outline: [] as Array<{ id: string; title: string; level: number }>,
+  };
+}
+
+async function documentContentFromPdf(file: File) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const bytes = await file.arrayBuffer();
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(bytes),
+    useWorkerFetch: false,
+    disableFontFace: true,
+  });
+  const pdf = await loadingTask.promise;
+  const pageTexts: string[] = [];
+  try {
+    for (let index = 1; index <= pdf.numPages; index += 1) {
+      const page = await pdf.getPage(index);
+      const textContent = await page.getTextContent();
+      const text = textContent.items
+        .map((item) =>
+          item && typeof item === "object" && "str" in item
+            ? String((item as { str?: string }).str ?? "")
+            : "",
+        )
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text) pageTexts.push(text);
+    }
+  } finally {
+    await pdf.destroy();
+  }
+  if (pageTexts.length === 0) return documentContentFromImportedPlainText("");
+  const html = pageTexts
+    .map(
+      (page, index) =>
+        `<h2>Page ${index + 1}</h2><p>${page
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")}</p>`,
+    )
+    .join("");
+  return documentContentFromImportedHtml(html);
+}
+
 /**
  * Library import must project editable content, not a blank default whose
  * original bytes sit unused in import history.
+ * PDFs are resource citizens (classifyLibraryImport) — this PDF projection
+ * remains for callers that explicitly open a PDF as a document projection.
  */
 export async function projectLibraryImportContent(
   file: File,
@@ -76,12 +199,60 @@ export async function projectLibraryImportContent(
     const { importPresentationFile } = await import("../presentation/io");
     return (await importPresentationFile(file)).content;
   }
-  if (blueprintKey === "document" && name.endsWith(".docx")) {
+  if (blueprintKey !== "document") return undefined;
+  if (name.endsWith(".docx")) {
     const mammoth = await import("mammoth/mammoth.browser");
     const result = await mammoth.convertToHtml({
       arrayBuffer: await file.arrayBuffer(),
     });
     return documentContentFromImportedHtml(result.value || "");
   }
+  if (name.endsWith(".pdf")) return documentContentFromPdf(file);
+  if (name.endsWith(".html") || name.endsWith(".htm")) {
+    return documentContentFromImportedHtml(await file.text());
+  }
+  if (
+    name.endsWith(".txt") ||
+    name.endsWith(".md") ||
+    name.endsWith(".markdown")
+  ) {
+    return documentContentFromImportedPlainText(await file.text());
+  }
   return undefined;
+}
+
+export async function importLibraryResourceFile(
+  file: File,
+  options?: { workspaceId?: string; parentNodeId?: string; title?: string },
+) {
+  const body = new FormData();
+  body.set("file", file, file.name);
+  if (options?.title) body.set("title", options.title);
+  if (options?.workspaceId) body.set("workspaceId", options.workspaceId);
+  if (options?.parentNodeId) body.set("parentNodeId", options.parentNodeId);
+  body.set("mimeType", file.type || "application/octet-stream");
+  const response = await fetch("/api/spectra/resources", {
+    method: "POST",
+    body,
+  });
+  const payload = (await response.json().catch(() => null)) as {
+    ok?: boolean;
+    artifactId?: string;
+    nodeId?: string;
+    nativeFormat?: string;
+    error?: { message?: string };
+    message?: string;
+  } | null;
+  if (!response.ok || !payload?.artifactId) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.message ||
+        "Could not import this file as a Library resource.",
+    );
+  }
+  return {
+    artifactId: payload.artifactId,
+    nodeId: payload.nodeId,
+    nativeFormat: payload.nativeFormat,
+  };
 }

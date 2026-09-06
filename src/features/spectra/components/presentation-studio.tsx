@@ -54,6 +54,7 @@ import {
   createPresentationSlide,
   normalizePresentationContent,
   presentationObjectText,
+  presentationSlideLabel,
   producePresentationContent,
   withPresentationObjectText,
   type PresentationContent,
@@ -1689,7 +1690,10 @@ export function PresentationStudio({
         setRedoStack([]);
       }
       setGestureDeck(null);
-      onChange(next);
+      // Re-normalize so settings/speakerNotes/layout fields match the Yjs
+      // projection before onChange dirties the studio (same class of drift as
+      // whiteboard zOrder — otherwise first ack looks like a remote conflict).
+      onChange(normalizePresentationContent(next));
     },
     [deck, onChange, readOnly],
   );
@@ -1789,14 +1793,14 @@ export function PresentationStudio({
     if (!previous || readOnly) return;
     setUndoStack((stack) => stack.slice(0, -1));
     setRedoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
-    onChange(previous);
+    onChange(normalizePresentationContent(previous));
   }
   function redo() {
     const next = redoStack.at(-1);
     if (!next || readOnly) return;
     setRedoStack((stack) => stack.slice(0, -1));
     setUndoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
-    onChange(next);
+    onChange(normalizePresentationContent(next));
   }
   function addSlide() {
     const slide = createPresentationSlide(deck.slides.length + 1);
@@ -2352,17 +2356,24 @@ export function PresentationStudio({
     setUndoStack((stack) => [...stack.slice(-79), drag.snapshot]);
     setRedoStack([]);
     if (gestureDeckRef.current) {
-      onChange(gestureDeckRef.current);
+      onChange(normalizePresentationContent(gestureDeckRef.current));
       setGestureDeck(null);
     }
   }
   function updateText(objectId: string, value: string) {
     mutateLocal((draft) => {
-      const object = draft.slides[activeSlideIndex]!.objects.find(
+      const slide = draft.slides[activeSlideIndex]!;
+      const object = slide.objects.find(
         (candidate) => candidate.id === objectId,
       );
-      if (object)
-        Object.assign(object, withPresentationObjectText(object, value));
+      if (!object) return;
+      Object.assign(object, withPresentationObjectText(object, value));
+      // Keep the slides rail label aligned with the text on the canvas.
+      const firstText = slide.objects.find((candidate) => candidate.type === "text");
+      if (firstText && firstText.id === objectId) {
+        const next = value.trim();
+        if (next) slide.title = next.slice(0, 300);
+      }
     });
   }
   function beginText(objectId: string) {
@@ -2376,7 +2387,7 @@ export function PresentationStudio({
     setRedoStack([]);
     textOriginRef.current = undefined;
     if (gestureDeckRef.current) {
-      onChange(gestureDeckRef.current);
+      onChange(normalizePresentationContent(gestureDeckRef.current));
       setGestureDeck(null);
     }
   }
@@ -2536,7 +2547,7 @@ export function PresentationStudio({
       ];
       setUndoStack((stack) => [...stack.slice(-79), cloneDeck(deck)]);
       setRedoStack([]);
-      onChange(next);
+      onChange(normalizePresentationContent(next));
       await completeArtifactImport({
         jobId,
         typeKey: "presentation",
@@ -2819,7 +2830,7 @@ export function PresentationStudio({
   }
   const slideItems = deck.slides.map((slide, index) => ({
     value: slide.id,
-    label: slide.title || `Slide ${index + 1}`,
+    label: presentationSlideLabel(slide, index),
   }));
   /**
    * Find is a filter on the rail, not a modal. The query narrows the previews to
@@ -3586,8 +3597,10 @@ export function PresentationStudio({
                 }
                 items={railSlides.map((slide) => ({
                   id: slide.id,
-                  title:
-                    slide.title || `Slide ${deck.slides.indexOf(slide) + 1}`,
+                  title: presentationSlideLabel(
+                    slide,
+                    deck.slides.indexOf(slide),
+                  ),
                   subtitle: [
                     slide.hidden ? "Hidden in Present" : undefined,
                     slide.speakerNotes ? "Has speaker notes" : undefined,
@@ -4599,7 +4612,7 @@ export function PresentationStudio({
                     />
                   </div>
                   <strong className="truncate text-caption font-semibold text-[var(--text-primary)]">
-                    {index + 1} · {slide.title || `Slide ${index + 1}`}
+                    {index + 1} · {presentationSlideLabel(slide, index)}
                   </strong>
                 </button>
                 <label className="grid min-w-0 gap-1.5">
@@ -4678,7 +4691,7 @@ export function PresentationStudio({
                   return (
                     <li key={slide.id}>
                       <span>{index + 1}</span>
-                      <strong>{slide.title || `Slide ${index + 1}`}</strong>
+                      <strong>{presentationSlideLabel(slide, index)}</strong>
                       <small data-over={duration > target * 1.25 || undefined}>
                         {durationLabel(duration)}
                       </small>

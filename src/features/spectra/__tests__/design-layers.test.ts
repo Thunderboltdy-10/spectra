@@ -66,7 +66,7 @@ describe("layering contract", () => {
     expect(consentSource).not.toContain('className="fixed inset-0');
   });
 
-  it("mutes dock pointer events while a modal dialog or version history overlay is open", () => {
+  it("mutes dock pointer events while a modal dialog, version history overlay, or menu is open", () => {
     const appCss = readFileSync(APP_CSS_PATH, "utf8");
     expect(appCss).toMatch(
       /body:has\(\[role="dialog"\]\[aria-modal="true"\]\) \.spectra-workbench-live-stack/,
@@ -76,6 +76,12 @@ describe("layering contract", () => {
     );
     expect(appCss).toMatch(
       /body:has\(\[aria-label="Version history comparison"\]\) \.spectra-workbench-live-stack/,
+    );
+    expect(appCss).toMatch(
+      /body:has\(\[role="menu"\]\[data-state="open"\]\) \.spectra-workbench-live-stack/,
+    );
+    expect(appCss).toMatch(
+      /body:has\(\[role="listbox"\]\[data-state="open"\]\) \.spectra-workbench-live-stack/,
     );
     const adminDialog = readFileSync(
       join(process.cwd(), "src/features/spectra/administration/shared.tsx"),

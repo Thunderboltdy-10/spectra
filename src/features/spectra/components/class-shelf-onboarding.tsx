@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useSpectraPreferences } from "../settings/preference-store";
+import { describeFailure } from "@/components/ui/truthful-state";
 import {
   ClassShelfPicker,
   classShelfLoadState,
@@ -56,10 +57,12 @@ export function ClassShelfOnboarding({
           .filter((item) => item.workspaceId)
           .map((item) => item.recordId),
       );
-    } catch {
+    } catch (error) {
       setState({
         kind: "error",
-        message: "Check your connection, then try loading classes again.",
+        message: describeFailure(error, {
+          fallback: "Check your connection, then try loading classes again.",
+        }).message,
       });
     }
   }, []);

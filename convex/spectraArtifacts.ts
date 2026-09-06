@@ -1978,6 +1978,101 @@ export const create = mutation({
   },
 });
 
+
+/**
+ * Library Import for ordinary files (CANON D29): PDFs, images, and unknown
+ * binaries land as real `resource` work with preserved bytes — never as a
+ * hollow document projection.
+ */
+export const createImportedResource = mutation({
+  args: {
+    title: v.string(),
+    nativeFormat: v.string(),
+    bytes: v.number(),
+    contentHash: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+    tags: v.optional(v.array(v.string())),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    parentNodeId: v.optional(v.union(v.id("orgNodes"), v.literal("root"))),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    if (args.workspaceId) {
+      await requireWorkspaceCapability(ctx, args.workspaceId, "modify");
+    }
+    const now = Date.now();
+    const title = args.title.trim() || "Untitled file";
+    const nativeFormat = args.nativeFormat
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "")
+      .slice(0, 32) || "bin";
+    if (!Number.isSafeInteger(args.bytes) || args.bytes < 0) {
+      throw new Error("RESOURCE_BYTES_INVALID");
+    }
+    const summary =
+      args.bytes > 0
+        ? `${Math.round(args.bytes).toLocaleString()} bytes · ${nativeFormat}`
+        : nativeFormat;
+    const artifactId = await ctx.db.insert("spectraArtifacts", {
+      ownerAccountId: actor._id,
+      schoolId: actor.schoolId,
+      blueprintKey: "resource",
+      resourceClass: "resource",
+      nativeFormat,
+      compatibilityProfile: "strict-native",
+      schemaVersion: 1,
+      title,
+      summary,
+      content: null,
+      contentHash: args.contentHash,
+      textIndex: buildArtifactTextIndex({
+        title,
+        summary,
+        content: null,
+        tags: args.tags,
+      }),
+      tags: args.tags ?? ["imported"],
+      status: "active",
+      createdFrom: {
+        source: "manual",
+        workspaceId: args.workspaceId,
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    const placementNode = await placeSourceNode(ctx, {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      kind: "work",
+      sourceId: artifactId,
+      name: title,
+      target: args.parentNodeId
+        ? { parentId: args.parentNodeId === "root" ? null : args.parentNodeId }
+        : args.workspaceId
+          ? { workspaceId: args.workspaceId }
+          : {},
+      placedByAccountId: actor.accountId,
+      typeKey: "resource",
+      accessProjection: true,
+    });
+    if (args.workspaceId) {
+      await ctx.db.patch(args.workspaceId, {
+        updatedAt: now,
+        lastActivityAt: now,
+      });
+    }
+    await syncArtifactSummary(ctx, artifactId);
+    await incrementOperationalCounter(ctx, {
+      schoolId: actor.schoolId,
+      category: "artifact_created",
+      dimension: "resource",
+      occurredAt: now,
+    });
+    return { artifactId, nodeId: placementNode._id };
+  },
+});
+
 export const createPending = mutation({
   args: {
     blueprintKey: vBlueprintKey,

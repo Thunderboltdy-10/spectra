@@ -62,6 +62,12 @@ export type WhiteboardContent = {
     visible: boolean;
     locked: boolean;
   }>;
+  /**
+   * Shared stacking order for collaborative boards. Always rebuilt during
+   * normalize so React emits and Yjs projections stay byte-comparable; omitting
+   * it made every sticky edit look like a remote conflict on /content/zOrder.
+   */
+  zOrder: string[];
   sources?: Array<{
     id: string;
     label: string;
@@ -384,6 +390,19 @@ export function normalizeWhiteboardContent(value: unknown): WhiteboardContent {
   const viewportPage = pageIds.has(text(viewport.pageId))
     ? text(viewport.pageId)
     : defaultPageId;
+  const requestedZOrder = Array.isArray(input.zOrder)
+    ? input.zOrder.filter(
+        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+      )
+    : [];
+  const zOrder = [
+    ...requestedZOrder.filter((id) => nodeIds.has(id)),
+    ...nodes
+      .slice()
+      .sort((left, right) => left.zIndex - right.zIndex)
+      .map((node) => node.id)
+      .filter((id) => !requestedZOrder.includes(id)),
+  ];
   return {
     viewport: {
       x: bounded(viewport.x, 0, -1_000_000, 1_000_000),
@@ -395,6 +414,7 @@ export function normalizeWhiteboardContent(value: unknown): WhiteboardContent {
     nodes,
     edges,
     layers,
+    zOrder,
     ...(Array.isArray(input.sources)
       ? {
           sources: input.sources.flatMap((candidate, index) => {

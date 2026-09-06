@@ -247,3 +247,24 @@ describe("SheetsStudio commits", () => {
     ).toBe("RCV1-PRESENCE-A1");
   });
 });
+
+
+describe("SheetsStudio normalize-on-emit", () => {
+  it("emits normalizeSheetsContent on commit paths like whiteboard/presentation", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(
+      resolve(__dirname, "../components/sheets-studio.tsx"),
+      "utf8",
+    );
+    expect(source).toContain(
+      "const normalized = normalizeSheetsContent(committed)",
+    );
+    expect(source).toContain(
+      "normalizeSheetsContent({ ...current, activeSheetId: sheetId })",
+    );
+    // No raw onChange of un-normalized workbook snapshots.
+    expect(source).not.toMatch(/onChange\(committed\)/);
+    expect(source).not.toMatch(/onChange\(previous\)/);
+  });
+});

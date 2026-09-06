@@ -1,4 +1,11 @@
+import {
+  normalizeMinutesBeforeReminders,
+  type MinutesBeforeReminder,
+} from "../reminders/minutes-before";
+
 export type PlanStatus = "backlog" | "todo" | "doing" | "blocked" | "done";
+
+export type PlanReminder = MinutesBeforeReminder;
 
 export type PlanTask = {
   id: string;
@@ -16,6 +23,8 @@ export type PlanTask = {
   dueAt?: number;
   officialDeadlineRef?: string;
   calendarBlockIds: string[];
+  /** Offsets before dueAt — same shape as Timetable / planner_task scheduling. */
+  reminders: PlanReminder[];
   checklist: Array<{ id: string; title: string; done: boolean }>;
   order: number;
 };
@@ -129,6 +138,7 @@ export function normalizePlanContent(value: unknown): PlanContent {
           dueAt: row.dueAt,
           referenceIds: row.linkedArtifactIds,
           sourceRefs: row.sourceRefs,
+          reminders: row.reminders,
           checklist: row.subtasks,
         },
         0,
@@ -170,6 +180,7 @@ function normalizePlanTask(value: unknown, index: number): PlanTask {
         ? row.officialDeadlineRef
         : undefined,
     calendarBlockIds: strings(row.calendarBlockIds),
+    reminders: normalizeMinutesBeforeReminders(row.reminders),
     checklist: Array.isArray(row.checklist)
       ? row.checklist.map((candidate, checklistIndex) => {
           const item = object(candidate);

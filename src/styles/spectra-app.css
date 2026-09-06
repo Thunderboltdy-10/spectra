@@ -15633,7 +15633,9 @@ body:has([aria-label="Version history comparison"]) .spectra-workbench-live-stac
    open, mute the dock so bottom rows (New → Whiteboard, row Actions near
    the composer) stay clickable even when a surface still uses z-dropdown. */
 body:has([role="menu"][data-state="open"]) .spectra-workbench-live-stack,
-body:has([role="menu"][data-state="open"]) .spectra-workbench-live-stack * {
+body:has([role="menu"][data-state="open"]) .spectra-workbench-live-stack *,
+body:has([role="listbox"][data-state="open"]) .spectra-workbench-live-stack,
+body:has([role="listbox"][data-state="open"]) .spectra-workbench-live-stack * {
   pointer-events: none !important;
 }
 

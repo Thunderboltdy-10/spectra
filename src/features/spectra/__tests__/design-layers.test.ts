@@ -80,6 +80,9 @@ describe("layering contract", () => {
     expect(appCss).toMatch(
       /body:has\(\[role="menu"\]\[data-state="open"\]\) \.spectra-workbench-live-stack/,
     );
+    expect(appCss).toMatch(
+      /body:has\(\[role="listbox"\]\[data-state="open"\]\) \.spectra-workbench-live-stack/,
+    );
     const adminDialog = readFileSync(
       join(process.cwd(), "src/features/spectra/administration/shared.tsx"),
       "utf8",

@@ -1578,6 +1578,10 @@ function NodeMenu({
         side="bottom"
         sideOffset={2}
         className="w-[224px]"
+        /* Same dock collision as SurfaceNewMenu: bottom rows / Whiteboard
+           must paint above the live composer. */
+        layer="composer-dock"
+        collisionPadding={{ bottom: 16 }}
       >
         {nodes.length === 0 ? (
           <>

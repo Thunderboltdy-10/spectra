@@ -26,11 +26,12 @@ const DropdownMenuContent = React.forwardRef<
     /** Stacking layer. Inside a dialog, pass the dialog's layer ("modal"). */
     layer?: SpectraLayer;
   }
->(({ className, style, sideOffset = 6, layer = "dropdown", ...props }, ref) => (
+>(({ className, style, sideOffset = 6, collisionPadding = 12, layer = "dropdown", ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
+      collisionPadding={collisionPadding}
       className={cn(
         "max-h-[min(70dvh,32rem)] min-w-[11rem] overflow-y-auto rounded-card border border-[var(--border-default)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
         LAYER_CLASS[layer],

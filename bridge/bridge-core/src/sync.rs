@@ -745,9 +745,16 @@ pub async fn drain_cloud_queue(
             .collect::<Vec<_>>();
         let results = match report_changes(deployment_url, credential, &mount_id, &changes).await {
             Ok(results) => results,
-            Err(_) => {
-                for (item, _) in batch {
+            Err(error) => {
+                let message = error.to_string();
+                for (item, _) in &batch {
                     journal.retry_queue(item.id, Backoff::delay_for_attempt(item.attempts))?;
+                }
+                // Cloud mount revoked/detached while local grant still looks Ready.
+                // Surface so the app loop can re-run registerMount via sync_grant
+                // instead of silently backing off forever under "Changes queued safely".
+                if message.contains("MOUNT_NOT_ACTIVE") {
+                    anyhow::bail!("MOUNT_NOT_ACTIVE");
                 }
                 continue;
             }

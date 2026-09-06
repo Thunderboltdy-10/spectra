@@ -2281,10 +2281,19 @@ fn main() {
                                         }
                                     }
                                     Err(error) => {
+                                        let message = error.to_string();
                                         let _ = sync_journal.set_config(
                                             "outbound_queue_error",
-                                            &error.to_string(),
+                                            &message,
                                         );
+                                        if message.contains("MOUNT_NOT_ACTIVE") {
+                                            // Re-register cloud mounts for local grants so
+                                            // LibreOffice/Office disk edits can upload again.
+                                            restored_grants_reconciled = false;
+                                            for grant in sync_grants.device_grants() {
+                                                let _ = sync_grant(&grant, &sync_journal).await;
+                                            }
+                                        }
                                     }
                                 }
                                 let _ = drain_structure_requests(

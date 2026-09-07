@@ -148,6 +148,7 @@ function ShellNavigation() {
   const [, setWorkspacesUnavailable] = useState(false);
   const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const [isMacPlatform, setIsMacPlatform] = useState(false);
   const [preferredSidebarCollapsed, setPreferredSidebarCollapsed] =
     useState(false);
   /* The workbench can ask chrome to rail the sidebar while open panels need
@@ -203,6 +204,14 @@ function ShellNavigation() {
   useLayoutEffect(() => {
     const stored = window.localStorage.getItem("spectra:sidebar-collapsed");
     setPreferredSidebarCollapsed(stored === "true");
+  }, []);
+
+  useEffect(() => {
+    setIsMacPlatform(
+      /mac|iphone|ipad|ipod/i.test(
+        navigator.platform || navigator.userAgent,
+      ),
+    );
   }, []);
 
   /* The dataset mirrors the *effective* geometry so the pre-hydration CSS in
@@ -571,7 +580,7 @@ function ShellNavigation() {
             className="h-8 w-full rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-micro outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]"
           />
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-tertiary)]">
-            ⌘ K
+            {isMacPlatform ? "⌘" : "Ctrl"} K
           </span>
         </label>
         <nav

@@ -123,6 +123,37 @@ function slideText(element: Element) {
   return paragraphs.filter(Boolean).join("\n");
 }
 
+function pptxSlidePathsInPresentationOrder(
+  files: Record<string, Uint8Array>,
+  presentation: Document,
+) {
+  const available = Object.keys(files)
+    .filter((path) => /^ppt\/slides\/slide\d+\.xml$/i.test(path))
+    .sort((left, right) => {
+      const a = Number(/slide(\d+)/i.exec(left)?.[1]);
+      const b = Number(/slide(\d+)/i.exec(right)?.[1]);
+      return a - b;
+    });
+  const availableSet = new Set(available);
+  const relationships = relationshipMap(files, "ppt/presentation.xml");
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const slideId of elements(presentation, "p:sldId")) {
+    const relationshipId = slideId.getAttribute("r:id");
+    const path = relationshipId
+      ? relationships.get(relationshipId)?.path
+      : undefined;
+    if (path && availableSet.has(path) && !seen.has(path)) {
+      ordered.push(path);
+      seen.add(path);
+    }
+  }
+  return [
+    ...ordered,
+    ...available.filter((path) => !seen.has(path)),
+  ];
+}
+
 function sceneBounds(
   element: Element,
   slideWidth: number,
@@ -211,13 +242,7 @@ function parsePptx(
   const ratio = slideWidth / slideHeight;
   const aspectRatio = ratio < 1.55 ? "4:3" : "16:9";
   const canvasHeight = aspectRatio === "4:3" ? 750 : 562.5;
-  const slidePaths = Object.keys(files)
-    .filter((path) => /^ppt\/slides\/slide\d+\.xml$/i.test(path))
-    .sort((left, right) => {
-      const a = Number(/slide(\d+)/i.exec(left)?.[1]);
-      const b = Number(/slide(\d+)/i.exec(right)?.[1]);
-      return a - b;
-    });
+  const slidePaths = pptxSlidePathsInPresentationOrder(files, presentation);
   if (!slidePaths.length)
     throw new Error("The PowerPoint file contains no slides.");
 
@@ -516,10 +541,52 @@ export async function importPresentationFile(
   return extension === "pptx" ? parsePptx(files) : parseOdp(files);
 }
 
+const PRESENTATION_EXPORT_COLORS: Record<string, string> = {
+  "brand-primary": "6A4DE8",
+  "brand-accent": "159B76",
+  "bg-primary": "FBFAF8",
+  "bg-secondary": "F6F4F0",
+  "bg-tertiary": "EFEDE8",
+  "bg-elevated": "FFFEFD",
+  "text-primary": "211F1C",
+  "text-secondary": "65615B",
+  "text-tertiary": "716D67",
+  "border-default": "E5E2DC",
+  "border-strong": "D4D0C8",
+  accent: "6A4DE8",
+  "accent-coral": "EF684F",
+  "accent-mint": "159B76",
+};
+
+function resolvedPresentationColor(value: string) {
+  const trimmed = value.trim();
+  const token = /^var\(--([\w-]+)\)$/.exec(trimmed);
+  if (token) return PRESENTATION_EXPORT_COLORS[token[1] ?? ""];
+  const match = /^#?([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(trimmed);
+  if (!match) return undefined;
+  const digits = match[1]!;
+  return digits.length === 3
+    ? digits
+        .split("")
+        .map((digit) => `${digit}${digit}`)
+        .join("")
+        .toUpperCase()
+    : digits.slice(0, 6).toUpperCase();
+}
+
 function hex(value: unknown, fallback: string) {
-  return typeof value === "string"
-    ? value.replace(/^#/, "").slice(0, 6)
-    : fallback;
+  if (typeof value !== "string") return fallback;
+  return resolvedPresentationColor(value) ?? fallback;
+}
+
+function presentationPaint(value: unknown, fallback: string) {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  const resolved = resolvedPresentationColor(trimmed);
+  if (resolved) return `#${resolved}`;
+  if (/^(?:rgb|rgba|hsl|hsla|lab|oklab|color)\(/i.test(trimmed))
+    return trimmed;
+  return fallback;
 }
 
 async function dataUrl(url: string) {
@@ -724,8 +791,10 @@ export async function renderPresentationSlide(
   if (!context)
     throw new Error("Canvas export is unavailable in this browser.");
   context.scale(scale, scale);
-  context.fillStyle =
-    slide.background ?? content.theme.tokens?.background ?? "var(--bg-primary)";
+  context.fillStyle = presentationPaint(
+    slide.background ?? content.theme.tokens?.background,
+    "#FBFAF8",
+  );
   context.fillRect(0, 0, 1_000, canvasHeight);
   const byId = assetMap(assets);
   for (const object of [...slide.objects].sort(
@@ -742,7 +811,10 @@ export async function renderPresentationSlide(
     if (object.type === "text") {
       const fontSize = Number(object.style?.fontSize ?? 32);
       const weight = Number(object.style?.fontWeight ?? 400);
-      context.fillStyle = String(object.style?.color ?? "var(--text-primary)");
+      context.fillStyle = presentationPaint(
+        object.style?.color,
+        "#211F1C",
+      );
       context.font = `${object.style?.italic ? "italic " : ""}${weight} ${fontSize}px Georgia`;
       context.textBaseline = "top";
       const lines = presentationObjectText(object).split("\n");
@@ -750,8 +822,11 @@ export async function renderPresentationSlide(
         context.fillText(line, 0, index * fontSize * 1.15, object.width),
       );
     } else if (object.type === "shape") {
-      context.fillStyle = String(object.style?.fill ?? "#e4eee8");
-      context.strokeStyle = String(object.style?.stroke ?? "#8da99a");
+      context.fillStyle = presentationPaint(object.style?.fill, "#E4EEE8");
+      context.strokeStyle = presentationPaint(
+        object.style?.stroke,
+        "#8DA99A",
+      );
       context.lineWidth = 1;
       context.beginPath();
       context.roundRect(
@@ -777,7 +852,10 @@ export async function renderPresentationSlide(
         ? (object.content as { values: unknown[] }).values.map(Number)
         : [62, 84, 48];
       const maximum = Math.max(1, ...values);
-      context.fillStyle = content.theme.tokens?.accent ?? "#2f9a72";
+      context.fillStyle = presentationPaint(
+        content.theme.tokens?.accent,
+        "#2F9A72",
+      );
       values.forEach((value, index) => {
         const barWidth = object.width / Math.max(values.length * 1.7, 1);
         const barHeight = (Math.max(0, value) / maximum) * object.height;

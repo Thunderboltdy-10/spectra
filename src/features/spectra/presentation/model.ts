@@ -93,6 +93,23 @@ export type PresentationContent = {
   };
 };
 
+function shallowValueEqual<T extends object>(
+  left: T | undefined,
+  right: T | undefined,
+) {
+  if (left === right) return true;
+  if (!left || !right) return left === right;
+  const leftEntries = Object.entries(left as Record<string, unknown>);
+  const rightEntries = Object.entries(right as Record<string, unknown>);
+  return (
+    leftEntries.length === rightEntries.length &&
+    leftEntries.every(([key, value]) =>
+      Object.prototype.hasOwnProperty.call(right, key) &&
+      (right as Record<string, unknown>)[key] === value,
+    )
+  );
+}
+
 function objectGeometryEqual(left: PresentationObject, right: PresentationObject) {
   return (
     left.x === right.x &&
@@ -101,15 +118,15 @@ function objectGeometryEqual(left: PresentationObject, right: PresentationObject
     left.height === right.height &&
     left.rotation === right.rotation &&
     left.content === right.content &&
-    left.style === right.style &&
+    shallowValueEqual(left.style, right.style) &&
     left.altText === right.altText &&
     left.locked === right.locked &&
     left.hidden === right.hidden &&
     left.readingOrder === right.readingOrder &&
     left.parentId === right.parentId &&
     left.componentId === right.componentId &&
-    left.sourceBinding === right.sourceBinding &&
-    left.animation === right.animation &&
+    shallowValueEqual(left.sourceBinding, right.sourceBinding) &&
+    shallowValueEqual(left.animation, right.animation) &&
     left.type === right.type &&
     left.id === right.id
   );
@@ -125,10 +142,21 @@ export function producePresentationContent(
 ): PresentationContent {
   const draft: PresentationContent = {
     ...deck,
-    theme: { ...deck.theme },
+    theme: {
+      ...deck.theme,
+      ...(deck.theme.tokens ? { tokens: { ...deck.theme.tokens } } : {}),
+      ...(deck.theme.fonts ? { fonts: { ...deck.theme.fonts } } : {}),
+    },
     slides: deck.slides.map((slide) => ({
       ...slide,
-      objects: slide.objects.map((object) => ({ ...object })),
+      objects: slide.objects.map((object) => ({
+        ...object,
+        ...(object.style ? { style: { ...object.style } } : {}),
+        ...(object.sourceBinding
+          ? { sourceBinding: { ...object.sourceBinding } }
+          : {}),
+        ...(object.animation ? { animation: { ...object.animation } } : {}),
+      })),
     })),
     ...(deck.sections ? { sections: deck.sections.map((section) => ({ ...section })) } : {}),
     ...(deck.components
@@ -169,6 +197,9 @@ export function producePresentationContent(
     draft.slides.length === deck.slides.length &&
     draft.slides.every((slide, index) => slide === deck.slides[index]) &&
     draft.theme.id === deck.theme.id &&
+    draft.theme.name === deck.theme.name &&
+    shallowValueEqual(draft.theme.tokens, deck.theme.tokens) &&
+    shallowValueEqual(draft.theme.fonts, deck.theme.fonts) &&
     draft.settings === deck.settings &&
     draft.sections === deck.sections &&
     draft.components === deck.components

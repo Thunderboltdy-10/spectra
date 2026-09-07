@@ -54,4 +54,27 @@ describe("presentation default deck", () => {
     );
     expect(projected).toEqual(normalizePresentationContent(edited));
   });
+
+  it("isolates nested theme and object style edits in copy-on-write updates", () => {
+    const base = createDefaultPresentationContent();
+    const original = normalizePresentationContent({
+      ...base,
+      theme: {
+        ...base.theme,
+        tokens: { background: "#fbfaf5" },
+      },
+    });
+    const originalColor = original.slides[0]!.objects[0]!.style?.color;
+
+    const next = producePresentationContent(original, (draft) => {
+      draft.theme.tokens!.background = "#ffffff";
+      draft.slides[0]!.objects[0]!.style!.color = "#111111";
+    });
+
+    expect(original.theme.tokens?.background).not.toBe("#ffffff");
+    expect(original.slides[0]!.objects[0]!.style?.color).toBe(originalColor);
+    expect(next.theme.tokens?.background).toBe("#ffffff");
+    expect(next.slides[0]!.objects[0]!.style?.color).toBe("#111111");
+    expect(next).not.toBe(original);
+  });
 });

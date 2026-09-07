@@ -151,7 +151,7 @@ const APP_SPECS: readonly AppSpec[] = [
     id: "app.settings.manage-account",
     description: "Open account management through the existing settings surface.",
     risk: "safe",
-    availability: "editable",
+    availability: "readable",
     choreography: { target: "settings-control", region: "account" },
     exposed: true,
   },

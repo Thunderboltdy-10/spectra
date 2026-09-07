@@ -55,6 +55,7 @@ import {
   getSpectraArtifact,
   getSpectraOverview,
   getSpectraResultCards,
+  getSpectraRunDetail,
   getSpectraThread,
   getSpectraThreads,
   postSpectra,
@@ -377,8 +378,23 @@ export function ChatShell() {
   });
 
   useEffect(() => {
-    return spectraBus.handle("work.open", ({ workId }) => openArtifact(workId));
-  }, [openArtifact]);
+    const removeWork = spectraBus.handle("work.open", ({ workId }) =>
+      openArtifact(workId),
+    );
+    const removeConversation = spectraBus.handle(
+      "run.openConversation",
+      async ({ runId, threadId }) => {
+        const resolvedThreadId =
+          threadId?.trim() || (await getSpectraRunDetail(runId)).run.threadId;
+        if (!resolvedThreadId) throw new Error("RUN_THREAD_NOT_FOUND");
+        selectThread(resolvedThreadId);
+      },
+    );
+    return () => {
+      removeWork();
+      removeConversation();
+    };
+  }, [openArtifact, selectThread]);
 
   useEffect(() => {
     const prompt = requestedPrompt?.trim();

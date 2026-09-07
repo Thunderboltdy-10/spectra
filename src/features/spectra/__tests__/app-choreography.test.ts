@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   arbitrateAppSurface,
+  appSurfaceFromPathname,
   choreographyDisabledResult,
   resolveAppChoreographySurface,
 } from "../collaboration/app-choreography";
@@ -57,6 +58,12 @@ describe("app choreography arbitration", () => {
       },
     );
     expect(decision).toMatchObject({ surface: "library", animate: true, navigate: false });
+  });
+
+  it("keeps workspace and library route identities distinct", () => {
+    expect(appSurfaceFromPathname("/workspace")).toBe("workspace");
+    expect(appSurfaceFromPathname("/workspace/class-1")).toBe("workspace");
+    expect(appSurfaceFromPathname("/library")).toBe("library");
   });
 
   it("commits identically when the visual layer is disabled", () => {

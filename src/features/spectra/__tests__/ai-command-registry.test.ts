@@ -14,6 +14,7 @@ describe("N8 app command registry", () => {
         "app.work.open",
         "app.library.organize",
         "app.settings.change",
+        "app.settings.manage-account",
         "app.calendar.open",
         "app.sync.policy.change",
         "app.memory.write",
@@ -75,5 +76,8 @@ describe("N8 app command registry", () => {
     const readOnly = { permissions: { editable: false } } as never;
     expect(appCommandById("app.work.open")?.availability(readOnly)).toEqual({ state: "enabled" });
     expect(appCommandById("app.calendar.open")?.availability(readOnly)).toEqual({ state: "enabled" });
+    expect(appCommandById("app.settings.manage-account")?.availability(readOnly)).toEqual({
+      state: "enabled",
+    });
   });
 });

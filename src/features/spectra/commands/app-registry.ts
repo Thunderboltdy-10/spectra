@@ -263,6 +263,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     description: "Open account management through the existing settings surface.",
     presentation: { kind: "button", compact: { iconOnly: true }, medium: { label: "Manage account" } },
     defaultPlacement: { tab: "Settings", group: "Account", order: 1 },
+    availability: readable,
     risk: "safe",
     undo: "none(explain)",
     choreography: { target: "settings-control", region: "account" },

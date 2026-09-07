@@ -251,8 +251,8 @@ export class AppChoreographyCoordinator {
 export function appSurfaceFromPathname(pathname: string): AppSurface {
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/calendar")) return "calendar";
-  if (pathname.startsWith("/workspace") || pathname.startsWith("/library"))
-    return "library";
+  if (pathname.startsWith("/workspace")) return "workspace";
+  if (pathname.startsWith("/library")) return "library";
   return "workspace";
 }
 

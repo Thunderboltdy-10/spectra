@@ -14,6 +14,7 @@ import {
   type XlsxOperation,
   type XlsxProjection,
 } from "./projection-contracts";
+import { xlsxFormulaSupport } from "./xlsx-formula-support";
 
 function codedOfficeContentError(code: string, message: string) {
   return Object.assign(new Error(message), { code });
@@ -544,6 +545,10 @@ export function xlsxProjectionFromContent(
         const previous = previousByRef.get(ref);
         const nextValue =
           value.value === undefined ? (previous?.value ?? null) : value.value;
+        const nextFormula =
+          typeof value.formula === "string" && value.formula
+            ? value.formula.replace(/^=/, "")
+            : previous?.formula;
         if (
           previous?.formula &&
           !value.formula &&
@@ -560,17 +565,12 @@ export function xlsxProjectionFromContent(
             value: null,
           }),
           value: nextValue,
-          ...(value.formula
+          ...(nextFormula
             ? {
-                formula: value.formula.replace(/^=/, ""),
-                formulaSupport: previous?.formulaSupport,
+                formula: nextFormula,
+                formulaSupport: xlsxFormulaSupport(nextFormula),
               }
-            : previous?.formula
-              ? {
-                  formula: previous.formula,
-                  formulaSupport: previous.formulaSupport,
-                }
-              : {}),
+            : {}),
           ...("format" in value &&
           !sheetFormatsEquivalent(value.format, previous?.format)
             ? { format: value.format ?? {} }

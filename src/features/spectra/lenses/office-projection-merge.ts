@@ -108,7 +108,12 @@ export function xlsxChangedRegions(before: XlsxProjection, after: XlsxProjection
       regions.push(sheet.id, ...sheet.cells.map((cell) => cellId(sheet.id, cell.ref)));
       continue;
     }
-    if (old.name !== sheet.name || !equal(old.merges, sheet.merges))
+    if (
+      old.name !== sheet.name ||
+      !equal(old.merges, sheet.merges) ||
+      (old.frozenRows ?? 0) !== (sheet.frozenRows ?? 0) ||
+      (old.frozenColumns ?? 0) !== (sheet.frozenColumns ?? 0)
+    )
       regions.push(`${sheet.id}:structure`);
     const priorCells = new Map(old.cells.map((cell) => [cellId(sheet.id, cell.ref), cell]));
     for (const cell of sheet.cells) {
@@ -147,11 +152,50 @@ function mergeSheet(
     conflictResolution: resolution === "spectra" ? "ours" : resolution === "external" ? "theirs" : undefined,
   });
   const structure = metadata.value[0] ?? { name: theirs.name, merges: theirs.merges };
+  const frozenRows = resolveWhole(
+    `${base.id}:freezeRows`,
+    base.frozenRows ?? 0,
+    ours.frozenRows ?? 0,
+    theirs.frozenRows ?? 0,
+    resolution,
+  );
+  const frozenColumns = resolveWhole(
+    `${base.id}:freezeColumns`,
+    base.frozenColumns ?? 0,
+    ours.frozenColumns ?? 0,
+    theirs.frozenColumns ?? 0,
+    resolution,
+  );
+  const freezeConflicts = [
+    ...(frozenRows.conflict ? [frozenRows.conflict] : []),
+    ...(frozenColumns.conflict ? [frozenColumns.conflict] : []),
+  ];
   return {
-    sheet: { ...theirs, name: structure.name, merges: structure.merges, cells: cells.value },
-    conflicts: [...metadata.conflicts, ...cells.conflicts] as MergeConflict<unknown>[],
-    spectraChanged: [...metadata.changedByOurs, ...cells.changedByOurs],
-    externalChanged: [...metadata.changedByTheirs, ...cells.changedByTheirs],
+    sheet: {
+      ...theirs,
+      name: structure.name,
+      merges: structure.merges,
+      frozenRows: frozenRows.value ?? 0,
+      frozenColumns: frozenColumns.value ?? 0,
+      cells: cells.value,
+    },
+    conflicts: [
+      ...metadata.conflicts,
+      ...freezeConflicts,
+      ...cells.conflicts,
+    ] as MergeConflict<unknown>[],
+    spectraChanged: [
+      ...metadata.changedByOurs,
+      ...(frozenRows.oursChanged ? [`${base.id}:freezeRows`] : []),
+      ...(frozenColumns.oursChanged ? [`${base.id}:freezeColumns`] : []),
+      ...cells.changedByOurs,
+    ],
+    externalChanged: [
+      ...metadata.changedByTheirs,
+      ...(frozenRows.theirsChanged ? [`${base.id}:freezeRows`] : []),
+      ...(frozenColumns.theirsChanged ? [`${base.id}:freezeColumns`] : []),
+      ...cells.changedByTheirs,
+    ],
   };
 }
 

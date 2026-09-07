@@ -1618,6 +1618,19 @@ class FormulaParser {
         ? flattened([args[0]])
         : [scalar(args[0] ?? null)];
       const position = Math.round(numeric(args[1] ?? 1));
+      const shape = this.argumentShapes[0];
+      if (shape && args[2] !== undefined) {
+        const column = Math.round(numeric(args[2]));
+        if (
+          position < 1 ||
+          position > shape.rows ||
+          column < 1 ||
+          column > shape.columns
+        )
+          throw new Error("#REF!");
+        const flatPosition = (position - 1) * shape.columns + column - 1;
+        return source[flatPosition] ?? null;
+      }
       if (position < 1 || position > source.length) throw new Error("#REF!");
       return source[position - 1] ?? null;
     }

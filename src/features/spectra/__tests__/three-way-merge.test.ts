@@ -99,6 +99,31 @@ describe("Office projection merge", () => {
     expect(conflict.conflicts.map((entry) => entry.id)).toEqual(["xlsx:sheet:1:A1"]);
   });
 
+  it("keeps independent freeze-pane changes during an Excel merge", () => {
+    const base = {
+      sheets: [{
+        id: "xlsx:sheet:1",
+        name: "Sheet1",
+        merges: [] as string[],
+        frozenRows: 0,
+        frozenColumns: 0,
+        cells: [{ id: "xlsx:1:A1", ref: "A1", value: "A" }],
+      }],
+      definedNames: [],
+      nativeBinding: { ...binding, format: "xlsx" as const, recognizedFormulaFunctions: [] },
+    };
+    const merged = mergeXlsxProjections(
+      base,
+      { ...base, sheets: [{ ...base.sheets[0]!, frozenRows: 1 }] },
+      { ...base, sheets: [{ ...base.sheets[0]!, frozenColumns: 2 }] },
+    );
+    expect(merged.conflicts).toEqual([]);
+    expect(merged.projection.sheets[0]).toMatchObject({
+      frozenRows: 1,
+      frozenColumns: 2,
+    });
+  });
+
   it("merges PowerPoint objects independently inside the same slide", () => {
     const object = (id: string, text: string) => ({
       id,

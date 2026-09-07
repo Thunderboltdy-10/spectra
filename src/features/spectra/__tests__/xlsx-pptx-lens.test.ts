@@ -123,6 +123,46 @@ describe("XLSX and PPTX fidelity lenses", () => {
     expect(preserved.value).toBe(5);
   });
 
+  it("recomputes formula support when native formula text changes", async () => {
+    const opened = await xlsxLens.open(await workbookFixture());
+    const content = xlsxArtifactContent(opened.projection);
+    const cell = content.sheets[0]!.cells.C2!;
+
+    const recognized = xlsxProjectionFromContent(
+      {
+        ...content,
+        sheets: content.sheets.map((sheet) => ({
+          ...sheet,
+          cells: {
+            ...sheet.cells,
+            C2: { ...cell, formula: "=SUM(A2:B2)" },
+          },
+        })),
+      },
+      opened.projection,
+    );
+    expect(recognized.sheets[0]!.cells.find((candidate) => candidate.ref === "C2")?.formulaSupport).toBe(
+      "recognized",
+    );
+
+    const cachedOnly = xlsxProjectionFromContent(
+      {
+        ...content,
+        sheets: content.sheets.map((sheet) => ({
+          ...sheet,
+          cells: {
+            ...sheet.cells,
+            C2: { ...cell, formula: "=XLOOKUP(A2,A2:A2,B2:B2)" },
+          },
+        })),
+      },
+      recognized,
+    );
+    expect(cachedOnly.sheets[0]!.cells.find((candidate) => candidate.ref === "C2")?.formulaSupport).toBe(
+      "cached-only",
+    );
+  });
+
   it("reports the stable refusal code when editor content drops a formula for a value", async () => {
     const opened = await xlsxLens.open(await workbookFixture());
     const content = xlsxArtifactContent(opened.projection);

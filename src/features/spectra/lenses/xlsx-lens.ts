@@ -20,12 +20,14 @@ import {
   type XlsxSemanticDelta,
   type XlsxSheetProjection,
 } from "./projection-contracts";
+import {
+  XLSX_RECOGNIZED_FORMULAS,
+  xlsxFormulaSupport,
+} from "./xlsx-formula-support";
 
 const SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
-export const XLSX_RECOGNIZED_FORMULAS = new Set([
-  "ABS", "AVERAGE", "COUNT", "COUNTA", "IF", "MAX", "MIN", "ROUND", "SUM",
-]);
+export { XLSX_RECOGNIZED_FORMULAS } from "./xlsx-formula-support";
 
 export type { XlsxCellProjection, XlsxProjection, XlsxSemanticDelta, XlsxSheetProjection } from "./projection-contracts";
 
@@ -48,16 +50,8 @@ function descendants(root: XmlElement): XmlElement[] {
   return result;
 }
 
-function formulaFunctions(formula: string) {
-  return [...formula.matchAll(/(?:^|[^A-Z0-9_.])(?:_xlfn\.)?([A-Z][A-Z0-9_.]*)\s*\(/gi)]
-    .map((match) => match[1]!.toUpperCase());
-}
-
 function formulaSupport(formula: string) {
-  const functions = formulaFunctions(formula);
-  return functions.every((name) => XLSX_RECOGNIZED_FORMULAS.has(name))
-    ? "recognized" as const
-    : "cached-only" as const;
+  return xlsxFormulaSupport(formula);
 }
 
 function worksheetFreeze(root: XmlElement) {

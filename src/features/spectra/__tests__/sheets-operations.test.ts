@@ -637,6 +637,21 @@ describe("sheets engine correctness", () => {
     ).toBe(9);
   });
 
+  it("uses both row and column arguments for a two-dimensional INDEX", () => {
+    expect(
+      evaluated(
+        {
+          A1: { value: "a" },
+          B1: { value: 10 },
+          A2: { value: "b" },
+          B2: { value: 20 },
+          C1: { formula: "=INDEX(A1:B2,2,2)" },
+        },
+        "C1",
+      )?.value,
+    ).toBe(20);
+  });
+
   it("does not silently drop cells past 10,000 in a formula range", () => {
     const cells: Record<string, SheetCell> = {
       A1: { value: 10 },

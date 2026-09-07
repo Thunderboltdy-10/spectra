@@ -1,6 +1,6 @@
 "use client";
 
-import { Crosshair, MessageSquare, X } from "lucide-react";
+import { Crosshair, MessageSquare, Play, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
@@ -40,7 +40,7 @@ export function LiveThreadPanel({
     <StudioSplitShell
       width={width}
       onWidthChange={onWidthChange}
-      ariaLabel="Live thread"
+      ariaLabel="Live chat"
       cssWidthVariable="--spectra-live-thread-width"
       overlay={overlay}
     >
@@ -55,12 +55,12 @@ export function LiveThreadPanel({
           <div className="min-w-0 flex-1 overflow-hidden">
             <div
               className="truncate font-display text-editor font-semibold text-[var(--text-primary)]"
-              title={title || "Live thread"}
+              title={title || "Live chat"}
             >
-              {title || "Live thread"}
+              {title || "Live chat"}
             </div>
             <div className="truncate text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              Live conversation
+              Live chat
             </div>
           </div>
           {/* Follow AI is a mode, not a command, so it reads as a pill that
@@ -104,28 +104,26 @@ export function LiveThreadPanel({
               className={`spectra-icon-action ${continuing ? "is-selected" : ""}`}
               aria-label={
                 continuing
-                  ? "Stop continuing this thread in the Live Dock"
-                  : "Continue this thread in the Live Dock"
+                  ? "Stop continuing this chat in the Live Dock"
+                  : "Continue this chat in the Live Dock"
               }
               aria-pressed={continuing}
-              data-tooltip={
-                continuing ? "Remove from Live Dock" : "Add to Live Dock"
-              }
+              data-tooltip={continuing ? "Stop continuing" : "Continue in Live Dock"}
               title={
                 continuing
-                  ? "Remove this thread from the Live Dock and start fresh next time"
-                  : "Restore this saved thread to the Live Dock and continue it"
+                  ? "Stop continuing this chat"
+                  : "Continue this chat in the Live Dock"
               }
             >
-              <MessageSquare className="h-4 w-4" />
+              <Play className="h-4 w-4" />
             </button>
           ) : null}
           <button
             type="button"
             onClick={onClose}
             className="spectra-icon-action"
-            aria-label="Close live thread"
-            data-tooltip="Close thread"
+            aria-label="Close live chat"
+            data-tooltip="Close chat"
           >
             <X className="h-4 w-4" />
           </button>

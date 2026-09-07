@@ -39,6 +39,6 @@ export const workTypeMeta = Object.freeze({
     key,
     { ...visuals[key], label: requireArtifactTypeManifest(key).identity.displayName },
   ])),
-  thread_reference: { ...visuals.thread_reference, label: "Thread" },
+  thread_reference: { ...visuals.thread_reference, label: "Chat" },
   resource: { ...visuals.resource, label: "File" },
 }) as Record<PresentedWorkType, TypePresentation>;

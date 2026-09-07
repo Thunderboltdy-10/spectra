@@ -256,3 +256,35 @@ export async function importLibraryResourceFile(
     nativeFormat: payload.nativeFormat,
   };
 }
+
+/**
+ * Parse Office files through the same lens contracts used by Bridge sync.
+ * The bridge is deliberately not involved here: the server only needs the
+ * uploaded bytes to produce the canonical native Spectra projection.
+ */
+export async function projectOfficeImportWithLens(file: File) {
+  const body = new FormData();
+  body.set("file", file, file.name);
+  const response = await fetch("/api/spectra/imports/office", {
+    method: "POST",
+    body,
+  });
+  const payload = (await response.json().catch(() => null)) as {
+    ok?: boolean;
+    blueprintKey?: ArtifactTypeKey;
+    nativeFormat?: string;
+    content?: unknown;
+    fidelityReport?: Array<{
+      scope: string;
+      level: "exact" | "adapted" | "unsupported";
+      message: string;
+    }>;
+    unsupportedFeatures?: string[];
+    parserVersion?: string;
+    message?: string;
+  } | null;
+  if (!response.ok || !payload?.ok || !payload.blueprintKey || payload.content === undefined) {
+    throw new Error(payload?.message || "Could not parse this Office file with the Spectra lens.");
+  }
+  return payload;
+}

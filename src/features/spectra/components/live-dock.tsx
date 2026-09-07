@@ -358,6 +358,7 @@ export type LiveDockProps = {
     attachments?: CommandAttachment[],
   ) => void | Promise<unknown>;
   openThreadId?: string;
+  openChat?: { id: string; title: string };
   /**
    * Deterministic tabs for story mode (the landing page).
    *
@@ -430,6 +431,7 @@ export function LiveDock({
   onRevise,
   onInput,
   openThreadId,
+  openChat,
   storyTabs,
 }: LiveDockProps) {
   const [fetchedTabs, setFetchedTabs] = useState(sharedTabs);
@@ -617,9 +619,10 @@ export function LiveDock({
     ["starting", "streaming"].includes(optimistic.status) &&
     !durableHasOptimistic,
   );
+  const openedChatAlreadyVisible = Boolean(openChat && visible.some((tab) => tab.threadId === openChat.id));
   // The rail is a collection of actual runs. A standalone new-thread button
   // reads like a second composer action, so an empty dock renders nothing.
-  if (!showOptimistic && visible.length === 0) return null;
+  if (!showOptimistic && visible.length === 0 && !openChat) return null;
 
   function openQuickChat(tab: SpectraRunTab) {
     if (story) {
@@ -633,7 +636,6 @@ export function LiveDock({
       );
       return;
     }
-    continueThread(tab);
     onOpen?.(
       tab.runId,
       tab.threadId,
@@ -749,8 +751,8 @@ export function LiveDock({
             type="button"
             onClick={onStartNewThread}
             className="spectra-live-dock-slot flex h-11 w-11 shrink-0 items-center justify-center rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-hover hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            aria-label="Start a new thread"
-            title="New thread"
+            aria-label="Start a new chat"
+            title="New chat"
           >
             <MessageSquarePlus className="h-4 w-4" />
           </button>
@@ -776,6 +778,14 @@ export function LiveDock({
           </article>
         ) : null}
 
+        {openChat && !openedChatAlreadyVisible ? (
+          <article className="spectra-live-dock-tab flex h-11 min-w-[220px] flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--brand-primary)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3" data-open-chat="true">
+            <button type="button" className="dock-tab-identity min-w-0 flex-1 py-1 text-left" onClick={() => onOpen?.("", openChat.id, openChat.title)} aria-label={`Open chat for ${openChat.title}`}>
+              <span className="block truncate text-caption font-semibold text-[var(--text-primary)]">{openChat.title}</span>
+              <span className="block truncate text-micro text-[var(--text-tertiary)]">Chat</span>
+            </button>
+          </article>
+        ) : null}
         <AnimatePresence initial={false}>
           {visible.map((tab) => {
             const source = tabSource(tab);
@@ -855,7 +865,8 @@ export function LiveDock({
                   <button
                     type="button"
                     onClick={() => {
-                      continueThread(tab);
+                      // Opening a saved chat is a navigation action. Continuation
+                      // remains explicit in the resume button and composer.
                       if (model.state === "needs_input") {
                         setCollapsedInputRuns((current) => {
                           const next = new Set(current);
@@ -920,8 +931,8 @@ export function LiveDock({
                     type="button"
                     onClick={() => openQuickChat(tab)}
                     className="dock-tab-icon ml-auto flex h-8 w-7 shrink-0 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    aria-label={`Open conversation for ${model.title}`}
-                    title="Open conversation"
+                    aria-label={`Open chat for ${model.title}`}
+                    title="Open chat"
                   >
                     <SquareArrowOutUpRight className="h-3.5 w-3.5" />
                   </button>

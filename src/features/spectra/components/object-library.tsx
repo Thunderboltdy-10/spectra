@@ -74,11 +74,11 @@ const types: Array<{ key: "all" | ObjectType; label: string }> = [
   { key: "sheets", label: "Sheets" },
   { key: "code", label: "Code & visualisations" },
   { key: "whiteboard", label: "Whiteboards" },
-  { key: "thread", label: "Threads" },
+  { key: "thread", label: "Chats" },
 ];
 
 const threadMeta = {
-  label: "Conversation",
+  label: "Chat",
   icon: MessageSquare,
   color: "var(--brand-primary)",
 };
@@ -100,11 +100,11 @@ function objectSummary(entry: ObjectLibraryEntry) {
     return `Updating ${objectTitle(entry)}`;
   const summary = entry.artifact?.summary ??
     entry.thread?.summaryShort ??
-    "Continue this conversation.";
+    "Continue this chat.";
   const rawBytes = summary.match(/^(\d+) bytes$/i);
   return previewText(
     rawBytes ? formatByteCount(Number(rawBytes[1])) : summary,
-    "Continue this conversation.",
+    "Continue this chat.",
   );
 }
 function objectUpdatedAt(entry: ObjectLibraryEntry) {
@@ -456,7 +456,7 @@ export function ObjectLibrary({
       <div className="flex items-center gap-2">
         <IconAction
           icon={ExternalLink}
-          label={entry.thread ? "Open conversation" : "Open artifact"}
+          label={entry.thread ? "Open chat" : "Open artifact"}
           onClick={() => onOpen(entry)}
         />
         {onTogglePin ? (

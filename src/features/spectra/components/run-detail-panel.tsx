@@ -210,7 +210,7 @@ export function RunDetailPanel({
     <StudioSplitShell
       width={width}
       onWidthChange={setWidth}
-      ariaLabel="Thread panel"
+      ariaLabel="Chat panel"
       cssWidthVariable="--spectra-run-panel-width"
       overlay={overlay}
     >
@@ -228,7 +228,7 @@ export function RunDetailPanel({
                 {conversation?.thread.title ?? "Conversation"}
               </div>
               <div className="text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
-                Thread · {runTruth ? liveDockStateCopy[runTruth.state] : "Loading"}
+                Chat · {runTruth ? liveDockStateCopy[runTruth.state] : "Loading"}
               </div>
             </div>
           </div>
@@ -261,7 +261,7 @@ export function RunDetailPanel({
           ) : (
             <div className="flex h-full items-center justify-center gap-2 text-caption text-[var(--text-tertiary)]">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Loading conversation
+              Loading chat
             </div>
           )}
         </div>

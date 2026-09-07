@@ -184,6 +184,7 @@ import {
   type ArtifactCommentRegion,
 } from "./artifact-comments-panel";
 import { ArtifactEmbedsPanel } from "./artifact-embeds-panel";
+import { ChatBrowserButton } from "./chat-browser-panel";
 import {
   WorkbarMenuAction,
   WorkbarMore,
@@ -2555,6 +2556,7 @@ export function ArtifactStudio({
   onShare,
   onDirtyChange,
   onContinueThread,
+  onOpenChats,
   continuedThreadId,
   compact = false,
   executeApplicationCommand,
@@ -2578,6 +2580,7 @@ export function ArtifactStudio({
   onShare?: (artifact: SpectraArtifact) => void;
   onDirtyChange: (artifactId: string, dirty: boolean) => void;
   onContinueThread?: (threadId: string, title: string) => void;
+  onOpenChats?: () => void;
   continuedThreadId?: string | null;
   compact?: boolean;
   executeApplicationCommand?: ApplicationCommandDispatcher;
@@ -2734,6 +2737,7 @@ export function ArtifactStudio({
               }}
               icon={Maximize2}
             />
+            {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} label="Browse chats about this work" /> : null}
             <IconButton label="Close" onClick={handleClose} icon={X} />
           </div>
         </header>
@@ -2774,6 +2778,7 @@ export function ArtifactStudio({
           onArchive={handleArchive}
           onShare={onShare ? () => onShare(artifact) : undefined}
           onDirtyChange={handleDirtyChange}
+          onOpenChats={onOpenChats}
           compact={compact}
           executeApplicationCommand={executeApplicationCommand}
         />
@@ -2832,6 +2837,7 @@ function ArtifactStudioEditor({
   onArchive,
   onShare,
   onDirtyChange,
+  onOpenChats,
   compact,
   executeApplicationCommand,
 }: {
@@ -2846,6 +2852,7 @@ function ArtifactStudioEditor({
   onArchive?: () => Promise<void> | void;
   onShare?: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  onOpenChats?: () => void;
   compact: boolean;
   executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
@@ -5578,6 +5585,7 @@ function ArtifactStudioEditor({
               onClick={() => setCommentsOpen(true)}
               icon={MessageSquare}
             />
+            {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} label="Browse chats about this work" /> : null}
             {mode === "split" && !compact ? (
               <IconButton
                 label="Open as tab"

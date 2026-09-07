@@ -387,13 +387,66 @@ export const list = query({
           .order("desc")
           .take(limit)
       : [];
-    return [...rows, ...archived]
+    const visible = [...rows, ...archived]
       .filter((thread) => thread.schoolId === actor.schoolId)
       .sort(
         (a, b) =>
           (b.lastMessageAt ?? b.updatedAt) - (a.lastMessageAt ?? a.updatedAt),
       )
       .slice(0, limit);
+    // Threads can touch more than their primary context. Derive compact
+    // context labels from runs and artifacts created by the conversation so
+    // Library, Workspace and Chat can all point back to the same thread.
+    return await Promise.all(
+      visible.map(async (thread) => {
+        const runs = await ctx.db
+          .query("spectraAiRuns")
+          .withIndex("by_thread", (q) => q.eq("threadId", thread._id))
+          .order("desc")
+          .take(40);
+        const workspaceIds = new Set<string>();
+        const artifactIds = new Set<string>();
+        if (thread.workspaceId) workspaceIds.add(String(thread.workspaceId));
+        if (thread.artifactId) artifactIds.add(String(thread.artifactId));
+        for (const run of runs) {
+          if (run.workspaceId) workspaceIds.add(String(run.workspaceId));
+          if (run.artifactId) artifactIds.add(String(run.artifactId));
+        }
+        const createdArtifacts = await ctx.db
+          .query("spectraArtifacts")
+          .withIndex("by_created_thread", (q) =>
+            q.eq("createdFrom.threadId", thread._id),
+          )
+          .order("desc")
+          .take(20);
+        for (const artifact of createdArtifacts) artifactIds.add(String(artifact._id));
+        const [workspaces, artifacts] = await Promise.all([
+          Promise.all(
+            [...workspaceIds].map(async (workspaceId) => {
+              const workspace = await ctx.db.get(workspaceId as Id<"spectraWorkspaces">);
+              return workspace && workspace.status === "active"
+                ? { id: String(workspace._id), title: workspace.title }
+                : null;
+            }),
+          ),
+          Promise.all(
+            [...artifactIds].map(async (artifactId) => {
+              const artifact = await ctx.db.get(artifactId as Id<"spectraArtifacts">);
+              return artifact && artifact.status !== "deleted"
+                ? { id: String(artifact._id), title: artifact.title }
+                : null;
+            }),
+          ),
+        ]);
+        return {
+          ...thread,
+          contexts: {
+            workspaces: workspaces.filter(Boolean),
+            artifacts: artifacts.filter(Boolean),
+          },
+        };
+      }),
+    );
   },
 });
 

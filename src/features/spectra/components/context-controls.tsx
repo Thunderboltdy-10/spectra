@@ -614,10 +614,7 @@ export function ContextFocusControl({
           : null}
       </>
       <span className="sr-only" aria-live="polite">
-        {continuation
-          ? `Continuing ${continuation.title}. `
-          : "Starting a new conversation. "}
-        {contextCount} context object{contextCount === 1 ? "" : "s"} included.
+        {contextCount} context object{contextCount === 1 ? "" : "s"} selected.
       </span>
     </div>
   );

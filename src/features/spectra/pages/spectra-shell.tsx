@@ -79,6 +79,7 @@ import { ShellActivityField } from "../components/shell-activity-field";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
+import { ChatBrowserButton, ChatBrowserPanel } from "../components/chat-browser-panel";
 import { WorkbenchDockShell } from "./workbench-dock-shell";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { applyPreferencePatch } from "../settings/schema";
@@ -158,6 +159,7 @@ import { openSpectraPackage } from "../lenses/spectra-package";
 import {
   classifyLibraryImport,
   importLibraryResourceFile,
+  projectOfficeImportWithLens,
   projectLibraryImportContent,
 } from "../organization/library-import";
 import { getWorkDefinition } from "../work/registry";
@@ -478,6 +480,7 @@ function WorkspaceHeader({
   onShareWorkspace,
   onExportWorkspace,
   onDeleteWorkspace,
+  onOpenChats,
 }: {
   workspace: SpectraWorkspace | null;
   items: SpectraWorkspaceItem[];
@@ -488,6 +491,7 @@ function WorkspaceHeader({
   onShareWorkspace: () => void;
   onExportWorkspace: () => void;
   onDeleteWorkspace: () => void;
+  onOpenChats?: () => void;
 }) {
   const artifactCount = items.filter((item) => item.artifact).length;
   const threadCount = workspaceThreadCount(items);
@@ -534,6 +538,7 @@ function WorkspaceHeader({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} /> : null}
           {/* People and Settings are compact disclosing actions, not sections:
               they open a dialog, so they do not belong in the work nav. */}
           <Button variant="secondary" size="md" onClick={onShareWorkspace}>
@@ -585,9 +590,11 @@ function WorkspaceHeader({
 function RootHeader({
   surface,
   workspaceCount,
+  onOpenChats,
 }: {
   surface: "library" | "workspace";
   workspaceCount: number;
+  onOpenChats?: () => void;
 }) {
   const Icon = surface === "library" ? Library : Home;
   return (
@@ -612,6 +619,7 @@ function RootHeader({
             </p>
           </div>
         </div>
+        {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} /> : null}
       </div>
     </header>
   );
@@ -1167,6 +1175,8 @@ export function SpectraShell({
   const [studioPanelWidth, setStudioPanelWidth] = useState(720);
   const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(480);
   const [runPanelWidth, setRunPanelWidth] = useState(680);
+  const [chatBrowserOpen, setChatBrowserOpen] = useState(false);
+  const [chatBrowserWidth, setChatBrowserWidth] = useState(440);
   /* One budget for the whole workbench row (CANON D44): sidebar, library,
      open work, thread and run panel all draw from the same pixels, so one
      pure resolver (`split-presentation.ts`) decides who stays in flow and
@@ -1369,7 +1379,6 @@ export function SpectraShell({
         : null,
     [threadPanelObject],
   );
-
   const loadOverview = useCallback(
     async (workspaceId?: string, quiet = false) => {
       const sequence = ++overviewRequestSequence.current;
@@ -1748,6 +1757,8 @@ export function SpectraShell({
     "spectra.shared.artifactStudio",
     allArtifacts,
   );
+  const chatBrowserArtifactId = studio.activeArtifactId ?? requestedArtifactId;
+  const chatBrowserScope = chatBrowserArtifactId ? "artifact" : selectedWorkspaceId ? "workspace" : "library";
   const applicationCommandDispatcher = useMemo(
     () =>
       createApplicationCommandDispatcher({
@@ -2102,22 +2113,9 @@ export function SpectraShell({
     setVisibleObjects,
     setActiveWorkspaceContext,
   } = useSpectraContext(allArtifacts, workspaces);
-  useEffect(() => {
-    if (!liveThread) return;
-    // An open conversation is the active conversational context by default.
-    // If the user explicitly stops continuing while keeping the panel open,
-    // respect that until they re-select continue or open another thread.
-    if (skipAutoContinueThreadIdRef.current === liveThread.id) return;
-    setComposerThread((current) =>
-      current?.id === liveThread.id
-        ? current
-        : {
-            id: liveThread.id,
-            title: liveThread.title,
-            workspaceId: selectedWorkspaceId,
-          },
-    );
-  }, [liveThread, selectedWorkspaceId, setComposerThread]);
+  // Opening a chat is intentionally read-only. Continuation is an explicit
+  // action from the Live Dock or chat panel, so browsing never hijacks the
+  // composer target.
   useEffect(() => {
     if (!requestedThreadId) return;
     void getSpectraThread(requestedThreadId)
@@ -3522,8 +3520,16 @@ export function SpectraShell({
         ? portable.manifest.artifactType
         : classification.blueprintKey ?? "document";
       const fallback = createDefaultArtifactPayload(blueprintKey);
+      const officeProjection =
+        !portable &&
+        (blueprintKey === "document" ||
+          blueprintKey === "sheets" ||
+          blueprintKey === "presentation")
+          ? await projectOfficeImportWithLens(file).catch(() => null)
+          : null;
       const importedContent =
         portable?.content ??
+        officeProjection?.content ??
         (await projectLibraryImportContent(file, blueprintKey)) ??
         fallback.content;
       const title = titleHint || fallback.title;
@@ -3556,16 +3562,18 @@ export function SpectraShell({
         jobId: beginning.jobId,
         typeKey: blueprintKey,
         status: "imported",
-        fidelityReport: [
-          {
-            scope: portable ? "package" : "original",
-            level: "exact",
-            message: portable
-              ? "Spectra restored the package content and preserved the uploaded package bytes exactly."
-              : "Original file preserved for the work editor import pipeline.",
-          },
-        ],
-        unsupportedFeatures: [],
+        fidelityReport: officeProjection?.fidelityReport?.length
+          ? officeProjection.fidelityReport
+          : [
+              {
+                scope: portable ? "package" : "original",
+                level: "exact",
+                message: portable
+                  ? "Spectra restored the package content and preserved the uploaded package bytes exactly."
+                  : "Original file preserved for the work editor import pipeline.",
+              },
+            ],
+        unsupportedFeatures: officeProjection?.unsupportedFeatures ?? [],
         importedContent,
       });
       await postSpectra({
@@ -4156,6 +4164,7 @@ export function SpectraShell({
                   onContinueThread={(threadId, title) =>
                     toggleContinuedThread(threadId, title)
                   }
+                  onOpenChats={() => setChatBrowserOpen(true)}
                   executeApplicationCommand={applicationCommandDispatcher}
                 />
               ) : studio.mode === "tab" && studio.activeArtifact ? (
@@ -4225,11 +4234,13 @@ export function SpectraShell({
                             setWorkspaceDeleteConfirmation("");
                             setWorkspaceDeleteOpen(true);
                           }}
+                          onOpenChats={() => setChatBrowserOpen(true)}
                         />
                       ) : (
                         <RootHeader
                           surface={surface}
                           workspaceCount={workspaces.length}
+                          onOpenChats={() => setChatBrowserOpen(true)}
                         />
                       )}
                       {needsSchool ? (
@@ -4358,6 +4369,7 @@ export function SpectraShell({
                             : undefined
                         }
                         onDirtyChange={studio.setDirty}
+                        onOpenChats={() => setChatBrowserOpen(true)}
                         executeApplicationCommand={applicationCommandDispatcher}
                         compact={false}
                       />
@@ -4390,6 +4402,7 @@ export function SpectraShell({
                             : undefined
                         }
                         onDirtyChange={studio.setDirty}
+                        onOpenChats={() => setChatBrowserOpen(true)}
                         executeApplicationCommand={applicationCommandDispatcher}
                         compact={false}
                       />
@@ -4429,17 +4442,11 @@ export function SpectraShell({
                 workspaceId: selectedWorkspaceId,
                 optimistic: runEngine.liveExchange,
                 openThreadId: liveThread?.id,
+                openChat: liveThread ? { id: liveThread.id, title: liveThread.title } : undefined,
                 onStartNewThread: startFreshComposerThread,
                 onOpen: (_runId, threadId, title, artifactId) => {
-                  skipAutoContinueThreadIdRef.current = null;
                   setActiveRunPanelId(null);
                   setLiveThread({ id: threadId, title });
-                  setComposerThread({
-                    id: threadId,
-                    title,
-                    runId: _runId,
-                    workspaceId: selectedWorkspaceId,
-                  });
                   if (artifactId) {
                     const artifact = allArtifacts.find(
                       (item) => item._id === artifactId,
@@ -4645,6 +4652,21 @@ export function SpectraShell({
                   if (artifact) openArtifactPanel(artifact);
                 }}
                 onOpenWorkspace={goToWorkspaceHub}
+              />
+            ) : null}
+            {chatBrowserOpen ? (
+              <ChatBrowserPanel
+                scope={chatBrowserScope}
+                workspaceId={selectedWorkspaceId}
+                artifactId={chatBrowserArtifactId}
+                width={chatBrowserWidth}
+                onWidthChange={setChatBrowserWidth}
+                title={chatBrowserScope === "artifact" ? "Chats about this work" : chatBrowserScope === "workspace" ? "Workspace chats" : "Library chats"}
+                onClose={() => setChatBrowserOpen(false)}
+                onOpenChat={(thread) => {
+                  setChatBrowserOpen(false);
+                  setLiveThread({ id: thread._id, title: thread.title });
+                }}
               />
             ) : null}
             {activeRunPanelId ? (

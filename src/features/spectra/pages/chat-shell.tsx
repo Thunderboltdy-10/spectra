@@ -43,7 +43,6 @@ import {
   StudioSplitPlaceholder,
   useArtifactStudioState,
 } from "../components/artifact-studio-shell";
-import { LiveThreadPanel } from "../components/live-thread-panel";
 import {
   disengageFollow,
   isProgrammaticFollowOpen,
@@ -94,26 +93,11 @@ export function ChatShell() {
     useState<ComposerFocusMode | null>(null);
   const [welcome, setWelcome] = useState("Welcome back.");
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
-  const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(560);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
   const syncedRequestedThreadRef = useRef<string | null | undefined>(undefined);
   const consumedPromptRef = useRef<string | null>(null);
-  const openObjects = useSpectraContextStore((state) => state.openObjects);
-  const openObject = useSpectraContextStore((state) => state.openObject);
   const closePresentation = useSpectraContextStore(
     (state) => state.closePresentation,
-  );
-  const threadPanelObject =
-    openObjects.find(
-      (object) =>
-        object.type === "thread" && object.presentation === "thread-panel",
-    ) ?? null;
-  const liveThread = useMemo(
-    () =>
-      threadPanelObject
-        ? { id: threadPanelObject.id, title: threadPanelObject.label }
-        : null,
-    [threadPanelObject],
   );
   const {
     composerThread,
@@ -277,21 +261,8 @@ export function ChatShell() {
     closePresentation("split");
     closePresentation("tab");
     closePresentation("tile");
+    closePresentation("thread-panel");
   }, [closePresentation, studio]);
-  const setLiveThread = useCallback(
-    (thread: { id: string; title: string } | null) => {
-      if (thread)
-        openObject({
-          type: "thread",
-          id: thread.id,
-          label: thread.title,
-          presentation: "thread-panel",
-          workspaceId: chatWorkspaceId ?? undefined,
-        });
-      else closePresentation("thread-panel");
-    },
-    [chatWorkspaceId, closePresentation, openObject],
-  );
   const openArtifact = useCallback(
     (artifactId: string) => {
       // A user-chosen open ends spectating; a follow-dispatched open does not.
@@ -330,13 +301,13 @@ export function ChatShell() {
         )
           return;
         if (targetThreadId) {
-          setLiveThread({ id: targetThreadId, title: artifact.title });
+          selectThread(targetThreadId);
           return;
         }
       }
       studio.openSplit(artifact);
     },
-    [artifacts, composerThread?.id, setLiveThread, studio, threadId],
+    [artifacts, composerThread?.id, selectThread, studio, threadId],
   );
 
   const focusedArtifact = studio.activeArtifact;
@@ -391,7 +362,7 @@ export function ChatShell() {
         title:
           id === threadId
             ? (detail?.thread.title ?? "Conversation")
-            : "New thread",
+            : "New chat",
       });
       if (id !== threadId) {
         setThreadId(id);
@@ -547,10 +518,10 @@ export function ChatShell() {
             <CrossfadeText
               value={visibleTitle}
               primitive="reveal"
-              className="truncate font-display text-heading font-semibold text-[var(--text-primary)]"
+              className="truncate font-display text-ui font-semibold text-[var(--text-primary)]"
             />
             <div className="text-micro uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              Thread · Shared Spectra conversation
+              Chat · Shared Spectra conversation
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -571,8 +542,8 @@ export function ChatShell() {
                   setRenaming(true);
                 }}
                 className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
-                aria-label="Rename thread"
-                title="Rename thread"
+                aria-label="Rename chat"
+                title="Rename chat"
               >
                 <Pencil className="h-3.5 w-3.5" />
               </button>
@@ -589,9 +560,9 @@ export function ChatShell() {
                 }
                 className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
                 aria-label={
-                  detail?.thread.pinned ? "Unpin thread" : "Pin thread"
+                  detail?.thread.pinned ? "Unpin chat" : "Pin chat"
                 }
-                title={detail?.thread.pinned ? "Unpin thread" : "Pin thread"}
+                title={detail?.thread.pinned ? "Unpin chat" : "Pin chat"}
               >
                 <Pin
                   className={`h-3.5 w-3.5 ${detail?.thread.pinned ? "fill-current text-[var(--accent-cyan)]" : ""}`}
@@ -681,21 +652,6 @@ export function ChatShell() {
             </button>
           </div>
         ) : null}
-        {threadId && composerThread?.id !== threadId ? (
-          <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)] sm:px-7">
-            <span className="font-semibold text-[var(--text-primary)]">
-              {composerThread
-                ? `Continuing ${composerThread.title}.`
-                : "New thread ready."}
-            </span>{" "}
-            The visible conversation remains open for reference; the next
-            message{" "}
-            {composerThread
-              ? "continues the selected conversation"
-              : "starts a separate thread"}{" "}
-            with the selected context.
-          </div>
-        ) : null}
         <ConversationSurface
           detail={detail}
           threadId={threadId ?? undefined}
@@ -728,10 +684,10 @@ export function ChatShell() {
               <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-surface border border-[color-mix(in_oklab,var(--brand-primary)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-elevated))] shadow-soft">
                 <SpectraMark size={28} />
               </div>
-              <h1 className="max-w-[820px] font-display text-display font-semibold leading-[1.08] tracking-[-0.03em] text-[var(--text-primary)]">
+              <h1 className="max-w-[820px] font-display text-title font-semibold leading-[1.12] text-[var(--text-primary)]">
                 {welcome}
               </h1>
-              <p className="mt-3 max-w-[640px] text-subhead leading-7 text-[var(--text-secondary)]">
+              <p className="mt-3 max-w-[640px] text-body leading-6 text-[var(--text-secondary)]">
                 Bring a half-formed question, a difficult topic, or a whole
                 workspace. Spectra can explain, build, and revise alongside you.
               </p>
@@ -829,23 +785,11 @@ export function ChatShell() {
         </div>
       </div>
 
-      {liveThread ? (
-        <LiveThreadPanel
-          threadId={liveThread.id}
-          title={liveThread.title}
-          width={liveThreadPanelWidth}
-          onWidthChange={setLiveThreadPanelWidth}
-          onClose={() => setLiveThread(null)}
-          onOpenArtifact={openArtifact}
-          onOpenWorkspace={selectWorkspaceContext}
-        />
-      ) : null}
-
       {historyOpen ? (
         <aside className="absolute inset-y-14 right-0 z-chrome w-[min(360px,92vw)] overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-primary)] p-4 shadow-soft">
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="text-ui font-semibold">Run & thread hub</h2>
+          <h2 className="text-ui font-semibold">Runs & chats</h2>
               <p className="text-micro text-[var(--text-tertiary)]">
                 Hidden results remain inspectable.
               </p>

@@ -435,7 +435,7 @@ export function ArtifactBlueprintSheet({
               {blueprintKey === "flashcard_deck" ? <DeckEditor cards={cards} setCards={setCards} /> : null}
               {blueprintKey === "quiz" ? <QuizEditor questions={questions} setQuestions={setQuestions} /> : null}
               {blueprintKey === "planner_task" ? <TaskEditor task={task} setTask={setTask} /> : null}
-              {artifact?.blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-card bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[var(--brand-primary)]" /><p className="mt-3 text-ui leading-6 text-[var(--text-secondary)]">Thread references continue in the shared conversation view.</p></div></div> : null}
+              {artifact?.blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-card bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[var(--brand-primary)]" /><p className="mt-3 text-ui leading-6 text-[var(--text-secondary)]">Linked chat</p></div></div> : null}
             </section>
             <aside className="space-y-4">
               <div className="rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">

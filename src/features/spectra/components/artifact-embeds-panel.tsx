@@ -380,7 +380,7 @@ export function ArtifactEmbedsPanel({
               ? undefined
               : transitionFor("reveal", motionLevel.level)
           }
-          className="absolute inset-0 z-panel flex justify-end bg-[color-mix(in_oklab,var(--text-primary)_12%,transparent)] backdrop-blur-[1px]"
+          className="absolute inset-0 z-panel flex justify-end"
           onPointerDown={onClose}
         >
           <motion.aside

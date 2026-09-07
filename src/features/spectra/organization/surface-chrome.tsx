@@ -72,13 +72,13 @@ export const GROUP_BY_LABELS: Record<BoardGroupBy, string> = {
  *
  * The server keys its board columns on exactly these values (`orgNodes.typeKey`),
  * so the filter, the columns and the create menu all speak the same words. The
- * List used to add "All work", "Threads" and "Folders and workspaces" — three
+ * List used to add "All work", "Chats" and "Folders and workspaces" — three
  * options the Board could not honour — which is how the same control came to
  * mean two different things in two places.
  */
 export const TYPE_FILTERS: ReadonlyArray<{ key: string; label: string }> = [
   ...workTypeFilters.map((type) => ({ key: type.key, label: type.label })),
-  { key: "thread", label: "Threads" },
+  { key: "thread", label: "Chats" },
 ];
 
 export function typeFilterLabel(filter: TypeFilter) {

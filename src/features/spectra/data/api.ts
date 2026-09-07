@@ -567,6 +567,10 @@ export type SpectraThread = {
   updatedAt: number;
   lastMessageAt?: number;
   lastRunId?: string;
+  contexts?: {
+    workspaces?: Array<{ id: string; title: string }>;
+    artifacts?: Array<{ id: string; title: string }>;
+  };
 };
 
 export type SpectraMessage = {

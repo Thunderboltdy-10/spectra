@@ -670,8 +670,9 @@ function ShellNavigation() {
                 if (!rows.length) return null;
                 return (
                   <section key={String(pinned)} className="mt-3">
-                    <h2 className="px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
-                      {pinned ? "Pinned" : "Recents"}
+                    <h2 className="flex items-center justify-between px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                      <span>{pinned ? "Pinned" : pathname === "/chat" ? "Chats" : "Recents"}</span>
+                      {pathname === "/chat" && !pinned ? <span className="font-normal normal-case tracking-normal text-[var(--text-placeholder)]">{rows.length}</span> : null}
                     </h2>
                     <div className="mt-1 space-y-0.5">
                       {rows.map((thread) => (
@@ -679,10 +680,15 @@ function ShellNavigation() {
                           key={thread._id}
                           href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
                           prefetch={false}
-                          className="group flex h-8 items-center gap-2 rounded-chip px-1.5 text-caption text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                          className={cn("group flex items-center gap-2 rounded-chip px-1.5 text-caption text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]", pathname === "/chat" ? "min-h-10 py-1" : "h-8")}
                         >
                           <span className="min-w-0 flex-1 truncate">
-                            {thread.title}
+                            <span className="block truncate">{thread.title}</span>
+                            {pathname === "/chat" && thread.contexts ? (
+                              <span className="block truncate text-micro text-[var(--text-placeholder)]">
+                                {[...(thread.contexts.workspaces ?? []).map((context) => context.title), ...(thread.contexts.artifacts ?? []).map((context) => context.title)].slice(0, 2).join(" · ") || "Inbox"}
+                              </span>
+                            ) : null}
                           </span>
                           <span className="shrink-0 text-micro tabular-nums text-[var(--text-tertiary)]">
                             {formatRelativeTime(

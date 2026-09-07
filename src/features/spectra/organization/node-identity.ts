@@ -46,7 +46,7 @@ const THREAD: NodeIdentity = {
   icon: MessageSquare,
   color: "var(--brand-primary)",
   soft: "color-mix(in oklab, var(--brand-primary) 10%, var(--bg-elevated))",
-  label: "Thread",
+  label: "Chat",
 };
 
 const WORKSPACE: NodeIdentity = {

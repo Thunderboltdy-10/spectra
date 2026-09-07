@@ -386,6 +386,7 @@ export async function requestBridgeUpdate(): Promise<string> {
   try {
     const response = await fetch(`${BRIDGE_URL}/v1/update`, {
       method: "POST",
+      signal: bridgeRequestSignal(),
       cache: "no-store",
     });
     if (response.ok) {
@@ -415,6 +416,7 @@ export async function offerPairing(input: {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
+      signal: bridgeRequestSignal(),
     });
   } catch (error) {
     throw new Error(pairingFailureMessage(error, { kind: "not-running" }));
@@ -431,6 +433,7 @@ export async function pairingStatus(challenge: string) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ challenge }),
+      signal: bridgeRequestSignal(),
     });
     if (!response.ok) return null;
     return z

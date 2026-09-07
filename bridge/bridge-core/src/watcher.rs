@@ -312,14 +312,14 @@ pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<Scan
 
 fn is_double_sync_path(path: &Path) -> bool {
     path.components().any(|component| {
-        matches!(
-            component
-                .as_os_str()
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .as_str(),
-            "onedrive" | "dropbox" | "google drive" | "my drive"
-        )
+        let component = component.as_os_str().to_string_lossy().to_ascii_lowercase();
+        component == "onedrive"
+            || component.starts_with("onedrive - ")
+            || component == "dropbox"
+            || component.starts_with("dropbox - ")
+            || component == "google drive"
+            || component.starts_with("google drive - ")
+            || component == "my drive"
     })
 }
 
@@ -779,9 +779,14 @@ mod tests {
     #[test]
     fn provider_backed_roots_use_a_wider_stability_window() {
         let provider = Path::new(r"C:\Users\pablo\OneDrive\Documents\Physics");
+        let named_provider = Path::new(r"C:\Users\pablo\OneDrive - School\Documents\Physics");
         let ordinary = Path::new(r"C:\Users\pablo\Documents\Physics");
         assert!(
             WatcherConfig::for_root(provider).stability_window
+                > WatcherConfig::default().stability_window
+        );
+        assert!(
+            WatcherConfig::for_root(named_provider).stability_window
                 > WatcherConfig::default().stability_window
         );
         assert_eq!(

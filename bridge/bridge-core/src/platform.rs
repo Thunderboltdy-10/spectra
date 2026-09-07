@@ -149,17 +149,23 @@ mod host {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
 mod host {
     use super::*;
+    use std::os::unix::fs::MetadataExt;
 
     #[async_trait]
     impl Platform for HostPlatform {
         fn file_identity(&self, file: &File) -> io::Result<OsFileIdentity> {
             let meta = file.metadata()?;
             Ok(OsFileIdentity {
-                volume: 0,
-                file_index: meta.len() as u128,
+                // A file length is not an identity: same-sized files are
+                // common in a school folder and would otherwise share one
+                // logical resource on macOS/Linux. Unix exposes the stable
+                // device/inode pair needed to survive renames and provider
+                // temp-file replacement.
+                volume: meta.dev(),
+                file_index: meta.ino() as u128,
             })
         }
         fn is_locked(&self, _path: &Path) -> io::Result<bool> {
@@ -191,5 +197,75 @@ mod host {
         fn enable_autostart(&self) -> anyhow::Result<()> {
             Ok(())
         }
+    }
+}
+
+#[cfg(not(any(windows, unix)))]
+mod host {
+    use super::*;
+
+    #[async_trait]
+    impl Platform for HostPlatform {
+        fn file_identity(&self, file: &File) -> io::Result<OsFileIdentity> {
+            let meta = file.metadata()?;
+            Ok(OsFileIdentity {
+                // Unsupported platforms do not have a stable identity
+                // implementation yet. Keep this fallback isolated rather
+                // than making macOS use a size-based identity.
+                volume: 0,
+                file_index: meta.len() as u128,
+            })
+        }
+        fn is_locked(&self, _path: &Path) -> io::Result<bool> {
+            Ok(false)
+        }
+        fn open_stable_reader(&self, path: &Path) -> io::Result<Option<File>> {
+            match File::options().read(true).open(path) {
+                Ok(file) => Ok(Some(file)),
+                Err(error) => Err(error),
+            }
+        }
+        fn recycle(&self, path: &Path) -> anyhow::Result<()> {
+            trash::delete(path)?;
+            Ok(())
+        }
+        fn store_credential(&self, account_id: &str, credential: &str) -> anyhow::Result<()> {
+            keyring::Entry::new("Spectra Bridge", account_id)?.set_password(credential)?;
+            Ok(())
+        }
+        fn read_credential(&self, account_id: &str) -> anyhow::Result<Option<String>> {
+            let entry = keyring::Entry::new("Spectra Bridge", account_id)?;
+            match entry.get_password() {
+                Ok(v) => Ok(Some(v)),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(e) => Err(e.into()),
+            }
+        }
+        fn enable_autostart(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{HostPlatform, Platform};
+    use std::fs::File;
+    use tempfile::tempdir;
+
+    #[test]
+    fn same_size_unix_files_have_distinct_resource_identity() {
+        let dir = tempdir().unwrap();
+        let first = dir.path().join("first.txt");
+        let second = dir.path().join("second.txt");
+        std::fs::write(&first, b"same-size").unwrap();
+        std::fs::write(&second, b"same-size").unwrap();
+        let first_id = HostPlatform
+            .file_identity(&File::open(first).unwrap())
+            .unwrap();
+        let second_id = HostPlatform
+            .file_identity(&File::open(second).unwrap())
+            .unwrap();
+        assert_ne!(first_id, second_id);
     }
 }

@@ -1814,6 +1814,9 @@ async function projectDocument(
         "instrText",
         "sdt",
         "hyperlink",
+        "commentRangeStart",
+        "commentRangeEnd",
+        "commentReference",
       );
       // Some Word writers persist built-in Heading styles as the numeric
       // style IDs 1/2/3. Normalize those aliases to the semantic names used
@@ -1875,7 +1878,7 @@ async function projectDocument(
           ? {
               readOnly: true,
               reason:
-                "This paragraph contains a Word revision, field, hyperlink range, content control, native image, or OMML equation and is preserved read-only.",
+                "This paragraph contains Word revision, field, hyperlink, comment, content-control, native-image, or OMML equation markup and is preserved read-only.",
             }
           : {}),
       });
@@ -1911,6 +1914,9 @@ async function projectDocument(
                 "fldChar",
                 "instrText",
                 "hyperlink",
+                "commentRangeStart",
+                "commentRangeEnd",
+                "commentReference",
               ),
           ),
         );

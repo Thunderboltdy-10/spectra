@@ -592,6 +592,23 @@ describe("DOCX preservation lens", () => {
     ).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
   });
 
+  it("keeps native Word comment ranges read-only instead of flattening their anchors", async () => {
+    const source = await fixture("macro-enabled.docm");
+    const opened = await docxLens.open(source);
+    const commented = opened.projection.blocks.find((block) =>
+      block.text.includes("On the Insert tab"),
+    );
+    expect(commented).toBeTruthy();
+    expect(commented?.attrs?.nativeReadOnly).toBe(true);
+    await expect(
+      docxLens.mutate(opened.preservedCarry, {
+        kind: "replace-paragraph",
+        regionId: commented!.id,
+        text: "Do not flatten native Word comment anchors.",
+      }),
+    ).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
+  });
+
   it("preserves multilingual text exactly through a safe unrelated edit", async () => {
     const source = await fixture("fields-toc.docx");
     const opened = await docxLens.open(source);

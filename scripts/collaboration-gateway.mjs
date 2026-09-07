@@ -1189,6 +1189,11 @@ const server = new Server({
       return encoded;
     }
     storedDocument.destroy();
+    stored = await bridge("load", {
+      artifactId: context.artifactId,
+      partitionKey: context.partitionKey,
+      includeInitialProjection: true,
+    });
     const document = new Y.Doc();
     if (stored?.initialProjection) {
       if (!initializeNativeArtifactDocument(document, stored.initialProjection))

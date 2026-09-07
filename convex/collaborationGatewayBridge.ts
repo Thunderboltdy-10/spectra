@@ -156,7 +156,16 @@ export const exchange = action({
       for (let page = 0; page < 20; page += 1) {
         const result = await ctx.runQuery(
           internal.collaborationGatewayStore.load,
-          { artifactId, partitionKey, afterSequence, limit: 500 },
+          {
+            artifactId,
+            partitionKey,
+            afterSequence,
+            limit: 500,
+            includeInitialProjection: optionalBoolean(
+              payload.includeInitialProjection,
+              "include_initial_projection",
+            ),
+          },
         );
         if (!result) return null;
         roomId = result.roomId;

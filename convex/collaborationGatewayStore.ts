@@ -274,6 +274,7 @@ export const load = internalQuery({
     partitionKey: v.string(),
     afterSequence: v.number(),
     limit: v.number(),
+    includeInitialProjection: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const room = await ctx.db
@@ -325,8 +326,13 @@ export const load = internalQuery({
       lastSnapshotAt: room.lastSnapshotAt ?? null,
       lastProjectionSequence: room.lastProjectionSequence ?? null,
       liveStateVectorHash: artifact.liveStateVectorHash ?? null,
+      // The gateway requests this explicitly only after it has determined
+      // that the stored Yjs state is not native. Keeping the bootstrap
+      // projection out of the normal state load avoids serializing the full
+      // artifact on every native room reload while preserving legacy-room
+      // migration.
       initialProjection:
-        args.afterSequence === 0
+        args.afterSequence === 0 && args.includeInitialProjection === true
           ? {
               title: artifact.title,
               summary: artifact.summary,

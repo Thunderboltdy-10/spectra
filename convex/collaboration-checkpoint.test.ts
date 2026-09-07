@@ -269,6 +269,60 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     expect(afterCheckpoint.room?.lastProjectionSequence).toBe(2);
   });
 
+  it("only sends the full bootstrap projection for an empty native room", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+
+    const emptyRoom = await t.query(internal.collaborationGatewayStore.load, {
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      afterSequence: 0,
+      limit: 500,
+      includeInitialProjection: true,
+    });
+    expect(emptyRoom?.initialProjection?.content).toEqual({
+      blocks: [{ id: "intro", type: "paragraph", text: "start" }],
+    });
+
+    const update = yjsUpdate("durable");
+    await t.mutation(internal.collaborationGatewayStore.append, {
+      accountId: seed.accountId,
+      actorKind: "human",
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "client-1",
+      policyVersion: 0,
+      idempotencyKey: "load:durable",
+      update: arrayBufferCopy(update.update),
+      baseStateVectorHash: "initial-state-vector",
+      stateVectorHash: update.hash,
+      regionIds: ["intro"],
+    });
+
+    const durableRoom = await t.query(internal.collaborationGatewayStore.load, {
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      afterSequence: 0,
+      limit: 500,
+    });
+    expect(durableRoom?.updates).toHaveLength(1);
+    expect(durableRoom?.initialProjection).toBeNull();
+
+    const legacyBootstrap = await t.query(
+      internal.collaborationGatewayStore.load,
+      {
+        artifactId: seed.artifactId,
+        partitionKey: "root",
+        afterSequence: 0,
+        limit: 500,
+        includeInitialProjection: true,
+      },
+    );
+    expect(legacyBootstrap?.initialProjection?.content).toEqual(
+      emptyRoom?.initialProjection?.content,
+    );
+  });
+
   it("compacts the update log through a verified snapshot", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedRoom(t);

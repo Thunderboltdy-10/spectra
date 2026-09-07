@@ -142,6 +142,24 @@ describe("OpenRouter public response streaming", () => {
     ]);
   });
 
+  it("processes a final SSE record when the stream closes without a newline", async () => {
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-plan","function":{"name":"submit_plan","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}',
+        ));
+        controller.close();
+      },
+    }), { headers: { "content-type": "text/event-stream" } });
+
+    await expect(readOpenRouterAgentTurn(response)).resolves.toMatchObject({
+      finishReason: "tool_calls",
+      toolCalls: [
+        { id: "call-plan", name: "submit_plan", arguments: "{}" },
+      ],
+    });
+  });
+
   it("recovers an agent turn after one malformed provider event", async () => {
     const chunks = [
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"read_artifact","arguments":"{\\"artifactId\\":\\"broken',

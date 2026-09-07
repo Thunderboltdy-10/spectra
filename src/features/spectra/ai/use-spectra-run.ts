@@ -696,7 +696,9 @@ export function useSpectraRun({
         const { value, done } = await reader.read();
         buffer += decoder.decode(value, { stream: !done });
         const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        // Process a final NDJSON event even when the response closes without a
+        // trailing newline; otherwise the terminal card/final event is lost.
+        buffer = done ? "" : lines.pop() ?? "";
         for (const line of lines) {
           if (!line.trim()) continue;
           const event = parseSpectraStreamEvent(JSON.parse(line));

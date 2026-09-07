@@ -151,4 +151,42 @@ describe("runSpectraAgentLoop", () => {
         }),
       );
   });
+
+  it("does not discard sibling calls when a provider mixes a terminal tool with reads", async () => {
+    const requestTurn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          { id: "plan-1", name: "submit_plan", arguments: '{"decision":"operate"}' },
+          { id: "read-1", name: "read_artifact", arguments: '{"artifactId":"a1"}' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        toolCalls: [
+          { id: "plan-2", name: "submit_plan", arguments: '{"decision":"operate"}' },
+        ],
+      });
+    const executeTool = vi.fn().mockResolvedValue({ ok: true, title: "Lesson notes" });
+    const result = await runSpectraAgentLoop({
+      messages: [{ role: "user", content: "Update the notes" }],
+      requestTurn,
+      executeTool,
+      isParallelSafeTool: (call) => call.name === "read_artifact",
+      isTerminalTool: (call) => call.name === "submit_plan",
+    });
+
+    expect(result.terminalTool?.id).toBe("plan-2");
+    expect(executeTool).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "read-1" }),
+    );
+    expect(requestTurn.mock.calls[1]?.[0]).toContainEqual(
+      expect.objectContaining({
+        role: "tool",
+        tool_call_id: "plan-1",
+        content: expect.stringContaining("terminal_tool_must_be_alone"),
+      }),
+    );
+  });
 });

@@ -312,7 +312,10 @@ export async function readOpenRouterResponse(
     );
     buffer += decoder.decode(value, { stream: !done });
     const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+    // A completed HTTP stream is allowed to end immediately after its final
+    // SSE record. Process that residual line instead of dropping the final
+    // model delta/tool call when no newline was sent.
+    buffer = done ? "" : lines.pop() ?? "";
     for (const line of lines) {
       if (streamEventIsMeaningful({ line })) {
         lastMeaningfulAt = Date.now();
@@ -496,7 +499,10 @@ export async function readOpenRouterAgentTurn(
     );
     buffer += decoder.decode(value, { stream: !done });
     const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+    // A completed HTTP stream is allowed to end immediately after its final
+    // SSE record. Process that residual line instead of dropping the final
+    // model delta/tool call when no newline was sent.
+    buffer = done ? "" : lines.pop() ?? "";
     for (const line of lines) {
       if (streamEventIsMeaningful({ line })) {
         lastMeaningfulAt = Date.now();

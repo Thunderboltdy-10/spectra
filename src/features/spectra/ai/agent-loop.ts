@@ -149,8 +149,9 @@ export async function runSpectraAgentLoop(input: {
     model = turn.model ?? model;
     provider = turn.provider ?? provider;
 
-    const terminal = turn.toolCalls.find(input.isTerminalTool);
-    if (terminal)
+    const terminalCalls = turn.toolCalls.filter(input.isTerminalTool);
+    const terminal = terminalCalls[0];
+    if (terminal && turn.toolCalls.length === 1)
       return {
         terminalTool: terminal,
         text: turn.text,
@@ -204,9 +205,35 @@ export async function runSpectraAgentLoop(input: {
           }
         : input.executeTool(call);
     };
+    const terminalCallIds = new Set(terminalCalls.map((call) => call.id));
+    const terminalCallError = {
+      status: 1,
+      ok: false,
+      code: "terminal_tool_must_be_alone",
+      error:
+        "A terminal tool must be the only tool call in a turn. Use the other tool results, then retry the terminal tool alone.",
+      message:
+        "A terminal tool must be the only tool call in a turn. Use the other tool results, then retry the terminal tool alone.",
+      retryable: true,
+    };
+    const mixedMutationCallError = {
+      ...terminalCallError,
+      code: "terminal_mixed_turn_action_not_executed",
+      error:
+        "A terminal tool was mixed with a non-read action. The action was not executed; retry it after using the read results and finish with the terminal tool alone.",
+      message:
+        "A terminal tool was mixed with a non-read action. The action was not executed; retry it after using the read results and finish with the terminal tool alone.",
+    };
     let mutationChain = Promise.resolve<unknown>(undefined);
     const results = await Promise.all(
       turn.toolCalls.map((call) => {
+        // Do not silently discard sibling reads/actions when a provider emits
+        // a terminal call in the same turn. Feed the terminal call a
+        // structured correction while still executing the non-terminal calls.
+        // The next model turn can then use those results and finish cleanly.
+        if (terminalCallIds.has(call.id)) return Promise.resolve(terminalCallError);
+        if (terminalCalls.length && !input.isParallelSafeTool?.(call))
+          return Promise.resolve(mixedMutationCallError);
         if (input.isParallelSafeTool?.(call)) return executeOne(call);
         const queued = mutationChain.then(() => executeOne(call));
         mutationChain = queued.then(

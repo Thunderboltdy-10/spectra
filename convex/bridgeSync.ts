@@ -10,6 +10,7 @@ import {
   chooseReplicaContinuity,
   latestActiveWriteForReplica,
 } from "./bridgeIdentity";
+import { evaluateAccessForActor } from "./authorityShared";
 import { assertPayloadWriteAllowed, computeEffectivePolicy } from "./syncPolicy";
 import { decideMissingResourceAction, policyIncludesPath } from "../shared/sync-policy";
 import type { SyncPolicyValues } from "../shared/sync-policy";
@@ -32,6 +33,25 @@ async function requireDevice(ctx: Parameters<typeof getActorForAccountId>[0], cr
   const actor = await getActorForAccountId(ctx, device.accountId);
   if (!actor) throw new Error("BRIDGE_ACCOUNT_UNAVAILABLE");
   return { device, actor };
+}
+
+type BridgeActor = NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>;
+
+async function hasArtifactModify(
+  ctx: Parameters<typeof getActorForAccountId>[0],
+  actor: BridgeActor,
+  workId: Id<"spectraArtifacts">,
+) {
+  const access = await evaluateAccessForActor(ctx, actor, "artifact", workId);
+  return access.allowed && access.capabilities.includes("modify");
+}
+
+async function requireArtifactModify(
+  ctx: Parameters<typeof getActorForAccountId>[0],
+  actor: BridgeActor,
+  workId: Id<"spectraArtifacts">,
+) {
+  if (!(await hasArtifactModify(ctx, actor, workId))) throw new Error("WORK_NOT_FOUND");
 }
 
 async function ensureFolderPath(ctx: Parameters<typeof createFolderNode>[0], accountId: Id<"accounts">, schoolId: Id<"schools">, rootId: Id<"orgNodes">, segments: string[]) {
@@ -66,6 +86,28 @@ async function failStorageTransitionForRequest(
     await ctx.db.patch(policy._id, { ...before.policy, updatedAt: now });
   else if (policy) await ctx.db.delete(policy._id);
   await ctx.db.patch(transition._id, { state: "failed", errorCode, updatedAt: now });
+}
+
+async function failBridgeWriteForRevokedAccess(
+  ctx: MutationCtx,
+  request: Doc<"bridgeWriteRequests">,
+  now: number,
+) {
+  const errorCode = "permission-revoked";
+  await ctx.db.patch(request._id, {
+    state: "failed",
+    errorCode,
+    errorMessage: "Access to this artifact was revoked before the Bridge save completed.",
+    claimedAt: undefined,
+    updatedAt: now,
+  });
+  const operation = await ctx.db.query("syncOperations")
+    .withIndex("by_account_key", (q) => q.eq("accountId", request.accountId).eq("idempotencyKey", request.idempotencyKey))
+    .unique();
+  if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
+  const replica = await ctx.db.get(request.replicaId);
+  if (replica) await ctx.db.patch(replica._id, { state: "error", errorCode, errorAt: now, updatedAt: now });
+  await failStorageTransitionForRequest(ctx, request, errorCode, now);
 }
 
 export const registerMount = mutation({
@@ -155,6 +197,7 @@ export const reconcileMissingResources = mutation({
     let restoring = 0;
     for (const replica of page.page) {
       if (replica.kind !== "local" || replica.lastSeenScanId === args.scanId || replica.state === "unavailable") continue;
+      if (!(await hasArtifactModify(ctx, actor, replica.workId))) continue;
       const policy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id), item: String(replica.workId) });
       const cloud = await ctx.db.query("workReplicas")
         .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
@@ -260,7 +303,7 @@ const discoveredResourceSchema = z.object({
 async function discoverResourceForMount(
   ctx: MutationCtx,
   device: Doc<"bridgeDevices">,
-  actor: { accountId: Id<"accounts">; schoolId: Id<"schools"> },
+  actor: BridgeActor,
   mount: Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
   input: z.infer<typeof discoveredResourceSchema>,
 ) {
@@ -301,6 +344,8 @@ async function discoverResourceForMount(
       hasCloudReplica: Boolean(cloud),
     })));
     if (existingReplica) {
+      if (!(await hasArtifactModify(ctx, actor, existingReplica.workId)))
+        return { skipped: true as const, reason: "artifact-access-revoked" as const };
       const existingNode = await findPrimaryNode(ctx, actor.accountId, "work", String(existingReplica.workId));
       if (existingNode?.deletedAt !== undefined) await restoreTrashedNode(ctx, existingNode);
       const policy = await computeEffectivePolicy(ctx, actor.accountId, {
@@ -595,7 +640,7 @@ export const beginPayloadUpload = mutation({
     mediaType: v.string(),
   },
   handler: async (ctx, args) => {
-    const { device } = await requireDevice(ctx, args.credential);
+    const { device, actor } = await requireDevice(ctx, args.credential);
     const input = z.object({
       hash: z.string().regex(/^[a-f0-9]{64}$/),
       bytes: z.number().int().min(0).max(100 * 1024 * 1024),
@@ -604,6 +649,7 @@ export const beginPayloadUpload = mutation({
     const replica = await ctx.db.get(args.replicaId);
     if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id)
       throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
+    await requireArtifactModify(ctx, actor, replica.workId);
     await assertPayloadWriteAllowed(ctx, device.accountId, replica.workId, replica.mountId);
     const existing = await ctx.db.query("payloadObjects")
       .withIndex("by_account_hash", (q) => q.eq("accountId", device.accountId).eq("hash", input.hash))
@@ -626,7 +672,7 @@ export const commitPayloadUpload = mutation({
     payloadRef: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { device } = await requireDevice(ctx, args.credential);
+    const { device, actor } = await requireDevice(ctx, args.credential);
     const input = z.object({
       hash: z.string().regex(/^[a-f0-9]{64}$/),
       bytes: z.number().int().min(0).max(100 * 1024 * 1024),
@@ -637,6 +683,7 @@ export const commitPayloadUpload = mutation({
     if (!replica || replica.accountId !== device.accountId || replica.deviceId !== device._id)
       throw new Error("REPLICA_NOT_OWNED_BY_DEVICE");
     try {
+      await requireArtifactModify(ctx, actor, replica.workId);
       await assertPayloadWriteAllowed(ctx, device.accountId, replica.workId, replica.mountId);
     } catch (error) {
       if (args.storageId) await ctx.storage.delete(args.storageId);
@@ -946,7 +993,7 @@ export const commitPayloadUpload = mutation({
 export const claimPendingPayloadUpload = mutation({
   args: { credential: v.string() },
   handler: async (ctx, args) => {
-    const { device } = await requireDevice(ctx, args.credential);
+    const { device, actor } = await requireDevice(ctx, args.credential);
     const replicaStates = ["current", "ahead", "pending"] as const;
     const batches = await Promise.all(
       replicaStates.map((state) =>
@@ -957,6 +1004,7 @@ export const claimPendingPayloadUpload = mutation({
     );
     for (const replica of batches.flat()) {
       if (replica.kind !== "local" || !replica.mountId || !replica.relativePath || !replica.localResourceId) continue;
+      if (!(await hasArtifactModify(ctx, actor, replica.workId))) continue;
       const transitions = await ctx.db.query("storageStrategyTransitions")
         .withIndex("by_work_created", (q) => q.eq("workId", replica.workId))
         .order("desc")
@@ -995,7 +1043,7 @@ export const claimPendingPayloadUpload = mutation({
 export const claimWrite = mutation({
   args: { credential: v.string() },
   handler: async (ctx, args) => {
-    const { device } = await requireDevice(ctx, args.credential);
+    const { device, actor } = await requireDevice(ctx, args.credential);
     const now = Date.now();
     const readyPending = await ctx.db.query("bridgeWriteRequests")
       .withIndex("by_device_state_retry", (q) =>
@@ -1014,6 +1062,10 @@ export const claimWrite = mutation({
       .filter((q) => q.lt(q.field("claimedAt"), now - 60_000))
       .take(20);
     for (const request of [...pending, ...abandonedClaims]) {
+      if (!(await hasArtifactModify(ctx, actor, request.workId))) {
+        await failBridgeWriteForRevokedAccess(ctx, request, now);
+        continue;
+      }
       if ((request.expiresAt ?? request.createdAt + BRIDGE_WRITE_EXPIRES_MS) <= now) {
         await ctx.db.patch(request._id, { state: "failed", errorCode: "write-expired", errorMessage: "The save did not finish. Try again.", claimedAt: undefined, updatedAt: now });
         const expiredOperation = await ctx.db.query("syncOperations")
@@ -1095,10 +1147,14 @@ export const completeWrite = mutation({
     errorMessage: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { device } = await requireDevice(ctx, args.credential);
+    const { device, actor } = await requireDevice(ctx, args.credential);
     const request = await ctx.db.get(args.requestId);
     if (!request || request.deviceId !== device._id || request.accountId !== device.accountId)
       throw new Error("WRITE_REQUEST_NOT_OWNED_BY_DEVICE");
+    if (!(await hasArtifactModify(ctx, actor, request.workId))) {
+      await failBridgeWriteForRevokedAccess(ctx, request, Date.now());
+      return { state: "failed" as const };
+    }
     const operation = await ctx.db.query("syncOperations")
       .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
       .unique();

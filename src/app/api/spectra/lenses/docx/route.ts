@@ -110,7 +110,7 @@ async function materializeDocxArtifactAttempt(
   let update = docxProjectionFromContent(content, opened.projection);
   if (attempt > 0) {
     const local = await fetchVerifiedNativePayload(workId, "local-latest");
-    const baseOpened = await storedDocxBase(cloud.truth, cloud.payload);
+    const baseOpened = await storedDocxBase(workId, cloud.truth, cloud.payload);
     const ours = contentProjection(content, baseOpened.projection);
     const externalOpened = await docxLens.open(local.payload, "strict-native");
     const rebased = mergeDocxProjections(baseOpened.projection, ours, externalOpened.projection, undefined, true);
@@ -296,8 +296,8 @@ function conflictPreview(conflict: MergeConflict<DocxProjection["blocks"][number
   return { regionId: conflict.id, spectra: preview(conflict.ours), external: preview(conflict.theirs) };
 }
 
-async function storedDocxBase(cloudTruth: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>["truth"], fallback: Uint8Array) {
-  return docxLens.open(await fetchStoredNativeBase(cloudTruth, fallback), "strict-native");
+async function storedDocxBase(workId: Id<"spectraArtifacts">, cloudTruth: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>["truth"], fallback: Uint8Array) {
+  return docxLens.open(await fetchStoredNativeBase(workId, cloudTruth, fallback), "strict-native");
 }
 
 function conflictIds(conflicts: readonly MergeConflict<unknown>[]) {
@@ -356,7 +356,7 @@ export async function POST(request: Request) {
             ),
             docxLens.open(local.payload, "strict-native"),
           ]);
-          const baseOpened = await storedDocxBase(local.truth, local.payload);
+          const baseOpened = await storedDocxBase(workId, local.truth, local.payload);
           const current = contentProjection(artifact.content, baseOpened.projection);
           const merged = mergeDocxProjections(baseOpened.projection, current, externalOpened.projection, undefined, true);
           const conflictRegionIds = conflictIds(merged.conflicts);
@@ -494,7 +494,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ state: "current" });
     }
     const [baseOpened, externalOpened] = await Promise.all([
-      storedDocxBase(cloud.truth, cloud.payload),
+      storedDocxBase(workId, cloud.truth, cloud.payload),
       docxLens.open(local.payload, "strict-native"),
     ]);
     const current = contentProjection(artifact.content, baseOpened.projection);

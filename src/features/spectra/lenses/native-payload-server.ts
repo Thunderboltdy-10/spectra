@@ -64,11 +64,14 @@ export async function fetchVerifiedNativePayload(
   return { truth, payload };
 }
 
-export async function fetchVerifiedNativePayloadByHash(hash: string) {
+export async function fetchVerifiedNativePayloadByHash(
+  hash: string,
+  workId?: Id<"spectraArtifacts">,
+) {
   const truth = await convexQuery<
-    { hash: string },
+    { hash: string; workId?: Id<"spectraArtifacts"> },
     { url: string | null; bytes: number; mediaType: string; hash: string } | null
-  >("payloads:get", { hash });
+  >("payloads:get", { hash, ...(workId ? { workId } : {}) });
   if (!truth?.url) throw new Error("NATIVE_PAYLOAD_UNAVAILABLE");
   const response = await fetch(truth.url, { cache: "no-store" });
   if (!response.ok) throw new Error("NATIVE_PAYLOAD_FETCH_FAILED");
@@ -79,12 +82,13 @@ export async function fetchVerifiedNativePayloadByHash(hash: string) {
 }
 
 export async function fetchStoredNativeBase(
+  workId: Id<"spectraArtifacts">,
   truth: NativePayloadTruth,
   fallback: Uint8Array,
 ) {
   const hash = truth.projectionBaseRevision;
   if (!hash || hash === truth.hash) return fallback;
-  return (await fetchVerifiedNativePayloadByHash(hash)).payload;
+  return (await fetchVerifiedNativePayloadByHash(hash, workId)).payload;
 }
 
 export async function uploadNativePayload(

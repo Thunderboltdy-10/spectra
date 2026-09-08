@@ -675,8 +675,12 @@ describe("replica truth machine", () => {
       .withIdentity(collaboratorIdentity)
       .query(api.replicas.forWork, { workId: fixture.workId });
     expect(collaboratorTruth.replicas.map((replica) => replica._id)).toEqual(
-      ownerTruth.replicas.map((replica) => replica._id),
+      ownerTruth.replicas
+        .filter((replica) => replica.kind === "cloud")
+        .map((replica) => replica._id),
     );
+    expect(collaboratorTruth.replicas.every((replica) => replica.kind === "cloud")).toBe(true);
+    expect(collaboratorTruth.replicas.some((replica) => "relativePath" in replica)).toBe(false);
     await expect(
       t.withIdentity(strangerIdentity).query(api.replicas.forWork, {
         workId: fixture.workId,
@@ -684,9 +688,219 @@ describe("replica truth machine", () => {
     ).rejects.toThrow(/WORK_NOT_FOUND/);
   });
 
+  it("forwards shared Office capability to cloud payloads and lens activation without exposing owner Bridge state", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const collaboratorIdentity = {
+      subject: "clerk_replica_native_collaborator",
+      email: "native-collaborator@example.test",
+      emailVerified: true,
+    };
+    const readerIdentity = {
+      subject: "clerk_replica_native_reader",
+      email: "native-reader@example.test",
+      emailVerified: true,
+    };
+    const revokedIdentity = {
+      subject: "clerk_replica_native_revoked",
+      email: "native-revoked@example.test",
+      emailVerified: true,
+    };
+    const foreignIdentity = {
+      subject: "clerk_replica_native_foreign",
+      email: "native-foreign@example.test",
+      emailVerified: true,
+    };
+    const ids = await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch(fixture.workId, { schoolId: fixture.schoolId });
+      const foreignSchoolId = await ctx.db.insert("schools", {
+        name: "Foreign Replica School",
+        slug: `foreign-replica-${crypto.randomUUID()}`,
+        verifiedDomains: [],
+        status: "active",
+        timezone: "Europe/Madrid",
+        policyVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const identities = [
+        [collaboratorIdentity, fixture.schoolId],
+        [readerIdentity, fixture.schoolId],
+        [revokedIdentity, fixture.schoolId],
+        [foreignIdentity, foreignSchoolId],
+      ] as const;
+      const accountIds = new Map<string, Id<"accounts">>();
+      for (const [candidate, schoolId] of identities) {
+        const accountId = await ctx.db.insert("accounts", {
+          clerkId: candidate.subject,
+          email: candidate.email,
+          emailVerified: true,
+          name: candidate.email,
+          status: "active",
+          createdAt: now,
+          updatedAt: now,
+        });
+        accountIds.set(candidate.subject, accountId);
+        await ctx.db.insert("schoolMemberships", {
+          accountId,
+          schoolId,
+          role: "student",
+          status: "active",
+          joinedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      const grant = async (candidate: typeof collaboratorIdentity, level: "read" | "modify") =>
+        ctx.db.insert("accessGrants", {
+          schoolId: fixture.schoolId,
+          resourceType: "artifact",
+          resourceId: fixture.workId,
+          principalType: "account",
+          principalId: accountIds.get(candidate.subject)!,
+          level,
+          capabilities: level === "modify"
+            ? ["read", "modify", "restore", "use", "comment"]
+            : ["read", "use", "comment"],
+          source: "direct",
+          createdByAccountId: fixture.accountId,
+          createdAt: now,
+          updatedAt: now,
+        });
+      const collaboratorGrantId = await grant(collaboratorIdentity, "modify");
+      await grant(readerIdentity, "read");
+      const revokedGrantId = await grant(revokedIdentity, "modify");
+      return { collaboratorGrantId, revokedGrantId };
+    });
+
+    expect(
+      (await t.withIdentity(identity).query(api.spectraArtifacts.get, {
+        artifactId: fixture.workId,
+      })).accessLevel,
+    ).toBe("modify");
+    expect(
+      (await t.withIdentity(collaboratorIdentity).query(api.spectraArtifacts.get, {
+        artifactId: fixture.workId,
+      })).accessLevel,
+    ).toBe("modify");
+    expect(
+      (await t.withIdentity(readerIdentity).query(api.spectraArtifacts.get, {
+        artifactId: fixture.workId,
+      })).accessLevel,
+    ).toBe("read");
+
+    const cloudForOwner = await t.withIdentity(identity).query(api.replicas.payloadForWork, {
+      workId: fixture.workId,
+      prefer: "cloud",
+    });
+    const cloudForCollaborator = await t.withIdentity(collaboratorIdentity).query(api.replicas.payloadForWork, {
+      workId: fixture.workId,
+      prefer: "cloud",
+    });
+    const cloudForReader = await t.withIdentity(readerIdentity).query(api.replicas.payloadForWork, {
+      workId: fixture.workId,
+      prefer: "cloud",
+    });
+    expect(cloudForCollaborator).toMatchObject({
+      payloadRef: String(fixture.basePayloadId),
+      replicaKind: "cloud",
+      hash: baseHash,
+    });
+    expect(cloudForReader?.payloadRef).toBe(String(fixture.basePayloadId));
+    expect(cloudForOwner?.url).toBeTruthy();
+    expect(cloudForCollaborator?.url).toBeTruthy();
+    expect(cloudForCollaborator?.url).toBe(cloudForOwner?.url);
+    expect(
+      await t.withIdentity(collaboratorIdentity).query(api.replicas.payloadForWork, {
+        workId: fixture.workId,
+        prefer: "local-latest",
+      }),
+    ).toMatchObject({ replicaKind: "cloud", payloadRef: String(fixture.basePayloadId) });
+    expect(
+      await t.withIdentity(collaboratorIdentity).query(api.payloads.get, {
+        hash: baseHash,
+      }),
+    ).toBeNull();
+    expect(
+      await t.withIdentity(collaboratorIdentity).query(api.payloads.get, {
+        hash: baseHash,
+        workId: fixture.workId,
+      }),
+    ).toMatchObject({ hash: baseHash, bytes: 4 });
+    await t.run(async (ctx) => ctx.db.patch(ids.revokedGrantId, { revokedAt: Date.now() }));
+    await expect(
+      t.withIdentity(revokedIdentity).query(api.spectraArtifacts.get, {
+        artifactId: fixture.workId,
+      }),
+    ).rejects.toThrow(/Artifact not found|WORK_NOT_FOUND|AUTH_RESOURCE_FORBIDDEN/);
+    await expect(
+      t.withIdentity(revokedIdentity).query(api.replicas.payloadForWork, {
+        workId: fixture.workId,
+        prefer: "cloud",
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+
+    await expect(
+      t.withIdentity(readerIdentity).mutation(api.replicas.activateLens, {
+        workId: fixture.workId,
+        payloadHash: baseHash,
+        content: { blocks: [] },
+        fidelityMap: { entries: [] },
+        semanticDigest: "c".repeat(64),
+        nativeFormat: "docx",
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+    await expect(
+      t.withIdentity(foreignIdentity).query(api.replicas.payloadForWork, {
+        workId: fixture.workId,
+        prefer: "cloud",
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+    await expect(
+      t.withIdentity(foreignIdentity).query(api.payloads.get, {
+        hash: baseHash,
+        workId: fixture.workId,
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+
+    await t.withIdentity(collaboratorIdentity).mutation(api.replicas.activateLens, {
+      workId: fixture.workId,
+      payloadHash: baseHash,
+      content: { blocks: [] },
+      fidelityMap: { entries: [] },
+      semanticDigest: "c".repeat(64),
+      nativeFormat: "docx",
+    });
+    await t.run(async (ctx) => ctx.db.patch(ids.collaboratorGrantId, { revokedAt: Date.now() }));
+    await expect(
+      t.withIdentity(collaboratorIdentity).query(api.replicas.forWork, {
+        workId: fixture.workId,
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+    await expect(
+      t.withIdentity(collaboratorIdentity).query(api.replicas.payloadForWork, {
+        workId: fixture.workId,
+        prefer: "cloud",
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+    await expect(
+      t.withIdentity(collaboratorIdentity).mutation(api.replicas.activateLens, {
+        workId: fixture.workId,
+        payloadHash: baseHash,
+        content: { blocks: [] },
+        fidelityMap: { entries: [] },
+        semanticDigest: "d".repeat(64),
+        nativeFormat: "docx",
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+
+  });
+
   it("lets a modify collaborator queue materialization only onto their own local replica", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedWork(t);
+    const collaboratorCredential = "bridge-collaborator-credential-000001";
     const collaboratorIdentity = {
       subject: "clerk_replica_writer",
       email: "replica-writer@example.test",
@@ -729,7 +943,7 @@ describe("replica truth machine", () => {
           updatedAt: now,
         });
       }
-      await ctx.db.insert("accessGrants", {
+      const collaboratorGrantId = await ctx.db.insert("accessGrants", {
         schoolId: fixture.schoolId,
         resourceType: "artifact",
         resourceId: fixture.workId,
@@ -759,7 +973,15 @@ describe("replica truth machine", () => {
         accountId: collaboratorAccountId,
         name: "Collaborator Bridge",
         platform: "windows",
-        credentialHash: "c".repeat(64),
+        credentialHash: Array.from(
+          new Uint8Array(
+            await crypto.subtle.digest(
+              "SHA-256",
+              new TextEncoder().encode(collaboratorCredential),
+            ),
+          ),
+          (byte) => byte.toString(16).padStart(2, "0"),
+        ).join(""),
         protocolVersion: "1",
         appVersion: "1",
         pairedAt: now,
@@ -806,7 +1028,7 @@ describe("replica truth machine", () => {
         lastVerifiedAt: now,
         updatedAt: now,
       });
-      return { localId, payloadId };
+      return { localId, payloadId, deviceId, mountId, collaboratorGrantId };
     });
 
     const queued = await t
@@ -854,6 +1076,48 @@ describe("replica truth machine", () => {
       });
     expect(typeof uploadUrl).toBe("string");
     expect(String(uploadUrl).length).toBeGreaterThan(8);
+
+    const claimed = await t.mutation(api.bridgeSync.claimWrite, {
+      credential: collaboratorCredential,
+    });
+    const requestId = requireWriteRequestId(queued.requestId);
+    expect(claimed.request?.requestId).toBe(requestId);
+    await t.run(async (ctx) =>
+      ctx.db.patch(seeded.collaboratorGrantId, { revokedAt: Date.now() }),
+    );
+    await expect(
+      t.mutation(api.bridgeSync.beginPayloadUpload, {
+        credential: collaboratorCredential,
+        replicaId: seeded.localId,
+        hash: nextHash,
+        bytes: 6,
+        mediaType: "application/test",
+      }),
+    ).rejects.toThrow(/WORK_NOT_FOUND/);
+    const completed = await t.mutation(api.bridgeSync.completeWrite, {
+      credential: collaboratorCredential,
+      requestId,
+      outcome: "verified",
+      actualRevision: nextHash,
+    });
+    expect(completed.state).toBe("failed");
+    const afterRevocation = await t.run(async (ctx) => ({
+      request: await ctx.db.get(requestId),
+      local: await ctx.db.get(seeded.localId),
+      cloud: await ctx.db.get(fixture.cloudId),
+    }));
+    expect(afterRevocation.request).toMatchObject({
+      state: "failed",
+      errorCode: "permission-revoked",
+    });
+    expect(afterRevocation.local).toMatchObject({
+      state: "error",
+      errorCode: "permission-revoked",
+    });
+    expect(afterRevocation.cloud).toMatchObject({
+      payloadRef: String(fixture.basePayloadId),
+      contentHash: baseHash,
+    });
   });
 
   it("does not keep Syncing after an applied Spectra write", async () => {

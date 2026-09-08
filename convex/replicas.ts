@@ -282,9 +282,16 @@ export const forWork = query({
     const access = await evaluateAccessForActor(ctx, actor, "artifact", workId);
     if (!access.allowed || !access.capabilities.includes("read")) throw new Error("WORK_NOT_FOUND");
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
+    // Shared artifact access grants content authority, not access to another
+    // account's Bridge filesystem. A collaborator can see the cloud truth and
+    // any local replica registered to their own account; owner-local paths,
+    // device ids, and mounts remain private.
+    const visibleReplicas = replicas.filter(
+      (replica) => replica.kind === "cloud" || replica.accountId === actor.accountId,
+    );
     const deviceIds = [
       ...new Set(
-        replicas
+        visibleReplicas
           .map((replica) => replica.deviceId)
           .filter((id): id is Id<"bridgeDevices"> => Boolean(id)),
       ),
@@ -293,7 +300,7 @@ export const forWork = query({
       await Promise.all(deviceIds.map((id) => ctx.db.get(id)))
     ).filter((device): device is Doc<"bridgeDevices"> => Boolean(device));
     const liveDeviceId = chooseLiveBridgeDeviceId(devices, Date.now());
-    const presented = replicas.map((replica) => {
+    const presented = visibleReplicas.map((replica) => {
       if (
         replica.kind !== "local" ||
         !liveDeviceId ||
@@ -517,14 +524,18 @@ export const payloadForWork = query({
   handler: async (ctx, { workId, prefer }) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    await requireActorArtifactCapability(ctx, actor, workId, "read");
     const work = await ctx.db.get(workId);
-    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    if (!work) throw new Error("WORK_NOT_FOUND");
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
+    const visibleReplicas = replicas.filter(
+      (replica) => replica.kind === "cloud" || replica.accountId === actor.accountId,
+    );
     if (prefer !== "local-latest" && work.pendingPayloadRef && work.pendingContentHash) {
       const pendingId = ctx.db.normalizeId("payloadObjects", work.pendingPayloadRef);
       const pending = pendingId ? await ctx.db.get(pendingId) : null;
-      const protectedLocal = replicas.find((replica) => replica.kind === "local" && replica.pendingPayloadRef === work.pendingPayloadRef);
-      if (pending && pending.accountId === actor.accountId && pending.state === "active") {
+      const protectedLocal = visibleReplicas.find((replica) => replica.kind === "local" && replica.pendingPayloadRef === work.pendingPayloadRef);
+      if (pending && pending.state === "active") {
         return {
           url: await ctx.storage.getUrl(pending.storageId), bytes: pending.bytes, hash: pending.hash,
           mediaType: pending.mediaType, payloadRef: String(pending._id), replicaId: protectedLocal?._id,
@@ -534,15 +545,15 @@ export const payloadForWork = query({
         };
       }
     }
-    const local = replicas
+    const local = visibleReplicas
       .filter((replica) => replica.kind === "local" && replica.payloadRef)
       .sort((left, right) => right.updatedAt - left.updatedAt)[0];
-    const cloud = replicas.find((replica) => replica.kind === "cloud" && replica.payloadRef);
+    const cloud = visibleReplicas.find((replica) => replica.kind === "cloud" && replica.payloadRef);
     const selected = prefer === "local-latest" ? local ?? cloud : cloud ?? local;
     if (!selected?.payloadRef) return null;
     const payloadId = ctx.db.normalizeId("payloadObjects", selected.payloadRef);
     const payload = payloadId ? await ctx.db.get(payloadId) : null;
-    if (!payload || payload.accountId !== actor.accountId || payload.state !== "active") return null;
+    if (!payload || payload.state !== "active") return null;
     return {
       url: await ctx.storage.getUrl(payload.storageId),
       bytes: payload.bytes,
@@ -588,8 +599,9 @@ export const activateLens = mutation({
       blueprintKey: z.enum(["document", "sheets", "presentation"]).optional(),
       textIndex: z.string().max(200_000).optional(),
     }).parse(args);
+    await requireActorArtifactCapability(ctx, actor, args.workId, "modify");
     const work = await ctx.db.get(args.workId);
-    if (!work || work.ownerAccountId !== actor.accountId) throw new Error("WORK_NOT_FOUND");
+    if (!work) throw new Error("WORK_NOT_FOUND");
     const cloud = await ctx.db.query("workReplicas")
       .withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud"))
       .unique();

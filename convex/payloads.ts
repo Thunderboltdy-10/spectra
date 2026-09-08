@@ -2,10 +2,40 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
+import type { Id } from "./_generated/dataModel";
 import { assertPayloadWriteAllowed } from "./syncPolicy";
 
 function assertHash(hash: string) {
   if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error("PAYLOAD_HASH_INVALID");
+}
+
+async function payloadForWork(
+  ctx: Parameters<typeof assertPayloadWriteAllowed>[0],
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  workId: Id<"spectraArtifacts">,
+  hash: string,
+) {
+  await requireActorArtifactCapability(ctx, actor, workId, "read");
+  const work = await ctx.db.get(workId);
+  if (!work) return null;
+  const replicas = await ctx.db
+    .query("workReplicas")
+    .withIndex("by_work", (q) => q.eq("workId", workId))
+    .take(20);
+  const references = [
+    work.pendingPayloadRef,
+    ...replicas.flatMap((replica) => [
+      replica.payloadRef,
+      replica.projectionBasePayloadRef,
+      replica.pendingPayloadRef,
+    ]),
+  ].filter((ref): ref is string => Boolean(ref));
+  for (const reference of [...new Set(references)]) {
+    const payloadId = ctx.db.normalizeId("payloadObjects", reference);
+    const payload = payloadId ? await ctx.db.get(payloadId) : null;
+    if (payload?.state === "active" && payload.hash === hash) return payload;
+  }
+  return null;
 }
 
 async function assertWorkPayloadWriteAllowed(
@@ -71,10 +101,12 @@ export const head = query({
 });
 
 export const get = query({
-  args: { hash: v.string() },
-  handler: async (ctx, { hash }) => {
+  args: { hash: v.string(), workId: v.optional(v.id("spectraArtifacts")) },
+  handler: async (ctx, { hash, workId }) => {
     const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED"); assertHash(hash);
-    const found = await ctx.db.query("payloadObjects").withIndex("by_account_hash", (q) => q.eq("accountId", actor.accountId).eq("hash", hash)).unique();
+    const found = workId
+      ? await payloadForWork(ctx, actor, workId, hash)
+      : await ctx.db.query("payloadObjects").withIndex("by_account_hash", (q) => q.eq("accountId", actor.accountId).eq("hash", hash)).unique();
     if (!found || found.state !== "active") return null;
     return { url: await ctx.storage.getUrl(found.storageId), bytes: found.bytes, mediaType: found.mediaType, hash: found.hash };
   },

@@ -191,7 +191,7 @@ async function materializeOfficeArtifactAttempt(
       );
   if (attempt > 0) {
     const local = await fetchVerifiedNativePayload(workId, "local-latest");
-    const ancestor = await storedOfficeBase(cloudTruth, cloudPayload, isSheet);
+    const ancestor = await storedOfficeBase(workId, cloudTruth, cloudPayload, isSheet);
     const latest = isSheet
       ? await xlsxLens.open(local.payload)
       : await pptxLens.open(local.payload);
@@ -402,11 +402,12 @@ export function mergeOfficeProjection(
 }
 
 async function storedOfficeBase(
+  workId: Id<"spectraArtifacts">,
   truth: Awaited<ReturnType<typeof fetchVerifiedNativePayload>>["truth"],
   fallback: Uint8Array,
   isSheet: boolean,
 ) {
-  const basePayload = await fetchStoredNativeBase(truth, fallback);
+  const basePayload = await fetchStoredNativeBase(workId, truth, fallback);
   return isSheet ? xlsxLens.open(basePayload) : pptxLens.open(basePayload);
 }
 
@@ -445,6 +446,7 @@ export async function POST(request: Request) {
               : pptxLens.open(local.payload),
           ]);
           const ancestorOpened = await storedOfficeBase(
+            workId,
             local.truth,
             local.payload,
             isSheet,
@@ -630,7 +632,7 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ state: "current" });
     }
-    const basePayload = await fetchStoredNativeBase(cloud.truth, cloud.payload);
+    const basePayload = await fetchStoredNativeBase(workId, cloud.truth, cloud.payload);
     const [ancestorOpened, externalOpened, diff] = await Promise.all([
       isSheet ? xlsxLens.open(basePayload) : pptxLens.open(basePayload),
       isSheet ? xlsxLens.open(local.payload) : pptxLens.open(local.payload),

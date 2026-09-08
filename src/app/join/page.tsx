@@ -38,6 +38,9 @@ function JoinSchoolContent() {
   >("ready");
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<InvitationPreview | null>(null);
+  const [previewState, setPreviewState] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >(token ? "loading" : "idle");
 
   useEffect(() => {
     if (token) persistJoinTokenCookie(token, document);
@@ -46,12 +49,32 @@ function JoinSchoolContent() {
   useEffect(() => {
     if (!token) return;
     let active = true;
+    setPreviewState("loading");
     void mutateAdministration<InvitationPreview>("previewInvitation", { token })
       .then((next) => {
-        if (active) setPreview(next);
+        if (!active) return;
+        setPreview(next);
+        setPreviewState("ready");
       })
-      .catch(() => {
-        if (active) setPreview(null);
+      .catch((nextError) => {
+        if (!active) return;
+        const raw = nextError instanceof Error ? nextError.message : "";
+        const human = raw.match(
+          /(?:INVITATION_[A-Z_]+|MEMBERSHIP_[A-Z_]+):\s*(.+)/,
+        );
+        if (
+          /INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
+            raw,
+          )
+        )
+          clearJoinTokenCookie(document);
+        setPreview(null);
+        setPreviewState("error");
+        setStatus("error");
+        setError(
+          (human?.[1] ?? raw).trim() ||
+            "This invitation could not be checked. Sign in with the invited email and try again.",
+        );
       });
     return () => {
       active = false;
@@ -68,7 +91,16 @@ function JoinSchoolContent() {
     setStatus("accepting");
     setError("");
     try {
-      await mutateAdministration("acceptInvitation", { token });
+      const result = await mutateAdministration<{ expired?: boolean }>(
+        "acceptInvitation",
+        { token },
+      );
+      if (result?.expired) {
+        clearJoinTokenCookie(document);
+        setStatus("error");
+        setError("This invitation has expired.");
+        return;
+      }
       clearJoinTokenCookie(document);
       setStatus("accepted");
       window.setTimeout(() => {
@@ -115,6 +147,8 @@ function JoinSchoolContent() {
       ? "Accepted"
       : status === "accepting"
         ? "Checking invitation"
+        : previewState === "loading"
+          ? "Checking invitation"
         : "Join school";
 
   return (
@@ -148,6 +182,8 @@ function JoinSchoolContent() {
             !token ||
             status === "accepting" ||
             status === "accepted" ||
+            previewState === "loading" ||
+            previewState === "error" ||
             preview?.emailMatches === false
           }
           className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-control bg-[var(--text-primary)] text-caption font-medium text-[var(--bg-primary)] disabled:opacity-50"

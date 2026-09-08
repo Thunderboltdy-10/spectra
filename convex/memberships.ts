@@ -101,7 +101,7 @@ export const acceptInvitation = mutation({
       throw new Error("INVITATION_INVALID: This invitation is unavailable.");
     if (invitation.expiresAt <= now) {
       await ctx.db.patch(invitation._id, { status: "expired", updatedAt: now });
-      throw new Error("INVITATION_EXPIRED: This invitation has expired.");
+      return { expired: true as const, schoolId: invitation.schoolId };
     }
     if (existing) {
       if (existing.schoolId === invitation.schoolId) {

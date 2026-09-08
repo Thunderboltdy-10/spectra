@@ -3,6 +3,7 @@ import { SignIn } from "@clerk/nextjs";
 import { SpectraMark } from "@/components/spectra-mark";
 import { SurfaceField } from "@/features/spectra/field/surface-field";
 import { SignedInContinue } from "@/components/signed-in-continue";
+import { authHrefForRedirect } from "@/lib/invitation-session";
 
 function getSearchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -20,7 +21,7 @@ function SignInCard({ redirectUrl }: { redirectUrl?: string }) {
             Sign in
           </span>
           <Link
-            href="/sign-up"
+            href={authHrefForRedirect("/sign-up", redirectUrl)}
             className="rounded-md px-4 py-1.5 text-sm text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
           >
             Sign up

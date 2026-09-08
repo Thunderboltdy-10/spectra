@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   JOIN_TOKEN_COOKIE,
+  authHrefForRedirect,
   clearJoinTokenCookie,
   joinHrefForToken,
   joinTokenFromSearch,
@@ -26,5 +27,16 @@ describe("invitation cookie recovery", () => {
     expect(resolveJoinToken("?token=fresh", store.cookie)).toBe("fresh");
     clearJoinTokenCookie(store);
     expect(readJoinTokenCookie(store.cookie)).toBe("");
+  });
+
+  it("keeps the invitation redirect when switching sign-in and sign-up", () => {
+    const redirect = "/join?token=invite-token";
+    expect(authHrefForRedirect("/sign-in", redirect)).toBe(
+      "/sign-in?redirect_url=%2Fjoin%3Ftoken%3Dinvite-token",
+    );
+    expect(authHrefForRedirect("/sign-up", redirect)).toBe(
+      "/sign-up?redirect_url=%2Fjoin%3Ftoken%3Dinvite-token",
+    );
+    expect(authHrefForRedirect("/sign-in")).toBe("/sign-in");
   });
 });

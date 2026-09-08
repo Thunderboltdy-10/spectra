@@ -125,4 +125,137 @@ describe("school invitation accept is idempotent", () => {
     );
     expect(invitation?.status).toBe("pending");
   });
+
+  it("previews a mismatch but refuses acceptance for the wrong account", async () => {
+    const t = convexTest(schema, modules);
+    const invitedIdentity = {
+      subject: "clerk_w2_14_invited",
+      email: "invited-w2-14@example.test",
+      emailVerified: true,
+    };
+    const wrongIdentity = {
+      subject: "clerk_w2_14_wrong",
+      email: "wrong-w2-14@example.test",
+      emailVerified: true,
+    };
+    const fixture = await t.run(async (ctx) => {
+      const now = Date.now();
+      const schoolId = await ctx.db.insert("schools", {
+        name: "W2-14 Wrong Account School",
+        slug: `wrong-account-${crypto.randomUUID()}`,
+        verifiedDomains: [],
+        status: "active",
+        timezone: "Europe/Madrid",
+        policyVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const invitedAccountId = await ctx.db.insert("accounts", {
+        clerkId: invitedIdentity.subject,
+        email: invitedIdentity.email,
+        emailVerified: true,
+        name: "Invited W2-14",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("accounts", {
+        clerkId: wrongIdentity.subject,
+        email: wrongIdentity.email,
+        emailVerified: true,
+        name: "Wrong W2-14",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const invitationId = await ctx.db.insert("membershipInvitations", {
+        schoolId,
+        email: invitedIdentity.email,
+        role: "student",
+        tokenHash: "wrong-account-hash",
+        status: "pending",
+        invitedByAccountId: invitedAccountId,
+        expiresAt: now + 86_400_000,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { invitationId };
+    });
+    const asWrongUser = t.withIdentity(wrongIdentity);
+    await expect(
+      asWrongUser.query(api.memberships.previewInvitation, {
+        tokenHash: "wrong-account-hash",
+      }),
+    ).resolves.toMatchObject({
+      emailMatches: false,
+      alreadyMember: false,
+    });
+    await expect(
+      asWrongUser.mutation(api.memberships.acceptInvitation, {
+        tokenHash: "wrong-account-hash",
+      }),
+    ).rejects.toThrow("INVITATION_EMAIL_MISMATCH");
+    const invitation = await t.run(async (ctx) =>
+      ctx.db.get(fixture.invitationId),
+    );
+    expect(invitation?.status).toBe("pending");
+  });
+
+  it("expires an invitation during acceptance and leaves no membership", async () => {
+    const t = convexTest(schema, modules);
+    const expiredIdentity = {
+      subject: "clerk_w2_14_expired",
+      email: "expired-w2-14@example.test",
+      emailVerified: true,
+    };
+    const fixture = await t.run(async (ctx) => {
+      const now = Date.now();
+      const schoolId = await ctx.db.insert("schools", {
+        name: "W2-14 Expired School",
+        slug: `expired-${crypto.randomUUID()}`,
+        verifiedDomains: [],
+        status: "active",
+        timezone: "Europe/Madrid",
+        policyVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: expiredIdentity.subject,
+        email: expiredIdentity.email,
+        emailVerified: true,
+        name: "Expired W2-14",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const invitationId = await ctx.db.insert("membershipInvitations", {
+        schoolId,
+        email: expiredIdentity.email,
+        role: "student",
+        tokenHash: "expired-hash",
+        status: "pending",
+        invitedByAccountId: accountId,
+        expiresAt: now - 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { invitationId, accountId };
+    });
+    const asExpiredUser = t.withIdentity(expiredIdentity);
+    await expect(
+      asExpiredUser.mutation(api.memberships.acceptInvitation, {
+        tokenHash: "expired-hash",
+      }),
+    ).resolves.toMatchObject({ expired: true });
+    const result = await t.run(async (ctx) => ({
+      invitation: await ctx.db.get(fixture.invitationId),
+      memberships: await ctx.db
+        .query("schoolMemberships")
+        .withIndex("by_account", (q) => q.eq("accountId", fixture.accountId))
+        .collect(),
+    }));
+    expect(result.invitation?.status).toBe("expired");
+    expect(result.memberships).toHaveLength(0);
+  });
 });

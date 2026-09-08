@@ -47,3 +47,10 @@ export function resolveJoinToken(search: string, cookieHeader: string) {
 export function joinHrefForToken(token: string) {
   return `/join?token=${encodeURIComponent(token)}`;
 }
+
+export function authHrefForRedirect(path: "/sign-in" | "/sign-up", redirectUrl?: string) {
+  const target = redirectUrl?.trim();
+  return target
+    ? `${path}?redirect_url=${encodeURIComponent(target)}`
+    : path;
+}

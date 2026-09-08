@@ -205,9 +205,7 @@ impl<P: Platform> SafeWriter<P> {
             .journal
             .resource_by_id(request.resource_id)?
             .map(|record| PathBuf::from(record.path_key.replace('\\', "/")));
-        let relative = journal_path
-            .as_deref()
-            .unwrap_or(request.relative_path);
+        let relative = journal_path.as_deref().unwrap_or(request.relative_path);
         let target = self.grants.resolve(request.grant_id, relative)?;
         let pre_hash = target.exists().then(|| sha256_file(&target)).transpose()?;
         let op = self.journal.begin_intent(
@@ -317,6 +315,18 @@ impl<P: Platform> SafeWriter<P> {
             pre_hash.as_deref(),
         )?;
         if op.state == OpState::Verified {
+            return Ok(op.op_id);
+        }
+        // Recycle is a destructive but idempotent terminal action. If the
+        // process stopped after the OS moved the target to the Recycle Bin
+        // and before the journal could record the transition, replay must not
+        // turn the already-achieved absent state into a failure by trying to
+        // recycle a path that no longer exists.
+        if !target.exists() {
+            self.journal
+                .transition(&op.op_id, OpState::Performed, None, None)?;
+            self.journal
+                .transition(&op.op_id, OpState::Verified, None, None)?;
             return Ok(op.op_id);
         }
         self.platform.recycle(&target)?;
@@ -714,5 +724,42 @@ mod tests {
             )
             .unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn recycle_replay_accepts_a_target_removed_after_the_intent() {
+        let dir = tempdir().unwrap();
+        let grants = Arc::new(GrantRegistry::default());
+        let grant = grants
+            .add_native_selection("Delete replay".into(), dir.path())
+            .unwrap();
+        let journal = Arc::new(Journal::in_memory().unwrap());
+        let writer = SafeWriter::new(grants, journal.clone(), Arc::new(TestPlatform::default()));
+        fs::write(dir.path().join("already-recycled.txt"), b"gone").unwrap();
+        let intent = journal
+            .begin_intent(
+                "delete-after-crash",
+                "fs.delete",
+                Some("resource-delete"),
+                None,
+                None,
+            )
+            .unwrap();
+        fs::remove_file(dir.path().join("already-recycled.txt")).unwrap();
+
+        let replayed = writer
+            .recycle(
+                &grant.id,
+                Path::new("already-recycled.txt"),
+                "resource-delete",
+                "delete-after-crash",
+            )
+            .unwrap();
+
+        assert_eq!(replayed, intent.op_id);
+        assert_eq!(
+            journal.by_key("delete-after-crash").unwrap().unwrap().state,
+            OpState::Verified
+        );
     }
 }

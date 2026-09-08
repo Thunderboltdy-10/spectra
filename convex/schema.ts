@@ -1170,6 +1170,8 @@ export default defineSchema({
     recurrence: v.optional(v.string()),
     legacyArtifactId: v.optional(v.id("spectraArtifacts")),
     legacyEventId: v.optional(v.string()),
+    /** Caller-owned identity for retrying one scheduled work-block request. */
+    idempotencyKey: v.optional(v.string()),
     revision: v.number(),
     createdBy: v.union(
       v.literal("human"),
@@ -1187,7 +1189,8 @@ export default defineSchema({
     .index("by_source_record", ["sourceRecordId"])
     .index("by_plan_task", ["planArtifactId", "planTaskId"])
     .index("by_task_item", ["taskItemId"])
-    .index("by_legacy_event", ["legacyArtifactId", "legacyEventId"]),
+    .index("by_legacy_event", ["legacyArtifactId", "legacyEventId"])
+    .index("by_schedule_idempotency", ["ownerAccountId", "idempotencyKey"]),
 
   calendarPeriodMaps: defineTable({
     schoolId: v.id("schools"),

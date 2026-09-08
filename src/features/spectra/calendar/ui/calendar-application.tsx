@@ -21,6 +21,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { uniqueToken } from "@/lib/unique-token";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { Button } from "@/components/ui/button";
 import {
@@ -686,7 +687,8 @@ export function CalendarApplication() {
   }
 
   async function schedulePlan(item: CalendarItem, startAt: number, endAt: number) {
-    const pendingId = `pending:${item.id}:${startAt}`;
+    const idempotencyKey = `human:${uniqueToken()}`;
+    const pendingId = `pending:${item.id}:${idempotencyKey}`;
     const optimistic: CalendarItem = {
       ...item,
       id: pendingId,
@@ -708,6 +710,7 @@ export function CalendarApplication() {
         startAt,
         endAt,
         timezone,
+        idempotencyKey,
       });
       replacePending(pendingId, calendarItemFromWire(wire as Record<string, unknown>));
       void load("merge", visibleRange.from, visibleRange.to);

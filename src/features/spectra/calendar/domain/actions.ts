@@ -9,6 +9,7 @@ export type CalendarSemanticAction =
       startAt: number;
       endAt: number;
       timezone: string;
+      idempotencyKey?: string;
     }
   | {
       type: "calendar.move_work_block";

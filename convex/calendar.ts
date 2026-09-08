@@ -314,6 +314,7 @@ export const scheduleTask = mutation({
     endAt: v.number(),
     timezone: v.string(),
     actorKind: v.optional(v.union(v.literal("human"), v.literal("ai"))),
+    idempotencyKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
@@ -321,6 +322,31 @@ export const scheduleTask = mutation({
       throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
     if (!args.taskItemId && !(args.planArtifactId && args.planTaskId))
       throw new Error("CALENDAR_TASK_REQUIRED");
+    const idempotencyKey = args.idempotencyKey?.trim().slice(0, 240);
+    if (args.idempotencyKey !== undefined && (!idempotencyKey || idempotencyKey.length < 8))
+      throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID");
+    const existingByKey = idempotencyKey
+      ? await ctx.db
+          .query("calendarItems")
+          .withIndex("by_schedule_idempotency", (q) =>
+            q.eq("ownerAccountId", actor.accountId).eq("idempotencyKey", idempotencyKey),
+          )
+          .unique()
+      : null;
+    if (existingByKey) {
+      const sameTask =
+        String(existingByKey.taskItemId ?? "") === String(args.taskItemId ?? "") &&
+        String(existingByKey.planArtifactId ?? "") === String(args.planArtifactId ?? "") &&
+        String(existingByKey.planTaskId ?? "") === String(args.planTaskId ?? "") &&
+        existingByKey.startAt === args.startAt &&
+        existingByKey.endAt === args.endAt &&
+        existingByKey.timezone === args.timezone;
+      if (!sameTask)
+        throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT: This scheduling key was already used for another block.");
+      if (existingByKey.status !== "active")
+        throw new Error("CALENDAR_IDEMPOTENCY_REPLAY_REMOVED: This scheduled block is no longer active.");
+      return itemWire(existingByKey);
+    }
     let title = "Scheduled work";
     let officialDeadlineItemId: Id<"calendarItems"> | undefined;
     if (args.taskItemId) {
@@ -355,6 +381,7 @@ export const scheduleTask = mutation({
       planTaskId: args.planTaskId,
       officialDeadlineItemId,
       linkedArtifactIds: args.planArtifactId ? [args.planArtifactId] : [],
+      idempotencyKey,
       revision: 1,
       createdBy: args.actorKind ?? "human",
       createdAt: now,

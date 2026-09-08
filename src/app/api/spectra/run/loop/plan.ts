@@ -2818,7 +2818,7 @@ Use only exact owned ids present in context. A new object may be referenced only
 
 export async function executeAgentReadTool(
   actorClerkId: string,
-  call: { name: string; arguments: string },
+  call: { id?: string; name: string; arguments: string },
   scope?: {
     workspaceId?: string;
     scopeNodeId?: string;
@@ -3589,6 +3589,13 @@ export async function executeAgentReadTool(
       };
     }
     if (call.name === "schedule_calendar_task") {
+      const requestedIdempotencyKey =
+        typeof args.idempotencyKey === "string" && args.idempotencyKey.trim()
+          ? args.idempotencyKey.trim().slice(0, 240)
+          : undefined;
+      const idempotencyKey =
+        requestedIdempotencyKey ??
+        `ai:${actorClerkId}:${call.id || createHash("sha256").update(call.arguments).digest("hex").slice(0, 64)}`;
       const item = await mutate<
         Record<string, unknown>,
         Record<string, unknown>
@@ -3605,6 +3612,7 @@ export async function executeAgentReadTool(
         endAt: Number(args.endAt),
         timezone: typeof args.timezone === "string" ? args.timezone : "UTC",
         actorKind: "ai",
+        idempotencyKey,
       });
       if (
         item.kind !== "scheduled_work_block" ||

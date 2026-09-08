@@ -77,6 +77,7 @@ export async function POST(request: NextRequest) {
           endAt,
           timezone: text(body.timezone, 100) || "UTC",
           actorKind: body.actorKind === "ai" ? "ai" : "human",
+          idempotencyKey: text(body.idempotencyKey, 240) || undefined,
         }),
       });
     }

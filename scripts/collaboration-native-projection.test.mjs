@@ -15,6 +15,7 @@ import {
   nativeArtifactProjection,
   nativeChangedRegionIds,
 } from "./collaboration-native-projection.mjs";
+import { applyStoredRoomUpdates, shouldRecoverNativeRoom } from "./collaboration-room-state.mjs";
 
 function defaultContent(typeKey) {
   const blueprint = getBlueprint(typeKey);
@@ -238,5 +239,49 @@ describe("native collaboration gateway projection", () => {
     expect(nativeChangedRegionIds(after, after)).toEqual([
       "$spectra:native-projection",
     ]);
+  });
+
+  it("reproduces the isolated crash window where replay is newer than the projection checkpoint", () => {
+    const baseline = documentYjsAdapter.createDocument({
+      blocks: [{ id: "intro", type: "paragraph", text: "before crash" }],
+    });
+    const envelope = {
+      title: "Crash-window probe",
+      summary: "",
+      tags: [],
+      typeKey: "document",
+      schemaVersion: 2,
+      content: documentYjsAdapter.project(baseline),
+    };
+    const replayed = new Y.Doc();
+    initializeNativeArtifactDocument(replayed, envelope);
+    replayed
+      .getMap("spectra:work-v2:live-meta")
+      .set("title", "replayed after crash");
+    const update = Y.encodeStateAsUpdate(replayed);
+    const stateVectorHash = Buffer.from(Y.encodeStateVector(replayed)).toString(
+      "base64url",
+    );
+    const loaded = applyStoredRoomUpdates(Y, {
+      snapshot: null,
+      updates: [{ update: Buffer.from(update).toString("base64") }],
+    });
+    const observed = nativeArtifactProjection(loaded, 2);
+    const lastProjectionSequence = 0;
+    const durableHeadSequence = 1;
+
+    expect(observed?.title).toBe("replayed after crash");
+    expect(envelope.title).toBe("Crash-window probe");
+    expect(
+      shouldRecoverNativeRoom({
+        liveStateVectorHash: stateVectorHash,
+        observedStateVectorHash: stateVectorHash,
+      }),
+    ).toBe(false);
+    expect(lastProjectionSequence).toBeLessThan(durableHeadSequence);
+
+    baseline.destroy();
+    replayed.destroy();
+    loaded.destroy();
   });
 });

@@ -32,6 +32,49 @@ const EMPTY: ArtifactLiveModelSnapshot = {
   regionIds: [],
 };
 
+function valueAtPath(value: unknown, path: readonly (string | number)[]) {
+  let current = value as unknown;
+  for (const segment of path) {
+    if (current === null || typeof current !== "object") return undefined;
+    current = (current as Record<string | number, unknown>)[segment];
+  }
+  return current;
+}
+
+function replaceAtPath(
+  value: unknown,
+  path: readonly (string | number)[],
+  replacement: unknown,
+) {
+  if (path.length === 0) return replacement;
+  if (value === null || typeof value !== "object")
+    throw new Error(`NATIVE_PARTIAL_RESTORE_PATH_INVALID: ${path.join("/")}`);
+  let current = value as Record<string | number, unknown>;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const segment = path[index]!;
+    const nextSegment = path[index + 1]!;
+    const existing = current[segment];
+    if (existing === null || typeof existing !== "object")
+      current[segment] =
+        typeof nextSegment === "number" ||
+        (typeof nextSegment === "string" && /^\d+$/.test(nextSegment))
+          ? []
+          : {};
+    current = current[segment] as Record<string | number, unknown>;
+  }
+  current[path[path.length - 1]!] = replacement;
+  return value;
+}
+
+function descriptorMatches(left: SemanticRegion, right: SemanticRegion) {
+  return (
+    left.kind === right.kind &&
+    left.overlapDomain === right.overlapDomain &&
+    JSON.stringify(left.path) === JSON.stringify(right.path) &&
+    left.parentRegionId === right.parentRegionId
+  );
+}
+
 function actorFor(
   transport: ArtifactCollaborationTransport,
 ): WorkActorIdentity {
@@ -477,27 +520,82 @@ export class NativeArtifactYjsModel {
     regionIds: readonly string[],
     controller: ArtifactRegionController,
   ) {
-    const selected = new Set(regionIds);
-    const onlyMetadata = [...selected].every((id) =>
-      id.startsWith("metadata:"),
+    const selected = [...new Set(regionIds)];
+    if (selected.length === 0) return { applied: true as const, claims: [] };
+    if (selected.includes("artifact:structure"))
+      return this.replaceSnapshot(value, controller);
+
+    const historicalRegions = new Map(
+      this.adapter
+        .deriveSemanticRegions(this.transport.document, value.content)
+        .map((region) => [region.regionId, region]),
     );
-    if (onlyMetadata) {
-      const claims = [...selected].map((regionId) => ({
+    const contentRegionIds = selected.filter(
+      (regionId) => !regionId.startsWith("metadata:"),
+    );
+    const currentContent = this.adapter.project(this.transport.document);
+    const currentRegions = new Map(
+      this.adapter
+        .deriveSemanticRegions(this.transport.document, currentContent)
+        .map((region) => [region.regionId, region]),
+    );
+    const claims = selected.map((regionId) => {
+      if (regionId.startsWith("metadata:"))
+        return { regionId, overlapDomains: [regionId] };
+      const currentRegion = currentRegions.get(regionId);
+      const historicalRegion = historicalRegions.get(regionId);
+      if (
+        !currentRegion ||
+        !historicalRegion ||
+        !descriptorMatches(currentRegion, historicalRegion)
+      )
+        throw new Error(`NATIVE_PARTIAL_RESTORE_STRUCTURE_CHANGED: ${regionId}`);
+      return {
         regionId,
-        overlapDomains: [regionId],
-      }));
-      const result = await controller.editMany(claims, () => {
-        if (selected.has("metadata:title"))
-          this.liveMeta.set("title", value.title);
-        if (selected.has("metadata:summary"))
-          this.liveMeta.set("summary", value.summary ?? "");
-        if (selected.has("metadata:tags"))
-          this.liveMeta.set("tags", [...value.tags]);
-      });
-      if (result.applied) this.rebuildSnapshotImmediately();
-      return result;
-    }
-    return this.replaceSnapshot(value, controller);
+        overlapDomains: [currentRegion.overlapDomain],
+      };
+    });
+
+    const result = await controller.editMany(claims, () => {
+      const liveContent = this.adapter.project(this.transport.document);
+      const mergedContent = structuredClone(liveContent);
+      const liveRegions = new Map(
+        this.adapter
+          .deriveSemanticRegions(this.transport.document, liveContent)
+          .map((region) => [region.regionId, region]),
+      );
+      for (const regionId of contentRegionIds) {
+        const liveRegion = liveRegions.get(regionId);
+        const historicalRegion = historicalRegions.get(regionId);
+        if (
+          !liveRegion ||
+          !historicalRegion ||
+          !descriptorMatches(liveRegion, historicalRegion)
+        )
+          throw new Error(
+            `NATIVE_PARTIAL_RESTORE_STRUCTURE_CHANGED: ${regionId}`,
+          );
+        replaceAtPath(
+          mergedContent,
+          liveRegion.path,
+          structuredClone(valueAtPath(value.content, historicalRegion.path)),
+        );
+      }
+      if (contentRegionIds.length)
+        this.adapter.applyProjection(
+          this.transport.document,
+          mergedContent,
+          workYjsOrigins(this.actor).localHuman,
+        );
+      if (selected.includes("metadata:title"))
+        this.liveMeta.set("title", value.title);
+      if (selected.includes("metadata:summary"))
+        this.liveMeta.set("summary", value.summary ?? "");
+      if (selected.includes("metadata:tags"))
+        this.liveMeta.set("tags", [...value.tags]);
+    });
+    if (result.applied) this.rebuildSnapshotImmediately();
+    return result;
   }
 }
 

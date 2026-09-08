@@ -482,6 +482,76 @@ describe("native fine-grained Yjs models", () => {
     document.destroy();
   });
 
+  it("restores selected native regions without replacing unrelated content", async () => {
+    const adapter = documentYjsAdapter;
+    const currentContent = {
+      ...(defaultContent("document") as Record<string, unknown>),
+      tiptap: undefined,
+      blocks: [
+        { id: "block-a", type: "paragraph", text: "Current A" },
+        { id: "block-b", type: "paragraph", text: "Current B" },
+      ],
+    };
+    const historicalContent = {
+      ...currentContent,
+      blocks: [
+        { id: "block-a", type: "paragraph", text: "Historical A" },
+        { id: "block-b", type: "paragraph", text: "Historical B" },
+      ],
+    };
+    const document = adapter.createDocument(currentContent);
+    const liveMeta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+    liveMeta.set("title", "Selective restore");
+    liveMeta.set("summary", "");
+    liveMeta.set("tags", []);
+    const model = new NativeArtifactYjsModel("document", {
+      clientId: "selective-restore-client",
+      document,
+      getSnapshot: () => ({
+        state: "synchronized" as const,
+        level: "modify" as const,
+        accountId: "account-1",
+        displayName: "Pablo",
+        unsynchronizedChanges: 0,
+        presence: [],
+      }),
+    } as unknown as ConstructorParameters<typeof NativeArtifactYjsModel>[1]);
+    const claimed: string[] = [];
+    const controller = {
+      editMany: async (
+        regions: Array<{ regionId: string; overlapDomains: string[] }>,
+        change: () => void,
+      ) => {
+        claimed.push(...regions.map((region) => region.regionId));
+        document.transact(change);
+        return { applied: true as const, claims: [] };
+      },
+    } as unknown as Parameters<
+      NativeArtifactYjsModel["replaceRegionsFromSnapshot"]
+    >[2];
+
+    await model.replaceRegionsFromSnapshot(
+      {
+        title: "Selective restore",
+        tags: [],
+        content: historicalContent,
+      },
+      ["block-a"],
+      controller,
+    );
+
+    const restored = adapter.project(document) as {
+      blocks: Array<{ id: string; type: string; text: string }>;
+    };
+    expect(claimed).toEqual(["block-a"]);
+    expect(restored.blocks).toEqual([
+      { id: "block-a", type: "paragraph", text: "Historical A" },
+      { id: "block-b", type: "paragraph", text: "Current B" },
+    ]);
+    model.destroy();
+    document.destroy();
+  });
+
   it("adopts a Word-only trailing paragraph without rewriting existing fragment nodes", () => {
     const adapter = documentYjsAdapter;
     const initial = {

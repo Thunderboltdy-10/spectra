@@ -141,6 +141,21 @@ function ndjson(task: (emit: (event: unknown) => void) => Promise<void>) {
   return createNdjsonResponse(task, publicError);
 }
 
+const ATTACHMENT_RETRY_MESSAGE =
+  "Attached files are not retained for retry. Reattach them and start a new run.";
+
+function recoveryForAttempt(
+  operationStatuses: Parameters<typeof interruptionRecovery>[0],
+  hasPartialResponse: boolean,
+  hasAttachmentInput: boolean,
+) {
+  const recovery = interruptionRecovery(
+    operationStatuses,
+    hasPartialResponse,
+  );
+  return hasAttachmentInput ? { ...recovery, retryable: false } : recovery;
+}
+
 async function runAttempt(
   params: {
     actorClerkId: string;
@@ -2384,9 +2399,11 @@ async function runAttempt(
         streamedCreationPreview ||
         pendingArtifactCount > 0,
       );
-      const recovery = interruptionRecovery(
+      const hasAttachmentInput = (params.attachments?.length ?? 0) > 0;
+      const recovery = recoveryForAttempt(
         commitStarted ? ["executing"] : [],
         Boolean(publicText.trim()),
+        hasAttachmentInput,
       );
       await mutate("spectraRuns:updateStatus", {
         actorClerkId: params.actorClerkId,
@@ -2394,11 +2411,13 @@ async function runAttempt(
         executionId: params.executionId,
         status: "cancelled",
         resultTitle: "Stopped",
-        resultSummary: recovery.retryable
-          ? stoppedWithVisibleWork
-            ? "Stopped by you. The partial response remains available, and you can retry when ready."
-            : "Stopped before the response began. You can retry when ready."
-          : "Stopped by you. Some work may already be visible — review it before continuing.",
+        resultSummary: hasAttachmentInput
+          ? `Stopped by you. ${ATTACHMENT_RETRY_MESSAGE}`
+          : recovery.retryable
+            ? stoppedWithVisibleWork
+              ? "Stopped by you. The partial response remains available, and you can retry when ready."
+              : "Stopped before the response began. You can retry when ready."
+            : "Stopped by you. Some work may already be visible — review it before continuing.",
         resultActions: recovery.retryable
           ? [
               {
@@ -2433,9 +2452,11 @@ async function runAttempt(
     const preservedOutcome = operationOutcomes.some(({ affected }) =>
       affected.some((item) => item.id),
     );
-    const recovery = interruptionRecovery(
+    const hasAttachmentInput = (params.attachments?.length ?? 0) > 0;
+    const recovery = recoveryForAttempt(
       commitStarted ? [preservedOutcome ? "executed" : "executing"] : [],
       Boolean(publicText.trim()),
+      hasAttachmentInput,
     );
     advanceProtocolState(
       recovery.retryable ? "paused" : "failed_terminal",
@@ -2468,9 +2489,11 @@ async function runAttempt(
       executionId: params.executionId,
       outcome: "failed",
     }).catch(() => null);
-    const resultSummary = recovery.retryable
-      ? message
-      : `${message} Review any affected work before submitting a follow-up command.`;
+    const resultSummary = hasAttachmentInput
+      ? `${message} ${ATTACHMENT_RETRY_MESSAGE}`
+      : recovery.retryable
+        ? message
+        : `${message} Review any affected work before submitting a follow-up command.`;
     await mutate("spectraRuns:updateStatus", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,

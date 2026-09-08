@@ -52,11 +52,22 @@ async function seedRun(
     status: "running" | "failed";
     recoveryState?: "partial" | "interrupted";
     retryable?: boolean;
+    hasAttachments?: boolean;
   },
 ) {
   const actor = await seedActor(t);
   return t.run(async (ctx) => {
     const now = Date.now();
+    const threadId = await ctx.db.insert("spectraThreads", {
+      ownerAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      title: "Lifecycle fixture",
+      origin: "chat",
+      status: "active",
+      messageCount: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
     const runId = await ctx.db.insert("spectraAiRuns", {
       ownerAccountId: actor.accountId,
       schoolId: actor.schoolId,
@@ -64,6 +75,7 @@ async function seedRun(
       status: options.status,
       phase: options.status === "running" ? "applying" : "partial",
       userPrompt: "Create a useful document",
+      threadId,
       executionId: "execution-1",
       recoveryState: options.recoveryState,
       retryable: options.retryable,
@@ -71,6 +83,26 @@ async function seedRun(
       createdAt: now,
       updatedAt: now,
     });
+    if (options.hasAttachments) {
+      await ctx.db.insert("spectraMessages", {
+        threadId,
+        schoolId: actor.schoolId,
+        role: "user",
+        content: "Inspect the attached fixture.",
+        runId,
+        metadata: {
+          attachments: [
+            {
+              name: "fixture.png",
+              mimeType: "image/png",
+              size: 128,
+              handling: "image",
+            },
+          ],
+        },
+        createdAt: now,
+      });
+    }
     const cardId = await ctx.db.insert("spectraResultCards", {
       runId,
       surface: "workspace",
@@ -220,5 +252,43 @@ describe("AI run create and recovery lifecycle", () => {
     const run = await t.run((ctx) => ctx.db.get(fixture.runId));
     expect(run?.status).toBe("queued");
     expect(run?.recoveryState).toBeUndefined();
+  });
+
+  it("does not offer Retry when Stop loses the attached source bytes", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedRun(t, {
+      status: "running",
+      hasAttachments: true,
+    });
+
+    await t.withIdentity(identity).mutation(api.spectraRuns.stopRun, {
+      runId: fixture.runId,
+      executionId: "execution-1",
+    });
+    const { run, card } = await t.run(async (ctx) => ({
+      run: await ctx.db.get(fixture.runId),
+      card: await ctx.db.get(fixture.cardId),
+    }));
+    expect(run?.retryable).toBe(false);
+    expect(card?.summary).toContain("Reattach them");
+    expect(card?.actions.some((action) => action.key === "retry")).toBe(false);
+  });
+
+  it("rejects retry for a failed run whose attachment bytes are unavailable", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedRun(t, {
+      status: "failed",
+      recoveryState: "interrupted",
+      retryable: true,
+      hasAttachments: true,
+    });
+
+    await expect(
+      t.withIdentity(identity).mutation(api.spectraRuns.resetForRetry, {
+        runId: fixture.runId,
+        executionId: "execution-1",
+        retryKey: "attachment-retry",
+      }),
+    ).rejects.toThrow("Attached files are not retained for retry");
   });
 });

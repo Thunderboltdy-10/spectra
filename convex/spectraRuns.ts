@@ -256,6 +256,41 @@ async function requireOwnedRun(
   return { actor, run };
 }
 
+const ATTACHMENT_RETRY_MESSAGE =
+  "Attached files are not retained for retry. Reattach them and start a new run.";
+
+function messageHasAttachmentInput(message: Doc<"spectraMessages">) {
+  if (message.role !== "user" || !message.metadata) return false;
+  const metadata =
+    typeof message.metadata === "object" && !Array.isArray(message.metadata)
+      ? (message.metadata as Record<string, unknown>)
+      : undefined;
+  return Array.isArray(metadata?.attachments) && metadata.attachments.length > 0;
+}
+
+async function runHasAttachmentInput(
+  ctx: Parameters<typeof getAuthenticatedActor>[0],
+  runId: Id<"spectraAiRuns">,
+) {
+  const messages = await ctx.db
+    .query("spectraMessages")
+    .withIndex("by_run", (q) => q.eq("runId", runId))
+    .collect();
+  return messages.some(messageHasAttachmentInput);
+}
+
+function recoveryForRun(
+  operationStatuses: Parameters<typeof interruptionRecovery>[0],
+  hasPartialResponse: boolean,
+  hasAttachmentInput: boolean,
+) {
+  const recovery = interruptionRecovery(
+    operationStatuses,
+    hasPartialResponse,
+  );
+  return hasAttachmentInput ? { ...recovery, retryable: false } : recovery;
+}
+
 export const beginRun = mutation({
   args: {
     sourceSurface: vSurface,
@@ -1218,9 +1253,11 @@ export const reconcileStaleRuns = internalMutation({
         (message) =>
           message.role === "assistant" && message.content.trim().length > 0,
       );
-      const recovery = interruptionRecovery(
+      const hasAttachmentInput = messages.some(messageHasAttachmentInput);
+      const recovery = recoveryForRun(
         currentOperations.map((operation) => operation.status),
         hasPartialResponse,
+        hasAttachmentInput,
       );
       await Promise.all(
         currentOperations
@@ -1237,7 +1274,9 @@ export const reconcileStaleRuns = internalMutation({
           ),
       );
       const error =
-        recovery.recoveryState === "partial"
+        hasAttachmentInput
+          ? ATTACHMENT_RETRY_MESSAGE
+          : recovery.recoveryState === "partial"
           ? "The run was interrupted after partial work was preserved. Review the affected objects before continuing."
           : "The run was interrupted before changes were applied and can be retried safely.";
       if (
@@ -1838,9 +1877,11 @@ export const stopRun = mutation({
     // `alive: false`; it then aborts at the next safe boundary and performs
     // the same pending/staged cleanup. Rejecting here can otherwise make a
     // stalled executing operation literally impossible to stop.
-    const recovery = interruptionRecovery(
+    const hasAttachmentInput = await runHasAttachmentInput(ctx, args.runId);
+    const recovery = recoveryForRun(
       currentOperations.map((operation) => operation.status),
       false,
+      hasAttachmentInput,
     );
     const now = Date.now();
     if (
@@ -1902,9 +1943,11 @@ export const stopRun = mutation({
         ctx.db.patch(card._id, {
           status: "cancelled",
           title: "Stopped",
-          summary: recovery.retryable
-            ? "Stopped by you. Any partial response remains available in the thread."
-            : "Stopped by you. Some work may already be visible — review it before continuing.",
+          summary: hasAttachmentInput
+            ? `Stopped by you. ${ATTACHMENT_RETRY_MESSAGE}`
+            : recovery.retryable
+              ? "Stopped by you. Any partial response remains available in the thread."
+              : "Stopped by you. Some work may already be visible — review it before continuing.",
           actions: recovery.retryable
             ? [
                 {
@@ -2013,6 +2056,8 @@ export const resetForRetry = mutation({
   },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
+    if (await runHasAttachmentInput(ctx, args.runId))
+      throw new Error(ATTACHMENT_RETRY_MESSAGE);
     if (
       run.status === "queued" &&
       run.lastRetryKey === args.retryKey &&

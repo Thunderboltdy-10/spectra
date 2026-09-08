@@ -638,11 +638,19 @@ export function ManageBacIntegrationShell() {
           ) : null}
 
           <section className="min-w-0">
-<ProductPageHeader
+            <ProductPageHeader
               className="pb-5 pt-1 sm:pt-2"
-              eyebrow="ManageBac · Admin setup"
-              title="ManageBac connection"
-              description="Manage the school connection and synchronization. Choose which classes get their own workspace from this page or from School."
+              eyebrow={
+                overview?.admin
+                  ? "ManageBac · Admin setup"
+                  : "ManageBac · Personal data"
+              }
+              title={overview?.admin ? "ManageBac connection" : "Your ManageBac data"}
+              description={
+                overview?.admin
+                  ? "Manage the school connection and synchronization. Choose which classes get their own workspace from this page or from School."
+                  : "Review your classes, timetable, and assignments. Choose which classes get their own workspace from this page or from School."
+              }
               actions={
                 <>
                   <button type="button" onClick={() => void refresh()} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Refresh connection data" title="Refresh connection data"><RefreshCw size={13} /></button>

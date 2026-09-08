@@ -10,6 +10,8 @@ describe("ManageBac sync UX honesty", () => {
     );
     expect(shell).toContain("Validating ManageBac capabilities");
     expect(shell).toContain("integrationStatusLabel");
+    expect(shell).toContain('"ManageBac · Personal data"');
+    expect(shell).toContain('"Your ManageBac data"');
     expect(shell).toContain("Syncing…");
     expect(shell).toContain("Every ${integration.syncPolicy.frequencyMinutes} minutes");
     // Header Sync now remains; Quick actions must not duplicate it.

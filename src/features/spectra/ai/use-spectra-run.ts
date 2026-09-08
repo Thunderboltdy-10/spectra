@@ -373,7 +373,9 @@ export function useSpectraRun({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const promptByRun = useRef(new Map<string, string>());
   const dismissedCardIds = useRef(new Set<string>());
-  const activeRequests = useRef(new Map<AbortController, string | null>());
+  const activeRequests = useRef(
+    new Map<AbortController, { runId: string | null; exchangeId?: string }>(),
+  );
   const activeRunIds = useRef(new Set<string>());
   /* Publish the live-run set as a typed bus query so ambient surfaces (the
      favicon, shell fields) can reflect activity without polling. */
@@ -676,7 +678,15 @@ export function useSpectraRun({
       const controller = new AbortController();
       let requestRunId: string | null = null;
       let requestReachedTerminal = false;
-      activeRequests.current.set(controller, null);
+      const requestExchangeId =
+        liveExchangeId ??
+        (typeof body.submissionKey === "string"
+          ? body.submissionKey
+          : undefined);
+      activeRequests.current.set(controller, {
+        runId: null,
+        exchangeId: requestExchangeId,
+      });
       const response = await fetch("/api/spectra/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -728,7 +738,10 @@ export function useSpectraRun({
             activeRunIds.current.add(event.runId);
             publishActiveRuns();
             requestRunId = event.runId;
-            activeRequests.current.set(controller, event.runId);
+            activeRequests.current.set(controller, {
+              runId: event.runId,
+              exchangeId: requestExchangeId,
+            });
             onAcknowledged?.(event.runId);
             spectraBus.emit("threads.changed", {});
           }
@@ -1022,8 +1035,11 @@ export function useSpectraRun({
         // preventing an unbounded optimistic "Starting" state.
         const beginTimeout = window.setTimeout(() => {
           if (beginSettled) return;
-          for (const [controller, requestRunId] of activeRequests.current) {
-            if (!requestRunId || requestRunId.startsWith("pending:")) {
+          for (const [controller, request] of activeRequests.current) {
+            if (
+              request.exchangeId === exchangeId &&
+              (!request.runId || request.runId.startsWith("pending:"))
+            ) {
               controller.abort();
               activeRequests.current.delete(controller);
             }
@@ -1355,10 +1371,12 @@ export function useSpectraRun({
       // acknowledged run id or the idempotent submission key used to create it.
       // This prevents a slow provider/request stream from leaving the red stop
       // control visibly stuck while the server settles the same execution.
-      activeRequests.current.forEach((requestRunId, controller) => {
+      activeRequests.current.forEach((request, controller) => {
         if (
-          (targetRunId && requestRunId === targetRunId) ||
-          (!targetRunId && requestRunId === null)
+          (targetRunId && request.runId === targetRunId) ||
+          (!targetRunId &&
+            request.runId === null &&
+            request.exchangeId === submissionKey)
         ) {
           controller.abort();
           activeRequests.current.delete(controller);
@@ -1386,14 +1404,7 @@ export function useSpectraRun({
                   title: "Stopped",
                   summary:
                     "Stopped by you. Any completed work remains available.",
-                  actions: [
-                    {
-                      key: "retry",
-                      label: "Retry",
-                      targetType: "run",
-                      targetId: targetRunId,
-                    },
-                  ],
+                   actions: [],
                   updatedAt: Date.now(),
                 }
               : card,

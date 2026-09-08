@@ -6,11 +6,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   getSpectraArtifact,
+  getSpectraRunDetail,
   getSpectraThread,
   type SpectraArtifact,
   type SpectraThread,
 } from "../data/api";
+import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { spectraBus } from "../events";
+import { useSpectraPreferences } from "../settings/preference-store";
 import {
   readRouteSideSession,
   readSharedWorkbenchSession,
@@ -46,6 +49,7 @@ const ArtifactStudio = dynamic(
 export function RouteSidePanelHost() {
   const pathname = usePathname();
   const router = useRouter();
+  const { preferences, replace: replacePreferences } = useSpectraPreferences();
   const eligible = ROUTE_SIDE_PANEL_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
@@ -57,32 +61,44 @@ export function RouteSidePanelHost() {
   const studio = useArtifactStudioState("spectra.route.studio", artifacts);
   const { openSplit, closeStudio, activateTab, setDirty } = studio;
 
+  const openWork = useCallback(
+    async (workId: string) => {
+      const result = await getSpectraArtifact(workId);
+      setWork(result.artifact);
+      openSplit(result.artifact);
+    },
+    [openSplit],
+  );
   const loadWork = useCallback(
     async (workId: string) => {
       try {
-        const result = await getSpectraArtifact(workId);
-        setWork(result.artifact);
-        openSplit(result.artifact);
+        await openWork(workId);
       } catch (error) {
         toast.error(
           error instanceof Error ? error.message : "Could not open this work.",
         );
       }
     },
-    [openSplit],
+    [openWork],
   );
-  const loadThread = useCallback(async (threadId: string) => {
-    try {
-      const result = await getSpectraThread(threadId);
-      setThread(result.thread);
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not open this conversation.",
-      );
-    }
+  const openThread = useCallback(async (threadId: string) => {
+    const result = await getSpectraThread(threadId);
+    setThread(result.thread);
   }, []);
+  const loadThread = useCallback(
+    async (threadId: string) => {
+      try {
+        await openThread(threadId);
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Could not open this conversation.",
+        );
+      }
+    },
+    [openThread],
+  );
 
   useEffect(() => {
     setWork(null);
@@ -115,14 +131,51 @@ export function RouteSidePanelHost() {
     [pathname, thread?._id, work?._id],
   );
 
-  function fullscreen(workId: string) {
-    const shared = readSharedWorkbenchSession(window.localStorage);
-    writeSharedWorkbenchSession(
-      window.localStorage,
-      transferSideSessionToLibrary(shared, { ...sideSession, workId }),
-    );
-    router.push(`/library/${encodeURIComponent(workId)}`);
-  }
+  const fullscreen = useCallback(
+    (workId: string) => {
+      const shared = readSharedWorkbenchSession(window.localStorage);
+      writeSharedWorkbenchSession(
+        window.localStorage,
+        transferSideSessionToLibrary(shared, { ...sideSession, workId }),
+      );
+      router.push(`/library/${encodeURIComponent(workId)}`);
+    },
+    [router, sideSession],
+  );
+
+  const applicationCommandDispatcher = useMemo(
+    () =>
+      createApplicationCommandDispatcher({
+        openArtifact: (artifactId, surface) =>
+          surface === "full" ? fullscreen(artifactId) : openWork(artifactId),
+        navigate: (destination, targetId) => {
+          if (destination === "library") {
+            router.push(
+              targetId
+                ? `/library/${encodeURIComponent(targetId)}`
+                : "/library",
+            );
+          } else if (destination === "calendar") {
+            router.push("/calendar");
+          } else if (destination === "settings") {
+            router.push(
+              targetId
+                ? `/settings?section=${encodeURIComponent(targetId)}`
+                : "/settings",
+            );
+          } else {
+            router.push(
+              targetId
+                ? `/workspace/${encodeURIComponent(targetId)}`
+                : "/workspace?home=1",
+            );
+          }
+        },
+        preferences,
+        replacePreferences,
+      }),
+    [fullscreen, openWork, preferences, replacePreferences, router],
+  );
 
   useEffect(() => {
     if (!eligible) return;
@@ -135,17 +188,19 @@ export function RouteSidePanelHost() {
     });
     const removeThread = spectraBus.handle(
       "run.openConversation",
-      (command) => {
-        if (command.threadId) void loadThread(command.threadId);
+      async (command) => {
+        const resolvedThreadId =
+          command.threadId?.trim() ||
+          (await getSpectraRunDetail(command.runId)).run.threadId;
+        if (!resolvedThreadId) throw new Error("RUN_THREAD_NOT_FOUND");
+        await openThread(resolvedThreadId);
       },
     );
     return () => {
       removeWork();
       removeThread();
     };
-    // fullscreen closes over the latest side session for the library handoff.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadWork/loadThread are the live openers
-  }, [eligible, loadThread, loadWork, pathname, thread?._id, work?._id]);
+  }, [eligible, fullscreen, loadWork, openThread]);
 
   function closeWork() {
     closeStudio();
@@ -170,6 +225,7 @@ export function RouteSidePanelHost() {
           onActivateTab={activateTab}
           onCloseTab={() => closeWork()}
           onDirtyChange={setDirty}
+          executeApplicationCommand={applicationCommandDispatcher}
         />
       ) : null}
       {thread ? (

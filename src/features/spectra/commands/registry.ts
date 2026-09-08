@@ -309,6 +309,23 @@ export function executeCommand<P extends CommandParam>(
   return true;
 }
 
+/**
+ * Awaitable companion for application surfaces that need completion/error
+ * semantics. The legacy boolean helper remains synchronous for existing
+ * workbars and keyboard bindings; new palettes and bridges should use this
+ * path when the command may cross an async boundary.
+ */
+export async function executeCommandAsync<P extends CommandParam>(
+  command: Command<P>,
+  ctx: CommandContext,
+  params?: P,
+): Promise<boolean> {
+  const availability = command.availability(ctx);
+  if (availability.state !== "enabled") return false;
+  await command.execute(ctx, params as P);
+  return true;
+}
+
 export function swapWorkbarCommandOrders(
   layout: CommandLayout | undefined,
   swap: {

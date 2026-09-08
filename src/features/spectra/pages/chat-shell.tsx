@@ -29,6 +29,7 @@ import { SpectraMark } from "@/components/spectra-mark";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
 import { spectraBus } from "../events";
+import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { ConversationSurface } from "../components/conversation-surface";
 import { CommandBar } from "../components/command-bar";
 import { ShellActivityField } from "../components/shell-activity-field";
@@ -65,6 +66,7 @@ import {
   type SpectraThreadDetail,
   type SpectraWorkspace,
 } from "../data/api";
+import { useSpectraPreferences } from "../settings/preference-store";
 
 const ArtifactStudio = dynamic(
   () =>
@@ -77,6 +79,7 @@ const ArtifactStudio = dynamic(
 export function ChatShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { preferences, replace: replacePreferences } = useSpectraPreferences();
   const requestedThreadId = searchParams.get("threadId");
   const requestedPrompt = searchParams.get("prompt");
   const [threadId, setThreadId] = useState<string | null>(requestedThreadId);
@@ -309,6 +312,45 @@ export function ChatShell() {
       studio.openSplit(artifact);
     },
     [artifacts, composerThread?.id, selectThread, studio, threadId],
+  );
+
+  const applicationCommandDispatcher = useMemo(
+    () =>
+      createApplicationCommandDispatcher({
+        openArtifact: (artifactId, surface) => {
+          if (surface === "full") {
+            router.push(`/library/${encodeURIComponent(artifactId)}`);
+            return;
+          }
+          return openArtifact(artifactId);
+        },
+        navigate: (destination, targetId) => {
+          if (destination === "library") {
+            router.push(
+              targetId
+                ? `/library/${encodeURIComponent(targetId)}`
+                : "/library",
+            );
+          } else if (destination === "calendar") {
+            router.push("/calendar");
+          } else if (destination === "settings") {
+            router.push(
+              targetId
+                ? `/settings?section=${encodeURIComponent(targetId)}`
+                : "/settings",
+            );
+          } else {
+            router.push(
+              targetId
+                ? `/workspace/${encodeURIComponent(targetId)}`
+                : "/workspace?home=1",
+            );
+          }
+        },
+        preferences,
+        replacePreferences,
+      }),
+    [openArtifact, preferences, replacePreferences, router],
   );
 
   const focusedArtifact = studio.activeArtifact;
@@ -783,6 +825,7 @@ export function ChatShell() {
           onActivateTab={studio.activateTab}
           onCloseTab={studio.closeTab}
           onDirtyChange={studio.setDirty}
+          executeApplicationCommand={applicationCommandDispatcher}
         />
       ) : null}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-modal bg-transparent px-5 pb-5 pt-2 sm:px-8">

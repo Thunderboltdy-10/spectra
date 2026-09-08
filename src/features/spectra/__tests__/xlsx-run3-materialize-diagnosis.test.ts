@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { xlsxLens } from "../lenses/xlsx-lens";
 import {
@@ -7,13 +8,14 @@ import {
 } from "../lenses/office-content";
 import { xlsxChangedRegions } from "../lenses/office-projection-merge";
 
-const xlsxPath =
-  "C:/Users/pablo/Downloads/spectra-rc-v1-final-mounted-20260903/xlsx-run3/IA Data Collection.xlsx";
+const configuredXlsxPath = process.env.SPECTRA_XLSX_RUN3_FIXTURE?.trim();
+const xlsxPath = configuredXlsxPath ? resolve(configuredXlsxPath) : undefined;
 
 describe("xlsx-run3 native materialize", () => {
-  it.skipIf(!existsSync(xlsxPath))(
+  it.skipIf(!xlsxPath || !existsSync(xlsxPath))(
     "writes one new cell without a format op for every visible cell",
     async () => {
+      if (!xlsxPath) throw new Error("SPECTRA_XLSX_RUN3_FIXTURE is required.");
       const opened = await xlsxLens.open(readFileSync(xlsxPath));
       const content = xlsxArtifactContent(opened.projection);
       const sheet = content.sheets[0];

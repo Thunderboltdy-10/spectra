@@ -106,6 +106,7 @@ describe("Spectra API route", () => {
     expect(response.status).toBe(400);
     expect(convexQuery).toHaveBeenCalledWith("orgTree:listWorkspaceContentsPublic", {
       workspaceId: "t57ax7akvh0w6j3zzqkr800kzd88vdrr",
+      includeDetails: false,
     });
   });
 

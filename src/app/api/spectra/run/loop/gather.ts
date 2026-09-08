@@ -210,6 +210,7 @@ export async function buildContext(
       ? query<unknown & object, unknown>("orgTree:listWorkspaceContents", {
           actorClerkId,
           workspaceId: body.workspaceId,
+          includeDetails: false,
         }).catch(() => null)
       : Promise.resolve(null),
     body.artifactId
@@ -367,6 +368,7 @@ export async function buildContext(
         query<unknown & object, unknown>("orgTree:listWorkspaceContents", {
           actorClerkId,
           workspaceId,
+          includeDetails: false,
         }).catch(() => null),
       ),
   );

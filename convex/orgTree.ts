@@ -32,6 +32,7 @@ import {
   subtreeNodes,
   trashNode,
   workspaceContextNodes,
+  artifactSummaryProjection,
   type OrgNode,
 } from "./orgTreeShared";
 import { hydrateNodes, type OrgNodeView } from "./orgTreeViews";
@@ -870,6 +871,7 @@ async function hydrateWorkNode(
   ctx: Parameters<typeof requireSpectraActor>[0],
   node: OrgNode,
   accountId: Id<"accounts">,
+  includeDetails: boolean,
 ) {
   const artifactId = normalizeArtifactId(ctx, node.sourceId ?? "");
   if (!artifactId) return null;
@@ -883,6 +885,9 @@ async function hydrateWorkNode(
   const projected = decision.level
     ? projectArtifactForAccess(artifact, decision.level)
     : artifact;
+  const visibleArtifact = includeDetails
+    ? projected
+    : artifactSummaryProjection(projected);
   const ownership =
     artifact.ownerAccountId === accountId
       ? ("owned" as const)
@@ -903,7 +908,7 @@ async function hydrateWorkNode(
     ? await ctx.db.get(node.workspaceContextId)
     : null;
   return {
-    ...projected,
+    ...visibleArtifact,
     ownership,
     accessLevel: decision.level ?? null,
     accessReason: decision.reason,
@@ -926,9 +931,28 @@ async function hydrateWorkNode(
   };
 }
 
+function summarizeWorkspaceThread(thread: Doc<"spectraThreads">) {
+  return {
+    _id: thread._id,
+    title: thread.title,
+    summaryShort: thread.summaryShort,
+    origin: thread.origin,
+    workspaceId: thread.workspaceId,
+    artifactId: thread.artifactId,
+    pinned: thread.pinned,
+    messageCount: thread.messageCount,
+    status: thread.status,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    lastMessageAt: thread.lastMessageAt,
+    lastRunId: thread.lastRunId,
+  };
+}
+
 async function readWorkspaceContents(
   ctx: Parameters<typeof requireSpectraActor>[0],
   workspaceId: Id<"spectraWorkspaces">,
+  includeDetails = true,
 ) {
   const { actor, workspace } = await requireWorkspaceCapability(
     ctx,
@@ -952,7 +976,12 @@ async function readWorkspaceContents(
       updatedAt: node.updatedAt,
     };
     if (node.kind === "work") {
-      const artifact = await hydrateWorkNode(ctx, node, actor.accountId);
+      const artifact = await hydrateWorkNode(
+        ctx,
+        node,
+        actor.accountId,
+        includeDetails,
+      );
       if (artifact) items.push({ ...base, artifact, thread: null });
       continue;
     }
@@ -960,7 +989,13 @@ async function readWorkspaceContents(
     const thread = threadId ? await ctx.db.get(threadId) : null;
     if (!thread || thread.status === "deleted") continue;
     const run = thread.lastRunId ? await ctx.db.get(thread.lastRunId) : null;
-    items.push({ ...base, artifact: null, thread: { ...thread, run } });
+    items.push({
+      ...base,
+      artifact: null,
+      thread: includeDetails
+        ? { ...thread, run }
+        : summarizeWorkspaceThread(thread),
+    });
   }
 
   /* The AI's own edits settle after a beat, and a staged patch previews in
@@ -985,15 +1020,26 @@ async function readWorkspaceContents(
 }
 
 export const listWorkspaceContents = query({
-  args: { workspaceId: v.id("spectraWorkspaces") },
-  handler: (ctx, args) => readWorkspaceContents(ctx, args.workspaceId),
+  args: {
+    workspaceId: v.id("spectraWorkspaces"),
+    includeDetails: v.optional(v.boolean()),
+  },
+  handler: (ctx, args) =>
+    readWorkspaceContents(
+      ctx,
+      args.workspaceId,
+      args.includeDetails ?? true,
+    ),
 });
 
 // HTTP query-string ids are untrusted. Normalize before entering a table-typed
 // validator so a stale id becomes a controlled miss, not a Convex
 // ArgumentValidationError for spectraWorkspaces.
 export const listWorkspaceContentsPublic = query({
-  args: { workspaceId: v.string() },
+  args: {
+    workspaceId: v.string(),
+    includeDetails: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
     const workspaceId = ctx.db.normalizeId(
       "spectraWorkspaces",
@@ -1001,7 +1047,11 @@ export const listWorkspaceContentsPublic = query({
     );
     if (!workspaceId) return null;
     try {
-      return await readWorkspaceContents(ctx, workspaceId);
+      return await readWorkspaceContents(
+        ctx,
+        workspaceId,
+        args.includeDetails ?? true,
+      );
     } catch (error) {
       if (
         error instanceof Error &&

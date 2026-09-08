@@ -49,10 +49,13 @@ async function verifiedPayload(workId: Id<"spectraArtifacts">) {
   }
 }
 
-async function ensurePortablePayload(workId: Id<"spectraArtifacts">) {
+async function ensurePortablePayload(
+  workId: Id<"spectraArtifacts">,
+  artifactPromise?: Promise<ArtifactTruth>,
+) {
   const existing = await verifiedPayload(workId);
   if (existing) return existing;
-  const artifact = await convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId });
+  const artifact = await (artifactPromise ?? convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId }));
   if (!SPECTRA_PACKAGE_TYPES.includes(artifact.blueprintKey as (typeof SPECTRA_PACKAGE_TYPES)[number])) throw new Error("NATIVE_PAYLOAD_UNAVAILABLE");
   const payload = createSpectraPackage({ artifactType: artifact.blueprintKey as (typeof SPECTRA_PACKAGE_TYPES)[number], schemaVersion: 1, createdByVersion: "spectra-n5", content: artifact.content ?? {} });
   const hash = await sha256Payload(payload);
@@ -66,9 +69,10 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const workId = artifactId(z.string().min(1).parse(url.searchParams.get("artifactId")));
+    const artifactPromise = convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId });
     const [artifact, retained] = await Promise.all([
-      convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId }),
-      ensurePortablePayload(workId),
+      artifactPromise,
+      ensurePortablePayload(workId, artifactPromise),
     ]);
     const extension = retained.truth.nativeFormat;
     const fileName = `${safeBaseName(artifact.title.replace(/\.[^.]+$/, ""))}.${extension}`;
@@ -82,15 +86,20 @@ export async function POST(request: Request) {
   try {
     const input = materializeSchema.parse(await request.json());
     const workId = artifactId(input.artifactId);
+    const artifactPromise = input.fileName
+      ? undefined
+      : convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId });
     const [artifact, retained, mounts] = await Promise.all([
-      convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>("spectraArtifacts:get", { artifactId: workId }),
-      ensurePortablePayload(workId),
+      artifactPromise ?? Promise.resolve(null),
+      ensurePortablePayload(workId, artifactPromise),
       convexQuery<Record<string, never>, ActiveMount[]>("bridge:activeMounts", {}),
     ]);
     const mount = input.mountId ? mounts.find((candidate) => String(candidate._id) === input.mountId) : mounts[0];
     if (!mount) throw new Error("NO_ACTIVE_BRIDGE_FOLDER");
     const extension = retained.truth.nativeFormat;
-    const requested = input.fileName ? safeBaseName(input.fileName.replace(/\.[^.]+$/, "")) : safeBaseName(artifact.title.replace(/\.[^.]+$/, ""));
+    const requested = input.fileName
+      ? safeBaseName(input.fileName.replace(/\.[^.]+$/, ""))
+      : safeBaseName(artifact!.title.replace(/\.[^.]+$/, ""));
     const relativePath = `${requested}.${extension}`;
     const result = await convexMutation<
       { workId: Id<"spectraArtifacts">; mountId: Id<"bridgeMounts">; relativePath: string; payloadRef: string; contentHash: string; nativeFormat: string; fidelityMap: unknown },

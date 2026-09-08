@@ -376,6 +376,7 @@ export async function GET(request: NextRequest) {
         "orgTree:listWorkspaceContentsPublic",
         {
           workspaceId,
+          includeDetails: false,
         },
       );
       if (!workspace) return badRequest("Workspace not found");
@@ -626,6 +627,7 @@ export async function GET(request: NextRequest) {
       const workspace = requestedWorkspaceId
         ? await spectraQuery("orgTree:listWorkspaceContentsPublic", {
             workspaceId: requestedWorkspaceId,
+            includeDetails: false,
           })
         : null;
       const selectedWorkspaceId =

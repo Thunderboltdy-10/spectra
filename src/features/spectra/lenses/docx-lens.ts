@@ -1261,7 +1261,12 @@ function setToggle(properties: XmlElement, localName: string, on: boolean) {
 }
 
 function safeFontName(value: string) {
-  if (!/^[\w .+&'-]{1,64}$/.test(value))
+  // Word font names are Unicode strings. `\w` is ASCII-only in JavaScript,
+  // so the old guard rejected valid CJK, kana and accented family names before
+  // they could reach the native writer. Keep the existing conservative
+  // punctuation policy while allowing Unicode letters, combining marks,
+  // numbers, connector punctuation and normal spaces.
+  if (!/^[\p{L}\p{M}\p{N}\p{Pc}\p{Zs}.+&'-]{1,64}$/u.test(value))
     throw new DocxLensError(
       "DOCX_UNSUPPORTED_EDIT",
       "That font name cannot be written safely into a Word file.",
@@ -1328,11 +1333,19 @@ function applyRunFormat(document: Document, paragraph: Paragraph, format: DocxRu
       else {
         const fonts = orderedChild(properties, "rFonts", RPR_ORDER);
         const name = safeFontName(format.fontFamily);
-        for (const slot of ["ascii", "hAnsi", "cs"])
+        for (const slot of ["ascii", "hAnsi", "eastAsia", "cs"])
           fonts.setAttributeNs(WML_NAMESPACE, slot, name);
         // A literal name and a theme reference in the same element would let
         // Word prefer the theme font and silently ignore the choice.
-        for (const slot of ["asciiTheme", "hAnsiTheme", "cstheme", "csTheme"])
+        for (const slot of [
+          "asciiTheme",
+          "hAnsiTheme",
+          "eastAsiaTheme",
+          "csTheme",
+          // Some producers emit this incorrectly cased spelling. Remove it
+          // too so it cannot remain as a conflicting extension attribute.
+          "cstheme",
+        ])
           fonts.removeAttributeNs(WML_NAMESPACE, slot);
       }
     }

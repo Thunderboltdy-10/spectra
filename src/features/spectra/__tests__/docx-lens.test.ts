@@ -147,6 +147,36 @@ describe("DOCX preservation lens", () => {
       .toBe("First\tSecond\nThird");
   });
 
+  it("writes Unicode font names to every Word script slot and clears theme indirection", async () => {
+    const source = await fixture("complex-structure.docx");
+    const opened = await docxLens.open(source);
+    const target = opened.projection.blocks.find(
+      (block) => block.type !== "table" && block.text.trim().length > 0 && block.attrs?.nativeReadOnly !== true,
+    )!;
+
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "format-runs",
+      regionId: target.id,
+      format: { fontFamily: "游ゴシック" },
+    });
+    const document = await Document.open(output);
+    const fonts = mainElements(document.body()).find(
+      (element) =>
+        element.namespaceUri() === WML_NAMESPACE &&
+        element.localName === "rFonts" &&
+        element.getAttributeNs(WML_NAMESPACE, "ascii") === "游ゴシック",
+    );
+    expect(fonts).toBeTruthy();
+    for (const slot of ["ascii", "hAnsi", "eastAsia", "cs"])
+      expect(fonts!.getAttributeNs(WML_NAMESPACE, slot)).toBe("游ゴシック");
+    for (const slot of ["asciiTheme", "hAnsiTheme", "eastAsiaTheme", "csTheme", "cstheme"])
+      expect(fonts!.getAttributeNs(WML_NAMESPACE, slot)).toBeUndefined();
+
+    const reopened = await docxLens.open(output);
+    expect(reopened.projection.blocks.find((block) => block.id === target.id)?.attrs?.format)
+      .toMatchObject({ fontFamily: "游ゴシック" });
+  });
+
   it("refuses a style alias that has no native style definition", async () => {
     const opened = await docxLens.open(await fixture("complex-structure.docx"));
     const target = opened.projection.blocks.find(

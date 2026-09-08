@@ -13,7 +13,7 @@ import {
   selectedAgentRecord,
 } from "./intake";
 import type { ProvisionalCreation } from "./intake";
-import { act, mutate, query, safeJson } from "./io";
+import { act, mutate, query, readQuery, safeJson } from "./io";
 import {
   evaluateCommandAuthority,
   recordAuthorityDecision,
@@ -2908,14 +2908,18 @@ export async function executeAgentReadTool(
     if (call.name === "search_objects") {
       const search = typeof args.query === "string" ? args.query.trim() : "";
       if (!search) return { ok: false, code: "query_required", results: [] };
-      const found = rows(
-        await query<unknown & object, unknown>("spectraArtifacts:list", {
+      const foundRead = await readQuery<unknown & object, unknown>(
+        "spectraArtifacts:list",
+        {
           actorClerkId,
           placement: "all",
           search: search.slice(0, 240),
           limit: 12,
-        }).catch(() => []),
+        },
+        "your Spectra library",
       );
+      if (!foundRead.ok) return { ...foundRead, results: [] };
+      const found = rows(foundRead.value);
       const requestedBlueprint =
         typeof args.blueprintKey === "string" ? args.blueprintKey : null;
       const filtered = found.filter(
@@ -2990,10 +2994,13 @@ export async function executeAgentReadTool(
     if (call.name === "read_artifact") {
       if (typeof args.artifactId !== "string")
         return { ok: false, code: "artifact_id_required" };
-      const artifact = await query<unknown & object, unknown>(
+      const artifactRead = await readQuery<unknown & object, unknown>(
         "spectraArtifacts:get",
         { actorClerkId, artifactId: args.artifactId },
-      ).catch(() => null);
+        "that Spectra artifact",
+      );
+      if (!artifactRead.ok) return artifactRead;
+      const artifact = artifactRead.value;
       return artifact && typeof artifact === "object"
         ? {
             ok: true,
@@ -3007,10 +3014,13 @@ export async function executeAgentReadTool(
     if (call.name === "read_workspace") {
       if (typeof args.workspaceId !== "string")
         return { ok: false, code: "workspace_id_required" };
-      const workspace = await query<unknown & object, unknown>(
+      const workspaceRead = await readQuery<unknown & object, unknown>(
         "orgTree:listWorkspaceContents",
         { actorClerkId, workspaceId: args.workspaceId },
-      ).catch(() => null);
+        "that Spectra workspace",
+      );
+      if (!workspaceRead.ok) return workspaceRead;
+      const workspace = workspaceRead.value;
       return workspace
         ? { ok: true, workspace }
         : { ok: false, code: "workspace_not_found" };
@@ -3018,10 +3028,13 @@ export async function executeAgentReadTool(
     if (call.name === "read_thread") {
       if (typeof args.threadId !== "string")
         return { ok: false, code: "thread_id_required" };
-      const thread = await query<unknown & object, unknown>(
+      const threadRead = await readQuery<unknown & object, unknown>(
         "spectraThreads:get",
         { actorClerkId, threadId: args.threadId },
-      ).catch(() => null);
+        "that Spectra thread",
+      );
+      if (!threadRead.ok) return threadRead;
+      const thread = threadRead.value;
       if (!thread || typeof thread !== "object")
         return { ok: false, code: "thread_not_found" };
       const record = thread as Record<string, unknown>;

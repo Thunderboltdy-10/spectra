@@ -27,6 +27,26 @@ export async function query<TArgs extends object, TResult>(
   }
 }
 
+export async function readQuery<TArgs extends object, TResult>(
+  name: string,
+  args: TArgs,
+  resource: string,
+) {
+  try {
+    return {
+      ok: true as const,
+      value: await query<TArgs, TResult>(name, args),
+    };
+  } catch {
+    return {
+      ok: false as const,
+      code: "context_read_unavailable" as const,
+      message: `Spectra could not read ${resource} right now. Use the existing context or try one bounded read again.`,
+      retryable: true as const,
+    };
+  }
+}
+
 export async function mutate<TArgs extends object, TResult>(
   name: string,
   args: TArgs,

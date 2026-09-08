@@ -15898,7 +15898,7 @@ body:has([role="listbox"][data-state="open"]) .spectra-workbench-live-stack * {
 .spectra-artifact-studio[data-blueprint="presentation"]
   .presentation-object-text[data-text-preset="title"] {
   font-family:
-    var(--font-manrope), ui-sans-serif, system-ui, sans-serif !important;
+    var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   letter-spacing: -0.025em;
 }
 

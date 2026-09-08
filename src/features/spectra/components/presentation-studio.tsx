@@ -104,6 +104,7 @@ import {
   buildPresentationPngArchive,
   buildPresentationPptx,
   importPresentationFile,
+  presentationFontFamily,
 } from "../presentation/io";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { spectraBus } from "../events";
@@ -548,6 +549,7 @@ function styleValue(
 
 function PresentationObjectView({
   object,
+  themeFonts,
   asset,
   linkedValues,
   linkedArtifact,
@@ -565,6 +567,7 @@ function PresentationObjectView({
   path,
 }: {
   object: PresentationObject;
+  themeFonts?: PresentationContent["theme"]["fonts"];
   asset?: SpectraArtifactAsset;
   linkedValues?: number[] | null;
   linkedArtifact?: SpectraArtifact;
@@ -674,6 +677,11 @@ function PresentationObjectView({
           onPointerDown={(event) => event.stopPropagation()}
           style={{
             color: String(styleValue(object, "color", "#173f35")),
+            fontFamily: presentationFontFamily(
+              object.style?.fontFamily,
+              themeFonts,
+              textFontSize,
+            ),
             // Presentation geometry uses a 1000-unit logical canvas. One cqw
             // represents ten of those units, so a 50-unit font maps to 5cqw.
             // The previous /65 conversion collapsed nearly every text style
@@ -1038,6 +1046,7 @@ function SlideCanvas({
           >
             <PresentationObjectView
               object={object}
+              themeFonts={deck.theme.fonts}
               asset={
                 typeof source.assetId === "string"
                   ? assetById.get(source.assetId)

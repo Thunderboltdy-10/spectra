@@ -607,6 +607,22 @@ function assetMap(assets: SpectraArtifactAsset[]) {
   return new Map(assets.map((asset) => [asset.assetId, asset]));
 }
 
+/**
+ * Keep the selected object font in the same lane as the theme fallback. The
+ * editor, canvas renderer, and PPTX writer all need the same answer or a font
+ * choice can look correct in one representation and silently revert in the
+ * next one.
+ */
+export function presentationFontFamily(
+  value: unknown,
+  fonts: PresentationContent["theme"]["fonts"] | undefined,
+  fontSize: number,
+) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  const themeFont = fontSize >= 44 ? fonts?.heading : fonts?.body;
+  return themeFont?.trim() || "Manrope";
+}
+
 export async function buildPresentationPptx(
   content: PresentationContent,
   assets: SpectraArtifactAsset[],
@@ -639,10 +655,15 @@ export async function buildPresentationPptx(
       const h = (object.height / canvasHeight) * heightInches;
       const options = { x, y, w, h, rotate: object.rotation };
       if (object.type === "text") {
+        const fontSize = Number(object.style?.fontSize ?? 28);
         page.addText(presentationObjectText(object), {
           ...options,
-          fontFace: content.theme.fonts?.body ?? "Aptos",
-          fontSize: Number(object.style?.fontSize ?? 28),
+          fontFace: presentationFontFamily(
+            object.style?.fontFamily,
+            content.theme.fonts,
+            fontSize,
+          ),
+          fontSize,
           bold: Number(object.style?.fontWeight ?? 400) >= 600,
           italic: Boolean(object.style?.italic),
           underline: object.style?.underline ? { style: "sng" } : undefined,
@@ -815,7 +836,11 @@ export async function renderPresentationSlide(
         object.style?.color,
         "#211F1C",
       );
-      context.font = `${object.style?.italic ? "italic " : ""}${weight} ${fontSize}px Georgia`;
+      context.font = `${object.style?.italic ? "italic " : ""}${weight} ${fontSize}px ${presentationFontFamily(
+        object.style?.fontFamily,
+        content.theme.fonts,
+        fontSize,
+      )}`;
       context.textBaseline = "top";
       const lines = presentationObjectText(object).split("\n");
       lines.forEach((line, index) =>

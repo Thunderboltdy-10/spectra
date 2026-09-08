@@ -61,7 +61,7 @@ describe("presentation default deck", () => {
       ...base,
       theme: {
         ...base.theme,
-        tokens: { background: "#fbfaf5" },
+        tokens: { background: "var(--bg-primary)" },
       },
     });
     const originalColor = original.slides[0]!.objects[0]!.style?.color;

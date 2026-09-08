@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { describeFailure } from "@/components/ui/truthful-state";
 import {
   getSpectraArtifact,
   getSpectraRunDetail,
@@ -74,9 +75,16 @@ export function RouteSidePanelHost() {
       try {
         await openWork(workId);
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Could not open this work.",
-        );
+        const failure = describeFailure(error, {
+          fallback: "This work could not be opened. Check your connection, then try again.",
+        });
+        toast.error(failure.message, {
+          description: `Reference ${failure.reference}`,
+          action: {
+            label: "Try again",
+            onClick: () => void loadWork(workId),
+          },
+        });
       }
     },
     [openWork],
@@ -90,11 +98,16 @@ export function RouteSidePanelHost() {
       try {
         await openThread(threadId);
       } catch (error) {
-        toast.error(
-          error instanceof Error
-            ? error.message
-            : "Could not open this conversation.",
-        );
+        const failure = describeFailure(error, {
+          fallback: "This conversation could not be opened. Check your connection, then try again.",
+        });
+        toast.error(failure.message, {
+          description: `Reference ${failure.reference}`,
+          action: {
+            label: "Try again",
+            onClick: () => void loadThread(threadId),
+          },
+        });
       }
     },
     [openThread],

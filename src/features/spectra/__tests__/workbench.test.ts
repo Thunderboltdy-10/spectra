@@ -156,9 +156,26 @@ describe("Inspector and navigation contracts", () => {
     const activeTree = source.slice(source.indexOf("<aside"), source.indexOf("{false ? ("));
     expect(activeTree.match(/<aside/g)).toHaveLength(1);
     expect(activeTree).toContain("data-collapsed={sidebarCollapsed}");
-    expect(activeTree).toContain('placeholder="Search"');
-    expect(activeTree).not.toContain("Search chats");
+    expect(activeTree).toContain('placeholder="Search recent chats"');
+    expect(activeTree).toContain('aria-label="Search recent chats"');
     expect(activeTree).toContain("coreDestinations.map");
     expect(activeTree).toContain("workspaces.map");
+  });
+
+  it("keeps narrow navigation labeled and separates chat failures from empty results", () => {
+    const sectionNav = readFileSync(
+      "src/features/spectra/components/product-section-nav.tsx",
+      "utf8",
+    );
+    const chatBrowser = readFileSync(
+      "src/features/spectra/components/chat-browser-panel.tsx",
+      "utf8",
+    );
+    expect(sectionNav).toContain('Math.min(3, primaryCount)');
+    expect(sectionNav).toContain("whitespace-nowrap");
+    expect(chatBrowser).toContain('title="Chats couldn’t load"');
+    expect(chatBrowser).toContain("setLoadError(true)");
+    expect(chatBrowser).toContain('role={isMobile ? "dialog" : undefined}');
+    expect(chatBrowser).toContain("restoreFocusRef.current?.focus()");
   });
 });

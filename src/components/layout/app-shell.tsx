@@ -75,6 +75,7 @@ import {
 import { RouteSidePanelHost } from "@/features/spectra/components/route-side-panel-host";
 import { ViewportContextPicker } from "@/features/spectra/components/viewport-context-picker";
 import { GlobalRouteWorkbench } from "@/features/spectra/components/global-route-workbench";
+import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
@@ -485,6 +486,41 @@ function ShellNavigation() {
     );
   }, [pathname, selectedWorkspaceId, coreDestinations]);
 
+  const mobilePrimaryDestinations = coreDestinations.slice(0, 4);
+  const mobileOverflowItems = useMemo(
+    () => [
+      ...coreDestinations.slice(4).map(({ href, label, icon }) => ({
+        key: `route:${href}`,
+        label: label === "Home" ? "Workspace" : label,
+        icon,
+      })),
+      { key: "workspaces", label: "Workspaces", icon: Folders },
+      {
+        key: "alerts",
+        label: unreadCount ? `Alerts (${unreadCount} unread)` : "Alerts",
+        icon: Bell,
+      },
+    ],
+    [coreDestinations, unreadCount],
+  );
+  const selectMobileOverflow = useCallback(
+    (key: string) => {
+      if (key === "workspaces") {
+        setNotificationsOpen(false);
+        setMobileWorkspaceOpen(true);
+        return;
+      }
+      if (key === "alerts") {
+        setMobileWorkspaceOpen(false);
+        setNotificationsOpen(true);
+        void refreshNotifications();
+        return;
+      }
+      if (key.startsWith("route:")) router.push(key.slice("route:".length));
+    },
+    [refreshNotifications, router],
+  );
+
   const navRef = useRef<HTMLElement>(null);
   const [railMarker, setRailMarker] = useState({
     top: 6,
@@ -576,7 +612,8 @@ function ShellNavigation() {
             data-spectra-sidebar-search=""
             value={sidebarSearch}
             onChange={(event) => setSidebarSearch(event.target.value)}
-            placeholder="Search"
+            placeholder="Search recent chats"
+            aria-label="Search recent chats"
             className="h-8 w-full rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-micro outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]"
           />
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-tertiary)]">
@@ -1012,71 +1049,50 @@ function ShellNavigation() {
       ) : null}
 
       <nav
-        aria-label="Spectra navigation"
-        className="spectra-thin-scrollbar fixed inset-x-3 bottom-3 z-chrome flex h-16 items-center gap-1 overflow-x-auto rounded-surface border px-2 shadow-[var(--shadow-lg)] backdrop-blur-xl md:hidden"
+        aria-label="Primary navigation"
+        className="fixed inset-x-3 bottom-3 z-chrome flex h-16 items-center gap-1 rounded-surface border px-2 shadow-[var(--shadow-lg)] backdrop-blur-xl md:hidden"
         style={{
           borderColor: "var(--border-default)",
           background:
             "color-mix(in oklab, var(--bg-elevated) 88%, transparent)",
         }}
       >
-        {coreDestinations.map(({ href, label, icon: Icon }) => {
+        {mobilePrimaryDestinations.map(({ href, label, icon: Icon }) => {
           const active = activeCoreHref === href;
           return (
             <Link
               key={href}
-              href={href}
+              href={href === "/workspace" ? "/workspace?home=1" : href}
               prefetch={false}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-micro font-semibold",
+                "flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1 py-2 text-micro font-semibold",
                 active
                   ? "text-[var(--brand-primary)]"
                   : "text-[var(--text-tertiary)]",
               )}
             >
               <Icon size={19} strokeWidth={active ? 2.1 : 1.7} />
-              {label}
+              {label === "Home" ? "Workspace" : label}
             </Link>
           );
         })}
-        <button
-          type="button"
-          onClick={() => setMobileWorkspaceOpen((open) => !open)}
-          aria-expanded={mobileWorkspaceOpen}
-          className={cn(
-            "flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-micro font-semibold",
-            selectedWorkspaceId || mobileWorkspaceOpen
-              ? "text-[var(--brand-primary)]"
-              : "text-[var(--text-tertiary)]",
+        <OverflowMenu
+          label="More destinations"
+          items={mobileOverflowItems}
+          onSelect={selectMobileOverflow}
+          active={Boolean(
+            (activeCoreHref &&
+              !mobilePrimaryDestinations.some(
+                ({ href }) => href === activeCoreHref,
+              )) ||
+              selectedWorkspaceId ||
+              mobileWorkspaceOpen ||
+              notificationsOpen,
           )}
-        >
-          <Folders size={19} strokeWidth={selectedWorkspaceId ? 2.1 : 1.7} />
-          Workspaces
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setMobileWorkspaceOpen(false);
-            setNotificationsOpen((open) => !open);
-            void refreshNotifications();
-          }}
-          aria-expanded={notificationsOpen}
-          className={cn(
-            "relative flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-micro font-semibold",
-            notificationsOpen
-              ? "text-[var(--brand-primary)]"
-              : "text-[var(--text-tertiary)]",
-          )}
-        >
-          <Bell size={19} strokeWidth={notificationsOpen ? 2.1 : 1.7} />
-          {unreadCount ? (
-            <span className="absolute right-3 top-1 grid min-w-4 place-items-center rounded-full bg-[var(--danger)] px-1 text-micro font-bold leading-4 text-white">
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
-          ) : null}
-          Alerts
-        </button>
+          size={52}
+          triggerClassName="flex flex-1 flex-col gap-1 rounded-xl px-1 py-2 text-micro font-semibold"
+        />
       </nav>
     </>
   );

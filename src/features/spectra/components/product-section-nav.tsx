@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
@@ -36,21 +37,36 @@ export function ProductSectionNav<T extends string>({
   primaryCount?: number;
   className?: string;
 }) {
+  const [compact, setCompact] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 639px)");
+    const update = () => setCompact(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  // Three complete labels plus More fit the narrowest supported shell. On
+  // wider surfaces the caller's priority still controls how much is visible.
+  const visiblePrimaryCount = compact ? Math.min(3, primaryCount) : primaryCount;
+
   // The active section is always reachable in one click: if it would fall into
   // the overflow, it trades places with the last primary tab.
   const ordered = [...items];
   const activeIndex = ordered.findIndex((item) => item.key === active);
-  if (activeIndex >= primaryCount && primaryCount > 0) {
+  if (activeIndex >= visiblePrimaryCount && visiblePrimaryCount > 0) {
     const [activeItem] = ordered.splice(activeIndex, 1);
-    ordered.splice(primaryCount - 1, 0, activeItem);
+    ordered.splice(visiblePrimaryCount - 1, 0, activeItem);
   }
 
-  const primary = ordered.slice(0, primaryCount);
-  const overflow = ordered.slice(primaryCount);
+  const primary = ordered.slice(0, visiblePrimaryCount);
+  const overflow = ordered.slice(visiblePrimaryCount);
 
   return (
     <nav
       aria-label={label}
+      data-compact={compact ? "true" : undefined}
       className={cn(
         "mb-5 flex min-w-0 items-end gap-4 border-b border-[var(--border-default)] sm:gap-6",
         className,
@@ -66,7 +82,7 @@ export function ProductSectionNav<T extends string>({
             onClick={() => onChange(item.key)}
             aria-current={selected ? "page" : undefined}
             className={cn(
-              "relative flex h-10 min-w-0 shrink items-center gap-2 px-0.5 text-caption font-medium transition-colors",
+              "relative flex h-10 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-0.5 text-caption font-medium transition-colors",
               selected
                 ? "text-[var(--text-primary)]"
                 : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",

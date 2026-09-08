@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api } from "./_generated/api";
+import type { Doc, Id } from "./_generated/dataModel";
 
 const modules = import.meta.glob("./**/*.ts");
 const credential = "bridge-batch-test-credential-00000001";
@@ -82,7 +83,170 @@ async function seedBridge(t: ReturnType<typeof convexTest>) {
   });
 }
 
+async function seedDeletedWrite(t: ReturnType<typeof convexTest>, state: "pending" | "claimed") {
+  const fixture = await seedBridge(t);
+  const discovery = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+    credential,
+    mountId: fixture.mountId,
+    resources: [{
+      localResourceId: `lr_${state === "pending" ? "f".repeat(16) : "e".repeat(16)}`,
+      relativePath: "Deleted/Essay.docx",
+      size: 42,
+      contentHash: "a".repeat(64),
+      nativeFormat: "docx",
+    }],
+  });
+  const registration = discovery.registrations[0];
+  if (!("replicaId" in registration) || !registration.replicaId) throw new Error("Expected a discovered replica");
+  const replicaId: Id<"workReplicas"> = registration.replicaId;
+  const seeded = await t.run(async (ctx) => {
+    const replica = await ctx.db.get(replicaId);
+    if (!replica) throw new Error("Expected replica row");
+    const now = Date.now();
+    const idempotencyKey = `deleted-work-${state}-${crypto.randomUUID()}`;
+    await ctx.db.patch(replica._id, {
+      state: "pending",
+      payloadRef: "payload-orphan",
+      pendingPayloadRef: "payload-pending",
+      projectionBasePayloadRef: "payload-base",
+      updatedAt: now,
+    });
+    const operationId = await ctx.db.insert("syncOperations", {
+      accountId: fixture.accountId,
+      workId: replica.workId,
+      replicaId: replica._id,
+      idempotencyKey,
+      direction: "cloud-to-local",
+      actorKind: "reconciliation",
+      state: "pending",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const requestId = await ctx.db.insert("bridgeWriteRequests", {
+      accountId: fixture.accountId,
+      workId: replica.workId,
+      replicaId: replica._id,
+      deviceId: fixture.deviceId,
+      mountId: fixture.mountId,
+      localResourceId: replica.localResourceId ?? "lr_deleted-work",
+      relativePath: replica.relativePath ?? "Deleted/Essay.docx",
+      payloadRef: "payload-orphan",
+      baseRevision: "a".repeat(64),
+      targetRevision: "b".repeat(64),
+      contentHash: "b".repeat(64),
+      idempotencyKey,
+      regionIds: [],
+      partNames: [],
+      state,
+      ...(state === "claimed" ? { claimedAt: now, attemptCount: 1 } : { retryAt: now - 1 }),
+      expiresAt: now + 60_000,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await ctx.db.delete(replica.workId);
+    return { operationId, requestId, replicaId: replica._id };
+  });
+  return { fixture, ...seeded };
+}
+
 describe("Bridge incremental cloud seam", () => {
+  it("fails pending native writes after the work is deleted and releases replica payload refs", async () => {
+    const t = convexTest(schema, modules);
+    const seeded = await seedDeletedWrite(t, "pending");
+
+    const result = await t.mutation(api.bridgeSync.claimWrite, { credential });
+    expect(result).toEqual({ request: null });
+    const state = await t.run(async (ctx) => ({
+      request: await ctx.db.get(seeded.requestId),
+      operation: await ctx.db.get(seeded.operationId),
+      replica: await ctx.db.get(seeded.replicaId),
+    }));
+    const replica = state.replica as Doc<"workReplicas"> | null;
+    expect(state.request).toMatchObject({ state: "failed", errorCode: "work-no-longer-exists" });
+    expect(state.operation).toMatchObject({ state: "failed", errorCode: "work-no-longer-exists" });
+    expect(state.replica).toMatchObject({
+      state: "unavailable",
+      unavailableReason: "work-no-longer-exists",
+      errorCode: "work-no-longer-exists",
+    });
+    expect(replica?.payloadRef).toBeUndefined();
+    expect(replica?.pendingPayloadRef).toBeUndefined();
+    expect(replica?.projectionBasePayloadRef).toBeUndefined();
+  });
+
+  it("fails an in-flight native write completion after the work is deleted", async () => {
+    const t = convexTest(schema, modules);
+    const seeded = await seedDeletedWrite(t, "claimed");
+
+    const result = await t.mutation(api.bridgeSync.completeWrite, {
+      credential,
+      requestId: seeded.requestId,
+      outcome: "waiting",
+    });
+    expect(result).toEqual({ state: "failed" });
+    const state = await t.run(async (ctx) => ({
+      request: await ctx.db.get(seeded.requestId),
+      operation: await ctx.db.get(seeded.operationId),
+      replica: await ctx.db.get(seeded.replicaId),
+    }));
+    const replica = state.replica as Doc<"workReplicas"> | null;
+    expect(state.request).toMatchObject({ state: "failed", errorCode: "work-no-longer-exists" });
+    expect(state.operation).toMatchObject({ state: "failed", errorCode: "work-no-longer-exists" });
+    expect(state.replica).toMatchObject({ state: "unavailable", unavailableReason: "work-no-longer-exists" });
+    expect(replica?.payloadRef).toBeUndefined();
+  });
+
+  it("does not claim a pending native structure operation after the work is deleted", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedBridge(t);
+    const discovery = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{
+        localResourceId: `lr_${"d".repeat(16)}`,
+        relativePath: "Deleted/Essay.docx",
+        size: 42,
+        contentHash: "a".repeat(64),
+        nativeFormat: "docx",
+      }],
+    });
+    const registration = discovery.registrations[0];
+    if (!("replicaId" in registration) || !registration.replicaId) throw new Error("Expected a discovered replica");
+    const replicaId: Id<"workReplicas"> = registration.replicaId;
+    const seeded = await t.run(async (ctx) => {
+      const replica = await ctx.db.get(replicaId);
+      if (!replica) throw new Error("Expected replica row");
+      const now = Date.now();
+      const requestId = await ctx.db.insert("bridgeFsRequests", {
+        accountId: fixture.accountId,
+        workId: replica.workId,
+        replicaId: replica._id,
+        deviceId: fixture.deviceId,
+        mountId: fixture.mountId,
+        localResourceId: replica.localResourceId ?? `lr_${"d".repeat(16)}`,
+        direction: "spectra-to-disk",
+        kind: "delete",
+        sourceRelativePath: "Deleted/Essay.docx",
+        idempotencyKey: `structure-deleted-${crypto.randomUUID()}`,
+        state: "pending",
+        explanation: "Delete the file after deleting the work.",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.delete(replica.workId);
+      return { requestId, replicaId: replica._id };
+    });
+
+    const result = await t.mutation(api.bridgeStructure.claim, { credential });
+    expect(result).toEqual({ request: null });
+    const state = await t.run(async (ctx) => ({
+      request: await ctx.db.get(seeded.requestId),
+      replica: await ctx.db.get(seeded.replicaId),
+    }));
+    expect(state.request).toMatchObject({ state: "failed", errorCode: "work-no-longer-exists" });
+    expect(state.replica).toMatchObject({ state: "unavailable", unavailableReason: "work-no-longer-exists" });
+  });
+
   it("isolates a malformed discovery entry while registering the rest of the page", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedBridge(t);

@@ -110,6 +110,53 @@ async function failBridgeWriteForRevokedAccess(
   await failStorageTransitionForRequest(ctx, request, errorCode, now);
 }
 
+const DELETED_WORK_ERROR = "work-no-longer-exists";
+const DELETED_WORK_MESSAGE = "The work no longer exists. Try again with another item.";
+
+/** Terminalize a native write when deletion wins the race with the Bridge. */
+async function failWriteForMissingWork(
+  ctx: MutationCtx,
+  request: Doc<"bridgeWriteRequests">,
+  now: number,
+) {
+  const [operation, replica] = await Promise.all([
+    ctx.db.query("syncOperations")
+      .withIndex("by_account_key", (q) => q.eq("accountId", request.accountId).eq("idempotencyKey", request.idempotencyKey))
+      .unique(),
+    ctx.db.get(request.replicaId),
+  ]);
+  await ctx.db.patch(request._id, {
+    state: "failed",
+    errorCode: DELETED_WORK_ERROR,
+    errorMessage: DELETED_WORK_MESSAGE,
+    claimedAt: undefined,
+    retryAt: undefined,
+    updatedAt: now,
+  });
+  if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: DELETED_WORK_ERROR, updatedAt: now });
+  if (replica) {
+    await ctx.db.patch(replica._id, {
+      state: "unavailable",
+      unavailableReason: DELETED_WORK_ERROR,
+      errorCode: DELETED_WORK_ERROR,
+      errorMessage: DELETED_WORK_MESSAGE,
+      errorAt: now,
+      payloadRef: undefined,
+      pendingPayloadRef: undefined,
+      pendingContentHash: undefined,
+      pendingBaseRevision: undefined,
+      projectionBasePayloadRef: undefined,
+      projectionBaseRevision: undefined,
+      projectionBaseContent: undefined,
+      projectionBaseContentHash: undefined,
+      projectionBaseTextIndex: undefined,
+      projectionBaseFidelityMap: undefined,
+      updatedAt: now,
+    });
+  }
+  await failStorageTransitionForRequest(ctx, request, DELETED_WORK_ERROR, now);
+}
+
 export const registerMount = mutation({
   args: { credential: v.string(), rootLabel: v.string(), grantId: v.string(), rootKey: v.string(), scanId: v.string(), fileCount: v.number(), doubleSyncRisk: v.boolean(), ownerLockPaths: v.array(v.string()) },
   handler: async (ctx, args) => {
@@ -1062,6 +1109,11 @@ export const claimWrite = mutation({
       .filter((q) => q.lt(q.field("claimedAt"), now - 60_000))
       .take(20);
     for (const request of [...pending, ...abandonedClaims]) {
+      const work = await ctx.db.get(request.workId);
+      if (!work || work.status === "deleted") {
+        await failWriteForMissingWork(ctx, request, now);
+        continue;
+      }
       if (!(await hasArtifactModify(ctx, actor, request.workId))) {
         await failBridgeWriteForRevokedAccess(ctx, request, now);
         continue;
@@ -1151,8 +1203,14 @@ export const completeWrite = mutation({
     const request = await ctx.db.get(args.requestId);
     if (!request || request.deviceId !== device._id || request.accountId !== device.accountId)
       throw new Error("WRITE_REQUEST_NOT_OWNED_BY_DEVICE");
+    const now = Date.now();
+    const work = await ctx.db.get(request.workId);
+    if (!work || work.status === "deleted") {
+      await failWriteForMissingWork(ctx, request, now);
+      return { state: "failed" as const };
+    }
     if (!(await hasArtifactModify(ctx, actor, request.workId))) {
-      await failBridgeWriteForRevokedAccess(ctx, request, Date.now());
+      await failBridgeWriteForRevokedAccess(ctx, request, now);
       return { state: "failed" as const };
     }
     const operation = await ctx.db.query("syncOperations")
@@ -1166,7 +1224,6 @@ export const completeWrite = mutation({
       (transition) => transition.state === "pending" &&
         String((transition.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? "") === String(request._id),
     );
-    const now = Date.now();
     if (args.outcome === "waiting") {
       await ctx.db.patch(request._id, {
         state: "pending",
@@ -1207,7 +1264,7 @@ export const completeWrite = mutation({
         replica?.pendingPayloadRef === request.payloadRef &&
         replica.pendingContentHash === request.contentHash,
       );
-      const work = protectedApply ? await ctx.db.get(request.workId) : null;
+      const protectedWork = protectedApply ? work : null;
       const cloud = await ctx.db
         .query("workReplicas")
         .withIndex("by_work_kind", (q) => q.eq("workId", request.workId).eq("kind", "cloud"))
@@ -1251,8 +1308,8 @@ export const completeWrite = mutation({
           : {}),
         updatedAt: now,
       });
-      if (protectedApply && work) {
-        await ctx.db.patch(work._id, {
+      if (protectedApply && protectedWork) {
+        await ctx.db.patch(protectedWork._id, {
           pendingPayloadRef: undefined,
           pendingContentHash: undefined,
           pendingBaseRevision: undefined,

@@ -26,6 +26,44 @@ async function requireDevice(ctx: Parameters<typeof getActorForAccountId>[0], cr
   return { device, actor };
 }
 
+const DELETED_WORK_ERROR = "work-no-longer-exists";
+const DELETED_WORK_MESSAGE = "The work no longer exists. Try again with another item.";
+
+async function failDeletedStructureRequest(
+  ctx: MutationCtx,
+  request: { _id: Id<"bridgeFsRequests">; replicaId: Id<"workReplicas"> },
+  now: number,
+) {
+  await ctx.db.patch(request._id, {
+    state: "failed",
+    errorCode: DELETED_WORK_ERROR,
+    errorMessage: DELETED_WORK_MESSAGE,
+    claimedAt: undefined,
+    updatedAt: now,
+  });
+  const replica = await ctx.db.get(request.replicaId);
+  if (replica) {
+    await ctx.db.patch(replica._id, {
+      state: "unavailable",
+      unavailableReason: DELETED_WORK_ERROR,
+      errorCode: DELETED_WORK_ERROR,
+      errorMessage: DELETED_WORK_MESSAGE,
+      errorAt: now,
+      payloadRef: undefined,
+      pendingPayloadRef: undefined,
+      pendingContentHash: undefined,
+      pendingBaseRevision: undefined,
+      projectionBasePayloadRef: undefined,
+      projectionBaseRevision: undefined,
+      projectionBaseContent: undefined,
+      projectionBaseContentHash: undefined,
+      projectionBaseTextIndex: undefined,
+      projectionBaseFidelityMap: undefined,
+      updatedAt: now,
+    });
+  }
+}
+
 const relativePath = z.string().trim().min(1).max(1024).refine((value) =>
   !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes(".."),
 );
@@ -196,6 +234,11 @@ export const claim = mutation({
       .take(20);
     const request = [...pending, ...abandoned][0];
     if (!request) return { request: null };
+    const work = await ctx.db.get(request.workId);
+    if (!work || work.status === "deleted") {
+      await failDeletedStructureRequest(ctx, request, now);
+      return { request: null };
+    }
     const mount = await ctx.db.get(request.mountId);
     if (!mount || mount.state !== "active") {
       await ctx.db.patch(request._id, { state: "failed", errorCode: "mount-unavailable", errorMessage: "The selected folder is unavailable.", updatedAt: Date.now() });
@@ -213,6 +256,11 @@ export const complete = mutation({
     const request = await ctx.db.get(args.requestId);
     if (!request || request.deviceId !== device._id || request.state !== "claimed") throw new Error("STRUCTURE_REQUEST_NOT_OWNED");
     const now = Date.now();
+    const work = await ctx.db.get(request.workId);
+    if (!work || work.status === "deleted") {
+      await failDeletedStructureRequest(ctx, request, now);
+      return { state: "failed" as const };
+    }
     await ctx.db.patch(request._id, { state: args.outcome, actualRelativePath: args.actualRelativePath, errorCode: args.errorCode, errorMessage: args.errorMessage, updatedAt: now });
     if (args.outcome === "verified" && request.kind !== "delete") {
       const target = args.actualRelativePath ?? request.targetRelativePath;

@@ -4,6 +4,7 @@ export const XLSX_RECOGNIZED_FORMULAS = new Set([
   "COUNT",
   "COUNTA",
   "IF",
+  "INDEX",
   "MAX",
   "MIN",
   "ROUND",

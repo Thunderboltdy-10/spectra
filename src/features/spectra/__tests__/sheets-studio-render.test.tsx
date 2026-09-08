@@ -2,7 +2,11 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SheetsStudio } from "../components/sheets-studio";
+import {
+  mergedRowEndPosition,
+  projectExcelJsFormulaValue,
+  SheetsStudio,
+} from "../components/sheets-studio";
 
 /**
  * What the grid actually paints.
@@ -56,6 +60,37 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+describe("Excel import geometry and formula projections", () => {
+  it("keeps ExcelJS cached results with their native formula support", () => {
+    expect(
+      projectExcelJsFormulaValue({
+        formula: "XLOOKUP(A2,A:A,B:B)",
+        result: 500,
+      }),
+    ).toMatchObject({
+      formula: "=XLOOKUP(A2,A:A,B:B)",
+      value: 500,
+      nativeFormulaSupport: "cached-only",
+    });
+    expect(
+      projectExcelJsFormulaValue({ formula: "SUM(B2:B3)", result: 60 }),
+    ).toMatchObject({
+      formula: "=SUM(B2:B3)",
+      value: 60,
+      nativeFormulaSupport: "recognized",
+    });
+    expect(
+      projectExcelJsFormulaValue({ formula: "INDEX(A1:B2,2,2)", result: 20 }),
+    ).toMatchObject({ nativeFormulaSupport: "recognized", value: 20 });
+  });
+
+  it("spans only visible rows when a merge crosses a hidden row", () => {
+    expect(mergedRowEndPosition([0, 2, 3, 5], 0, 3)).toBe(2);
+    expect(mergedRowEndPosition([0, 2, 3, 5], 1, 3)).toBe(2);
+    expect(mergedRowEndPosition([0, 2, 4, 5], 0, 3)).toBe(1);
+  });
 });
 
 describe("grid view state", () => {

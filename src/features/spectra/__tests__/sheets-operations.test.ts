@@ -652,6 +652,123 @@ describe("sheets engine correctness", () => {
     ).toBe(20);
   });
 
+  it("honors exact and sorted approximate MATCH modes", () => {
+    expect(
+      evaluated(
+        {
+          A1: { value: 10 },
+          A2: { value: 50 },
+          A3: { value: 90 },
+          B1: { formula: "=MATCH(55,A1:A3,1)" },
+        },
+        "B1",
+      )?.value,
+    ).toBe(2);
+    expect(
+      evaluated(
+        {
+          A1: { value: 90 },
+          A2: { value: 50 },
+          A3: { value: 10 },
+          B1: { formula: "=MATCH(55,A1:A3,-1)" },
+        },
+        "B1",
+      )?.value,
+    ).toBe(1);
+    expect(
+      evaluated(
+        {
+          A1: { value: 10 },
+          A2: { value: 90 },
+          B1: { formula: "=MATCH(5,A1:A2,1)" },
+        },
+        "B1",
+      )?.error,
+    ).toBe("#N/A");
+  });
+
+  it("honors approximate VLOOKUP and HLOOKUP modes", () => {
+    expect(
+      evaluated(
+        {
+          A1: { value: 10 },
+          B1: { value: 100 },
+          A2: { value: 50 },
+          B2: { value: 500 },
+          A3: { value: 90 },
+          B3: { value: 900 },
+          D1: { formula: "=VLOOKUP(55,A1:B3,2,1)" },
+        },
+        "D1",
+      )?.value,
+    ).toBe(500);
+    expect(
+      evaluated(
+        {
+          A1: { value: 10 },
+          B1: { value: 50 },
+          C1: { value: 90 },
+          A2: { value: 100 },
+          B2: { value: 500 },
+          C2: { value: 900 },
+          D1: { formula: "=HLOOKUP(55,A1:C2,2,1)" },
+        },
+        "D1",
+      )?.value,
+    ).toBe(500);
+    expect(
+      evaluated(
+        {
+          A1: { value: 10 },
+          B1: { value: 100 },
+          A2: { value: 50 },
+          B2: { value: 500 },
+          D1: { formula: "=VLOOKUP(55,A1:B2,2,0)" },
+        },
+        "D1",
+      )?.error,
+    ).toBe("#N/A");
+  });
+
+  it("honors reverse XLOOKUP search and refuses unsupported modes", () => {
+    expect(
+      evaluated(
+        {
+          A1: { value: 1 },
+          A2: { value: 1 },
+          B1: { value: 10 },
+          B2: { value: 20 },
+          C1: { formula: '=XLOOKUP(1,A1:A2,B1:B2,"missing",0,-1)' },
+        },
+        "C1",
+      )?.value,
+    ).toBe(20);
+    expect(
+      evaluated(
+        {
+          A1: { value: 10 },
+          A2: { value: 50 },
+          A3: { value: 90 },
+          B1: { value: 100 },
+          B2: { value: 500 },
+          B3: { value: 900 },
+          C1: { formula: '=XLOOKUP(55,A1:A3,B1:B3,"missing",1,1)' },
+        },
+        "C1",
+      )?.value,
+    ).toBe(900);
+    expect(
+      evaluated(
+        {
+          A1: { value: 1 },
+          B1: { value: 10 },
+          C1: { formula: '=XLOOKUP(1,A1:A1,B1:B1,"missing",2,1)' },
+        },
+        "C1",
+      )?.error,
+    ).toBe("#N/A");
+  });
+
   it("does not silently drop cells past 10,000 in a formula range", () => {
     const cells: Record<string, SheetCell> = {
       A1: { value: 10 },

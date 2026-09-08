@@ -146,6 +146,7 @@ import {
   patchSheetCellRecord,
   readSheetCellsOverlay,
 } from "../sheets/cell-overlay";
+import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -370,6 +371,66 @@ function cellInput(cell?: SheetCell) {
   return cell?.value === null || cell?.value === undefined
     ? ""
     : String(cell.value);
+}
+
+/**
+ * ExcelJS stores a formula and its last saved result in one value object. The
+ * result is not a recalculation promise: it is the only honest value we can
+ * show for a formula the local evaluator does not understand. Keep it beside
+ * the formula so export/readback can retain the native formula and cache.
+ */
+export function projectExcelJsFormulaValue(raw: unknown) {
+  const valueRecord =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : null;
+  const sourceFormula =
+    typeof valueRecord?.formula === "string" ? valueRecord.formula : undefined;
+  if (!sourceFormula) return null;
+  const formula = sourceFormula.startsWith("=")
+    ? sourceFormula
+    : `=${sourceFormula}`;
+  const externalFormula = sourceFormula.includes("[");
+  const result = valueRecord?.result;
+  const value =
+    result instanceof Date
+      ? result.getTime()
+      : result === null ||
+          typeof result === "string" ||
+          typeof result === "number" ||
+          typeof result === "boolean"
+        ? result
+        : typeof valueRecord?.error === "string"
+          ? valueRecord.error
+          : undefined;
+  return {
+    formula,
+    externalFormula,
+    ...(value !== undefined ? { value } : {}),
+    ...(externalFormula
+      ? {}
+      : { nativeFormulaSupport: xlsxFormulaSupport(formula) }),
+  } as const;
+}
+
+/**
+ * A merged cell spans visible tracks, not raw row numbers. Hidden or filtered
+ * rows still belong to the merge range but have no painted track to consume.
+ */
+export function mergedRowEndPosition(
+  visibleRows: readonly number[],
+  startPosition: number,
+  endRow: number,
+) {
+  if (startPosition < 0 || startPosition >= visibleRows.length)
+    return startPosition;
+  let endPosition = startPosition;
+  while (
+    endPosition + 1 < visibleRows.length &&
+    visibleRows[endPosition + 1]! <= endRow
+  )
+    endPosition += 1;
+  return endPosition;
 }
 
 function selected(range: CellRange, row: number, column: number) {
@@ -3016,6 +3077,7 @@ export const SheetsStudio = memo(function SheetsStudio({
       let externalLinks = 0;
       let hyperlinks = 0;
       let unsupportedValues = 0;
+      let cachedOnlyFormulas = 0;
       const sheets: WorkbookSheet[] = [];
       imported.eachSheet((worksheet, worksheetIndex) => {
         const cells: Record<string, SheetCell> = {};
@@ -3031,9 +3093,12 @@ export const SheetsStudio = memo(function SheetsStudio({
                 ? valueRecord.formula
                 : undefined;
             const externalFormula = formula?.includes("[") === true;
+            const formulaProjection = projectExcelJsFormulaValue(raw);
+            if (formulaProjection?.nativeFormulaSupport === "cached-only")
+              cachedOnlyFormulas += 1;
             if (externalFormula) externalLinks += 1;
             let value: string | number | boolean | null | undefined;
-            if (formula && !externalFormula) value = undefined;
+            if (formula && !externalFormula) value = formulaProjection?.value;
             else if (externalFormula) value = `=${formula}`;
             else if (raw instanceof Date) value = raw.getTime();
             else if (
@@ -3068,7 +3133,11 @@ export const SheetsStudio = memo(function SheetsStudio({
             cells[sourceCell.address] = {
               ...(value !== undefined ? { value } : {}),
               ...(formula && !externalFormula
-                ? { formula: `=${formula}` }
+                ? {
+                    formula: formulaProjection?.formula ?? `=${formula}`,
+                    nativeFormulaSupport:
+                      formulaProjection?.nativeFormulaSupport,
+                  }
                 : {}),
               format: {
                 bold: sourceCell.font?.bold || undefined,
@@ -3156,6 +3225,9 @@ export const SheetsStudio = memo(function SheetsStudio({
           : "",
         hyperlinks
           ? `${hyperlinks} hyperlink${hyperlinks === 1 ? " was" : "s were"} imported as visible text`
+          : "",
+        cachedOnlyFormulas
+          ? `${cachedOnlyFormulas} formula${cachedOnlyFormulas === 1 ? " was" : "s were"} retained with Excel's saved result; edits to precedents mark that cache stale`
           : "",
         unsupportedValues
           ? `${unsupportedValues} uncommon value${unsupportedValues === 1 ? " used" : "s used"} displayed text`
@@ -5068,6 +5140,13 @@ export const SheetsStudio = memo(function SheetsStudio({
                 );
                 const style = cell?.format;
                 const conditionalStyle = conditionalStyles.get(address);
+                const mergedEndPosition = merged
+                  ? mergedRowEndPosition(
+                      visibleRowIndices,
+                      position,
+                      merged.range.end.row,
+                    )
+                  : position;
                 return (
                   <SheetsCellPointerTarget
                     key={address}
@@ -5135,12 +5214,8 @@ export const SheetsStudio = memo(function SheetsStudio({
                           columnOffsets[merged.range.start.column]!
                         : columnSpan(column),
                       height: merged
-                        ? rowOffsets[
-                            position +
-                              merged.range.end.row -
-                              merged.range.start.row +
-                              1
-                          ]! - rowOffsets[position]!
+                        ? rowOffsets[mergedEndPosition + 1]! -
+                          rowOffsets[position]!
                         : rowSpan(position),
                       zIndex:
                         isFrozenRow && isFrozenColumn

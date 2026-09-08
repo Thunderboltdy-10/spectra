@@ -1077,6 +1077,98 @@ function flattened(values: FormulaValue[]) {
   );
 }
 
+type LookupComparable = number | string;
+
+function lookupComparable(value: SheetScalar): LookupComparable | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") return value.toLocaleLowerCase();
+  return null;
+}
+
+function compareLookupValues(
+  left: SheetScalar,
+  right: SheetScalar,
+): number | null {
+  const comparableLeft = lookupComparable(left);
+  const comparableRight = lookupComparable(right);
+  if (comparableLeft === null || comparableRight === null) return null;
+  if (typeof comparableLeft !== typeof comparableRight) return null;
+  return typeof comparableLeft === "number"
+    ? comparableLeft - (comparableRight as number)
+    : comparableLeft.localeCompare(comparableRight as string);
+}
+
+/**
+ * Return the last eligible entry in a sorted lookup vector. Approximate Excel
+ * lookups are only safe when the ordering contract is true; refusing an
+ * unsorted vector is preferable to returning a plausible but wrong row.
+ */
+function sortedApproximatePosition(
+  source: SheetScalar[],
+  needle: SheetScalar,
+  direction: "ascending" | "descending",
+) {
+  let position = -1;
+  let previous: SheetScalar | undefined;
+  for (let index = 0; index < source.length; index += 1) {
+    const value = source[index]!;
+    if (previous !== undefined) {
+      const order = compareLookupValues(previous, value);
+      if (
+        order === null ||
+        (direction === "ascending" ? order > 0 : order < 0)
+      )
+        return null;
+    }
+    previous = value;
+    const comparison = compareLookupValues(value, needle);
+    if (comparison === null) return null;
+    if (
+      (direction === "ascending" && comparison <= 0) ||
+      (direction === "descending" && comparison >= 0)
+    )
+      position = index;
+  }
+  return position;
+}
+
+function xlookupApproximatePosition(
+  source: SheetScalar[],
+  needle: SheetScalar,
+  matchMode: 1 | -1,
+  reverse: boolean,
+) {
+  let position = -1;
+  const target = lookupComparable(needle);
+  if (target === null) return null;
+  const indices = source.map((_, index) => index);
+  if (reverse) indices.reverse();
+  for (const index of indices) {
+    const comparison = compareLookupValues(source[index]!, needle);
+    if (comparison === null) return null;
+    const eligible = matchMode === 1 ? comparison >= 0 : comparison <= 0;
+    if (!eligible) continue;
+    const currentVsBest =
+      position < 0
+        ? null
+        : compareLookupValues(source[position]!, source[index]!);
+    const better =
+      currentVsBest === null
+        ? position < 0
+        : matchMode === 1
+          ? currentVsBest > 0
+          : currentVsBest < 0;
+    const tied = currentVsBest === 0;
+    if (
+      better ||
+      (tied && (reverse ? index > position : index < position))
+    ) {
+      position = index;
+    }
+  }
+  return position;
+}
+
 function formulaCriteriaMatches(value: SheetScalar, criterion: SheetScalar) {
   if (typeof criterion !== "string") return value === criterion;
   const match = /^(<=|>=|<>|=|<|>)([\s\S]*)$/.exec(criterion);
@@ -1639,8 +1731,17 @@ class FormulaParser {
       const source = Array.isArray(args[1])
         ? flattened([args[1]])
         : [scalar(args[1] ?? null)];
-      const position = source.findIndex((value) => value === needle);
-      if (position < 0) throw new Error("#N/A");
+      const matchType = Math.round(numeric(args[2] ?? 1));
+      if (![1, 0, -1].includes(matchType)) throw new Error("#N/A");
+      const position =
+        matchType === 0
+          ? source.findIndex((value) => value === needle)
+          : sortedApproximatePosition(
+              source,
+              needle,
+              matchType === 1 ? "ascending" : "descending",
+            );
+      if (position === null || position < 0) throw new Error("#N/A");
       return position + 1;
     }
     if (name === "XLOOKUP") {
@@ -1651,7 +1752,25 @@ class FormulaParser {
       const returned = Array.isArray(args[2])
         ? flattened([args[2]])
         : [scalar(args[2] ?? null)];
-      const position = lookup.findIndex((value) => value === needle);
+      const matchMode = Math.round(numeric(args[4] ?? 0));
+      const searchMode = Math.round(numeric(args[5] ?? 1));
+      if (![0, 1, -1].includes(matchMode) || ![1, -1].includes(searchMode))
+        throw new Error("#N/A");
+      let position = -1;
+      const indices = lookup.map((_, index) => index);
+      if (searchMode === -1) indices.reverse();
+      if (matchMode === 0) {
+        position =
+          indices.find((index) => lookup[index] === needle) ?? -1;
+      } else {
+        position =
+          xlookupApproximatePosition(
+            lookup,
+            needle,
+            matchMode as 1 | -1,
+            searchMode === -1,
+          ) ?? -1;
+      }
       if (position < 0) {
         if (args[3] !== undefined) return scalar(args[3]);
         throw new Error("#N/A");
@@ -1715,20 +1834,31 @@ class FormulaParser {
       const height = shape.rows;
       if (name === "VLOOKUP") {
         if (index > width) throw new Error("#REF!");
-        for (let row = 0; row < height; row += 1) {
-          if (table[row * width] === needle)
-            return table[row * width + index - 1] ?? null;
-        }
+        const approximate =
+          args[3] === undefined || Boolean(scalar(args[3]));
+        const lookupValues = Array.from(
+          { length: height },
+          (_, row) => table[row * width] ?? null,
+        );
+        const position = approximate
+          ? sortedApproximatePosition(lookupValues, needle, "ascending")
+          : lookupValues.findIndex((value) => value === needle);
+        if (position === null || position < 0) throw new Error("#N/A");
+        return table[position * width + index - 1] ?? null;
       } else {
         if (index > height) throw new Error("#REF!");
-        for (let column = 0; column < width; column += 1) {
-          if (table[column] === needle)
-            return table[(index - 1) * width + column] ?? null;
-        }
+        const approximate =
+          args[3] === undefined || Boolean(scalar(args[3]));
+        const lookupValues = Array.from(
+          { length: width },
+          (_, column) => table[column] ?? null,
+        );
+        const position = approximate
+          ? sortedApproximatePosition(lookupValues, needle, "ascending")
+          : lookupValues.findIndex((value) => value === needle);
+        if (position === null || position < 0) throw new Error("#N/A");
+        return table[(index - 1) * width + position] ?? null;
       }
-      const approximate = args[3] === undefined || Boolean(scalar(args[3]));
-      if (!approximate) throw new Error("#N/A");
-      throw new Error("#N/A");
     }
     if (name === "PROPER")
       return String(scalar(args[0] ?? "") ?? "").replace(

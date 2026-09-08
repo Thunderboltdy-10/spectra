@@ -9,7 +9,18 @@
     "windows": [{ "title": "Spectra Bridge", "width": 420, "height": 460, "resizable": false }],
     "security": { "csp": "default-src 'self'; connect-src http://127.0.0.1:47615 ws://127.0.0.1:47615" }
   },
-  "bundle": { "active": true, "targets": ["nsis"], "createUpdaterArtifacts": true },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true
+  },
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDM0VEQjczNDM0Q0IwNzAKUldSd3NFeERjOXMrakdhUnRGL0pIQTFXYnd0K0FvTlVLVCtYblQwOWxJQUtCemRzY3ZpVDZ3MVoK",

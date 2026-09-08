@@ -778,19 +778,29 @@ mod tests {
 
     #[test]
     fn provider_backed_roots_use_a_wider_stability_window() {
-        let provider = Path::new(r"C:\Users\pablo\OneDrive\Documents\Physics");
-        let named_provider = Path::new(r"C:\Users\pablo\OneDrive - School\Documents\Physics");
-        let ordinary = Path::new(r"C:\Users\pablo\Documents\Physics");
+        // Build paths from components so this test exercises the same
+        // provider-folder recognition on Windows, macOS, and Linux. The old
+        // Windows-only spelling was one Path component on Unix and therefore
+        // never tested the provider branches there.
+        let provider = PathBuf::from_iter(["Users", "pablo", "OneDrive", "Documents", "Physics"]);
+        let named_provider = PathBuf::from_iter([
+            "Users",
+            "pablo",
+            "OneDrive - School",
+            "Documents",
+            "Physics",
+        ]);
+        let ordinary = PathBuf::from_iter(["Users", "pablo", "Documents", "Physics"]);
         assert!(
-            WatcherConfig::for_root(provider).stability_window
+            WatcherConfig::for_root(&provider).stability_window
                 > WatcherConfig::default().stability_window
         );
         assert!(
-            WatcherConfig::for_root(named_provider).stability_window
+            WatcherConfig::for_root(&named_provider).stability_window
                 > WatcherConfig::default().stability_window
         );
         assert_eq!(
-            WatcherConfig::for_root(ordinary).stability_window,
+            WatcherConfig::for_root(&ordinary).stability_window,
             WatcherConfig::default().stability_window
         );
     }

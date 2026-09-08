@@ -1,0 +1,140 @@
+name: Spectra Bridge desktop artifacts
+
+# This workflow is deliberately manual. A friend-test run creates unsigned
+# artifacts for the final Mac smoke test; a public-candidate run requires the
+# explicitly configured signing/notarization secrets but still does not
+# publish a release. Publication and updater-host migration need an explicit
+# release decision after the artifacts have been tested.
+on:
+  workflow_dispatch:
+    inputs:
+      distribution:
+        description: "Unsigned friend-Mac test or signed public candidate"
+        required: true
+        type: choice
+        options:
+          - friend-test
+          - public-candidate
+        default: friend-test
+      convex_url:
+        description: "Hosted Convex URL embedded in the Bridge candidate"
+        required: true
+        type: string
+      allowed_origins:
+        description: "Exact hosted browser origin(s), comma-separated if needed"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.platform }} ${{ matrix.target }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            bundles: nsis
+            target: x86_64-pc-windows-msvc
+          - platform: macos-14
+            bundles: app,dmg
+            target: aarch64-apple-darwin
+          - platform: macos-13
+            bundles: app,dmg
+            target: x86_64-apple-darwin
+    env:
+      # These are public deployment coordinates, not credentials. The app
+      # embeds them only for an explicit release build; local runs still use
+      # process environment overrides.
+      SPECTRA_CONVEX_URL: ${{ inputs.convex_url }}
+      SPECTRA_ORIGINS: ${{ inputs.allowed_origins }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.distribution == 'public-candidate' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.distribution == 'public-candidate' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+      APPLE_CERTIFICATE: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_CERTIFICATE || '' }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+      APPLE_SIGNING_IDENTITY: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+      APPLE_ID: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_ID || '' }}
+      APPLE_PASSWORD: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_TEAM_ID || '' }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Verify explicit release inputs
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          for name in ("SPECTRA_CONVEX_URL", "SPECTRA_ORIGINS"):
+              value = os.environ.get(name, "").strip()
+              if not value:
+                  raise SystemExit(f"{name} must be supplied; localhost defaults are not release configuration")
+
+          parsed = urlparse(os.environ["SPECTRA_CONVEX_URL"])
+          if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+              raise SystemExit("SPECTRA_CONVEX_URL must be a complete http:// or https:// URL")
+          if parsed.hostname.lower() in {"localhost", "127.0.0.1", "::1"} or parsed.username or parsed.password or parsed.query or parsed.fragment:
+              raise SystemExit("SPECTRA_CONVEX_URL must point to a hosted deployment without credentials, query, or fragment")
+
+          for origin in os.environ["SPECTRA_ORIGINS"].split(","):
+              parsed = urlparse(origin.strip())
+              if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.path not in {"", "/"}:
+                  raise SystemExit(f"SPECTRA_ORIGINS contains an invalid origin: {origin!r}")
+              if parsed.hostname.lower() in {"localhost", "127.0.0.1", "::1"} or parsed.username or parsed.password or parsed.query or parsed.fragment:
+                  raise SystemExit(f"SPECTRA_ORIGINS must contain hosted origins without credentials, query, or fragment: {origin!r}")
+          PY
+
+      - name: Require signing inputs for a public candidate
+        if: inputs.distribution == 'public-candidate'
+        shell: bash
+        run: |
+          for name in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "$name is required for a public candidate" >&2
+              exit 1
+            fi
+          done
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              if [ -z "${!name}" ]; then
+                echo "$name is required for a signed/notarized Mac candidate" >&2
+                exit 1
+              fi
+            done
+          fi
+
+      - name: Install the pinned Tauri CLI
+        shell: bash
+        run: cargo install tauri-cli --version 2.11.5 --locked
+
+      - name: Generate bundle icons
+        shell: bash
+        working-directory: bridge/bridge-app
+        run: cargo tauri icon icons/tray-icon.svg
+
+      - name: Build and retain desktop artifacts
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: bridge/bridge-app
+          tauriScript: cargo tauri
+          args: >-
+            --bundles ${{ matrix.bundles }}
+            --target ${{ matrix.target }}
+            ${{ inputs.distribution == 'friend-test' && '--config tauri.friend-test.conf.json' || '' }}
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: spectra-bridge-${{ inputs.distribution }}-[platform]-[arch]-[bundle]
+          uploadUpdaterJson: ${{ inputs.distribution == 'public-candidate' }}
+          uploadUpdaterSignatures: ${{ inputs.distribution == 'public-candidate' }}

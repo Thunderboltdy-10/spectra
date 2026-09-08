@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -147,11 +149,43 @@ fn repair_windows_autostart_command() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Release builds receive the public deployment/origin configuration from the
+/// manually-dispatched release workflow. Local development and friend-Mac
+/// testing can still override these values at process launch. Keeping the
+/// fallback at the app boundary means the bridge never silently returns to a
+/// localhost deployment when it is launched by an installer/autostart entry.
+fn configure_embedded_release_environment() {
+    for (name, value) in [
+        ("SPECTRA_CONVEX_URL", option_env!("SPECTRA_CONVEX_URL")),
+        ("SPECTRA_ORIGINS", option_env!("SPECTRA_ORIGINS")),
+    ] {
+        if std::env::var_os(name).is_none() {
+            if let Some(value) = value {
+                // Rust 2024 makes process-wide environment mutation explicit.
+                // This runs before Tauri starts any worker or plugin thread.
+                unsafe { std::env::set_var(name, value) };
+            }
+        }
+    }
+}
+
 fn record_process_start() {
-    let Some(base) = std::env::var_os("APPDATA") else {
+    let Some(base) = std::env::var_os("APPDATA")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| {
+                let home = std::path::PathBuf::from(home);
+                if cfg!(target_os = "macos") {
+                    home.join("Library/Application Support")
+                } else {
+                    home.join(".local/share")
+                }
+            })
+        })
+    else {
         return;
     };
-    let directory = std::path::PathBuf::from(base).join("com.spectra.bridge");
+    let directory = base.join("com.spectra.bridge");
     if std::fs::create_dir_all(&directory).is_err() {
         return;
     }
@@ -2109,7 +2143,55 @@ async fn remove_mount(
     remove_mount_impl(&grant_id, &runtime.grants, &runtime.journal).await
 }
 
+fn open_log_file(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer.exe")
+            .arg(path)
+            .creation_flags(0x08000000)
+            .spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(path).spawn()?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(path).spawn()?;
+    }
+    Ok(())
+}
+
+fn open_logs_impl(app: &tauri::AppHandle, journal: &Journal) -> Result<(), String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let path = directory.join("bridge-diagnostics.log");
+    let contents = journal
+        .diagnostic_log(200)
+        .map_err(|error| error.to_string())?;
+    let contents = if contents.is_empty() {
+        "No bridge operations have been recorded yet.\n".to_owned()
+    } else {
+        format!("{contents}\n")
+    };
+    std::fs::write(&path, contents).map_err(|error| error.to_string())?;
+    open_log_file(&path).map_err(|error| format!("Could not open the Bridge log: {error}"))
+}
+
+#[tauri::command]
+fn open_logs(
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, BridgeRuntime>,
+) -> Result<(), String> {
+    open_logs_impl(&app, &runtime.journal)
+}
+
 fn main() {
+    configure_embedded_release_environment();
     record_process_start();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -2131,7 +2213,8 @@ fn main() {
             confirm_pairing,
             select_mount,
             retry_mount,
-            remove_mount
+            remove_mount,
+            open_logs
         ])
         .setup(|app| {
             // Debug and release binaries must share the same per-user journal
@@ -2356,22 +2439,27 @@ fn main() {
                 }
             });
             let show = MenuItem::with_id(app, "show", "Open Spectra Bridge", true, None::<&str>)?;
-            let pause = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
             let logs = MenuItem::with_id(app, "logs", "Open logs", true, None::<&str>)?;
             let stop = MenuItem::with_id(app, "stop", "Stop Bridge", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &pause, &logs, &stop])?;
+            let menu = Menu::with_items(app, &[&show, &logs, &stop])?;
+            let tray_journal = journal.clone();
             let mut tray = TrayIconBuilder::new()
                 .menu(&menu)
                 .tooltip("Spectra Bridge · Disconnected")
-                .on_menu_event(|app, event| match event.id().as_ref() {
+                .on_menu_event(move |app, event| match event.id().as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
                     }
+                    "logs" => {
+                        if let Err(error) = open_logs_impl(app, &tray_journal) {
+                            eprintln!("Could not open the Bridge log: {error}");
+                        }
+                    }
                     "stop" => app.exit(0),
-                    "pause" | "logs" | _ => {}
+                    _ => {}
                 });
             let tray_icon =
                 tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;

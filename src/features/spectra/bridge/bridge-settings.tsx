@@ -346,7 +346,7 @@ export function BridgeSettings() {
             Selected folders
           </h2>
           <p className="mt-1 text-caption leading-5 text-[var(--text-secondary)]">
-            Choose and manage folders here. Windows only shows its native folder
+            Choose and manage folders here. Your computer uses its native folder
             picker when you add one.
           </p>
         </header>

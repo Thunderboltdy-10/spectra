@@ -25,7 +25,7 @@
     <div id="mounts"></div><p id="empty">No folders selected.</p><p id="global-error" role="status" hidden></p>
     <button id="add-folder" type="button">Add folder</button>
   </section>
-  <div class="footer"><button type="button">Open logs</button><small>Version 0.1.0</small></div>
+  <div class="footer"><button id="open-logs" type="button">Open logs</button><small>Version 0.1.0</small></div>
 </main>
 <script>
 const invoke = window.__TAURI__.core.invoke;
@@ -57,6 +57,7 @@ async function refresh() {
 }
 document.querySelector('#confirm').onclick = () => act(async () => { await invoke('confirm_pairing', { code: document.querySelector('#code').textContent }); });
 document.querySelector('#add-folder').onclick = () => act(() => invoke('select_mount'));
+document.querySelector('#open-logs').onclick = () => act(() => invoke('open_logs'));
 // Status reads are safe while a long-running folder sync is in flight. Keeping
 // them running is what makes scanning and per-file progress visible to people.
 setInterval(() => refresh().catch(showError), 750); refresh().catch(showError);

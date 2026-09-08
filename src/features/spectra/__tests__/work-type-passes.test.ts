@@ -775,6 +775,7 @@ function planTask(partial: Partial<PlanTask> & { id: string }): PlanTask {
     checklist: [],
     order: 0,
     ...partial,
+    reminders: partial.reminders ?? [],
   };
 }
 

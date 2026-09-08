@@ -2534,7 +2534,6 @@ function snapshotKey(snapshot: {
   return reconciliationSnapshotKey(snapshot);
 }
 
-type ArtifactEditorSnapshot = ReturnType<typeof artifactEditorSnapshot>;
 
 function collaborationFailureMessage(error: unknown) {
   return humanizePublicFailure(error);

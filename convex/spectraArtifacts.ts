@@ -3208,6 +3208,78 @@ export const permanentlyDelete = mutation({
       actor.accountId,
     );
 
+    // Embed rows are retained as tombstones so a hard-deleted source or
+    // container cannot leave a live placement or a dangling access request.
+    // This covers both directions of the relationship: the artifact may be
+    // embedded elsewhere, or it may own the placement being deleted.
+    const [sourceEmbeds, containerEmbeds] = await Promise.all([
+      ctx.db
+        .query("artifactEmbeds")
+        .withIndex("by_source", (q) =>
+          q.eq("sourceArtifactId", args.artifactId),
+        )
+        .collect(),
+      ctx.db
+        .query("artifactEmbeds")
+        .withIndex("by_container", (q) =>
+          q.eq("containerType", "artifact").eq(
+            "containerId",
+            String(args.artifactId),
+          ),
+        )
+        .collect(),
+    ]);
+    const embedRows = [
+      ...new Map(
+        [...sourceEmbeds, ...containerEmbeds].map((embed) => [embed._id, embed]),
+      ).values(),
+    ];
+    const now = Date.now();
+    await Promise.all(
+      embedRows.map((embed) =>
+        ctx.db.patch(embed._id, {
+          removedAt: embed.removedAt ?? now,
+          updatedAt: now,
+        }),
+      ),
+    );
+    const pendingEmbedRequests = (
+      await Promise.all(
+        embedRows.map((embed) =>
+          ctx.db
+            .query("artifactAccessRequests")
+            .withIndex("by_embed_status", (q) =>
+              q.eq("embedId", embed._id).eq("status", "pending"),
+            )
+            .collect(),
+        ),
+      )
+    ).flat();
+    const pendingSourceRequests = await ctx.db
+      .query("artifactAccessRequests")
+      .withIndex("by_source_status", (q) =>
+        q.eq("sourceArtifactId", args.artifactId).eq("status", "pending"),
+      )
+      .collect();
+    const requests = [
+      ...new Map(
+        [...pendingEmbedRequests, ...pendingSourceRequests].map((request) => [
+          request._id,
+          request,
+        ]),
+      ).values(),
+    ];
+    await Promise.all(
+      requests.map((request) =>
+        ctx.db.patch(request._id, {
+          status: "cancelled",
+          updatedAt: now,
+          resolvedAt: now,
+          resolvedByAccountId: actor.accountId,
+        }),
+      ),
+    );
+
     const purgedPlacements = await purgeSourceNodes(
       ctx,
       "work",

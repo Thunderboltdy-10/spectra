@@ -144,7 +144,12 @@ function JoinSchoolContent() {
         <button
           type="button"
           onClick={() => void accept()}
-          disabled={!token || status === "accepting" || status === "accepted"}
+          disabled={
+            !token ||
+            status === "accepting" ||
+            status === "accepted" ||
+            preview?.emailMatches === false
+          }
           className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-control bg-[var(--text-primary)] text-caption font-medium text-[var(--bg-primary)] disabled:opacity-50"
         >
           {status === "accepting" ? (

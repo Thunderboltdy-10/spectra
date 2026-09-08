@@ -1397,6 +1397,77 @@ export async function purgeAccountSourceNodes(
   return purged;
 }
 
+/** Retain embed identity while removing any live source/container reference. */
+export async function tombstoneArtifactEmbeds(
+  ctx: OrgWriteCtx,
+  artifactId: Id<"spectraArtifacts">,
+  resolvedByAccountId: Id<"accounts">,
+  now = Date.now(),
+) {
+  const [sourceEmbeds, containerEmbeds] = await Promise.all([
+    ctx.db
+      .query("artifactEmbeds")
+      .withIndex("by_source", (q) => q.eq("sourceArtifactId", artifactId))
+      .collect(),
+    ctx.db
+      .query("artifactEmbeds")
+      .withIndex("by_container", (q) =>
+        q.eq("containerType", "artifact").eq("containerId", String(artifactId)),
+      )
+      .collect(),
+  ]);
+  const embedRows = [
+    ...new Map(
+      [...sourceEmbeds, ...containerEmbeds].map((embed) => [embed._id, embed]),
+    ).values(),
+  ];
+  await Promise.all(
+    embedRows.map((embed) =>
+      ctx.db.patch(embed._id, {
+        removedAt: embed.removedAt ?? now,
+        updatedAt: now,
+      }),
+    ),
+  );
+  const pendingEmbedRequests = (
+    await Promise.all(
+      embedRows.map((embed) =>
+        ctx.db
+          .query("artifactAccessRequests")
+          .withIndex("by_embed_status", (q) =>
+            q.eq("embedId", embed._id).eq("status", "pending"),
+          )
+          .collect(),
+      ),
+    )
+  ).flat();
+  const pendingSourceRequests = await ctx.db
+    .query("artifactAccessRequests")
+    .withIndex("by_source_status", (q) =>
+      q.eq("sourceArtifactId", artifactId).eq("status", "pending"),
+    )
+    .collect();
+  const requests = [
+    ...new Map(
+      [...pendingEmbedRequests, ...pendingSourceRequests].map((request) => [
+        request._id,
+        request,
+      ]),
+    ).values(),
+  ];
+  await Promise.all(
+    requests.map((request) =>
+      ctx.db.patch(request._id, {
+        status: "cancelled",
+        updatedAt: now,
+        resolvedAt: now,
+        resolvedByAccountId,
+      }),
+    ),
+  );
+  return { embedCount: embedRows.length, requestCount: requests.length };
+}
+
 /** Remove a source's nodes outright — for a real artifact/thread deletion. */
 export async function purgeSourceNodes(
   ctx: OrgWriteCtx,
@@ -1526,6 +1597,7 @@ async function purgeOwnedWorkRecord(
   ctx: OrgWriteCtx,
   artifact: Doc<"spectraArtifacts">,
 ) {
+  await tombstoneArtifactEmbeds(ctx, artifact._id, artifact.ownerAccountId);
   await purgeSourceNodes(ctx, "work", artifact._id);
   await drainIndexPage(
     () =>

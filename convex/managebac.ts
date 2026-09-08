@@ -900,13 +900,19 @@ export const adminOverview = query({
         .withIndex("by_school_status", (q) =>
           q.eq("schoolId", actor.schoolId).eq("status", "ambiguous"),
         )
-        .take(100),
+        .take(100)
+        .then((rows) =>
+          rows.filter((item) => item.integrationId === integration._id),
+        ),
       ctx.db
         .query("externalIdentityMappings")
         .withIndex("by_school_status", (q) =>
           q.eq("schoolId", actor.schoolId).eq("status", "no_match"),
         )
-        .take(100),
+        .take(100)
+        .then((rows) =>
+          rows.filter((item) => item.integrationId === integration._id),
+        ),
       ctx.db
         .query("externalRecords")
         .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
@@ -925,6 +931,7 @@ export const adminOverview = query({
       previews: schoolRecords
         .filter(
           (item) =>
+            item.integrationId === integration._id &&
             !item.mappedAccountId &&
             item.classification !== "personal" &&
             item.audienceScope !== "mapped_user",
@@ -1083,20 +1090,41 @@ export const myOverview = query({
           q.eq("accountId", actor.accountId),
         )
         .order("desc")
-        .take(30),
+        .take(30)
+        .then((rows) =>
+          rows.filter(
+            (item) =>
+              item.integrationId === integration._id &&
+              item.schoolId === actor.schoolId,
+          ),
+        ),
       ctx.db
         .query("externalSyncConflicts")
         .withIndex("by_account_status", (q) =>
           q.eq("accountId", actor.accountId).eq("status", "open"),
         )
-        .take(100),
+        .take(100)
+        .then((rows) =>
+          rows.filter(
+            (item) =>
+              item.integrationId === integration._id &&
+              item.schoolId === actor.schoolId,
+          ),
+        ),
       ctx.db
         .query("externalRecords")
         .withIndex("by_account_type", (q) =>
           q.eq("mappedAccountId", actor.accountId),
         )
         .order("desc")
-        .take(2_000),
+        .take(2_000)
+        .then((rows) =>
+          rows.filter(
+            (item) =>
+              item.integrationId === integration._id &&
+              item.schoolId === actor.schoolId,
+          ),
+        ),
     ]);
     return {
       integration: safeIntegration(integration),
@@ -1696,7 +1724,16 @@ async function ensureClassWorkspace(
     .withIndex("by_provider_key", (q) =>
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
-    .unique();
+    .collect()
+    .then(
+      (rows) =>
+        rows.find(
+          (item) =>
+            item.schoolId === integration.schoolId &&
+            item.accountId === accountId &&
+            item.projectionType === "workspace",
+        ) ?? null,
+    );
   const normalized = record(source.normalized);
   const now = Date.now();
   const capabilities = await ctx.db
@@ -1826,6 +1863,7 @@ async function ensureClassWorkspace(
 async function classWorkspaceId(
   ctx: MutationCtx,
   integrationId: Id<"schoolIntegrations">,
+  accountId: Id<"accounts">,
   providerClassId?: string,
   academicPeriodKey?: string,
 ) {
@@ -1836,7 +1874,14 @@ async function classWorkspaceId(
     .withIndex("by_provider_key", (q) =>
       q.eq("integrationId", integrationId).eq("providerKey", providerKey),
     )
-    .unique();
+    .collect()
+    .then(
+      (rows) =>
+        rows.find(
+          (item) =>
+            item.accountId === accountId && item.projectionType === "workspace",
+        ) ?? null,
+    );
   return projection?.projectionType === "workspace"
     ? ctx.db.normalizeId("spectraWorkspaces", projection.projectionId)
     : null;
@@ -1854,7 +1899,16 @@ async function ensurePlannerProjection(
     .withIndex("by_provider_key", (q) =>
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
-    .unique();
+    .collect()
+    .then(
+      (rows) =>
+        rows.find(
+          (item) =>
+            item.schoolId === integration.schoolId &&
+            item.accountId === accountId &&
+            item.projectionType === "planner_task",
+        ) ?? null,
+    );
   if (existing) return { projection: existing, created: false };
   const normalized = record(source.normalized);
   const now = Date.now();
@@ -1920,6 +1974,7 @@ async function ensurePlannerProjection(
   const workspaceId = await classWorkspaceId(
     ctx,
     integration._id,
+    accountId,
     source.providerClassId,
     source.academicPeriodKey,
   );
@@ -1962,7 +2017,16 @@ async function ensureTimetableProjection(
     .withIndex("by_provider_key", (q) =>
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
-    .unique();
+    .collect()
+    .then(
+      (rows) =>
+        rows.find(
+          (item) =>
+            item.schoolId === integration.schoolId &&
+            item.accountId === accountId &&
+            item.projectionType === "timetable_event",
+        ) ?? null,
+    );
   const calendar = await upsertSourceCalendarItem(ctx, {
     ownerAccountId: accountId,
     schoolId: integration.schoolId,
@@ -2013,7 +2077,16 @@ async function ensureResourceProjection(
     .withIndex("by_provider_key", (q) =>
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
-    .unique();
+    .collect()
+    .then(
+      (rows) =>
+        rows.find(
+          (item) =>
+            item.schoolId === integration.schoolId &&
+            item.accountId === accountId &&
+            item.projectionType === "resource",
+        ) ?? null,
+    );
   const now = Date.now();
   const sourceId = `managebac:${source._id}`;
   /* The projection below is the record of this resource. It gets no tree node:
@@ -2059,8 +2132,11 @@ async function ensureSourceRelations(
     .take(500);
   const target = classCandidates.find(
     (item) =>
-      item.providerRecordId === source.providerClassId ||
-      item.providerClassId === source.providerClassId,
+      item.schoolId === integration.schoolId &&
+      (item.mappedAccountId === undefined ||
+        item.mappedAccountId === source.mappedAccountId) &&
+      (item.providerRecordId === source.providerClassId ||
+        item.providerClassId === source.providerClassId),
   );
   if (!target) return;
   const relationType =
@@ -2412,7 +2488,12 @@ export const commitNormalizedPage = mutation({
         const projections = await ctx.db
           .query("externalProjections")
           .withIndex("by_record_type", (q) => q.eq("recordId", existing._id))
-          .collect();
+          .collect()
+          .then((rows) =>
+            syncRun.accountId
+              ? rows.filter((item) => item.accountId === syncRun.accountId)
+              : rows,
+          );
         const overlays = syncRun.accountId
           ? await ctx.db
               .query("externalRecordOverlays")
@@ -2830,7 +2911,12 @@ export const completeSync = mutation({
                 q.eq("mappedAccountId", syncRun.accountId),
               )
               .collect()
-          ).filter((item) => personalTypes.has(item.recordType))
+          ).filter(
+            (item) =>
+              item.integrationId === integration._id &&
+              item.schoolId === integration.schoolId &&
+              personalTypes.has(item.recordType),
+          )
         : [];
     const sharedRecords =
       actor.schoolRole === "school_admin" && sharedTypes.size
@@ -2881,7 +2967,12 @@ export const completeSync = mutation({
       const projections = await ctx.db
         .query("externalProjections")
         .withIndex("by_record_type", (q) => q.eq("recordId", source._id))
-        .collect();
+        .collect()
+        .then((rows) =>
+          syncRun.accountId
+            ? rows.filter((item) => item.accountId === syncRun.accountId)
+            : rows,
+        );
       for (const projection of projections) {
         await markProjectionSourceRemoved(ctx, projection);
         await ctx.db.patch(projection._id, {
@@ -2909,12 +3000,25 @@ export const completeSync = mutation({
         });
       tombstoned += 1;
     }
-    const conflicts = await ctx.db
-      .query("externalSyncConflicts")
-      .withIndex("by_integration_status", (q) =>
-        q.eq("integrationId", integration._id).eq("status", "open"),
-      )
-      .collect();
+    const conflicts = syncRun.accountId
+      ? (
+          await ctx.db
+            .query("externalSyncConflicts")
+            .withIndex("by_account_status", (q) =>
+              q.eq("accountId", syncRun.accountId!).eq("status", "open"),
+            )
+            .collect()
+        ).filter(
+          (item) =>
+            item.integrationId === integration._id &&
+            item.schoolId === integration.schoolId,
+        )
+      : await ctx.db
+          .query("externalSyncConflicts")
+          .withIndex("by_integration_status", (q) =>
+            q.eq("integrationId", integration._id).eq("status", "open"),
+          )
+          .collect();
     const status =
       syncRun.counts.errors > 0
         ? ("partial" as const)
@@ -3033,6 +3137,8 @@ export const resolveConflict = mutation({
       !conflict ||
       conflict.schoolId !== actor.schoolId ||
       conflict.status !== "open" ||
+      (conflict.accountId === undefined &&
+        actor.schoolRole !== "school_admin") ||
       (conflict.accountId &&
         conflict.accountId !== actor.accountId &&
         actor.schoolRole !== "school_admin")
@@ -3041,10 +3147,41 @@ export const resolveConflict = mutation({
         "INTEGRATION_CONFLICT_FORBIDDEN: Conflict is unavailable.",
       );
     const now = Date.now();
-    const projections = await ctx.db
-      .query("externalProjections")
-      .withIndex("by_record_type", (q) => q.eq("recordId", conflict.recordId))
-      .collect();
+    const projections = (
+      await ctx.db
+        .query("externalProjections")
+        .withIndex("by_record_type", (q) => q.eq("recordId", conflict.recordId))
+        .collect()
+    ).filter(
+      (projection) =>
+        projection.schoolId === actor.schoolId &&
+        projection.integrationId === conflict.integrationId &&
+        (conflict.accountId === undefined ||
+          projection.accountId === conflict.accountId),
+    );
+    if (args.resolution === "link_existing" && args.linkProjectionId) {
+      const linkTarget = (
+        await ctx.db
+          .query("externalProjections")
+          .withIndex("by_projection", (q) =>
+            q
+              .eq("projectionType", conflict.projectionType)
+              .eq("projectionId", args.linkProjectionId!),
+          )
+          .take(20)
+      ).find(
+        (projection) =>
+          projection.schoolId === actor.schoolId &&
+          projection.integrationId === conflict.integrationId &&
+          projection.state === "active" &&
+          (conflict.accountId === undefined ||
+            projection.accountId === conflict.accountId),
+      );
+      if (!linkTarget)
+        throw new Error(
+          "INTEGRATION_CONFLICT_LINK_FORBIDDEN: Target projection is unavailable.",
+        );
+    }
     for (const projection of projections) {
       if (args.resolution === "detach")
         await ctx.db.patch(projection._id, {
@@ -3188,28 +3325,49 @@ export const recordsForPurpose = query({
         [...allowed].map((recordType) =>
           ctx.db
             .query("externalRecords")
-            .withIndex("by_account_type", (q) =>
+            .withIndex("by_integration_type", (q) =>
               q
-                .eq("mappedAccountId", actor.accountId)
+                .eq("integrationId", integration._id)
                 .eq("recordType", recordType),
             )
             .order("desc")
-            .take(200),
+            .take(500)
+            .then((rows) =>
+              rows.filter((item) => item.mappedAccountId === actor.accountId),
+            ),
         ),
       )
-    ).flat();
-    const membershipRows = await Promise.all(
-      ["class", "course", "membership"].map((recordType) =>
-        ctx.db
-          .query("externalRecords")
-          .withIndex("by_account_type", (q) =>
-            q
-              .eq("mappedAccountId", actor.accountId)
-              .eq("recordType", recordType),
-          )
-          .take(500),
-      ),
-    );
+    )
+      .flat()
+      .filter(
+        (item) =>
+          item.integrationId === integration._id &&
+          item.schoolId === actor.schoolId,
+      );
+    const membershipRows = (
+      await Promise.all(
+        ["class", "course", "membership"].map((recordType) =>
+          ctx.db
+            .query("externalRecords")
+            .withIndex("by_integration_type", (q) =>
+              q
+                .eq("integrationId", integration._id)
+                .eq("recordType", recordType),
+            )
+            .take(500)
+            .then((rows) =>
+              rows.filter((item) => item.mappedAccountId === actor.accountId),
+            ),
+        ),
+      )
+    )
+      .flat()
+      .filter(
+        (item) =>
+          item.integrationId === integration._id &&
+          item.schoolId === actor.schoolId &&
+          !item.tombstone,
+      );
     const accessibleClassIds = new Set(
       membershipRows
         .flat()
@@ -3247,7 +3405,7 @@ export const recordsForPurpose = query({
               actor.schoolRole === "school_admin")),
       );
     const deduped = new Map(
-      [...personalRows, ...scopedRows].map((item) => [
+      [...scopedRows, ...personalRows].map((item) => [
         item.providerRecordKey,
         item,
       ]),
@@ -3358,7 +3516,9 @@ export const listMyClassCandidates = query({
     const [records, projections, membershipRows] = await Promise.all([
       ctx.db
         .query("externalRecords")
-        .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
+        .withIndex("by_integration_type", (q) =>
+          q.eq("integrationId", integration._id).eq("recordType", "class"),
+        )
         .order("desc")
         .take(2_000),
       ctx.db
@@ -3370,21 +3530,35 @@ export const listMyClassCandidates = query({
         ["class", "course", "membership"].map((recordType) =>
           ctx.db
             .query("externalRecords")
-            .withIndex("by_account_type", (q) =>
+            .withIndex("by_integration_type", (q) =>
               q
-                .eq("mappedAccountId", actor.accountId)
+                .eq("integrationId", integration._id)
                 .eq("recordType", recordType),
             )
-            .take(500),
+            .take(500)
+            .then((rows) =>
+              rows.filter((item) => item.mappedAccountId === actor.accountId),
+            ),
         ),
       ),
     ]);
+    const integrationRecords = records.filter(
+      (item) =>
+        item.integrationId === integration._id &&
+        item.schoolId === actor.schoolId,
+    );
+    const integrationMemberships = membershipRows
+      .flat()
+      .filter(
+        (item) =>
+          item.integrationId === integration._id &&
+          item.schoolId === actor.schoolId &&
+          !item.tombstone,
+      );
     const accessibleClassIds = new Set(
-      membershipRows
-        .flat()
-        .flatMap((item) =>
-          item.providerClassId ? [item.providerClassId] : [],
-        ),
+      integrationMemberships.flatMap((item) =>
+        item.providerClassId ? [item.providerClassId] : [],
+      ),
     );
     const workspaceByProviderKey = new Map(
       projections
@@ -3396,17 +3570,16 @@ export const listMyClassCandidates = query({
         )
         .map((item) => [item.providerKey, item.projectionId] as const),
     );
-    const eligibleClasses = records
-      .filter(
-        (item) =>
-          item.recordType === "class" &&
-          !item.tombstone &&
-          ((item.mappedAccountId === actor.accountId) ||
-            Boolean(
-              item.providerClassId &&
-              accessibleClassIds.has(item.providerClassId),
-            )),
-      );
+    const eligibleClasses = integrationRecords.filter(
+      (item) =>
+        item.recordType === "class" &&
+        !item.tombstone &&
+        (item.mappedAccountId === actor.accountId ||
+          Boolean(
+            item.providerClassId &&
+            accessibleClassIds.has(item.providerClassId),
+          )),
+    );
     const bestClassByProvider = new Map<
       string,
       (typeof eligibleClasses)[number]
@@ -3517,15 +3690,25 @@ export const materializeClassWorkspaces = mutation({
         ["class", "course", "membership"].map((recordType) =>
           ctx.db
             .query("externalRecords")
-            .withIndex("by_account_type", (q) =>
+            .withIndex("by_integration_type", (q) =>
               q
-                .eq("mappedAccountId", actor.accountId)
+                .eq("integrationId", integration._id)
                 .eq("recordType", recordType),
             )
-            .take(500),
+            .take(500)
+            .then((rows) =>
+              rows.filter((item) => item.mappedAccountId === actor.accountId),
+            ),
         ),
       )
-    ).flat();
+    )
+      .flat()
+      .filter(
+        (item) =>
+          item.integrationId === integration._id &&
+          item.schoolId === actor.schoolId &&
+          !item.tombstone,
+      );
     const accessibleClassIds = new Set(
       membershipRows.flatMap((item) =>
         item.providerClassId ? [item.providerClassId] : [],
@@ -3762,7 +3945,16 @@ export const releaseClassWorkspaces = mutation({
                 .eq("integrationId", integration._id)
                 .eq("providerKey", providerKey),
             )
-            .unique()
+            .collect()
+            .then(
+              (rows) =>
+                rows.find(
+                  (item) =>
+                    item.schoolId === actor.schoolId &&
+                    item.accountId === actor.accountId &&
+                    item.projectionType === "workspace",
+                ) ?? null,
+            )
         : null;
       const workspaceId =
         projection?.projectionType === "workspace"

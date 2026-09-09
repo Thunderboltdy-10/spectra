@@ -1,18 +1,10 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use spectra_bridge_core::fs::sha256_file;
 use spectra_bridge_core::platform::HostPlatform;
 use spectra_bridge_core::watcher::scan_page;
 use walkdir::WalkDir;
-
-fn fixture_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(".tmp-n3-mount")
-        .canonicalize()
-        .unwrap()
-}
 
 fn manifest(root: &Path) -> BTreeMap<String, String> {
     WalkDir::new(root)
@@ -35,7 +27,12 @@ fn manifest(root: &Path) -> BTreeMap<String, String> {
 
 #[test]
 fn granting_and_scanning_the_acceptance_tree_changes_zero_bytes() {
-    let root = fixture_root();
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path();
+    std::fs::create_dir(root.join("Lesson notes")).unwrap();
+    std::fs::write(root.join("readme.txt"), b"Keep the original bytes").unwrap();
+    std::fs::write(root.join("Lesson notes").join("equation.txt"), "x² + y² = r²").unwrap();
+    std::fs::write(root.join("Lesson notes").join("data.csv"), b"day,value\n1,42\n").unwrap();
     let before = manifest(&root);
     let page = scan_page(&HostPlatform, &root, None, 100).unwrap();
     let after = manifest(&root);

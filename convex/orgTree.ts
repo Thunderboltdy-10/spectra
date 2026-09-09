@@ -10,7 +10,10 @@ import {
   requireSpectraActor,
   requireWorkspaceCapability,
 } from "./spectraShared";
-import { evaluateAccess } from "./authorityShared";
+import {
+  evaluateAccess,
+  evaluateAccessForActorWithLoadedResource,
+} from "./authorityShared";
 import { projectArtifactForAccess } from "./quizPrivacy";
 import {
   MAX_TREE_DEPTH,
@@ -870,7 +873,7 @@ export type WorkspaceContentItem = {
 async function hydrateWorkNode(
   ctx: Parameters<typeof requireSpectraActor>[0],
   node: OrgNode,
-  accountId: Id<"accounts">,
+  actor: Awaited<ReturnType<typeof requireSpectraActor>>,
   includeDetails: boolean,
 ) {
   const artifactId = normalizeArtifactId(ctx, node.sourceId ?? "");
@@ -878,7 +881,20 @@ async function hydrateWorkNode(
   const candidate = await ctx.db.get(artifactId);
   const resourceType =
     candidate?.blueprintKey === "agent" ? ("agent" as const) : ("artifact" as const);
-  const decision = await evaluateAccess(ctx, resourceType, artifactId);
+  const decision = await evaluateAccessForActorWithLoadedResource(
+    ctx,
+    actor,
+    resourceType,
+    artifactId,
+    candidate
+      ? {
+          resource: candidate,
+          ownerAccountId: candidate.ownerAccountId,
+          schoolId: candidate.schoolId,
+          lifecycle: candidate.status,
+        }
+      : null,
+  );
   if (!decision.allowed) return null;
   const artifact = decision.loaded.resource as Doc<"spectraArtifacts">;
   if (artifact.status === "deleted") return null;
@@ -889,7 +905,7 @@ async function hydrateWorkNode(
     ? projected
     : artifactSummaryProjection(projected);
   const ownership =
-    artifact.ownerAccountId === accountId
+    artifact.ownerAccountId === actor.accountId
       ? ("owned" as const)
       : ("shared" as const);
   const invitations = await ctx.db
@@ -979,7 +995,7 @@ async function readWorkspaceContents(
       const artifact = await hydrateWorkNode(
         ctx,
         node,
-        actor.accountId,
+        actor,
         includeDetails,
       );
       if (artifact) items.push({ ...base, artifact, thread: null });

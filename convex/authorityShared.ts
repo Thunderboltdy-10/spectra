@@ -49,6 +49,8 @@ export async function loadResource(ctx: AuthorityCtx, resourceType: ResourceType
   return { resource, ownerAccountId: resource.ownerAccountId, schoolId: resource.schoolId, lifecycle: resource.status };
 }
 
+export type LoadedResource = NonNullable<Awaited<ReturnType<typeof loadResource>>>;
+
 function activeGrant(grant: Doc<"accessGrants">, now: number) {
   return !grant.revokedAt && (!grant.expiresAt || grant.expiresAt > now);
 }
@@ -73,12 +75,17 @@ async function directAccess(ctx: AuthorityCtx, actor: NonNullable<Awaited<Return
   return { level, sources };
 }
 
-async function inheritedArtifactAccess(ctx: AuthorityCtx, actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>, artifactId: Id<"spectraArtifacts">) {
+async function inheritedArtifactAccess(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  artifactId: Id<"spectraArtifacts">,
+  loadedArtifact?: Doc<"spectraArtifacts">,
+) {
   const override = await ctx.db.query("artifactAccessOverrides").withIndex("by_artifact_account", (q) => q.eq("artifactId", artifactId).eq("accountId", actor.accountId)).unique();
   if (override?.effect === "deny") return { level: null, denied: true, sources: [] as Array<{ kind: "workspace"; workspaceId: Id<"spectraWorkspaces">; grantId: Id<"accessGrants">; level: AccessLevel }> };
 
   const [artifact, nodes] = await Promise.all([
-    ctx.db.get(artifactId),
+    loadedArtifact ?? ctx.db.get(artifactId),
     findNodesForSource(ctx, "work", artifactId),
   ]);
   let level: AccessLevel | null = null;
@@ -109,13 +116,13 @@ async function inheritedArtifactAccess(ctx: AuthorityCtx, actor: NonNullable<Awa
   return { level, denied: false, sources };
 }
 
-export async function evaluateAccessForActor(
+async function evaluateLoadedResourceAccess(
   ctx: AuthorityCtx,
   actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
   resourceType: ResourceType,
   resourceId: string,
+  loaded: LoadedResource | null,
 ) {
-  const loaded = await loadResource(ctx, resourceType, resourceId);
   if (!loaded) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "not_found" as const, sources: [] };
   if (loaded.lifecycle === "deleted") return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "deleted" as const, sources: [] };
 
@@ -147,7 +154,12 @@ export async function evaluateAccessForActor(
   }
   if (loaded.ownerAccountId === actor.accountId) return { allowed: true as const, level: "modify" as const, capabilities: ownerCapabilities, actor, loaded, reason: "owner" as const, sources: [{ kind: "owner" as const }] };
   const inherited = resourceType === "artifact" || resourceType === "agent"
-    ? await inheritedArtifactAccess(ctx, actor, loaded.resource._id as Id<"spectraArtifacts">)
+    ? await inheritedArtifactAccess(
+        ctx,
+        actor,
+        loaded.resource._id as Id<"spectraArtifacts">,
+        loaded.resource as Doc<"spectraArtifacts">,
+      )
     : { level: null, denied: false, sources: [] };
   if (inherited.denied && !direct.level) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "artifact_exception" as const, sources: inherited.sources };
   // Artifact exceptions narrow only workspace-projected access. A deliberate
@@ -156,6 +168,38 @@ export async function evaluateAccessForActor(
   const level = direct.level && inheritedLevel ? combineLevel(direct.level, inheritedLevel) : direct.level ?? inheritedLevel;
   if (!level) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "private" as const, sources: [] };
   return { allowed: true as const, level, capabilities: capabilitiesForLevel(level), actor, loaded, reason: direct.level ? "grant" as const : "workspace_inheritance" as const, sources: [...direct.sources, ...inherited.sources] };
+}
+
+export async function evaluateAccessForActor(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  resourceType: ResourceType,
+  resourceId: string,
+) {
+  return evaluateLoadedResourceAccess(
+    ctx,
+    actor,
+    resourceType,
+    resourceId,
+    await loadResource(ctx, resourceType, resourceId),
+  );
+}
+
+/** Reuse an artifact row already loaded by a discovery query. */
+export async function evaluateAccessForActorWithLoadedResource(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  resourceType: ResourceType,
+  resourceId: string,
+  loaded: LoadedResource | null,
+) {
+  return evaluateLoadedResourceAccess(
+    ctx,
+    actor,
+    resourceType,
+    resourceId,
+    loaded,
+  );
 }
 
 export async function evaluateAccess(ctx: AuthorityCtx, resourceType: ResourceType, resourceId: string) {

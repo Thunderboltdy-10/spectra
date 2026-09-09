@@ -68,7 +68,7 @@ export function ProductSectionNav<T extends string>({
       aria-label={label}
       data-compact={compact ? "true" : undefined}
       className={cn(
-        "mb-5 flex min-w-0 items-end gap-4 border-b border-[var(--border-default)] sm:gap-6",
+        "mb-5 flex min-w-0 items-end gap-4 border-b border-[var(--border-default)] data-[compact=true]:gap-2 sm:gap-6",
         className,
       )}
     >
@@ -82,7 +82,7 @@ export function ProductSectionNav<T extends string>({
             onClick={() => onChange(item.key)}
             aria-current={selected ? "page" : undefined}
             className={cn(
-              "relative flex h-10 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-0.5 text-caption font-medium transition-colors",
+              "relative flex h-10 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-0.5 text-caption font-medium transition-colors data-[compact=true]:gap-1",
               selected
                 ? "text-[var(--text-primary)]"
                 : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",

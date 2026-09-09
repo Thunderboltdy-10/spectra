@@ -31,6 +31,7 @@ import { useSpectraContext } from "../hooks/use-spectra-context";
 import { spectraBus } from "../events";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { ConversationSurface } from "../components/conversation-surface";
+import { ProductErrorState } from "../components/product-state";
 import { CommandBar } from "../components/command-bar";
 import { ShellActivityField } from "../components/shell-activity-field";
 import { CrossfadeText } from "../motion";
@@ -76,6 +77,12 @@ const ArtifactStudio = dynamic(
   { loading: () => <StudioSplitPlaceholder /> },
 );
 
+function chatLoadErrorMessage(threadId: string | null) {
+  return threadId
+    ? "This conversation could not load. Try again."
+    : "Chat could not load. Try again.";
+}
+
 export function ChatShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -89,6 +96,7 @@ export function ChatShell() {
   const [artifacts, setArtifacts] = useState<SpectraArtifact[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<SpectraResultCard[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(requestedThreadId));
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -134,9 +142,10 @@ export function ChatShell() {
       getSpectraThreads({ limit: 100 }),
       getSpectraOverview(),
     ]);
-    const selected = nextThreadId
-      ? await getSpectraThread(nextThreadId).catch(() => null)
-      : null;
+    // A failed detail read is not a missing thread. Let the caller render a
+    // retryable error instead of replacing a recoverable conversation with a
+    // misleading new-chat state.
+    const selected = nextThreadId ? await getSpectraThread(nextThreadId) : null;
     setThreads(threadRows.threads);
     setWorkspaces(overview.workspaces);
     setArtifacts((current) => {
@@ -178,6 +187,7 @@ export function ChatShell() {
     );
     activeThreadRef.current = requestedThreadId;
     setLoading(Boolean(requestedThreadId));
+    setLoadError(null);
     void refresh(requestedThreadId)
       .then(({ threadFound }) => {
         if (
@@ -195,11 +205,10 @@ export function ChatShell() {
           "That conversation is no longer available. Opened a new conversation instead.",
         );
       })
-      .catch((error) =>
-        toast.error(
-          error instanceof Error ? error.message : "Could not load chat.",
-        ),
-      )
+      .catch(() => {
+        if (activeThreadRef.current !== requestedThreadId) return;
+        setLoadError(chatLoadErrorMessage(requestedThreadId));
+      })
       .finally(() => setLoading(false));
   }, [requestedThreadId, refresh, router, setComposerThread]);
 
@@ -738,74 +747,103 @@ export function ChatShell() {
           onCardRevise={(card, revision) => runEngine.revise(card, revision)}
           onRetryRun={runEngine.retry}
           empty={
-            <div className="mx-auto flex min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px] flex-col justify-center py-8 text-left">
-              <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-surface border border-[color-mix(in_oklab,var(--brand-primary)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-elevated))] shadow-soft">
-                <SpectraMark size={28} />
-              </div>
-              <h1 className="max-w-[820px] font-display text-title font-semibold leading-[1.12] text-[var(--text-primary)]">
-                {welcome}
-              </h1>
-              <p className="mt-3 max-w-[640px] text-body leading-6 text-[var(--text-secondary)]">
-                Bring a half-formed question, a difficult topic, or a whole
-                workspace. Spectra can explain, build, and revise alongside you.
-              </p>
-              {workspaces.length > 0 ? (
-                <div className="mt-8 grid gap-3 sm:grid-cols-2">
-                  {workspaces.slice(0, 6).map((workspace) => {
-                    const selected = chatWorkspaceId === workspace._id;
-                    const count = artifacts.filter((artifact) =>
-                      artifact.placements?.some(
-                        (placement) => placement.workspaceId === workspace._id,
-                      ),
-                    ).length;
-                    return (
-                      <button
-                        key={workspace._id}
-                        type="button"
-                        data-spectra-card="workspace"
-                        data-card-state={selected ? "active" : "normal"}
-                        data-interactive="true"
-                        onClick={() =>
-                          selectWorkspaceContext(
-                            selected ? null : workspace._id,
-                          )
-                        }
-                        className="group min-h-[112px] p-4 text-left"
-                        style={
-                          {
-                            "--card-accent": "var(--accent-cyan)",
-                          } as CSSProperties
-                        }
-                      >
-                        <span className="relative flex items-start gap-3">
-                          <span className="spectra-card-type-icon h-9 w-9 text-[var(--accent-cyan)]">
-                            <FolderPlus className="h-4 w-4" />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center gap-2 text-body font-semibold text-[var(--text-primary)]">
-                              {workspace.title}
-                              {selected ? (
-                                <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
-                              ) : null}
-                            </span>
-                            <span className="mt-1 line-clamp-2 text-micro leading-5 text-[var(--text-secondary)]">
-                              {workspace.description ??
-                                `${count} objects ready as context`}
-                            </span>
-                            <span className="mt-2 flex items-center gap-1 text-micro font-medium text-[var(--text-tertiary)]">
-                              {selected
-                                ? "Context selected"
-                                : `Start here · ${count} objects`}
-                              <ArrowRight className="h-3 w-3 transition group-hover:translate-x-0.5" />
-                            </span>
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
+            loadError ? (
+              <ProductErrorState
+                title={
+                  requestedThreadId
+                    ? "This conversation could not load"
+                    : "Chat could not load"
+                }
+                detail={loadError}
+                className="mx-auto min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px]"
+                action={
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoading(true);
+                      setLoadError(null);
+                      void refresh(requestedThreadId)
+                        .catch(() =>
+                          setLoadError(chatLoadErrorMessage(requestedThreadId)),
+                        )
+                        .finally(() => setLoading(false));
+                    }}
+                    className="h-9 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
+                  >
+                    Try again
+                  </button>
+                }
+              />
+            ) : (
+              <div className="mx-auto flex min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px] flex-col justify-center py-8 text-left">
+                <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-surface border border-[color-mix(in_oklab,var(--brand-primary)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-elevated))] shadow-soft">
+                  <SpectraMark size={28} />
                 </div>
-              ) : null}
-            </div>
+                <h1 className="max-w-[820px] font-display text-title font-semibold leading-[1.12] text-[var(--text-primary)]">
+                  {welcome}
+                </h1>
+                <p className="mt-3 max-w-[640px] text-body leading-6 text-[var(--text-secondary)]">
+                  Bring a half-formed question, a difficult topic, or a whole
+                  workspace. Spectra can explain, build, and revise alongside you.
+                </p>
+                {workspaces.length > 0 ? (
+                  <div className="mt-8 grid gap-3 sm:grid-cols-2">
+                    {workspaces.slice(0, 6).map((workspace) => {
+                      const selected = chatWorkspaceId === workspace._id;
+                      const count = artifacts.filter((artifact) =>
+                        artifact.placements?.some(
+                          (placement) => placement.workspaceId === workspace._id,
+                        ),
+                      ).length;
+                      return (
+                        <button
+                          key={workspace._id}
+                          type="button"
+                          data-spectra-card="workspace"
+                          data-card-state={selected ? "active" : "normal"}
+                          data-interactive="true"
+                          onClick={() =>
+                            selectWorkspaceContext(
+                              selected ? null : workspace._id,
+                            )
+                          }
+                          className="group min-h-[112px] p-4 text-left"
+                          style={
+                            {
+                              "--card-accent": "var(--accent-cyan)",
+                            } as CSSProperties
+                          }
+                        >
+                          <span className="relative flex items-start gap-3">
+                            <span className="spectra-card-type-icon h-9 w-9 text-[var(--accent-cyan)]">
+                              <FolderPlus className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-2 text-body font-semibold text-[var(--text-primary)]">
+                                {workspace.title}
+                                {selected ? (
+                                  <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
+                                ) : null}
+                              </span>
+                              <span className="mt-1 line-clamp-2 text-micro leading-5 text-[var(--text-secondary)]">
+                                {workspace.description ??
+                                  `${count} objects ready as context`}
+                              </span>
+                              <span className="mt-2 flex items-center gap-1 text-micro font-medium text-[var(--text-tertiary)]">
+                                {selected
+                                  ? "Context selected"
+                                  : `Start here · ${count} objects`}
+                                <ArrowRight className="h-3 w-3 transition group-hover:translate-x-0.5" />
+                              </span>
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            )
           }
         />
       </section>

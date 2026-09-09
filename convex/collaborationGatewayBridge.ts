@@ -335,6 +335,23 @@ export const exchange = action({
         partitionKey,
         clientId: text(payload.clientId, "client_id", 180),
         policyVersion: integer(payload.policyVersion, "policy_version"),
+        roomId:
+          payload.roomId === undefined || payload.roomId === null
+            ? undefined
+            : (text(payload.roomId, "room_id") as Id<"collaborationRooms">),
+        expectedNextSequence:
+          payload.expectedNextSequence === undefined ||
+          payload.expectedNextSequence === null
+            ? undefined
+            : integer(payload.expectedNextSequence, "expected_next_sequence"),
+        expectedLastProjectionSequence:
+          payload.expectedLastProjectionSequence === undefined ||
+          payload.expectedLastProjectionSequence === null
+            ? undefined
+            : integer(
+                payload.expectedLastProjectionSequence,
+                "expected_last_projection_sequence",
+              ),
         stateVectorHash: text(
           payload.stateVectorHash,
           "state_vector_hash",

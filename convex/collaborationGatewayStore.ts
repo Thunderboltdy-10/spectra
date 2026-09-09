@@ -659,6 +659,8 @@ export const bootstrapNative = internalMutation({
       ctx.db.patch(room._id, {
         nextSequence: args.expectedNextSequence + 1,
         uncompactedBytes: room.uncompactedBytes + args.update.byteLength,
+        lastProjectionSequence: args.expectedNextSequence,
+        lastProjectionAt: now,
         updatedAt: now,
       }),
       ctx.db.patch(artifact._id, {
@@ -1115,6 +1117,9 @@ export const checkpoint = internalMutation({
     partitionKey: v.string(),
     clientId: v.string(),
     policyVersion: v.number(),
+    roomId: v.optional(v.id("collaborationRooms")),
+    expectedNextSequence: v.optional(v.number()),
+    expectedLastProjectionSequence: v.optional(v.number()),
     stateVectorHash: v.string(),
     projectionJson: v.string(),
     projectionHash: v.string(),
@@ -1175,10 +1180,42 @@ export const checkpoint = internalMutation({
       artifact,
     );
     if (!projection) throw new Error("COLLABORATION_PROJECTION_INVALID");
-    if (artifact.contentHash === args.projectionHash)
+    if (args.roomId !== undefined && room._id !== args.roomId)
+      throw new Error("COLLABORATION_DURABLE_RECOVERY_STALE");
+    const currentProjectionSequence = room.lastProjectionSequence ?? 0;
+    const requestedSequence = Math.max(
+      0,
+      Math.min(
+        args.throughSequence ?? room.nextSequence - 1,
+        room.nextSequence - 1,
+      ),
+    );
+    const alreadyApplied =
+      artifact.contentHash === args.projectionHash &&
+      artifact.liveStateVectorHash === args.stateVectorHash &&
+      currentProjectionSequence >= requestedSequence;
+    // A retried gateway request may arrive after this room has accepted a
+    // newer append. Content hash plus a monotonic projection sequence is the
+    // existing idempotency proof; do not require the old head again.
+    if (alreadyApplied)
       return {
-        sequence: room.lastProjectionSequence ?? room.nextSequence - 1,
+        sequence: currentProjectionSequence,
         duplicate: true,
+      };
+    if (
+      (args.expectedNextSequence !== undefined &&
+        (!Number.isSafeInteger(args.expectedNextSequence) ||
+          args.expectedNextSequence < 1 ||
+          room.nextSequence !== args.expectedNextSequence)) ||
+      (args.expectedLastProjectionSequence !== undefined &&
+        (!Number.isSafeInteger(args.expectedLastProjectionSequence) ||
+          args.expectedLastProjectionSequence < 0 ||
+          currentProjectionSequence !== args.expectedLastProjectionSequence)) ||
+      requestedSequence < currentProjectionSequence
+    )
+      return {
+        sequence: currentProjectionSequence,
+        stale: true,
       };
     if (
       artifact.liveStateVectorHash &&
@@ -1188,13 +1225,7 @@ export const checkpoint = internalMutation({
         sequence: room.lastProjectionSequence ?? room.nextSequence - 1,
         stale: true,
       };
-    const throughSequence = Math.max(
-      0,
-      Math.min(
-        args.throughSequence ?? room.nextSequence - 1,
-        room.nextSequence - 1,
-      ),
-    );
+    const throughSequence = requestedSequence;
     const now = Date.now();
     if (!args.clientId.trim())
       throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");

@@ -17,6 +17,7 @@ import {
   applyStoredRoomUpdates,
   encodeStoredRoomSnapshot,
   shouldCompactRoom,
+  shouldRepairNativeProjection,
   shouldRecoverNativeRoom,
 } from "./collaboration-room-state.mjs";
 import {
@@ -450,6 +451,7 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
         clientId: first.context.clientId,
         policyVersion: first.context.policyVersion,
         schemaVersion: first.context.schemaVersion,
+        roomId: first.context.roomId,
         stateVectorHash: last.stateVectorHash,
         throughSequence: appendResult?.sequence ?? null,
       };
@@ -466,6 +468,7 @@ async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
           accountId: lastCheckpoint.accountId,
           clientId: lastCheckpoint.clientId,
           policyVersion: lastCheckpoint.policyVersion,
+          roomId: lastCheckpoint.roomId,
           stateVectorHash: lastCheckpoint.stateVectorHash,
           projectionJson,
           projectionHash: createHash("sha256")
@@ -1148,12 +1151,23 @@ const server = new Server({
     rememberDurableHead(context, stored?.liveStateVectorHash);
     if (isNativeArtifactDocument(storedDocument)) {
       const observedStateVectorHash = documentStateVectorHash(storedDocument);
-      if (
-        shouldRecoverNativeRoom({
-          liveStateVectorHash: stored?.liveStateVectorHash,
-          observedStateVectorHash,
-        })
-      ) {
+      const durableHeadSequence = Math.max(
+        0,
+        (stored?.nextSequence ?? 1) - 1,
+      );
+      const shouldRecover = shouldRecoverNativeRoom({
+        liveStateVectorHash: stored?.liveStateVectorHash,
+        observedStateVectorHash,
+      });
+      const shouldRepair =
+        !shouldRecover &&
+        shouldRepairNativeProjection({
+          durableHeadSequence,
+          lastProjectionSequence: stored?.lastProjectionSequence ?? null,
+        }) &&
+        typeof stored?.roomId === "string" &&
+        typeof stored?.liveStateVectorHash === "string";
+      if (shouldRecover || shouldRepair) {
         const observedProjectionJson = artifactProjection(
           storedDocument,
           context.schemaVersion,
@@ -1161,20 +1175,45 @@ const server = new Server({
         if (!observedProjectionJson)
           throw new Error("COLLABORATION_NATIVE_RECOVERY_PROJECTION_MISSING");
         storedDocument.destroy();
-        await bridge("recover", {
-          artifactId: context.artifactId,
-          partitionKey: context.partitionKey,
-          accountId: context.accountId,
-          clientId: context.clientId,
-          policyVersion: context.policyVersion,
-          expectedNextSequence: stored.nextSequence,
-          expectedStateVectorHash: stored.liveStateVectorHash,
-          observedStateVectorHash,
-          observedProjectionJson,
-          observedProjectionHash: createHash("sha256")
-            .update(observedProjectionJson)
-            .digest("base64url"),
-        });
+        if (shouldRecover) {
+          await bridge("recover", {
+            artifactId: context.artifactId,
+            partitionKey: context.partitionKey,
+            accountId: context.accountId,
+            clientId: context.clientId,
+            policyVersion: context.policyVersion,
+            expectedNextSequence: stored.nextSequence,
+            expectedStateVectorHash: stored.liveStateVectorHash,
+            observedStateVectorHash,
+            observedProjectionJson,
+            observedProjectionHash: createHash("sha256")
+              .update(observedProjectionJson)
+              .digest("base64url"),
+          });
+        } else {
+          // Append-before-checkpoint recovery uses the same authority, room
+          // generation and state-vector CAS as an ordinary checkpoint. It
+          // repairs only the durable head observed above; a newer append or
+          // rotated room makes the mutation stale and leaves the artifact
+          // projection untouched.
+          await bridge("checkpoint", {
+            artifactId: context.artifactId,
+            partitionKey: context.partitionKey,
+            accountId: context.accountId,
+            clientId: context.clientId,
+            policyVersion: context.policyVersion,
+            roomId: stored.roomId,
+            expectedNextSequence: stored.nextSequence,
+            expectedLastProjectionSequence:
+              stored.lastProjectionSequence ?? 0,
+            stateVectorHash: stored.liveStateVectorHash,
+            projectionJson: observedProjectionJson,
+            projectionHash: createHash("sha256")
+              .update(observedProjectionJson)
+              .digest("base64url"),
+            throughSequence: durableHeadSequence,
+          });
+        }
         stored = await bridge("load", {
           artifactId: context.artifactId,
           partitionKey: context.partitionKey,

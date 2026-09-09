@@ -552,6 +552,192 @@ describe("native fine-grained Yjs models", () => {
     document.destroy();
   });
 
+  it("restores one sheet cell while preserving neighboring cells and sheet structure", async () => {
+    const adapter = workYjsAdapter("sheets");
+    const currentContent = {
+      workbook: { calculationMode: "automatic", locale: "en-US" },
+      activeSheetId: "sheet-a",
+      sheets: [
+        {
+          id: "sheet-a",
+          name: "Data",
+          cells: {
+            A1: { value: "Current A" },
+            B1: { value: "Current B" },
+          },
+          tables: [],
+          charts: [],
+        },
+      ],
+    };
+    const document = adapter.createDocument(currentContent);
+    const liveMeta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+    liveMeta.set("title", "Selective sheet restore");
+    liveMeta.set("summary", "");
+    liveMeta.set("tags", []);
+    const projectedCurrent = adapter.project(document) as typeof currentContent;
+    const historicalContent = structuredClone(projectedCurrent);
+    historicalContent.sheets[0]!.cells.A1 = { value: "Historical A" };
+    const cellRegion = adapter
+      .deriveSemanticRegions(document, projectedCurrent)
+      .find((region) =>
+        JSON.stringify(region.path) ===
+        JSON.stringify(["sheets", 0, "cells", "A1"]),
+      );
+    expect(cellRegion).toBeDefined();
+    const model = new NativeArtifactYjsModel("sheets", {
+      clientId: "selective-sheet-client",
+      document,
+      getSnapshot: () => ({
+        state: "synchronized" as const,
+        level: "modify" as const,
+        accountId: "account-1",
+        displayName: "Pablo",
+        unsynchronizedChanges: 0,
+        presence: [],
+      }),
+    } as unknown as ConstructorParameters<typeof NativeArtifactYjsModel>[1]);
+    const claimed: string[] = [];
+    const controller = {
+      editMany: async (
+        regions: Array<{ regionId: string; overlapDomains: string[] }>,
+        change: () => void,
+      ) => {
+        claimed.push(...regions.map((region) => region.regionId));
+        document.transact(change);
+        return { applied: true as const, claims: [] };
+      },
+    } as unknown as Parameters<
+      NativeArtifactYjsModel["replaceRegionsFromSnapshot"]
+    >[2];
+
+    await model.replaceRegionsFromSnapshot(
+      {
+        title: "Selective sheet restore",
+        tags: [],
+        content: historicalContent,
+      },
+      [cellRegion!.regionId],
+      controller,
+    );
+
+    const restored = adapter.project(document) as typeof currentContent;
+    expect(claimed).toEqual([cellRegion!.regionId]);
+    expect(restored.sheets[0]!.cells).toMatchObject({
+      A1: { value: "Historical A" },
+      B1: { value: "Current B" },
+    });
+    expect(restored.sheets[0]!.id).toBe("sheet-a");
+    model.destroy();
+    document.destroy();
+  });
+
+  it("restores a presentation root descriptor and refuses a changed target structure", async () => {
+    const adapter = workYjsAdapter("presentation");
+    const currentContent = {
+      theme: { id: "theme-current", name: "Current theme" },
+      slides: [
+        {
+          id: "slide-a",
+          title: "Current slide",
+          speakerNotes: "Current notes",
+          objects: [
+            {
+              id: "object-a",
+              type: "text" as const,
+              x: 10,
+              y: 10,
+              width: 200,
+              height: 80,
+              rotation: 0,
+              content: { text: "Current object" },
+            },
+          ],
+        },
+        {
+          id: "slide-b",
+          title: "Unrelated current slide",
+          objects: [],
+        },
+      ],
+      sections: [],
+      components: [],
+      settings: { aspectRatio: "16:9" as const },
+    };
+    const document = adapter.createDocument(currentContent);
+    const liveMeta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+    liveMeta.set("title", "Selective presentation restore");
+    liveMeta.set("summary", "");
+    liveMeta.set("tags", []);
+    const projectedCurrent = adapter.project(document) as typeof currentContent;
+    const historicalContent = structuredClone(projectedCurrent);
+    historicalContent.theme = { id: "theme-historical", name: "Historical theme" };
+    historicalContent.slides[0]!.objects[0]!.content = {
+      text: "Historical object",
+    };
+    const model = new NativeArtifactYjsModel("presentation", {
+      clientId: "selective-presentation-client",
+      document,
+      getSnapshot: () => ({
+        state: "synchronized" as const,
+        level: "modify" as const,
+        accountId: "account-1",
+        displayName: "Pablo",
+        unsynchronizedChanges: 0,
+        presence: [],
+      }),
+    } as unknown as ConstructorParameters<typeof NativeArtifactYjsModel>[1]);
+    const claimed: string[] = [];
+    const controller = {
+      editMany: async (
+        regions: Array<{ regionId: string; overlapDomains: string[] }>,
+        change: () => void,
+      ) => {
+        claimed.push(...regions.map((region) => region.regionId));
+        document.transact(change);
+        return { applied: true as const, claims: [] };
+      },
+    } as unknown as Parameters<
+      NativeArtifactYjsModel["replaceRegionsFromSnapshot"]
+    >[2];
+
+    await model.replaceRegionsFromSnapshot(
+      {
+        title: "Selective presentation restore",
+        tags: [],
+        content: historicalContent,
+      },
+      ["presentation:theme"],
+      controller,
+    );
+    const restored = adapter.project(document) as typeof currentContent;
+    expect(claimed).toEqual(["presentation:theme"]);
+    expect(restored.theme).toEqual(historicalContent.theme);
+    expect(restored.slides[1]!.title).toBe("Unrelated current slide");
+    expect(restored.slides[0]!.objects[0]!.content).toEqual(
+      projectedCurrent.slides[0]!.objects[0]!.content,
+    );
+
+    const changedStructure = structuredClone(projectedCurrent);
+    changedStructure.slides[0]!.id = "slide-renamed";
+    await expect(
+      model.replaceRegionsFromSnapshot(
+        {
+          title: "Selective presentation restore",
+          tags: [],
+          content: changedStructure,
+        },
+        ["object-a"],
+        controller,
+      ),
+    ).rejects.toThrow("NATIVE_PARTIAL_RESTORE_STRUCTURE_CHANGED");
+    expect((adapter.project(document) as typeof currentContent).theme).toEqual(
+      historicalContent.theme,
+    );
+    model.destroy();
+    document.destroy();
+  });
+
   it("adopts a Word-only trailing paragraph without rewriting existing fragment nodes", () => {
     const adapter = documentYjsAdapter;
     const initial = {

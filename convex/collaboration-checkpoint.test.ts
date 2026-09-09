@@ -42,6 +42,15 @@ function initialProjection() {
   return { json, hash: createHash("sha256").update(json).digest("base64url") };
 }
 
+function projectionWithTitle(title: string) {
+  const value = JSON.parse(initialProjection().json) as {
+    title: string;
+  } & Record<string, unknown>;
+  value.title = title;
+  const json = JSON.stringify(value);
+  return { json, hash: createHash("sha256").update(json).digest("base64url") };
+}
+
 async function seedRoom(t: ReturnType<typeof convexTest>) {
   return t.run(async (ctx) => {
     const now = Date.now();
@@ -267,6 +276,166 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     expect(afterCheckpoint.artifact?.content).toEqual(projection.content);
     expect(afterCheckpoint.artifact?.contentHash).toBe(projectionHash);
     expect(afterCheckpoint.room?.lastProjectionSequence).toBe(2);
+  });
+
+  it("repairs a replayed append-before-checkpoint head exactly once", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const durable = yjsUpdate("replayed after crash");
+    await t.mutation(internal.collaborationGatewayStore.append, {
+      accountId: seed.accountId,
+      actorKind: "human",
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "crash-window-client",
+      policyVersion: 0,
+      idempotencyKey: "crash-window:append",
+      update: arrayBufferCopy(durable.update),
+      baseStateVectorHash: "initial-state-vector",
+      stateVectorHash: durable.hash,
+      regionIds: ["intro"],
+    });
+    const projection = projectionWithTitle("replayed after crash");
+    const repair = {
+      accountId: seed.accountId,
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "crash-window-client",
+      policyVersion: 0,
+      roomId: seed.roomId,
+      expectedNextSequence: 2,
+      expectedLastProjectionSequence: 0,
+      stateVectorHash: durable.hash,
+      projectionJson: projection.json,
+      projectionHash: projection.hash,
+      throughSequence: 1,
+    };
+
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.checkpoint, repair),
+    ).resolves.toMatchObject({
+      duplicate: false,
+      sequence: 1,
+    });
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.checkpoint, repair),
+    ).resolves.toMatchObject({
+      duplicate: true,
+      sequence: 1,
+    });
+
+    const after = await t.run(async (ctx) => ({
+      artifact: await ctx.db.get(seed.artifactId),
+      room: await ctx.db.get(seed.roomId),
+    }));
+    expect(after.artifact).toMatchObject({
+      title: "replayed after crash",
+      contentHash: projection.hash,
+      liveStateVectorHash: durable.hash,
+    });
+    expect(after.room).toMatchObject({
+      nextSequence: 2,
+      lastProjectionSequence: 1,
+    });
+  });
+
+  it("refuses a stale head without overwriting the newer editor projection", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const first = yjsUpdate("first durable edit");
+    const newer = yjsUpdate("newer durable edit");
+    for (const [index, update] of [first, newer].entries()) {
+      await t.mutation(internal.collaborationGatewayStore.append, {
+        accountId: seed.accountId,
+        actorKind: "human",
+        artifactId: seed.artifactId,
+        partitionKey: "root",
+        clientId: index === 0 ? "editor-a" : "editor-b",
+        policyVersion: 0,
+        idempotencyKey: `stale-head:${index + 1}`,
+        update: arrayBufferCopy(update.update),
+        baseStateVectorHash: index === 0 ? "initial-state-vector" : first.hash,
+        stateVectorHash: update.hash,
+        regionIds: ["intro"],
+      });
+    }
+    const projection = projectionWithTitle("must not win");
+    const result = await t.mutation(
+      internal.collaborationGatewayStore.checkpoint,
+      {
+        accountId: seed.accountId,
+        artifactId: seed.artifactId,
+        partitionKey: "root",
+        clientId: "editor-a",
+        policyVersion: 0,
+        roomId: seed.roomId,
+        expectedNextSequence: 2,
+        expectedLastProjectionSequence: 0,
+        stateVectorHash: first.hash,
+        projectionJson: projection.json,
+        projectionHash: projection.hash,
+        throughSequence: 1,
+      },
+    );
+    expect(result).toMatchObject({ stale: true, sequence: 0 });
+    const after = await t.run(async (ctx) => ({
+      artifact: await ctx.db.get(seed.artifactId),
+      room: await ctx.db.get(seed.roomId),
+    }));
+    expect(after.artifact?.title).toBe("Essay");
+    expect(after.artifact?.contentHash).toBe("initial-content-hash");
+    expect(after.artifact?.liveStateVectorHash).toBe(newer.hash);
+    expect(after.room?.lastProjectionSequence).toBeUndefined();
+  });
+
+  it("refuses a checkpoint from a retired room generation", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    let currentRoomId: typeof seed.roomId | undefined;
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.patch(seed.roomId, {
+        partitionKey: `__retired__:${seed.roomId}`,
+        status: "closed",
+      });
+      currentRoomId = await ctx.db.insert("collaborationRooms", {
+        artifactId: seed.artifactId,
+        schoolId: seed.schoolId,
+        typeKey: "document",
+        provider: "self_hosted_yjs",
+        partitionKey: "root",
+        schemaVersion: 2,
+        policyVersion: 0,
+        status: "active",
+        nextSequence: 1,
+        snapshotSequence: 0,
+        uncompactedBytes: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    expect(currentRoomId).toBeDefined();
+    const projection = initialProjection();
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.checkpoint, {
+        accountId: seed.accountId,
+        artifactId: seed.artifactId,
+        partitionKey: "root",
+        clientId: "retired-room-client",
+        policyVersion: 0,
+        roomId: seed.roomId,
+        stateVectorHash: "retired-state-vector",
+        projectionJson: projection.json,
+        projectionHash: projection.hash,
+        throughSequence: 0,
+      }),
+    ).rejects.toThrow("COLLABORATION_DURABLE_RECOVERY_STALE");
+    const after = await t.run(async (ctx) => ({
+      artifact: await ctx.db.get(seed.artifactId),
+      room: await ctx.db.get(currentRoomId!),
+    }));
+    expect(after.artifact?.contentHash).toBe("initial-content-hash");
+    expect(after.room?.lastProjectionSequence).toBeUndefined();
   });
 
   it("only sends the full bootstrap projection for an empty native room", async () => {

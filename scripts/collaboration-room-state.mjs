@@ -80,3 +80,26 @@ export function shouldRecoverNativeRoom({
   return observedStateVectorHash !== liveStateVectorHash;
 }
 
+/**
+ * A native room can have a replayed Y.Doc whose state vector already equals
+ * the durable append head while its artifact projection checkpoint still
+ * points at an earlier sequence. State-vector equality alone is therefore
+ * not a proof that native projections are current.
+ *
+ * @param {{
+ *   durableHeadSequence?: number,
+ *   lastProjectionSequence?: number | null,
+ * }} options
+ */
+export function shouldRepairNativeProjection({
+  durableHeadSequence = 0,
+  lastProjectionSequence = null,
+} = {}) {
+  if (!Number.isSafeInteger(durableHeadSequence) || durableHeadSequence <= 0)
+    return false;
+  const projectedSequence = lastProjectionSequence ?? 0;
+  if (!Number.isSafeInteger(projectedSequence) || projectedSequence < 0)
+    return false;
+  return projectedSequence < durableHeadSequence;
+}
+

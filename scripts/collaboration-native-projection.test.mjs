@@ -15,6 +15,7 @@ import {
   nativeArtifactProjection,
   nativeChangedRegionIds,
 } from "./collaboration-native-projection.mjs";
+import { shouldRepairNativeProjection } from "./collaboration-room-state.mjs";
 
 function defaultContent(typeKey) {
   const blueprint = getBlueprint(typeKey);
@@ -238,5 +239,26 @@ describe("native collaboration gateway projection", () => {
     expect(nativeChangedRegionIds(after, after)).toEqual([
       "$spectra:native-projection",
     ]);
+  });
+
+  it("requests projection repair when a replayed durable head is ahead of its checkpoint", () => {
+    expect(
+      shouldRepairNativeProjection({
+        durableHeadSequence: 1,
+        lastProjectionSequence: 0,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRepairNativeProjection({
+        durableHeadSequence: 4,
+        lastProjectionSequence: 4,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRepairNativeProjection({
+        durableHeadSequence: 0,
+        lastProjectionSequence: null,
+      }),
+    ).toBe(false);
   });
 });

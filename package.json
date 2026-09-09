@@ -108,8 +108,8 @@
     "axios": "^1.18.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "convex": "^1.41.0",
-    "convex-helpers": "^0.1.123",
+    "convex": "^1.45.0",
+    "convex-helpers": "^0.1.124",
     "d3": "^7.9.0",
     "date-fns": "^4.1.0",
     "docx": "^8.5.0",
@@ -129,7 +129,7 @@
     "kbar": "^0.1.0-beta.48",
     "lucide-react": "^0.563.0",
     "mammoth": "^1.11.0",
-    "next": "^16.2.9",
+    "next": "^16.3.4",
     "nodemailer": "^9.0.1",
     "pdfjs-dist": "^5.4.624",
     "pptxgenjs": "^3.12.0",
@@ -160,7 +160,7 @@
   "overrides": {
     "dompurify": "^3.4.11",
     "lodash-es": "^4.18.1",
-    "postcss": "^8.5.10"
+    "postcss": "8.5.23"
   },
   "devDependencies": {
     "@edge-runtime/vm": "^5.0.0",
@@ -180,7 +180,7 @@
     "concurrently": "^9.2.4",
     "convex-test": "^0.0.54",
     "eslint": "^9",
-    "eslint-config-next": "16.2.2",
+    "eslint-config-next": "16.3.4",
     "jsdom": "^28.0.0",
     "playwright-core": "^1.62.1",
     "tailwindcss": "^4",

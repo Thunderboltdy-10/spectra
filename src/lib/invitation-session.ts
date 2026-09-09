@@ -54,3 +54,9 @@ export function authHrefForRedirect(path: "/sign-in" | "/sign-up", redirectUrl?:
     ? `${path}?redirect_url=${encodeURIComponent(target)}`
     : path;
 }
+
+export function invitationPreviewCanRetry(message: string) {
+  return !/INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
+    message,
+  );
+}

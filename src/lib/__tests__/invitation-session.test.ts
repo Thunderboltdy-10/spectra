@@ -3,6 +3,7 @@ import {
   JOIN_TOKEN_COOKIE,
   authHrefForRedirect,
   clearJoinTokenCookie,
+  invitationPreviewCanRetry,
   joinHrefForToken,
   joinTokenFromSearch,
   persistJoinTokenCookie,
@@ -38,5 +39,11 @@ describe("invitation cookie recovery", () => {
       "/sign-up?redirect_url=%2Fjoin%3Ftoken%3Dinvite-token",
     );
     expect(authHrefForRedirect("/sign-in")).toBe("/sign-in");
+  });
+
+  it("only offers preview retry for transient failures", () => {
+    expect(invitationPreviewCanRetry("INTEGRATION_UNAVAILABLE: Try again.")).toBe(true);
+    expect(invitationPreviewCanRetry("INVITATION_EXPIRED: This invitation has expired.")).toBe(false);
+    expect(invitationPreviewCanRetry("INVITATION_INVALID: This invitation is unavailable.")).toBe(false);
   });
 });

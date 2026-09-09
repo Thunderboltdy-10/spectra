@@ -744,7 +744,10 @@ export function ManageBacIntegrationShell() {
                   title="Verified school data will appear here"
                   detail="Once an administrator connects the token and imports the tenant capability manifest, Spectra will resolve your identity without exposing alternative accounts."
                 />
-              ) : !overview?.admin && data?.mapping?.status !== "verified" ? (
+              ) : !overview?.admin &&
+                data?.mapping?.status !== "verified" &&
+                tab !== "history" &&
+                tab !== "provenance" ? (
                 <div className="mx-auto flex min-h-[390px] max-w-lg flex-col items-center justify-center text-center">
                   <span className="grid size-12 place-items-center rounded-2xl bg-[color-mix(in oklab, var(--accent-cyan) 8%, var(--bg-elevated))] text-[var(--accent-cyan)]">
                     <UserCheck size={22} />
@@ -851,7 +854,17 @@ export function ManageBacIntegrationShell() {
                   emptyDetail="Readable assignments, assessments, and deadlines appear as source-linked planner tasks without replacing personal notes."
                 />
               ) : tab === "history" ? (
-                <SyncTable runs={data?.syncRuns ?? []} />
+                  <SyncTable
+                    runs={data?.syncRuns ?? []}
+                    onRetry={() =>
+                      void runAction("sync", () => syncSpectraManageBac())
+                    }
+                    onResolveIdentity={() =>
+                      void runAction("identity", () =>
+                        resolveSpectraManageBacIdentity(),
+                      )
+                    }
+                  />
               ) : tab === "conflicts" ? (
                 data?.conflicts.length ? (
                   <ConflictList
@@ -1115,7 +1128,15 @@ export function ManageBacIntegrationShell() {
   );
 }
 
-function SyncTable({ runs }: { runs: SpectraManageBacSyncRun[] }) {
+function SyncTable({
+  runs,
+  onRetry,
+  onResolveIdentity,
+}: {
+  runs: SpectraManageBacSyncRun[];
+  onRetry: () => void;
+  onResolveIdentity: () => void;
+}) {
   if (!runs.length)
     return (
       <EmptyState
@@ -1135,6 +1156,7 @@ function SyncTable({ runs }: { runs: SpectraManageBacSyncRun[] }) {
             <th className="px-3 py-2 font-normal">Updated</th>
             <th className="px-3 py-2 font-normal">Conflicts</th>
             <th className="px-3 py-2 font-normal">Triggered by</th>
+            <th className="px-3 py-2 font-normal">Recovery</th>
           </tr>
         </thead>
         <tbody>
@@ -1147,7 +1169,17 @@ function SyncTable({ runs }: { runs: SpectraManageBacSyncRun[] }) {
                 {formatDate(run.completedAt ?? run.createdAt)}
               </td>
               <td className="px-3 py-2.5 transition-colors group-hover:bg-[var(--bg-secondary)]">
-                <SyncStatus run={run} />
+                <div className="flex min-w-32 flex-col items-start gap-1">
+                  <SyncStatus run={run} />
+                  <span className="text-micro text-[var(--text-tertiary)]">
+                    {run.stage.replaceAll("_", " ")}
+                  </span>
+                  {run.errorSummary ? (
+                    <span className="max-w-56 text-micro leading-4 text-[var(--danger)]">
+                      {run.errorSummary}
+                    </span>
+                  ) : null}
+                </div>
               </td>
               <td className="px-3 py-2.5 text-micro transition-colors group-hover:bg-[var(--bg-secondary)]">{run.counts.created}</td>
               <td className="px-3 py-2.5 text-micro transition-colors group-hover:bg-[var(--bg-secondary)]">{run.counts.updated}</td>
@@ -1156,6 +1188,32 @@ function SyncTable({ runs }: { runs: SpectraManageBacSyncRun[] }) {
               </td>
               <td className="rounded-r-lg px-3 py-2.5 text-micro capitalize text-[var(--text-secondary)] transition-colors group-hover:bg-[var(--bg-secondary)]">
                 {run.kind}
+              </td>
+              <td className="rounded-r-lg px-3 py-2.5 text-micro transition-colors group-hover:bg-[var(--bg-secondary)]">
+                {run.kind === "identity" &&
+                run.status === "awaiting_review" ? (
+                  <button
+                    type="button"
+                    onClick={onResolveIdentity}
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--border-subtle)] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    <Fingerprint size={11} />
+                    Resolve identity
+                  </button>
+                ) : run.status === "failed" || run.status === "partial" ? (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--border-subtle)] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    <RefreshCw size={11} />
+                    Retry sync
+                  </button>
+                ) : run.status === "awaiting_review" ? (
+                  <span className="text-[var(--text-tertiary)]">Review conflicts</span>
+                ) : (
+                  <span className="text-[var(--text-tertiary)]">—</span>
+                )}
               </td>
             </tr>
           ))}
@@ -1204,22 +1262,50 @@ function ConflictList({
                 </span>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  disabled={Boolean(busy)}
-                  onClick={() => onResolve(conflict, "keep_overlay")}
-                  className="h-7 rounded-md border border-[var(--border-subtle)] px-2 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
-                >
-                  Keep mine
-                </button>
-                <button
-                  type="button"
-                  disabled={Boolean(busy)}
-                  onClick={() => onResolve(conflict, "rebase")}
-                  className="h-7 rounded-md bg-[var(--text-primary)] px-2.5 text-micro text-white hover:bg-[var(--text-primary)] disabled:opacity-50"
-                >
-                  Rebase
-                </button>
+                {conflict.suggestedActions.includes("detach") ||
+                conflict.suggestedActions.includes("archive_projection") ? (
+                  <>
+                    {conflict.suggestedActions.includes("detach") ? (
+                      <button
+                        type="button"
+                        disabled={Boolean(busy)}
+                        onClick={() => onResolve(conflict, "detach")}
+                        className="h-7 rounded-md border border-[var(--border-subtle)] px-2 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
+                      >
+                        Keep local copy
+                      </button>
+                    ) : null}
+                    {conflict.suggestedActions.includes("archive_projection") ? (
+                      <button
+                        type="button"
+                        disabled={Boolean(busy)}
+                        onClick={() => onResolve(conflict, "archive_projection")}
+                        className="h-7 rounded-md bg-[var(--text-primary)] px-2.5 text-micro text-white hover:bg-[var(--text-primary)] disabled:opacity-50"
+                      >
+                        Archive source
+                      </button>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={Boolean(busy)}
+                      onClick={() => onResolve(conflict, "keep_overlay")}
+                      className="h-7 rounded-md border border-[var(--border-subtle)] px-2 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
+                    >
+                      Keep mine
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(busy)}
+                      onClick={() => onResolve(conflict, "rebase")}
+                      className="h-7 rounded-md bg-[var(--text-primary)] px-2.5 text-micro text-white hover:bg-[var(--text-primary)] disabled:opacity-50"
+                    >
+                      Rebase
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </article>

@@ -9,6 +9,7 @@ import { SurfaceField } from "@/features/spectra/field/surface-field";
 import { mutateAdministration } from "@/features/spectra/administration/api";
 import {
   clearJoinTokenCookie,
+  invitationPreviewCanRetry,
   persistJoinTokenCookie,
   resolveJoinToken,
 } from "@/lib/invitation-session";
@@ -41,6 +42,8 @@ function JoinSchoolContent() {
   const [previewState, setPreviewState] = useState<
     "idle" | "loading" | "ready" | "error"
   >(token ? "loading" : "idle");
+  const [previewRetryable, setPreviewRetryable] = useState(false);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
 
   useEffect(() => {
     if (token) persistJoinTokenCookie(token, document);
@@ -50,6 +53,7 @@ function JoinSchoolContent() {
     if (!token) return;
     let active = true;
     setPreviewState("loading");
+    setPreviewRetryable(false);
     void mutateAdministration<InvitationPreview>("previewInvitation", { token })
       .then((next) => {
         if (!active) return;
@@ -59,6 +63,7 @@ function JoinSchoolContent() {
       .catch((nextError) => {
         if (!active) return;
         const raw = nextError instanceof Error ? nextError.message : "";
+        const retryable = invitationPreviewCanRetry(raw);
         const human = raw.match(
           /(?:INVITATION_[A-Z_]+|MEMBERSHIP_[A-Z_]+):\s*(.+)/,
         );
@@ -70,6 +75,7 @@ function JoinSchoolContent() {
           clearJoinTokenCookie(document);
         setPreview(null);
         setPreviewState("error");
+        setPreviewRetryable(retryable);
         setStatus("error");
         setError(
           (human?.[1] ?? raw).trim() ||
@@ -79,7 +85,14 @@ function JoinSchoolContent() {
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [previewAttempt, token]);
+
+  function retryPreview() {
+    setStatus("ready");
+    setError("");
+    setPreviewRetryable(false);
+    setPreviewAttempt((attempt) => attempt + 1);
+  }
 
   async function accept() {
     if (!token) {
@@ -172,7 +185,16 @@ function JoinSchoolContent() {
         </p>
         {status === "error" ? (
           <div className="mt-5 rounded-control border border-[color-mix(in oklab, var(--accent-coral) 28%, var(--bg-elevated))] bg-[color-mix(in oklab, var(--accent-coral) 8%, var(--bg-elevated))] p-3 text-micro leading-5 text-[var(--danger)]">
-            {error}
+            <p>{error}</p>
+            {previewRetryable && previewState === "error" ? (
+              <button
+                type="button"
+                onClick={retryPreview}
+                className="mt-2 inline-flex h-8 items-center rounded-control border border-current px-2.5 text-micro font-medium hover:bg-[color-mix(in oklab,var(--accent-coral)_10%,transparent)]"
+              >
+                Retry invitation check
+              </button>
+            ) : null}
           </div>
         ) : null}
         <button

@@ -2820,6 +2820,7 @@ export async function executeAgentReadTool(
   actorClerkId: string,
   call: { id?: string; name: string; arguments: string },
   scope?: {
+    mutationScopeId?: string;
     workspaceId?: string;
     scopeNodeId?: string;
     artifactId?: string;
@@ -3593,9 +3594,16 @@ export async function executeAgentReadTool(
         typeof args.idempotencyKey === "string" && args.idempotencyKey.trim()
           ? args.idempotencyKey.trim().slice(0, 240)
           : undefined;
-      const idempotencyKey =
-        requestedIdempotencyKey ??
-        `ai:${actorClerkId}:${call.id || createHash("sha256").update(call.arguments).digest("hex").slice(0, 64)}`;
+      // Provider tool ids and model-supplied keys may repeat in another run.
+      // Keep replay protection within this model execution, so a later user
+      // request can intentionally schedule the same task and time again.
+      const idempotencyKey = `ai:${createHash("sha256")
+        .update(JSON.stringify([
+          actorClerkId,
+          scope?.mutationScopeId ?? crypto.randomUUID(),
+          requestedIdempotencyKey ?? call.id ?? call.arguments,
+        ]))
+        .digest("hex")}`;
       const item = await mutate<
         Record<string, unknown>,
         Record<string, unknown>
@@ -3865,6 +3873,7 @@ export async function callModel(
   }) => void,
 ) {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  const mutationScopeId = crypto.randomUUID();
   if (!apiKey)
     throw new Error("OpenRouter is not configured for Spectra runs.");
   const textAttachments = attachments
@@ -5008,6 +5017,7 @@ export async function callModel(
               actorClerkId,
               call,
               {
+                mutationScopeId,
                 workspaceId:
                   contextRecord.workspace &&
                   typeof contextRecord.workspace === "object" &&

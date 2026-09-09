@@ -988,7 +988,9 @@ async function readWorkspaceContents(
     const threadId = ctx.db.normalizeId("spectraThreads", node.sourceId);
     const thread = threadId ? await ctx.db.get(threadId) : null;
     if (!thread || thread.status === "deleted") continue;
-    const run = thread.lastRunId ? await ctx.db.get(thread.lastRunId) : null;
+    const run = includeDetails && thread.lastRunId
+      ? await ctx.db.get(thread.lastRunId)
+      : null;
     items.push({
       ...base,
       artifact: null,

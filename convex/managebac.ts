@@ -3325,9 +3325,9 @@ export const recordsForPurpose = query({
         [...allowed].map((recordType) =>
           ctx.db
             .query("externalRecords")
-            .withIndex("by_integration_type", (q) =>
+            .withIndex("by_account_type", (q) =>
               q
-                .eq("integrationId", integration._id)
+                .eq("mappedAccountId", actor.accountId)
                 .eq("recordType", recordType),
             )
             .order("desc")
@@ -3349,9 +3349,9 @@ export const recordsForPurpose = query({
         ["class", "course", "membership"].map((recordType) =>
           ctx.db
             .query("externalRecords")
-            .withIndex("by_integration_type", (q) =>
+            .withIndex("by_account_type", (q) =>
               q
-                .eq("integrationId", integration._id)
+                .eq("mappedAccountId", actor.accountId)
                 .eq("recordType", recordType),
             )
             .take(500)
@@ -3530,9 +3530,9 @@ export const listMyClassCandidates = query({
         ["class", "course", "membership"].map((recordType) =>
           ctx.db
             .query("externalRecords")
-            .withIndex("by_integration_type", (q) =>
+            .withIndex("by_account_type", (q) =>
               q
-                .eq("integrationId", integration._id)
+                .eq("mappedAccountId", actor.accountId)
                 .eq("recordType", recordType),
             )
             .take(500)
@@ -3690,9 +3690,9 @@ export const materializeClassWorkspaces = mutation({
         ["class", "course", "membership"].map((recordType) =>
           ctx.db
             .query("externalRecords")
-            .withIndex("by_integration_type", (q) =>
+            .withIndex("by_account_type", (q) =>
               q
-                .eq("integrationId", integration._id)
+                .eq("mappedAccountId", actor.accountId)
                 .eq("recordType", recordType),
             )
             .take(500)

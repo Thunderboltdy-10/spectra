@@ -766,11 +766,27 @@ async function statusInstance(instanceId, environment) {
     return;
   }
   const state = await readRuntimeState(paths);
-  const running = Boolean(
+  const launcherRunning = Boolean(
     state?.launcherPid && processExists(state.launcherPid),
   );
+  const [convexName, webHealthText, gatewayHealthText] = await Promise.all([
+    fetchText(`http://127.0.0.1:${manifest.ports.convexCloud}/instance_name`),
+    fetchText(`http://localhost:${manifest.ports.web}/api/health`),
+    fetchText(`http://127.0.0.1:${manifest.ports.collaboration}/_spectra/health`),
+  ]);
+  const reportsReady = (value) => {
+    try {
+      return JSON.parse(value ?? "null")?.status === "ready";
+    } catch {
+      return false;
+    }
+  };
+  const backendReady = Boolean(convexName && convexName === state?.deploymentName);
+  const running = launcherRunning && backendReady &&
+    reportsReady(webHealthText) && reportsReady(gatewayHealthText);
+  const status = running ? "ready" : launcherRunning ? "not_ready" : "stopped";
   process.stdout.write(
-    `Local instance ${instanceId}: ${running ? "running" : "stopped"}\n` +
+    `Local instance ${instanceId}: ${status}\n` +
       `  App:    http://localhost:${manifest.ports.web}\n` +
       `  Convex: http://127.0.0.1:${manifest.ports.convexCloud}\n` +
       `  Env:    ${paths.appEnv}\n` +

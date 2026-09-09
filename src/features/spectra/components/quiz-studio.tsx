@@ -1695,7 +1695,7 @@ export function QuizStudio({
           }}
         />
       ) : null}
-      <div className="spectra-editor-body">
+      <div className="spectra-editor-body spectra-composer-clearance">
         {/* Publish state is a fact about this quiz, so it is stated rather than
             left to be inferred from which verb the primary happens to show.
             Editing a published quiz withdraws it: attempts are pinned to the

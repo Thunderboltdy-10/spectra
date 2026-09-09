@@ -11,6 +11,18 @@ const root = process.cwd();
 const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
 
 describe("P6.I1 UX debt closure", () => {
+  it("keeps quiz editor actions above the floating composer dock", () => {
+    const quiz = read("src/features/spectra/components/quiz-studio.tsx");
+    const appCss = read("src/styles/spectra-app.css");
+    expect(quiz).toContain(
+      '<div className="spectra-editor-body spectra-composer-clearance">',
+    );
+    expect(appCss).toContain(".spectra-composer-clearance {");
+    expect(appCss).toContain(
+      "padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 16px);",
+    );
+  });
+
   it("builds reload-stable shell URLs for work and workspace navigation", () => {
     expect(spectraShellHref({ surface: "library" })).toBe("/library");
     expect(

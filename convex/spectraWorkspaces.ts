@@ -678,6 +678,7 @@ export const permanentlyDelete = mutation({
         ctx.db.patch(thread._id, {
           workspaceId: undefined,
           updatedAt: Date.now(),
+          readSchemaVersion: 1,
         }),
       ),
       ...runs.map((run) =>

@@ -2133,7 +2133,17 @@ export const createPending = mutation({
         thread.schoolId === actor.schoolId &&
         !thread.artifactId
       ) {
-        await ctx.db.patch(thread._id, { artifactId, updatedAt: now });
+        await ctx.db.patch(thread._id, {
+          artifactId,
+          updatedAt: now,
+          readSchemaVersion: 1,
+        });
+        await ctx.db.patch(thread._id, {
+          contextArtifactIds: [
+            ...new Set([...(thread.contextArtifactIds ?? []), artifactId]),
+          ].slice(-8),
+          readSchemaVersion: 1,
+        });
       }
     }
     /* A pending artifact is placed at creation like any other, so a run that

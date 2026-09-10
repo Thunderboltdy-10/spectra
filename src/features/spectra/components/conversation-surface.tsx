@@ -44,16 +44,23 @@ import {
   clearSpectraRunAgent,
   getSpectraOperationConflict,
   getSpectraThread,
+  getSpectraThreadMessages,
+  getSpectraThreadRunTrace,
   getSpectraWorkspaces,
   postSpectra,
   resolveSpectraOperationConflict,
   submitSpectraAgentFeedback,
   type SpectraArtifact,
   type SpectraOperation,
+  type SpectraRun,
   type SpectraThreadDetail,
   type SpectraThreadTrace,
   type SpectraWorkspace,
 } from "../data/api";
+import { useQuery } from "convex/react";
+import type { Id } from "../../../../convex/_generated/dataModel";
+import { api } from "../../../../convex/_generated/api";
+import { useAuthedArgs } from "../data/use-authed-args";
 import { CommandBar } from "./command-bar";
 import { ResultCardStack } from "./result-card";
 import { workTypeMeta } from "./artifact-card";
@@ -97,6 +104,87 @@ function operationLabel(
   if (operation.type === "workspace.create")
     return `${proposed ? "Create" : "Created"} ${title ?? "workspace"}`;
   return operation.type.replaceAll(".", " ");
+}
+
+type TraceLoadState = {
+  trace?: SpectraThreadTrace;
+  loading: boolean;
+  error?: string;
+};
+
+type TraceFamily = "operations" | "cards" | "events";
+
+function mergeTracePage(
+  previous: SpectraThreadTrace | undefined,
+  page: Awaited<ReturnType<typeof getSpectraThreadRunTrace>>,
+  family: TraceFamily,
+  append: boolean,
+): SpectraThreadTrace {
+  return {
+    run: page.run,
+    operations:
+      family === "operations"
+        ? append
+          ? [...page.operations, ...(previous?.operations ?? [])]
+          : page.operations
+        : (previous?.operations ?? []),
+    cards:
+      family === "cards"
+        ? append
+          ? [...page.cards, ...(previous?.cards ?? [])]
+          : page.cards
+        : (previous?.cards ?? []),
+    events:
+      family === "events"
+        ? append
+          ? [...(previous?.events ?? []), ...page.events]
+          : page.events
+        : (previous?.events ?? []),
+    artifacts: page.artifacts.length
+      ? page.artifacts
+      : (previous?.artifacts ?? []),
+    eventPage: page.eventPage ?? previous?.eventPage,
+    operationPage: page.operationPage ?? previous?.operationPage,
+    cardPage: page.cardPage ?? previous?.cardPage,
+  };
+}
+
+function savedRunStatusCopy(run: SpectraRun | undefined) {
+  if (!run) return "Saved progress and results";
+  if (run.status === "awaiting_confirmation") return "Waiting for your approval";
+  if (run.status === "awaiting_resolution") return "Waiting for a conflict to be resolved";
+  if (run.status === "queued") return "Queued";
+  if (run.status === "running") return "Still running";
+  if (run.status === "completed") return "Completed result";
+  if (run.status === "cancelled") return "Run stopped";
+  return "Recovery details";
+}
+
+function SavedRunDisclosure({
+  run,
+  state,
+  onLoad,
+}: {
+  run?: SpectraRun;
+  state?: TraceLoadState;
+  onLoad: () => void;
+}) {
+  if (state?.trace) return null;
+  return (
+    <div className="mt-3 flex items-center gap-2 rounded-control bg-[var(--bg-secondary)] px-3 py-2">
+      <span className="min-w-0 flex-1 text-micro text-[var(--text-secondary)]">
+        {state?.error ?? savedRunStatusCopy(run)}
+      </span>
+      <button
+        type="button"
+        onClick={onLoad}
+        disabled={state?.loading}
+        className="shrink-0 rounded-chip px-2 py-1 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[var(--bg-hover)] disabled:opacity-60"
+      >
+        {state?.loading ? "Loading…" : state?.error ? "Try again" : "Show details"}
+      </button>
+    </div>
+  );
 }
 
 function messageAttachments(message: SpectraThreadDetail["messages"][number]) {
@@ -1728,14 +1816,178 @@ export function ConversationSurface({
   onChoice?: (choice: ConversationChoice) => Promise<void> | void;
   onRetryRun?: (runId: string) => Promise<unknown> | unknown;
 }) {
+  const observedThreadId = threadId ?? detail?.thread._id;
+  const observedActiveExecution = useQuery(
+    api.spectraThreads.getActiveExecution,
+    useAuthedArgs(
+      observedThreadId
+        ? { threadId: observedThreadId as Id<"spectraThreads"> }
+        : "skip",
+    ),
+  );
+  const renderedDetail = useMemo(() => {
+    if (!detail || observedActiveExecution === undefined) return detail;
+    return {
+      ...detail,
+      activeExecution: observedActiveExecution
+        ? { run: observedActiveExecution.run }
+        : null,
+    };
+  }, [detail, observedActiveExecution]);
+  const [traceStates, setTraceStates] = useState<Record<string, TraceLoadState>>({});
+  const traceRequestRef = useRef(new Map<string, number>());
+  useEffect(() => {
+    traceRequestRef.current.clear();
+    setTraceStates({});
+  }, [renderedDetail?.thread._id]);
+  const requestRunTrace = useCallback(
+    async (
+      runId: string,
+      options: {
+        family?: TraceFamily;
+        eventAfter?: number;
+        eventsCursor?: string;
+        operationsBefore?: string;
+        cardsBefore?: string;
+        skipOperations?: boolean;
+        skipCards?: boolean;
+        skipEvents?: boolean;
+        includeArtifacts?: boolean;
+      } = {},
+    ) => {
+      if (!observedThreadId) return;
+      const key = `${observedThreadId}:${runId}`;
+      const requestId = (traceRequestRef.current.get(key) ?? 0) + 1;
+      traceRequestRef.current.set(key, requestId);
+      const families: TraceFamily[] = options.family
+        ? [options.family]
+        : options.eventsCursor || options.operationsBefore || options.cardsBefore
+          ? [
+              ...(options.skipOperations ? [] : (["operations"] as const)),
+              ...(options.skipCards ? [] : (["cards"] as const)),
+              ...(options.skipEvents ? [] : (["events"] as const)),
+            ]
+          : ["operations", "cards", "events"];
+      if (!families.length) return;
+      setTraceStates((current) => ({
+        ...current,
+        [runId]: { ...current[runId], loading: true, error: undefined },
+      }));
+      try {
+        const pages = await Promise.all(
+          families.map(async (family) => ({
+            family,
+            page: await getSpectraThreadRunTrace(observedThreadId, runId, {
+              family,
+              eventAfter: family === "events" ? options.eventAfter : undefined,
+              eventsCursor: family === "events" ? options.eventsCursor : undefined,
+              operationsBefore:
+                family === "operations" ? options.operationsBefore : undefined,
+              cardsBefore: family === "cards" ? options.cardsBefore : undefined,
+              includeArtifacts:
+                options.includeArtifacts ??
+                (family === "operations" && !options.operationsBefore),
+            }),
+          })),
+        );
+        if (
+          traceRequestRef.current.get(key) !== requestId ||
+          (renderedDetail?.thread._id ?? observedThreadId) !== observedThreadId
+        )
+          return;
+        setTraceStates((current) => {
+          let trace = current[runId]?.trace;
+          for (const result of pages) {
+            const append =
+              result.family === "operations"
+                ? Boolean(options.operationsBefore)
+                : result.family === "cards"
+                  ? Boolean(options.cardsBefore)
+                  : Boolean(options.eventsCursor);
+            trace = mergeTracePage(trace, result.page, result.family, append);
+          }
+          return {
+            ...current,
+            [runId]: { loading: false, trace },
+          };
+        });
+      } catch (error) {
+        if (traceRequestRef.current.get(key) !== requestId) return;
+        setTraceStates((current) => ({
+          ...current,
+          [runId]: {
+            ...current[runId],
+            loading: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Could not load saved run details.",
+          },
+        }));
+      }
+    },
+    [observedThreadId, renderedDetail?.thread._id],
+  );
   const traceByRun = useMemo(
-    () =>
-      new Map((detail?.traces ?? []).map((trace) => [trace.run._id, trace])),
-    [detail],
+    () => {
+      const traces = new Map(
+        (renderedDetail?.traces ?? []).map((trace) => [trace.run._id, trace]),
+      );
+      for (const [runId, state] of Object.entries(traceStates))
+        if (state.trace) traces.set(runId, state.trace);
+      return traces;
+    },
+    [renderedDetail?.traces, traceStates],
   );
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+  const olderRequestRef = useRef(0);
+  const [olderMessages, setOlderMessages] = useState<
+    SpectraThreadDetail["messages"]
+  >([]);
+  const [olderPage, setOlderPage] = useState<
+    SpectraThreadDetail["messagePage"]
+  >();
+  useEffect(() => {
+    olderRequestRef.current += 1;
+    setOlderMessages([]);
+    setOlderPage(undefined);
+    setOlderError(null);
+  }, [renderedDetail?.thread._id]);
+  const displayedMessages = useMemo(() => {
+    const rows = [...olderMessages, ...(renderedDetail?.messages ?? [])];
+    return [...new Map(rows.map((message) => [message._id, message])).values()];
+  }, [renderedDetail?.messages, olderMessages]);
+  const loadOlder = useCallback(async () => {
+    const pageState = olderPage ?? renderedDetail?.messagePage;
+    if (!renderedDetail || !pageState?.hasOlder || loadingOlder) return;
+    const before = pageState.olderBefore;
+    if (before === undefined) return;
+    const requestedThreadId = renderedDetail.thread._id;
+    const requestId = ++olderRequestRef.current;
+    const beforeHeight = scrollRef.current?.scrollHeight ?? 0;
+    const beforeTop = scrollRef.current?.scrollTop ?? 0;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const page = await getSpectraThreadMessages(requestedThreadId, before);
+      if (olderRequestRef.current !== requestId || renderedDetail.thread._id !== requestedThreadId) return;
+      setOlderMessages((current) => [...page.messages, ...current]);
+      setOlderPage({ hasOlder: page.hasOlder, olderBefore: page.olderBefore });
+      requestAnimationFrame(() => {
+        if (olderRequestRef.current !== requestId || !scrollRef.current) return;
+        scrollRef.current.scrollTop = beforeTop + (scrollRef.current.scrollHeight - beforeHeight);
+      });
+    } catch (error) {
+      if (olderRequestRef.current === requestId)
+        setOlderError(error instanceof Error ? error.message : "Could not load older messages.");
+    } finally {
+      if (olderRequestRef.current === requestId) setLoadingOlder(false);
+    }
+  }, [loadingOlder, olderPage, renderedDetail]);
   const persistedUserRunIds = useMemo(
     () =>
       new Set(
@@ -1756,13 +2008,13 @@ export function ConversationSurface({
   );
   const unresolvedTraces = useMemo(
     () =>
-      (detail?.traces ?? []).filter(
+      [...traceByRun.values()].filter(
         (trace) =>
           !persistedUserRunIds.has(trace.run._id) &&
           !persistedAssistantRunIds.has(trace.run._id) &&
           trace.run.status !== "completed",
       ),
-    [detail, persistedAssistantRunIds, persistedUserRunIds],
+    [persistedAssistantRunIds, persistedUserRunIds, traceByRun],
   );
   useEffect(() => {
     if (!following) return;
@@ -1780,9 +2032,9 @@ export function ConversationSurface({
       cancelAnimationFrame(secondFrame);
     };
   }, [
-    detail?.messages.length,
-    detail?.traces.length,
-    detail?.thread._id,
+    displayedMessages.length,
+    traceByRun.size,
+    renderedDetail?.thread._id,
     following,
     liveExchange?.content,
   ]);
@@ -1799,12 +2051,12 @@ export function ConversationSurface({
     });
     observer.observe(contentRef.current);
     return () => observer.disconnect();
-  }, [detail?.thread._id, following]);
-  useEffect(() => setFollowing(true), [detail?.thread._id]);
+  }, [renderedDetail?.thread._id, following]);
+  useEffect(() => setFollowing(true), [renderedDetail?.thread._id]);
   const messageMeta = useCallback(
     (message: NonNullable<SpectraThreadDetail>["messages"][number]) => {
       return [
-        message.role === "user" ? (detail?.viewerName ?? "You") : "Spectra",
+        message.role === "user" ? (renderedDetail?.viewerName ?? "You") : "Spectra",
         new Intl.DateTimeFormat(undefined, {
           hour: "numeric",
           minute: "2-digit",
@@ -1813,7 +2065,7 @@ export function ConversationSurface({
         .filter(Boolean)
         .join(" · ");
     },
-    [detail?.viewerName],
+    [renderedDetail?.viewerName],
   );
   return (
     <div className="spectra-conversation relative flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
@@ -1846,8 +2098,21 @@ export function ConversationSurface({
             </div>
           ) : null}
           {!loading && loadError ? loadError : null}
-          {!loading && !detail && !liveExchange ? empty : null}
-          {detail?.messages
+          {!loading && !renderedDetail && !liveExchange ? empty : null}
+          {(olderPage ?? renderedDetail?.messagePage)?.hasOlder ? (
+            <div className="mb-6 flex justify-center">
+              <button
+                type="button"
+                onClick={() => void loadOlder()}
+                disabled={loadingOlder}
+                className="rounded-control border border-[var(--border-default)] px-3 py-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-60"
+              >
+                {loadingOlder ? "Loading older messages…" : olderError ? "Retry older messages" : "Load older messages"}
+              </button>
+              {olderError ? <span role="status" className="ml-2 text-micro text-[var(--danger)]">{olderError}</span> : null}
+            </div>
+          ) : null}
+          {displayedMessages
             .filter(
               (message) =>
                 message.role === "user" || message.role === "assistant",
@@ -1856,6 +2121,20 @@ export function ConversationSurface({
               const trace = message.runId
                 ? traceByRun.get(message.runId)
                 : undefined;
+              const traceState = message.runId
+                ? traceStates[message.runId]
+                : undefined;
+              const activeRun =
+                message.runId &&
+                renderedDetail?.activeExecution?.run._id === message.runId
+                  ? renderedDetail.activeExecution.run
+                  : undefined;
+              const shouldOfferTrace = Boolean(
+                message.runId &&
+                  !trace &&
+                  (message.role === "assistant" ||
+                    !persistedAssistantRunIds.has(message.runId)),
+              );
               const affectedWorkspaceIds = trace
                 ? [
                     ...new Set(
@@ -1903,6 +2182,13 @@ export function ConversationSurface({
                         <div className="mt-1.5 text-right text-micro text-[var(--text-tertiary)]">
                           {messageMeta(message)}
                         </div>
+                        {shouldOfferTrace && message.runId ? (
+                          <SavedRunDisclosure
+                            run={activeRun}
+                            state={traceState}
+                            onLoad={() => void requestRunTrace(message.runId!)}
+                          />
+                        ) : null}
                       </div>
                       {trace &&
                       trace.run.status === "failed" &&
@@ -1937,6 +2223,13 @@ export function ConversationSurface({
                           !compact && "sm:text-subhead",
                         )}
                       />
+                      {shouldOfferTrace && message.runId ? (
+                        <SavedRunDisclosure
+                          run={activeRun}
+                          state={traceState}
+                          onLoad={() => void requestRunTrace(message.runId!)}
+                        />
+                      ) : null}
                       {(() => {
                         const choices = messageChoices(
                           message,
@@ -2010,25 +2303,9 @@ export function ConversationSurface({
                           />
                         </>
                       ) : null}
-                      {trace?.cards.some((card) =>
-                        card.actions.some(
-                          (action) =>
-                            action.key === "confirm" ||
-                            action.key === "cancel" ||
-                            action.key === "reject",
-                        ),
-                      ) ? (
+                      {trace?.cards.length ? (
                         <ResultCardStack
-                          cards={trace.cards
-                            .filter((card) =>
-                              card.actions.some(
-                                (action) =>
-                                  action.key === "confirm" ||
-                                  action.key === "cancel" ||
-                                  action.key === "reject",
-                              ),
-                            )
-                            .map((card) => ({
+                          cards={trace.cards.map((card) => ({
                               id: card._id,
                               runId: card.runId,
                               status: card.status,
@@ -2044,6 +2321,35 @@ export function ConversationSurface({
                           onAction={onCardAction}
                           onRevise={onCardRevise}
                         />
+                      ) : null}
+                      {trace &&
+                      (trace.eventPage?.hasMore ||
+                        trace.operationPage?.hasMore ||
+                        trace.cardPage?.hasMore) &&
+                      message.runId ? (
+                        <button
+                          type="button"
+                          disabled={traceState?.loading}
+                          onClick={() =>
+                            void requestRunTrace(message.runId!, {
+                              operationsBefore: trace.operationPage?.hasMore
+                                ? trace.operationPage.before ?? undefined
+                                : undefined,
+                              cardsBefore: trace.cardPage?.hasMore
+                                ? trace.cardPage.before ?? undefined
+                                : undefined,
+                              eventsCursor: trace.eventPage?.hasMore
+                                ? trace.eventPage.nextCursor ?? undefined
+                                : undefined,
+                              skipOperations: !trace.operationPage?.hasMore,
+                              skipCards: !trace.cardPage?.hasMore,
+                              skipEvents: !trace.eventPage?.hasMore,
+                            })
+                          }
+                          className="mt-3 rounded-chip px-2.5 py-1 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-60"
+                        >
+                          {traceState?.loading ? "Loading run history…" : "Load more run history"}
+                        </button>
                       ) : null}
                       {trace &&
                       isSettledAiRunStatus(trace.run.status) &&

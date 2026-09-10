@@ -369,6 +369,7 @@ export const beginRun = mutation({
         await ctx.db.patch(thread._id, {
           artifactId: derivedArtifact._id,
           updatedAt: Date.now(),
+          readSchemaVersion: 1,
         });
         thread = { ...thread, artifactId: derivedArtifact._id };
       }
@@ -458,6 +459,7 @@ export const beginRun = mutation({
         artifactId: effectiveArtifactId,
         status: "active",
         messageCount: 0,
+        readSchemaVersion: 1,
         createdAt: now,
         updatedAt: now,
       });
@@ -520,6 +522,12 @@ export const beginRun = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    const currentMessageCount =
+      thread?.messageCount ??
+      (await ctx.db
+        .query("spectraMessages")
+        .withIndex("by_thread", (q) => q.eq("threadId", threadId))
+        .collect()).length;
     await ctx.db.insert("spectraMessages", {
       threadId,
       schoolId: actor.schoolId,
@@ -529,9 +537,19 @@ export const beginRun = mutation({
       clientMessageId: `user:${runId}`,
       metadata: args.messageMetadata,
       createdAt: now,
+      ordinal: currentMessageCount + 1,
     });
     await ctx.db.patch(threadId, {
       messageCount: (thread?.messageCount ?? 0) + 1,
+      messageCount: currentMessageCount + 1,
+      previewText: cleanPrompt.replace(/\s+/g, " ").trim().slice(0, 240),
+      contextWorkspaceIds: workspaceId
+        ? [...new Set([...(thread?.contextWorkspaceIds ?? []), workspaceId])].slice(-8)
+        : thread?.contextWorkspaceIds,
+      contextArtifactIds: effectiveArtifactId
+        ? [...new Set([...(thread?.contextArtifactIds ?? []), effectiveArtifactId])].slice(-8)
+        : thread?.contextArtifactIds,
+      readSchemaVersion: 1,
       lastMessageAt: now,
       lastRunId: runId,
       updatedAt: now,
@@ -2429,6 +2447,7 @@ export const setAgentRouting = mutation({
         retainedAgentId: artifact._id,
         retainedAgentVersionId: release.versionId,
         updatedAt: now,
+        readSchemaVersion: 1,
       });
     return {
       agentId: artifact._id,
@@ -2455,6 +2474,7 @@ export const clearRetainedAgent = mutation({
       retainedAgentId: undefined,
       retainedAgentVersionId: undefined,
       updatedAt: Date.now(),
+      readSchemaVersion: 1,
     });
     return { cleared: true, threadId: thread._id };
   },

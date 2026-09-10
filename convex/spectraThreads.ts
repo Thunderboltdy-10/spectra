@@ -1,7 +1,7 @@
 import { query } from "./_generated/server";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
 import {
   ensureThreadWorkspacePlacement,
@@ -28,6 +28,130 @@ const vRole = v.union(
   v.literal("system"),
   v.literal("tool"),
 );
+
+const THREAD_READ_SCHEMA_VERSION = 1;
+const INITIAL_MESSAGE_LIMIT = 32;
+const MESSAGE_PAGE_LIMIT = 48;
+const TRACE_CHILD_LIMIT = 40;
+const LIST_CURSOR_VERSION = 1;
+const MESSAGE_CURSOR_VERSION = 1;
+const TRACE_CURSOR_VERSION = 1;
+const BACKFILL_CURSOR_VERSION = 1;
+
+function encodeCursor(value: unknown) {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+function decodeCursor<T>(value: string | undefined): T | undefined {
+  if (!value) return undefined;
+  try { return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as T; } catch { return undefined; }
+}
+
+function requireCursor<T>(value: string, kind: string): T {
+  const decoded = decodeCursor<T>(value);
+  if (!decoded) throw new Error(`This ${kind} cursor is invalid or expired. Reload the view and try again.`);
+  return decoded;
+}
+
+type ThreadListCursor = {
+  version: typeof LIST_CURSOR_VERSION;
+  kind: "thread-list";
+  ownerAccountId: string;
+  schoolId: string;
+  includeArchived: boolean;
+  status: "active" | "archived";
+  cursor: string | null;
+};
+
+type MessageCursor = {
+  version: typeof MESSAGE_CURSOR_VERSION;
+  kind: "thread-messages";
+  threadId: string;
+  order: "desc";
+  cursor: string;
+};
+
+type TraceCursor = {
+  version: typeof TRACE_CURSOR_VERSION;
+  kind: "thread-trace";
+  runId: string;
+  family: "operations" | "cards" | "events";
+  order: "desc" | "asc";
+  cursor: string;
+  after?: number;
+};
+
+type BackfillCursor = {
+  version: typeof BACKFILL_CURSOR_VERSION;
+  kind: "thread-read-backfill";
+  cursor: string;
+};
+
+function assertThreadListCursor(
+  value: string | undefined,
+  actor: { _id: Id<"accounts">; schoolId: Id<"schools"> },
+  includeArchived: boolean,
+) {
+  if (!value) return null;
+  const cursor = requireCursor<ThreadListCursor>(value, "thread list");
+  if (
+    cursor.version !== LIST_CURSOR_VERSION ||
+    cursor.kind !== "thread-list" ||
+    cursor.ownerAccountId !== String(actor._id) ||
+    cursor.schoolId !== String(actor.schoolId) ||
+    cursor.includeArchived !== includeArchived ||
+    (cursor.status !== "active" && cursor.status !== "archived") ||
+    typeof cursor.cursor !== "string"
+  )
+    throw new Error("This thread list cursor belongs to another query. Reload the list and try again.");
+  return cursor;
+}
+
+function childCursor(
+  runId: Id<"spectraAiRuns">,
+  family: TraceCursor["family"],
+  order: TraceCursor["order"],
+  cursor: string,
+  after?: number,
+) {
+  return encodeCursor({
+    version: TRACE_CURSOR_VERSION,
+    kind: "thread-trace",
+    runId: String(runId),
+    family,
+    order,
+    cursor,
+    ...(after === undefined ? {} : { after }),
+  });
+}
+
+function previewContent(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 240);
+}
+
+function compactThread(thread: Doc<"spectraThreads">) {
+  return {
+    _id: thread._id,
+    _creationTime: thread._creationTime,
+    title: thread.title,
+    summaryShort: thread.summaryShort,
+    previewText: thread.previewText,
+    origin: thread.origin,
+    workspaceId: thread.workspaceId,
+    artifactId: thread.artifactId,
+    contextWorkspaceIds: thread.contextWorkspaceIds,
+    contextArtifactIds: thread.contextArtifactIds,
+    pinned: thread.pinned,
+    messageCount: thread.messageCount,
+    lastRunId: thread.lastRunId,
+    status: thread.status,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    lastMessageAt: thread.lastMessageAt,
+    readSchemaVersion: thread.readSchemaVersion,
+  };
+}
+
 
 function cleanTitle(value: string) {
   const words = value
@@ -238,6 +362,7 @@ export const appendMessage = mutation({
             lastMessageAt: now,
             lastRunId: args.runId,
             updatedAt: now,
+            readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
           });
           await ctx.db.patch(args.runId, {
             dockSummary: {
@@ -249,6 +374,12 @@ export const appendMessage = mutation({
         }
       }
     }
+    const currentMessageCount =
+      thread.messageCount ??
+      (await ctx.db
+        .query("spectraMessages")
+        .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
+        .collect()).length;
     const now = Date.now();
     const messageId = await ctx.db.insert("spectraMessages", {
       threadId: args.threadId,
@@ -259,18 +390,21 @@ export const appendMessage = mutation({
       clientMessageId: args.clientMessageId,
       metadata: args.metadata,
       createdAt: now,
+      ordinal: currentMessageCount + 1,
     });
-    const firstUserMessage =
-      args.role === "user" && (thread.messageCount ?? 0) === 0;
+    const firstUserMessage = args.role === "user" && currentMessageCount === 0;
     await ctx.db.patch(args.threadId, {
       title:
         firstUserMessage && thread.title === "New thread"
           ? cleanTitle(content)
           : thread.title,
       messageCount: (thread.messageCount ?? 0) + 1,
+      messageCount: currentMessageCount + 1,
+      previewText: previewContent(content),
       lastMessageAt: now,
       lastRunId: args.runId ?? thread.lastRunId,
       updatedAt: now,
+      readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
     });
     if (args.role === "assistant" && args.runId) {
       const run = await ctx.db.get(args.runId);
@@ -367,86 +501,82 @@ export const list = query({
   args: {
     includeArchived: v.optional(v.boolean()),
     limit: v.optional(v.number()),
+    cursor: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
     const limit = Math.max(1, Math.min(args.limit ?? 80, 200));
-    const rows = await ctx.db
+    const includeArchived = args.includeArchived === true;
+    const requestedCursor = assertThreadListCursor(args.cursor, actor, includeArchived);
+    const status = requestedCursor?.status ?? "active";
+    const convexCursor = requestedCursor?.cursor ?? null;
+    const page = await ctx.db
       .query("spectraThreads")
-      .withIndex("by_account_status", (q) =>
-        q.eq("ownerAccountId", actor._id).eq("status", "active"),
+      .withIndex("by_account_school_status_updated", (q) =>
+        q
+          .eq("ownerAccountId", actor._id)
+          .eq("schoolId", actor.schoolId)
+          .eq("status", status),
       )
       .order("desc")
-      .take(limit * 2);
-    const archived = args.includeArchived
-      ? await ctx.db
-          .query("spectraThreads")
-          .withIndex("by_account_status", (q) =>
-            q.eq("ownerAccountId", actor._id).eq("status", "archived"),
-          )
-          .order("desc")
-          .take(limit)
-      : [];
-    const visible = [...rows, ...archived]
-      .filter((thread) => thread.schoolId === actor.schoolId)
-      .sort(
-        (a, b) =>
-          (b.lastMessageAt ?? b.updatedAt) - (a.lastMessageAt ?? a.updatedAt),
-      )
-      .slice(0, limit);
-    // Threads can touch more than their primary context. Derive compact
-    // context labels from runs and artifacts created by the conversation so
-    // Library, Workspace and Chat can all point back to the same thread.
-    return await Promise.all(
-      visible.map(async (thread) => {
-        const runs = await ctx.db
-          .query("spectraAiRuns")
-          .withIndex("by_thread", (q) => q.eq("threadId", thread._id))
-          .order("desc")
-          .take(40);
-        const workspaceIds = new Set<string>();
-        const artifactIds = new Set<string>();
-        if (thread.workspaceId) workspaceIds.add(String(thread.workspaceId));
-        if (thread.artifactId) artifactIds.add(String(thread.artifactId));
-        for (const run of runs) {
-          if (run.workspaceId) workspaceIds.add(String(run.workspaceId));
-          if (run.artifactId) artifactIds.add(String(run.artifactId));
-        }
-        const createdArtifacts = await ctx.db
-          .query("spectraArtifacts")
-          .withIndex("by_created_thread", (q) =>
-            q.eq("createdFrom.threadId", thread._id),
-          )
-          .order("desc")
-          .take(20);
-        for (const artifact of createdArtifacts) artifactIds.add(String(artifact._id));
-        const [workspaces, artifacts] = await Promise.all([
-          Promise.all(
-            [...workspaceIds].map(async (workspaceId) => {
-              const workspace = await ctx.db.get(workspaceId as Id<"spectraWorkspaces">);
-              return workspace && workspace.status === "active"
-                ? { id: String(workspace._id), title: workspace.title }
-                : null;
-            }),
-          ),
-          Promise.all(
-            [...artifactIds].map(async (artifactId) => {
-              const artifact = await ctx.db.get(artifactId as Id<"spectraArtifacts">);
-              return artifact && artifact.status !== "deleted"
-                ? { id: String(artifact._id), title: artifact.title }
-                : null;
-            }),
-          ),
-        ]);
-        return {
-          ...thread,
-          contexts: {
-            workspaces: workspaces.filter(Boolean),
-            artifacts: artifacts.filter(Boolean),
-          },
-        };
-      }),
-    );
+      .paginate({ cursor: convexCursor, numItems: limit });
+    const visible = page.page;
+    const nextCursor = page.isDone
+      ? includeArchived && status === "active"
+        ? encodeCursor({
+            version: LIST_CURSOR_VERSION,
+            kind: "thread-list",
+            ownerAccountId: String(actor._id),
+            schoolId: String(actor.schoolId),
+            includeArchived,
+            status: "archived",
+            cursor: null,
+          } satisfies ThreadListCursor)
+        : null
+      : encodeCursor({
+          version: LIST_CURSOR_VERSION,
+          kind: "thread-list",
+          ownerAccountId: String(actor._id),
+          schoolId: String(actor.schoolId),
+          includeArchived,
+          status,
+          cursor: page.continueCursor,
+        } satisfies ThreadListCursor);
+    const workspaceIds = [...new Set(visible.flatMap((thread) =>
+      [thread.workspaceId, ...(thread.contextWorkspaceIds ?? [])].filter(Boolean).map(String),
+    ))].slice(0, limit * 8);
+    const artifactIds = [...new Set(visible.flatMap((thread) =>
+      [thread.artifactId, ...(thread.contextArtifactIds ?? [])].filter(Boolean).map(String),
+    ))].slice(0, limit * 8);
+    const [workspaces, artifacts] = await Promise.all([
+      Promise.all(workspaceIds.map(async (id) => {
+        try {
+          const access = await requireWorkspaceCapability(ctx, id as Id<"spectraWorkspaces">, "read");
+          return access.workspace.status === "active" ? { id, title: access.workspace.title } : null;
+        } catch { return null; }
+      })),
+      Promise.all(artifactIds.map(async (id) => {
+        try {
+          const access = await requireArtifactCapability(ctx, id as Id<"spectraArtifacts">, "read");
+          return access.artifact.status !== "deleted" ? { id, title: access.artifact.title } : null;
+        } catch { return null; }
+      })),
+    ]);
+    const workspaceById = new Map(workspaces.filter(Boolean).map((row) => [row!.id, row!]));
+    const artifactById = new Map(artifacts.filter(Boolean).map((row) => [row!.id, row!]));
+    return {
+      threads: visible.map((thread) => ({
+        ...compactThread(thread),
+        contexts: {
+          workspaces: [thread.workspaceId, ...(thread.contextWorkspaceIds ?? [])]
+            .filter(Boolean).map(String).map((id) => workspaceById.get(id)).filter(Boolean),
+          artifacts: [thread.artifactId, ...(thread.contextArtifactIds ?? [])]
+            .filter(Boolean).map(String).map((id) => artifactById.get(id)).filter(Boolean),
+        },
+      })),
+      hasMore: nextCursor !== null,
+      nextCursor,
+    };
   },
 });
 
@@ -469,71 +599,375 @@ export const get = query({
             artifact.ownerAccountId === actor._id &&
             artifact.status !== "deleted",
         );
-    const messages = await ctx.db
+    const messagePage = await ctx.db
       .query("spectraMessages")
       .withIndex("by_thread_created", (q) => q.eq("threadId", args.threadId))
       .order("desc")
-      .take(160);
-    messages.reverse();
-    const runIds = [
-      ...new Set(
-        messages.flatMap((message) => (message.runId ? [message.runId] : [])),
-      ),
-    ];
-    const traces = await Promise.all(
-      runIds.map(async (runId) => {
-        const run = await ctx.db.get(runId);
-        if (!run) return null;
-        const [operations, cards, events] = await Promise.all([
-          ctx.db
-            .query("spectraOperations")
-            .withIndex("by_run", (q) => q.eq("runId", runId))
-            .collect(),
-          ctx.db
-            .query("spectraResultCards")
-            .withIndex("by_run", (q) => q.eq("runId", runId))
-            .collect(),
-          ctx.db
-            .query("spectraRunEvents")
-            .withIndex("by_run_sequence", (q) => q.eq("runId", runId))
-            .collect(),
-        ]);
-        const artifactIds = [
-          ...new Set(
-            operations
-              .flatMap((operation) => operation.affected)
-              .filter((affected) => affected.type === "artifact")
-              .map((affected) => affected.id),
-          ),
-        ];
-        const artifacts = (
-          await Promise.all(
-            artifactIds.map(async (id) => {
-              const artifactId = ctx.db.normalizeId("spectraArtifacts", id);
-              const artifact = artifactId ? await ctx.db.get(artifactId) : null;
-              return artifact &&
-                artifact.ownerAccountId === thread.ownerAccountId
-                ? artifact
-                : null;
-            }),
-          )
-        ).filter(Boolean);
-        return {
-          run,
-          operations,
-          cards,
-          events: events.sort((a, b) => a.sequence - b.sequence),
-          artifacts,
-        };
-      }),
-    );
+      .paginate({ cursor: null, numItems: INITIAL_MESSAGE_LIMIT });
+    const messages = [...messagePage.page].reverse();
+    const activeRun = thread.lastRunId ? await ctx.db.get(thread.lastRunId) : null;
     return {
       thread: derivedArtifact
         ? { ...thread, artifactId: derivedArtifact._id }
         : thread,
       messages,
-      traces: traces.filter(Boolean),
+      // Historical trace families are fetched on demand through getRunTrace.
+      // Keep the field for old clients during the migration window.
+      traces: [],
+      messagePage: {
+        hasOlder: !messagePage.isDone,
+        olderBefore: messagePage.isDone
+          ? undefined
+          : encodeCursor({
+              version: MESSAGE_CURSOR_VERSION,
+              kind: "thread-messages",
+              threadId: String(args.threadId),
+              order: "desc",
+              cursor: messagePage.continueCursor,
+            } satisfies MessageCursor),
+      },
+      tracePage: { limit: TRACE_CHILD_LIMIT },
+      activeExecution:
+        activeRun &&
+        activeRun.ownerAccountId === actor._id &&
+        activeRun.schoolId === actor.schoolId &&
+        ["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(activeRun.status)
+          ? { run: activeRun }
+          : null,
       viewerName: actor.name,
+    };
+  },
+});
+
+export const getSummary = query({
+  args: { threadId: v.id("spectraThreads") },
+  handler: async (ctx, args) => {
+    const { thread } = await requireOwnedThread(ctx, args.threadId);
+    return { thread: compactThread(thread) };
+  },
+});
+
+export const getActiveExecution = query({
+  args: { threadId: v.id("spectraThreads") },
+  handler: async (ctx, args) => {
+    const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
+    if (!thread.lastRunId) return null;
+    const run = await ctx.db.get(thread.lastRunId);
+    if (
+      !run ||
+      run.threadId !== thread._id ||
+      run.ownerAccountId !== actor._id ||
+      run.schoolId !== actor.schoolId ||
+      !["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(run.status)
+    )
+      return null;
+    return {
+      run,
+    };
+  },
+});
+
+export const backfillReadMetadata = internalMutation({
+  args: { limit: v.optional(v.number()), cursor: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const limit = Math.max(1, Math.min(args.limit ?? 50, 100));
+    const cursor = args.cursor
+      ? requireCursor<BackfillCursor>(args.cursor, "thread metadata")
+      : null;
+    if (
+      cursor &&
+      (cursor.version !== BACKFILL_CURSOR_VERSION ||
+        cursor.kind !== "thread-read-backfill")
+    )
+      throw new Error("This thread metadata cursor belongs to another migration.");
+    const page = await ctx.db
+      .query("spectraThreads")
+      .order("asc")
+      .paginate({ cursor: cursor?.cursor ?? null, numItems: limit });
+    let updated = 0;
+    for (const thread of page.page) {
+      const [lastMessage, runs, created] = await Promise.all([
+        ctx.db
+          .query("spectraMessages")
+          .withIndex("by_thread_created", (q) => q.eq("threadId", thread._id))
+          .order("desc")
+          .first(),
+        ctx.db
+          .query("spectraAiRuns")
+          .withIndex("by_thread", (q) => q.eq("threadId", thread._id))
+          .order("desc")
+          .take(40),
+        ctx.db
+          .query("spectraArtifacts")
+          .withIndex("by_created_thread", (q) =>
+            q.eq("createdFrom.threadId", thread._id),
+          )
+          .order("desc")
+          .take(20),
+      ]);
+      const workspaceIds = new Set<Id<"spectraWorkspaces">>();
+      const artifactIds = new Set<Id<"spectraArtifacts">>();
+      if (thread.workspaceId) workspaceIds.add(thread.workspaceId);
+      if (thread.artifactId) artifactIds.add(thread.artifactId);
+      for (const run of runs) {
+        if (run.workspaceId) workspaceIds.add(run.workspaceId);
+        if (run.artifactId) artifactIds.add(run.artifactId);
+      }
+      for (const artifact of created) artifactIds.add(artifact._id);
+      const patch: Partial<Doc<"spectraThreads">> = {
+        previewText: lastMessage ? previewContent(lastMessage.content) : thread.previewText,
+        contextWorkspaceIds: [...workspaceIds].slice(-8),
+        contextArtifactIds: [...artifactIds].slice(-8),
+        lastMessageAt: lastMessage?.createdAt ?? thread.lastMessageAt,
+        lastRunId: thread.lastRunId ?? runs[0]?._id,
+        readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
+      };
+      if (thread.messageCount === undefined) {
+        patch.messageCount = await ctx.db
+          .query("spectraMessages")
+          .withIndex("by_thread", (q) => q.eq("threadId", thread._id))
+          .collect()
+          .then((messages) => messages.length);
+      }
+      await ctx.db.patch(thread._id, patch);
+      updated += 1;
+    }
+    const nextCursor = page.isDone
+      ? null
+      : encodeCursor({
+          version: BACKFILL_CURSOR_VERSION,
+          kind: "thread-read-backfill",
+          cursor: page.continueCursor,
+        } satisfies BackfillCursor);
+    return {
+      scanned: page.page.length,
+      updated,
+      complete: page.isDone,
+      nextCursor,
+    };
+  },
+});
+
+export const listMessages = query({
+  args: {
+    threadId: v.id("spectraThreads"),
+    before: v.optional(v.union(v.string(), v.number())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwnedThread(ctx, args.threadId);
+    const limit = Math.max(1, Math.min(args.limit ?? MESSAGE_PAGE_LIMIT, 80));
+    if (typeof args.before === "number")
+      throw new Error("This older message cursor is from an older client. Reload the conversation to continue safely.");
+    const cursor = args.before
+      ? requireCursor<MessageCursor>(args.before, "message history")
+      : null;
+    if (
+      cursor &&
+      (cursor.version !== MESSAGE_CURSOR_VERSION ||
+        cursor.kind !== "thread-messages" ||
+        cursor.threadId !== String(args.threadId) ||
+        cursor.order !== "desc")
+    )
+      throw new Error("This message cursor belongs to another conversation. Reload the conversation and try again.");
+    const page = await ctx.db
+      .query("spectraMessages")
+      .withIndex("by_thread_created", (q) => q.eq("threadId", args.threadId))
+      .order("desc")
+      .paginate({ cursor: cursor?.cursor ?? null, numItems: limit });
+    const messages = [...page.page].reverse();
+    return {
+      messages,
+      hasOlder: !page.isDone,
+      olderBefore: page.isDone
+        ? undefined
+        : encodeCursor({
+            version: MESSAGE_CURSOR_VERSION,
+            kind: "thread-messages",
+            threadId: String(args.threadId),
+            order: "desc",
+            cursor: page.continueCursor,
+          } satisfies MessageCursor),
+      nextCursor: page.isDone
+        ? null
+        : encodeCursor({
+            version: MESSAGE_CURSOR_VERSION,
+            kind: "thread-messages",
+            threadId: String(args.threadId),
+            order: "desc",
+            cursor: page.continueCursor,
+          } satisfies MessageCursor),
+    };
+  },
+});
+
+export const getRunTrace = query({
+  args: {
+    threadId: v.id("spectraThreads"),
+    runId: v.id("spectraAiRuns"),
+    family: v.optional(
+      v.union(v.literal("operations"), v.literal("cards"), v.literal("events")),
+    ),
+    eventAfter: v.optional(v.union(v.string(), v.number())),
+    operationsBefore: v.optional(v.string()),
+    cardsBefore: v.optional(v.string()),
+    eventsCursor: v.optional(v.string()),
+    skipOperations: v.optional(v.boolean()),
+    skipCards: v.optional(v.boolean()),
+    skipEvents: v.optional(v.boolean()),
+    includeArtifacts: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
+    const run = await ctx.db.get(args.runId);
+    if (
+      !run ||
+      run.threadId !== thread._id ||
+      run.ownerAccountId !== thread.ownerAccountId ||
+      run.schoolId !== actor.schoolId
+    )
+      throw new Error("AI run not found");
+    const limit = Math.max(1, Math.min(args.limit ?? TRACE_CHILD_LIMIT, 100));
+    const family =
+      args.family ??
+      (args.operationsBefore ? "operations" : args.cardsBefore ? "cards" : "events");
+    if (
+      (family === "operations" && args.skipOperations) ||
+      (family === "cards" && args.skipCards) ||
+      (family === "events" && args.skipEvents)
+    )
+      throw new Error("This run history request skipped its selected family.");
+    if (
+      (args.operationsBefore && family !== "operations") ||
+      (args.cardsBefore && family !== "cards") ||
+      (args.eventsCursor && family !== "events")
+    )
+      throw new Error("This run history cursor selected the wrong family. Reopen the run details.");
+    const operationCursor = family === "operations" && args.operationsBefore
+      ? requireCursor<TraceCursor>(args.operationsBefore, "operation history")
+      : null;
+    const cardCursor = family === "cards" && args.cardsBefore
+      ? requireCursor<TraceCursor>(args.cardsBefore, "result history")
+      : null;
+    const eventCursor = family === "events" && args.eventsCursor
+      ? requireCursor<TraceCursor>(args.eventsCursor, "run progress")
+      : null;
+    if (
+      (operationCursor &&
+        (operationCursor.version !== TRACE_CURSOR_VERSION ||
+          operationCursor.kind !== "thread-trace" ||
+          operationCursor.runId !== String(run._id) ||
+          operationCursor.family !== "operations" ||
+          operationCursor.order !== "desc")) ||
+      (cardCursor &&
+        (cardCursor.version !== TRACE_CURSOR_VERSION ||
+          cardCursor.kind !== "thread-trace" ||
+          cardCursor.runId !== String(run._id) ||
+          cardCursor.family !== "cards" ||
+          cardCursor.order !== "desc")) ||
+      (eventCursor &&
+        (eventCursor.version !== TRACE_CURSOR_VERSION ||
+          eventCursor.kind !== "thread-trace" ||
+          eventCursor.runId !== String(run._id) ||
+          eventCursor.family !== "events" ||
+          eventCursor.order !== "asc" ||
+          typeof eventCursor.after !== "number"))
+    )
+      throw new Error("This run history cursor belongs to another run. Reopen the run details and try again.");
+    if (typeof args.eventAfter === "string" && !args.eventsCursor)
+      throw new Error("This run progress cursor is from an older client. Reopen the run details to continue safely.");
+    const eventAfter = typeof args.eventAfter === "number" ? args.eventAfter : 0;
+    const operationPage = family === "operations"
+      ? await ctx.db
+          .query("spectraOperations")
+          .withIndex("by_run", (q) => q.eq("runId", run._id))
+          .order("desc")
+          .paginate({ cursor: operationCursor?.cursor ?? null, numItems: limit })
+      : null;
+    const cardPage = family === "cards"
+      ? await ctx.db
+          .query("spectraResultCards")
+          .withIndex("by_run", (q) => q.eq("runId", run._id))
+          .order("desc")
+          .paginate({ cursor: cardCursor?.cursor ?? null, numItems: limit })
+      : null;
+    const eventPage = family === "events"
+      ? await (eventCursor
+          ? ctx.db
+              .query("spectraRunEvents")
+              .withIndex("by_run_sequence", (q) =>
+                q.eq("runId", run._id).gt("sequence", eventCursor.after!),
+              )
+              .order("asc")
+              .paginate({ cursor: eventCursor.cursor, numItems: limit })
+          : ctx.db
+              .query("spectraRunEvents")
+              .withIndex("by_run_sequence", (q) =>
+                q.eq("runId", run._id).gt("sequence", eventAfter),
+              )
+              .order("asc")
+              .paginate({ cursor: null, numItems: limit }))
+      : null;
+    const artifactRows =
+      family === "operations" && !operationCursor && args.includeArtifacts !== false
+      ? await ctx.db
+          .query("spectraArtifacts")
+          .withIndex("by_ai_run", (q) => q.eq("aiRunId", run._id))
+          .order("desc")
+          .take(100)
+      : [];
+    const operations = operationPage ? [...operationPage.page].reverse() : [];
+    const cards = cardPage ? [...cardPage.page].reverse() : [];
+    const events = eventPage?.page ?? [];
+    const artifacts = artifactRows
+      .filter(
+        (artifact) =>
+          artifact.ownerAccountId === actor._id &&
+          artifact.schoolId === actor.schoolId &&
+          artifact.status !== "deleted",
+      )
+      .map((artifact) => ({
+        _id: artifact._id,
+        blueprintKey: artifact.blueprintKey,
+        title: artifact.title,
+        summary: artifact.summary,
+        tags: artifact.tags,
+        status: artifact.status,
+        createdAt: artifact.createdAt,
+        updatedAt: artifact.updatedAt,
+      }));
+    return {
+      run,
+      operations,
+      cards,
+      events,
+      artifacts,
+      eventPage: eventPage
+        ? {
+            hasMore: !eventPage.isDone,
+            after: events.at(-1)?.sequence ?? eventAfter,
+            nextCursor: eventPage.isDone
+              ? null
+              : childCursor(run._id, "events", "asc", eventPage.continueCursor, eventAfter),
+          }
+        : undefined,
+      operationPage: operationPage
+        ? {
+            hasMore: !operationPage.isDone,
+            before: operationPage.isDone
+              ? null
+              : childCursor(run._id, "operations", "desc", operationPage.continueCursor),
+          }
+        : undefined,
+      cardPage: cardPage
+        ? {
+            hasMore: !cardPage.isDone,
+            before: cardPage.isDone
+              ? null
+              : childCursor(run._id, "cards", "desc", cardPage.continueCursor),
+          }
+        : undefined,
     };
   },
 });
@@ -571,6 +1005,7 @@ export const update = mutation({
       workspaceId: nextWorkspaceId,
       status: args.status ?? thread.status,
       updatedAt: now,
+      readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
     });
     /* The tree is what the reader sees, so the new name, pin and home land there
        in this same transaction. A changed workspace moves the thread's one node
@@ -630,6 +1065,7 @@ export const applyGeneratedMetadata = mutation({
       title,
       summaryShort: summary,
       updatedAt: now,
+      readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
     });
     if (title !== thread.title)
       await syncSourceNodes(ctx, "thread", args.threadId, title);
@@ -711,6 +1147,7 @@ export const migrateLegacyThreadReferences = internalMutation({
           await ctx.db.patch(thread._id, {
             workspaceId: destination,
             updatedAt: Date.now(),
+            readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
           });
         await ensureThreadWorkspacePlacement(ctx, {
           threadId: thread._id,

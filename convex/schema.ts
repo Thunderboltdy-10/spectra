@@ -3170,6 +3170,12 @@ export default defineSchema({
     lastMessageAt: v.optional(v.number()),
   })
     .index("by_account_status", ["ownerAccountId", "status"])
+    .index("by_account_school_status_updated", [
+      "ownerAccountId",
+      "schoolId",
+      "status",
+      "updatedAt",
+    ])
     .index("by_school_status", ["schoolId", "status", "updatedAt"])
     .index("by_workspace", ["workspaceId"])
     .index("by_artifact", ["artifactId"]),

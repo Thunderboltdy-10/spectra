@@ -760,6 +760,7 @@ export async function ensureThreadWorkspacePlacement(
     await ctx.db.patch(params.threadId, {
       workspaceId,
       updatedAt: Date.now(),
+      readSchemaVersion: 1,
     });
   const node = await placeSourceNode(ctx, {
     accountId: thread.ownerAccountId,

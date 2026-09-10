@@ -1117,7 +1117,11 @@ export async function renameNode(
   if (node.kind === "thread" && node.sourceId) {
     const threadId = ctx.db.normalizeId("spectraThreads", node.sourceId);
     if (threadId)
-      await ctx.db.patch(threadId, { title: name, updatedAt: now });
+      await ctx.db.patch(threadId, {
+        title: name,
+        updatedAt: now,
+        readSchemaVersion: 1,
+      });
   }
   for (const link of await findNodesForSource(ctx, "link", node._id))
     if (link.name !== name)

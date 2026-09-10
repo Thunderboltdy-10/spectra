@@ -573,17 +573,75 @@ export async function GET(request: NextRequest) {
     }
 
     if (action === "threads") {
-      const threads = await spectraQuery("spectraThreads:list", {
+      const result = await spectraQuery("spectraThreads:list", {
         includeArchived: params.get("includeArchived") === "true",
         limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+        cursor: params.get("cursor") || undefined,
       });
-      return ok({ threads });
+      return ok(result);
     }
 
     if (action === "thread") {
       const threadId = requireString(params.get("threadId"), "threadId");
       const thread = await spectraQuery("spectraThreads:get", { threadId });
       return ok(thread);
+    }
+
+    if (action === "threadActiveExecution") {
+      const threadId = requireString(params.get("threadId"), "threadId");
+      const activeExecution = await spectraQuery("spectraThreads:getActiveExecution", { threadId });
+      return ok({ activeExecution });
+    }
+
+    if (action === "threadMessages") {
+      const threadId = requireString(params.get("threadId"), "threadId");
+      const result = await spectraQuery<
+        { threadId: string; before?: string | number; limit?: number },
+        { messages: unknown[]; hasOlder: boolean; olderBefore?: string; nextCursor?: string | null }
+      >("spectraThreads:listMessages", {
+        threadId,
+        before: params.get("before") || undefined,
+        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "threadRunTrace") {
+      const threadId = requireString(params.get("threadId"), "threadId");
+      const runId = requireString(params.get("runId"), "runId");
+      const result = await spectraQuery<
+        {
+          threadId: string;
+          runId: string;
+          family?: "operations" | "cards" | "events";
+          eventAfter?: string | number;
+          operationsBefore?: string;
+          cardsBefore?: string;
+          eventsCursor?: string;
+          skipOperations?: boolean;
+          skipCards?: boolean;
+          skipEvents?: boolean;
+          includeArtifacts?: boolean;
+          limit?: number;
+        },
+        Record<string, unknown>
+      >("spectraThreads:getRunTrace", {
+        threadId,
+        runId,
+        family: (params.get("family") as "operations" | "cards" | "events" | null) || undefined,
+        eventAfter: params.has("eventAfter")
+          ? params.get("eventAfter")!
+          : undefined,
+        operationsBefore: params.get("operationsBefore") || undefined,
+        cardsBefore: params.get("cardsBefore") || undefined,
+        eventsCursor: params.get("eventsCursor") || undefined,
+        skipOperations: params.get("skipOperations") === "true" || undefined,
+        skipCards: params.get("skipCards") === "true" || undefined,
+        skipEvents: params.get("skipEvents") === "true" || undefined,
+        includeArtifacts: params.get("includeArtifacts") === "true" || undefined,
+        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+      });
+      return ok(result);
     }
 
     if (action === "memory") {

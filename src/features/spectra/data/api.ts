@@ -589,6 +589,9 @@ export type SpectraThreadTrace = {
   cards: SpectraResultCard[];
   events?: SpectraRunEvent[];
   artifacts: SpectraArtifact[];
+  eventPage?: { hasMore: boolean; after: number; nextCursor?: string | null };
+  operationPage?: { hasMore: boolean; before?: string | null };
+  cardPage?: { hasMore: boolean; before?: string | null };
 };
 
 export type SpectraRunEvent = {
@@ -606,6 +609,12 @@ export type SpectraThreadDetail = {
   messages: SpectraMessage[];
   traces: SpectraThreadTrace[];
   viewerName?: string;
+};
+
+export type SpectraThreadPage = {
+  threads: SpectraThread[];
+  hasMore: boolean;
+  nextCursor?: string | null;
 };
 
 export type SpectraResultAction = {
@@ -1565,7 +1574,7 @@ const notificationCenterRequests = new Map<
 >();
 const threadIndexRequests = new Map<
   string,
-  { at: number; promise: Promise<{ threads: SpectraThread[] }> }
+  { at: number; promise: Promise<SpectraThreadPage> }
 >();
 
 export const SPECTRA_THREAD_INDEX_LIMIT = 40;
@@ -2288,11 +2297,13 @@ export async function getSpectraArtifactEmbed(embedId: string) {
 export async function getSpectraThreads(params?: {
   includeArchived?: boolean;
   limit?: number;
+  cursor?: string;
   force?: boolean;
 }) {
   const qs = new URLSearchParams({ action: "threads" });
   if (params?.includeArchived) qs.set("includeArchived", "true");
   qs.set("limit", String(params?.limit ?? SPECTRA_THREAD_INDEX_LIMIT));
+  if (params?.cursor) qs.set("cursor", params.cursor);
   const key = qs.toString();
   return coalesceInFlight(
     threadIndexRequests,
@@ -2300,7 +2311,7 @@ export async function getSpectraThreads(params?: {
     FIRST_PAINT_FETCH_TTL_MS,
     () =>
       fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }).then(
-        (response) => readJson<{ threads: SpectraThread[] }>(response),
+        (response) => readJson<SpectraThreadPage>(response),
       ),
     { force: params?.force },
   );
@@ -2311,6 +2322,67 @@ export async function getSpectraThread(threadId: string) {
   return readJson<SpectraThreadDetail>(
     await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
+}
+
+export async function getSpectraThreadMessages(
+  threadId: string,
+  before?: string | number,
+  limit = 48,
+) {
+  const qs = new URLSearchParams({
+    action: "threadMessages",
+    threadId,
+    limit: String(limit),
+  });
+  if (before !== undefined) qs.set("before", String(before));
+  return readJson<{
+    messages: SpectraMessage[];
+    hasOlder: boolean;
+    olderBefore?: string;
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraThreadRunTrace(
+  threadId: string,
+  runId: string,
+  options: {
+    family?: "operations" | "cards" | "events";
+    eventAfter?: number;
+    eventsCursor?: string;
+    operationsBefore?: string;
+    cardsBefore?: string;
+    skipOperations?: boolean;
+    skipCards?: boolean;
+    skipEvents?: boolean;
+    includeArtifacts?: boolean;
+    limit?: number;
+  } = {},
+) {
+  const qs = new URLSearchParams({
+    action: "threadRunTrace",
+    threadId,
+    runId,
+    eventAfter: String(options.eventAfter ?? 0),
+    limit: String(options.limit ?? 40),
+  });
+  if (options.family) qs.set("family", options.family);
+  if (options.eventsCursor) qs.set("eventsCursor", options.eventsCursor);
+  if (options.operationsBefore) qs.set("operationsBefore", options.operationsBefore);
+  if (options.cardsBefore) qs.set("cardsBefore", options.cardsBefore);
+  if (options.skipOperations) qs.set("skipOperations", "true");
+  if (options.skipCards) qs.set("skipCards", "true");
+  if (options.skipEvents) qs.set("skipEvents", "true");
+  if (options.includeArtifacts) qs.set("includeArtifacts", "true");
+  return readJson<{
+    run: SpectraRun;
+    operations: SpectraOperation[];
+    cards: SpectraResultCard[];
+    events: SpectraRunEvent[];
+    artifacts: SpectraArtifact[];
+    eventPage?: { hasMore: boolean; after: number; nextCursor?: string | null };
+    operationPage?: { hasMore: boolean; before?: string | null };
+    cardPage?: { hasMore: boolean; before?: string | null };
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function clearSpectraRunAgent(runId: string) {

@@ -176,8 +176,7 @@ async function evaluateLoadedResourceAccess(
     !expectedResourceId ||
     loadedResource._id !== expectedResourceId ||
     (resourceType === "workspace" ? isArtifactResource : !isArtifactResource) ||
-    (resourceType === "agent" && artifactResource?.blueprintKey !== "agent") ||
-    (resourceType === "artifact" && artifactResource?.blueprintKey === "agent")
+    (resourceType === "agent" && artifactResource?.blueprintKey !== "agent")
   )
     return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "not_found" as const, sources: [] };
   if (loaded.lifecycle === "deleted") return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "deleted" as const, sources: [] };
@@ -249,6 +248,15 @@ export async function evaluateAccessForActorWithLoadedResource(
   resourceId: string,
   loaded: LoadedResource | null,
 ) {
+  // Discovery supplies an explicit agent/artifact grant scope. Generic
+  // artifact readers still support agent work through loadResource.
+  if (
+    resourceType === "artifact" &&
+    loaded &&
+    "blueprintKey" in loaded.resource &&
+    loaded.resource.blueprintKey === "agent"
+  )
+    return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "not_found" as const, sources: [] };
   return evaluateLoadedResourceAccess(
     ctx,
     actor,

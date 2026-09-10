@@ -1475,28 +1475,6 @@ export const beginSync = mutation({
     if (readable.length === 0)
       throw new Error("INTEGRATION_CAPABILITY_REQUIRED: No route is verified.");
     const now = Date.now();
-    const activeRuns = await ctx.db
-      .query("externalSyncRuns")
-      .withIndex("by_integration_created", (q) =>
-        q.eq("integrationId", integration._id),
-      )
-      .order("desc")
-      .take(30);
-    const expectedAccountId =
-      args.kind === "reconciliation" && actor.schoolRole === "school_admin"
-        ? undefined
-        : actor.accountId;
-    if (
-      activeRuns.some(
-        (run) =>
-          run.accountId === expectedAccountId &&
-          ["queued", "leased", "running"].includes(run.status) &&
-          (!run.leaseExpiresAt || run.leaseExpiresAt > now),
-      )
-    )
-      throw new Error(
-        "INTEGRATION_SYNC_BUSY: A synchronization is already running. Wait for it to finish before trying again.",
-      );
     const syncRunId = await ctx.db.insert("externalSyncRuns", {
       integrationId: integration._id,
       schoolId: actor.schoolId,

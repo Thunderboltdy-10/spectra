@@ -1429,7 +1429,7 @@ export const SheetsStudio = memo(function SheetsStudio({
   });
   const gridRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
-  // Keep recent emitted revisions by reference, with semantic verification as
+  // Keep unacknowledged emitted revisions by reference, with semantic verification as
   // the fallback for a Yjs projection that materializes a replacement object.
   // This protects against an older local echo without making a hash the proof
   // of equality or retaining duplicate dense cell maps.
@@ -1465,20 +1465,26 @@ export const SheetsStudio = memo(function SheetsStudio({
   }, [grantLocked]);
 
   useEffect(() => {
-    if (incoming === workbookRef.current) return;
     // Semantic equality is authoritative here. A compact hash cannot prove
     // that a remote chart/table/style update is a no-op, and sorting/hashing
     // every cell on each render regresses dense workbooks. The comparison uses
     // the existing cell-overlay hint for local edits and an address walk for
     // external replacement maps.
-    if (sheetsContentEqual(incoming, workbookRef.current)) return;
-    if (
-      recentEmittedRef.current.some(
+    if (sheetsContentEqual(incoming, workbookRef.current)) {
+      recentEmittedRef.current = [];
+      return;
+    }
+    const pendingEcho = recentEmittedRef.current.findIndex(
         (revision) =>
           revision === incoming || sheetsContentEqual(incoming, revision),
-      )
-    )
+    );
+    if (pendingEcho >= 0) {
+      recentEmittedRef.current.splice(0, pendingEcho + 1);
       return;
+    }
+    // A new canonical projection supersedes the pending local echo window.
+    // Retaining acknowledged snapshots would reject a later collaborator undo.
+    recentEmittedRef.current = [];
     const viewed = localSheetIdRef.current;
     const next =
       viewed &&

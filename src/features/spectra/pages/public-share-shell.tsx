@@ -17,7 +17,8 @@ import {
   Sparkles,
   Table2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { PublishedCodeRuntime } from "../components/published-code-runtime";
 import { sheetCellEntries } from "../../../../shared/sheet-cells";
 
@@ -474,13 +475,16 @@ function ArtifactContent({
 }
 
 export function PublicShareShell() {
+  const router = useRouter();
   const [projection, setProjection] = useState<PublicProjection | null>(null);
   const [state, setState] = useState<
     "loading" | "ready" | "error" | "auth-required"
   >("loading");
   const [message, setMessage] = useState("");
+  const loadGenerationRef = useRef(0);
 
   const load = useCallback(async (background = false) => {
+    const generation = ++loadGenerationRef.current;
     const token = readPublicShareToken();
     if (!token) {
       setMessage("This link is incomplete.");
@@ -500,6 +504,7 @@ export function PublicShareShell() {
         error?: string;
         code?: string;
       } | null;
+      if (generation !== loadGenerationRef.current) return;
       if (response.status === 401 && payload?.code === "AUTH_REQUIRED") {
         rememberPublicShareToken(token);
         setProjection(null);
@@ -510,13 +515,23 @@ export function PublicShareShell() {
         setState("auth-required");
         return;
       }
-      if (!response.ok || !payload?.projection)
+      if (!response.ok || !payload?.projection) {
+        if (response.status === 404) forgetPublicShareToken();
         throw new Error(payload?.error || "This public view is unavailable.");
+      }
+      // The auth return uses /public without a token in the redirect URL.
+      // Restore its fragment before clearing temporary storage so refresh,
+      // focus and a full reload continue opening the same shared work.
+      if (!window.location.hash) {
+        const restoredUrl = new URL(window.location.href);
+        restoredUrl.hash = token;
+        window.history.replaceState(window.history.state, "", restoredUrl);
+      }
       forgetPublicShareToken();
       setProjection(payload.projection);
       setState("ready");
     } catch (error) {
-      forgetPublicShareToken();
+      if (generation !== loadGenerationRef.current) return;
       setMessage(
         error instanceof Error
           ? error.message
@@ -538,6 +553,7 @@ export function PublicShareShell() {
     window.addEventListener("focus", refreshInBackground);
     document.addEventListener("visibilitychange", refreshInBackground);
     return () => {
+      loadGenerationRef.current += 1;
       window.clearInterval(interval);
       window.removeEventListener("hashchange", refresh);
       window.removeEventListener("focus", refreshInBackground);
@@ -556,7 +572,7 @@ export function PublicShareShell() {
       return;
     }
     rememberPublicShareToken(token);
-    window.location.assign(
+    router.push(
       `/sign-in?redirect_url=${encodeURIComponent("/public")}`,
     );
   }

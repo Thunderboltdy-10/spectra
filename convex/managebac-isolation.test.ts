@@ -599,17 +599,6 @@ describe("ManageBac account isolation", () => {
     expect(materialized.skipped).toBe(0);
   });
 
-  it("rejects a second sync while the same account already has one running", async () => {
-    const t = setupTest();
-    await seedFixture(t);
-    const asAlice = t.withIdentity(alice);
-
-    await asAlice.mutation(api.managebac.beginSync, { kind: "manual" });
-    await expect(
-      asAlice.mutation(api.managebac.beginSync, { kind: "manual" }),
-    ).rejects.toThrow("INTEGRATION_SYNC_BUSY");
-  });
-
   it("refreshes a calendarItems timetable projection and removes it without duplicates", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);

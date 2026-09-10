@@ -166,6 +166,29 @@ describe("SheetsStudio commits", () => {
     ).toBe(false);
   });
 
+  it("accepts a collaborator undo after local revisions were acknowledged", async () => {
+    const changes: unknown[] = [];
+    const onChange = (next: unknown) => changes.push(next);
+    const view = (content: unknown) => (
+      <SheetsStudio artifactId="workbook-1" content={content} onChange={onChange} />
+    );
+    const { rerender } = render(view(initialWorkbook));
+    const formulaBar = screen.getByLabelText("Formula for A1");
+    fireEvent.change(formulaBar, { target: { value: "Revision A" } });
+    fireEvent.blur(formulaBar);
+    await waitFor(() => expect(changes).toHaveLength(1));
+    const acknowledgedA = JSON.parse(JSON.stringify(changes[0]));
+    rerender(view(acknowledgedA));
+
+    fireEvent.change(formulaBar, { target: { value: "Revision B" } });
+    fireEvent.blur(formulaBar);
+    await waitFor(() => expect(changes).toHaveLength(2));
+    rerender(view(JSON.parse(JSON.stringify(changes[1]))));
+    rerender(view(JSON.parse(JSON.stringify(acknowledgedA))));
+    await waitFor(() => expect((formulaBar as HTMLInputElement).value).toBe("Revision A"));
+    expect(changes).toHaveLength(2);
+  });
+
   it("accepts an incoming chart-only revision after a local cell edit", async () => {
     const changes: unknown[] = [];
     const { rerender, container } = render(

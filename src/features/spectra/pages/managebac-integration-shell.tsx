@@ -1391,7 +1391,7 @@ function ConflictList({
                         onClick={() => onResolve(conflict, "archive_projection")}
                         className="h-7 rounded-md bg-[var(--text-primary)] px-2.5 text-micro text-white hover:bg-[var(--text-primary)] disabled:opacity-50"
                       >
-                        Archive projection
+                        Archive in Spectra
                       </button>
                     ) : null}
                   </>

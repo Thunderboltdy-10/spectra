@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { evaluateAccessForActorWithLoadedResource } from "./authorityShared";
+import { evaluateAccessForActor, evaluateAccessForActorWithLoadedResource } from "./authorityShared";
 import { getActorForAccountId } from "./identityShared";
 import type { Id } from "./_generated/dataModel";
 
@@ -261,6 +261,17 @@ describe("authority discovery read reuse", () => {
       allowed: false,
       reason: "deleted",
     });
+  });
+
+  it("preserves generic artifact access for an agent owner", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedAuthorityFixture(t);
+    const decision = await t.run(async (ctx) => {
+      const actor = await getActorForAccountId(ctx, fixture.ownerId);
+      if (!actor) throw new Error("Owner fixture missing");
+      return evaluateAccessForActor(ctx, actor, "artifact", fixture.agentId);
+    });
+    expect(decision).toMatchObject({ allowed: true, reason: "owner" });
   });
 
   it("keeps agent grants scoped to an agent resource", async () => {

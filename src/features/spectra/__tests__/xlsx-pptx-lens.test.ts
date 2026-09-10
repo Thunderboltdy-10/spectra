@@ -8,6 +8,7 @@ import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
 import { dateToSerial } from "../sheets/excel-serial";
 import { xlsxLens } from "../lenses/xlsx-lens";
+import { invalidateXlsxFormulaCaches } from "../lenses/xlsx-cache-policy";
 import { pptxLens } from "../lenses/pptx-lens";
 import {
   bindPptxProjectionSource,
@@ -70,6 +71,23 @@ async function nativeTransitionFixture() {
 }
 
 describe("XLSX and PPTX fidelity lenses", () => {
+  it("invalidates caches without changing manual calculation mode", async () => {
+    const workbook = await Workbook.open(await workbookFixture());
+    const xml = await workbook.office.xml(workbook.office.mainPart.name);
+    const ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let calcPr = xml.root.find(ns, "calcPr");
+    if (!calcPr) {
+      calcPr = new XmlElement("calcPr", xml.root.prefix);
+      xml.root.appendChild(calcPr);
+    }
+    calcPr.setAttribute("calcMode", "manual");
+    workbook.office.markDirty(workbook.office.mainPart.name);
+    await invalidateXlsxFormulaCaches(workbook);
+    const files = unzipSync(await workbook.save());
+    expect(strFromU8(files["xl/workbook.xml"]!)).toMatch(/calcMode="manual"/);
+    expect(strFromU8(files["xl/worksheets/sheet1.xml"]!)).not.toMatch(/<v>5<\/v>/);
+  });
+
   it("projects date cells as Excel serials, not ISO strings", async () => {
     const workbook = Workbook.create();
     const sheet = workbook.sheet("Sheet1")!;

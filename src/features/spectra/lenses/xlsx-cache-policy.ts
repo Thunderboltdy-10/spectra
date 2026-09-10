@@ -86,7 +86,8 @@ export async function invalidateXlsxFormulaCaches(workbook: Workbook) {
     });
     workbookDocument.root.insertBefore(calcPr, reference ?? null);
   }
-  calcPr.setAttribute("calcMode", "auto");
+  // Cache invalidation must not change the author's calculation preference.
+  if (!calcPr.getAttribute("calcMode")) calcPr.setAttribute("calcMode", "auto");
   calcPr.setAttribute("fullCalcOnLoad", "1");
   calcPr.setAttribute("forceFullCalc", "1");
   workbook.office.markDirty(workbook.office.mainPart.name);

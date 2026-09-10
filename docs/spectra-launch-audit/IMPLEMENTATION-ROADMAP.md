@@ -1,5 +1,7 @@
 # Compact implementation roadmap
 
+Status 2026-09-10: W4 reviewed and integrated into main through dc1261d9, including parent corrections in WAVE-4-SYNTHESIS.md. M01/M02 are ready for manual execution in parallel. The running environment was left alone; future starts use `npm run local:start:all`. Later stages remain a dependency plan that will be revised from the next results, not a fixed estimate of all remaining work.
+
 The launch objective is reliable educational work across web, AI, collaboration and broad native Office editing on Windows and macOS. This is an implementation sequence, not a request for another inventory audit. Landing, broad admin polish, Notion, hosted Office adoption and hosting migration are excluded unless Pablo changes the scope.
 
 ## Stage A: five bounded Luna tasks
@@ -18,7 +20,7 @@ Every task fixes owned bounded defects and returns commits plus relevant checks.
 
 ## Stage B: manual foundation pair
 
-First have the parent integrate the reviewed W4 batch and update the runtime once. Do not launch manual work on the old W3-only source. Then paste the complete contents of these files into manually created tasks, preferably using the strongest model/reasoning setting available to Pablo. No particular model is imposed.
+W4 source integration is complete. Start from current main, including the newer local:start:all launcher and W4 parent amendments; do not use the old W3-only source. Paste the complete contents of these files into manually created tasks, preferably using the strongest model/reasoning setting available to Pablo. No particular model is imposed. Use private dependencies and distinguish changed-checkout tests from the shared running app.
 
 1. [M01 — Read cost and deletion](prompts/M01-data-cost-and-lifecycle.md): bounded thread reads, selective subscriptions, Bridge polling, owner deletion and durable embed placement cleanup. Deliver measured before/after workload results and explicit migration/rollback handling.
 2. [M02 — Durable intake and evidence](prompts/M02-durable-intake-and-evidence.md): shared asset receipt, rich import commit, bounded parsers, reliable attachment references and truthful fetched-source evidence. This is the prerequisite for reliable rich outputs.
@@ -39,7 +41,7 @@ After integrating Stage C:
 5. [M04 — AI, actions and K-bar](prompts/M04-ai-actions-and-kbar.md): exact durable continuation, verified output/recovery, shared action inventory, K-bar, viewport/follow orchestration, attachments and professional deliverables. Existing basic AI work remains usable throughout; this package can now target proven Office and sync operations.
 6. [M06 — Bridge trust and Mac readiness](prompts/M06-bridge-trust-and-macos.md): stable-file write protocol, moves/deletions/offline/provider transitions, browser-first presets/setup, Windows no-console behaviour and Mac packaging readiness. Reuse Office proofs rather than implementing a second Office parser in Rust. This can run alongside M04; M06 publishes typed browser setup/permission actions for M04 to consume.
 
-These six manual prompts are the complete planned complex workload, grouped by authority and dependency. Do not split them into dozens of automatic tasks. If an implementation demonstrates that a major hosted engine, storage vendor, new canonical model or material launch-scope tradeoff is necessary, bring Pablo the concrete alternatives before adopting it.
+These six manual prompts group the currently known complex workload by authority and dependency. Their later scope and parallelism will be reconsidered after the first pair returns; they are not a guaranteed final task count. Do not split them into dozens of automatic tasks. If implementation demonstrates that a major hosted engine, storage vendor, new canonical model or material launch-scope tradeoff is necessary, bring Pablo concrete alternatives before adopting it.
 
 ## Local acceptance and finish
 

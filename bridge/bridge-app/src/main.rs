@@ -1,9 +1,12 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod polling;
+
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use polling::{PollResult, PollScheduler, PollWake, WaitResult};
 use spectra_bridge_core::fs::{FsError, Grant, GrantRegistry, SafeWriter, WriteRequest};
 use spectra_bridge_core::identity::{AdoptionCandidate, adopt, local_resource_id};
 use spectra_bridge_core::journal::{Journal, OpState, ResourceRecord};
@@ -34,6 +37,7 @@ use tauri_plugin_updater::UpdaterExt;
 struct BridgeRuntime {
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
+    wake: PollWake,
 }
 
 fn resolve_bridge_data_dir(
@@ -57,6 +61,7 @@ struct SpectraLocalControl {
     state: Arc<ServerState>,
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
+    wake: PollWake,
 }
 
 impl SpectraLocalControl {
@@ -76,7 +81,11 @@ impl LocalBridgeControl for SpectraLocalControl {
             .state
             .take_pairing_offer(challenge)
             .map_err(|error| error.to_string())?;
-        complete_pairing_offer(&offer, &self.state, &self.journal).await
+        let result = complete_pairing_offer(&offer, &self.state, &self.journal).await;
+        if result.is_ok() {
+            self.wake.wake_configuration();
+        }
+        result
     }
 
     async fn request_update(&self) -> Result<String, String> {
@@ -99,17 +108,17 @@ impl LocalBridgeControl for SpectraLocalControl {
     }
 
     async fn select_mount(&self) -> Result<(), String> {
-        select_mount_impl(&self.app, &self.grants, &self.journal)
+        select_mount_impl(&self.app, &self.grants, &self.journal, &self.wake)
             .await
             .map(|_| ())
     }
 
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
-        retry_mount_impl(grant_id, &self.grants, &self.journal).await
+        retry_mount_impl(grant_id, &self.grants, &self.journal, &self.wake).await
     }
 
     async fn remove_mount(&self, grant_id: &str) -> Result<(), String> {
-        remove_mount_impl(grant_id, &self.grants, &self.journal).await
+        remove_mount_impl(grant_id, &self.grants, &self.journal, &self.wake).await
     }
 }
 
@@ -1621,7 +1630,12 @@ async fn drain_structure_requests(
     Ok(handled)
 }
 
-fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Journal>) {
+fn spawn_grant_watcher(
+    grant: Grant,
+    grants: Arc<GrantRegistry>,
+    journal: Arc<Journal>,
+    wake: PollWake,
+) {
     tauri::async_runtime::spawn(async move {
         let config = WatcherConfig::for_root(std::path::Path::new(grant.device_root()));
         // Keep startup in the same path as reconnects.  A watcher can be
@@ -1639,6 +1653,9 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
         let mut last_hold_scan = std::time::Instant::now();
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            if wake.is_shutdown() {
+                break;
+            }
             if !grants
                 .device_grants()
                 .iter()
@@ -1717,6 +1734,7 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                 .as_ref()
                 .map(MountWatcher::drain_paths)
                 .unwrap_or_default();
+            let mut local_work_queued = false;
             let observed_at = std::time::Instant::now();
             for path in batch.existing_files {
                 pending_missing.remove(&path);
@@ -1765,7 +1783,11 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                     continue;
                 }
                 if file_held_by_office(&path) {
-                    if enqueue_locked_path(&grant, &journal, &path).is_ok() {
+                    if enqueue_locked_path(&grant, &journal, &path)
+                        .map(|queued| queued > 0)
+                        .unwrap_or(false)
+                    {
+                        local_work_queued = true;
                         let _ = set_mount_status(
                             &journal,
                             &grant.id,
@@ -1777,7 +1799,12 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                     }
                     continue;
                 }
-                let _ = enqueue_unlocked_path(&grant, &journal, &path);
+                if enqueue_unlocked_path(&grant, &journal, &path)
+                    .map(|queued| queued > 0)
+                    .unwrap_or(false)
+                {
+                    local_work_queued = true;
+                }
                 match stability.observe(&path, observed_at) {
                     Ok(Some(hash)) => {
                         let current_generation = match generation {
@@ -1800,7 +1827,8 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                             &hash,
                             current_generation,
                         ) {
-                            Ok(_) => {
+                            Ok(changed) => {
+                                local_work_queued |= changed;
                                 pending_files.remove(&path);
                             }
                             Err(_) => isolated_failures += 1,
@@ -1832,7 +1860,8 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                     },
                 };
                 match enqueue_missing_path(&grant, &journal, &path, current_generation) {
-                    Ok(_) => {
+                    Ok(queued) => {
+                        local_work_queued |= queued > 0;
                         pending_missing.remove(&path);
                     }
                     Err(_) => isolated_failures += 1,
@@ -1862,9 +1891,19 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
                             .device_root()
                             .join(std::path::Path::new(&resource.path_key));
                         if file_held_by_office(&held_path) {
-                            let _ = enqueue_locked_path(&grant, &journal, &held_path);
+                            if enqueue_locked_path(&grant, &journal, &held_path)
+                                .map(|queued| queued > 0)
+                                .unwrap_or(false)
+                            {
+                                local_work_queued = true;
+                            }
                         } else {
-                            let _ = enqueue_unlocked_path(&grant, &journal, &held_path);
+                            if enqueue_unlocked_path(&grant, &journal, &held_path)
+                                .map(|queued| queued > 0)
+                                .unwrap_or(false)
+                            {
+                                local_work_queued = true;
+                            }
                         }
                     }
                 }
@@ -1872,6 +1911,12 @@ fn spawn_grant_watcher(grant: Grant, grants: Arc<GrantRegistry>, journal: Arc<Jo
             if last_reconciliation.elapsed() >= config.reconciliation_interval {
                 let _ = sync_grant(&grant, &journal).await;
                 last_reconciliation = std::time::Instant::now();
+            }
+            if local_work_queued {
+                // The journal is the idempotent side-effect boundary. This is
+                // only a wake hint; a worker retry never replays a completed
+                // native write because claims and receipts remain durable.
+                wake.wake();
             }
         }
     });
@@ -2031,13 +2076,18 @@ async fn confirm_pairing(
     let offer = state
         .confirm_pairing_code(&code)
         .map_err(|error| error.to_string())?;
-    complete_pairing_offer(&offer, &state, &runtime.journal).await
+    let result = complete_pairing_offer(&offer, &state, &runtime.journal).await;
+    if result.is_ok() {
+        runtime.wake.wake_configuration();
+    }
+    result
 }
 
 async fn select_mount_impl(
     app: &tauri::AppHandle,
     grants: &Arc<GrantRegistry>,
     journal: &Arc<Journal>,
+    wake: &PollWake,
 ) -> Result<Option<(String, String)>, String> {
     let Some(selection) = app.dialog().file().blocking_pick_folder() else {
         return Ok(None);
@@ -2068,7 +2118,8 @@ async fn select_mount_impl(
         0,
         0,
     )?;
-    spawn_grant_watcher(grant.clone(), grants.clone(), journal.clone());
+    spawn_grant_watcher(grant.clone(), grants.clone(), journal.clone(), wake.clone());
+    wake.wake();
     Ok(Some((grant.id, label)))
 }
 
@@ -2077,20 +2128,25 @@ async fn select_mount(
     app: tauri::AppHandle,
     runtime: tauri::State<'_, BridgeRuntime>,
 ) -> Result<Option<(String, String)>, String> {
-    select_mount_impl(&app, &runtime.grants, &runtime.journal).await
+    select_mount_impl(&app, &runtime.grants, &runtime.journal, &runtime.wake).await
 }
 
 async fn retry_mount_impl(
     grant_id: &str,
     grants: &Arc<GrantRegistry>,
     journal: &Arc<Journal>,
+    wake: &PollWake,
 ) -> Result<(), String> {
     let grant = grants
         .device_grants()
         .into_iter()
         .find(|grant| grant.id == grant_id)
         .ok_or_else(|| "Folder grant not found".to_string())?;
-    sync_grant(&grant, journal).await
+    let result = sync_grant(&grant, journal).await;
+    if result.is_ok() {
+        wake.wake();
+    }
+    result
 }
 
 #[tauri::command]
@@ -2098,13 +2154,14 @@ async fn retry_mount(
     grant_id: String,
     runtime: tauri::State<'_, BridgeRuntime>,
 ) -> Result<(), String> {
-    retry_mount_impl(&grant_id, &runtime.grants, &runtime.journal).await
+    retry_mount_impl(&grant_id, &runtime.grants, &runtime.journal, &runtime.wake).await
 }
 
 async fn remove_mount_impl(
     grant_id: &str,
     grants: &Arc<GrantRegistry>,
     journal: &Arc<Journal>,
+    wake: &PollWake,
 ) -> Result<(), String> {
     if let (Ok(deployment), Some(device_id)) = (
         deployment_url(journal),
@@ -2132,6 +2189,7 @@ async fn remove_mount_impl(
             .delete_config(&format!("{prefix}{grant_id}"))
             .map_err(|error| error.to_string())?;
     }
+    wake.wake();
     Ok(())
 }
 
@@ -2140,7 +2198,7 @@ async fn remove_mount(
     grant_id: String,
     runtime: tauri::State<'_, BridgeRuntime>,
 ) -> Result<(), String> {
-    remove_mount_impl(&grant_id, &runtime.grants, &runtime.journal).await
+    remove_mount_impl(&grant_id, &runtime.grants, &runtime.journal, &runtime.wake).await
 }
 
 fn open_log_file(path: &std::path::Path) -> std::io::Result<()> {
@@ -2182,6 +2240,245 @@ fn open_logs_impl(app: &tauri::AppHandle, journal: &Journal) -> Result<(), Strin
     open_log_file(&path).map_err(|error| format!("Could not open the Bridge log: {error}"))
 }
 
+async fn run_sync_iteration(
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    state: &Arc<ServerState>,
+    restored_grants_reconciled: &mut bool,
+    last_compaction: &mut std::time::Instant,
+    deployment: &mut Option<String>,
+    configuration_dirty: &mut bool,
+) -> PollResult {
+    if *configuration_dirty || deployment.is_none() {
+        match deployment_url(journal) {
+            Ok(url) => {
+                *deployment = Some(url);
+                *configuration_dirty = false;
+            }
+            Err(error) => {
+                let _ = journal.set_config("deployment_error", &error);
+                return PollResult::FailedConfiguration;
+            }
+        }
+    }
+    let Some(deployment) = deployment.as_deref() else {
+        return PollResult::FailedConfiguration;
+    };
+    let device_id = match journal.config("device_id") {
+        Ok(Some(device_id)) => device_id,
+        Ok(None) => return PollResult::Disconnected,
+        Err(error) => {
+            let _ = journal.set_config("device_error", &error.to_string());
+            return PollResult::FailedConfiguration;
+        }
+    };
+    let credential = match HostPlatform.read_credential(&device_id) {
+        Ok(Some(credential)) => credential,
+        Ok(None) => return PollResult::Unauthenticated,
+        Err(error) => {
+            let _ = journal.set_config("credential_error", &error.to_string());
+            return PollResult::Unauthenticated;
+        }
+    };
+
+    if let Err(error) = run_replica_migration(journal, deployment, &credential).await {
+        let _ = journal.set_config("replica_migration_error", &error);
+        return PollResult::FailedMigration;
+    }
+    let _ = journal.delete_config("replica_migration_error");
+
+    let mut failed = false;
+    if !*restored_grants_reconciled {
+        let mut reconciliation_succeeded = true;
+        for grant in grants.device_grants() {
+            if sync_grant(&grant, journal).await.is_err() {
+                reconciliation_succeeded = false;
+            }
+        }
+        if reconciliation_succeeded {
+            *restored_grants_reconciled = true;
+        } else {
+            failed = true;
+        }
+    }
+
+    let mut cloud_request_succeeded = false;
+    match drain_cloud_queue(journal, deployment, &credential).await {
+        Ok(deliveries) => {
+            cloud_request_succeeded = true;
+            let mut delivery_failed = false;
+            let mut delivery_tasks = tokio::task::JoinSet::new();
+            for delivery in deliveries {
+                let grants = grants.clone();
+                let journal = journal.clone();
+                let deployment = deployment.to_owned();
+                let device_credential = credential.clone();
+                delivery_tasks.spawn(async move {
+                    finish_delivered_change(
+                        &grants,
+                        &journal,
+                        &deployment,
+                        &device_credential,
+                        delivery,
+                    )
+                    .await
+                });
+            }
+            while let Some(result) = delivery_tasks.join_next().await {
+                if !matches!(result, Ok(Ok(()))) {
+                    delivery_failed = true;
+                }
+            }
+            if delivery_failed {
+                failed = true;
+                let _ = journal.set_config(
+                    "outbound_queue_error",
+                    "One file change will retry; unrelated files continued.",
+                );
+            } else {
+                let _ = journal.delete_config("outbound_queue_error");
+            }
+        }
+        Err(error) => {
+            failed = true;
+            let message = error.to_string();
+            let _ = journal.set_config("outbound_queue_error", &message);
+            if message.contains("MOUNT_NOT_ACTIVE") {
+                // Re-register cloud mounts for local grants so
+                // LibreOffice/Office disk edits can upload again.
+                *restored_grants_reconciled = false;
+                for grant in grants.device_grants() {
+                    let _ = sync_grant(&grant, journal).await;
+                }
+            }
+        }
+    }
+
+    let structure_handled =
+        match drain_structure_requests(grants, journal, deployment, &credential).await {
+            Ok(handled) => {
+                cloud_request_succeeded = true;
+                let _ = journal.delete_config("structure_queue_error");
+                handled
+            }
+            Err(error) => {
+                failed = true;
+                let _ = journal.set_config("structure_queue_error", &error.to_string());
+                0
+            }
+        };
+    let payload_handled =
+        match drain_pending_payload_uploads(grants, journal, deployment, &credential).await {
+            Ok(handled) => {
+                cloud_request_succeeded = true;
+                let _ = journal.delete_config("payload_queue_error");
+                handled
+            }
+            Err(error) => {
+                failed = true;
+                let _ = journal.set_config("payload_queue_error", &error.to_string());
+                0
+            }
+        };
+    let write_handled = match drain_write_requests(grants, journal, deployment, &credential).await {
+        Ok(handled) => {
+            cloud_request_succeeded = true;
+            let _ = journal.delete_config("write_queue_error");
+            handled
+        }
+        Err(error) => {
+            failed = true;
+            let _ = journal.set_config("write_queue_error", &error.to_string());
+            0
+        }
+    };
+
+    if cloud_request_succeeded {
+        // Cloud-connected status is evidence that at least one actual cloud
+        // request returned successfully, not merely that local config exists.
+        state.mark_cloud_seen();
+    }
+    if last_compaction.elapsed() >= std::time::Duration::from_secs(6 * 60 * 60) {
+        let older_than = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64
+            - 7 * 24 * 60 * 60 * 1_000;
+        match journal.compact_verified(older_than) {
+            Ok(_) => {
+                let _ = journal.delete_config("journal_compaction_error");
+            }
+            Err(error) => {
+                let _ = journal.set_config("journal_compaction_error", &error.to_string());
+            }
+        }
+        *last_compaction = std::time::Instant::now();
+    }
+
+    if failed {
+        PollResult::FailedRequest
+    } else if structure_handled + payload_handled + write_handled > 0 {
+        PollResult::WorkCompleted
+    } else {
+        PollResult::SuccessfulIdle
+    }
+}
+
+async fn run_sync_worker(
+    grants: Arc<GrantRegistry>,
+    journal: Arc<Journal>,
+    state: Arc<ServerState>,
+    wake: PollWake,
+) {
+    // UUID v4 supplies an independent per-process component. The scheduler
+    // folds the persisted device ID into it once pairing is available.
+    let process_seed = uuid::Uuid::new_v4().as_u128() as u64;
+    let mut scheduler = PollScheduler::new(process_seed);
+    let mut device_id = None;
+    let mut restored_grants_reconciled = false;
+    let mut last_compaction = std::time::Instant::now();
+    let mut deployment = None;
+    let mut configuration_dirty = true;
+
+    loop {
+        if wake.is_shutdown() {
+            break;
+        }
+        if let Ok(Some(current_device_id)) = journal.config("device_id") {
+            if device_id.as_deref() != Some(current_device_id.as_str()) {
+                scheduler.set_device_id(Some(&current_device_id));
+                device_id = Some(current_device_id);
+            }
+        }
+        let result = run_sync_iteration(
+            &grants,
+            &journal,
+            &state,
+            &mut restored_grants_reconciled,
+            &mut last_compaction,
+            &mut deployment,
+            &mut configuration_dirty,
+        )
+        .await;
+        if result == PollResult::Disconnected || result == PollResult::Unauthenticated {
+            restored_grants_reconciled = false;
+        }
+        scheduler.record(result);
+        match wake.wait(scheduler.next_delay()).await {
+            WaitResult::Shutdown => break,
+            WaitResult::Woken => {
+                // A wake may represent pairing, a credential/config change,
+                // or local journal work. Only the first two require re-reading
+                // deployment config; repeated signals are coalesced by PollWake.
+                if wake.take_configuration_changed() {
+                    configuration_dirty = true;
+                }
+            }
+            WaitResult::TimedOut => {}
+        }
+    }
+}
+
 #[tauri::command]
 fn open_logs(
     app: tauri::AppHandle,
@@ -2193,6 +2490,8 @@ fn open_logs(
 fn main() {
     configure_embedded_release_environment();
     record_process_start();
+    let sync_wake = PollWake::new();
+    let shutdown_wake = sync_wake.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
@@ -2216,7 +2515,8 @@ fn main() {
             remove_mount,
             open_logs
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            let sync_wake = sync_wake.clone();
             // Debug and release binaries must share the same per-user journal
             // by default. Test isolation is opt-in through the explicit
             // SPECTRA_BRIDGE_DATA_DIR environment variable; silently deriving
@@ -2284,155 +2584,27 @@ fn main() {
             app.manage(BridgeRuntime {
                 grants: grants.clone(),
                 journal: journal.clone(),
+                wake: sync_wake.clone(),
             });
             state.install_local_control(Arc::new(SpectraLocalControl {
                 app: app.handle().clone(),
                 state: state.clone(),
                 grants: grants.clone(),
                 journal: journal.clone(),
+                wake: sync_wake.clone(),
             }));
             for grant in restored_grants {
-                spawn_grant_watcher(grant, grants.clone(), journal.clone());
+                spawn_grant_watcher(grant, grants.clone(), journal.clone(), sync_wake.clone());
             }
             let sync_journal = app.state::<BridgeRuntime>().journal.clone();
             let sync_grants = app.state::<BridgeRuntime>().grants.clone();
             let sync_state = state.clone();
-            tauri::async_runtime::spawn(async move {
-                // A file can change while the Bridge is offline. Reconcile every
-                // restored grant before claiming queued cloud-to-local writes so
-                // SafeWriter compares against the uploaded local truth, never a
-                // stale pre-shutdown revision. New grants are reconciled by
-                // add_mount before their watcher starts.
-                let mut restored_grants_reconciled = false;
-                let mut last_compaction = std::time::Instant::now();
-                loop {
-                    if let (Ok(url), Ok(Some(device_id))) = (
-                        deployment_url(&sync_journal),
-                        sync_journal.config("device_id"),
-                    ) {
-                        if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
-                            if let Err(error) =
-                                run_replica_migration(&sync_journal, &url, &credential).await
-                            {
-                                let _ = sync_journal.set_config("replica_migration_error", &error);
-                            } else {
-                                sync_state.mark_cloud_seen();
-                                let _ = sync_journal.delete_config("replica_migration_error");
-                                if !restored_grants_reconciled {
-                                    let mut reconciliation_succeeded = true;
-                                    for grant in sync_grants.device_grants() {
-                                        if sync_grant(&grant, &sync_journal).await.is_err() {
-                                            reconciliation_succeeded = false;
-                                        }
-                                    }
-                                    if reconciliation_succeeded {
-                                        restored_grants_reconciled = true;
-                                    }
-                                }
-                                match drain_cloud_queue(&sync_journal, &url, &credential).await {
-                                    Ok(deliveries) => {
-                                        let mut delivery_failed = false;
-                                        let mut delivery_tasks = tokio::task::JoinSet::new();
-                                        for delivery in deliveries {
-                                            let grants = sync_grants.clone();
-                                            let journal = sync_journal.clone();
-                                            let deployment = url.clone();
-                                            let device_credential = credential.clone();
-                                            delivery_tasks.spawn(async move {
-                                                finish_delivered_change(
-                                                    &grants,
-                                                    &journal,
-                                                    &deployment,
-                                                    &device_credential,
-                                                    delivery,
-                                                )
-                                                .await
-                                            });
-                                        }
-                                        while let Some(result) = delivery_tasks.join_next().await {
-                                            if !matches!(result, Ok(Ok(()))) {
-                                                delivery_failed = true;
-                                            }
-                                        }
-                                        if delivery_failed {
-                                            let _ = sync_journal.set_config(
-                                                "outbound_queue_error",
-                                                "One file change will retry; unrelated files continued.",
-                                            );
-                                        } else {
-                                            let _ = sync_journal.delete_config("outbound_queue_error");
-                                        }
-                                    }
-                                    Err(error) => {
-                                        let message = error.to_string();
-                                        let _ = sync_journal.set_config(
-                                            "outbound_queue_error",
-                                            &message,
-                                        );
-                                        if message.contains("MOUNT_NOT_ACTIVE") {
-                                            // Re-register cloud mounts for local grants so
-                                            // LibreOffice/Office disk edits can upload again.
-                                            restored_grants_reconciled = false;
-                                            for grant in sync_grants.device_grants() {
-                                                let _ = sync_grant(&grant, &sync_journal).await;
-                                            }
-                                        }
-                                    }
-                                }
-                                let _ = drain_structure_requests(
-                                    &sync_grants,
-                                    &sync_journal,
-                                    &url,
-                                    &credential,
-                                )
-                                .await;
-                                let _ = drain_pending_payload_uploads(
-                                    &sync_grants,
-                                    &sync_journal,
-                                    &url,
-                                    &credential,
-                                )
-                                .await;
-                                if let Err(error) = drain_write_requests(
-                                    &sync_grants,
-                                    &sync_journal,
-                                    &url,
-                                    &credential,
-                                )
-                                .await
-                                {
-                                    let _ = sync_journal
-                                        .set_config("write_queue_error", &error.to_string());
-                                } else {
-                                    let _ = sync_journal.delete_config("write_queue_error");
-                                }
-                                if last_compaction.elapsed()
-                                    >= std::time::Duration::from_secs(6 * 60 * 60)
-                                {
-                                    let older_than = std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_millis() as i64
-                                        - 7 * 24 * 60 * 60 * 1_000;
-                                    match sync_journal.compact_verified(older_than) {
-                                        Ok(_) => {
-                                            let _ = sync_journal.delete_config("journal_compaction_error");
-                                        }
-                                        Err(error) => {
-                                            let _ = sync_journal.set_config(
-                                                "journal_compaction_error",
-                                                &error.to_string(),
-                                            );
-                                        }
-                                    }
-                                    last_compaction = std::time::Instant::now();
-                                }
-                            }
-                        }
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                }
-            });
+            tauri::async_runtime::spawn(run_sync_worker(
+                sync_grants,
+                sync_journal,
+                sync_state,
+                sync_wake.clone(),
+            ));
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = serve(state).await {
                     eprintln!("{error:#}");
@@ -2476,8 +2648,16 @@ fn main() {
                 let _ = window.hide();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("Spectra Bridge shell failed");
+        .build(tauri::generate_context!())
+        .expect("Spectra Bridge shell failed")
+        .run(move |_app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+            ) {
+                shutdown_wake.shutdown();
+            }
+        });
 }
 
 #[cfg(test)]
@@ -2529,3 +2709,4 @@ mod tests {
         assert!(error.to_string().contains("must be absolute"));
     }
 }
+

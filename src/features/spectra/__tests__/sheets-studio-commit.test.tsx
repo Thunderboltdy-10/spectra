@@ -166,6 +166,51 @@ describe("SheetsStudio commits", () => {
     ).toBe(false);
   });
 
+  it("accepts an incoming chart-only revision after a local cell edit", async () => {
+    const changes: unknown[] = [];
+    const { rerender, container } = render(
+      <SheetsStudio
+        artifactId="workbook-1"
+        content={initialWorkbook}
+        onChange={(next) => changes.push(next)}
+      />,
+    );
+    const formulaBar = screen.getByLabelText("Formula for A1");
+    fireEvent.change(formulaBar, { target: { value: "Cell revision" } });
+    fireEvent.keyDown(formulaBar, { key: "Enter" });
+    await waitFor(() => expect(changes).toHaveLength(1));
+    const local = changes[0] as typeof initialWorkbook;
+    const incoming = {
+      ...local,
+      sheets: [
+        {
+          ...local.sheets[0]!,
+          charts: [
+            {
+              id: "chart-1",
+              type: "column" as const,
+              sourceRange: "A1:A1",
+              title: "Incoming chart",
+              position: { x: 0, y: 0, width: 280, height: 220 },
+            },
+          ],
+        },
+      ],
+    };
+    rerender(
+      <SheetsStudio
+        artifactId="workbook-1"
+        content={incoming}
+        onChange={(next) => changes.push(next)}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector(".sheets-chart-object")).toBeTruthy(),
+    );
+    expect(changes).toHaveLength(1);
+    expect((formulaBar as HTMLInputElement).value).toBe("Cell revision");
+  });
+
   it("keeps native formula input ahead of synchronous presence reconciliation", async () => {
     const changes: unknown[] = [];
     const listeners = new Set<() => void>();

@@ -7,6 +7,10 @@ import {
   projectExcelJsFormulaValue,
   SheetsStudio,
 } from "../components/sheets-studio";
+import {
+  xlsxExportCalculationProperties,
+  xlsxFormulaExportValue,
+} from "../sheets/formula-export-policy";
 
 /**
  * What the grid actually paints.
@@ -84,6 +88,51 @@ describe("Excel import geometry and formula projections", () => {
     expect(
       projectExcelJsFormulaValue({ formula: "INDEX(A1:B2,2,2)", result: 20 }),
     ).toMatchObject({ nativeFormulaSupport: "recognized", value: 20 });
+  });
+
+  it("does not serialize a stale cached-only result in a new XLSX export", async () => {
+    expect(
+      xlsxFormulaExportValue(
+        {
+          formula: "=XLOOKUP(A1,A:A,B:B)",
+          value: 15,
+          nativeFormulaSupport: "cached-only",
+          cachedValueStale: true,
+        },
+        25,
+      ),
+    ).toEqual({ formula: "XLOOKUP(A1,A:A,B:B)" });
+    expect(
+      xlsxFormulaExportValue(
+        { formula: "=SUM(A1:A5)", nativeFormulaSupport: "recognized" },
+        25,
+      ),
+    ).toEqual({ formula: "SUM(A1:A5)", result: 25 });
+    expect(xlsxExportCalculationProperties("automatic")).toEqual({
+      calcMode: "auto",
+      fullCalcOnLoad: true,
+      forceFullCalc: true,
+    });
+    const ExcelJS = await import("exceljs");
+    const created = new ExcelJS.Workbook();
+    const sheet = created.addWorksheet("Sheet1");
+    sheet.getCell("A1").value = 11;
+    sheet.getCell("B1").value = xlsxFormulaExportValue(
+      {
+        formula: "=XLOOKUP(A1,A:A,B:B)",
+        value: 15,
+        nativeFormulaSupport: "cached-only",
+        cachedValueStale: true,
+      },
+      25,
+    );
+    created.calcProperties = xlsxExportCalculationProperties("automatic");
+    const bytes = await created.xlsx.writeBuffer();
+    const reopened = new ExcelJS.Workbook();
+    await reopened.xlsx.load(bytes);
+    const formula = reopened.getWorksheet("Sheet1")?.getCell("B1").value;
+    expect(formula).toMatchObject({ formula: "XLOOKUP(A1,A:A,B:B)" });
+    expect((formula as { result?: unknown }).result).toBeUndefined();
   });
 
   it("spans only visible rows when a merge crosses a hidden row", () => {

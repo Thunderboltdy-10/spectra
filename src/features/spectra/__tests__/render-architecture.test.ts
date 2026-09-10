@@ -217,18 +217,18 @@ describe("named keystroke and overflow kills", () => {
     expect(collabBranch).not.toContain("JSON.stringify");
   });
 
-  it("commits sheets by structural identity instead of serializing the workbook", () => {
+  it("commits sheets by semantic identity without a workbook hash walk", () => {
     const source = readFileSync(
       "src/features/spectra/components/sheets-studio.tsx",
       "utf8",
     );
-    expect(source).toContain("function workbookIdentityKey");
-    expect(source).toContain("function sameContent");
+    expect(source).toContain("sheetsContentEqual");
+    expect(source).not.toContain("function workbookIdentityKey");
     const commit = source.slice(
       source.indexOf("const commit = useCallback"),
       source.indexOf("const showSheet = useCallback"),
     );
-    expect(commit).toContain("sameContent(current, next)");
+    expect(commit).toContain("sheetsContentEqual(current, next)");
     expect(commit).not.toContain("JSON.stringify");
   });
 

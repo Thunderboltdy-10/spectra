@@ -1,6 +1,7 @@
 import { Document, Paragraph, type Run, WML_NAMESPACE } from "@ariadng/office/docx";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
+import { firstNativeFontFamily } from "../office-fonts";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -1266,12 +1267,13 @@ function safeFontName(value: string) {
   // they could reach the native writer. Keep the existing conservative
   // punctuation policy while allowing Unicode letters, combining marks,
   // numbers, connector punctuation and normal spaces.
-  if (!/^[\p{L}\p{M}\p{N}\p{Pc}\p{Zs}.+&'-]{1,64}$/u.test(value))
+  const family = firstNativeFontFamily(value);
+  if (!family)
     throw new DocxLensError(
       "DOCX_UNSUPPORTED_EDIT",
       "That font name cannot be written safely into a Word file.",
     );
-  return value;
+  return family;
 }
 
 function safeHexColor(value: string) {

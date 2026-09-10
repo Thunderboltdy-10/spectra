@@ -142,11 +142,15 @@ import {
   type StudioContract,
 } from "./artifact-studio-shell";
 import {
-  changedSheetCellAddresses,
   patchSheetCellRecord,
   readSheetCellsOverlay,
 } from "../sheets/cell-overlay";
+import { sheetsContentEqual } from "../sheets/semantic-equality";
 import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
+import {
+  xlsxExportCalculationProperties,
+  xlsxFormulaExportValue,
+} from "../sheets/formula-export-policy";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -284,85 +288,9 @@ type Viewport = {
   scrollTop: number;
 };
 
-function cellSame(left?: SheetCell, right?: SheetCell) {
-  if (left === right) return true;
-  if (!left || !right) return !left && !right;
-  return (
-    left.value === right.value &&
-    left.formula === right.formula &&
-    left.format === right.format &&
-    left.nativeFormulaSupport === right.nativeFormulaSupport
-  );
-}
-
 function sheetHasCells(cells: Record<string, SheetCell>) {
   for (const key in cells) return true;
   return false;
-}
-
-function sameContent(left: SheetsContent, right: SheetsContent) {
-  if (left === right) return true;
-  if (left.activeSheetId !== right.activeSheetId) return false;
-  if (left.sheets.length !== right.sheets.length) return false;
-  return left.sheets.every((sheet, index) => {
-    const other = right.sheets[index];
-    if (!other) return false;
-    if (sheet === other) return true;
-    if (sheet.id !== other.id || sheet.name !== other.name) return false;
-    if (sheet.cells === other.cells) return true;
-    const hinted = changedSheetCellAddresses(sheet.cells, other.cells);
-    if (hinted) {
-      return hinted.every((address) =>
-        cellSame(sheet.cells[address], other.cells[address]),
-      );
-    }
-    const leftKeys = Object.keys(sheet.cells);
-    const rightKeys = Object.keys(other.cells);
-    if (leftKeys.length !== rightKeys.length) return false;
-    return leftKeys.every(
-      (address) =>
-        Object.prototype.hasOwnProperty.call(other.cells, address) &&
-        cellSame(sheet.cells[address], other.cells[address]),
-    );
-  });
-}
-
-function workbookIdentityKey(content: SheetsContent) {
-  let hash = 2166136261;
-  const mix = (value: string) => {
-    for (let index = 0; index < value.length; index += 1) {
-      hash ^= value.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-  };
-  mix(content.activeSheetId);
-  mix(String(content.sheets.length));
-  for (const sheet of content.sheets) {
-    mix(sheet.id);
-    mix(sheet.name);
-    const overlay = readSheetCellsOverlay(sheet.cells);
-    if (overlay) {
-      mix("overlay");
-      mix(String(Object.keys(overlay.patch).length));
-      for (const address of Object.keys(overlay.patch).sort()) {
-        const cell = overlay.patch[address];
-        mix(address);
-        mix(String(cell?.value ?? ""));
-        mix(cell?.formula ?? "");
-      }
-      continue;
-    }
-    const addresses = Object.keys(sheet.cells);
-    mix(String(addresses.length));
-    for (const address of addresses) {
-      const cell = sheet.cells[address];
-      mix(address);
-      mix(String(cell?.value ?? ""));
-      mix(cell?.formula ?? "");
-      mix(cell?.format ? JSON.stringify(cell.format) : "");
-    }
-  }
-  return (hash >>> 0).toString(36);
 }
 
 function cellInput(cell?: SheetCell) {
@@ -1501,19 +1429,15 @@ export const SheetsStudio = memo(function SheetsStudio({
   });
   const gridRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
-  const lastEmittedKeyRef = useRef<string | null>(null);
-  const recentEmittedKeysRef = useRef(new Set<string>());
-
+  // Keep recent emitted revisions by reference, with semantic verification as
+  // the fallback for a Yjs projection that materializes a replacement object.
+  // This protects against an older local echo without making a hash the proof
+  // of equality or retaining duplicate dense cell maps.
+  const recentEmittedRef = useRef<SheetsContent[]>([]);
   const rememberEmitted = useCallback((next: SheetsContent) => {
-    const key = workbookIdentityKey(next);
-    lastEmittedKeyRef.current = key;
-    const recent = recentEmittedKeysRef.current;
-    recent.add(key);
-    while (recent.size > 80) {
-      const oldest = recent.values().next().value;
-      if (typeof oldest !== "string") break;
-      recent.delete(oldest);
-    }
+    const recent = recentEmittedRef.current;
+    recent.push(next);
+    while (recent.length > 80) recent.shift();
   }, []);
 
   /**
@@ -1542,14 +1466,17 @@ export const SheetsStudio = memo(function SheetsStudio({
 
   useEffect(() => {
     if (incoming === workbookRef.current) return;
-    const incomingKey = workbookIdentityKey(incoming);
-    if (sameContent(incoming, workbook)) {
-      recentEmittedKeysRef.current.delete(incomingKey);
-      return;
-    }
+    // Semantic equality is authoritative here. A compact hash cannot prove
+    // that a remote chart/table/style update is a no-op, and sorting/hashing
+    // every cell on each render regresses dense workbooks. The comparison uses
+    // the existing cell-overlay hint for local edits and an address walk for
+    // external replacement maps.
+    if (sheetsContentEqual(incoming, workbookRef.current)) return;
     if (
-      incomingKey === lastEmittedKeyRef.current ||
-      recentEmittedKeysRef.current.delete(incomingKey)
+      recentEmittedRef.current.some(
+        (revision) =>
+          revision === incoming || sheetsContentEqual(incoming, revision),
+      )
     )
       return;
     const viewed = localSheetIdRef.current;
@@ -1561,7 +1488,7 @@ export const SheetsStudio = memo(function SheetsStudio({
         : incoming;
     workbookRef.current = next;
     setWorkbook(next);
-  }, [incoming]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [incoming]);
 
   const activeSheet =
     workbook.sheets.find(
@@ -1988,7 +1915,7 @@ export const SheetsStudio = memo(function SheetsStudio({
       // that lifts the protection itself — a lock you cannot unlock is a trap.
       if (scope === "cells" ? locked : grantLocked) return;
       const current = workbookRef.current;
-      if (sameContent(current, next)) return;
+      if (sheetsContentEqual(current, next)) return;
       const committed =
         scope === "cells" ? applyCachedStaleness(current, next) : next;
       if (remember) {
@@ -2310,9 +2237,9 @@ export const SheetsStudio = memo(function SheetsStudio({
     setCanUndo(undoRef.current.length > 0);
     setCanRedo(true);
     const normalized = normalizeSheetsContent(previous);
+    rememberEmitted(normalized);
     workbookRef.current = normalized;
     setWorkbook(normalized);
-    rememberEmitted(normalized);
     onChange(normalized);
   }
 
@@ -2324,9 +2251,9 @@ export const SheetsStudio = memo(function SheetsStudio({
     setCanUndo(true);
     setCanRedo(redoRef.current.length > 0);
     const normalized = normalizeSheetsContent(next);
+    rememberEmitted(normalized);
     workbookRef.current = normalized;
     setWorkbook(normalized);
-    rememberEmitted(normalized);
     onChange(normalized);
   }
 
@@ -3422,10 +3349,10 @@ export const SheetsStudio = memo(function SheetsStudio({
         const excelCell = worksheet.getCell(address);
         const calculatedCell = calculated.get(`${sheet.id}:${address}`);
         if (cell.formula) {
-          excelCell.value = {
-            formula: cell.formula.replace(/^=/, ""),
-            result: calculatedCell?.value ?? undefined,
-          };
+          excelCell.value = xlsxFormulaExportValue(
+            cell,
+            calculatedCell?.value,
+          );
         } else if (cell.value !== undefined) excelCell.value = cell.value;
         if (cell.format?.bold)
           excelCell.font = { ...excelCell.font, bold: true };
@@ -3445,6 +3372,9 @@ export const SheetsStudio = memo(function SheetsStudio({
         ];
       }
     }
+    book.calcProperties = xlsxExportCalculationProperties(
+      workbook.workbook.calculationMode,
+    );
     const buffer = await book.xlsx.writeBuffer();
     downloadDocumentBlob(
       `${safeTitle}.xlsx`,

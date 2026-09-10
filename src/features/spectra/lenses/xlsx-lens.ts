@@ -24,6 +24,7 @@ import {
   XLSX_RECOGNIZED_FORMULAS,
   xlsxFormulaSupport,
 } from "./xlsx-formula-support";
+import { invalidateXlsxFormulaCaches } from "./xlsx-cache-policy";
 
 const SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
@@ -354,11 +355,18 @@ function findSheet(workbook: Workbook, sheetId: string) {
 async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: XlsxSemanticDelta) {
   const workbook = await Workbook.open(carry.payload);
   const operations = delta.kind === "ai-edit" ? delta.operations : [delta];
+  let formulaCachesNeedInvalidation = false;
   for (const operation of operations) {
     const sheet = findSheet(workbook, operation.sheetId);
     if ("ref" in operation) parseCellRef(operation.ref);
-    if (operation.kind === "set-formula") sheet.setFormula(operation.ref, operation.formula);
-    else if (operation.kind === "clear-cell") sheet.setCell(operation.ref, null);
+    if (operation.kind === "set-formula") {
+      sheet.setFormula(operation.ref, operation.formula);
+      formulaCachesNeedInvalidation = true;
+    }
+    else if (operation.kind === "clear-cell") {
+      sheet.setCell(operation.ref, null);
+      formulaCachesNeedInvalidation = true;
+    }
     else if (operation.kind === "set-cell-format") {
       if (Object.keys(operation.format).length) sheet.setCellStyle(operation.ref, styleUpdate(operation.format));
       else await clearCellStyle(workbook, sheet.partName, operation.ref);
@@ -370,8 +378,11 @@ async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: Xlsx
     else {
       if (sheet.getFormula(operation.ref)) throw new XlsxLensError("XLSX_FORMULA_LITERALIZATION_BLOCKED", "A formula cell cannot be replaced by a literal through a value edit. Edit its formula text instead.");
       sheet.setCell(operation.ref, operation.value);
+      formulaCachesNeedInvalidation = true;
     }
   }
+  if (formulaCachesNeedInvalidation)
+    await invalidateXlsxFormulaCaches(workbook);
   return workbook.save();
 }
 

@@ -7,6 +7,7 @@ import {
   buildPresentationPptx,
   importPresentationFile,
   presentationFontFamily,
+  presentationNativeFontFamily,
 } from "../presentation/io";
 
 describe("PowerPoint import ordering", () => {
@@ -88,6 +89,13 @@ describe("PowerPoint import ordering", () => {
     expect(presentationFontFamily(undefined, { body: "Aptos" }, 24)).toBe(
       "Aptos",
     );
+    expect(
+      presentationNativeFontFamily(
+        "Georgia, Cambria, serif",
+        { heading: "Manrope", body: "Aptos" },
+        24,
+      ),
+    ).toBe("Georgia");
 
     const exported = await buildPresentationPptx(
       {
@@ -120,7 +128,10 @@ describe("PowerPoint import ordering", () => {
                 height: 100,
                 rotation: 0,
                 content: { text: "Body" },
-                style: { fontSize: 24, fontFamily: "Georgia" },
+                style: {
+                  fontSize: 24,
+                  fontFamily: "Georgia, Cambria, serif",
+                },
               },
             ],
           },

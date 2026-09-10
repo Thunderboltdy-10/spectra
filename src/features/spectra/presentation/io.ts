@@ -7,6 +7,7 @@ import {
   type PresentationSlide,
 } from "./model";
 import type { SpectraArtifactAsset } from "../data/api";
+import { normalizeNativeFontFamily } from "../office-fonts";
 
 export type PresentationFidelityEntry = {
   scope: string;
@@ -623,6 +624,18 @@ export function presentationFontFamily(
   return themeFont?.trim() || "Manrope";
 }
 
+/** The native writer gets one concrete family; the browser keeps its CSS stack. */
+export function presentationNativeFontFamily(
+  value: unknown,
+  fonts: PresentationContent["theme"]["fonts"] | undefined,
+  fontSize: number,
+) {
+  return normalizeNativeFontFamily(
+    presentationFontFamily(value, fonts, fontSize),
+    fontSize >= 44 ? fonts?.heading ?? "Manrope" : fonts?.body ?? "Manrope",
+  );
+}
+
 export async function buildPresentationPptx(
   content: PresentationContent,
   assets: SpectraArtifactAsset[],
@@ -658,7 +671,7 @@ export async function buildPresentationPptx(
         const fontSize = Number(object.style?.fontSize ?? 28);
         page.addText(presentationObjectText(object), {
           ...options,
-          fontFace: presentationFontFamily(
+          fontFace: presentationNativeFontFamily(
             object.style?.fontFamily,
             content.theme.fonts,
             fontSize,

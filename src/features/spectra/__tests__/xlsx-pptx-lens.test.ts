@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { strFromU8, unzipSync } from "fflate";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Workbook } from "@ariadng/office/xlsx";
@@ -86,7 +87,7 @@ describe("XLSX and PPTX fidelity lenses", () => {
     expect(typeof content.sheets[0]!.cells.A1?.value).toBe("number");
     expect(content.sheets[0]!.cells.A1?.value).toBe(cell.value);
   });
-  it("keeps an unrecognized formula as formula text and cached value", async () => {
+  it("keeps an unrecognized formula while invalidating its stale cache", async () => {
     const source = await workbookFixture();
     const opened = await xlsxLens.open(source);
     const cell = opened.projection.sheets[0]!.cells.find(
@@ -115,12 +116,26 @@ describe("XLSX and PPTX fidelity lenses", () => {
         ?.verdict,
     ).toBe("different");
     const reopened = await xlsxLens.open(edited);
+    const files = unzipSync(edited);
+    const sheetXml = strFromU8(files["xl/worksheets/sheet1.xml"]!);
+    const workbookXml = strFromU8(files["xl/workbook.xml"]!);
+    expect(sheetXml).toContain("XLOOKUP(A2,A2:A2,B2:B2)");
+    const formulaCellXml = sheetXml.match(
+      /<c[^>]*r="C2"[^>]*>[\s\S]*?<\/c>/,
+    )?.[0];
+    expect(formulaCellXml).toBeDefined();
+    expect(formulaCellXml).not.toContain("<v");
+    expect(workbookXml).toMatch(/<calcPr\b[^>]*calcMode="auto"/);
+    expect(workbookXml).toMatch(/<calcPr\b[^>]*fullCalcOnLoad="1"/);
+    expect(workbookXml).toMatch(/<calcPr\b[^>]*forceFullCalc="1"/);
     const preserved = reopened.projection.sheets[0]!.cells.find(
       (candidate) => candidate.ref === "C2",
     )!;
     expect(preserved.formula).toBe("XLOOKUP(A2,A2:A2,B2:B2)");
     expect(preserved.formulaSupport).toBe("cached-only");
-    expect(preserved.value).toBe(5);
+    // The old cache was for the pre-edit inputs. It is omitted rather than
+    // presented as a new result; Excel is instructed to recalculate on open.
+    expect(preserved.value).toBeNull();
   });
 
   it("recomputes formula support when native formula text changes", async () => {

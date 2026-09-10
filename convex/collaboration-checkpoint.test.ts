@@ -339,6 +339,81 @@ describe("P5.I2 checkpoint projection and compaction", () => {
     });
   });
 
+  it("advances the durable head for a no-content native append and checkpoints it once", async () => {
+    const t = convexTest(schema, modules);
+    const seed = await seedRoom(t);
+    const projection = initialProjection();
+    await t.run(async (ctx) => {
+      await ctx.db.patch(seed.artifactId, {
+        contentHash: projection.hash,
+      });
+    });
+    const noContentChange = yjsUpdate("native convergence metadata");
+    const append = {
+      accountId: seed.accountId,
+      actorKind: "human" as const,
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "no-content-client",
+      policyVersion: 0,
+      idempotencyKey: "no-content:append",
+      update: arrayBufferCopy(noContentChange.update),
+      baseStateVectorHash: "initial-state-vector",
+      stateVectorHash: noContentChange.hash,
+      regionIds: ["$spectra:native-projection"],
+      projectionJson: projection.json,
+      projectionHash: projection.hash,
+    };
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.append, append),
+    ).resolves.toMatchObject({
+      sequence: 1,
+      duplicate: false,
+      regionIds: [],
+    });
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.append, append),
+    ).resolves.toMatchObject({ sequence: 1, duplicate: true });
+
+    const afterAppend = await t.run(async (ctx) => ({
+      artifact: await ctx.db.get(seed.artifactId),
+      room: await ctx.db.get(seed.roomId),
+    }));
+    expect(afterAppend.artifact?.contentHash).toBe(projection.hash);
+    expect(afterAppend.artifact?.liveStateVectorHash).toBe(
+      noContentChange.hash,
+    );
+    expect(afterAppend.room?.nextSequence).toBe(2);
+    expect(afterAppend.room?.lastProjectionSequence).toBeUndefined();
+
+    const checkpoint = {
+      accountId: seed.accountId,
+      artifactId: seed.artifactId,
+      partitionKey: "root",
+      clientId: "no-content-client",
+      policyVersion: 0,
+      roomId: seed.roomId,
+      expectedNextSequence: 2,
+      expectedLastProjectionSequence: 0,
+      stateVectorHash: noContentChange.hash,
+      projectionJson: projection.json,
+      projectionHash: projection.hash,
+      throughSequence: 1,
+    };
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.checkpoint, checkpoint),
+    ).resolves.toMatchObject({ sequence: 1, duplicate: false });
+    await expect(
+      t.mutation(internal.collaborationGatewayStore.checkpoint, checkpoint),
+    ).resolves.toMatchObject({ sequence: 1, duplicate: true });
+    await expect(
+      t.run(async (ctx) => ctx.db.get(seed.roomId)),
+    ).resolves.toMatchObject({
+      nextSequence: 2,
+      lastProjectionSequence: 1,
+    });
+  });
+
   it("refuses a stale head without overwriting the newer editor projection", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedRoom(t);

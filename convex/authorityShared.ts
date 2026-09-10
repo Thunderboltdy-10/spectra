@@ -124,6 +124,27 @@ async function evaluateLoadedResourceAccess(
   loaded: LoadedResource | null,
 ) {
   if (!loaded) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "not_found" as const, sources: [] };
+  // The only preloaded-resource caller is server-side workspace hydration,
+  // which first obtains the row from ctx.db. Keep the resource/type binding
+  // explicit so a caller cannot pair a loaded agent with an artifact grant (or
+  // vice versa), and never treat a client-supplied projection as authority.
+  const expectedResourceId = ctx.db.normalizeId(
+    resourceType === "workspace" ? "spectraWorkspaces" : "spectraArtifacts",
+    resourceId,
+  );
+  const loadedResource = loaded.resource;
+  const isArtifactResource = "blueprintKey" in loadedResource;
+  const artifactResource = isArtifactResource
+    ? (loadedResource as Doc<"spectraArtifacts">)
+    : null;
+  if (
+    !expectedResourceId ||
+    loadedResource._id !== expectedResourceId ||
+    (resourceType === "workspace" ? isArtifactResource : !isArtifactResource) ||
+    (resourceType === "agent" && artifactResource?.blueprintKey !== "agent") ||
+    (resourceType === "artifact" && artifactResource?.blueprintKey === "agent")
+  )
+    return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "not_found" as const, sources: [] };
   if (loaded.lifecycle === "deleted") return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "deleted" as const, sources: [] };
 
   const direct = await directAccess(ctx, actor, resourceType, resourceId);
@@ -157,8 +178,8 @@ async function evaluateLoadedResourceAccess(
     ? await inheritedArtifactAccess(
         ctx,
         actor,
-        loaded.resource._id as Id<"spectraArtifacts">,
-        loaded.resource as Doc<"spectraArtifacts">,
+        loadedResource._id as Id<"spectraArtifacts">,
+        loadedResource as Doc<"spectraArtifacts">,
       )
     : { level: null, denied: false, sources: [] };
   if (inherited.denied && !direct.level) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "artifact_exception" as const, sources: inherited.sources };

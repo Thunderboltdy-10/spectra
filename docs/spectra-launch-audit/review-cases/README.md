@@ -1,5 +1,7 @@
 # Parent boundary counterexamples
 
+The second completion review adds parent-foundation-depth.test.ts.txt. Copy it to convex/parent-foundation-depth.test.ts in the c832d8f3 remediation lineage to reproduce long-history/backfill, memory traversal and active-object release gaps. The foreign-original and terminal-original cases now pass after narrow parent fixes. W5-01 owns the first two; D01/D02 own the remaining lifecycle cases. Strengthen the active-object fixture using the actual trusted upload path, not arbitrary storage fields. See WAVE-5.md for exact observed counts and evidence limits. Do not add knowingly failing tests to main before their implementation.
+
 Captured against M01 1dc1be2d and M02 95a5d6b6 on 2026-09-10. These are portable behavioral reproductions of rejected candidate code, not production tests that should currently run in main. They use synthetic local fixtures and controlled network mocks.
 
 Copy to the corresponding candidate checkout:

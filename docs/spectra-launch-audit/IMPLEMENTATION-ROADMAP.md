@@ -1,6 +1,6 @@
 # Compact implementation roadmap
 
-Status 2026-09-10: W4 remains integrated through dc1261d9. The first M01/M02 candidates were reviewed and held after nine reproduced boundary failures and additional incomplete contracts. Read M01-M02-REVIEW.md. Run the two completion prompts below in sequence; no later stage is released yet. The running environment was left alone; future starts use `npm run local:start:all`. Later stages remain a dependency plan, not a fixed estimate of all remaining work.
+Status 2026-09-11: W4 remains integrated. Both M01/M02 completion reports and actual source have now been reviewed. Read WAVE-5.md for the resulting implementation decisions; the old broad completion prompts are superseded. W5 fixes auth plus four independently owned boundaries, followed by the focused manual D01/D02 implementation pair. Use one shared runtime only, with sequential verification after integration. Future starts use `npm run local:start:all`; no routine environment monitoring.
 
 The launch objective is reliable educational work across web, AI, collaboration and broad native Office editing on Windows and macOS. This is an implementation sequence, not a request for another inventory audit. Landing, broad admin polish, Notion, hosted Office adoption and hosting migration are excluded unless Pablo changes the scope.
 
@@ -18,14 +18,16 @@ Auto-launch GPT-5.6 Luna / xhigh, one actual Codex task per row. All start from 
 
 Every task fixes owned bounded defects and returns commits plus relevant checks. No dedicated observer/recovery task, no broad test sweep. Parent stops immediately after dispatch and resumes when Pablo says the batch has finished.
 
-## Stage B: manual foundation pair — complete the held candidates
+## Stage B: focused foundation implementations — released in W5
 
-W4 source integration is complete. Preserve its parent corrections and launcher. Continue the existing manual tasks using the complete prompts below, preferably with Pablo's strongest chosen model/reasoning. No new automatic batch is needed. Use private dependencies and distinguish candidate source, fixtures and actual changed-backend evidence.
+Preserve W4's parent corrections and launcher. WAVE-5.md contains the completed second review, four new depth failures and two narrowly repaired authority holes. The private remediation base c832d8f3 combines useful candidate work without accepting it on main. W5-COMMON.md defines precise ownership and single-runtime rules.
 
-1. FIRST: [M02 — Complete working intake](prompts/M02-complete-intake.md). Fix the actual PNG/original upload path, materialize media, make canonical import receipts causal and replayable, implement reference release, parser limits and authoritative evidence. The original task requirements still apply.
-2. AFTER M02 finishes: [M01 — Complete reads and lifecycle](prompts/M01-complete-read-and-lifecycle.md). Consume M02's finished candidate in the M01 private checkout, then complete lossless history, actual read savings, bounded recoverable deletion, durable placement and prompt/cheap Bridge discovery.
+1. W5-AUTH, Luna xhigh: fix Clerk factor-route remounts and verify the small change directly on main. W5-01 through W5-04, parallel Luna xhigh implementations: lossless history/results, pinned source transport/provenance, bounded parsers and Bridge poll/wake timing. They use private tests and do not publish separate backends.
+2. AFTER the Luna tasks: [D01 — Upload to saved work](prompts/D01-upload-to-saved-work.md), manually run with Pablo's stronger chosen agent. Integrate the four finished scoped candidates privately, complete actual transport/ownership/media/canonical-save/release contracts.
+3. AFTER D01: [D02 — Cleanup and placement](prompts/D02-cleanup-and-placement.md), manually run with a stronger agent against D01's exact final candidate. Complete bounded progress, every retained family, durable placement and offline fencing.
+4. Parent integrates the combined candidate once, then manually run [V5-01](prompts/V5-01-shared-runtime.md) and [V5-02](prompts/V5-02-lifecycle-runtime.md), sequentially, against the single changed local Convex/dev/Bridge stack. They verify and fix small defects in the linked journeys; no broad new audit.
 
-The earlier parallel foundation plan is superseded. Review showed that each implementation deferred the same byte-retention boundary. M01-M02-HANDOFF.md now fixes ownership and a narrow helper contract; M02 implements it first, M01 consumes it second. Neither candidate is merged into primary automatically. Parent reviews the combined results and performs only the necessary changed-boundary integration checks before Stage C. Use reports/M02-COMPLETION.md and M01-COMPLETION.md for the revised contracts, not the held originals.
+The earlier broad M01/M02 tasks are history, not instructions to repeat them. Submitted completion reports are preserved; WAVE-5.md supersedes their unsupported completion claims. D01 owns trusted intake/release and D02 owns artifact-wide coordination, with an explicit handoff. No storage/vendor migration is chosen. Response-size measurements do not stand in for actual database read cost.
 
 ## Stage C: Office and educational sync
 
@@ -41,11 +43,11 @@ After integrating Stage C:
 5. [M04 — AI, actions and K-bar](prompts/M04-ai-actions-and-kbar.md): exact durable continuation, verified output/recovery, shared action inventory, K-bar, viewport/follow orchestration, attachments and professional deliverables. Existing basic AI work remains usable throughout; this package can now target proven Office and sync operations.
 6. [M06 — Bridge trust and Mac readiness](prompts/M06-bridge-trust-and-macos.md): stable-file write protocol, moves/deletions/offline/provider transitions, browser-first presets/setup, Windows no-console behaviour and Mac packaging readiness. Reuse Office proofs rather than implementing a second Office parser in Rust. This can run alongside M04; M06 publishes typed browser setup/permission actions for M04 to consume.
 
-These six manual prompts group the currently known complex workload by authority and dependency. Their later scope and parallelism will be reconsidered after the first pair returns; they are not a guaranteed final task count. Do not split them into dozens of automatic tasks. If implementation demonstrates that a major hosted engine, storage vendor, new canonical model or material launch-scope tradeoff is necessary, bring Pablo concrete alternatives before adopting it.
+M03/M05/M04/M06 remain the later implementation grouping, not currently dispatched tasks or a guaranteed final count. Their concrete scopes will be refreshed against completed W5/D01/D02 contracts. Reuse existing investigations; do not launch another global discovery wave. If a hosted engine, storage vendor, new canonical model or material launch-scope tradeoff is necessary, bring Pablo concrete alternatives before adopting it.
 
 ## Local acceptance and finish
 
-- Each package records exact commits, changed contracts, migration behaviour, focused tests, a short real-user browser journey, canonical readback and native package readback where relevant. It must state which checks used a fixture, private preview, shared runtime or native device.
+- Parallel implementations record exact commits, changed contracts, migrations and focused private tests. Changed browser/backend journeys run sequentially after integration on the one shared stack, with canonical/native readback where relevant. Every report distinguishes fixture, shared runtime and native device evidence; an unmerged worktree cannot verify its code by visiting main's localhost.
 - Parent integration checks only changed boundaries and their direct neighbours. A schema/API integration gets a short real Convex check after integration; do not rerun every past artifact scenario.
 - Functional regressions block that slice. Cosmetic differences with usable controls do not trigger endless polish. Keep each UI pass bounded to a batched desktop/narrow inspection, one repair batch, and a confirmation, unless a new functional failure justifies another check.
 - A held/unsupported operation is not silently counted as complete. No placeholder, preview, successful HTTP status, toast or stale health badge substitutes for the user's saved result.

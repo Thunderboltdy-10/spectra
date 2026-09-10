@@ -1,0 +1,104 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { convexTest } from "convex-test";
+import schema from "./schema";
+import { api, internal } from "./_generated/api";
+import { makeFunctionReference } from "convex/server";
+import type { Id } from "./_generated/dataModel";
+const modules = import.meta.glob("./**/*.ts");
+const identity = { subject: "parent-m01", email: "parent-m01@example.test", emailVerified: true };
+async function seed(t: ReturnType<typeof convexTest>) {
+  return t.run(async ctx => {
+    const now = Date.now();
+    const schoolId = await ctx.db.insert("schools", { name: "Parent review", slug: crypto.randomUUID(), verifiedDomains: [], status: "active", timezone: "Europe/Madrid", policyVersion: 1, createdAt: now, updatedAt: now });
+    const accountId = await ctx.db.insert("accounts", { clerkId: identity.subject, email: identity.email, emailVerified: true, name: "Parent fixture", status: "active", createdAt: now, updatedAt: now });
+    await ctx.db.insert("schoolMemberships", { accountId, schoolId, role: "student", status: "active", joinedAt: now, createdAt: now, updatedAt: now });
+    const artifactId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: accountId, schoolId, blueprintKey: "document", schemaVersion: 2, title: "Disposable", content: { blocks: [] }, textIndex: "", tags: [], status: "active", createdAt: now, updatedAt: now });
+    return { accountId, schoolId, artifactId, now };
+  });
+}
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+describe("Parent foundation completion depth", () => {
+  it("retrieves an entire 1000-message thread across all pages", async () => {
+    const t = convexTest(schema, modules); const f = await seed(t);
+    const threadId = await t.run(async ctx => {
+      const id = await ctx.db.insert("spectraThreads", { ownerAccountId: f.accountId, schoolId: f.schoolId, artifactId: f.artifactId, title: "Long", origin: "chat", status: "active", messageCount: 1000, createdAt: f.now, updatedAt: f.now });
+      for (let i = 0; i < 1000; i++) await ctx.db.insert("spectraMessages", { threadId: id, schoolId: f.schoolId, role: "user", content: "m" + i, createdAt: f.now + i });
+      return id;
+    });
+    const authed = t.withIdentity(identity);
+    const initial = await authed.query(api.spectraThreads.get, { threadId });
+    const seen = new Set(initial.messages.map(m => m._id));
+    let before = initial.messagePage.olderBefore;
+    for (let i = 0; i < 30; i++) {
+      const page = await authed.query(api.spectraThreads.listMessages, { threadId, before, limit: 48 });
+      for (const row of page.messages) seen.add(row._id);
+      before = page.olderBefore;
+      if (!page.hasOlder) break;
+    }
+    expect(seen.size).toBe(1000);
+  });
+  it("backfills beyond a 296-row scan window", async () => {
+    const t = convexTest(schema, modules); const f = await seed(t);
+    await t.run(async ctx => {
+      for (let i = 0; i < 700; i++) await ctx.db.insert("spectraThreads", { ownerAccountId: f.accountId, schoolId: f.schoolId, title: "Legacy " + i, origin: "chat", status: "active", createdAt: f.now + i, updatedAt: f.now + i });
+    });
+    let cursor: string | undefined;
+    for (let i = 0; i < 30; i++) {
+      const page = await t.mutation(internal.spectraThreads.backfillReadMetadata, { limit: 40, cursor });
+      cursor = page.nextCursor ?? undefined;
+      if (page.complete) break;
+    }
+    const count = await t.run(async ctx => (await ctx.db.query("spectraThreads").collect()).filter(r => r.readSchemaVersion === 1).length);
+    expect(count).toBe(700);
+  });
+  it("progresses after redacting an artifact memory claim", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules); const f = await seed(t);
+    const jobId = await t.run(async ctx => {
+      await ctx.db.patch(f.artifactId, { status: "deleted", deletionGeneration: 1 });
+      await ctx.db.insert("memoryClaims", { accountId: f.accountId, schoolId: f.schoolId, artifactId: f.artifactId, scope: "shared_artifact", subjectKind: "artifact", claimType: "declared_fact", proposition: "Fixture", normalizedProposition: "fixture", propositionHash: "a", assertion: "asserted", confidence: 1, sensitivity: "standard", status: "active", createdBy: "user", validFrom: f.now, createdAt: f.now, updatedAt: f.now });
+      return ctx.db.insert("artifactDeletionJobs", { artifactId: f.artifactId, ownerAccountId: f.accountId, schoolId: f.schoolId, generation: 1, phase: "children", cursor: Buffer.from(JSON.stringify({ family: "memory" })).toString("base64url"), deletedRows: 0, releasedBytes: 0, createdAt: f.now, updatedAt: f.now });
+    });
+    const processDeletion = makeFunctionReference<"mutation", { jobId: Id<"artifactDeletionJobs">; generation: number }>("spectraArtifactDeletion:process");
+    for (let i = 0; i < 20; i++) await t.mutation(processDeletion, { jobId, generation: 1 });
+    expect((await t.run(ctx => ctx.db.get(jobId)))?.phase).toBe("complete");
+  });
+  it("releases an unreferenced active asset from a deleted artifact", async () => {
+    const t = convexTest(schema, modules); const f = await seed(t);
+    const storageId = await t.run(async ctx => {
+      const id = await ctx.storage.store(new Blob(["fixture"], { type: "text/plain" }));
+      await ctx.db.insert("artifactAssets", { artifactId: f.artifactId, schoolId: f.schoolId, uploadedByAccountId: f.accountId, storageId: id, path: "fixture.txt", name: "Fixture", mediaType: "text/plain", bytes: 7, sha256: "a".repeat(64), status: "active", createdAt: f.now, updatedAt: f.now });
+      await ctx.db.patch(f.artifactId, { status: "deleted" });
+      return id;
+    });
+    const { releaseArtifactIntakePage } = await import("./artifactIntakeLifecycle");
+    let cursor: string | null = null;
+    for (let i = 0; i < 5; i++) {
+      const result = await t.run(ctx => releaseArtifactIntakePage(ctx, { artifactId: f.artifactId, ownerAccountId: f.accountId, cursor }));
+      cursor = result.cursor;
+      if (result.done) break;
+    }
+    expect(await t.run(ctx => ctx.db.system.get("_storage", storageId))).toBeNull();
+  });
+  it("rejects a foreign original candidate before it becomes cleanup authority", async () => {
+    const t = convexTest(schema, modules); const f = await seed(t);
+    const args = await t.run(async ctx => {
+      const storageId = await ctx.storage.store(new Blob(["foreign"], { type: "text/plain" }));
+      const jobId = await ctx.db.insert("artifactImportJobs", { artifactId: f.artifactId, ownerAccountId: f.accountId, schoolId: f.schoolId, typeKey: "document", format: "docx", originalAssetRef: "pending:fixture", originalBytes: 1, originalSha256: "a".repeat(64), uploadReceipt: "fixture-receipt", status: "uploading", unsupportedFeatures: [], parserVersion: "fixture", createdAt: f.now, updatedAt: f.now });
+      return { jobId, storageId, uploadReceipt: "fixture-receipt" };
+    });
+    await expect(t.withIdentity(identity).mutation(api.artifactImports.finalizeUpload, args)).rejects.toThrow("IMPORT_UPLOAD_ORIGIN_INVALID");
+    const job = await t.run(ctx => ctx.db.get(args.jobId));
+    expect(job?.candidateStorageId).toBeUndefined();
+    expect(await t.run(ctx => ctx.db.system.get("_storage", args.storageId))).not.toBeNull();
+  });
+  it("authorizes terminal original-upload replay", async () => {
+    const t = convexTest(schema, modules); const f = await seed(t);
+    const args = await t.run(async ctx => {
+      const storageId = await ctx.storage.store(new Blob(["fixture"], { type: "text/plain" }));
+      const jobId = await ctx.db.insert("artifactImportJobs", { artifactId: f.artifactId, ownerAccountId: f.accountId, schoolId: f.schoolId, typeKey: "document", format: "docx", originalAssetRef: "fixture", originalStorageId: storageId, uploadReceipt: "fixture-receipt", status: "uploaded", unsupportedFeatures: [], parserVersion: "fixture", createdAt: f.now, updatedAt: f.now });
+      return { jobId, storageId, uploadReceipt: "fixture-receipt" };
+    });
+    await expect(t.mutation(api.artifactImports.finalizeUpload, args)).rejects.toThrow();
+  });
+});

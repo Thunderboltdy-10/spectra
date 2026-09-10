@@ -1,10 +1,10 @@
 # Compact implementation roadmap
 
-Status 2026-09-10: W4 reviewed and integrated into main through dc1261d9, including parent corrections in WAVE-4-SYNTHESIS.md. M01/M02 are ready for manual execution in parallel. The running environment was left alone; future starts use `npm run local:start:all`. Later stages remain a dependency plan that will be revised from the next results, not a fixed estimate of all remaining work.
+Status 2026-09-10: W4 remains integrated through dc1261d9. The first M01/M02 candidates were reviewed and held after nine reproduced boundary failures and additional incomplete contracts. Read M01-M02-REVIEW.md. Run the two completion prompts below in sequence; no later stage is released yet. The running environment was left alone; future starts use `npm run local:start:all`. Later stages remain a dependency plan, not a fixed estimate of all remaining work.
 
 The launch objective is reliable educational work across web, AI, collaboration and broad native Office editing on Windows and macOS. This is an implementation sequence, not a request for another inventory audit. Landing, broad admin polish, Notion, hosted Office adoption and hosting migration are excluded unless Pablo changes the scope.
 
-## Stage A: five bounded Luna tasks
+## Stage A: five bounded Luna tasks — completed and integrated
 
 Auto-launch GPT-5.6 Luna / xhigh, one actual Codex task per row. All start from the current project default branch in separate worktrees. Their full instructions are in WAVE-4-ASSIGNMENTS.json.
 
@@ -18,14 +18,14 @@ Auto-launch GPT-5.6 Luna / xhigh, one actual Codex task per row. All start from 
 
 Every task fixes owned bounded defects and returns commits plus relevant checks. No dedicated observer/recovery task, no broad test sweep. Parent stops immediately after dispatch and resumes when Pablo says the batch has finished.
 
-## Stage B: manual foundation pair
+## Stage B: manual foundation pair — complete the held candidates
 
-W4 source integration is complete. Start from current main, including the newer local:start:all launcher and W4 parent amendments; do not use the old W3-only source. Paste the complete contents of these files into manually created tasks, preferably using the strongest model/reasoning setting available to Pablo. No particular model is imposed. Use private dependencies and distinguish changed-checkout tests from the shared running app.
+W4 source integration is complete. Preserve its parent corrections and launcher. Continue the existing manual tasks using the complete prompts below, preferably with Pablo's strongest chosen model/reasoning. No new automatic batch is needed. Use private dependencies and distinguish candidate source, fixtures and actual changed-backend evidence.
 
-1. [M01 — Read cost and deletion](prompts/M01-data-cost-and-lifecycle.md): bounded thread reads, selective subscriptions, Bridge polling, owner deletion and durable embed placement cleanup. Deliver measured before/after workload results and explicit migration/rollback handling.
-2. [M02 — Durable intake and evidence](prompts/M02-durable-intake-and-evidence.md): shared asset receipt, rich import commit, bounded parsers, reliable attachment references and truthful fetched-source evidence. This is the prerequisite for reliable rich outputs.
+1. FIRST: [M02 — Complete working intake](prompts/M02-complete-intake.md). Fix the actual PNG/original upload path, materialize media, make canonical import receipts causal and replayable, implement reference release, parser limits and authoritative evidence. The original task requirements still apply.
+2. AFTER M02 finishes: [M01 — Complete reads and lifecycle](prompts/M01-complete-read-and-lifecycle.md). Consume M02's finished candidate in the M01 private checkout, then complete lossless history, actual read savings, bounded recoverable deletion, durable placement and prompt/cheap Bridge discovery.
 
-M01 and M02 can run together in separate worktrees. M01 owns general read/deletion coordination; M02 owns upload/import/evidence receipt semantics. Both may need small schema additions; use separately named fields/tables through the existing schema conventions and reconcile at integration. Neither rewrites the other's lifecycle. M02 exports reference/cleanup hooks that M01 calls; the parent resolves this one integration boundary before Stage C.
+The earlier parallel foundation plan is superseded. Review showed that each implementation deferred the same byte-retention boundary. M01-M02-HANDOFF.md now fixes ownership and a narrow helper contract; M02 implements it first, M01 consumes it second. Neither candidate is merged into primary automatically. Parent reviews the combined results and performs only the necessary changed-boundary integration checks before Stage C. Use reports/M02-COMPLETION.md and M01-COMPLETION.md for the revised contracts, not the held originals.
 
 ## Stage C: Office and educational sync
 

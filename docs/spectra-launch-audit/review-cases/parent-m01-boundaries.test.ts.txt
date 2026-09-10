@@ -1,0 +1,72 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { convexTest } from "convex-test";
+import schema from "./schema";
+import { api, internal } from "./_generated/api";
+const modules = import.meta.glob("./**/*.ts");
+const identity = { subject: "parent-m01", email: "parent-m01@example.test", emailVerified: true };
+async function seed(t: ReturnType<typeof convexTest>) {
+  return t.run(async ctx => {
+    const now = Date.now();
+    const schoolId = await ctx.db.insert("schools", { name: "Parent review", slug: crypto.randomUUID(), verifiedDomains: [], status: "active", timezone: "Europe/Madrid", policyVersion: 1, createdAt: now, updatedAt: now });
+    const accountId = await ctx.db.insert("accounts", { clerkId: identity.subject, email: identity.email, emailVerified: true, name: "Parent fixture", status: "active", createdAt: now, updatedAt: now });
+    await ctx.db.insert("schoolMemberships", { accountId, schoolId, role: "student", status: "active", joinedAt: now, createdAt: now, updatedAt: now });
+    const artifactId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: accountId, schoolId, blueprintKey: "document", schemaVersion: 2, title: "Disposable", content: { blocks: [] }, textIndex: "", tags: [], status: "active", createdAt: now, updatedAt: now });
+    return { accountId, schoolId, artifactId, now };
+  });
+}
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+describe("Parent M01 boundary counterexamples", () => {
+  it("retrieves every message when a page boundary splits equal timestamps", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seed(t);
+    const threadId = await t.run(async ctx => {
+      const id = await ctx.db.insert("spectraThreads", { ownerAccountId: f.accountId, schoolId: f.schoolId, title: "Same timestamp", artifactId: f.artifactId, origin: "chat", status: "active", messageCount: 40, createdAt: f.now, updatedAt: f.now });
+      for (let i = 0; i < 40; i++) await ctx.db.insert("spectraMessages", { threadId: id, schoolId: f.schoolId, role: "user", content: "message " + i, createdAt: f.now });
+      return id;
+    });
+    const authed = t.withIdentity(identity);
+    const initial = await authed.query(api.spectraThreads.get, { threadId });
+    const older = await authed.query(api.spectraThreads.listMessages, { threadId, before: initial.messagePage.olderBefore, limit: 48 });
+    expect(new Set([...initial.messages, ...older.messages].map(m => m._id)).size).toBe(40);
+  });
+  it("backfill advances past the newest migrated batch", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seed(t);
+    await t.run(async ctx => {
+      for (let i = 0; i < 21; i++) await ctx.db.insert("spectraThreads", { ownerAccountId: f.accountId, schoolId: f.schoolId, title: "Legacy " + i, origin: "chat", status: "active", createdAt: f.now + i, updatedAt: f.now + i });
+    });
+    for (let i = 0; i < 4; i++) await t.mutation(internal.spectraThreads.backfillReadMetadata, { limit: 10 });
+    const remaining = await t.run(async ctx => (await ctx.db.query("spectraThreads").collect()).filter(r => r.readSchemaVersion !== 1).length);
+    expect(remaining).toBe(0);
+  });
+  it("does not disclose another student's deletion job", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seed(t);
+    const other = { subject: "parent-m01-peer", email: "parent-m01-peer@example.test", emailVerified: true };
+    const jobId = await t.run(async ctx => {
+      const accountId = await ctx.db.insert("accounts", { clerkId: other.subject, email: other.email, emailVerified: true, name: "Peer", status: "active", createdAt: f.now, updatedAt: f.now });
+      await ctx.db.insert("schoolMemberships", { accountId, schoolId: f.schoolId, role: "student", status: "active", joinedAt: f.now, createdAt: f.now, updatedAt: f.now });
+      return ctx.db.insert("artifactDeletionJobs", { artifactId: f.artifactId, ownerAccountId: f.accountId, schoolId: f.schoolId, generation: 1, phase: "failed", lastError: "Private lifecycle details", deletedRows: 0, releasedBytes: 0, createdAt: f.now, updatedAt: f.now });
+    });
+    const outcome = await t.withIdentity(other).query(api.spectraArtifactDeletion.status, { jobId }).then(row => row, () => null);
+    expect(outcome).toBeNull();
+  });
+  it("deletion progresses beyond already failed Bridge requests", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const f = await seed(t);
+    const jobId = await t.run(async ctx => {
+      const deviceId = await ctx.db.insert("bridgeDevices", { accountId: f.accountId, name: "Fixture", platform: "windows", credentialHash: "a".repeat(64), protocolVersion: "1", appVersion: "1", pairedAt: f.now, lastSeenAt: f.now, state: "active" });
+      const nodeId = await ctx.db.insert("orgNodes", { accountId: f.accountId, schoolId: f.schoolId, parentId: null, kind: "folder", name: "Fixture", orderKey: "a", createdAt: f.now, updatedAt: f.now });
+      const mountId = await ctx.db.insert("bridgeMounts", { accountId: f.accountId, deviceId, rootLabel: "Fixture", grantId: "fixture", rootKey: "a".repeat(64), rootOrgNodeId: nodeId, state: "active", fileCount: 1, doubleSyncRisk: false, createdAt: f.now, updatedAt: f.now });
+      const replicaId = await ctx.db.insert("workReplicas", { accountId: f.accountId, workId: f.artifactId, kind: "local", nativeFormat: "docx", revision: "a", state: "current", updatedAt: f.now });
+      await ctx.db.insert("bridgeWriteRequests", { accountId: f.accountId, workId: f.artifactId, replicaId, deviceId, mountId, localResourceId: "fixture", relativePath: "Fixture.docx", payloadRef: "fixture", baseRevision: "a", targetRevision: "b", contentHash: "b", idempotencyKey: "fixture", regionIds: [], partNames: [], state: "failed", errorCode: "work-deleted", createdAt: f.now, updatedAt: f.now });
+      await ctx.db.delete(replicaId);
+      await ctx.db.delete(f.artifactId);
+      return ctx.db.insert("artifactDeletionJobs", { artifactId: f.artifactId, ownerAccountId: f.accountId, schoolId: f.schoolId, generation: 1, phase: "children", deletedRows: 0, releasedBytes: 0, createdAt: f.now, updatedAt: f.now });
+    });
+    for (let i = 0; i < 4; i++) await t.mutation(internal.spectraArtifactDeletion.process, { jobId });
+    const job = await t.run(ctx => ctx.db.get(jobId));
+    expect(job?.phase).toBe("complete");
+  });
+});

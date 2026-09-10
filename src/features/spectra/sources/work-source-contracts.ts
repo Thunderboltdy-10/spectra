@@ -30,9 +30,11 @@ export type PortableSourceBundle = { sources: SourceRecord[]; evidence: Evidence
 export function createPortableSourceBundle(input: PortableSourceBundle): PortableSourceBundle {
   const sourceIds = new Set(input.sources.filter((source) => source.verified).map((source) => source.id));
   const evidenceIds = new Set(input.evidence.filter((span) => sourceIds.has(span.sourceId)).map((span) => span.id));
-  const citations = input.citations.filter((citation) => sourceIds.has(citation.sourceId) && citation.evidenceIds.length > 0 && citation.evidenceIds.every((id) => evidenceIds.has(id)));
-  if (citations.length !== input.citations.length) throw new Error("SOURCE_BUNDLE_CONTAINS_UNVERIFIED_CITATION");
-  return { sources: [...input.sources], evidence: [...input.evidence], citations: [...citations] };
+  const citations = input.citations.map((citation) => {
+    if (!sourceIds.has(citation.sourceId) || !citation.evidenceIds.length || !citation.evidenceIds.every((id) => evidenceIds.has(id))) throw new Error("SOURCE_BUNDLE_CONTAINS_UNVERIFIED_CITATION");
+    return citation;
+  });
+  return { sources: [...input.sources], evidence: [...input.evidence], citations };
 }
 
 export function preserveSourcesThroughConversion<T>(content: T, bundle: PortableSourceBundle, targetType: ArtifactTypeKey) {

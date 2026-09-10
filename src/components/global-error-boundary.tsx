@@ -3,7 +3,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 
-type Props = { children: ReactNode };
+type Props = { children: ReactNode; resetKey?: string | null };
 type State = { hasError: boolean; error?: Error };
 
 /** Swallows a subtree failure so a bad query cannot blank the whole product. */
@@ -58,6 +58,15 @@ export class GlobalErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[GlobalErrorBoundary]", error, info.componentStack);
+  }
+
+  componentDidUpdate(previousProps: Props) {
+    if (
+      this.state.hasError &&
+      previousProps.resetKey !== this.props.resetKey
+    ) {
+      this.setState({ hasError: false, error: undefined });
+    }
   }
 
   render() {

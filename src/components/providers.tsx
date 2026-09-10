@@ -35,7 +35,7 @@ function AccountStorageBoundary() {
 
 function PathScopedErrorBoundary({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  return <GlobalErrorBoundary key={pathname}>{children}</GlobalErrorBoundary>;
+  return <GlobalErrorBoundary resetKey={pathname}>{children}</GlobalErrorBoundary>;
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {

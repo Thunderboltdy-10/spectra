@@ -1,6 +1,7 @@
 import { Document, Paragraph, type Run, WML_NAMESPACE } from "@ariadng/office/docx";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
+import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
 import { firstNativeFontFamily } from "../office-fonts";
 import type {
   LensCapabilitySet,
@@ -2129,7 +2130,7 @@ async function applyDelta(
   carry: LensPreservedCarry<DocxProjection>,
   delta: DocxSemanticDelta,
 ) {
-  const document = await Document.open(carry.payload);
+  const document = await Document.open(carry.safePayload ?? carry.payload);
   const identity = ensureStableRegionIds(document);
   const aliases = identity.aliases;
   const opened = await projectDocument(document, carry.profile, identity.identityStable);
@@ -2245,8 +2246,10 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
 
   async open(payload, profile = "strict-native"): Promise<LensOpenResult<DocxProjection>> {
     let document: Document;
+    let safePayload: Uint8Array;
     try {
-      document = await Document.open(payload);
+      safePayload = await prepareBoundedArchiveBytes(payload, OFFICE_ARCHIVE_LIMITS);
+      document = await Document.open(safePayload);
     } catch (error) {
       if (bytesLookEncrypted(payload))
         throw new DocxLensError(
@@ -2270,6 +2273,7 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         profile,
         basePayloadHash,
         payload,
+        safePayload,
         projection,
       },
       capabilities: this.capabilities(profile, fidelityMap),

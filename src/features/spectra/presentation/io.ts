@@ -1,4 +1,5 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { strFromU8, strToU8, zipSync } from "fflate";
+import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import {
   normalizePresentationContent,
   presentationObjectText,
@@ -50,10 +51,11 @@ function parseXml(bytes: Uint8Array, label: string) {
   return document;
 }
 
-function archiveFrom(buffer: ArrayBuffer) {
-  const files = unzipSync(new Uint8Array(buffer), {
-    filter: (entry) => !entry.name.endsWith("/"),
-  });
+async function archiveFrom(buffer: ArrayBuffer) {
+  const checked = await readBoundedArchive(new Uint8Array(buffer), OFFICE_ARCHIVE_LIMITS);
+  const files = Object.fromEntries(
+    Object.entries(checked.entries).filter(([name]) => !name.endsWith("/")),
+  );
   const entries = Object.entries(files);
   if (entries.length > MAX_ARCHIVE_FILES)
     throw new Error("The presentation archive contains too many files.");
@@ -528,7 +530,7 @@ export async function importPresentationFile(
     throw new Error("Choose a .pptx or .odp presentation export.");
   if (file.size > 80_000_000)
     throw new Error("Presentation imports cannot exceed 80 MB.");
-  const files = archiveFrom(await file.arrayBuffer());
+  const files = await archiveFrom(await file.arrayBuffer());
   if (
     Object.keys(files).some((path) =>
       /(?:vbaProject\.bin|activeX|embeddings\/.+\.(?:exe|dll|js|vbs|cmd|bat))$/i.test(

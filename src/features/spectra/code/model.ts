@@ -1,5 +1,6 @@
-import { Gunzip, strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { Gunzip, strFromU8, strToU8, zipSync } from "fflate";
 import { normalizeCodeNetworkOrigins } from "./network-policy";
+import { DEFAULT_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 
 export type CodeRuntime = "browser" | "react" | "python" | "none";
 
@@ -883,47 +884,17 @@ export async function importCodeFiles(selected: readonly File[]) {
     if (/\.zip$/i.test(file.name)) {
       let archive: Record<string, Uint8Array>;
       try {
-        let declaredBytes = 0;
-        let declaredFiles = 0;
-        archive = unzipSync(bytes, {
-          filter: (entry) => {
-            if (entry.name.endsWith("/")) return false;
-            declaredFiles += 1;
-            if (declaredFiles > MAX_FILES) {
-              skipped.push(
-                `${file.name}/${entry.name}: archive file-count limit reached`,
-              );
-              return false;
-            }
-            const entryLimit = assetMediaType(entry.name)
-              ? MAX_IMPORTED_ASSET_BYTES
-              : MAX_FILE_BYTES;
-            if (entry.originalSize > entryLimit) {
-              skipped.push(
-                `${file.name}/${entry.name}: declared size exceeds its safe live import limit`,
-              );
-              return false;
-            }
-            if (
-              entry.size > 0 &&
-              entry.originalSize > 100_000 &&
-              entry.originalSize / entry.size > 120
-            ) {
-              skipped.push(
-                `${file.name}/${entry.name}: suspicious compression ratio was quarantined`,
-              );
-              return false;
-            }
-            declaredBytes += entry.originalSize;
-            if (declaredBytes > MAX_EXPANDED_IMPORT_BYTES) {
-              skipped.push(
-                `${file.name}/${entry.name}: expanded archive budget reached`,
-              );
-              return false;
-            }
-            return true;
-          },
-        });
+        archive = (
+          await readBoundedArchive(bytes, {
+            ...DEFAULT_ARCHIVE_LIMITS,
+            maxEntries: MAX_FILES,
+            maxExpandedBytes: MAX_EXPANDED_IMPORT_BYTES,
+            maxEntryBytes: MAX_IMPORTED_ASSET_BYTES,
+            maxInputBytes: MAX_ARCHIVE_CONTAINER_BYTES,
+            maxWorkBytes: MAX_ARCHIVE_CONTAINER_BYTES + MAX_EXPANDED_IMPORT_BYTES,
+            maxCompressionRatio: 120,
+          })
+        ).entries;
       } catch {
         throw new Error(`${file.name} is not a readable ZIP archive.`);
       }

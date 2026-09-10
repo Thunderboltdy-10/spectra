@@ -1,6 +1,7 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { strFromU8, strToU8, zipSync } from "fflate";
 import { z } from "zod";
 import { validateArtifactContent } from "../artifacts/registry";
+import { readBoundedArchive } from "../../../../shared/parser-limits";
 
 export const SPECTRA_PACKAGE_VERSION = 1;
 export const SPECTRA_PACKAGE_TYPES = ["flashcard_deck", "quiz", "planner_task", "agent", "whiteboard", "presentation"] as const;
@@ -47,9 +48,19 @@ function safePath(name: string) {
   return normalized;
 }
 
-export function openSpectraPackage(bytes: Uint8Array): SpectraPackage {
-  let files: ReturnType<typeof unzipSync>;
-  try { files = unzipSync(bytes); } catch { throw new Error("SPECTRA_PACKAGE_CORRUPT"); }
+export async function openSpectraPackage(bytes: Uint8Array): Promise<SpectraPackage> {
+  let files: Record<string, Uint8Array>;
+  try {
+    files = (await readBoundedArchive(bytes)).entries;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /escapes the archive root|ARCHIVE_PATH_INVALID/.test(error.message)
+    ) {
+      throw new Error("SPECTRA_PACKAGE_PATH_INVALID");
+    }
+    throw new Error("SPECTRA_PACKAGE_CORRUPT");
+  }
   for (const name of Object.keys(files)) {
     const directory = name.endsWith("/");
     const normalized = safePath(directory ? name.slice(0, -1) : name);
@@ -81,4 +92,4 @@ export function upgradeManifest(value: unknown): SpectraPackageManifest {
   return manifest;
 }
 
-export function summarizeSpectraPackage(bytes: Uint8Array) { const pkg = openSpectraPackage(bytes); return { artifactType: pkg.manifest.artifactType, schemaVersion: pkg.manifest.schemaVersion, packageFormatVersion: pkg.manifest.packageFormatVersion, assetCount: Object.keys(pkg.assets).length, historyEntryCount: Object.keys(pkg.history).length, contentKeys: pkg.content && typeof pkg.content === "object" && !Array.isArray(pkg.content) ? Object.keys(pkg.content as Record<string, unknown>) : [] }; }
+export async function summarizeSpectraPackage(bytes: Uint8Array) { const pkg = await openSpectraPackage(bytes); return { artifactType: pkg.manifest.artifactType, schemaVersion: pkg.manifest.schemaVersion, packageFormatVersion: pkg.manifest.packageFormatVersion, assetCount: Object.keys(pkg.assets).length, historyEntryCount: Object.keys(pkg.history).length, contentKeys: pkg.content && typeof pkg.content === "object" && !Array.isArray(pkg.content) ? Object.keys(pkg.content as Record<string, unknown>) : [] }; }

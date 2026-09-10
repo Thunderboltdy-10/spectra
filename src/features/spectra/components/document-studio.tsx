@@ -119,6 +119,7 @@ import {
   type ReferenceFallback,
 } from "../references/export/reference-fallback";
 import { useSpectraPreferences } from "../settings/preference-store";
+import { bytesToArrayBuffer, enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import type { SourceRecord } from "../sources/records/source-record";
 import { createDocumentRelativeSelection } from "../work/models/yjs";
 import { availableWorkModes, getWorkDefinition } from "../work/registry";
@@ -1947,8 +1948,12 @@ export function DocumentStudio({
       await uploadArtifactImportOriginal(importJobId, file);
       if (name.endsWith(".docx")) {
         const mammoth = await import("mammoth/mammoth.browser");
+        const checked = await readBoundedArchive(
+          new Uint8Array(await file.arrayBuffer()),
+          OFFICE_ARCHIVE_LIMITS,
+        );
         const result = await mammoth.convertToHtml({
-          arrayBuffer: await file.arrayBuffer(),
+          arrayBuffer: bytesToArrayBuffer(checked.bytes),
         });
         editor.commands.setContent(
           sanitizeDocumentHtml(result.value || "<p></p>"),
@@ -1971,8 +1976,11 @@ export function DocumentStudio({
           "unsupported floating layout",
         );
       } else if (name.endsWith(".odt")) {
-        const { strFromU8, unzipSync } = await import("fflate");
-        const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
+        const { strFromU8 } = await import("fflate");
+        const archive = (await readBoundedArchive(
+          new Uint8Array(await file.arrayBuffer()),
+          OFFICE_ARCHIVE_LIMITS,
+        )).entries;
         const contentXml = archive["content.xml"];
         if (!contentXml) throw new Error("ODT content.xml is missing.");
         const xml = strFromU8(contentXml);
@@ -2020,9 +2028,13 @@ export function DocumentStudio({
         );
       } else if (name.endsWith(".pdf")) {
         const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-        const document = await pdfjs.getDocument({
-          data: new Uint8Array(await file.arrayBuffer()),
-        }).promise;
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        enforcePdfInput(bytes);
+        const pdfOptions = {
+          data: bytes,
+          enableScripting: false,
+        };
+        const document = await pdfjs.getDocument(pdfOptions).promise;
         const pages: string[] = [];
         for (
           let pageNumber = 1;

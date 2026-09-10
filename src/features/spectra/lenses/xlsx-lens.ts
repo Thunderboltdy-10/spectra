@@ -2,6 +2,7 @@ import { Workbook, parseCellRef, type CellStyleUpdate } from "@ariadng/office/xl
 import { dateToSerial } from "../sheets/excel-serial";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement } from "@ariadng/office/xml";
+import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
 import { sha256Payload } from "./docx-lens";
 import { normalizedCellFormat, xlsxOperationsBetween } from "./office-content";
 import type {
@@ -353,7 +354,7 @@ function findSheet(workbook: Workbook, sheetId: string) {
 }
 
 async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: XlsxSemanticDelta) {
-  const workbook = await Workbook.open(carry.payload);
+  const workbook = await Workbook.open(carry.safePayload ?? carry.payload);
   const operations = delta.kind === "ai-edit" ? delta.operations : [delta];
   let formulaCachesNeedInvalidation = false;
   for (const operation of operations) {
@@ -390,10 +391,11 @@ export const xlsxLens: SpectraLens<XlsxProjection, XlsxSemanticDelta> = {
   format: "xlsx",
   async open(payload, profile = "strict-native"): Promise<LensOpenResult<XlsxProjection>> {
     let workbook: Workbook;
-    try { workbook = await Workbook.open(payload); }
+    let safePayload: Uint8Array;
+    try { safePayload = await prepareBoundedArchiveBytes(payload, OFFICE_ARCHIVE_LIMITS); workbook = await Workbook.open(safePayload); }
     catch (error) { throw new XlsxLensError("XLSX_CORRUPT", `This Excel package could not be opened safely.${error instanceof Error ? ` (${error.message})` : ""}`); }
     const { projection, fidelityMap } = await projectWorkbook(workbook, profile);
-    return { projection, fidelityMap, preservedCarry: { version: 1, format: projection.nativeBinding.format, profile, basePayloadHash: await sha256Payload(payload), payload, projection }, capabilities: this.capabilities(profile, fidelityMap) };
+    return { projection, fidelityMap, preservedCarry: { version: 1, format: projection.nativeBinding.format, profile, basePayloadHash: await sha256Payload(payload), payload, safePayload, projection }, capabilities: this.capabilities(profile, fidelityMap) };
   },
   mutate: applyDelta,
   async materialize({ projection, carry }) {

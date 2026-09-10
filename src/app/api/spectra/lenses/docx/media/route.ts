@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { Id } from "../../../../../../../convex/_generated/dataModel";
 import { fetchVerifiedNativePayload } from "@/features/spectra/lenses/native-payload-server";
+import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../../../../shared/parser-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +44,9 @@ export async function GET(request: NextRequest) {
     if (retained.truth.hash !== input.payloadHash)
       throw new Error("NATIVE_MEDIA_REVISION_STALE");
 
-    const document = await Document.open(retained.payload);
+    const document = await Document.open(
+      await prepareBoundedArchiveBytes(retained.payload, OFFICE_ARCHIVE_LIMITS),
+    );
     const relationship = document.office.mainPart
       .relationships()
       .byType(IMAGE_RELATIONSHIP)

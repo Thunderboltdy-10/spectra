@@ -29,6 +29,13 @@ import { matchSpectraCreationShorthand } from "@/features/spectra/operations/cre
 import { promptLooksLikeFocusedStructuralEdit } from "@/features/spectra/operations/intent-alignment";
 import { SPECTRA_BLUEPRINT_KEYS } from "@/features/spectra/operations/schema";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
+import {
+  bytesToArrayBuffer,
+  decodeBase64DataUrl,
+  OFFICE_ARCHIVE_LIMITS,
+  readBoundedArchive,
+  enforcePdfInput,
+} from "../../../../../../shared/parser-limits";
 
 export const PROGRESS_ACTIVITIES = new Set<NativeProgressActivity>([
   "plan",
@@ -750,10 +757,12 @@ export async function selectAgentRuntime(params: {
   };
 }
 
-export function attachmentBuffer(data: string, name: string) {
-  const match = data.match(/^data:[^;,]+;base64,([a-z0-9+/=\r\n]+)$/i);
-  if (!match?.[1]) throw new Error(`Invalid binary attachment: ${name}`);
-  return Buffer.from(match[1], "base64");
+export function attachmentBuffer(data: string, name: string, maxBytes = 25_000_000) {
+  return decodeBase64DataUrl(data, name, maxBytes);
+}
+
+async function checkedZip(bytes: Uint8Array) {
+  return readBoundedArchive(bytes, OFFICE_ARCHIVE_LIMITS);
 }
 
 export function decodePackageXmlText(value: string) {
@@ -768,11 +777,14 @@ export function decodePackageXmlText(value: string) {
     );
 }
 
-export async function extractPdfText(buffer: Buffer, characterLimit: number) {
+export async function extractPdfText(buffer: Uint8Array, characterLimit: number) {
+  enforcePdfInput(buffer);
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const document = await pdfjs.getDocument({
-    data: new Uint8Array(buffer),
-  }).promise;
+  const pdfOptions = {
+    data: buffer,
+    enableScripting: false,
+  };
+  const document = await pdfjs.getDocument(pdfOptions).promise;
   const pages: string[] = [];
   let characters = 0;
   for (
@@ -796,18 +808,19 @@ export async function extractPdfText(buffer: Buffer, characterLimit: number) {
     characters += Math.min(labelled.length, remaining);
   }
   const pageCount = document.numPages;
-  await document.destroy();
+  await document.cleanup();
   return {
     text: pages.join("\n\n"),
     pageCount,
   };
 }
 
-export async function extractXlsxText(buffer: Buffer, characterLimit: number) {
+export async function extractXlsxText(buffer: Uint8Array, characterLimit: number) {
+  const checked = await checkedZip(buffer);
   const ExcelJS = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(
-    buffer as unknown as Parameters<typeof workbook.xlsx.load>[0],
+    checked.bytes as unknown as Parameters<typeof workbook.xlsx.load>[0],
   );
   const sections: string[] = [];
   let characters = 0;
@@ -833,9 +846,8 @@ export async function extractXlsxText(buffer: Buffer, characterLimit: number) {
   return sections.join("\n\n").slice(0, characterLimit);
 }
 
-export async function extractPptxText(buffer: Buffer, characterLimit: number) {
-  const { unzipSync } = await import("fflate");
-  const archive = unzipSync(new Uint8Array(buffer));
+export async function extractPptxText(buffer: Uint8Array, characterLimit: number) {
+  const archive = (await checkedZip(buffer)).entries;
   const decoder = new TextDecoder();
   const names = Object.keys(archive)
     .filter((name) => /^ppt\/(?:slides|notesSlides)\/[^/]+\.xml$/i.test(name))
@@ -913,7 +925,7 @@ export async function _legacyPrepareAttachments(
         throw new Error(`Invalid PDF attachment: ${name}`);
       const remaining = Math.max(0, 80_000 - extractedCharacters);
       const local = await extractPdfText(
-        attachmentBuffer(row.data, name),
+        attachmentBuffer(row.data, name, 10 * 1024 * 1024),
         Math.min(60_000, remaining),
       );
       extractedCharacters += local.text.length;
@@ -942,9 +954,11 @@ export async function _legacyPrepareAttachments(
     if (row.handling === "docx") {
       if (size > 8 * 1024 * 1024 || typeof row.data !== "string")
         throw new Error(`Invalid DOCX attachment: ${name}`);
+      const sourceBytes = attachmentBuffer(row.data, name, 8 * 1024 * 1024);
+      const checked = await checkedZip(sourceBytes);
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({
-        buffer: attachmentBuffer(row.data, name),
+        arrayBuffer: bytesToArrayBuffer(checked.bytes),
       });
       const remaining = Math.max(0, 80_000 - extractedCharacters);
       const extractedText = result.value
@@ -966,7 +980,7 @@ export async function _legacyPrepareAttachments(
         throw new Error(`Invalid XLSX attachment: ${name}`);
       const remaining = Math.max(0, 80_000 - extractedCharacters);
       const extractedText = await extractXlsxText(
-        attachmentBuffer(row.data, name),
+        attachmentBuffer(row.data, name, 12 * 1024 * 1024),
         Math.min(60_000, remaining),
       );
       extractedCharacters += extractedText.length;
@@ -985,7 +999,7 @@ export async function _legacyPrepareAttachments(
         throw new Error(`Invalid PPTX attachment: ${name}`);
       const remaining = Math.max(0, 80_000 - extractedCharacters);
       const extractedText = await extractPptxText(
-        attachmentBuffer(row.data, name),
+        attachmentBuffer(row.data, name, 20 * 1024 * 1024),
         Math.min(60_000, remaining),
       );
       extractedCharacters += extractedText.length;
@@ -1109,9 +1123,11 @@ export async function renderPdfEvidencePages(
   if (!attachment.data) return [];
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const { createCanvas } = await import("@napi-rs/canvas");
-  const document = await pdfjs.getDocument({
-    data: new Uint8Array(attachmentBuffer(attachment.data, attachment.name)),
-  }).promise;
+  const pdfOptions = {
+    data: attachmentBuffer(attachment.data, attachment.name, 10 * 1024 * 1024),
+    enableScripting: false,
+  };
+  const document = await pdfjs.getDocument(pdfOptions).promise;
   const pageNumbers = relevantPdfPages(
     { ...attachment, pageCount: document.numPages },
     prompt,
@@ -1146,7 +1162,7 @@ export async function renderPdfEvidencePages(
     });
     page.cleanup();
   }
-  await document.destroy();
+  await document.cleanup();
   return images;
 }
 
@@ -1154,10 +1170,7 @@ export async function extractPackageMediaEvidence(
   attachment: PreparedAttachment,
 ) {
   if (!attachment.data) return [];
-  const { unzipSync } = await import("fflate");
-  const archive = unzipSync(
-    new Uint8Array(attachmentBuffer(attachment.data, attachment.name)),
-  );
+  const archive = (await checkedZip(attachmentBuffer(attachment.data, attachment.name, 20 * 1024 * 1024))).entries;
   const prefix =
     attachment.handling === "docx"
       ? "word/media/"

@@ -147,6 +147,7 @@ import {
 } from "../sheets/cell-overlay";
 import { sheetsContentEqual } from "../sheets/semantic-equality";
 import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
+import { bytesToArrayBuffer, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import {
   xlsxExportCalculationProperties,
   xlsxFormulaExportValue,
@@ -3006,7 +3007,11 @@ export const SheetsStudio = memo(function SheetsStudio({
     try {
       const ExcelJS = await import("exceljs");
       const imported = new ExcelJS.Workbook();
-      await imported.xlsx.load(await file.arrayBuffer());
+      const checked = await readBoundedArchive(
+        new Uint8Array(await file.arrayBuffer()),
+        OFFICE_ARCHIVE_LIMITS,
+      );
+      await imported.xlsx.load(bytesToArrayBuffer(checked.bytes));
       let externalLinks = 0;
       let hyperlinks = 0;
       let unsupportedValues = 0;
@@ -3230,7 +3235,7 @@ export const SheetsStudio = memo(function SheetsStudio({
           : extension === "ods"
             ? await (async () => {
                 if (locked) throw new Error("This workbook is read-only.");
-                const imported = importOds(await file.arrayBuffer(), workbook);
+                const imported = await importOds(await file.arrayBuffer(), workbook);
                 commit(imported.next);
                 setRange({
                   start: { row: 0, column: 0 },

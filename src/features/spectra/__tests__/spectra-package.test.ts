@@ -45,14 +45,14 @@ describe("Spectra package", () => {
     expect(Buffer.from(second).equals(Buffer.from(first))).toBe(true);
   });
 
-  it("opens a package with directory entries and validates the restored content", () => {
+  it("opens a package with directory entries and validates the restored content", async () => {
     const bytes = createSpectraPackage({
       artifactType: "flashcard_deck",
       schemaVersion: 3,
       createdByVersion: "spectra-test",
       content,
     });
-    const opened = openSpectraPackage(bytes);
+    const opened = await openSpectraPackage(bytes);
     expect(opened.manifest.artifactType).toBe("flashcard_deck");
     expect(opened.content).toEqual(content);
     expect(validateArtifactContent(opened.manifest.artifactType, opened.content).success).toBe(true);
@@ -64,7 +64,7 @@ describe("Spectra package", () => {
       "assets/": new Uint8Array(),
       "history/": new Uint8Array(),
     });
-    expect(openSpectraPackage(withDirectories).content).toEqual(content);
+    expect((await openSpectraPackage(withDirectories)).content).toEqual(content);
   });
 
   it("stays byte-identical when the wall clock changes", () => {
@@ -129,9 +129,10 @@ describe("Spectra package", () => {
       "Second paragraph with enough text.",
     ]);
 
-    const pdfBytes = readFileSync(
-      resolve("/workspace/demos/fixtures/qa-resource-citizen.pdf"),
-    );
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF();
+    pdf.text("QA Resource Citizen", 20, 20);
+    const pdfBytes = new Uint8Array(pdf.output("arraybuffer"));
     const file = new File([pdfBytes], "qa-resource-citizen.pdf", {
       type: "application/pdf",
     });
@@ -145,7 +146,7 @@ describe("Spectra package", () => {
 
 
 
-  it("refuses traversal, unexpected entries, and invalid artifact content", () => {
+  it("refuses traversal, unexpected entries, and invalid artifact content", async () => {
     const manifest = JSON.stringify({
       packageFormatVersion: 1,
       artifactType: "flashcard_deck",
@@ -159,11 +160,14 @@ describe("Spectra package", () => {
         "manifest.json": strToU8(manifest),
         ...extra,
       });
-    expect(() => openSpectraPackage(archive({ "assets/../escape.txt": strToU8("no") })))
-      .toThrowError("SPECTRA_PACKAGE_PATH_INVALID");
-    expect(() => openSpectraPackage(archive({ "extra.txt": strToU8("no") })))
-      .toThrowError("SPECTRA_PACKAGE_ENTRY_INVALID");
-    expect(() => openSpectraPackage(archive({}, { cards: [] })))
-      .toThrowError("SPECTRA_PACKAGE_CONTENT_INVALID");
+    await expect(
+      openSpectraPackage(archive({ "assets/../escape.txt": strToU8("no") })),
+    ).rejects.toThrowError("SPECTRA_PACKAGE_PATH_INVALID");
+    await expect(
+      openSpectraPackage(archive({ "extra.txt": strToU8("no") })),
+    ).rejects.toThrowError("SPECTRA_PACKAGE_ENTRY_INVALID");
+    await expect(
+      openSpectraPackage(archive({}, { cards: [] })),
+    ).rejects.toThrowError("SPECTRA_PACKAGE_CONTENT_INVALID");
   });
 });

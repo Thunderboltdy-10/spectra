@@ -532,9 +532,9 @@ async function extractPdfText(bytes: Uint8Array, signal: AbortSignal) {
       }
     }
   } finally {
-    const destroying = document.destroy();
-    if (!signal.aborted) await awaitWithSignal(destroying, signal);
-    else void destroying.catch(() => undefined);
+    const cleaning = document.cleanup();
+    if (!signal.aborted) await awaitWithSignal(cleaning, signal);
+    else void cleaning.catch(() => undefined);
   }
   return { text, ranges, partial };
 }

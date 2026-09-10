@@ -7,6 +7,14 @@ export type AttachmentInput = {
   data?: string;
 };
 
+import {
+  bytesToArrayBuffer,
+  decodeBase64DataUrl,
+  OFFICE_ARCHIVE_LIMITS,
+  readBoundedArchive,
+  enforcePdfInput,
+} from "../../../../../shared/parser-limits";
+
 export type PreparedAttachment = {
   id?: string;
   name: string;
@@ -61,10 +69,8 @@ async function officeTextPdf(name: string, text: string) {
   return `data:application/pdf;base64,${bytes.toString("base64")}`;
 }
 
-export function attachmentBuffer(data: string, name: string) {
-  const match = data.match(/^data:[^;,]+;base64,([a-z0-9+/=\r\n]+)$/i);
-  if (!match?.[1]) throw new Error(`Invalid binary attachment: ${name}`);
-  return Buffer.from(match[1], "base64");
+export function attachmentBuffer(data: string, name: string, maxBytes = 25_000_000) {
+  return decodeBase64DataUrl(data, name, maxBytes);
 }
 
 function decodePackageXmlText(value: string) {
@@ -79,9 +85,11 @@ function decodePackageXmlText(value: string) {
     );
 }
 
-async function extractPdfText(buffer: Buffer, characterLimit: number) {
+async function extractPdfText(buffer: Uint8Array, characterLimit: number) {
+  enforcePdfInput(buffer);
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const document = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+  const pdfOptions = { data: buffer, enableScripting: false };
+  const document = await pdfjs.getDocument(pdfOptions).promise;
   const pages: string[] = [];
   let characters = 0;
   for (
@@ -105,15 +113,16 @@ async function extractPdfText(buffer: Buffer, characterLimit: number) {
     characters += Math.min(labelled.length, remaining);
   }
   const pageCount = document.numPages;
-  await document.destroy();
+  await document.cleanup();
   return { text: pages.join("\n\n"), pageCount };
 }
 
-async function extractXlsxText(buffer: Buffer, characterLimit: number) {
+async function extractXlsxText(buffer: Uint8Array, characterLimit: number) {
+  const checked = await readBoundedArchive(buffer, OFFICE_ARCHIVE_LIMITS);
   const ExcelJS = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(
-    buffer as unknown as Parameters<typeof workbook.xlsx.load>[0],
+    checked.bytes as unknown as Parameters<typeof workbook.xlsx.load>[0],
   );
   const sections: string[] = [];
   let characters = 0;
@@ -142,9 +151,8 @@ async function extractXlsxText(buffer: Buffer, characterLimit: number) {
   return sections.join("\n\n").slice(0, characterLimit);
 }
 
-async function extractPptxText(buffer: Buffer, characterLimit: number) {
-  const { unzipSync } = await import("fflate");
-  const archive = unzipSync(new Uint8Array(buffer));
+async function extractPptxText(buffer: Uint8Array, characterLimit: number) {
+  const archive = (await readBoundedArchive(buffer, OFFICE_ARCHIVE_LIMITS)).entries;
   const decoder = new TextDecoder();
   const names = Object.keys(archive)
     .filter((name) => /^ppt\/(?:slides|notesSlides)\/[^/]+\.xml$/i.test(name))
@@ -204,7 +212,7 @@ export async function prepareAttachments(
     if (row.handling === "pdf") {
       if (size > 10 * 1024 * 1024 || typeof row.data !== "string" || !row.data.startsWith("data:application/pdf;base64,"))
         throw new Error(`Invalid PDF attachment: ${name}`);
-      const local = await extractPdfText(attachmentBuffer(row.data, name), Math.min(60_000, remaining));
+      const local = await extractPdfText(attachmentBuffer(row.data, name, 10 * 1024 * 1024), Math.min(60_000, remaining));
       extractedCharacters += local.text.length;
       prepared.push({ name, mimeType: "application/pdf", size, handling: "pdf", data: row.data, extractedText: local.text, pageCount: local.pageCount });
       continue;
@@ -218,10 +226,11 @@ export async function prepareAttachments(
     }
     if (row.handling === "docx") {
       if (size > 8 * 1024 * 1024 || typeof row.data !== "string") throw new Error(`Invalid DOCX attachment: ${name}`);
+      const buffer = attachmentBuffer(row.data, name, 8 * 1024 * 1024);
+      const checked = await readBoundedArchive(buffer, OFFICE_ARCHIVE_LIMITS);
       const mammoth = await import("mammoth");
-      const buffer = attachmentBuffer(row.data, name);
-      const result = await mammoth.extractRawText({ buffer });
-      const html = await mammoth.convertToHtml({ buffer });
+      const result = await mammoth.extractRawText({ arrayBuffer: bytesToArrayBuffer(checked.bytes) });
+      const html = await mammoth.convertToHtml({ arrayBuffer: bytesToArrayBuffer(checked.bytes) });
       const extractedText = result.value.replace(/\u0000/g, "").slice(0, Math.min(40_000, remaining));
       extractedCharacters += extractedText.length;
       prepared.push({ name, mimeType, size, handling: "docx", data: row.data, extractedText, visualPdfData: await officeTextPdf(name, extractedText), structuredRepresentation: { kind: "docx", value: { html: html.value, messages: [...result.messages, ...html.messages].map((message) => message.message) } } });
@@ -230,7 +239,7 @@ export async function prepareAttachments(
     if (row.handling === "xlsx" || row.handling === "pptx") {
       const maximum = row.handling === "xlsx" ? 12 : 20;
       if (size > maximum * 1024 * 1024 || typeof row.data !== "string") throw new Error(`Invalid ${row.handling.toUpperCase()} attachment: ${name}`);
-      const buffer = attachmentBuffer(row.data, name);
+      const buffer = attachmentBuffer(row.data, name, row.handling === "xlsx" ? 12 * 1024 * 1024 : 20 * 1024 * 1024);
       const extractedText = await (row.handling === "xlsx" ? extractXlsxText(buffer, Math.min(60_000, remaining)) : extractPptxText(buffer, Math.min(60_000, remaining)));
       extractedCharacters += extractedText.length;
       prepared.push({ name, mimeType, size, handling: row.handling, data: row.data, extractedText, visualPdfData: await officeTextPdf(name, extractedText) });

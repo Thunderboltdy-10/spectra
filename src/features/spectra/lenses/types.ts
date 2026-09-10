@@ -32,6 +32,8 @@ export type LensPreservedCarry<P = unknown> = {
   profile: LensCompatibilityProfile;
   basePayloadHash: string;
   payload: Uint8Array;
+  /** Validated/re-emitted package used for native parsing and mutation. */
+  safePayload?: Uint8Array;
   projection: P;
 };
 

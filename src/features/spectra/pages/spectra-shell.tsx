@@ -3514,7 +3514,7 @@ export function SpectraShell({
       const originalBuffer = await file.arrayBuffer();
       const portable =
         classification.kind === "portable"
-          ? openSpectraPackage(new Uint8Array(originalBuffer))
+          ? await openSpectraPackage(new Uint8Array(originalBuffer))
           : null;
       const blueprintKey: ArtifactTypeKey = portable
         ? portable.manifest.artifactType

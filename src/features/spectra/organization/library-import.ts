@@ -1,4 +1,5 @@
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { bytesToArrayBuffer, enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 
 export const LIBRARY_IMPORT_ACCEPT = [
   ".spectra-pkg",
@@ -143,11 +144,14 @@ export function documentContentFromImportedPlainText(text: string) {
 async function documentContentFromPdf(file: File) {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const bytes = await file.arrayBuffer();
-  const loadingTask = pdfjs.getDocument({
+  enforcePdfInput(new Uint8Array(bytes));
+  const pdfOptions = {
     data: new Uint8Array(bytes),
     useWorkerFetch: false,
     disableFontFace: true,
-  });
+    enableScripting: false,
+  };
+  const loadingTask = pdfjs.getDocument(pdfOptions);
   const pdf = await loadingTask.promise;
   const pageTexts: string[] = [];
   try {
@@ -166,7 +170,7 @@ async function documentContentFromPdf(file: File) {
       if (text) pageTexts.push(text);
     }
   } finally {
-    await pdf.destroy();
+    await pdf.cleanup();
   }
   if (pageTexts.length === 0) return documentContentFromImportedPlainText("");
   const html = pageTexts
@@ -202,8 +206,12 @@ export async function projectLibraryImportContent(
   if (blueprintKey !== "document") return undefined;
   if (name.endsWith(".docx")) {
     const mammoth = await import("mammoth/mammoth.browser");
+    const checked = await readBoundedArchive(
+      new Uint8Array(await file.arrayBuffer()),
+      OFFICE_ARCHIVE_LIMITS,
+    );
     const result = await mammoth.convertToHtml({
-      arrayBuffer: await file.arrayBuffer(),
+      arrayBuffer: bytesToArrayBuffer(checked.bytes),
     });
     return documentContentFromImportedHtml(result.value || "");
   }

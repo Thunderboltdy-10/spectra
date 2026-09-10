@@ -1,6 +1,7 @@
 import mammoth from "mammoth";
 import type { ImportedDocument } from "@/lib/editor/tiptap-import";
 import { htmlToTiptapJson, textFromTiptapJson, titleFromFilename } from "@/lib/editor/tiptap-import";
+import { bytesToArrayBuffer, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../shared/parser-limits";
 
 /**
  * Lossy, one-shot DOCX import. This creates an independent Spectra document;
@@ -9,7 +10,8 @@ import { htmlToTiptapJson, textFromTiptapJson, titleFromFilename } from "@/lib/e
  */
 export async function importDocxCopyFile(file: File): Promise<ImportedDocument> {
   const bytes = await file.arrayBuffer();
-  const result = await mammoth.convertToHtml({ arrayBuffer: bytes });
+  const checked = await readBoundedArchive(new Uint8Array(bytes), OFFICE_ARCHIVE_LIMITS);
+  const result = await mammoth.convertToHtml({ arrayBuffer: bytesToArrayBuffer(checked.bytes) });
   const content = htmlToTiptapJson(result.value);
   return {
     title: titleFromFilename(file.name),

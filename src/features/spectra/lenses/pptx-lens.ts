@@ -2,6 +2,7 @@ import { Presentation, DRAWINGML_NAMESPACE, PML_NAMESPACE } from "@ariadng/offic
 import { resolveRelationshipTarget } from "@ariadng/office/opc";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
+import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
 import type { PresentationObject } from "../presentation/model";
 import { sha256Payload } from "./docx-lens";
 import { pptxOperationsBetween } from "./office-content";
@@ -464,7 +465,7 @@ function addTextBox(root: XmlElement, text: string) {
 }
 
 async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: PptxSemanticDelta) {
-  const deck = await Presentation.open(carry.payload); const operations = delta.kind === "ai-edit" ? delta.operations : [delta];
+  const deck = await Presentation.open(carry.safePayload ?? carry.payload); const operations = delta.kind === "ai-edit" ? delta.operations : [delta];
   // A slide added in this delta has no part until it exists, so its caller-side
   // id is mapped to the real one and every later operation in the same delta —
   // including the order — can still name it.
@@ -539,7 +540,7 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
 
 export const pptxLens: SpectraLens<PptxProjection, PptxSemanticDelta> = {
   format: "pptx",
-  async open(payload, profile = "strict-native"): Promise<LensOpenResult<PptxProjection>> { let deck: Presentation; try { deck = await Presentation.open(payload); } catch (error) { throw new PptxLensError("PPTX_CORRUPT", `This PowerPoint package could not be opened safely.${error instanceof Error ? ` (${error.message})` : ""}`); } const { projection, fidelityMap } = await projectPresentation(deck, profile); return { projection, fidelityMap, preservedCarry: { version: 1, format: projection.nativeBinding.format, profile, basePayloadHash: await sha256Payload(payload), payload, projection }, capabilities: this.capabilities(profile, fidelityMap) }; },
+  async open(payload, profile = "strict-native"): Promise<LensOpenResult<PptxProjection>> { let deck: Presentation; let safePayload: Uint8Array; try { safePayload = await prepareBoundedArchiveBytes(payload, OFFICE_ARCHIVE_LIMITS); deck = await Presentation.open(safePayload); } catch (error) { throw new PptxLensError("PPTX_CORRUPT", `This PowerPoint package could not be opened safely.${error instanceof Error ? ` (${error.message})` : ""}`); } const { projection, fidelityMap } = await projectPresentation(deck, profile); return { projection, fidelityMap, preservedCarry: { version: 1, format: projection.nativeBinding.format, profile, basePayloadHash: await sha256Payload(payload), payload, safePayload, projection }, capabilities: this.capabilities(profile, fidelityMap) }; },
   mutate: applyDelta,
   async materialize({ projection, carry }) {
     const operations = pptxOperationsBetween(carry.projection, projection);

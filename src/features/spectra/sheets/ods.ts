@@ -1,4 +1,4 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { strFromU8, strToU8, zipSync } from "fflate";
 import {
   columnName,
   coordinateToAddress,
@@ -7,6 +7,7 @@ import {
   type SheetsContent,
   type WorkbookSheet,
 } from "./model";
+import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 
 const MAX_ROWS = 100_000;
 const MAX_COLUMNS = 16_384;
@@ -100,11 +101,11 @@ function parseCell(cell: Element): SheetCell {
   };
 }
 
-export function importOds(
+export async function importOds(
   buffer: ArrayBuffer,
   current: SheetsContent,
-): { next: SheetsContent; unsupported: string[] } {
-  const archive = unzipSync(new Uint8Array(buffer));
+): Promise<{ next: SheetsContent; unsupported: string[] }> {
+  const archive = (await readBoundedArchive(new Uint8Array(buffer), OFFICE_ARCHIVE_LIMITS)).entries;
   const contentFile = archive["content.xml"];
   if (!contentFile)
     throw new Error("ODS_CONTENT_MISSING: content.xml is absent.");

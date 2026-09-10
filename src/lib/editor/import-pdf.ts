@@ -1,5 +1,6 @@
 import type { ImportedDocument } from "@/lib/editor/tiptap-import";
 import { plainTextToTiptapJson, textFromTiptapJson, titleFromFilename } from "@/lib/editor/tiptap-import";
+import { enforcePdfInput } from "../../../shared/parser-limits";
 
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
@@ -15,11 +16,14 @@ async function getPdfjsModule() {
 export async function importPdfFile(file: File): Promise<ImportedDocument> {
   const pdfjs = await getPdfjsModule();
   const bytes = await file.arrayBuffer();
-  const loadingTask = pdfjs.getDocument({
+  enforcePdfInput(new Uint8Array(bytes));
+  const pdfOptions = {
     data: new Uint8Array(bytes),
     useWorkerFetch: false,
     disableFontFace: true,
-  });
+    enableScripting: false,
+  };
+  const loadingTask = pdfjs.getDocument(pdfOptions);
   const pdf = await loadingTask.promise;
   const pageTexts: string[] = [];
 
@@ -35,7 +39,7 @@ export async function importPdfFile(file: File): Promise<ImportedDocument> {
       if (text) pageTexts.push(text);
     }
   } finally {
-    await pdf.destroy();
+    await pdf.cleanup();
   }
 
   const content = plainTextToTiptapJson(pageTexts.join("\n\n"));

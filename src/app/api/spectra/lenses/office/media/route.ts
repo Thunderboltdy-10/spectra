@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Id } from "../../../../../../../convex/_generated/dataModel";
 import { fetchVerifiedNativePayload } from "@/features/spectra/lenses/native-payload-server";
 import { sniffOfficeRasterMedia } from "@/features/spectra/lenses/office-media";
+import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../../../../shared/parser-limits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,7 +52,9 @@ export async function GET(request: NextRequest) {
     if (retained.truth.hash !== input.payloadHash)
       throw new Error("NATIVE_MEDIA_REVISION_STALE");
 
-    const deck = await Presentation.open(retained.payload);
+    const deck = await Presentation.open(
+      await prepareBoundedArchiveBytes(retained.payload, OFFICE_ARCHIVE_LIMITS),
+    );
     const part = relatedImagePart(deck, input.partName);
     if (!part) throw new Error("NATIVE_MEDIA_PART_UNAVAILABLE");
     const bytes = await part.read();

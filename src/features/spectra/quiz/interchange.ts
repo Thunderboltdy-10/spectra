@@ -1,5 +1,6 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { strFromU8, strToU8, zipSync } from "fflate";
 import { delimitedValue, parseDelimited } from "../sheets/model";
+import { readBoundedArchive } from "../../../../shared/parser-limits";
 
 export const QUIZ_QUESTION_TYPES = [
   "multiple_choice",
@@ -576,26 +577,16 @@ export async function parseQuizImport(file: File): Promise<QuizImportResult> {
       : parseQtiDocuments([parsed]);
   }
   if (extension === "zip" || extension === "qti") {
-    let acceptedEntries = 0;
-    let acceptedBytes = 0;
-    const archive = unzipSync(new Uint8Array(await file.arrayBuffer()), {
-      filter: ({ name, size, originalSize }) => {
-        const safe =
-          !name.startsWith("__MACOSX/") &&
-          !name.includes("../") &&
-          !name.startsWith("/") &&
-          !/^[a-zA-Z]:/.test(name) &&
-          size <= 12 * 1024 * 1024 &&
-          originalSize <= 36 * 1024 * 1024 &&
-          acceptedEntries < 1_000 &&
-          acceptedBytes + originalSize <= 160 * 1024 * 1024;
-        if (safe) {
-          acceptedEntries += 1;
-          acceptedBytes += originalSize;
-        }
-        return safe;
-      },
-    });
+    const archive = (
+      await readBoundedArchive(new Uint8Array(await file.arrayBuffer()), {
+        maxEntries: 1_000,
+        maxExpandedBytes: 160 * 1024 * 1024,
+        maxEntryBytes: 36 * 1024 * 1024,
+        maxInputBytes: 100 * 1024 * 1024,
+        maxWorkBytes: 260 * 1024 * 1024,
+        maxCompressionRatio: 1_200,
+      })
+    ).entries;
     const xmlFiles = Object.entries(archive)
       .filter(([name]) => name.toLowerCase().endsWith(".xml"))
       .slice(0, 500);

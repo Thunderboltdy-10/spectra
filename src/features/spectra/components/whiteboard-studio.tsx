@@ -105,6 +105,7 @@ import {
   type CommandBinding,
 } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
+import { enforcePdfInput } from "../../../../shared/parser-limits";
 import { ArtifactEmbedById } from "./artifact-embed-host";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
@@ -2280,13 +2281,17 @@ export function WhiteboardStudio({
     importJobId: string,
   ) {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const pdfDocument = await pdfjs.getDocument({
-      data: new Uint8Array(await file.arrayBuffer()),
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    enforcePdfInput(bytes);
+    const pdfOptions = {
+      data: bytes,
       useWorkerFetch: false,
       disableFontFace: true,
-    }).promise;
+      enableScripting: false,
+    };
+    const pdfDocument = await pdfjs.getDocument(pdfOptions).promise;
     if (pdfDocument.numPages > 100) {
-      await pdfDocument.destroy();
+      await pdfDocument.cleanup();
       throw new Error("PDF whiteboard imports are limited to 100 pages.");
     }
     const next = clone(content);
@@ -2365,7 +2370,7 @@ export function WhiteboardStudio({
         importedNodes.push(node);
       }
     } finally {
-      await pdfDocument.destroy();
+      await pdfDocument.cleanup();
     }
     next.nodes.push(...importedNodes);
     const refreshed = await getArtifactAssets(artifactId);

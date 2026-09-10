@@ -57,6 +57,7 @@ import {
 import { parseDelimited } from "../sheets/model";
 import type { WorkCapability } from "../work/registry";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import { spectraBus } from "../events";
 import {
   ArtifactRichTextEditor,
@@ -1023,9 +1024,17 @@ export function FlashcardStudio({
       importJobId = beginning.jobId;
       await uploadArtifactImportOriginal(importJobId, file);
       if (extension === "apkg") {
-        const [{ default: initSqlJs }, { strFromU8, unzipSync }] =
+        const [{ default: initSqlJs }, { strFromU8 }] =
           await Promise.all([import("sql.js"), import("fflate")]);
-        const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
+        const archive = (await readBoundedArchive(
+          new Uint8Array(await file.arrayBuffer()),
+          {
+            ...OFFICE_ARCHIVE_LIMITS,
+            maxEntries: 256,
+            maxExpandedBytes: 120 * 1024 * 1024,
+            maxWorkBytes: 150 * 1024 * 1024,
+          },
+        )).entries;
         const databaseBytes =
           archive["collection.anki21"] ??
           archive["collection.anki2"] ??
@@ -1219,8 +1228,16 @@ export function FlashcardStudio({
         extension === "spectra-deck" ||
         file.name.toLocaleLowerCase().endsWith(".spectra-deck.zip")
       ) {
-        const { strFromU8, unzipSync } = await import("fflate");
-        const archive = unzipSync(new Uint8Array(await file.arrayBuffer()));
+        const { strFromU8 } = await import("fflate");
+        const archive = (await readBoundedArchive(
+          new Uint8Array(await file.arrayBuffer()),
+          {
+            ...OFFICE_ARCHIVE_LIMITS,
+            maxEntries: 256,
+            maxExpandedBytes: 120 * 1024 * 1024,
+            maxWorkBytes: 150 * 1024 * 1024,
+          },
+        )).entries;
         const entries = Object.entries(archive);
         const uncompressedBytes = entries.reduce(
           (total, [, bytes]) => total + bytes.length,

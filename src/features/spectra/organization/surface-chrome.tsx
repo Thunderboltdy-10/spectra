@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { type ReactNode, type RefObject } from "react";
 import {
   ArrowDownUp,
   Columns3,
@@ -484,13 +484,16 @@ export function SurfaceNewMenu({
 export function SurfaceRailToggle({
   collapsed,
   onToggle,
+  buttonRef,
 }: {
   collapsed: boolean;
   onToggle: () => void;
+  buttonRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const Icon = collapsed ? PanelLeftOpen : PanelLeftClose;
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onToggle}
       aria-pressed={collapsed}

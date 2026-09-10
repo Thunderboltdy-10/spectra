@@ -15634,6 +15634,25 @@ body {
   right: 0 !important;
 }
 
+/* The fixed band is a hit-test shell, not a page-wide scrim. Keep the stack
+   transparent to pointer input and opt actual controls back in. In
+   particular, the run strip is full-width for scrolling but its empty space
+   must not cover an editor control underneath it. */
+.spectra-workbench-live-stack > .spectra-live-stack,
+.spectra-workbench-live-stack .spectra-live-dock-root,
+.spectra-workbench-live-stack .spectra-live-dock-row,
+.spectra-workbench-live-stack .spectra-run-tab-strip {
+  pointer-events: none;
+}
+
+.spectra-workbench-live-stack .spectra-live-dock-tab,
+.spectra-workbench-live-stack .spectra-live-dock-slot,
+.spectra-workbench-live-stack .spectra-live-dock-hover,
+.spectra-workbench-live-stack .spectra-command-bar,
+.spectra-workbench-live-stack .spectra-command-bar > * {
+  pointer-events: auto;
+}
+
 /* Modal dialogs share the composer-dock layer. While one is open, the dock
    must not steal clicks from the dialog footer or paint as a competing
    overlay. */

@@ -106,6 +106,9 @@ export function ChatShell() {
   const [welcome, setWelcome] = useState("Welcome back.");
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
+  const loadGenerationRef = useRef(0);
+  const historyToggleRef = useRef<HTMLButtonElement | null>(null);
+  const historyOpenerRef = useRef<HTMLButtonElement | null>(null);
   const syncedRequestedThreadRef = useRef<string | null | undefined>(undefined);
   const consumedPromptRef = useRef<string | null>(null);
   const closePresentation = useSpectraContextStore(
@@ -137,40 +140,121 @@ export function ChatShell() {
     );
   }, []);
 
-  const refresh = useCallback(async (nextThreadId?: string | null) => {
-    const [threadRows, overview] = await Promise.all([
-      getSpectraThreads({ limit: 100 }),
-      getSpectraOverview(),
-    ]);
-    // A failed detail read is not a missing thread. Let the caller render a
-    // retryable error instead of replacing a recoverable conversation with a
-    // misleading new-chat state.
-    const selected = nextThreadId ? await getSpectraThread(nextThreadId) : null;
-    setThreads(threadRows.threads);
-    setWorkspaces(overview.workspaces);
-    setArtifacts((current) => {
-      const next = new Map(
-        overview.artifacts.map((artifact) => [artifact._id, artifact] as const),
-      );
-      const currentlyOpenIds = new Set(
-        useSpectraContextStore
-          .getState()
-          .openObjects.filter((object) => object.type === "artifact")
-          .map((object) => object.id),
-      );
-      // The overview is deliberately bounded. An Inbox artifact opened from a
-      // result card can be absent from a later refresh while it remains a real,
-      // canonical object. Preserve only actively mounted artifacts so a run
-      // completion cannot make the editor look like a temporary tab.
-      for (const artifact of current)
-        if (currentlyOpenIds.has(artifact._id) && !next.has(artifact._id))
-          next.set(artifact._id, artifact);
-      return [...next.values()];
-    });
-    if (nextThreadId === activeThreadRef.current) setDetail(selected);
-    spectraBus.emit("threads.changed", {});
-    return { threadFound: !nextThreadId || Boolean(selected) };
-  }, []);
+  const refresh = useCallback(
+    async (nextThreadId?: string | null, generation?: number) => {
+      const [threadRows, overview] = await Promise.all([
+        getSpectraThreads({ limit: 100 }),
+        getSpectraOverview(),
+      ]);
+      // A failed detail read is not a missing thread. Let the caller render a
+      // retryable error instead of replacing a recoverable conversation with a
+      // misleading new-chat state.
+      const selected = nextThreadId
+        ? await getSpectraThread(nextThreadId)
+        : null;
+      // Route loads are allowed to finish in the background, but an old
+      // request must never publish its data into a newer route. Non-route
+      // refreshes omit the generation and retain their existing semantics.
+      if (
+        generation !== undefined &&
+        generation !== loadGenerationRef.current
+      )
+        return { threadFound: true, stale: true };
+      setThreads(threadRows.threads);
+      setWorkspaces(overview.workspaces);
+      setArtifacts((current) => {
+        const next = new Map(
+          overview.artifacts.map((artifact) => [artifact._id, artifact] as const),
+        );
+        const currentlyOpenIds = new Set(
+          useSpectraContextStore
+            .getState()
+            .openObjects.filter((object) => object.type === "artifact")
+            .map((object) => object.id),
+        );
+        // The overview is deliberately bounded. An Inbox artifact opened from
+        // a result card can be absent from a later refresh while it remains a
+        // real, canonical object. Preserve only actively mounted artifacts so
+        // a run completion cannot make the editor look like a temporary tab.
+        for (const artifact of current)
+          if (currentlyOpenIds.has(artifact._id) && !next.has(artifact._id))
+            next.set(artifact._id, artifact);
+        return [...next.values()];
+      });
+      if (nextThreadId === activeThreadRef.current) setDetail(selected);
+      spectraBus.emit("threads.changed", {});
+      return { threadFound: !nextThreadId || Boolean(selected), stale: false };
+    },
+    [],
+  );
+
+  const startRouteLoad = useCallback(
+    (nextThreadId: string | null, clearDetail: boolean) => {
+      const generation = loadGenerationRef.current + 1;
+      loadGenerationRef.current = generation;
+      activeThreadRef.current = nextThreadId;
+      if (clearDetail) setDetail(null);
+      setLoading(Boolean(nextThreadId));
+      setLoadError(null);
+      void refresh(nextThreadId, generation)
+        .then(({ threadFound, stale }) => {
+          if (
+            stale ||
+            generation !== loadGenerationRef.current ||
+            activeThreadRef.current !== nextThreadId
+          )
+            return;
+          if (threadFound || !nextThreadId) return;
+          activeThreadRef.current = null;
+          setThreadId(null);
+          setDetail(null);
+          setComposerThread(null);
+          router.replace("/chat?new=1");
+          toast.message(
+            "That conversation is no longer available. Opened a new conversation instead.",
+          );
+        })
+        .catch(() => {
+          if (
+            generation !== loadGenerationRef.current ||
+            activeThreadRef.current !== nextThreadId
+          )
+            return;
+          setLoadError(chatLoadErrorMessage(nextThreadId));
+        })
+        .finally(() => {
+          if (
+            generation === loadGenerationRef.current &&
+            activeThreadRef.current === nextThreadId
+          )
+            setLoading(false);
+        });
+    },
+    [refresh, router, setComposerThread],
+  );
+
+  const refreshActiveThread = useCallback(async () => {
+    const currentThreadId = activeThreadRef.current;
+    const currentGeneration = loadGenerationRef.current;
+    try {
+      const result = await refresh(currentThreadId, currentGeneration);
+      if (
+        !result.stale &&
+        loadGenerationRef.current === currentGeneration &&
+        activeThreadRef.current === currentThreadId
+      )
+        setLoadError(null);
+    } catch {
+      // Background updates must leave the last known conversation rendered;
+      // surface the failure beside those messages instead of replacing them
+      // with the empty-chat welcome state.
+      if (
+        loadGenerationRef.current === currentGeneration &&
+        activeThreadRef.current === currentThreadId
+      )
+        setLoadError(chatLoadErrorMessage(currentThreadId));
+    }
+  }, [refresh]);
 
   useEffect(() => {
     if (syncedRequestedThreadRef.current === requestedThreadId) return;
@@ -185,32 +269,8 @@ export function ChatShell() {
         ? { id: requestedThreadId, title: "Conversation" }
         : null,
     );
-    activeThreadRef.current = requestedThreadId;
-    setLoading(Boolean(requestedThreadId));
-    setLoadError(null);
-    void refresh(requestedThreadId)
-      .then(({ threadFound }) => {
-        if (
-          threadFound ||
-          !requestedThreadId ||
-          activeThreadRef.current !== requestedThreadId
-        )
-          return;
-        activeThreadRef.current = null;
-        setThreadId(null);
-        setDetail(null);
-        setComposerThread(null);
-        router.replace("/chat?new=1");
-        toast.message(
-          "That conversation is no longer available. Opened a new conversation instead.",
-        );
-      })
-      .catch(() => {
-        if (activeThreadRef.current !== requestedThreadId) return;
-        setLoadError(chatLoadErrorMessage(requestedThreadId));
-      })
-      .finally(() => setLoading(false));
-  }, [requestedThreadId, refresh, router, setComposerThread]);
+    startRouteLoad(requestedThreadId, true);
+  }, [requestedThreadId, setComposerThread, startRouteLoad]);
 
   useEffect(() => {
     if (
@@ -224,15 +284,41 @@ export function ChatShell() {
       )
     )
       return;
-    const timer = window.setInterval(
-      () =>
-        void getSpectraThread(threadId)
-          .then(setDetail)
-          .catch(() => undefined),
-      750,
-    );
+    const pollingThreadId = threadId;
+    const pollingGeneration = loadGenerationRef.current;
+    const timer = window.setInterval(() => {
+      void getSpectraThread(pollingThreadId)
+        .then((nextDetail) => {
+          if (
+            activeThreadRef.current === pollingThreadId &&
+            loadGenerationRef.current === pollingGeneration
+          )
+            setDetail(nextDetail);
+        })
+        .catch(() => undefined);
+    }, 750);
     return () => window.clearInterval(timer);
   }, [detail?.traces, threadId]);
+
+  const retryRouteLoad = useCallback(() => {
+    startRouteLoad(requestedThreadId, false);
+  }, [requestedThreadId, startRouteLoad]);
+
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    window.requestAnimationFrame(() => historyOpenerRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeHistory();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeHistory, historyOpen]);
 
   const selectThread = useCallback(
     (id: string | null) => {
@@ -421,10 +507,10 @@ export function ChatShell() {
         activeThreadRef.current = id;
         router.replace(`/chat?threadId=${encodeURIComponent(id)}`);
       }
-      await refresh(id);
+      await refreshActiveThread();
     },
     onContinuationConflict: () => selectThread(null),
-    onDataChanged: () => refresh(activeThreadRef.current),
+    onDataChanged: refreshActiveThread,
     onOpenArtifact: openArtifact,
   });
 
@@ -658,6 +744,8 @@ export function ChatShell() {
                   return;
                 }
                 studio.closeStudio();
+                if (!historyOpen)
+                  historyOpenerRef.current = historyToggleRef.current;
                 setHistoryOpen((value) => !value);
                 if (!historyOpen)
                   void getSpectraResultCards({
@@ -667,7 +755,9 @@ export function ChatShell() {
               }}
               className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               aria-label="Open runs"
+              aria-expanded={historyOpen}
               title="Runs"
+              ref={historyToggleRef}
             >
               <History className="h-3.5 w-3.5" />
             </button>
@@ -723,6 +813,28 @@ export function ChatShell() {
           detail={detail}
           threadId={threadId ?? undefined}
           loading={loading}
+          loadError={
+            detail && loadError ? (
+              <ProductErrorState
+                title={
+                  requestedThreadId
+                    ? "This conversation could not refresh"
+                    : "Chat could not refresh"
+                }
+                detail="The messages shown below are the last loaded copy. Try again to refresh this conversation."
+                className="mb-5 min-h-0 items-start rounded-card border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))] px-4 py-3 text-left"
+                action={
+                  <button
+                    type="button"
+                    onClick={retryRouteLoad}
+                    className="h-8 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
+                  >
+                    Try again
+                  </button>
+                }
+              />
+            ) : undefined
+          }
           liveExchange={runEngine.liveExchange}
           workspaces={workspaces}
           onOpenArtifact={openArtifact}
@@ -759,15 +871,7 @@ export function ChatShell() {
                 action={
                   <button
                     type="button"
-                    onClick={() => {
-                      setLoading(true);
-                      setLoadError(null);
-                      void refresh(requestedThreadId)
-                        .catch(() =>
-                          setLoadError(chatLoadErrorMessage(requestedThreadId)),
-                        )
-                        .finally(() => setLoading(false));
-                    }}
+                    onClick={retryRouteLoad}
                     className="h-9 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
                   >
                     Try again
@@ -893,7 +997,7 @@ export function ChatShell() {
             </div>
             <button
               type="button"
-              onClick={() => setHistoryOpen(false)}
+              onClick={closeHistory}
               className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               aria-label="Close runs"
               title="Close"

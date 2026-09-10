@@ -741,16 +741,16 @@ export function LiveDock({
 
   return (
     <section
-      className="mb-1.5 w-full"
+      className="spectra-live-dock-root pointer-events-none mb-1.5 w-full"
       aria-label="Live Dock"
       data-live-dock-version="2"
     >
-      <div className="spectra-live-dock-row grid w-full grid-cols-[44px_minmax(0,1fr)] items-center gap-2">
+      <div className="spectra-live-dock-row pointer-events-none grid w-full grid-cols-[44px_minmax(0,1fr)] items-center gap-2">
         {onStartNewThread && (showOptimistic || visible.length > 0) ? (
           <button
             type="button"
             onClick={onStartNewThread}
-            className="spectra-live-dock-slot flex h-11 w-11 shrink-0 items-center justify-center rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-hover hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="spectra-live-dock-slot pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-hover hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             aria-label="Start a new chat"
             title="New chat"
           >
@@ -758,12 +758,12 @@ export function LiveDock({
           </button>
         ) : null}
         <div
-          className="spectra-run-tab-strip col-start-2 flex min-w-0 w-full items-center gap-1.5 overflow-x-auto overflow-y-visible px-0.5 pb-0.5 pt-0.5 max-sm:snap-x"
+          className="spectra-run-tab-strip pointer-events-none col-start-2 flex min-w-0 w-full items-center gap-1.5 overflow-x-auto overflow-y-visible px-0.5 pb-0.5 pt-0.5 max-sm:snap-x"
           aria-live="polite"
         >
         {showOptimistic ? (
           <article
-            className="spectra-live-dock-tab flex h-11 flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3"
+            className="spectra-live-dock-tab pointer-events-auto flex h-11 flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3"
             data-run-status="starting"
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
@@ -779,7 +779,7 @@ export function LiveDock({
         ) : null}
 
         {openChat && !openedChatAlreadyVisible ? (
-          <article className="spectra-live-dock-tab flex h-11 min-w-[220px] flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--brand-primary)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3" data-open-chat="true">
+          <article className="spectra-live-dock-tab pointer-events-auto flex h-11 min-w-[220px] flex-1 items-center gap-2 rounded-card border border-[color-mix(in_oklab,var(--brand-primary)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3" data-open-chat="true">
             <button type="button" className="dock-tab-identity min-w-0 flex-1 py-1 text-left" onClick={() => onOpen?.("", openChat.id, openChat.title)} aria-label={`Open chat for ${openChat.title}`}>
               <span className="block truncate text-caption font-semibold text-[var(--text-primary)]">{openChat.title}</span>
               <span className="block truncate text-micro text-[var(--text-tertiary)]">Chat</span>
@@ -831,7 +831,7 @@ export function LiveDock({
               <motion.article
                 layout
                 key={tab.runId}
-                className={`spectra-live-dock-tab group relative max-w-full snap-start overflow-visible rounded-card border bg-[var(--bg-elevated)] shadow-hover ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-composer-dock max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
+                className={`spectra-live-dock-tab pointer-events-auto group relative max-w-full snap-start overflow-visible rounded-card border bg-[var(--bg-elevated)] shadow-hover ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-composer-dock max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
                 data-continued={active || undefined}
                 style={
                   {

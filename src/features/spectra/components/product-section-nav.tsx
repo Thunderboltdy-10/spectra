@@ -81,6 +81,7 @@ export function ProductSectionNav<T extends string>({
             type="button"
             onClick={() => onChange(item.key)}
             aria-current={selected ? "page" : undefined}
+            data-compact={compact ? "true" : undefined}
             className={cn(
               "relative flex h-10 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-0.5 text-caption font-medium transition-colors data-[compact=true]:gap-1",
               selected

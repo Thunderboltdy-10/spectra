@@ -1694,6 +1694,7 @@ export function ConversationSurface({
   detail,
   threadId,
   loading = false,
+  loadError,
   empty,
   composer,
   activeCards,
@@ -1711,6 +1712,8 @@ export function ConversationSurface({
   detail: SpectraThreadDetail | null;
   threadId?: string;
   loading?: boolean;
+  /** A retryable refresh notice that must remain visible beside old messages. */
+  loadError?: ReactNode;
   empty?: ReactNode;
   composer?: ReactNode;
   activeCards?: Parameters<typeof ResultCardStack>[0]["cards"];
@@ -1842,6 +1845,7 @@ export function ConversationSurface({
               </div>
             </div>
           ) : null}
+          {!loading && loadError ? loadError : null}
           {!loading && !detail && !liveExchange ? empty : null}
           {detail?.messages
             .filter(

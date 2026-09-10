@@ -28,7 +28,7 @@ export function WorkbenchLiveStack({ children }: { children: ReactNode }) {
       ref={bandRef}
       className="spectra-workbench-live-stack pointer-events-none absolute inset-x-0 bottom-0 z-composer-dock bg-transparent px-2 pb-4 pt-2 sm:px-5 sm:pb-5 lg:px-8"
     >
-      <div className="spectra-live-stack pointer-events-auto mx-auto max-w-[880px]">
+      <div className="spectra-live-stack pointer-events-none mx-auto max-w-[880px]">
         {children}
       </div>
     </div>

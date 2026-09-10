@@ -45,6 +45,7 @@ export function OrganizerRail({
   floorId = null,
   floorLabel = "Library",
   handlers,
+  className,
 }: {
   location: OrganizerLocation;
   expanded: ReadonlySet<string>;
@@ -54,12 +55,16 @@ export function OrganizerRail({
   floorId?: string | null;
   floorLabel?: string;
   handlers: RailHandlers;
+  className?: string;
 }) {
   const atFloor = location.kind === "folder" && location.nodeId === floorId;
   return (
     <nav
       aria-label="Library folders"
-      className="flex w-[248px] shrink-0 flex-col overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] px-2 py-3"
+      className={cn(
+        "flex w-[248px] shrink-0 flex-col overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar)] px-2 py-3",
+        className,
+      )}
     >
       <button
         type="button"

@@ -478,7 +478,7 @@ export function PlanStudio({
           },
         ])}
       />
-      <div className="spectra-editor-body">
+      <div className="spectra-editor-body spectra-composer-clearance">
       {readOnly ? null : (
         <input
           ref={importRef}

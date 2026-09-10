@@ -24,8 +24,8 @@ export function WorkbenchDockShell({
     <WorkbenchLiveStack>
       <div ref={attachmentsHostRef} />
       <LiveDock {...dock} />
-      {selection}
-      {composer}
+      {selection ? <div className="pointer-events-auto">{selection}</div> : null}
+      <div className="pointer-events-auto">{composer}</div>
     </WorkbenchLiveStack>
   );
 }

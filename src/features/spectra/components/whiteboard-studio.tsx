@@ -3137,7 +3137,7 @@ export function WhiteboardStudio({
         </div>
       ) : null}
 
-      <div className="whiteboard-shell">
+      <div className="whiteboard-shell spectra-composer-clearance">
         {contract.surface === "full" ? (
           <StudioItemRail
             label="Pages"

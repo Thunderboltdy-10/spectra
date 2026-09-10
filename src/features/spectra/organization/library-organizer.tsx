@@ -93,6 +93,12 @@ import {
   type BoardGroupBy,
   type SurfaceView,
 } from "./surface-chrome";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@/components/ui/sheet";
 
 /**
  * The Library, as a filesystem.
@@ -321,6 +327,8 @@ export function LibraryOrganizer({
      window. Reachable from both views, because a reader who wants more room for
      a board wants it for a list too. */
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const [narrowViewport, setNarrowViewport] = useState(false);
+  const railToggleRef = useRef<HTMLButtonElement | null>(null);
   const board = view === "board";
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -919,6 +927,49 @@ export function LibraryOrganizer({
     return index === -1 ? chain : chain.slice(index + 1);
   }, [path, floorId]);
 
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const update = () => {
+      setNarrowViewport(media.matches);
+      if (media.matches) setRailCollapsed(true);
+    };
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  const rail = (
+    <OrganizerRail
+      location={location}
+      expanded={expanded}
+      dropNodeId={railDropId}
+      floorId={floorId}
+      floorLabel={floorLabel}
+      className={narrowViewport ? "h-full w-full border-0 px-3" : undefined}
+      handlers={{
+        onNavigate: navigate,
+        onToggle: (nodeId) =>
+          setExpanded((current) => {
+            const next = new Set(current);
+            if (next.has(nodeId)) next.delete(nodeId);
+            else next.add(nodeId);
+            return next;
+          }),
+        onBeginDrag: (event, node) =>
+          beginDrag(event, [node.nodeId], node.name),
+        onContextMenu: (event, node) => {
+          event.preventDefault();
+          setMenu({
+            x: event.clientX,
+            y: event.clientY,
+            nodeIds: [node.nodeId],
+          });
+        },
+        onNodesSeen: noteNodes,
+      }}
+    />
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
       <IsolatedErrorBoundary>
@@ -946,6 +997,7 @@ export function LibraryOrganizer({
           {showRail ? (
             <SurfaceRailToggle
               collapsed={railCollapsed}
+              buttonRef={railToggleRef}
               onToggle={() => setRailCollapsed((current) => !current)}
             />
           ) : null}
@@ -1082,36 +1134,37 @@ export function LibraryOrganizer({
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         {showRail && !railCollapsed ? (
-          <OrganizerRail
-            location={location}
-            expanded={expanded}
-            dropNodeId={railDropId}
-            floorId={floorId}
-            floorLabel={floorLabel}
-            handlers={{
-              onNavigate: navigate,
-              onToggle: (nodeId) =>
-                setExpanded((current) => {
-                  const next = new Set(current);
-                  if (next.has(nodeId)) next.delete(nodeId);
-                  else next.add(nodeId);
-                  return next;
-                }),
-              onBeginDrag: (event, node) =>
-                beginDrag(event, [node.nodeId], node.name),
-              onContextMenu: (event, node) => {
-                event.preventDefault();
-                setMenu({
-                  x: event.clientX,
-                  y: event.clientY,
-                  nodeIds: [node.nodeId],
-                });
-              },
-              onNodesSeen: noteNodes,
-            }}
-          />
+          narrowViewport ? (
+            <Sheet
+              open
+              onOpenChange={(open) => {
+                if (!open) setRailCollapsed(true);
+              }}
+            >
+              <SheetContent
+                aria-describedby="library-folders-description"
+                className="left-0 right-auto w-[min(320px,calc(100vw-24px))] border-l-0 border-r border-[var(--border-default)] data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left"
+                onCloseAutoFocus={(event) => {
+                  event.preventDefault();
+                  railToggleRef.current?.focus();
+                }}
+              >
+                <header className="shrink-0 border-b border-[var(--border-subtle)] px-5 py-4 pr-14">
+                  <SheetTitle className="text-heading font-semibold text-[var(--text-primary)]">
+                    Library folders
+                  </SheetTitle>
+                  <SheetDescription id="library-folders-description" className="mt-1">
+                    Choose a folder, recent view, or Trash.
+                  </SheetDescription>
+                </header>
+                <div className="min-h-0 flex-1 overflow-hidden">{rail}</div>
+              </SheetContent>
+            </Sheet>
+          ) : (
+            rail
+          )
         ) : null}
 
         {board && !searching && inFolder ? (

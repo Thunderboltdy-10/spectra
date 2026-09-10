@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 
 import type { ReactNode } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatShell } from "../pages/chat-shell";
 
@@ -19,6 +26,11 @@ const mocks = vi.hoisted(() => {
     router,
     searchParams: new URLSearchParams(),
     useStore,
+    runOptions: {
+      current: null as {
+        onDataChanged?: () => Promise<unknown> | unknown;
+      } | null,
+    },
     getThreads: vi.fn(),
     getOverview: vi.fn(),
     getThread: vi.fn(),
@@ -85,23 +97,45 @@ vi.mock("../hooks/use-spectra-context", () => ({
 }));
 
 vi.mock("../ai/use-spectra-run", () => ({
-  useSpectraRun: () => ({
-    cards: [],
-    liveExchange: null,
-    submitting: false,
-    activeRunId: null,
-    run: vi.fn(),
-    stop: vi.fn(),
-    steer: vi.fn(),
-    retry: vi.fn(),
-    revise: vi.fn(),
-    onCardAction: vi.fn(),
-  }),
+  useSpectraRun: (options: {
+    onDataChanged?: () => Promise<unknown> | unknown;
+  }) => {
+    mocks.runOptions.current = options;
+    return {
+      cards: [],
+      liveExchange: null,
+      submitting: false,
+      activeRunId: null,
+      run: vi.fn(),
+      stop: vi.fn(),
+      steer: vi.fn(),
+      retry: vi.fn(),
+      revise: vi.fn(),
+      onCardAction: vi.fn(),
+    };
+  },
 }));
 
 vi.mock("../components/conversation-surface", () => ({
-  ConversationSurface: ({ empty }: { empty: ReactNode }) => (
-    <div data-testid="conversation-surface">{empty}</div>
+  ConversationSurface: ({
+    empty,
+    loadError,
+    detail,
+    loading,
+  }: {
+    empty: ReactNode;
+    loadError?: ReactNode;
+    detail?: { messages?: Array<{ _id: string; content: string }> } | null;
+    loading?: boolean;
+  }) => (
+    <div data-testid="conversation-surface">
+      {loading ? <div>Loading conversation</div> : null}
+      {!loading && loadError ? loadError : null}
+      {!loading && !detail ? empty : null}
+      {detail?.messages?.map((message) => (
+        <p key={message._id}>{message.content}</p>
+      ))}
+    </div>
   ),
 }));
 
@@ -162,6 +196,7 @@ beforeEach(() => {
   mocks.getResultCards.mockResolvedValue({ resultCards: [] });
   mocks.getThreads.mockResolvedValue({ threads: [] });
   mocks.getOverview.mockResolvedValue({ workspaces: [], artifacts: [] });
+  mocks.runOptions.current = null;
 });
 
 afterEach(() => {
@@ -189,4 +224,109 @@ describe("ChatShell load states", () => {
     ).toBeTruthy();
     expect(mocks.router.replace).not.toHaveBeenCalledWith("/chat?new=1");
   });
+
+  it("redirects a confirmed missing thread through the normal new-chat route", async () => {
+    mocks.searchParams = new URLSearchParams("threadId=deleted-thread");
+    mocks.getThread.mockResolvedValueOnce(null);
+    render(<ChatShell />);
+
+    await waitFor(() =>
+      expect(mocks.router.replace).toHaveBeenCalledWith("/chat?new=1"),
+    );
+    expect(screen.queryByText("Chat could not load")).toBeNull();
+  });
+
+  it("keeps the last loaded messages visible when a background refresh fails", async () => {
+    mocks.searchParams = new URLSearchParams("threadId=old-thread");
+    mocks.getThread.mockResolvedValue({
+      thread: { _id: "old-thread", title: "Saved conversation" },
+      messages: [{ _id: "message-1", content: "Keep this message visible." }],
+      traces: [],
+    });
+    render(<ChatShell />);
+
+    expect(await screen.findByText("Keep this message visible.")).toBeTruthy();
+    mocks.getThreads.mockRejectedValueOnce(new Error("gateway unavailable"));
+
+    await act(async () => {
+      await mocks.runOptions.current?.onDataChanged?.();
+    });
+
+    expect(
+      await screen.findByText("This conversation could not refresh"),
+    ).toBeTruthy();
+    expect(screen.getByText("Keep this message visible.")).toBeTruthy();
+    expect(screen.queryByText(/New conversation/)).toBeNull();
+  });
+
+  it("restores focus to the runs trigger after closing history", async () => {
+    render(<ChatShell />);
+    const trigger = screen.getByRole("button", { name: "Open runs" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("heading", { name: "Runs & chats" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close runs" }));
+
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("does not let an older route load overwrite a newer conversation", async () => {
+    const oldLoad = deferred<{
+      thread: { _id: string; title: string };
+      messages: Array<{ _id: string; content: string }>;
+      traces: [];
+    }>();
+    const newLoad = deferred<{
+      thread: { _id: string; title: string };
+      messages: Array<{ _id: string; content: string }>;
+      traces: [];
+    }>();
+    mocks.searchParams = new URLSearchParams("threadId=old-thread");
+    mocks.getThread.mockImplementation((id: string) =>
+      id === "old-thread" ? oldLoad.promise : newLoad.promise,
+    );
+    const view = render(<ChatShell />);
+    await waitFor(() =>
+      expect(mocks.getThread).toHaveBeenCalledWith("old-thread"),
+    );
+
+    mocks.searchParams = new URLSearchParams("threadId=new-thread");
+    await act(async () => {
+      view.rerender(<ChatShell />);
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(mocks.getThread).toHaveBeenCalledWith("new-thread"),
+    );
+
+    await act(async () => {
+      newLoad.resolve({
+        thread: { _id: "new-thread", title: "New conversation" },
+        messages: [{ _id: "new-message", content: "New route wins." }],
+        traces: [],
+      });
+      await newLoad.promise;
+    });
+    expect(await screen.findByText("New route wins.")).toBeTruthy();
+
+    await act(async () => {
+      oldLoad.resolve({
+        thread: { _id: "old-thread", title: "Old conversation" },
+        messages: [{ _id: "old-message", content: "Stale route loses." }],
+        traces: [],
+      });
+      await oldLoad.promise;
+    });
+    await waitFor(() => expect(screen.getByText("New route wins.")).toBeTruthy());
+    expect(screen.queryByText("Stale route loses.")).toBeNull();
+  });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}

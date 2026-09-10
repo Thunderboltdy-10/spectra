@@ -106,6 +106,7 @@ export function GlobalRouteWorkbench() {
         }
       />
       <CommandBar
+        className="pointer-events-auto"
         allowAttachments
         attachmentsPortalTarget={attachmentsHost}
         placeholder={

@@ -7,6 +7,7 @@ import {
   bumpPolicyVersion,
   capabilitiesForLevel,
   evaluateAccess,
+  getVerifiedViewerDomain,
   loadResource,
   requireCapability,
 } from "./authorityShared";
@@ -37,6 +38,23 @@ const resourceType = v.union(
   v.literal("agent"),
 );
 const level = v.union(v.literal("read"), v.literal("modify"));
+
+type PublicLinkViewerDecision =
+  | "allowed"
+  | "sign_in_required"
+  | "email_unverified"
+  | "domain_restricted";
+
+async function publicLinkViewerDecision(
+  ctx: QueryCtx,
+  domainRestriction?: string,
+): Promise<PublicLinkViewerDecision> {
+  if (!domainRestriction) return "allowed";
+  const viewer = await getVerifiedViewerDomain(ctx);
+  if (!viewer.authenticated) return "sign_in_required";
+  if (!viewer.verified || !viewer.domain) return "email_unverified";
+  return viewer.domain === domainRestriction ? "allowed" : "domain_restricted";
+}
 
 async function publicRuntimeBuild(
   ctx: QueryCtx,
@@ -1228,7 +1246,7 @@ export const revokePublicLink = mutation({
 });
 
 export const resolvePublicLink = query({
-  args: { tokenHash: v.string(), viewerDomain: v.optional(v.string()) },
+  args: { tokenHash: v.string() },
   handler: async (ctx, args) => {
     const link = await ctx.db
       .query("publicLinks")
@@ -1237,10 +1255,7 @@ export const resolvePublicLink = query({
     const now = Date.now();
     if (!link || link.revokedAt || (link.expiresAt && link.expiresAt <= now))
       return null;
-    if (
-      link.domainRestriction &&
-      link.domainRestriction !== args.viewerDomain?.trim().toLowerCase()
-    )
+    if ((await publicLinkViewerDecision(ctx, link.domainRestriction)) !== "allowed")
       return null;
     const policy = await ctx.db
       .query("resourcePolicies")
@@ -1264,7 +1279,7 @@ export const resolvePublicLink = query({
 });
 
 export const publicProjection = query({
-  args: { tokenHash: v.string(), viewerDomain: v.optional(v.string()) },
+  args: { tokenHash: v.string() },
   handler: async (ctx, args) => {
     const link = await ctx.db
       .query("publicLinks")
@@ -1273,11 +1288,11 @@ export const publicProjection = query({
     const now = Date.now();
     if (!link || link.revokedAt || (link.expiresAt && link.expiresAt <= now))
       return null;
-    if (
-      link.domainRestriction &&
-      link.domainRestriction !== args.viewerDomain?.trim().toLowerCase()
-    )
-      return null;
+    const viewerDecision = await publicLinkViewerDecision(
+      ctx,
+      link.domainRestriction,
+    );
+    if (viewerDecision !== "allowed") return { access: viewerDecision };
     const policy = await ctx.db
       .query("resourcePolicies")
       .withIndex("by_resource", (q) =>

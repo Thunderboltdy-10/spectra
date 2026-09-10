@@ -99,6 +99,7 @@ import { ArtifactWorkbar, type CommandBinding, WorkbarItemSelector } from "./art
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
+export { canPublishAgentArtifact } from "./agent-publish-gates";
 
 const FACET_LABEL: Record<FoundryFacet, string> = {
   objective: "Objective",

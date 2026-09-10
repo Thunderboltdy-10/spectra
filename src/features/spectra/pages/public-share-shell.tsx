@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowRight,
   BookOpen,
   CalendarDays,
   CheckSquare2,
@@ -8,6 +9,7 @@ import {
   FileText,
   Grid3X3,
   LayoutDashboard,
+  LogIn,
   Loader2,
   LockKeyhole,
   Presentation,
@@ -92,6 +94,34 @@ function formatUpdated(value: number) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+const PUBLIC_SHARE_RETURN_KEY = "spectra:public-share-return";
+
+function readPublicShareToken() {
+  const hashToken = window.location.hash.slice(1).trim();
+  if (hashToken) return hashToken;
+  try {
+    return window.sessionStorage.getItem(PUBLIC_SHARE_RETURN_KEY)?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberPublicShareToken(token: string) {
+  try {
+    window.sessionStorage.setItem(PUBLIC_SHARE_RETURN_KEY, token);
+  } catch {
+    // A storage-restricted browser can still use the original hash directly.
+  }
+}
+
+function forgetPublicShareToken() {
+  try {
+    window.sessionStorage.removeItem(PUBLIC_SHARE_RETURN_KEY);
+  } catch {
+    // Nothing else is required when session storage is unavailable.
+  }
 }
 
 function ArtifactContent({
@@ -445,11 +475,13 @@ function ArtifactContent({
 
 export function PublicShareShell() {
   const [projection, setProjection] = useState<PublicProjection | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [state, setState] = useState<
+    "loading" | "ready" | "error" | "auth-required"
+  >("loading");
   const [message, setMessage] = useState("");
 
   const load = useCallback(async (background = false) => {
-    const token = window.location.hash.slice(1).trim();
+    const token = readPublicShareToken();
     if (!token) {
       setMessage("This link is incomplete.");
       setState("error");
@@ -466,12 +498,25 @@ export function PublicShareShell() {
       const payload = (await response.json().catch(() => null)) as {
         projection?: PublicProjection;
         error?: string;
+        code?: string;
       } | null;
+      if (response.status === 401 && payload?.code === "AUTH_REQUIRED") {
+        rememberPublicShareToken(token);
+        setProjection(null);
+        setMessage(
+          payload.error ||
+            "Sign in with a verified school account to open this shared view.",
+        );
+        setState("auth-required");
+        return;
+      }
       if (!response.ok || !payload?.projection)
         throw new Error(payload?.error || "This public view is unavailable.");
+      forgetPublicShareToken();
       setProjection(payload.projection);
       setState("ready");
     } catch (error) {
+      forgetPublicShareToken();
       setMessage(
         error instanceof Error
           ? error.message
@@ -502,6 +547,19 @@ export function PublicShareShell() {
   const expiry = projection?.expiresAt
     ? formatUpdated(projection.expiresAt)
     : null;
+
+  function continueToSignIn() {
+    const token = readPublicShareToken();
+    if (!token) {
+      setMessage("This link is incomplete.");
+      setState("error");
+      return;
+    }
+    rememberPublicShareToken(token);
+    window.location.assign(
+      `/sign-in?redirect_url=${encodeURIComponent("/public")}`,
+    );
+  }
 
   return (
     <main className="spectra-wave-y min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
@@ -542,6 +600,33 @@ export function PublicShareShell() {
             </h1>
             <p className="mt-2 text-caption leading-6 text-[var(--text-secondary)]">
               {message}
+            </p>
+          </section>
+        ) : null}
+        {state === "auth-required" ? (
+          <section className="mx-auto mt-[12vh] max-w-[460px] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center shadow-soft">
+            <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-secondary))] text-[var(--brand-primary)]">
+              <LogIn className="h-5 w-5" />
+            </span>
+            <h1 className="mt-5 font-display text-metric font-semibold">
+              Sign in to open this view
+            </h1>
+            <p
+              className="mt-2 text-caption leading-6 text-[var(--text-secondary)]"
+              role="status"
+            >
+              {message}
+            </p>
+            <button
+              type="button"
+              className="mt-6 inline-flex items-center gap-2 rounded-control bg-[var(--brand-primary)] px-4 py-2.5 text-caption font-semibold text-white transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] focus-visible:ring-offset-2"
+              onClick={continueToSignIn}
+            >
+              Sign in to continue
+              <ArrowRight className="h-4 w-4" />
+            </button>
+            <p className="mt-4 text-micro text-[var(--text-tertiary)]">
+              You will return to this shared view after signing in.
             </p>
           </section>
         ) : null}

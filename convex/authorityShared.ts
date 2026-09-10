@@ -8,6 +8,41 @@ export type ResourceType = "workspace" | "artifact" | "agent";
 export type AccessLevel = "read" | "modify";
 export type Capability = "read" | "modify" | "share" | "delete" | "restore" | "use" | "comment" | "publish";
 
+export type VerifiedViewerDomain = {
+  authenticated: boolean;
+  verified: boolean;
+  domain: string | null;
+};
+
+/**
+ * Read the domain from Convex's verified JWT identity, never from request
+ * headers or a browser argument. A signed-in identity with no verified,
+ * well-formed email is deliberately not eligible for a restricted link.
+ */
+export async function getVerifiedViewerDomain(
+  ctx: AuthorityCtx,
+): Promise<VerifiedViewerDomain> {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) return { authenticated: false, verified: false, domain: null };
+
+  const email = identity.email?.trim().toLowerCase() ?? "";
+  const at = email.lastIndexOf("@");
+  const hasValidEmail =
+    identity.emailVerified === true &&
+    at > 0 &&
+    at < email.length - 1 &&
+    email.indexOf("@") === at &&
+    !/\s/.test(email);
+  if (!hasValidEmail)
+    return { authenticated: true, verified: false, domain: null };
+
+  return {
+    authenticated: true,
+    verified: true,
+    domain: email.slice(at + 1),
+  };
+}
+
 const ownerCapabilities: Capability[] = ["read", "modify", "share", "delete", "restore", "use", "comment", "publish"];
 const levelCapabilities: Record<AccessLevel, Capability[]> = {
   // Comments are a collaboration layer over an artifact, not a mutation of

@@ -231,6 +231,7 @@ import {
 import { ContextSourceBoundary } from "./context-source-boundary";
 import { ThreadConversation } from "./conversation-surface";
 import { SandboxedArtifactRuntime } from "./sandboxed-artifact-runtime";
+import { canPublishAgentArtifact } from "./agent-publish-gates";
 import {
   artifactPlacements,
   formatRelativeTime,
@@ -6049,8 +6050,7 @@ function ArtifactStudioEditor({
                   aiChangedPaths={highlightPaths}
                   readOnly={readOnly}
                   canPublish={
-                    artifact.capabilities?.includes("publish") ??
-                    artifact.ownership === "owned"
+                    canPublishAgentArtifact(artifact)
                   }
                   onActiveRegionChange={handleActiveRegionChange}
                 />

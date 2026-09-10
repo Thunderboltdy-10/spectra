@@ -43,6 +43,7 @@ describe("invitation cookie recovery", () => {
 
   it("only offers preview retry for transient failures", () => {
     expect(invitationPreviewCanRetry("INTEGRATION_UNAVAILABLE: Try again.")).toBe(true);
+    expect(invitationPreviewCanRetry("INTEGRATION_UNAVAILABLE: Try again.", 2)).toBe(false);
     expect(invitationPreviewCanRetry("INVITATION_EXPIRED: This invitation has expired.")).toBe(false);
     expect(invitationPreviewCanRetry("INVITATION_INVALID: This invitation is unavailable.")).toBe(false);
   });

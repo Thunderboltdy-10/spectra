@@ -5,6 +5,8 @@ type SourceCalendarInput = {
   ownerAccountId: Id<"accounts">;
   schoolId: Id<"schools">;
   sourceRecordId: Id<"externalRecords">;
+  /** Reuse a legacy source row while its projection is upgraded to this key. */
+  existingItemId?: Id<"calendarItems">;
   sourceKey: string;
   sourceHash: string;
   sourceUrl?: string;
@@ -162,12 +164,23 @@ export async function upsertSourceCalendarItem(
     ? "official_deadline"
     : "official_event";
   const sourceKey = `${input.sourceKey}:${kind}`.slice(0, 500);
-  const existing = await ctx.db
+  const existingByKey = await ctx.db
     .query("calendarItems")
     .withIndex("by_source_key", (q) =>
       q.eq("ownerAccountId", input.ownerAccountId).eq("sourceKey", sourceKey),
     )
     .unique();
+  const existingById = input.existingItemId
+    ? await ctx.db.get(input.existingItemId)
+    : null;
+  const existing =
+    existingByKey ??
+    (existingById &&
+    existingById.ownerAccountId === input.ownerAccountId &&
+    existingById.schoolId === input.schoolId &&
+    existingById.sourceLocked
+      ? existingById
+      : null);
   const now = Date.now();
   const title =
     text(normalized.title ?? normalized.name ?? normalized.subject, 500) ||

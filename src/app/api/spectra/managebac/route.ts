@@ -451,6 +451,20 @@ function isPrivateIpv6(ip: string) {
 
 async function assertPublicApiHost(baseUrl: string) {
   const url = new URL(baseUrl);
+  const testFixtureOrigin =
+    process.env.NODE_ENV === "test"
+      ? process.env.SPECTRA_MANAGEBAC_TEST_FIXTURE_ORIGIN?.trim()
+      : undefined;
+  if (testFixtureOrigin && url.origin === testFixtureOrigin) {
+    if (
+      url.protocol !== "http:" ||
+      !["127.0.0.1", "localhost"].includes(url.hostname)
+    )
+      throw new Error(
+        "INTEGRATION_EGRESS_BLOCKED: Test fixtures must use a loopback HTTP origin.",
+      );
+    return url;
+  }
   if (url.protocol !== "https:" || url.username || url.password)
     throw new Error("INTEGRATION_EGRESS_BLOCKED: API URL must be HTTPS.");
   if (isIP(url.hostname)) {

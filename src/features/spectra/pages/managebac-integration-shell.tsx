@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -272,8 +272,105 @@ function SyncStatus({ run }: { run: SpectraManageBacSyncRun }) {
           ? "warning"
           : "blue";
   return (
-    <StatusPill state={state}>{run.status.replaceAll("_", " ")}</StatusPill>
+    <StatusPill state={state}>{syncStatusLabel(run.status)}</StatusPill>
   );
+}
+
+function syncStatusLabel(status: SpectraManageBacSyncRun["status"]) {
+  switch (status) {
+    case "queued":
+      return "Waiting to start";
+    case "running":
+      return "In progress";
+    case "awaiting_review":
+      return "Needs review";
+    case "completed":
+      return "Complete";
+    case "partial":
+      return "Partially complete";
+    case "failed":
+      return "Needs attention";
+    case "cancelled":
+      return "Stopped";
+  }
+}
+
+function syncKindLabel(kind: SpectraManageBacSyncRun["kind"]) {
+  switch (kind) {
+    case "identity":
+      return "Identity check";
+    case "bootstrap":
+      return "Initial sync";
+    case "reconciliation":
+      return "Scheduled sync";
+    case "scheduled":
+      return "Scheduled sync";
+    case "manual":
+      return "Manual sync";
+  }
+}
+
+function syncStageLabel(
+  run: Pick<SpectraManageBacSyncRun, "status" | "stage">,
+) {
+  switch (run.stage) {
+    case "queued":
+      return "Waiting to start";
+    case "resolving_identity":
+      return "Checking your school account";
+    case "no_match":
+    case "ambiguous":
+      return "School account needs review";
+    case "ingesting":
+      return "Reading school data";
+    case "review_conflicts":
+      return "Reviewing source changes";
+    case "complete":
+      return "School data is current";
+    case "failed":
+      return "Sync stopped";
+    default:
+      if (run.stage.startsWith("syncing:")) return "Reading school data";
+      if (run.stage.startsWith("quarantined:")) return "Data needs review";
+      if (run.status === "running") return "Working on school data";
+      return run.status === "completed" ? "School data is current" : "Sync status";
+  }
+}
+
+function syncRecoveryMessage(run: SpectraManageBacSyncRun) {
+  switch (run.errorCode) {
+    case "INTEGRATION_IDENTITY_REQUIRED":
+    case "INTEGRATION_IDENTITY_FAILED":
+    case "INTEGRATION_IDENTITY_INVALID":
+      return "Resolve your school identity to continue.";
+    case "INTEGRATION_CREDENTIAL_REJECTED":
+      return "Ask a school administrator to reconnect the read-only ManageBac connection.";
+    case "INTEGRATION_RATE_LIMITED":
+      return "ManageBac asked us to wait. Try again in a little while.";
+    case "INTEGRATION_SYNC_BUSY":
+      return "Another sync is already running. Wait for it to finish.";
+    case "INTEGRATION_RESPONSE_TOO_LARGE":
+      return "ManageBac returned more data than this sync can safely read.";
+    case "INTEGRATION_ROUTE_FAILED":
+    case "INTEGRATION_CAPABILITY_FAILED":
+      return "ManageBac could not provide this data. Try again or ask a school administrator to review the connection.";
+    default:
+      return run.status === "partial"
+        ? "Some school data was saved. Retry to fill the gaps."
+        : run.status === "failed"
+          ? "The sync did not finish. Retry when the connection is ready."
+          : undefined;
+  }
+}
+
+function humanizeIntegrationError(value: unknown) {
+  const message = value instanceof Error ? value.message : "";
+  const code = message.match(/^([A-Z][A-Z0-9_]+)\b/)?.[1];
+  return syncRecoveryMessage({
+    status: "failed",
+    stage: "failed",
+    errorCode: code,
+  } as SpectraManageBacSyncRun) ?? "ManageBac could not complete that action. Try again.";
 }
 
 function RecordIcon({ type }: { type: string }) {
@@ -456,6 +553,7 @@ export function ManageBacIntegrationShell() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const busyRef = useRef(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [detailsTab, setDetailsTab] = useState<"details" | "activity">(
     "details",
@@ -539,20 +637,26 @@ export function ManageBacIntegrationShell() {
         ),
     [records],
   );
+  const syncInProgress = useMemo(
+    () =>
+      (data?.syncRuns ?? []).some((run) =>
+        ["queued", "running"].includes(run.status),
+      ),
+    [data?.syncRuns],
+  );
   const runAction = useCallback(
     async (key: string, action: () => Promise<unknown>) => {
+      if (busyRef.current) return;
+      busyRef.current = true;
       setBusy(key);
       setError("");
       try {
         await action();
         await refresh();
       } catch (nextError) {
-        setError(
-          nextError instanceof Error
-            ? nextError.message
-            : "The integration action failed.",
-        );
+        setError(humanizeIntegrationError(nextError));
       } finally {
+        busyRef.current = false;
         setBusy("");
       }
     },
@@ -654,7 +758,7 @@ export function ManageBacIntegrationShell() {
               actions={
                 <>
                   <button type="button" onClick={() => void refresh()} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Refresh connection data" title="Refresh connection data"><RefreshCw size={13} /></button>
-                  {integration ? <button type="button" disabled={Boolean(busy) || integration.status === "validating" || integration.status === "draft"} onClick={() => void runAction("sync", () => syncSpectraManageBac())} className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3 text-micro font-medium text-[var(--bg-primary)] transition hover:opacity-90 disabled:opacity-60" title={integration.status === "validating" ? "Sync waits until capability validation finishes." : integration.status === "draft" ? "Connect ManageBac before syncing." : "Sync now"}><RefreshCw size={13} className={busy === "sync" ? "animate-spin" : ""} />{busy === "sync" ? "Syncing…" : integration.status === "validating" ? "Validating…" : "Sync now"}</button> : null}
+                  {integration ? <button type="button" disabled={Boolean(busy) || syncInProgress || integration.status === "validating" || integration.status === "draft"} onClick={() => void runAction("sync", () => syncSpectraManageBac())} className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3 text-micro font-medium text-[var(--bg-primary)] transition hover:opacity-90 disabled:opacity-60" title={integration.status === "validating" ? "Sync waits until capability validation finishes." : integration.status === "draft" ? "Connect ManageBac before syncing." : syncInProgress ? "A sync is already running." : "Sync now"}><RefreshCw size={13} className={busy === "sync" || syncInProgress ? "animate-spin" : ""} />{busy === "sync" || syncInProgress ? "Syncing…" : integration.status === "validating" ? "Validating…" : "Sync now"}</button> : null}
                   {overview?.admin ? <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="ManageBac settings" title="ManageBac settings"><Settings2 size={13} /></button> : null}
                   {!contextOpen ? <AuxiliaryRailTrigger label="ManageBac context" onOpen={() => setContextOpen(true)} /> : null}
                 </>
@@ -677,7 +781,7 @@ export function ManageBacIntegrationShell() {
                 </div>
                 <button
                   type="button"
-                  disabled={Boolean(busy)}
+                  disabled={Boolean(busy) || syncInProgress}
                   onClick={() =>
                     void runAction("identity", () =>
                       resolveSpectraManageBacIdentity(),
@@ -770,7 +874,7 @@ export function ManageBacIntegrationShell() {
                     }
                     className="mt-5 inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-micro font-medium text-white disabled:opacity-60"
                   >
-                    {busy === "identity" ? (
+                    {busy === "identity" || syncInProgress ? (
                       <LoaderCircle className="animate-spin" size={14} />
                     ) : (
                       <Fingerprint size={14} />
@@ -856,6 +960,7 @@ export function ManageBacIntegrationShell() {
               ) : tab === "history" ? (
                   <SyncTable
                     runs={data?.syncRuns ?? []}
+                    syncBusy={Boolean(busy) || syncInProgress}
                     onRetry={() =>
                       void runAction("sync", () => syncSpectraManageBac())
                     }
@@ -894,7 +999,7 @@ export function ManageBacIntegrationShell() {
                   identityQueue={data?.identityQueue ?? []}
                   onOpenManifest={() => setManifestOpen(true)}
                   onRetrySync={() => void runAction("sync", () => syncSpectraManageBac())}
-                  syncBusy={busy === "sync"}
+                  syncBusy={busy === "sync" || syncInProgress}
                   admin={Boolean(overview?.admin)}
                 />
               )}
@@ -1069,11 +1174,11 @@ export function ManageBacIntegrationShell() {
                   </span>
                   <div className="min-w-0">
                     <strong className="block text-micro font-medium capitalize">
-                      {run.kind} sync {run.status.replaceAll("_", " ")}
+                      {syncKindLabel(run.kind)} · {syncStatusLabel(run.status)}
                     </strong>
                     <span className="block text-micro text-[var(--text-tertiary)]">
                       {run.counts.created} added · {run.counts.updated} updated
-                      · {relative(run.completedAt ?? run.createdAt)}
+                      · {syncStageLabel(run)} · {relative(run.completedAt ?? run.createdAt)}
                     </span>
                   </div>
                 </div>
@@ -1130,10 +1235,12 @@ export function ManageBacIntegrationShell() {
 
 function SyncTable({
   runs,
+  syncBusy,
   onRetry,
   onResolveIdentity,
 }: {
   runs: SpectraManageBacSyncRun[];
+  syncBusy: boolean;
   onRetry: () => void;
   onResolveIdentity: () => void;
 }) {
@@ -1172,11 +1279,11 @@ function SyncTable({
                 <div className="flex min-w-32 flex-col items-start gap-1">
                   <SyncStatus run={run} />
                   <span className="text-micro text-[var(--text-tertiary)]">
-                    {run.stage.replaceAll("_", " ")}
+                    {syncStageLabel(run)}
                   </span>
-                  {run.errorSummary ? (
+                  {syncRecoveryMessage(run) ? (
                     <span className="max-w-56 text-micro leading-4 text-[var(--danger)]">
-                      {run.errorSummary}
+                      {syncRecoveryMessage(run)}
                     </span>
                   ) : null}
                 </div>
@@ -1194,6 +1301,7 @@ function SyncTable({
                 run.status === "awaiting_review" ? (
                   <button
                     type="button"
+                    disabled={syncBusy}
                     onClick={onResolveIdentity}
                     className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--border-subtle)] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
                   >
@@ -1203,6 +1311,7 @@ function SyncTable({
                 ) : run.status === "failed" || run.status === "partial" ? (
                   <button
                     type="button"
+                    disabled={syncBusy}
                     onClick={onRetry}
                     className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--border-subtle)] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
                   >
@@ -1272,7 +1381,7 @@ function ConflictList({
                         onClick={() => onResolve(conflict, "detach")}
                         className="h-7 rounded-md border border-[var(--border-subtle)] px-2 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
                       >
-                        Keep local copy
+                        Keep in Spectra
                       </button>
                     ) : null}
                     {conflict.suggestedActions.includes("archive_projection") ? (
@@ -1282,7 +1391,7 @@ function ConflictList({
                         onClick={() => onResolve(conflict, "archive_projection")}
                         className="h-7 rounded-md bg-[var(--text-primary)] px-2.5 text-micro text-white hover:bg-[var(--text-primary)] disabled:opacity-50"
                       >
-                        Archive source
+                        Archive projection
                       </button>
                     ) : null}
                   </>

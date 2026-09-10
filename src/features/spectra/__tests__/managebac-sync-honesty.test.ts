@@ -15,8 +15,11 @@ describe("ManageBac sync UX honesty", () => {
     expect(shell).toContain("Syncing…");
     expect(shell).toContain("Retry sync");
     expect(shell).toContain("Resolve identity");
-    expect(shell).toContain("Keep local copy");
-    expect(shell).toContain("Archive source");
+    expect(shell).toContain("Keep in Spectra");
+    expect(shell).toContain("Archive projection");
+    expect(shell).toContain("Checking your school account");
+    expect(shell).toContain("Some school data was saved. Retry to fill the gaps.");
+    expect(shell).not.toContain("{run.errorSummary}");
     expect(shell).toContain("Every ${integration.syncPolicy.frequencyMinutes} minutes");
     // Header Sync now remains; Quick actions must not duplicate it.
     const quickStart = shell.indexOf('<RightCard title="Quick actions">');

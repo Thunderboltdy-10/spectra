@@ -63,7 +63,7 @@ function JoinSchoolContent() {
       .catch((nextError) => {
         if (!active) return;
         const raw = nextError instanceof Error ? nextError.message : "";
-        const retryable = invitationPreviewCanRetry(raw);
+        const retryable = invitationPreviewCanRetry(raw, previewAttempt);
         const human = raw.match(
           /(?:INVITATION_[A-Z_]+|MEMBERSHIP_[A-Z_]+):\s*(.+)/,
         );

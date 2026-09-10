@@ -55,8 +55,16 @@ export function authHrefForRedirect(path: "/sign-in" | "/sign-up", redirectUrl?:
     : path;
 }
 
-export function invitationPreviewCanRetry(message: string) {
-  return !/INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
-    message,
+export const INVITATION_PREVIEW_MAX_RETRIES = 2;
+
+export function invitationPreviewCanRetry(
+  message: string,
+  attempt = 0,
+) {
+  return (
+    attempt < INVITATION_PREVIEW_MAX_RETRIES &&
+    !/INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
+      message,
+    )
   );
 }

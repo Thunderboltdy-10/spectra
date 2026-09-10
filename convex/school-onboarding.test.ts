@@ -51,7 +51,9 @@ describe("school onboarding fixture", () => {
 
       const persisted = await t.run(async (ctx) => {
         const school = await ctx.db.get(first.schoolId);
-        const invitation = await ctx.db.get(first.invitationId);
+        const invitation = first.invitationId
+          ? await ctx.db.get(first.invitationId)
+          : null;
         const saga = await ctx.db.get(first.sagaId);
         const policies = (await ctx.db.query("limitPolicies").collect()).filter(
           (policy) => policy.schoolId === first.schoolId,

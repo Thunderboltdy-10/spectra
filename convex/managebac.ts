@@ -1475,6 +1475,28 @@ export const beginSync = mutation({
     if (readable.length === 0)
       throw new Error("INTEGRATION_CAPABILITY_REQUIRED: No route is verified.");
     const now = Date.now();
+    const activeRuns = await ctx.db
+      .query("externalSyncRuns")
+      .withIndex("by_integration_created", (q) =>
+        q.eq("integrationId", integration._id),
+      )
+      .order("desc")
+      .take(30);
+    const expectedAccountId =
+      args.kind === "reconciliation" && actor.schoolRole === "school_admin"
+        ? undefined
+        : actor.accountId;
+    if (
+      activeRuns.some(
+        (run) =>
+          run.accountId === expectedAccountId &&
+          ["queued", "leased", "running"].includes(run.status) &&
+          (!run.leaseExpiresAt || run.leaseExpiresAt > now),
+      )
+    )
+      throw new Error(
+        "INTEGRATION_SYNC_BUSY: A synchronization is already running. Wait for it to finish before trying again.",
+      );
     const syncRunId = await ctx.db.insert("externalSyncRuns", {
       integrationId: integration._id,
       schoolId: actor.schoolId,
@@ -2027,10 +2049,19 @@ async function ensureTimetableProjection(
             item.projectionType === "timetable_event",
         ) ?? null,
     );
+  const legacyCalendarItem = existing
+    ? await legacyTimetableCalendarItem(
+        ctx,
+        existing,
+        integration.schoolId,
+        accountId,
+      )
+    : null;
   const calendar = await upsertSourceCalendarItem(ctx, {
     ownerAccountId: accountId,
     schoolId: integration.schoolId,
     sourceRecordId: source._id,
+    ...(legacyCalendarItem ? { existingItemId: legacyCalendarItem._id } : {}),
     sourceKey: source.providerRecordKey,
     sourceHash: source.sourceHash,
     sourceUrl: source.provenanceUrl,
@@ -2063,6 +2094,92 @@ async function ensureTimetableProjection(
       updatedAt: now,
     });
   return { projection: (await ctx.db.get(projectionId))!, created: calendar.created };
+}
+
+function legacyTimetableParts(projectionId: string) {
+  const separator = projectionId.indexOf("#");
+  if (separator <= 0 || separator === projectionId.length - 1) return null;
+  return {
+    artifactValue: projectionId.slice(0, separator),
+    eventId: projectionId.slice(separator + 1),
+  };
+}
+
+async function legacyTimetableCalendarItem(
+  ctx: MutationCtx,
+  projection: Doc<"externalProjections">,
+  schoolId: Id<"schools">,
+  accountId: Id<"accounts">,
+) {
+  if (!accountId) return null;
+  const legacy = legacyTimetableParts(projection.projectionId);
+  if (!legacy) return null;
+  const artifactId = ctx.db.normalizeId("spectraArtifacts", legacy.artifactValue);
+  if (!artifactId) return null;
+  const item = await ctx.db
+    .query("calendarItems")
+    .withIndex("by_legacy_event", (q) =>
+      q.eq("legacyArtifactId", artifactId).eq("legacyEventId", legacy.eventId),
+    )
+    .unique();
+  if (
+    !item ||
+    item.ownerAccountId !== accountId ||
+    item.schoolId !== schoolId ||
+    !item.sourceLocked
+  )
+    return null;
+  return item;
+}
+
+async function legacyTimetableArtifactEvent(
+  ctx: MutationCtx,
+  projection: Doc<"externalProjections">,
+) {
+  const legacy = legacyTimetableParts(projection.projectionId);
+  if (!legacy) return null;
+  const artifactId = ctx.db.normalizeId("spectraArtifacts", legacy.artifactValue);
+  if (!artifactId) return null;
+  const artifact = await ctx.db.get(artifactId);
+  if (
+    !artifact ||
+    artifact.blueprintKey !== "timetable" ||
+    (projection.accountId && artifact.ownerAccountId !== projection.accountId) ||
+    artifact.schoolId !== projection.schoolId
+  )
+    return null;
+  const content = record(artifact.content);
+  const events = array(content.events).map(record);
+  const index = events.findIndex((event) => event.id === legacy.eventId);
+  if (index < 0) return null;
+  return {
+    artifact,
+    content,
+    events,
+    eventId: legacy.eventId,
+    index,
+  };
+}
+
+async function directTimetableCalendarItem(
+  ctx: MutationCtx,
+  projection: Doc<"externalProjections">,
+  source: Doc<"externalRecords">,
+) {
+  if (!projection.accountId) return null;
+  const itemId = ctx.db.normalizeId("calendarItems", projection.projectionId);
+  if (!itemId) return null;
+  const item = await ctx.db.get(itemId);
+  if (
+    !item ||
+    item.ownerAccountId !== projection.accountId ||
+    item.schoolId !== projection.schoolId ||
+    item.sourceProvider !== "managebac" ||
+    item.sourceRecordId !== source._id ||
+    !item.sourceLocked
+  )
+    return null;
+  return item;
 }
 
 async function ensureResourceProjection(
@@ -2223,29 +2340,35 @@ async function safelyRefreshProjection(
     return true;
   }
   if (projection.projectionType === "timetable_event") {
-    const [artifactValue, eventId] = projection.projectionId.split("#");
-    const artifactId = artifactValue
-      ? ctx.db.normalizeId("spectraArtifacts", artifactValue)
-      : null;
-    const artifact = artifactId ? await ctx.db.get(artifactId) : null;
-    if (!artifact || artifact.blueprintKey !== "timetable" || !eventId)
-      return false;
-    const content = record(artifact.content);
-    const events = array(content.events).map(record);
-    const index = events.findIndex((event) => event.id === eventId);
-    if (
-      index < 0 ||
-      (!force && events[index]!.sourceHash !== previousSourceHash)
-    )
-      return false;
-    const oldEvent = events[index]!;
+    const directItem = await directTimetableCalendarItem(ctx, projection, source);
+    if (directItem) {
+      if (!force && directItem.sourceHash !== previousSourceHash) return false;
+      await upsertSourceCalendarItem(ctx, {
+        ownerAccountId: projection.accountId!,
+        schoolId: projection.schoolId,
+        sourceRecordId: source._id,
+        existingItemId: directItem._id,
+        sourceKey: source.providerRecordKey,
+        sourceHash: source.sourceHash,
+        sourceUrl: source.provenanceUrl,
+        fetchedAt: source.fetchedAt,
+        recordType: source.recordType,
+        normalized,
+      });
+      return true;
+    }
+
+    const legacy = await legacyTimetableArtifactEvent(ctx, projection);
+    if (!legacy) return false;
+    const oldEvent = legacy.events[legacy.index]!;
+    if (!force && oldEvent.sourceHash !== previousSourceHash) return false;
     const start =
       isoValue(normalized.startAt ?? normalized.start ?? normalized.beginsAt) ??
       text(oldEvent.start, 100);
     const end =
       isoValue(normalized.endAt ?? normalized.end ?? normalized.finishesAt) ??
       text(oldEvent.end, 100);
-    events[index] = {
+    legacy.events[legacy.index] = {
       ...oldEvent,
       title: text(
         normalized.title ?? normalized.name,
@@ -2267,19 +2390,40 @@ async function safelyRefreshProjection(
         ? { notes: text(normalized.description ?? normalized.notes, 20_000) }
         : {}),
     };
-    const nextContent = { ...content, events };
+    const nextContent = { ...legacy.content, events: legacy.events };
     const now = Date.now();
-    await ctx.db.patch(artifact._id, {
+    await ctx.db.patch(legacy.artifact._id, {
       content: nextContent,
       textIndex: buildArtifactTextIndex({
-        title: artifact.title,
-        summary: artifact.summary ?? "",
+        title: legacy.artifact.title,
+        summary: legacy.artifact.summary ?? "",
         content: nextContent,
-        tags: artifact.tags,
+        tags: legacy.artifact.tags,
       }),
       updatedAt: now,
     });
-    await syncArtifactSummary(ctx, artifact._id);
+    const legacyCalendarItem = projection.accountId
+      ? await legacyTimetableCalendarItem(
+          ctx,
+          projection,
+          projection.schoolId,
+          projection.accountId,
+        )
+      : null;
+    if (legacyCalendarItem)
+      await upsertSourceCalendarItem(ctx, {
+        ownerAccountId: projection.accountId!,
+        schoolId: projection.schoolId,
+        sourceRecordId: source._id,
+        existingItemId: legacyCalendarItem._id,
+        sourceKey: source.providerRecordKey,
+        sourceHash: source.sourceHash,
+        sourceUrl: source.provenanceUrl,
+        fetchedAt: source.fetchedAt,
+        recordType: source.recordType,
+        normalized,
+      });
+    await syncArtifactSummary(ctx, legacy.artifact._id);
     return true;
   }
   return true;
@@ -2309,15 +2453,60 @@ async function markProjectionSourceRemoved(
     return;
   }
   if (projection.projectionType === "timetable_event") {
-    const itemId = ctx.db.normalizeId("calendarItems", projection.projectionId);
-    const item = itemId ? await ctx.db.get(itemId) : null;
-    if (!item) return;
-    await ctx.db.patch(item._id, {
-      status: "removed",
-      sourceCapabilityState: "stale",
-      revision: item.revision + 1,
-      updatedAt: Date.now(),
+    const source = await ctx.db.get(projection.recordId);
+    const directItem = source
+      ? await directTimetableCalendarItem(ctx, projection, source)
+      : null;
+    if (directItem) {
+      if (directItem.status !== "removed" || directItem.sourceCapabilityState !== "stale")
+        await ctx.db.patch(directItem._id, {
+          status: "removed",
+          sourceCapabilityState: "stale",
+          revision: directItem.revision + 1,
+          updatedAt: Date.now(),
+        });
+      return;
+    }
+    const legacy = await legacyTimetableArtifactEvent(ctx, projection);
+    if (!legacy) return;
+    legacy.events[legacy.index] = {
+      ...legacy.events[legacy.index],
+      sourceStatus: "removed",
+    };
+    const now = Date.now();
+    const nextContent = { ...legacy.content, events: legacy.events };
+    await ctx.db.patch(legacy.artifact._id, {
+      content: nextContent,
+      textIndex: buildArtifactTextIndex({
+        title: legacy.artifact.title,
+        summary: legacy.artifact.summary ?? "",
+        content: nextContent,
+        tags: legacy.artifact.tags,
+      }),
+      updatedAt: now,
     });
+    if (source) {
+      const legacyCalendarItem = projection.accountId
+        ? await legacyTimetableCalendarItem(
+            ctx,
+            projection,
+            projection.schoolId,
+            projection.accountId,
+          )
+        : null;
+      if (
+        legacyCalendarItem &&
+        (legacyCalendarItem.status !== "removed" ||
+          legacyCalendarItem.sourceCapabilityState !== "stale")
+      )
+        await ctx.db.patch(legacyCalendarItem._id, {
+          status: "removed",
+          sourceCapabilityState: "stale",
+          revision: legacyCalendarItem.revision + 1,
+          updatedAt: now,
+        });
+    }
+    await syncArtifactSummary(ctx, legacy.artifact._id);
   }
 }
 

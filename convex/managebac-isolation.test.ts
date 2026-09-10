@@ -293,6 +293,119 @@ async function commitPage(
   });
 }
 
+async function insertTimetableRun(
+  t: ReturnType<typeof setupTest>,
+  fixture: Awaited<ReturnType<typeof seedFixture>>,
+  accountId: Id<"accounts">,
+) {
+  return t.run(async (ctx) => {
+    const now = Date.now();
+    const capabilityId = await ctx.db.insert("integrationCapabilities", {
+      integrationId: fixture.integrationId,
+      schoolId: fixture.schoolId,
+      category: "Timetable",
+      name: "Timetable",
+      recordType: "timetable",
+      method: "GET",
+      path: "/timetable",
+      purpose: "Read the signed-in student's timetable",
+      scope: "personal",
+      minimumRole: "student",
+      pagination: "none",
+      changeStrategy: "full_reconciliation",
+      freshnessSlaMinutes: 60,
+      contractVersion: "test-timetable-v1",
+      permissionState: "read_only",
+      verificationStatus: "verified",
+      routeSource: "manual_verified",
+      normalization: {},
+      lastVerifiedAt: now,
+      lastSuccessAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const syncRunId = await ctx.db.insert("externalSyncRuns", {
+      integrationId: fixture.integrationId,
+      schoolId: fixture.schoolId,
+      accountId,
+      kind: "manual",
+      status: "running",
+      trigger: "user",
+      stage: "ingesting",
+      capabilityIds: [capabilityId],
+      counts: { ...emptyCounts },
+      attemptCount: 1,
+      nextAttemptAt: now,
+      startedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await ctx.db.insert("externalSyncCapabilityRuns", {
+      syncRunId,
+      integrationId: fixture.integrationId,
+      capabilityId,
+      status: "running",
+      pageCount: 0,
+      recordCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { capabilityId, syncRunId };
+  });
+}
+
+async function commitTimetablePage(
+  t: ReturnType<typeof setupTest>,
+  fixture: Awaited<ReturnType<typeof seedFixture>>,
+  timetable: Awaited<ReturnType<typeof insertTimetableRun>>,
+  title: string,
+  sourceHash: string,
+  nonce: string,
+) {
+  const records = [
+    {
+      providerRecordId: "timetable-event-1",
+      providerRecordKey: "timetable:math-1",
+      classification: "personal" as const,
+      audienceScope: "mapped_user" as const,
+      providerClassId: "class-current",
+      normalized: {
+        title,
+        startAt: "2026-09-10T08:30:00.000Z",
+        endAt: "2026-09-10T09:20:00.000Z",
+        location: "Room 101",
+      },
+      payloadVersion: "v1",
+      sourceHash,
+    },
+  ];
+  const timestamp = Date.now();
+  const payloadDigest = digest({
+    capabilityId: timetable.capabilityId,
+    records,
+    pageNumber: 1,
+  });
+  return t.withIdentity(alice).mutation(api.managebac.commitNormalizedPage, {
+    integrationId: fixture.integrationId,
+    syncRunId: timetable.syncRunId,
+    capabilityId: timetable.capabilityId,
+    records,
+    pageNumber: 1,
+    payloadDigest,
+    timestamp,
+    nonce,
+    signature: signature(
+      "sync-page",
+      alice,
+      fixture.integrationId,
+      timetable.syncRunId,
+      timestamp,
+      nonce,
+      payloadDigest,
+    ),
+  });
+}
+
 describe("ManageBac account isolation", () => {
   beforeEach(() => {
     process.env.SPECTRA_CONNECTOR_BRIDGE_KEY = bridgeKey;
@@ -484,6 +597,350 @@ describe("ManageBac account isolation", () => {
     ]);
     expect(materialized.created).toBe(1);
     expect(materialized.skipped).toBe(0);
+  });
+
+  it("rejects a second sync while the same account already has one running", async () => {
+    const t = setupTest();
+    await seedFixture(t);
+    const asAlice = t.withIdentity(alice);
+
+    await asAlice.mutation(api.managebac.beginSync, { kind: "manual" });
+    await expect(
+      asAlice.mutation(api.managebac.beginSync, { kind: "manual" }),
+    ).rejects.toThrow("INTEGRATION_SYNC_BUSY");
+  });
+
+  it("refreshes a calendarItems timetable projection and removes it without duplicates", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const firstRun = await insertTimetableRun(t, fixture, fixture.aliceId);
+
+    await commitTimetablePage(
+      t,
+      fixture,
+      firstRun,
+      "Math — Monday",
+      "timetable-v1",
+      "timetable-page-1",
+    );
+    const first = await t.run(async (ctx) => ({
+      calendar: await ctx.db
+        .query("calendarItems")
+        .withIndex("by_source_key", (q) =>
+          q.eq("ownerAccountId", fixture.aliceId).eq("sourceKey", "timetable:math-1:official_event"),
+        )
+        .collect(),
+      projections: await ctx.db
+        .query("externalProjections")
+        .withIndex("by_provider_key", (q) =>
+          q.eq("integrationId", fixture.integrationId).eq("providerKey", "timetable:timetable:math-1"),
+        )
+        .collect(),
+    }));
+    expect(first.calendar).toHaveLength(1);
+    expect(first.projections).toHaveLength(1);
+    expect(first.projections[0]?.projectionId).toBe(String(first.calendar[0]?._id));
+
+    const guardRows = await t.run(async (ctx) => {
+      const source = await ctx.db
+        .query("externalRecords")
+        .withIndex("by_integration_key", (q) =>
+          q.eq("integrationId", fixture.integrationId).eq("providerRecordKey", "timetable:math-1"),
+        )
+        .unique();
+      if (!source) throw new Error("timetable fixture source missing");
+      const now = Date.now();
+      const unrelatedCalendarId = await ctx.db.insert("calendarItems", {
+        ownerAccountId: fixture.bobId,
+        schoolId: fixture.schoolId,
+        kind: "official_event",
+        title: "Bob's unrelated event",
+        allDay: false,
+        timezone: "UTC",
+        timePrecision: "exact",
+        status: "active",
+        sourceLocked: true,
+        sourceProvider: "managebac",
+        sourceRecordId: source._id,
+        sourceKey: "unrelated:timetable-event-1",
+        sourceHash: "timetable-v1",
+        sourceCapabilityState: "available",
+        linkedArtifactIds: [],
+        revision: 1,
+        createdBy: "source",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const missingCalendarId = await ctx.db.insert("calendarItems", {
+        ownerAccountId: fixture.aliceId,
+        schoolId: fixture.schoolId,
+        kind: "official_event",
+        title: "Deleted calendar target",
+        allDay: false,
+        timezone: "UTC",
+        timePrecision: "exact",
+        status: "active",
+        sourceLocked: true,
+        sourceProvider: "managebac",
+        sourceRecordId: source._id,
+        sourceKey: "missing:timetable-event-1",
+        sourceHash: "timetable-v1",
+        sourceCapabilityState: "available",
+        linkedArtifactIds: [],
+        revision: 1,
+        createdBy: "source",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const unrelatedProjectionId = await ctx.db.insert("externalProjections", {
+        integrationId: fixture.integrationId,
+        schoolId: fixture.schoolId,
+        recordId: source._id,
+        accountId: fixture.aliceId,
+        projectionType: "timetable_event",
+        projectionId: String(unrelatedCalendarId),
+        providerKey: "timetable:unrelated:timetable-event-1",
+        sourceHash: "timetable-v1",
+        state: "active",
+        bootstrapVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const missingProjectionId = await ctx.db.insert("externalProjections", {
+        integrationId: fixture.integrationId,
+        schoolId: fixture.schoolId,
+        recordId: source._id,
+        accountId: fixture.aliceId,
+        projectionType: "timetable_event",
+        projectionId: String(missingCalendarId),
+        providerKey: "timetable:missing:timetable-event-1",
+        sourceHash: "timetable-v1",
+        state: "active",
+        bootstrapVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.delete(missingCalendarId);
+      return { unrelatedCalendarId, unrelatedProjectionId, missingProjectionId };
+    });
+
+    const secondRun = await insertTimetableRun(t, fixture, fixture.aliceId);
+    await commitTimetablePage(
+      t,
+      fixture,
+      secondRun,
+      "Math — Tuesday",
+      "timetable-v2",
+      "timetable-page-2",
+    );
+    const refreshed = await t.run(async (ctx) => ({
+      calendar: await ctx.db
+        .query("calendarItems")
+        .withIndex("by_source_key", (q) =>
+          q.eq("ownerAccountId", fixture.aliceId).eq("sourceKey", "timetable:math-1:official_event"),
+        )
+        .collect(),
+      projection: (
+        await ctx.db
+          .query("externalProjections")
+      .withIndex("by_provider_key", (q) =>
+            q.eq("integrationId", fixture.integrationId).eq("providerKey", "timetable:timetable:math-1"),
+          )
+          .collect()
+      )[0],
+      unrelatedCalendar: await ctx.db.get(guardRows.unrelatedCalendarId),
+      unrelatedProjection: await ctx.db.get(guardRows.unrelatedProjectionId),
+      missingProjection: await ctx.db.get(guardRows.missingProjectionId),
+    }));
+    expect(refreshed.calendar).toHaveLength(1);
+    expect(refreshed.calendar[0]?.title).toBe("Math — Tuesday");
+    expect(refreshed.calendar[0]?.sourceHash).toBe("timetable-v2");
+    expect(refreshed.projection?.projectionId).toBe(String(refreshed.calendar[0]?._id));
+    expect(refreshed.unrelatedCalendar?.title).toBe("Bob's unrelated event");
+    expect(refreshed.unrelatedProjection?.state).toBe("conflicted");
+    expect(refreshed.missingProjection?.state).toBe("conflicted");
+
+    const repeatRun = await insertTimetableRun(t, fixture, fixture.aliceId);
+    await commitTimetablePage(
+      t,
+      fixture,
+      repeatRun,
+      "Math — Tuesday",
+      "timetable-v2",
+      "timetable-page-repeat",
+    );
+    const repeated = await t.run(async (ctx) =>
+      ctx.db
+        .query("calendarItems")
+        .withIndex("by_source_key", (q) =>
+          q.eq("ownerAccountId", fixture.aliceId).eq("sourceKey", "timetable:math-1:official_event"),
+        )
+        .collect(),
+    );
+    expect(repeated).toHaveLength(1);
+
+    const removeRun = await insertTimetableRun(t, fixture, fixture.aliceId);
+    const removePayload = {
+      seenProviderKeys: [] as string[],
+      reconciledCapabilityIds: [removeRun.capabilityId],
+    };
+    const timestamp = Date.now();
+    const payloadDigest = digest(removePayload);
+    await t.withIdentity(alice).mutation(api.managebac.completeSync, {
+      integrationId: fixture.integrationId,
+      syncRunId: removeRun.syncRunId,
+      ...removePayload,
+      payloadDigest,
+      timestamp,
+      nonce: "timetable-remove-1",
+      signature: signature(
+        "sync-complete",
+        alice,
+        fixture.integrationId,
+        removeRun.syncRunId,
+        timestamp,
+        "timetable-remove-1",
+        payloadDigest,
+      ),
+    });
+    const removed = await t.run(async (ctx) => ({
+      calendar: await ctx.db
+        .query("calendarItems")
+        .withIndex("by_source_key", (q) =>
+          q.eq("ownerAccountId", fixture.aliceId).eq("sourceKey", "timetable:math-1:official_event"),
+        )
+        .collect(),
+      projection: (
+        await ctx.db
+          .query("externalProjections")
+          .withIndex("by_provider_key", (q) =>
+            q.eq("integrationId", fixture.integrationId).eq("providerKey", "timetable:timetable:math-1"),
+          )
+          .collect()
+      )[0],
+    }));
+    expect(removed.calendar).toHaveLength(1);
+    expect(removed.calendar[0]?.status).toBe("removed");
+    expect(removed.projection?.state).toBe("tombstoned");
+  });
+
+  it("refreshes a legacy timetable projection in place before upgrading its id", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const seeded = await t.run(async (ctx) => {
+      const now = Date.now();
+      const sourceId = await ctx.db.insert("externalRecords", {
+        integrationId: fixture.integrationId,
+        schoolId: fixture.schoolId,
+        providerRecordId: "legacy-timetable-event-1",
+        providerRecordKey: "timetable:math-1",
+        recordType: "timetable",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        mappedAccountId: fixture.aliceId,
+        providerClassId: "class-current",
+        normalized: {
+          title: "Math — Monday",
+          startAt: "2026-09-10T08:30:00.000Z",
+          endAt: "2026-09-10T09:20:00.000Z",
+        },
+        payloadVersion: "legacy-v1",
+        sourceHash: "legacy-v1",
+        tombstone: false,
+        fetchedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const artifactId = await ctx.db.insert("spectraArtifacts", {
+        ownerAccountId: fixture.aliceId,
+        schoolId: fixture.schoolId,
+        blueprintKey: "timetable",
+        title: "Legacy timetable",
+        content: {
+          timezone: "UTC",
+          events: [
+            {
+              id: "event-1",
+              title: "Math — Monday",
+              start: "2026-09-10T08:30:00.000Z",
+              end: "2026-09-10T09:20:00.000Z",
+              sourceHash: "legacy-v1",
+              sourceStatus: "active",
+            },
+          ],
+        },
+        tags: ["managebac"],
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const calendarId = await ctx.db.insert("calendarItems", {
+        ownerAccountId: fixture.aliceId,
+        schoolId: fixture.schoolId,
+        kind: "official_event",
+        title: "Math — Monday",
+        startAt: Date.parse("2026-09-10T08:30:00.000Z"),
+        endAt: Date.parse("2026-09-10T09:20:00.000Z"),
+        allDay: false,
+        timezone: "UTC",
+        timePrecision: "exact",
+        status: "active",
+        sourceLocked: true,
+        sourceProvider: "legacy_timetable",
+        sourceRecordId: sourceId,
+        sourceKey: `legacy:${artifactId}:event-1`,
+        sourceHash: "legacy-v1",
+        sourceCapabilityState: "available",
+        linkedArtifactIds: [],
+        legacyArtifactId: artifactId,
+        legacyEventId: "event-1",
+        revision: 1,
+        createdBy: "migration",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const projectionId = await ctx.db.insert("externalProjections", {
+        integrationId: fixture.integrationId,
+        schoolId: fixture.schoolId,
+        recordId: sourceId,
+        accountId: fixture.aliceId,
+        projectionType: "timetable_event",
+        projectionId: `${artifactId}#event-1`,
+        providerKey: "timetable:timetable:math-1",
+        sourceHash: "legacy-v1",
+        state: "active",
+        bootstrapVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { sourceId, artifactId, calendarId, projectionId };
+    });
+
+    const run = await insertTimetableRun(t, fixture, fixture.aliceId);
+    await commitTimetablePage(
+      t,
+      fixture,
+      run,
+      "Math — Tuesday",
+      "legacy-v2",
+      "legacy-timetable-page-1",
+    );
+    const state = await t.run(async (ctx) => ({
+      calendar: await ctx.db.get(seeded.calendarId),
+      artifact: await ctx.db.get(seeded.artifactId),
+      projection: await ctx.db.get(seeded.projectionId),
+      allCalendar: await ctx.db
+        .query("calendarItems")
+        .withIndex("by_source_record", (q) => q.eq("sourceRecordId", seeded.sourceId))
+        .collect(),
+    }));
+    const events = Array.isArray(state.artifact?.content?.events)
+      ? state.artifact.content.events
+      : [];
+    expect(state.allCalendar).toHaveLength(1);
+    expect(state.calendar?.title).toBe("Math — Tuesday");
+    expect(events[0]?.title).toBe("Math — Tuesday");
+    expect(state.projection?.projectionId).toBe(String(seeded.calendarId));
   });
 
   it("hides foreign-school data and enforces conflict authority/link scope", async () => {

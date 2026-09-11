@@ -1,5 +1,6 @@
 import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
 import { parseXml, XmlElement, XmlText } from "@ariadng/office/xml";
+import { latexToEquation } from "./equation-interchange";
 import { docxLens, type DocxProjection } from "./docx-lens";
 import { documentContentToProseMirrorJson, type DocumentJsonNode } from "./document-projection";
 
@@ -362,6 +363,17 @@ function appendNativeOmml(paragraph: XmlElement, value: string) {
   paragraph.appendChild(root);
 }
 
+function appendEquation(paragraph: XmlElement, latex: string, display: "inline" | "block", ommlXml?: string) {
+  if (ommlXml) {
+    appendNativeOmml(paragraph, ommlXml);
+    return;
+  }
+  const interchange = latexToEquation(latex, display);
+  if (!interchange.supported)
+    throw new Error(`Equation contains unsupported commands: ${interchange.unsupported.join(", ")}`);
+  appendNativeOmml(paragraph, interchange.xml);
+}
+
 async function appendInlineContent(
   document: Document,
   paragraph: XmlElement,
@@ -372,9 +384,12 @@ async function appendInlineContent(
     if (node.type === "text" && node.text) appendTextRun(document, paragraph, node.text, node.marks);
     else if (node.type === "inlineEquation") {
       const attrs = record(node.attrs);
-      if (typeof attrs.ommlXml === "string" && attrs.ommlXml)
-        appendNativeOmml(paragraph, attrs.ommlXml);
-      else appendTextRun(document, paragraph, `[Equation: ${String(attrs.latex ?? "")}]`);
+      appendEquation(
+        paragraph,
+        String(attrs.latex ?? ""),
+        attrs.display === "block" ? "block" : "inline",
+        typeof attrs.ommlXml === "string" && attrs.ommlXml ? attrs.ommlXml : undefined,
+      );
     } else if (node.type === "image") {
       await appendImageInline(document, paragraph, node, resolver);
     } else if (node.content)
@@ -534,31 +549,12 @@ export async function exportDocxCopy(
       }
       if (node.type === "equation") {
         const attrs = record(node.attrs);
-        const hasNative = typeof attrs.ommlXml === "string" && attrs.ommlXml;
         await appendParagraph(document, {
           type: "paragraph",
           content: [
-            hasNative
-              ? {
-                  type: "inlineEquation",
-                  attrs: {
-                    latex: String(attrs.latex ?? ""),
-                    ommlXml: attrs.ommlXml,
-                  },
-                }
-              : {
-                  type: "text",
-                  text: `[Equation: ${String(attrs.latex ?? "")}]`,
-                },
+            { type: "inlineEquation", attrs: { latex: String(attrs.latex ?? ""), display: "block", ...(typeof attrs.ommlXml === "string" && attrs.ommlXml ? { ommlXml: attrs.ommlXml } : {}) } },
           ],
         }, undefined, options.resolveAsset);
-        if (!hasNative)
-          notes.push({
-            scope: "equations",
-            level: "unsupported",
-            message:
-              "New equations have no native OMML interchange yet; the copy keeps a compact editable indication. Imported native OMML is carried through unchanged.",
-          });
         continue;
       }
       if (

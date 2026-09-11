@@ -189,16 +189,24 @@ describe("DOCX preservation lens", () => {
     })).rejects.toMatchObject({ code: "DOCX_UNSUPPORTED_EDIT" });
   });
 
-  it("treats native OMML as preserved read-only at both command and paragraph seams", async () => {
+  it("keeps native OMML editable at both command and paragraph seams", async () => {
     const opened = await docxLens.open(await fixture("equation-omml.docx"));
     expect(opened.fidelityMap.entries.find((entry) => entry.feature === "equations"))
-      .toMatchObject({ class: "PRESERVED", readOnly: true });
-    const equation = opened.projection.blocks.find((block) => block.attrs?.nativeReadOnly === true)!;
-    await expect(docxLens.mutate(opened.preservedCarry, {
+      .toMatchObject({ class: "NATIVE" });
+    const equation = opened.projection.blocks.find((block) =>
+      block.inlineContent?.some((item) => item.kind === "equation"),
+    )!;
+    const changed = await docxLens.mutate(opened.preservedCarry, {
       kind: "replace-paragraph",
       regionId: equation.id,
-      text: "Would flatten OMML",
-    })).rejects.toMatchObject({ code: "DOCX_REGION_READ_ONLY" });
+      text: equation.text,
+      inlineContent: [{ kind: "equation", latex: String.raw`\frac{x+1}{2}`, display: "block" }],
+    });
+    const reopened = await docxLens.open(changed);
+    expect(reopened.projection.blocks[0]?.inlineContent?.[0]).toMatchObject({
+      kind: "equation",
+      latex: String.raw`\frac{x+1}{2}`,
+    });
   });
 
   it("projects mixed and display OMML in native order as valid KaTeX", async () => {
@@ -230,7 +238,7 @@ describe("DOCX preservation lens", () => {
       ).not.toThrow();
   });
 
-  it("promotes a paragraph containing only oMathPara to a protected display equation", async () => {
+  it("promotes a paragraph containing only oMathPara to an editable display equation", async () => {
     const source = await fixture("equation-omml.docx");
     const { unzipSync, zipSync, strFromU8, strToU8 } = await import("fflate");
     const files = unzipSync(source);
@@ -253,7 +261,6 @@ describe("DOCX preservation lens", () => {
       attrs: {
         display: "block",
         alignment: "center",
-        nativeReadOnly: true,
       },
     });
   });
@@ -290,7 +297,7 @@ describe("DOCX preservation lens", () => {
       "equation",
       "text",
     ]);
-    expect(projected.attrs?.nativeReadOnly).toBe(true);
+    expect(projected.attrs?.nativeReadOnly).toBeUndefined();
   });
 
   it("projects an image-only cover as a bounded package reference", async () => {

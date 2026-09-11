@@ -55,7 +55,7 @@ export const transitionStorageStrategy = mutation({
         "bridgeWriteRequests",
         String((replayed.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? ""),
       );
-      return { state: replayed.state, transitionId: replayed._id, materializationRequestId: requestId };
+      return { state: replayed.state, transitionId: replayed._id, materializationRequestId: requestId, transitionReceipt: { kind: "bridge-storage-transition", transitionId: String(replayed._id), artifactId: String(args.workId), from: fromPreset, to: args.toPreset, materializationRequestId: requestId ? String(requestId) : undefined, state: replayed.state === "verified" ? "verified" : "pending" } };
     }
     const idempotencyKey = await deriveStorageTransitionIdempotencyKey({
       workId: String(args.workId),
@@ -70,7 +70,7 @@ export const transitionStorageStrategy = mutation({
         "bridgeWriteRequests",
         String((existingTransition.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? ""),
       );
-      return { state: existingTransition.state, transitionId: existingTransition._id, materializationRequestId: requestId };
+      return { state: existingTransition.state, transitionId: existingTransition._id, materializationRequestId: requestId, transitionReceipt: { kind: "bridge-storage-transition", transitionId: String(existingTransition._id), artifactId: String(args.workId), from: fromPreset, to: args.toPreset, materializationRequestId: requestId ? String(requestId) : undefined, state: existingTransition.state === "verified" ? "verified" : "pending" } };
     }
     let [cloud, locals] = await Promise.all([
       ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud")).unique(),
@@ -257,7 +257,7 @@ export const transitionStorageStrategy = mutation({
       const after = { preset: args.toPreset, cloudPayloadRef: args.toPreset === "device" || args.toPreset === "linked" ? undefined : attachablePayload ? String(attachablePayload._id) : cloud?.payloadRef, localReplicaIds: locals.map((replica) => String(replica._id)), physicalLocalAction: args.toPreset === "spectra" ? "leave-file-in-place" : "retain", materializationRequestId: materializationRequestId ? String(materializationRequestId) : undefined };
       const finalState = createdLocal || strategyPlan.requiresCloudMaterialization ? "pending" : strategyPlan.completion;
       await ctx.db.patch(transitionId, { state: finalState, after, updatedAt: Date.now() });
-      return { state: finalState as "pending" | "verified", transitionId, materializationRequestId: materializationRequestId ?? null };
+      return { state: finalState as "pending" | "verified", transitionId, materializationRequestId: materializationRequestId ?? null, transitionReceipt: { kind: "bridge-storage-transition", transitionId: String(transitionId), artifactId: String(args.workId), from: fromPreset, to: args.toPreset, materializationRequestId: materializationRequestId ? String(materializationRequestId) : undefined, state: finalState === "verified" ? "verified" : "pending", before: { hash: cloud?.contentHash }, after: { hash: attachablePayload?.hash ?? cloud?.contentHash } } };
     } catch (error) {
       const failedAt = Date.now();
       const previousPolicy = before.policy;
@@ -731,6 +731,7 @@ export const queueMaterialization = mutation({
     projectionContent: v.optional(v.any()),
     projectionContentHash: v.optional(v.string()),
     projectionTextIndex: v.optional(v.string()),
+    nativeReceipt: v.optional(v.any()),
     promotionMode: v.optional(
       v.union(v.literal("verified-first"), v.literal("immediate-projection")),
     ),
@@ -884,6 +885,7 @@ export const queueMaterialization = mutation({
       projectionBaseContentHash: input.projectionContentHash ?? work.contentHash,
       projectionBaseTextIndex: input.projectionTextIndex ?? work.textIndex,
       projectionBaseFidelityMap: args.fidelityMap,
+      nativeReceipt: args.nativeReceipt,
       state: "pending",
       retryAt: now,
       attemptCount: 0,
@@ -917,6 +919,7 @@ export const queueMaterialization = mutation({
       revisionAfter: input.contentHash,
       state: "pending",
       actorKind: "user",
+      nativeReceipt: args.nativeReceipt,
       createdAt: now,
       updatedAt: now,
     });

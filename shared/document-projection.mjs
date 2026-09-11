@@ -90,6 +90,7 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           attrs: {
             latex: item.latex,
             ...(typeof item.ommlXml === "string" ? { ommlXml: item.ommlXml } : {}),
+            ...(typeof item.ommlSourceLatex === "string" ? { ommlSourceLatex: item.ommlSourceLatex } : {}),
             ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
           },
         },
@@ -175,6 +176,9 @@ export function docxRichBlockToJson(value, binding) {
         alignment: attrs.alignment ?? "center",
         ...(typeof equation?.ommlXml === "string"
           ? { ommlXml: equation.ommlXml }
+          : {}),
+        ...(typeof equation?.ommlSourceLatex === "string"
+          ? { ommlSourceLatex: equation.ommlSourceLatex }
           : {}),
       },
     };
@@ -438,6 +442,9 @@ export function documentRichInlineFromJson(node) {
         display: current.type === "equation" ? "block" : "inline",
         ...(typeof current.attrs?.ommlXml === "string"
           ? { ommlXml: current.attrs.ommlXml }
+          : {}),
+        ...(typeof current.attrs?.ommlSourceLatex === "string"
+          ? { ommlSourceLatex: current.attrs.ommlSourceLatex }
           : {}),
       });
       return;

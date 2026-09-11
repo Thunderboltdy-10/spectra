@@ -1653,6 +1653,7 @@ export default defineSchema({
     projectionBaseContentHash: v.optional(v.string()),
     projectionBaseTextIndex: v.optional(v.string()),
     projectionBaseFidelityMap: v.optional(v.any()),
+    nativeReceipt: v.optional(v.any()),
     state: v.union(v.literal("current"), v.literal("ahead"), v.literal("behind"), v.literal("diverged"), v.literal("pending"), v.literal("error"), v.literal("unavailable")),
     lastVerifiedAt: v.optional(v.number()),
     errorCode: v.optional(v.string()),
@@ -1684,6 +1685,7 @@ export default defineSchema({
     state: v.union(v.literal("pending"), v.literal("applied"), v.literal("verified"), v.literal("failed"), v.literal("conflicted")),
     actorKind: v.union(v.literal("user"), v.literal("ai"), v.literal("external-edit"), v.literal("reconciliation"), v.literal("migration"), v.literal("restore")),
     runId: v.optional(v.id("spectraAiRuns")),
+    nativeReceipt: v.optional(v.any()),
     errorCode: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -1748,6 +1750,7 @@ export default defineSchema({
     projectionBaseContentHash: v.optional(v.string()),
     projectionBaseTextIndex: v.optional(v.string()),
     projectionBaseFidelityMap: v.optional(v.any()),
+    nativeReceipt: v.optional(v.any()),
     state: v.union(
       v.literal("pending"),
       v.literal("claimed"),

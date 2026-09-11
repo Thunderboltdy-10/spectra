@@ -22,9 +22,11 @@ import {
   nativeLiveNeedsPromotion,
 } from "../lenses/native-live-promotion";
 import type { RecentNativeOperation } from "../lenses/native-reconciliation";
+import type { NativeSaveReceipt } from "../../../../shared/native-office-contract";
 
 export type NativeMaterialization =
-  { state: "queueing" } | { state: "pending"; hash: string };
+  | { state: "queueing" }
+  | { state: "pending"; hash: string; receipt?: NativeSaveReceipt };
 
 export type NativeConflict = {
   regionIds: string[];
@@ -227,6 +229,7 @@ export function useArtifactNativeSync({
       .then(async (response) => {
         const result = (await response.json().catch(() => null)) as {
           state?: string;
+          receipt?: NativeSaveReceipt;
           content?: unknown;
           projection?: unknown;
           message?: string;
@@ -337,6 +340,7 @@ export function useArtifactNativeSync({
           hash?: string;
           message?: string;
           state?: string;
+          receipt?: NativeSaveReceipt;
           conflict?: NativeConflict;
         } | null;
         if (!response.ok)
@@ -373,7 +377,7 @@ export function useArtifactNativeSync({
           );
         lastPromotedLiveKeyRef.current = nativeLiveContentKey(snapshot.content);
         lastFailedPromotionKeyRef.current = undefined;
-        setNativeMaterialization({ state: "pending", hash: result.hash });
+        setNativeMaterialization({ state: "pending", hash: result.hash, receipt: result.receipt });
       } catch (error) {
         lastFailedPromotionKeyRef.current = nativeLiveContentKey(
           snapshot.content,

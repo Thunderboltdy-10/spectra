@@ -68,8 +68,10 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
       kind: z.literal("equation"),
       latex: z.string().max(2_000_000),
       display: z.enum(["inline", "block"]),
-      /** Exact OMML is carried only for native readback/export; no conversion is implied. */
+      /** Exact OMML is carried for native readback/export. */
       ommlXml: z.string().max(4_000_000).optional(),
+      /** LaTeX value represented by the retained OMML subtree at open time. */
+      ommlSourceLatex: z.string().max(2_000_000).optional(),
     })
     .strict(),
   z

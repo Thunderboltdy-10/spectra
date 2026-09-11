@@ -1182,6 +1182,7 @@ export const claimWrite = mutation({
         targetRevision: request.targetRevision,
         contentHash: request.contentHash,
         idempotencyKey: request.idempotencyKey,
+        nativeReceipt: request.nativeReceipt,
         payloadUrl,
       } };
     }
@@ -1195,6 +1196,7 @@ export const completeWrite = mutation({
     requestId: v.id("bridgeWriteRequests"),
     outcome: v.union(v.literal("verified"), v.literal("waiting"), v.literal("conflicted"), v.literal("failed")),
     actualRevision: v.optional(v.string()),
+    nativeReceipt: v.optional(v.any()),
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
   },
@@ -1227,6 +1229,9 @@ export const completeWrite = mutation({
     if (args.outcome === "waiting") {
       await ctx.db.patch(request._id, {
         state: "pending",
+        nativeReceipt: request.nativeReceipt
+          ? { ...(request.nativeReceipt as Record<string, unknown>), state: "pending" }
+          : args.nativeReceipt,
         retryAt: now + 5_000,
         errorCode: args.errorCode ?? "office-locked",
         errorMessage: args.errorMessage,
@@ -1336,8 +1341,23 @@ export const completeWrite = mutation({
           updatedAt: now,
         });
       }
-      await ctx.db.patch(request._id, { state: "verified", errorCode: undefined, errorMessage: undefined, updatedAt: now });
-      if (operation) await ctx.db.patch(operation._id, { state: "verified", updatedAt: now });
+      const appliedReceipt = request.nativeReceipt ?? args.nativeReceipt;
+      await ctx.db.patch(request._id, {
+        state: "verified",
+        nativeReceipt: appliedReceipt && typeof appliedReceipt === "object"
+          ? { ...(appliedReceipt as Record<string, unknown>), state: "applied", acknowledgedAt: now }
+          : appliedReceipt,
+        errorCode: undefined,
+        errorMessage: undefined,
+        updatedAt: now,
+      });
+      if (operation) await ctx.db.patch(operation._id, {
+        state: "verified",
+        nativeReceipt: appliedReceipt && typeof appliedReceipt === "object"
+          ? { ...(appliedReceipt as Record<string, unknown>), state: "applied", acknowledgedAt: now }
+          : appliedReceipt,
+        updatedAt: now,
+      });
       if (strategyTransition) {
         if (strategyTransition.toPreset === "device" || strategyTransition.toPreset === "linked") {
           const transitionCloud = await ctx.db.query("workReplicas")
@@ -1364,6 +1384,9 @@ export const completeWrite = mutation({
     const conflicted = args.outcome === "conflicted";
     await ctx.db.patch(request._id, {
       state: conflicted ? "conflicted" : "failed",
+      nativeReceipt: request.nativeReceipt && typeof request.nativeReceipt === "object"
+        ? { ...(request.nativeReceipt as Record<string, unknown>), state: conflicted ? "conflicted" : "failed", errorCode: args.errorCode }
+        : args.nativeReceipt,
       errorCode: args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"),
       errorMessage: args.errorMessage,
       updatedAt: now,

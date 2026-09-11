@@ -13,6 +13,7 @@ import {
   retainSnapshotObject,
   type SnapshotStrategy,
 } from "./artifactSnapshots";
+import { confirmCanonicalPlacements } from "./artifactEmbeds";
 
 export const HUMAN_CHANGE_IDLE_MS = 45_000;
 
@@ -255,6 +256,7 @@ async function commitImportJob(
     status: "imported",
     commitReceipt: job.commitReceipt ?? crypto.randomUUID(),
   });
+  await confirmCanonicalPlacements(ctx, versionId);
   if (options.preserveLiveCurrent !== false)
     await retainLiveStateAfterRecoveredImport(
       ctx,
@@ -357,6 +359,7 @@ export async function commitChangeGroup(
     versionId,
   });
   await ctx.db.patch(artifact._id, { currentVersionId: versionId });
+  await confirmCanonicalPlacements(ctx, versionId);
   return { status: "committed" as const, versionId };
 }
 

@@ -46,6 +46,7 @@ import {
   xlsxChangedRegions,
 } from "@/features/spectra/lenses/office-projection-merge";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
+import { nativeOperationId, type NativeSaveReceipt } from "../../../../../../shared/native-office-contract";
 
 // Compatibility exports for existing callers. The implementation lives in the
 // canonical office-content module; routes only re-export the shared transform.
@@ -277,11 +278,31 @@ async function materializeOfficeArtifactAttempt(
     : materializationPayload;
   const hash = await sha256Payload(output);
   if (hash === materializationTruth.hash)
-    return { state: "unchanged" as const, hash };
+    return {
+      state: "unchanged" as const,
+      hash,
+      receipt: {
+        kind: "native-office-save" as const,
+        format: isSheet ? "xlsx" as const : "pptx" as const,
+        operationId: nativeOperationId(String(workId), materializationTruth.revision, hash),
+        artifactId: String(workId),
+        basePayloadHash: materializationTruth.hash,
+        resultPayloadHash: hash,
+        baseRevision: materializationTruth.revision,
+        resultRevision: hash,
+        targets: { regionIds: [], partNames: [] },
+        semantic: { resultDigest: baseProjection.nativeBinding.semanticDigest, readbackDigest: baseProjection.nativeBinding.semanticDigest },
+        preservedPartNames: [],
+        state: "unchanged" as const,
+      } satisfies NativeSaveReceipt,
+    };
   const [next, comparison] = await Promise.all([
     isSheet ? xlsxLens.open(output) : pptxLens.open(output),
     comparePackages(materializationPayload, output),
   ]);
+  const readbackDigest = (next.projection as OfficeProjection).nativeBinding.semanticDigest;
+  if (readbackDigest !== projection.nativeBinding.semanticDigest)
+    throw new Error("OFFICE_READBACK_MISMATCH");
   /**
    * The preservation promise, checked against the bytes before anything is
    * queued. Every other preservation check in Spectra is a declaration — a
@@ -295,19 +316,35 @@ async function materializeOfficeArtifactAttempt(
     entries: baseOpened.fidelityMap.entries,
     parts: comparison.parts,
   });
+  const local = workTruth.replicas.find(
+    (replica) => replica.kind === "local" && replica.state !== "unavailable",
+  );
+  const changedPartNames = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`);
+  const nativeReceipt: NativeSaveReceipt = {
+    kind: "native-office-save",
+    format: isSheet ? "xlsx" : "pptx",
+    operationId: nativeOperationId(String(workId), materializationTruth.revision, hash),
+    artifactId: String(workId),
+    basePayloadHash: materializationTruth.hash,
+    resultPayloadHash: hash,
+    baseRevision: materializationTruth.revision,
+    resultRevision: hash,
+    targets: { regionIds, partNames: changedPartNames },
+    semantic: { baseDigest: baseProjection.nativeBinding.semanticDigest, resultDigest: projection.nativeBinding.semanticDigest, readbackDigest },
+    preservedPartNames: comparison.parts.filter((part) => part.verdict === "identical").map((part) => `/${part.name}`),
+    state: local ? "pending" : "cloud_saved",
+  };
   const stored = await uploadNativePayload(
     workId,
     output,
     hash,
     materializationTruth.nativeFormat,
   );
-  const local = workTruth.replicas.find(
-    (replica) => replica.kind === "local" && replica.state !== "unavailable",
-  );
   if (!local) {
     return {
       state: "cloud_saved" as const,
       hash,
+      receipt: nativeReceipt,
       status:
         "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Office copy on this computer.",
     };
@@ -337,6 +374,7 @@ async function materializeOfficeArtifactAttempt(
       ),
       projectionContentHash: (next.projection as OfficeProjection).nativeBinding
         .semanticDigest,
+      nativeReceipt,
       ...(options?.promotionMode
         ? { promotionMode: options.promotionMode }
         : {}),
@@ -355,6 +393,7 @@ async function materializeOfficeArtifactAttempt(
       return {
         state: "cloud_saved" as const,
         hash,
+        receipt: nativeReceipt,
         status:
           "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Office copy on this computer.",
       };
@@ -365,6 +404,7 @@ async function materializeOfficeArtifactAttempt(
     state: queued.state,
     requestId: queued.requestId,
     hash,
+    receipt: nativeReceipt,
     status: "Waiting to save locally",
   };
 }

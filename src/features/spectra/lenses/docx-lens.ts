@@ -1,8 +1,9 @@
 import { Document, Paragraph, type Run, WML_NAMESPACE } from "@ariadng/office/docx";
 import { comparePackages } from "@ariadng/office/preservation";
-import { serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
+import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
 import { firstNativeFontFamily } from "../office-fonts";
+import { latexToEquation } from "./equation-interchange";
 import type {
   LensCapabilitySet,
   LensCompatibilityProfile,
@@ -56,6 +57,7 @@ export class DocxLensError extends Error {
       | "DOCX_TABLE_WRITE_UNSUPPORTED"
       | "DOCX_IDENTITY_AMBIGUOUS"
       | "DOCX_IDENTITY_UNSTABLE"
+      | "DOCX_READBACK_MISMATCH"
       | "DOCX_KEEP_SPECTRA_WRITE_PENDING",
     message: string,
   ) {
@@ -83,12 +85,6 @@ function hasWml(element: XmlElement, ...names: string[]) {
     (candidate) =>
       candidate.namespaceUri() === WML_NAMESPACE &&
       wanted.has(candidate.localName),
-  );
-}
-
-function hasOmml(element: XmlElement) {
-  return [element, ...descendants(element)].some(
-    (candidate) => candidate.namespaceUri() === OMML_NAMESPACE,
   );
 }
 
@@ -692,6 +688,7 @@ function projectedRichContent(
         latex: ommlToLatex(element),
         display: "block",
         ommlXml: serializedOmml(element),
+        ommlSourceLatex: ommlToLatex(element),
       });
       return;
     }
@@ -701,6 +698,7 @@ function projectedRichContent(
         latex: ommlToLatex(element),
         display: "inline",
         ommlXml: serializedOmml(element),
+        ommlSourceLatex: ommlToLatex(element),
       });
       return;
     }
@@ -783,7 +781,7 @@ function semanticRichText(content: readonly DocxRichInline[]) {
 }
 
 function hasRichObject(content: readonly DocxRichInline[]) {
-  return content.some((item) => item.kind !== "text");
+  return content.some((item) => item.kind === "image");
 }
 
 function hasRichSemantics(content: readonly DocxRichInline[]) {
@@ -1704,22 +1702,42 @@ function appendRichText(
   } else parent.appendChild(run);
 }
 
+function appendNativeOmml(paragraph: XmlElement, value: string) {
+  const root = parseXml(value).root;
+  if (root.namespaceUri() !== OMML_NAMESPACE)
+    throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The equation is not valid Office Math markup.");
+  paragraph.appendChild(root);
+}
+
 function replaceParagraphRich(
   document: Document,
   paragraph: Paragraph,
   inlineContent: readonly DocxRichInline[],
 ) {
-  if (inlineContent.some((item) => item.kind !== "text"))
+  if (inlineContent.some((item) => item.kind === "image"))
     throw new DocxLensError(
       "DOCX_REGION_READ_ONLY",
-      "Native pictures and equations remain in their Word representation; edit neighboring text without replacing that native object.",
+      "Native pictures remain in their Word representation; edit neighboring text without replacing that native object.",
     );
   const properties = paragraph.element.find(WML_NAMESPACE, "pPr");
   for (const child of [...paragraph.element.children])
     if (child !== properties) paragraph.element.removeChild(child);
-  for (const item of inlineContent)
+  for (const item of inlineContent) {
     if (item.kind === "text" && item.text)
       appendRichText(document, paragraph.element, item.text, item.format, item.href);
+    else if (item.kind === "equation") {
+      const unchangedNative = item.ommlXml && item.ommlSourceLatex === item.latex;
+      const interchange = unchangedNative
+        ? undefined
+        : latexToEquation(item.latex, item.display);
+      if (interchange && !interchange.supported)
+        throw new DocxLensError(
+          "DOCX_UNSUPPORTED_EDIT",
+          `Equation contains unsupported commands: ${interchange.unsupported.join(", ")}`,
+        );
+      appendNativeOmml(paragraph.element, interchange?.xml ?? item.ommlXml!);
+    }
+  }
   if (!inlineContent.length) appendRichText(document, paragraph.element, "");
   document._markMainDirty();
 }
@@ -2121,9 +2139,9 @@ const REGION_FIDELITY: ReadonlyArray<{
   },
   {
     region: "equations",
-    class: "PRESERVED",
+    class: "NATIVE",
     reason:
-      "Word equations are preserved as OMML. Spectra writes its own LaTeX equations, which a linked Word file cannot hold, so equation editing belongs in Word.",
+      "Supported fractions, scripts, roots, operators, delimiters, matrices and aligned expressions round-trip as editable OMML; unknown native subtrees remain preserved-only.",
   },
   {
     region: "footnotes",
@@ -2196,7 +2214,7 @@ async function projectDocument(
             ["drawing", "pict", "object", "fldSimple"].includes(nested.localName),
           ),
       );
-      const readOnly = hasRichObject(richContent) || unsafeHyperlink || hasOmml(element) || hasWml(
+      const readOnly = hasRichObject(richContent) || unsafeHyperlink || hasWml(
         element,
         "ins",
         "del",
@@ -2241,7 +2259,7 @@ async function projectDocument(
             : displayEquation
               ? "equation"
               : "paragraph",
-        text: hasRichObject(richContent)
+        text: hasRichSemantics(richContent)
           ? semanticRichText(richContent)
           : paragraph.text(),
         ...(displayEquation ? { latex: displayEquation.latex } : {}),
@@ -2274,7 +2292,7 @@ async function projectDocument(
           ? {
               readOnly: true,
               reason:
-                "This paragraph contains Word revision, field, hyperlink, comment, content-control, native-image, or OMML equation markup and is preserved read-only.",
+                "This paragraph contains Word revision, field, hyperlink, comment, content-control, or native-image markup and is preserved read-only.",
             }
           : {}),
       });
@@ -2300,7 +2318,6 @@ async function projectDocument(
           row.cells().some(
             (cell, columnIndex) =>
               hasRichObject(richRows[rowIndex]?.[columnIndex] ?? []) ||
-              hasOmml(cell.element) ||
               hasWml(
                 cell.element,
                 "ins",
@@ -2320,7 +2337,7 @@ async function projectDocument(
         const rows = table.rows().map((row, rowIndex) =>
           row.cells().map((cell, columnIndex) => {
             const content = richRows[rowIndex]?.[columnIndex] ?? [];
-            return hasRichObject(content) ? semanticRichText(content) : cell.text();
+            return hasRichSemantics(content) ? semanticRichText(content) : cell.text();
           }),
         );
         blocks.push({

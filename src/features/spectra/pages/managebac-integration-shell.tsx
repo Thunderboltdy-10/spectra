@@ -921,7 +921,11 @@ export function ManageBacIntegrationShell() {
                 </div>
               ) : tab === "classes" ? (
                 <div>
-                  <ClassShelfEditor onSaved={() => void refresh()} />
+                  <ClassShelfEditor
+                    onSaved={() =>
+                      runAction("sync", () => syncSpectraManageBac("manual"))
+                    }
+                  />
                   <div className="mt-8">
                     <RecordsList
                       records={classes}

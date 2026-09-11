@@ -116,6 +116,7 @@ import {
 import { spectraBus } from "../events";
 import {
   syncSpectraManageBac,
+  selectSpectraManageBacClasses,
   rememberSpectraMemory,
   correctSpectraMemory,
 } from "../data/api";
@@ -2001,12 +2002,24 @@ export function SpectraShell({
     const removeManageBac = spectraBus.handle("managebac.sync", async () => {
       await syncSpectraManageBac("manual");
     });
+    const removeManageBacSelection = spectraBus.handle(
+      "managebac.selectClasses",
+      async ({ recordIds, expectedRevision, retention }) => {
+        if (recordIds.length === 0) throw new Error("MANAGEBAC_CLASSES_REQUIRED");
+        await selectSpectraManageBacClasses({
+          recordIds,
+          ...(typeof expectedRevision === "number" ? { expectedRevision } : {}),
+          ...(retention ? { retention } : {}),
+        });
+      },
+    );
     return () => {
       removeSettings();
       removeSync();
       removeMemory();
       removeSharing();
       removeManageBac();
+      removeManageBacSelection();
     };
   }, [patchItemSyncPolicies, preferences, replacePreferences, router]);
 

@@ -1261,6 +1261,18 @@ export async function syncSpectraManageBac(
   return postManageBac<Record<string, unknown>>({ action: "sync", kind });
 }
 
+export async function selectSpectraManageBacClasses(input: {
+  recordIds: string[];
+  expectedRevision?: number;
+  retention?: "keep_in_spectra" | "archive_projection";
+}) {
+  return postManageBac<{
+    selectionRevision: number;
+    selectedClassIds: string[];
+    selectedRecordIds: string[];
+  }>({ action: "selectClasses", ...input });
+}
+
 export async function resolveSpectraManageBacConflict(input: {
   conflictId: string;
   resolution:

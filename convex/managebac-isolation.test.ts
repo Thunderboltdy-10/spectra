@@ -254,6 +254,7 @@ async function commitPage(
   title: string,
   sourceHash: string,
   nonce: string,
+  academicPeriodKey?: string,
 ) {
   const records = [
     {
@@ -261,6 +262,7 @@ async function commitPage(
       providerRecordKey,
       classification: "personal" as const,
       audienceScope: "mapped_user" as const,
+      ...(academicPeriodKey ? { academicPeriodKey } : {}),
       normalized: { title, description: `${title} private source` },
       payloadVersion: "v2p2",
       sourceHash,
@@ -488,6 +490,67 @@ describe("ManageBac account isolation", () => {
     ]);
   });
 
+  it("scopes the same provider record id by account and academic period", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const aliceCurrent = await insertSyncRun(t, fixture, fixture.aliceId);
+    const bobCurrent = await insertSyncRun(t, fixture, fixture.bobId);
+    const aliceNextYear = await insertSyncRun(t, fixture, fixture.aliceId);
+
+    await commitPage(
+      t,
+      fixture,
+      alice,
+      aliceCurrent,
+      "assignment:shared-provider-id",
+      "Alice current assignment",
+      "alice-current-v1",
+      "same-provider-alice-current",
+      "2026",
+    );
+    await commitPage(
+      t,
+      fixture,
+      bob,
+      bobCurrent,
+      "assignment:shared-provider-id",
+      "Bob current assignment",
+      "bob-current-v1",
+      "same-provider-bob-current",
+      "2026",
+    );
+    await commitPage(
+      t,
+      fixture,
+      alice,
+      aliceNextYear,
+      "assignment:shared-provider-id",
+      "Alice next-year assignment",
+      "alice-next-year-v1",
+      "same-provider-alice-next-year",
+      "2027",
+    );
+
+    const records = await t.run(async (ctx) =>
+      ctx.db
+        .query("externalRecords")
+        .withIndex("by_integration_type", (q) =>
+          q
+            .eq("integrationId", fixture.integrationId)
+            .eq("recordType", "class_resource"),
+        )
+        .collect(),
+    );
+    expect(records).toHaveLength(3);
+    expect(new Set(records.map((item) => item.mappedAccountId))).toEqual(
+      new Set([fixture.aliceId, fixture.bobId]),
+    );
+    expect(new Set(records.map((item) => item.academicPeriodKey))).toEqual(
+      new Set(["2026", "2027"]),
+    );
+    expect(new Set(records.map((item) => item.sourceIdentityKey)).size).toBe(3);
+  });
+
   it("derives class access from non-tombstoned memberships only", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);
@@ -576,6 +639,10 @@ describe("ManageBac account isolation", () => {
     });
 
     const asAlice = t.withIdentity(alice);
+    await asAlice.mutation(api.managebac.setSelectedClasses, {
+      recordIds: [seeded.currentClassId],
+      expectedRevision: 0,
+    });
     const resources = await asAlice.query(api.managebac.recordsForPurpose, {
       purpose: "class_resources",
     });

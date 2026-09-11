@@ -38,6 +38,118 @@ const EMPTY_COUNTS = {
   errors: 0,
 };
 
+const SYNC_LEASE_MS = 30 * 60_000;
+
+function canonicalAcademicPeriodKey(value: unknown) {
+  const key = text(value, 300);
+  return key || undefined;
+}
+
+/**
+ * Provider ids are only stable inside the provider account and academic
+ * period. Personal rows additionally carry the Spectra account. Keeping this
+ * key beside the raw provider key lets the bounded migration reconcile legacy
+ * rows without ever treating equal provider ids as equal people.
+ */
+function sourceIdentityKey(
+  integrationId: Id<"schoolIntegrations">,
+  accountId: Id<"accounts"> | undefined,
+  input: {
+    providerRecordKey: string;
+    audienceScope: string;
+    academicPeriodKey?: string;
+  },
+) {
+  const owner =
+    input.audienceScope === "mapped_user"
+      ? `account:${accountId ?? "unknown"}`
+      : `scope:${input.audienceScope}`;
+  return [
+    String(integrationId),
+    owner,
+    `period:${canonicalAcademicPeriodKey(input.academicPeriodKey) ?? "unknown"}`,
+    input.providerRecordKey.trim().slice(0, 700),
+  ].join("|");
+}
+
+function projectionSourceKey(source: Doc<"externalRecords">) {
+  // Keep the legacy raw calendar key stable when the provider supplied no
+  // academic period. Period-bearing rows use the canonical identity so a
+  // rollover cannot collide with the prior year's projection.
+  return source.academicPeriodKey
+    ? source.sourceIdentityKey ?? source.providerRecordKey
+    : source.providerRecordKey;
+}
+
+async function selectionSnapshot(
+  ctx: Ctx,
+  integrationId: Id<"schoolIntegrations">,
+  accountId: Id<"accounts">,
+) {
+  const rows = await ctx.db
+    .query("managebacClassSelections")
+    .withIndex("by_account_integration", (q) =>
+      q.eq("accountId", accountId).eq("integrationId", integrationId),
+    )
+    .collect();
+  return {
+    revision: rows.reduce((highest, row) => Math.max(highest, row.selectionRevision), 0),
+    selectedClassIds: rows.filter((row) => row.selected).map((row) => row.providerClassId),
+  };
+}
+
+async function assertCurrentSyncLease(
+  ctx: MutationCtx,
+  syncRun: Doc<"externalSyncRuns">,
+  leaseToken?: string,
+) {
+  if (syncRun.status === "completed" || syncRun.status === "failed" || syncRun.status === "cancelled")
+    throw new Error("INTEGRATION_SYNC_FENCED: This sync is no longer current.");
+  if (syncRun.leaseToken && syncRun.leaseToken !== leaseToken)
+    throw new Error("INTEGRATION_SYNC_FENCED: A newer sync owns this work.");
+  if (syncRun.leaseToken && (!syncRun.leaseExpiresAt || syncRun.leaseExpiresAt <= Date.now()))
+    throw new Error("INTEGRATION_SYNC_FENCED: The sync lease expired.");
+  if (syncRun.accountId && syncRun.selectionRevision !== undefined) {
+    const current = await selectionSnapshot(ctx, syncRun.integrationId, syncRun.accountId);
+    if (current.revision !== syncRun.selectionRevision)
+      throw new Error("INTEGRATION_SELECTION_CHANGED: Class selection changed while this sync was running.");
+  }
+}
+
+async function activeRunForScope(
+  ctx: MutationCtx,
+  integrationId: Id<"schoolIntegrations">,
+  accountId: Id<"accounts"> | undefined,
+  now: number,
+) {
+  const rows = (
+    await Promise.all(
+      (["queued", "leased", "running"] as const).map((status) =>
+        ctx.db
+          .query("externalSyncRuns")
+          .withIndex("by_integration_account_status", (q) =>
+            q.eq("integrationId", integrationId).eq("accountId", accountId).eq("status", status),
+          )
+          .collect(),
+      ),
+    )
+  ).flat();
+  for (const row of rows) {
+    if (row.leaseExpiresAt && row.leaseExpiresAt > now) return row;
+    // Rows written before scoped leases were introduced cannot safely accept
+    // a late response, so close them before allowing a replacement claim.
+    await ctx.db.patch(row._id, {
+      status: "failed",
+      stage: "lease_expired",
+      errorCode: "INTEGRATION_WORKER_LEASE_EXPIRED",
+      errorSummary: "This older sync no longer owns provider work.",
+      completedAt: now,
+      updatedAt: now,
+    });
+  }
+  return null;
+}
+
 function scheduleSync(
   ctx: MutationCtx,
   integrationId: Id<"schoolIntegrations">,
@@ -689,6 +801,20 @@ export const disconnect = mutation({
         completedAt: now,
         updatedAt: now,
       });
+    const sources = await ctx.db
+      .query("externalRecords")
+      .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
+      .take(5_000);
+    for (const source of sources.filter(
+      (item) => item.integrationId === integration._id && !item.tombstone,
+    ))
+      await ctx.db.patch(source._id, {
+        sourceState: "removed",
+        sourceStateAt: now,
+        sourceStateReason:
+          "The ManageBac connection was disconnected by a school administrator.",
+        updatedAt: now,
+      });
     await ctx.db.patch(integration._id, {
       status: "revoked",
       blockedReason: "Disconnected by a school administrator.",
@@ -1158,12 +1284,15 @@ export const myOverview = query({
         recordType: item.recordType,
         classification: item.classification,
         audienceScope: item.audienceScope,
+        sourceIdentityKey: item.sourceIdentityKey,
         providerClassId: item.providerClassId,
         academicPeriodKey: item.academicPeriodKey,
         normalized: item.normalized,
         sourceModifiedAt: item.sourceModifiedAt,
         fetchedAt: item.fetchedAt,
         tombstone: item.tombstone,
+        sourceState: item.sourceState ?? (item.tombstone ? "removed" : "available"),
+        sourceStateReason: item.sourceStateReason,
         provenanceUrl: item.provenanceUrl,
       })),
     };
@@ -1199,37 +1328,10 @@ export const claimScheduledSync = mutation({
       )
       .sort(
         (a, b) => (a.nextSyncAt ?? a.createdAt) - (b.nextSyncAt ?? b.createdAt),
-      );
+    );
     for (const integration of due) {
-      const activeRuns = await ctx.db
-        .query("externalSyncRuns")
-        .withIndex("by_integration_created", (q) =>
-          q.eq("integrationId", integration._id),
-        )
-        .order("desc")
-        .take(20);
-      if (
-        activeRuns.some(
-          (run) =>
-            ["queued", "leased", "running"].includes(run.status) &&
-            (!run.leaseExpiresAt || run.leaseExpiresAt > now),
-        )
-      )
+      if (await activeRunForScope(ctx, integration._id, undefined, now))
         continue;
-      for (const expired of activeRuns.filter(
-        (run) =>
-          ["queued", "leased", "running"].includes(run.status) &&
-          Boolean(run.leaseExpiresAt && run.leaseExpiresAt <= now),
-      ))
-        await ctx.db.patch(expired._id, {
-          status: "failed",
-          stage: "lease_expired",
-          errorCode: "INTEGRATION_WORKER_LEASE_EXPIRED",
-          errorSummary:
-            "The scheduled worker lease expired before the run settled.",
-          completedAt: now,
-          updatedAt: now,
-        });
       const admins = await ctx.db
         .query("schoolMemberships")
         .withIndex("by_school_role", (q) =>
@@ -1283,6 +1385,7 @@ export const claimScheduledSync = mutation({
       }
       const workerId = text(args.workerId, 200);
       const leaseExpiresAt = now + 30 * 60_000;
+      const leaseToken = crypto.randomUUID();
       const syncRunId = await ctx.db.insert("externalSyncRuns", {
         integrationId: integration._id,
         schoolId: integration.schoolId,
@@ -1293,6 +1396,7 @@ export const claimScheduledSync = mutation({
         capabilityIds: readable.map((item) => item._id),
         counts: EMPTY_COUNTS,
         leaseOwner: workerId,
+        leaseToken,
         leaseExpiresAt,
         attemptCount: 1,
         nextAttemptAt: now,
@@ -1322,6 +1426,8 @@ export const claimScheduledSync = mutation({
       return {
         integrationId: integration._id,
         syncRunId,
+        leaseToken,
+        selectionRevision: 0,
         schoolId: integration.schoolId,
         serviceSubject: actor.clerkId,
         actor: {
@@ -1363,7 +1469,7 @@ export const connectorContext = mutation({
       payloadDigest: args.payloadDigest,
       signature: args.signature,
     });
-    const [capabilities, mapping] = await Promise.all([
+    const [capabilities, mapping, selection] = await Promise.all([
       ctx.db
         .query("integrationCapabilities")
         .withIndex("by_integration", (q) =>
@@ -1378,6 +1484,7 @@ export const connectorContext = mutation({
             .eq("accountId", actor.accountId),
         )
         .unique(),
+      selectionSnapshot(ctx, integration._id, actor.accountId),
     ]);
     return {
       integration: {
@@ -1419,6 +1526,7 @@ export const connectorContext = mutation({
               providerUserId: mapping.providerUserId,
             }
           : { status: mapping?.status ?? "pending" },
+      selection,
       actor: {
         accountId: actor.accountId,
         email: actor.email,
@@ -1475,13 +1583,28 @@ export const beginSync = mutation({
     if (readable.length === 0)
       throw new Error("INTEGRATION_CAPABILITY_REQUIRED: No route is verified.");
     const now = Date.now();
+    const accountId =
+      args.kind === "reconciliation" && actor.schoolRole === "school_admin"
+        ? undefined
+        : actor.accountId;
+    const active = await activeRunForScope(
+      ctx,
+      integration._id,
+      accountId,
+      now,
+    );
+    if (active)
+      throw new Error(
+        "INTEGRATION_SYNC_BUSY: A sync for this account and connection is already running.",
+      );
+    const selection = accountId
+      ? await selectionSnapshot(ctx, integration._id, accountId)
+      : undefined;
+    const leaseToken = crypto.randomUUID();
     const syncRunId = await ctx.db.insert("externalSyncRuns", {
       integrationId: integration._id,
       schoolId: actor.schoolId,
-      accountId:
-        args.kind === "reconciliation" && actor.schoolRole === "school_admin"
-          ? undefined
-          : actor.accountId,
+      accountId,
       kind: args.kind,
       status: "queued",
       trigger:
@@ -1504,6 +1627,10 @@ export const beginSync = mutation({
               .map((item) => item._id)
           : readable.map((item) => item._id),
       counts: EMPTY_COUNTS,
+      leaseOwner: actor.clerkId,
+      leaseToken,
+      leaseExpiresAt: now + SYNC_LEASE_MS,
+      selectionRevision: selection?.revision,
       attemptCount: 0,
       nextAttemptAt: now,
       createdAt: now,
@@ -1520,7 +1647,12 @@ export const beginSync = mutation({
         createdAt: now,
         updatedAt: now,
       });
-    return { syncRunId, integrationId: integration._id };
+    return {
+      syncRunId,
+      integrationId: integration._id,
+      leaseToken,
+      selectionRevision: selection?.revision ?? 0,
+    };
   },
 });
 
@@ -1549,20 +1681,7 @@ export const requestAiRefresh = mutation({
         lastSyncAt: integration.lastSyncAt,
         nextEligibleAt: integration.lastSyncAt + cooldownMs,
       };
-    const active = await ctx.db
-      .query("externalSyncRuns")
-      .withIndex("by_integration_created", (q) =>
-        q.eq("integrationId", integration._id),
-      )
-      .order("desc")
-      .take(12);
-    if (
-      active.some(
-        (run) =>
-          ["queued", "leased", "running"].includes(run.status) &&
-          (!run.leaseExpiresAt || run.leaseExpiresAt > now),
-      )
-    )
+    if (await activeRunForScope(ctx, integration._id, undefined, now))
       return {
         started: false,
         skipped: true,
@@ -1622,6 +1741,7 @@ export const commitIdentityResolution = mutation({
     providerUserIdHash: v.optional(v.string()),
     verifiedEmailHash: v.string(),
     evidenceCapabilityId: v.optional(v.id("integrationCapabilities")),
+    leaseToken: v.optional(v.string()),
     payloadDigest: v.string(),
     timestamp: v.number(),
     nonce: v.string(),
@@ -1642,6 +1762,7 @@ export const commitIdentityResolution = mutation({
       syncRun.kind !== "identity"
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Identity run mismatch.");
+    await assertCurrentSyncLease(ctx, syncRun, args.leaseToken);
     const expectedDigest = await exactDigest({
       matchCount: args.matchCount,
       ...(args.providerUserId ? { providerUserId: args.providerUserId } : {}),
@@ -1652,6 +1773,7 @@ export const commitIdentityResolution = mutation({
       ...(args.evidenceCapabilityId
         ? { evidenceCapabilityId: args.evidenceCapabilityId }
         : {}),
+      ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
     });
     if (expectedDigest !== args.payloadDigest)
       throw new Error("INTEGRATION_PAYLOAD_INVALID: Identity payload changed.");
@@ -1893,23 +2015,39 @@ async function ensurePlannerProjection(
   accountId: Id<"accounts">,
   source: Doc<"externalRecords">,
 ) {
-  const providerKey = `planner:${source.providerRecordKey}`;
-  const existing = await ctx.db
+  const sourceKey = projectionSourceKey(source);
+  const providerKey = `planner:${sourceKey}`;
+  const existingByKey = await ctx.db
     .query("externalProjections")
     .withIndex("by_provider_key", (q) =>
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
-    .collect()
-    .then(
-      (rows) =>
-        rows.find(
-          (item) =>
-            item.schoolId === integration.schoolId &&
-            item.accountId === accountId &&
-            item.projectionType === "planner_task",
-        ) ?? null,
-    );
-  if (existing) return { projection: existing, created: false };
+    .collect();
+  const existingByRecord = await ctx.db
+    .query("externalProjections")
+    .withIndex("by_record_type", (q) =>
+      q.eq("recordId", source._id).eq("projectionType", "planner_task"),
+    )
+    .collect();
+  const existing =
+    existingByKey.find(
+      (item) =>
+        item.schoolId === integration.schoolId &&
+        item.accountId === accountId &&
+        item.projectionType === "planner_task",
+    ) ??
+    existingByRecord.find(
+      (item) => item.schoolId === integration.schoolId && item.accountId === accountId,
+    ) ??
+    null;
+  if (existing) {
+    if (existing.providerKey !== providerKey)
+      await ctx.db.patch(existing._id, { providerKey, updatedAt: Date.now() });
+    return {
+      projection: (await ctx.db.get(existing._id))!,
+      created: false,
+    };
+  }
   const normalized = record(source.normalized);
   const now = Date.now();
   const content = {
@@ -1936,7 +2074,7 @@ async function ensurePlannerProjection(
       status: source.tombstone ? "removed" : "active",
       lockedFields: ["taskTitle", "description", "dueAt", "source"],
     },
-    sourceRefs: [`managebac:${source.providerRecordKey}`],
+    sourceRefs: [`managebac:${sourceKey}`],
     personalOverlay: {},
   };
   const title = text(
@@ -2011,22 +2149,31 @@ async function ensureTimetableProjection(
   accountId: Id<"accounts">,
   source: Doc<"externalRecords">,
 ) {
-  const providerKey = `timetable:${source.providerRecordKey}`;
-  const existing = await ctx.db
+  const sourceKey = projectionSourceKey(source);
+  const providerKey = `timetable:${sourceKey}`;
+  const existingByKey = await ctx.db
     .query("externalProjections")
     .withIndex("by_provider_key", (q) =>
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
-    .collect()
-    .then(
-      (rows) =>
-        rows.find(
-          (item) =>
-            item.schoolId === integration.schoolId &&
-            item.accountId === accountId &&
-            item.projectionType === "timetable_event",
-        ) ?? null,
-    );
+    .collect();
+  const existingByRecord = await ctx.db
+    .query("externalProjections")
+    .withIndex("by_record_type", (q) =>
+      q.eq("recordId", source._id).eq("projectionType", "timetable_event"),
+    )
+    .collect();
+  const existing =
+    existingByKey.find(
+      (item) =>
+        item.schoolId === integration.schoolId &&
+        item.accountId === accountId &&
+        item.projectionType === "timetable_event",
+    ) ??
+    existingByRecord.find(
+      (item) => item.schoolId === integration.schoolId && item.accountId === accountId,
+    ) ??
+    null;
   const legacyCalendarItem = existing
     ? await legacyTimetableCalendarItem(
         ctx,
@@ -2040,7 +2187,7 @@ async function ensureTimetableProjection(
     schoolId: integration.schoolId,
     sourceRecordId: source._id,
     ...(legacyCalendarItem ? { existingItemId: legacyCalendarItem._id } : {}),
-    sourceKey: source.providerRecordKey,
+    sourceKey,
     sourceHash: source.sourceHash,
     sourceUrl: source.provenanceUrl,
     fetchedAt: source.fetchedAt,
@@ -2051,6 +2198,7 @@ async function ensureTimetableProjection(
   if (existing) {
     await ctx.db.patch(existing._id, {
       projectionId: String(calendar.itemId),
+      providerKey,
       sourceHash: source.sourceHash,
       state: "active",
       updatedAt: now,
@@ -2166,22 +2314,31 @@ async function ensureResourceProjection(
   accountId: Id<"accounts">,
   source: Doc<"externalRecords">,
 ) {
-  const providerKey = `resource:${source.providerRecordKey}`;
-  const existing = await ctx.db
+  const sourceKey = projectionSourceKey(source);
+  const providerKey = `resource:${sourceKey}`;
+  const existingByKey = await ctx.db
     .query("externalProjections")
     .withIndex("by_provider_key", (q) =>
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
-    .collect()
-    .then(
-      (rows) =>
-        rows.find(
-          (item) =>
-            item.schoolId === integration.schoolId &&
-            item.accountId === accountId &&
-            item.projectionType === "resource",
-        ) ?? null,
-    );
+    .collect();
+  const existingByRecord = await ctx.db
+    .query("externalProjections")
+    .withIndex("by_record_type", (q) =>
+      q.eq("recordId", source._id).eq("projectionType", "resource"),
+    )
+    .collect();
+  const existing =
+    existingByKey.find(
+      (item) =>
+        item.schoolId === integration.schoolId &&
+        item.accountId === accountId &&
+        item.projectionType === "resource",
+    ) ??
+    existingByRecord.find(
+      (item) => item.schoolId === integration.schoolId && item.accountId === accountId,
+    ) ??
+    null;
   const now = Date.now();
   const sourceId = `managebac:${source._id}`;
   /* The projection below is the record of this resource. It gets no tree node:
@@ -2191,6 +2348,7 @@ async function ensureResourceProjection(
     await ctx.db.patch(existing._id, {
       recordId: source._id,
       sourceHash: source.sourceHash,
+      providerKey,
       state: "active",
       updatedAt: now,
     });
@@ -2326,7 +2484,7 @@ async function safelyRefreshProjection(
         schoolId: projection.schoolId,
         sourceRecordId: source._id,
         existingItemId: directItem._id,
-        sourceKey: source.providerRecordKey,
+        sourceKey: projectionSourceKey(source),
         sourceHash: source.sourceHash,
         sourceUrl: source.provenanceUrl,
         fetchedAt: source.fetchedAt,
@@ -2394,7 +2552,7 @@ async function safelyRefreshProjection(
         schoolId: projection.schoolId,
         sourceRecordId: source._id,
         existingItemId: legacyCalendarItem._id,
-        sourceKey: source.providerRecordKey,
+        sourceKey: projectionSourceKey(source),
         sourceHash: source.sourceHash,
         sourceUrl: source.provenanceUrl,
         fetchedAt: source.fetchedAt,
@@ -2556,6 +2714,8 @@ export const commitNormalizedPage = mutation({
     records: v.array(vNormalizedRecord),
     nextCursor: v.optional(v.string()),
     pageNumber: v.number(),
+    leaseToken: v.optional(v.string()),
+    selectionRevision: v.optional(v.number()),
     payloadDigest: v.string(),
     timestamp: v.number(),
     nonce: v.string(),
@@ -2583,11 +2743,23 @@ export const commitNormalizedPage = mutation({
       !syncRun.capabilityIds.includes(capability._id)
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Sync scope mismatch.");
+    await assertCurrentSyncLease(ctx, syncRun, args.leaseToken);
+    if (
+      args.selectionRevision !== undefined &&
+      args.selectionRevision !== (syncRun.selectionRevision ?? 0)
+    )
+      throw new Error(
+        "INTEGRATION_SELECTION_CHANGED: This page belongs to an older class selection.",
+      );
     const expectedDigest = await exactDigest({
       capabilityId: args.capabilityId,
       records: args.records,
       ...(args.nextCursor ? { nextCursor: args.nextCursor } : {}),
       pageNumber: args.pageNumber,
+      ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
+      ...(args.selectionRevision !== undefined
+        ? { selectionRevision: args.selectionRevision }
+        : {}),
     });
     if (expectedDigest !== args.payloadDigest)
       throw new Error("INTEGRATION_PAYLOAD_INVALID: Sync page changed.");
@@ -2615,18 +2787,54 @@ export const commitNormalizedPage = mutation({
     const counts = { ...syncRun.counts };
     counts.fetched += args.records.length;
     for (const input of args.records) {
-      const existing = await ctx.db
+      const mappedAccountId =
+        input.audienceScope === "mapped_user" ? syncRun.accountId : undefined;
+      const canonicalKey = sourceIdentityKey(integration._id, mappedAccountId, {
+        providerRecordKey: input.providerRecordKey,
+        audienceScope: input.audienceScope,
+        academicPeriodKey: input.academicPeriodKey,
+      });
+      const canonicalMatches = await ctx.db
+        .query("externalRecords")
+        .withIndex("by_source_identity", (q) =>
+          q.eq("integrationId", integration._id).eq("sourceIdentityKey", canonicalKey),
+        )
+        .collect();
+      const existing =
+        canonicalMatches.find(
+          (item) =>
+            item.schoolId === integration.schoolId &&
+            item.sourceIdentityKey === canonicalKey,
+        ) ??
+        (
+          await ctx.db
         .query("externalRecords")
         .withIndex("by_integration_key", (q) =>
           q
             .eq("integrationId", integration._id)
             .eq("providerRecordKey", input.providerRecordKey),
         )
-        .unique();
+        .collect()
+        ).find(
+          (item) =>
+            item.schoolId === integration.schoolId &&
+            item.sourceIdentityKey === undefined &&
+            item.audienceScope === input.audienceScope &&
+            item.mappedAccountId === mappedAccountId &&
+            canonicalAcademicPeriodKey(item.academicPeriodKey) ===
+              canonicalAcademicPeriodKey(input.academicPeriodKey),
+        );
       let source: Doc<"externalRecords">;
       if (existing?.sourceHash === input.sourceHash && !existing.tombstone) {
         counts.unchanged += 1;
-        source = existing;
+        await ctx.db.patch(existing._id, {
+          sourceIdentityKey: canonicalKey,
+          sourceState: "available",
+          sourceStateAt: now,
+          sourceStateReason: undefined,
+          updatedAt: now,
+        });
+        source = (await ctx.db.get(existing._id))!;
       } else if (existing) {
         const previousNormalized = existing.normalized;
         await ctx.db.patch(existing._id, {
@@ -2634,10 +2842,7 @@ export const commitNormalizedPage = mutation({
           recordType: capability.recordType,
           classification: input.classification,
           audienceScope: input.audienceScope,
-          mappedAccountId:
-            input.audienceScope === "mapped_user"
-              ? syncRun.accountId
-              : undefined,
+          mappedAccountId,
           providerClassId: input.providerClassId?.slice(0, 500),
           academicPeriodKey: input.academicPeriodKey?.slice(0, 300),
           normalized: input.normalized,
@@ -2647,6 +2852,11 @@ export const commitNormalizedPage = mutation({
           provenanceUrl: input.provenanceUrl?.slice(0, 2_000),
           tombstone: false,
           tombstonedAt: undefined,
+          sourceIdentityKey: canonicalKey,
+          sourceState:
+            existing.sourceHash === input.sourceHash ? "available" : "changed",
+          sourceStateAt: now,
+          sourceStateReason: undefined,
           fetchedAt: now,
           updatedAt: now,
         });
@@ -2733,10 +2943,7 @@ export const commitNormalizedPage = mutation({
           recordType: capability.recordType,
           classification: input.classification,
           audienceScope: input.audienceScope,
-          mappedAccountId:
-            input.audienceScope === "mapped_user"
-              ? syncRun.accountId
-              : undefined,
+          mappedAccountId,
           providerClassId: input.providerClassId?.slice(0, 500),
           academicPeriodKey: input.academicPeriodKey?.slice(0, 300),
           normalized: input.normalized,
@@ -2745,6 +2952,9 @@ export const commitNormalizedPage = mutation({
           sourceModifiedAt: input.sourceModifiedAt,
           provenanceUrl: input.provenanceUrl?.slice(0, 2_000),
           tombstone: false,
+          sourceIdentityKey: canonicalKey,
+          sourceState: "available",
+          sourceStateAt: now,
           fetchedAt: now,
           createdAt: now,
           updatedAt: now,
@@ -2782,6 +2992,9 @@ export const commitNormalizedPage = mutation({
         : undefined,
       counts,
       startedAt: syncRun.startedAt ?? now,
+      leaseExpiresAt: syncRun.leaseToken
+        ? now + SYNC_LEASE_MS
+        : syncRun.leaseExpiresAt,
       updatedAt: now,
     });
     return { counts, nextCursor: args.nextCursor };
@@ -2798,6 +3011,8 @@ export const commitQuarantine = mutation({
     payloadHash: v.string(),
     providerRecordKeyHash: v.string(),
     sanitizedSample: v.optional(v.any()),
+    leaseToken: v.optional(v.string()),
+    selectionRevision: v.optional(v.number()),
     payloadDigest: v.string(),
     timestamp: v.number(),
     nonce: v.string(),
@@ -2824,6 +3039,14 @@ export const commitQuarantine = mutation({
       capability.integrationId !== integration._id
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Quarantine scope mismatch.");
+    await assertCurrentSyncLease(ctx, syncRun, args.leaseToken);
+    if (
+      args.selectionRevision !== undefined &&
+      args.selectionRevision !== (syncRun.selectionRevision ?? 0)
+    )
+      throw new Error(
+        "INTEGRATION_SELECTION_CHANGED: This quarantine belongs to an older class selection.",
+      );
     const expectedDigest = await exactDigest({
       capabilityId: args.capabilityId,
       reasonCode: args.reasonCode,
@@ -2831,6 +3054,10 @@ export const commitQuarantine = mutation({
       providerRecordKeyHash: args.providerRecordKeyHash,
       ...(args.sanitizedSample !== undefined
         ? { sanitizedSample: args.sanitizedSample }
+        : {}),
+      ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
+      ...(args.selectionRevision !== undefined
+        ? { selectionRevision: args.selectionRevision }
         : {}),
     });
     if (expectedDigest !== args.payloadDigest)
@@ -2903,6 +3130,7 @@ export const failSync = mutation({
     errorCode: v.string(),
     errorSummary: v.string(),
     retryAfterAt: v.optional(v.number()),
+    leaseToken: v.optional(v.string()),
     payloadDigest: v.string(),
     timestamp: v.number(),
     nonce: v.string(),
@@ -2924,12 +3152,14 @@ export const failSync = mutation({
         actor.schoolRole !== "school_admin")
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Sync run mismatch.");
+    await assertCurrentSyncLease(ctx, syncRun, args.leaseToken);
     const expectedDigest = await exactDigest({
       errorCode: args.errorCode,
       errorSummary: args.errorSummary,
       ...(args.retryAfterAt !== undefined
         ? { retryAfterAt: args.retryAfterAt }
         : {}),
+      ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
     });
     if (expectedDigest !== args.payloadDigest)
       throw new Error("INTEGRATION_PAYLOAD_INVALID: Failure payload changed.");
@@ -2953,6 +3183,25 @@ export const failSync = mutation({
         syncRun.counts.updated +
         syncRun.counts.unchanged >
       0;
+    const sources = await ctx.db
+      .query("externalRecords")
+      .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
+      .take(5_000);
+    const scopedSources = sources.filter(
+      (item) =>
+        item.integrationId === integration._id &&
+        !item.tombstone &&
+        (syncRun.accountId
+          ? item.mappedAccountId === syncRun.accountId
+          : item.mappedAccountId === undefined),
+    );
+    for (const source of scopedSources)
+      await ctx.db.patch(source._id, {
+        sourceState: "temporarily_unavailable",
+        sourceStateAt: now,
+        sourceStateReason: text(args.errorSummary, 500),
+        updatedAt: now,
+      });
     const capabilityRuns = await ctx.db
       .query("externalSyncCapabilityRuns")
       .withIndex("by_sync_run", (q) => q.eq("syncRunId", syncRun._id))
@@ -2975,6 +3224,7 @@ export const failSync = mutation({
       errorSummary: text(args.errorSummary, 500),
       nextAttemptAt: retryAt,
       attemptCount: syncRun.attemptCount + 1,
+      leaseExpiresAt: undefined,
       completedAt: now,
       updatedAt: now,
     });
@@ -3005,7 +3255,10 @@ export const completeSync = mutation({
     syncRunId: v.id("externalSyncRuns"),
     serviceSubject: v.optional(v.string()),
     seenProviderKeys: v.array(v.string()),
+    seenSourceIdentityKeys: v.optional(v.array(v.string())),
     reconciledCapabilityIds: v.array(v.id("integrationCapabilities")),
+    leaseToken: v.optional(v.string()),
+    selectionRevision: v.optional(v.number()),
     payloadDigest: v.string(),
     timestamp: v.number(),
     nonce: v.string(),
@@ -3027,9 +3280,24 @@ export const completeSync = mutation({
         actor.schoolRole !== "school_admin")
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Sync run mismatch.");
+    await assertCurrentSyncLease(ctx, syncRun, args.leaseToken);
+    if (
+      args.selectionRevision !== undefined &&
+      args.selectionRevision !== (syncRun.selectionRevision ?? 0)
+    )
+      throw new Error(
+        "INTEGRATION_SELECTION_CHANGED: This completion belongs to an older class selection.",
+      );
     const expectedDigest = await exactDigest({
       seenProviderKeys: args.seenProviderKeys,
+      ...(args.seenSourceIdentityKeys
+        ? { seenSourceIdentityKeys: args.seenSourceIdentityKeys }
+        : {}),
       reconciledCapabilityIds: args.reconciledCapabilityIds,
+      ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
+      ...(args.selectionRevision !== undefined
+        ? { selectionRevision: args.selectionRevision }
+        : {}),
     });
     if (expectedDigest !== args.payloadDigest)
       throw new Error(
@@ -3045,6 +3313,9 @@ export const completeSync = mutation({
       signature: args.signature,
     });
     const seen = new Set(args.seenProviderKeys.slice(0, 100_000));
+    const seenSourceIdentities = new Set(
+      (args.seenSourceIdentityKeys ?? []).slice(0, 100_000),
+    );
     const capabilities = (
       await Promise.all(
         args.reconciledCapabilityIds
@@ -3124,10 +3395,19 @@ export const completeSync = mutation({
       });
     let tombstoned = 0;
     for (const source of currentRecords) {
-      if (source.tombstone || seen.has(source.providerRecordKey)) continue;
+      if (
+        source.tombstone ||
+        (source.sourceIdentityKey !== undefined
+          ? seenSourceIdentities.has(source.sourceIdentityKey)
+          : seen.has(source.providerRecordKey))
+      )
+        continue;
       await ctx.db.patch(source._id, {
         tombstone: true,
         tombstonedAt: now,
+        sourceState: "missing",
+        sourceStateAt: now,
+        sourceStateReason: "The provider omitted this record from a complete reconciliation.",
         fetchedAt: now,
         updatedAt: now,
       });
@@ -3204,6 +3484,7 @@ export const completeSync = mutation({
       currentCapabilityId: undefined,
       cursorState: undefined,
       counts,
+      leaseExpiresAt: undefined,
       completedAt: now,
       updatedAt: now,
     });
@@ -3511,6 +3792,20 @@ export const recordsForPurpose = query({
           item.integrationId === integration._id &&
           item.schoolId === actor.schoolId,
       );
+    const selection = await selectionSnapshot(ctx, integration._id, actor.accountId);
+    const selectedKeys = new Set(
+      (await ctx.db
+        .query("managebacClassSelections")
+        .withIndex("by_account_integration", (q) =>
+          q.eq("accountId", actor.accountId).eq("integrationId", integration._id),
+        )
+        .collect())
+        .filter((row) => row.selected)
+        .map(
+          (row) =>
+            `${row.providerClassId}|${row.academicPeriodKey ?? "unknown"}`,
+        ),
+    );
     const membershipRows = (
       await Promise.all(
         ["class", "course", "membership"].map((recordType) =>
@@ -3573,12 +3868,26 @@ export const recordsForPurpose = query({
       );
     const deduped = new Map(
       [...scopedRows, ...personalRows].map((item) => [
-        item.providerRecordKey,
+        item.sourceIdentityKey ??
+          `${item.mappedAccountId ?? "shared"}|${item.academicPeriodKey ?? "unknown"}|${item.providerRecordKey}`,
         item,
       ]),
     );
     const limited = [...deduped.values()]
       .filter((item) => !item.tombstone)
+      .filter(
+        (item) =>
+          args.purpose === "classes" ||
+          !item.providerClassId ||
+          selectedKeys.has(
+            `${item.providerClassId}|${item.academicPeriodKey ?? "unknown"}`,
+          ) ||
+          selectedKeys.has(`${item.providerClassId}|unknown`) ||
+          (item.academicPeriodKey === undefined &&
+            [...selectedKeys].some((key) =>
+              key.startsWith(`${item.providerClassId}|`),
+            )),
+      )
       .filter(
         (item) =>
           !args.classId ||
@@ -3639,6 +3948,9 @@ export const recordsForPurpose = query({
         recordType: item.recordType,
         normalized: item.normalized,
         providerClassId: item.providerClassId,
+        academicPeriodKey: item.academicPeriodKey,
+        sourceIdentityKey: item.sourceIdentityKey,
+        sourceState: item.sourceState ?? (item.tombstone ? "removed" : "available"),
         sourceModifiedAt: item.sourceModifiedAt,
         fetchedAt: item.fetchedAt,
         provenanceUrl: item.provenanceUrl,
@@ -3649,6 +3961,262 @@ export const recordsForPurpose = query({
         lastSyncAt: integration.lastSyncAt,
         purpose: args.purpose,
       },
+    };
+  },
+});
+
+export const setSelectedClasses = mutation({
+  args: {
+    recordIds: v.array(v.id("externalRecords")),
+    expectedRevision: v.optional(v.number()),
+    retention: v.optional(
+      v.union(v.literal("keep_in_spectra"), v.literal("archive_projection")),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const integration = await integrationForSchool(ctx, actor.schoolId);
+    if (!integration || integration.status === "revoked")
+      throw new Error("INTEGRATION_NOT_CONNECTED: ManageBac is not connected.");
+    const currentRows = await ctx.db
+      .query("managebacClassSelections")
+      .withIndex("by_account_integration", (q) =>
+        q.eq("accountId", actor.accountId).eq("integrationId", integration._id),
+      )
+      .collect();
+    const currentRevision = currentRows.reduce(
+      (highest, row) => Math.max(highest, row.selectionRevision),
+      0,
+    );
+    if (
+      args.expectedRevision !== undefined &&
+      args.expectedRevision !== currentRevision
+    )
+      throw new Error(
+        "INTEGRATION_SELECTION_CONFLICT: Class choices changed. Reload the class list and try again.",
+      );
+    const membershipRows = (
+      await Promise.all(
+        ["class", "course", "membership"].map((recordType) =>
+          ctx.db
+            .query("externalRecords")
+            .withIndex("by_account_type", (q) =>
+              q.eq("mappedAccountId", actor.accountId).eq("recordType", recordType),
+            )
+            .take(500),
+        ),
+      )
+    )
+      .flat()
+      .filter(
+        (row) =>
+          row.integrationId === integration._id &&
+          row.schoolId === actor.schoolId &&
+          !row.tombstone &&
+          Boolean(row.providerClassId),
+      );
+    const accessibleClassIds = new Set(
+      membershipRows.map((row) => row.providerClassId!),
+    );
+    const selectedRecords: Array<Doc<"externalRecords">> = [];
+    for (const recordId of [...new Set(args.recordIds)].slice(0, 100)) {
+      const source = await ctx.db.get(recordId);
+      if (
+        !source ||
+        source.integrationId !== integration._id ||
+        source.schoolId !== actor.schoolId ||
+        source.recordType !== "class" ||
+        source.tombstone ||
+        (source.mappedAccountId !== actor.accountId &&
+          (!source.providerClassId ||
+            !accessibleClassIds.has(source.providerClassId))) ||
+        !source.providerClassId
+      )
+        throw new Error(
+          "INTEGRATION_CLASS_SELECTION_INVALID: Choose only current classes from your ManageBac membership.",
+        );
+      selectedRecords.push(source);
+    }
+    const selectedKeys = new Set(
+      selectedRecords.map(
+        (source) =>
+          `${source.providerClassId}|${canonicalAcademicPeriodKey(source.academicPeriodKey) ?? "unknown"}`,
+      ),
+    );
+    const revision = currentRevision + 1;
+    const now = Date.now();
+    const nextRetention = args.retention ?? "keep_in_spectra";
+    for (const row of currentRows) {
+      const key = `${row.providerClassId}|${row.academicPeriodKey ?? "unknown"}`;
+      const shouldSelect = selectedKeys.has(key);
+      if (row.selected === shouldSelect && !args.retention) continue;
+      await ctx.db.patch(row._id, {
+        selected: shouldSelect,
+        retention: args.retention ?? row.retention,
+        selectionRevision: revision,
+        ...(shouldSelect ? { selectedAt: now, deselectedAt: undefined } : { deselectedAt: now }),
+        updatedAt: now,
+      });
+    }
+    for (const source of selectedRecords) {
+      const periodKey = canonicalAcademicPeriodKey(source.academicPeriodKey);
+      const existing = currentRows.find(
+        (row) =>
+          row.providerClassId === source.providerClassId &&
+          (row.academicPeriodKey ?? undefined) === periodKey,
+      );
+      if (existing) {
+        if (!existing.selected || args.retention)
+          await ctx.db.patch(existing._id, {
+            selected: true,
+            retention: args.retention ?? existing.retention,
+            selectionRevision: revision,
+            selectedAt: now,
+            deselectedAt: undefined,
+            updatedAt: now,
+          });
+        continue;
+      }
+      await ctx.db.insert("managebacClassSelections", {
+        integrationId: integration._id,
+        schoolId: actor.schoolId,
+        accountId: actor.accountId,
+        providerClassId: source.providerClassId!,
+        providerRecordKey: source.providerRecordKey,
+        ...(periodKey ? { academicPeriodKey: periodKey } : {}),
+        selected: true,
+        retention: nextRetention,
+        selectionRevision: revision,
+        selectedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: "integration.managebac.class_selection_changed",
+      targetType: "school_integration",
+      targetId: integration._id,
+      metadata: {
+        selectionRevision: revision,
+        selectedClassCount: selectedKeys.size,
+      },
+      retentionClass: "operational",
+    });
+    return {
+      selectionRevision: revision,
+      selectedClassIds: [...selectedKeys],
+      selectedRecordIds: selectedRecords.map((source) => source._id),
+    };
+  },
+});
+
+/**
+ * Backfill canonical provider identities for records written before account
+ * and academic-period scoping existed. This is intentionally bounded and
+ * resumable. Collisions are ledgered rather than deleted, preserving the
+ * legacy row's overlays/projections for an administrator to review.
+ */
+export const migrateSourceIdentityKeys = mutation({
+  args: {
+    integrationId: v.optional(v.id("schoolIntegrations")),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const integration = args.integrationId
+      ? await requireIntegration(ctx, actor, args.integrationId)
+      : await integrationForSchool(ctx, actor.schoolId);
+    if (!integration || integration.status === "revoked")
+      throw new Error("INTEGRATION_NOT_CONNECTED: ManageBac is not connected.");
+    const limit = Math.max(1, Math.min(args.limit ?? 250, 500));
+    const rows = await ctx.db
+      .query("externalRecords")
+      .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
+      .order("asc")
+      .take(limit * 4);
+    const candidates = rows.filter(
+      (row) =>
+        row.integrationId === integration._id &&
+        row.sourceIdentityKey === undefined &&
+        (actor.schoolRole === "school_admin" ||
+          row.mappedAccountId === actor.accountId),
+    ).slice(0, limit);
+    let linked = 0;
+    let duplicates = 0;
+    let skipped = 0;
+    const now = Date.now();
+    for (const row of candidates) {
+      const canonicalKey = sourceIdentityKey(
+        integration._id,
+        row.mappedAccountId,
+        {
+          providerRecordKey: row.providerRecordKey,
+          audienceScope: row.audienceScope,
+          academicPeriodKey: row.academicPeriodKey,
+        },
+      );
+      const priorLedger = await ctx.db
+        .query("externalRecordIdentityMigrations")
+        .withIndex("by_legacy_record", (q) => q.eq("legacyRecordId", row._id))
+        .collect();
+      if (priorLedger.some((item) => item.canonicalKey === canonicalKey)) {
+        skipped += 1;
+        continue;
+      }
+      const matches = await ctx.db
+        .query("externalRecords")
+        .withIndex("by_source_identity", (q) =>
+          q.eq("integrationId", integration._id).eq("sourceIdentityKey", canonicalKey),
+        )
+        .collect();
+      const survivor = matches.find((item) => item._id !== row._id);
+      if (survivor) {
+        await ctx.db.insert("externalRecordIdentityMigrations", {
+          integrationId: integration._id,
+          schoolId: actor.schoolId,
+          legacyRecordId: row._id,
+          canonicalKey,
+          status: "duplicate",
+          survivorRecordId: survivor._id,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await ctx.db.patch(row._id, {
+          sourceState: "changed",
+          sourceStateAt: now,
+          sourceStateReason:
+            "Legacy provider identity collided with a newer account- or period-scoped record; links were preserved for review.",
+          updatedAt: now,
+        });
+        duplicates += 1;
+        continue;
+      }
+      await ctx.db.patch(row._id, {
+        sourceIdentityKey: canonicalKey,
+        sourceState: row.tombstone ? "removed" : "available",
+        sourceStateAt: now,
+        sourceStateReason: undefined,
+        updatedAt: now,
+      });
+      await ctx.db.insert("externalRecordIdentityMigrations", {
+        integrationId: integration._id,
+        schoolId: actor.schoolId,
+        legacyRecordId: row._id,
+        canonicalKey,
+        status: "linked",
+        createdAt: now,
+        updatedAt: now,
+      });
+      linked += 1;
+    }
+    return {
+      scanned: candidates.length,
+      linked,
+      duplicates,
+      skipped,
+      hasMore: candidates.length >= limit,
     };
   },
 });
@@ -3680,6 +4248,17 @@ export const listMyClassCandidates = query({
         lastSyncAt: integration.lastSyncAt,
         nextSyncAt: integration.nextSyncAt,
       };
+    const selection = await selectionSnapshot(ctx, integration._id, actor.accountId);
+    const selectedKeys = new Set(
+      (await ctx.db
+        .query("managebacClassSelections")
+        .withIndex("by_account_integration", (q) =>
+          q.eq("accountId", actor.accountId).eq("integrationId", integration._id),
+        )
+        .collect())
+        .filter((row) => row.selected)
+        .map((row) => `${row.providerClassId}|${row.academicPeriodKey ?? "unknown"}`),
+    );
     const [records, projections, membershipRows] = await Promise.all([
       ctx.db
         .query("externalRecords")
@@ -3761,7 +4340,7 @@ export const listMyClassCandidates = query({
       );
     };
     for (const item of eligibleClasses) {
-      const key = item.providerClassId ?? item.providerRecordId;
+      const key = `${item.providerClassId ?? item.providerRecordId}|${item.academicPeriodKey ?? "unknown"}`;
       const current = bestClassByProvider.get(key);
       if (!current || candidateScore(item) > candidateScore(current))
         bestClassByProvider.set(key, item);
@@ -3783,6 +4362,10 @@ export const listMyClassCandidates = query({
           description: plainText(normalized.description, 400),
           archived,
           workspaceId: workspaceId ?? null,
+          selected: selectedKeys.has(
+            `${item.providerClassId ?? item.providerRecordId}|${item.academicPeriodKey ?? "unknown"}`,
+          ),
+          academicPeriodKey: item.academicPeriodKey,
           fetchedAt: item.fetchedAt,
         };
       })
@@ -3791,6 +4374,8 @@ export const listMyClassCandidates = query({
     return {
       integration: safeIntegration(integration),
       classes,
+      selectionRevision: selection.revision,
+      selectedClassIds: [...selectedKeys],
       lastSyncAt: integration.lastSyncAt,
       nextSyncAt: integration.nextSyncAt,
     };

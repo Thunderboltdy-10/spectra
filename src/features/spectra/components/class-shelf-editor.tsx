@@ -29,12 +29,14 @@ export function ClassShelfEditor({
   integration,
   identityRequired = false,
   classes,
+  selectionRevision: controlledSelectionRevision,
   classLoadError = "",
   onSaved,
 }: {
   integration?: unknown;
   identityRequired?: boolean;
   classes?: ClassShelfCandidate[];
+  selectionRevision?: number;
   classLoadError?: string;
   onSaved?: () => void | Promise<void>;
 }) {
@@ -44,6 +46,7 @@ export function ClassShelfEditor({
     classes ?? [],
   );
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectionRevision, setSelectionRevision] = useState<number>();
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const inFlight = useRef(false);
@@ -54,6 +57,7 @@ export function ClassShelfEditor({
       integration: unknown;
       identityRequired: boolean;
       classes: ClassShelfCandidate[];
+      selectionRevision?: number;
       classLoadError?: string;
     }) => {
       const resolved = next.classLoadError
@@ -61,9 +65,10 @@ export function ClassShelfEditor({
         : classShelfLoadState(next);
       setState(resolved);
       setLoadedClasses(next.classes);
+      setSelectionRevision(next.selectionRevision);
       setSelectedIds(
         next.classes
-          .filter((item) => item.workspaceId)
+          .filter((item) => item.selected)
           .map((item) => item.recordId),
       );
     },
@@ -76,6 +81,7 @@ export function ClassShelfEditor({
         integration,
         identityRequired,
         classes: classes ?? [],
+        selectionRevision: controlledSelectionRevision,
         classLoadError,
       });
       return;
@@ -106,6 +112,7 @@ export function ClassShelfEditor({
     controlled,
     identityRequired,
     integration,
+    controlledSelectionRevision,
   ]);
 
   const linkedIds = loadedClasses
@@ -118,6 +125,15 @@ export function ClassShelfEditor({
     setSubmitting(true);
     setSubmitError("");
     try {
+      const selectionResult = await manageBacPost({
+        action: "selectClasses",
+        recordIds: selectedIds,
+        ...(selectionRevision !== undefined
+          ? { expectedRevision: selectionRevision }
+          : {}),
+      });
+      if (typeof selectionResult?.selectionRevision === "number")
+        setSelectionRevision(selectionResult.selectionRevision);
       const linked = new Set(linkedIds);
       const selected = new Set(selectedIds);
       const toAdd = selectedIds.filter((id) => !linked.has(id));

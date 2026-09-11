@@ -99,6 +99,7 @@ type SchoolPayload = {
   records: RecordRow[];
   conflicts: unknown[];
   classes: ClassShelfCandidate[];
+  selectionRevision?: number;
 };
 
 type SectionKey =
@@ -334,6 +335,9 @@ export function SchoolDataShell() {
         identityRequired: classResult.ok
           ? classResult.result.identityRequired
           : false,
+        selectionRevision: classResult.ok
+          ? classResult.result.selectionRevision
+          : undefined,
         classLoadError: classResult.ok ? "" : classResult.message,
       });
     } catch (nextError) {
@@ -498,8 +502,11 @@ export function SchoolDataShell() {
                     integration={payload.integration}
                     identityRequired={payload.identityRequired}
                     classes={payload.classes}
+                    selectionRevision={payload.selectionRevision}
                     classLoadError={payload.classLoadError}
-                    onSaved={load}
+                    onSaved={async () => {
+                      await run("sync", () => syncSpectraManageBac("manual"));
+                    }}
                   />
                 ) : active === "sync" ? (
                   <SyncStatus payload={payload} />

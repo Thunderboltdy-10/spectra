@@ -839,11 +839,48 @@ export default defineSchema({
     .index("by_school_status", ["schoolId", "status"])
     .index("by_provider_hash", ["integrationId", "providerUserIdHash"]),
 
+  /**
+   * A person's explicit ManageBac class scope. This is deliberately separate
+   * from the provider membership rows: a membership is evidence of access,
+   * while this row is the user's planning choice. One row per account,
+   * integration, class and academic period makes add/remove idempotent and
+   * prevents a same-named provider class from crossing account or rollover
+   * boundaries.
+   */
+  managebacClassSelections: defineTable({
+    integrationId: v.id("schoolIntegrations"),
+    schoolId: v.id("schools"),
+    accountId: v.id("accounts"),
+    providerClassId: v.string(),
+    providerRecordKey: v.string(),
+    academicPeriodKey: v.optional(v.string()),
+    selected: v.boolean(),
+    retention: v.union(
+      v.literal("keep_in_spectra"),
+      v.literal("archive_projection"),
+    ),
+    selectionRevision: v.number(),
+    selectedAt: v.optional(v.number()),
+    deselectedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_integration", ["accountId", "integrationId"])
+    .index("by_account_period", ["accountId", "academicPeriodKey"])
+    .index("by_integration_account_class", [
+      "integrationId",
+      "accountId",
+      "providerClassId",
+    ])
+    .index("by_selection_revision", ["integrationId", "accountId", "selectionRevision"]),
+
   externalRecords: defineTable({
     integrationId: v.id("schoolIntegrations"),
     schoolId: v.id("schools"),
     providerRecordId: v.string(),
     providerRecordKey: v.string(),
+    /** Canonical identity; legacy rows may be backfilled lazily. */
+    sourceIdentityKey: v.optional(v.string()),
     recordType: v.string(),
     classification: v.union(
       v.literal("personal"),
@@ -863,6 +900,17 @@ export default defineSchema({
     normalized: v.any(),
     payloadVersion: v.string(),
     sourceHash: v.string(),
+    sourceState: v.optional(
+      v.union(
+        v.literal("available"),
+        v.literal("changed"),
+        v.literal("temporarily_unavailable"),
+        v.literal("missing"),
+        v.literal("removed"),
+      ),
+    ),
+    sourceStateAt: v.optional(v.number()),
+    sourceStateReason: v.optional(v.string()),
     sourceModifiedAt: v.optional(v.number()),
     provenanceUrl: v.optional(v.string()),
     tombstone: v.boolean(),
@@ -872,6 +920,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_integration_key", ["integrationId", "providerRecordKey"])
+    .index("by_source_identity", ["integrationId", "sourceIdentityKey"])
     .index("by_integration_type", ["integrationId", "recordType"])
     .index("by_account_type", ["mappedAccountId", "recordType"])
     .index("by_class_type", ["providerClassId", "recordType"])
@@ -896,6 +945,24 @@ export default defineSchema({
     .index("by_source", ["sourceRecordId"])
     .index("by_target", ["targetRecordId"])
     .index("by_integration", ["integrationId"]),
+
+  /**
+   * Durable ledger for the bounded legacy identity migration. A duplicate is
+   * recorded instead of deleted so existing overlays and projections remain
+   * recoverable while an administrator resolves the provenance link.
+   */
+  externalRecordIdentityMigrations: defineTable({
+    integrationId: v.id("schoolIntegrations"),
+    schoolId: v.id("schools"),
+    legacyRecordId: v.id("externalRecords"),
+    canonicalKey: v.string(),
+    status: v.union(v.literal("linked"), v.literal("duplicate")),
+    survivorRecordId: v.optional(v.id("externalRecords")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_legacy_record", ["legacyRecordId"])
+    .index("by_canonical_key", ["integrationId", "canonicalKey"]),
 
   externalRecordOverlays: defineTable({
     recordId: v.id("externalRecords"),
@@ -964,7 +1031,11 @@ export default defineSchema({
       errors: v.number(),
     }),
     leaseOwner: v.optional(v.string()),
+    /** Fences late provider responses from an expired/replaced worker. */
+    leaseToken: v.optional(v.string()),
     leaseExpiresAt: v.optional(v.number()),
+    /** Snapshot of the account's class selection at claim time. */
+    selectionRevision: v.optional(v.number()),
     attemptCount: v.number(),
     nextAttemptAt: v.number(),
     errorCode: v.optional(v.string()),
@@ -977,6 +1048,7 @@ export default defineSchema({
     .index("by_status_next_attempt", ["status", "nextAttemptAt"])
     .index("by_integration_created", ["integrationId", "createdAt"])
     .index("by_account_created", ["accountId", "createdAt"])
+    .index("by_integration_account_status", ["integrationId", "accountId", "status"])
     .index("by_school_created", ["schoolId", "createdAt"]),
 
   externalSyncCapabilityRuns: defineTable({

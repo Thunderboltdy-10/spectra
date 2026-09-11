@@ -347,6 +347,29 @@ describe("ManageBac route provider fixture", () => {
     expect(syncBody.summaries.some((item: { name: string }) => item.name === "Timetable for classes")).toBe(true);
     expect(fixture.requests.some((request) => request.path === "/v2p2/students")).toBe(true);
     expect(fixture.requests.some((request) => request.path === "/v2p2/memberships")).toBe(true);
+    expect(fixture.requests.some((request) => request.path.endsWith("/tasks"))).toBe(false);
+    const catalogue = (await query("managebac:listMyClassCandidates", {})) as {
+      classes: Array<{ providerClassId?: string; recordId: string }>;
+      selectionRevision: number;
+    };
+    expect(catalogue.classes).toHaveLength(2);
+    const selectedClass = catalogue.classes.find(
+      (item: { providerClassId?: string }) => item.providerClassId === "101",
+    );
+    expect(selectedClass).toBeDefined();
+    await mutation("managebac:setSelectedClasses", {
+      recordIds: [selectedClass!.recordId],
+      expectedRevision: catalogue.selectionRevision,
+    });
+
+    const selectedSyncResponse = await POST(
+      new NextRequest("http://localhost/api/spectra/managebac", {
+        method: "POST",
+        body: JSON.stringify({ action: "sync" }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(selectedSyncResponse.status).toBe(200);
     expect(fixture.requests.some((request) => request.path.endsWith("/tasks"))).toBe(true);
     expect(fixture.requests.some((request) => request.path.endsWith("/timetable"))).toBe(true);
     expect(fixture.requests.some((request) => request.path.endsWith("/resources"))).toBe(true);

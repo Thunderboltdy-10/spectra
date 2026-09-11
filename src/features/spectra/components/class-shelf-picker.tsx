@@ -13,6 +13,8 @@ export type ClassShelfCandidate = {
   program: string;
   grade: string;
   workspaceId: string | null;
+  selected?: boolean;
+  academicPeriodKey?: string;
 };
 
 export type ClassShelfLoadState =
@@ -27,6 +29,7 @@ export async function fetchMyClassCandidates(): Promise<{
   integration: unknown;
   identityRequired: boolean;
   classes: ClassShelfCandidate[];
+  selectionRevision?: number;
 }> {
   const response = await fetch("/api/spectra/managebac?action=myClasses");
   const payload = await response.json().catch(() => ({}));
@@ -37,6 +40,10 @@ export async function fetchMyClassCandidates(): Promise<{
   return {
     integration: data.integration ?? null,
     identityRequired: data.identityRequired === true,
+    selectionRevision:
+      typeof data.selectionRevision === "number"
+        ? data.selectionRevision
+        : undefined,
     classes: rows.map((row: Record<string, unknown>) => ({
       recordId: String(row.recordId ?? ""),
       title: String(row.title ?? "Class"),
@@ -46,6 +53,11 @@ export async function fetchMyClassCandidates(): Promise<{
         typeof row.workspaceId === "string" && row.workspaceId
           ? row.workspaceId
           : null,
+      selected: row.selected === true,
+      academicPeriodKey:
+        typeof row.academicPeriodKey === "string" && row.academicPeriodKey
+          ? row.academicPeriodKey
+          : undefined,
     })).filter((row: ClassShelfCandidate) => row.recordId),
   };
 }

@@ -440,6 +440,35 @@ export const resizeWorkBlock = mutation({
   },
 });
 
+export const completeWorkBlock = mutation({
+  args: {
+    itemId: v.id("calendarItems"),
+    expectedRevision: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await actorOrThrow(ctx);
+    const item = await ctx.db.get(args.itemId);
+    if (
+      !item ||
+      item.ownerAccountId !== actor.accountId ||
+      item.kind !== "scheduled_work_block"
+    )
+      throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND");
+    if (item.revision !== args.expectedRevision)
+      throw new Error(
+        "CALENDAR_GESTURE_CONFLICT: Re-resolve the block before completing it.",
+      );
+    if (item.status === "removed" || item.status === "cancelled")
+      throw new Error("CALENDAR_WORK_BLOCK_UNAVAILABLE");
+    await ctx.db.patch(item._id, {
+      status: "completed",
+      revision: item.revision + 1,
+      updatedAt: Date.now(),
+    });
+    return itemWire((await ctx.db.get(item._id))!);
+  },
+});
+
 export const removePersonalItem = mutation({
   args: { itemId: v.id("calendarItems") },
   handler: async (ctx, args) => {

@@ -54,6 +54,7 @@ type ConnectorContext = {
     normalization: unknown;
   }>;
   mapping: { status: string; providerUserId?: string };
+  selection: { revision: number; selectedClassIds: string[] };
   actor: { accountId: string; email: string; schoolRole: string };
 };
 
@@ -109,6 +110,27 @@ function canonicalJson(value: unknown): string {
 
 function digest(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("base64url");
+}
+
+function sourceIdentityKeyForRoute(
+  integrationId: string,
+  accountId: string | undefined,
+  input: {
+    providerRecordKey: string;
+    audienceScope: string;
+    academicPeriodKey?: string;
+  },
+) {
+  const owner =
+    input.audienceScope === "mapped_user"
+      ? `account:${accountId ?? "unknown"}`
+      : `scope:${input.audienceScope}`;
+  return [
+    integrationId,
+    owner,
+    `period:${string(input.academicPeriodKey, 300) || "unknown"}`,
+    input.providerRecordKey.trim().slice(0, 700),
+  ].join("|");
 }
 
 function officialPersonalCapabilities() {
@@ -822,10 +844,16 @@ function normalizeProviderPage(
     const providerClassId =
       identifier(atPath(raw, string(config.classIdPath, 300)), 500) ||
       identifier(routeParameters[classIdFromRouteParameter], 500);
-    const academicPeriodKey = string(
-      atPath(raw, string(config.academicPeriodPath, 300)),
-      300,
-    );
+    const academicPeriodKey =
+      string(atPath(raw, string(config.academicPeriodPath, 300)), 300) ||
+      string(
+        atPath(raw, "academic_period_key") ??
+          atPath(raw, "academic_period") ??
+          atPath(raw, "academic_year_id") ??
+          atPath(raw, "academic_year.id") ??
+          normalized.academicPeriodKey,
+        300,
+      );
     const sourceModifiedAt = timestamp(
       atPath(raw, string(config.modifiedAtPath, 300)),
     );
@@ -996,11 +1024,16 @@ async function signedCommit(
     integrationId: string;
     syncRunId: string;
     payload: Record<string, unknown>;
+    leaseToken?: string;
     mutation: string;
     serviceSubject?: string;
   },
 ) {
-  const payloadDigest = exactDigest(input.payload);
+  const payload = {
+    ...input.payload,
+    ...(input.leaseToken ? { leaseToken: input.leaseToken } : {}),
+  };
+  const payloadDigest = exactDigest(payload);
   const bridge = await bridgeArgs({
     operation: input.operation,
     subject: actor.clerkId,
@@ -1012,7 +1045,7 @@ async function signedCommit(
     integrationId: input.integrationId,
     syncRunId: input.syncRunId,
     ...(input.serviceSubject ? { serviceSubject: input.serviceSubject } : {}),
-    ...input.payload,
+    ...payload,
     payloadDigest,
     ...bridge,
   };
@@ -1044,6 +1077,7 @@ async function resolveIdentity(
     Record<string, unknown>,
     { syncRunId: string; integrationId: string }
   >("managebac:beginSync", { kind: "identity" });
+  const startedRecord = object(started);
   try {
     const payload = await providerFetch(context, capability, token, {
       verifiedEmail: actor.email,
@@ -1094,6 +1128,7 @@ async function resolveIdentity(
       integrationId,
       syncRunId: started.syncRunId,
       payload: body,
+      leaseToken: string(startedRecord.leaseToken, 300) || undefined,
       mutation: "managebac:commitIdentityResolution",
     });
     return {
@@ -1112,6 +1147,9 @@ async function resolveIdentity(
         errorCode:
           message.match(/^([A-Z0-9_]+)/)?.[1] ?? "INTEGRATION_IDENTITY_FAILED",
         errorSummary: message.replace(/^[A-Z0-9_]+:\s*/, "").slice(0, 500),
+        ...(startedRecord.leaseToken
+          ? { leaseToken: string(startedRecord.leaseToken, 300) }
+          : {}),
       },
       mutation: "managebac:failSync",
     }).catch(() => undefined);
@@ -1128,6 +1166,8 @@ async function runSync(
     syncRunId: string;
     integrationId: string;
     serviceSubject: string;
+    leaseToken?: string;
+    selectionRevision?: number;
   },
   options: { personalOnly?: boolean } = {},
 ) {
@@ -1143,8 +1183,10 @@ async function runSync(
     (await convexMutation<
       Record<string, unknown>,
       { syncRunId: string; integrationId: string }
-    >("managebac:beginSync", { kind }));
+     >("managebac:beginSync", { kind }));
+  const startedRecord = object(started);
   const seen = new Set<string>();
+  const seenSourceIdentityKeys = new Set<string>();
   const reconciledCapabilityIds: string[] = [];
   const summaries: Array<{
     capabilityId: string;
@@ -1173,6 +1215,7 @@ async function runSync(
   let lastProviderRequestAt = 0;
   const accessibleClassIds = new Set<string>();
   const accessibleYearGroupIds = new Set<string>();
+  const selectedClassIds = new Set(context.selection?.selectedClassIds ?? []);
   const pacedFetch = async (
     capability: ConnectorContext["capabilities"][number],
     input: Parameters<typeof providerFetch>[3],
@@ -1255,7 +1298,11 @@ async function runSync(
       const fanOutIds =
         fanOutSource === "year_group"
           ? accessibleYearGroupIds
-          : accessibleClassIds;
+          : new Set(
+              [...selectedClassIds].filter((classId) =>
+                accessibleClassIds.has(classId),
+              ),
+            );
       const routeBindings = fanOutParameter
         ? [...fanOutIds].map((value) => ({
             [fanOutParameter]: value,
@@ -1297,6 +1344,10 @@ async function runSync(
             );
             for (const item of normalized.records) {
               seen.add(item.providerRecordKey);
+              seenSourceIdentityKeys.add(
+                sourceIdentityKeyForRoute(context.integration._id, item.mappedAccountId ??
+                  (item.audienceScope === "mapped_user" ? actor.accountId : undefined), item),
+              );
               if (item.providerClassId)
                 accessibleClassIds.add(item.providerClassId);
               const normalizedRecord =
@@ -1323,6 +1374,12 @@ async function runSync(
                 ? { nextCursor: normalized.nextCursor }
                 : {}),
               pageNumber: pageCount + 1,
+              ...(startedRecord.leaseToken
+                ? { leaseToken: string(startedRecord.leaseToken, 300) }
+                : {}),
+              ...(startedRecord.selectionRevision !== undefined
+                ? { selectionRevision: Number(startedRecord.selectionRevision) }
+                : {}),
             };
             await signedCommit(actor, {
               operation: "sync-page",
@@ -1384,6 +1441,12 @@ async function runSync(
             `${capability._id}:${capability.path}:${pageCount + 1}`,
           ),
           sanitizedSample,
+          ...(startedRecord.leaseToken
+            ? { leaseToken: string(startedRecord.leaseToken, 300) }
+            : {}),
+          ...(startedRecord.selectionRevision !== undefined
+            ? { selectionRevision: Number(startedRecord.selectionRevision) }
+            : {}),
         };
         await signedCommit(actor, {
           operation: "quarantine",
@@ -1408,7 +1471,14 @@ async function runSync(
       syncRunId: started.syncRunId,
       payload: {
         seenProviderKeys: [...seen],
+        seenSourceIdentityKeys: [...seenSourceIdentityKeys],
         reconciledCapabilityIds,
+        ...(startedRecord.leaseToken
+          ? { leaseToken: string(startedRecord.leaseToken, 300) }
+          : {}),
+        ...(startedRecord.selectionRevision !== undefined
+          ? { selectionRevision: Number(startedRecord.selectionRevision) }
+          : {}),
       },
       mutation: "managebac:completeSync",
       serviceSubject: scheduled?.serviceSubject,
@@ -1427,10 +1497,16 @@ async function runSync(
       payload: {
         errorCode,
         errorSummary,
-        ...(errorCode === "INTEGRATION_RATE_LIMITED"
-          ? { retryAfterAt: Date.now() + 60_000 }
-          : {}),
-      },
+          ...(errorCode === "INTEGRATION_RATE_LIMITED"
+            ? { retryAfterAt: Date.now() + 60_000 }
+            : {}),
+          ...(startedRecord.leaseToken
+            ? { leaseToken: string(startedRecord.leaseToken, 300) }
+            : {}),
+          ...(startedRecord.selectionRevision !== undefined
+            ? { selectionRevision: Number(startedRecord.selectionRevision) }
+            : {}),
+        },
       mutation: "managebac:failSync",
       serviceSubject: scheduled?.serviceSubject,
     }).catch(() => undefined);
@@ -1495,6 +1571,8 @@ async function runScheduledSync(workerId: string) {
       syncRunId: string;
       schoolId: string;
       serviceSubject: string;
+      leaseToken?: string;
+      selectionRevision?: number;
       actor: ConnectorActor;
     } | null
   >("managebac:claimScheduledSync", {
@@ -1529,6 +1607,12 @@ async function runScheduledSync(workerId: string) {
         integrationId: claimed.integrationId,
         syncRunId: claimed.syncRunId,
         serviceSubject: claimed.serviceSubject,
+        leaseToken:
+          typeof claimed.leaseToken === "string" ? claimed.leaseToken : undefined,
+        selectionRevision:
+          typeof claimed.selectionRevision === "number"
+            ? claimed.selectionRevision
+            : undefined,
       },
     );
     return {
@@ -1549,6 +1633,12 @@ async function runScheduledSync(workerId: string) {
         errorCode:
           message.match(/^([A-Z0-9_]+)/)?.[1] ?? "INTEGRATION_SYNC_FAILED",
         errorSummary: message.replace(/^[A-Z0-9_]+:\s*/, "").slice(0, 500),
+        ...(typeof claimed.leaseToken === "string"
+          ? { leaseToken: claimed.leaseToken }
+          : {}),
+        ...(typeof claimed.selectionRevision === "number"
+          ? { selectionRevision: claimed.selectionRevision }
+          : {}),
       },
       mutation: "managebac:failSync",
       serviceSubject: claimed.serviceSubject,
@@ -1771,6 +1861,26 @@ export async function POST(request: NextRequest) {
       throw new Error(
         "INTEGRATION_NOT_CONFIGURED: ManageBac is not configured.",
       );
+    if (action === "selectClasses") {
+      const recordIds = Array.isArray(body.recordIds)
+        ? body.recordIds.filter(
+            (item): item is string => typeof item === "string" && item.length > 0,
+          )
+        : [];
+      return ok(
+        await convexMutation("managebac:setSelectedClasses", {
+          recordIds,
+          expectedRevision:
+            typeof body.expectedRevision === "number"
+              ? body.expectedRevision
+              : undefined,
+          retention:
+            body.retention === "archive_projection"
+              ? "archive_projection"
+              : "keep_in_spectra",
+        }),
+      );
+    }
     let context = await connectorContext(actor, integrationId);
     if (action === "resolveIdentity")
       context = await ensureOfficialPersonalCapabilityManifest(

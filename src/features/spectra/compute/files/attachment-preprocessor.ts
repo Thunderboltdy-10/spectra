@@ -1,5 +1,8 @@
 export type AttachmentInput = {
   id?: string;
+  assetId?: string;
+  importId?: string;
+  sourceRef?: string;
   name?: string;
   mimeType?: string;
   size?: number;
@@ -256,7 +259,11 @@ export async function prepareAttachments(
       if (attachment.handling === "docx") return [{ kind: "section" as const, label: "Document body" }];
       return [];
     })();
-    const originalFileId = rows[index]?.id ?? `file:${attachment.name}:${attachment.size}`;
+    const originalFileId =
+      rows[index]?.assetId ??
+      rows[index]?.importId ??
+      rows[index]?.id ??
+      `file:${attachment.name}:${attachment.size}`;
     return {
       ...attachment,
       id: originalFileId,

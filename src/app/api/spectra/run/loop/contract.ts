@@ -49,6 +49,9 @@ export type Body = {
 
 export type AttachmentInput = {
   id?: string;
+  assetId?: string;
+  importId?: string;
+  sourceRef?: string;
   name?: string;
   mimeType?: string;
   size?: number;
@@ -57,6 +60,7 @@ export type AttachmentInput = {
 };
 
 export type PreparedAttachment = {
+  id?: string;
   name: string;
   mimeType: string;
   size: number;
@@ -65,6 +69,23 @@ export type PreparedAttachment = {
   extractedText?: string;
   pageCount?: number;
   visualPdfData?: string;
+  structuredRepresentation?: { kind: string; value: unknown };
+  sourceMap?: Array<{
+    kind: "page" | "slide" | "sheet" | "range" | "section";
+    label: string;
+    startOffset?: number;
+    endOffset?: number;
+  }>;
+  warnings?: Array<{ code: string; message: string }>;
+  provenance?: {
+    source: "user_upload" | "integration" | "linked_work" | "research";
+    originalFileId: string;
+    originalName: string;
+    originalMimeType: string;
+    originalBytes: number;
+    preparedAt: string;
+    extractor: string;
+  };
 };
 
 export type StoredOperation = {
@@ -136,6 +157,7 @@ export type RunState = {
     currentView?: string;
     requestedAgentId?: string;
     disableAgentRouting?: boolean;
+    researchEvidence?: unknown;
   };
 };
 

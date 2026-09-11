@@ -623,6 +623,8 @@ export async function executeOperation(
     scopeNodeId?: string;
     selectedArtifactIds?: string[];
     attachmentNames?: string[];
+    attachmentIds?: string[];
+    researchEvidence?: unknown;
     contextSummary?: string;
     pendingArtifactId?: string;
     pendingWorkspaceId?: string;
@@ -686,6 +688,7 @@ export async function executeOperation(
         runId,
         threadId: context.threadId,
         executionId: context.executionId,
+        sourceAttachmentIds: context.attachmentIds,
       });
       pendingArtifactId = pending.artifactId;
       pendingNodeId = pending.nodeId;
@@ -785,6 +788,13 @@ export async function executeOperation(
       }
       if (finalizeError) throw finalizeError;
     }
+    if (context.researchEvidence && typeof output.artifactId === "string")
+      await mutate("spectraArtifacts:attachResearchEvidence", {
+        actorClerkId,
+        artifactId: output.artifactId,
+        runId,
+        executionId: context.executionId,
+      });
     if (!output.nodeId && pendingNodeId) output.nodeId = pendingNodeId;
     if (typeof output.artifactId === "string")
       affected.push({ type: "artifact", id: output.artifactId });
@@ -906,6 +916,13 @@ export async function executeOperation(
         }).catch(() => null);
       }
     }
+    if (context.researchEvidence)
+      await mutate("spectraArtifacts:attachResearchEvidence", {
+        actorClerkId,
+        artifactId: input.artifactId,
+        runId,
+        executionId: context.executionId,
+      });
     const effectProgress = operationEffectProgress(
       operation,
       context.operationIndex ?? 0,

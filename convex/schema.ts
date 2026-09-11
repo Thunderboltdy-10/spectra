@@ -1503,6 +1503,8 @@ export default defineSchema({
         sourceArtifactIds: v.optional(v.array(v.id("spectraArtifacts"))),
         sourceThreadIds: v.optional(v.array(v.id("spectraThreads"))),
         sourceAttachmentNames: v.optional(v.array(v.string())),
+        sourceAttachmentIds: v.optional(v.array(v.string())),
+        sourceBundle: v.optional(v.any()),
         contextSummary: v.optional(v.string()),
       }),
     ),
@@ -3514,6 +3516,13 @@ export default defineSchema({
     executionId: v.string(),
     ownerAccountId: v.id("accounts"),
     storageId: v.optional(v.id("_storage")),
+    originalFileId: v.optional(v.string()),
+    sha256: v.optional(v.string()),
+    status: v.optional(
+      v.union(v.literal("uploading"), v.literal("active"), v.literal("quarantined")),
+    ),
+    uploadReceipt: v.optional(v.string()),
+    quarantineReason: v.optional(v.string()),
     name: v.string(),
     mimeType: v.string(),
     size: v.number(),
@@ -3527,6 +3536,9 @@ export default defineSchema({
     ),
     extractedText: v.optional(v.string()),
     pageCount: v.optional(v.number()),
+    sourceMap: v.optional(v.any()),
+    provenance: v.optional(v.any()),
+    updatedAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_run_execution", ["runId", "executionId"])

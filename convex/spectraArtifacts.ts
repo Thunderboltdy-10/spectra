@@ -2082,6 +2082,7 @@ export const createPending = mutation({
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
     threadId: v.optional(v.id("spectraThreads")),
+    sourceAttachmentIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
@@ -2121,6 +2122,7 @@ export const createPending = mutation({
         workspaceId: args.workspaceId,
         runId: args.runId,
         threadId: args.threadId,
+        sourceAttachmentIds: args.sourceAttachmentIds,
       },
       createdAt: now,
       updatedAt: now,
@@ -2646,6 +2648,125 @@ export const stageAiPatch = mutation({
     });
     await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId };
+  },
+});
+
+function researchRefsInContent(value: unknown, output = new Set<string>(), depth = 0): Set<string> {
+  if (depth > 12 || value === null || value === undefined) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) researchRefsInContent(item, output, depth + 1);
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record.sourceRefs)) {
+    for (const ref of record.sourceRefs)
+      if (typeof ref === "string" && /^(?:source|evidence):/.test(ref))
+        output.add(ref);
+  }
+  for (const child of Object.values(record))
+    researchRefsInContent(child, output, depth + 1);
+  return output;
+}
+
+function citationsForResearchContent(bundle: unknown, content: unknown) {
+  if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) return bundle;
+  const record = bundle as Record<string, unknown>;
+  const sources = Array.isArray(record.sources) ? record.sources : [];
+  const evidence = Array.isArray(record.evidence) ? record.evidence : [];
+  const sourceIds = new Set(
+    sources.flatMap((source) =>
+      source && typeof source === "object" && typeof (source as Record<string, unknown>).id === "string"
+        ? [(source as Record<string, unknown>).id as string]
+        : [],
+    ),
+  );
+  const evidenceBySource = new Map<string, string[]>();
+  const evidenceIds = new Set<string>();
+  for (const span of evidence) {
+    if (!span || typeof span !== "object") continue;
+    const row = span as Record<string, unknown>;
+    if (typeof row.id !== "string" || typeof row.sourceId !== "string") continue;
+    if (!sourceIds.has(row.sourceId)) continue;
+    evidenceIds.add(row.id);
+    evidenceBySource.set(row.sourceId, [
+      ...(evidenceBySource.get(row.sourceId) ?? []),
+      row.id,
+    ]);
+  }
+  const citations = new Map<string, { sourceId: string; evidenceIds: string[] }>();
+  for (const ref of researchRefsInContent(content)) {
+    if (ref.startsWith("source:")) {
+      if (!sourceIds.has(ref)) throw new Error("RESEARCH_SOURCE_REF_NOT_ISSUED");
+      const ids = evidenceBySource.get(ref) ?? [];
+      const source = sources.find(
+        (candidate) =>
+          candidate &&
+          typeof candidate === "object" &&
+          (candidate as Record<string, unknown>).id === ref,
+      ) as Record<string, unknown> | undefined;
+      // Partial/unverified search results remain visible as sourceRefs, but
+      // cannot be upgraded into a portable citation.
+      if (source?.verified === true && ids.length)
+        citations.set(ref, { sourceId: ref, evidenceIds: [ids[0]!] });
+    } else {
+      if (!evidenceIds.has(ref)) throw new Error("RESEARCH_EVIDENCE_REF_NOT_ISSUED");
+      const span = evidence.find(
+        (candidate) => candidate && typeof candidate === "object" && (candidate as Record<string, unknown>).id === ref,
+      ) as Record<string, unknown> | undefined;
+      if (span && typeof span.sourceId === "string") {
+        const source = sources.find(
+          (candidate) =>
+            candidate &&
+            typeof candidate === "object" &&
+            (candidate as Record<string, unknown>).id === span.sourceId,
+        ) as Record<string, unknown> | undefined;
+        if (source?.verified !== true) continue;
+        const prior = citations.get(span.sourceId);
+        citations.set(span.sourceId, {
+          sourceId: span.sourceId,
+          evidenceIds: [...new Set([...(prior?.evidenceIds ?? []), ref])],
+        });
+      }
+    }
+  }
+  return { ...record, citations: [...citations.values()] };
+}
+
+export const attachResearchEvidence = mutation({
+  args: {
+    artifactId: v.id("spectraArtifacts"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "modify",
+    );
+    const run = await ctx.db.get(args.runId);
+    if (
+      !run ||
+      run.ownerAccountId !== actor.accountId ||
+      run.executionId !== args.executionId
+    )
+      throw new Error("This research evidence belongs to another run.");
+    const snapshot =
+      run.contextSnapshot &&
+      typeof run.contextSnapshot === "object" &&
+      !Array.isArray(run.contextSnapshot)
+        ? (run.contextSnapshot as Record<string, unknown>)
+        : {};
+    const bundle = snapshot.researchEvidence;
+    if (!bundle) return { artifactId: artifact._id, attached: false };
+    const createdFrom = artifact.createdFrom ?? { source: "ai" as const };
+    const persistedBundle = citationsForResearchContent(bundle, artifact.content);
+    await ctx.db.patch(artifact._id, {
+      createdFrom: { ...createdFrom, sourceBundle: persistedBundle },
+      updatedAt: Date.now(),
+    });
+    return { artifactId: artifact._id, attached: true };
   },
 });
 

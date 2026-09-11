@@ -13,6 +13,7 @@ import {
   createVerifiedSource,
   type EvidenceSpan,
   type SourceRecord,
+  type VerifiedCitation,
 } from "../records";
 import type { ParallelSearchResult } from "./parallel-search";
 
@@ -757,3 +758,60 @@ export async function buildResearchEvidence(results: ParallelSearchResult[], sig
   }
 }
 
+export type ResearchEvidenceBundle = {
+  sources: SourceRecord[];
+  evidence: EvidenceSpan[];
+  citations: VerifiedCitation[];
+  partial: boolean;
+};
+
+/**
+ * Keep the model-facing evidence packet bounded without trusting or minting
+ * any source identity. New evidence ids are issued by this server-side
+ * boundary, and each shortened excerpt gets a fresh integrity hash.
+ */
+export function compactResearchEvidence(
+  bundle: {
+    sources: SourceRecord[];
+    evidence: EvidenceSpan[];
+    partial?: boolean;
+  },
+  options: { maxSources?: number; maxEvidencePerSource?: number; maxExcerptChars?: number } = {},
+): ResearchEvidenceBundle {
+  const maxSources = Math.max(1, Math.min(12, Math.floor(options.maxSources ?? 12)));
+  const maxEvidencePerSource = Math.max(1, Math.min(6, Math.floor(options.maxEvidencePerSource ?? 3)));
+  const maxExcerptChars = Math.max(240, Math.min(2_400, Math.floor(options.maxExcerptChars ?? 2_000)));
+  const sources = bundle.sources.slice(0, maxSources);
+  const sourceIds = new Set(sources.map((source) => source.id));
+  const evidence: EvidenceSpan[] = [];
+  for (const source of sources) {
+    const sourceEvidence = bundle.evidence
+      .filter((span) => span.sourceId === source.id)
+      .slice(0, maxEvidencePerSource);
+    for (const span of sourceEvidence) {
+      const excerpt = span.excerpt.replace(/\u0000/g, "").trim().slice(0, maxExcerptChars);
+      if (!excerpt) continue;
+      const preservesRange =
+        excerpt === span.excerpt &&
+        span.startOffset !== undefined &&
+        span.endOffset === span.startOffset + excerpt.length;
+      evidence.push(
+        createEvidenceSpan(source, excerpt, {
+          ...(span.page !== undefined ? { page: span.page } : {}),
+          ...(preservesRange
+            ? {
+                startOffset: span.startOffset,
+                endOffset: span.endOffset,
+              }
+            : {}),
+        }),
+      );
+    }
+  }
+  return {
+    sources,
+    evidence,
+    citations: [],
+    partial: bundle.partial === true || evidence.length < bundle.evidence.filter((span) => sourceIds.has(span.sourceId)).length,
+  };
+}

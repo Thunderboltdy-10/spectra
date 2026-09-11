@@ -16,6 +16,13 @@ import {
 import { SPECTRA_BLUEPRINT_KEYS } from "@/features/spectra/operations/schema";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
 import { assertArtifactQuality } from "@/features/spectra/quality/rubrics";
+import {
+  contentHash,
+  verifyCitation,
+  type EvidenceSpan,
+  type SourceRecord,
+  type VerifiedCitation,
+} from "@/features/spectra/sources/records";
 
 export function readContentPointer(content: unknown, path: string) {
   const sheetsPath = canonicalizeSheetsPatchChange({
@@ -111,6 +118,7 @@ export async function committedCreatesAreUsable(
     operation: ModelOperation;
     affected: Array<{ type: string; id: string }>;
   }>,
+  options: { requireResearchEvidence?: boolean } = {},
 ) {
   const creates = outcomes.filter(
     (outcome) => outcome.operation.type === "artifact.create",
@@ -140,8 +148,93 @@ export async function committedCreatesAreUsable(
       )
     )
       return false;
+    if (options.requireResearchEvidence) {
+      try {
+        assertResearchEvidenceReadback(artifact);
+      } catch {
+        return false;
+      }
+    }
   }
   return true;
+}
+
+function assertResearchEvidenceReadback(artifact: Record<string, unknown>) {
+  const createdFrom =
+    artifact.createdFrom &&
+    typeof artifact.createdFrom === "object" &&
+    !Array.isArray(artifact.createdFrom)
+      ? (artifact.createdFrom as Record<string, unknown>)
+      : null;
+  const bundle =
+    createdFrom?.sourceBundle &&
+    typeof createdFrom.sourceBundle === "object" &&
+    !Array.isArray(createdFrom.sourceBundle)
+      ? (createdFrom.sourceBundle as Record<string, unknown>)
+      : null;
+  const sources = Array.isArray(bundle?.sources)
+    ? (bundle.sources as SourceRecord[])
+    : [];
+  const evidence = Array.isArray(bundle?.evidence)
+    ? (bundle.evidence as EvidenceSpan[])
+    : [];
+  if (!sources.length || !evidence.length)
+    throw new Error("RESEARCH_EVIDENCE_NOT_PERSISTED");
+  const sourceIds = new Set(
+    sources.filter((source) => source && typeof source.id === "string").map((source) => source.id),
+  );
+  const evidenceIds = new Set<string>();
+  for (const span of evidence) {
+    if (
+      !span ||
+      typeof span.id !== "string" ||
+      typeof span.sourceId !== "string" ||
+      !sourceIds.has(span.sourceId) ||
+      !span.id.startsWith("evidence:") ||
+      typeof span.excerpt !== "string" ||
+      !span.excerpt.trim() ||
+      contentHash(span.excerpt) !== span.excerptHash ||
+      (span.startOffset !== undefined &&
+        span.endOffset !== span.startOffset + span.excerpt.length)
+    )
+      throw new Error("RESEARCH_EVIDENCE_INVALID");
+    evidenceIds.add(span.id);
+  }
+  if ([...sourceIds].some((id) => !id.startsWith("source:")))
+    throw new Error("RESEARCH_SOURCE_HANDLE_INVALID");
+  const citations = Array.isArray(bundle?.citations)
+    ? (bundle.citations as VerifiedCitation[])
+    : [];
+  for (const citation of citations) {
+    const source = sources.find((entry) => entry.id === citation.sourceId);
+    if (
+      !sourceIds.has(citation.sourceId) ||
+      source?.verified !== true ||
+      !citation.evidenceIds.length ||
+      !citation.evidenceIds.every((id) => evidenceIds.has(id))
+    )
+      throw new Error("RESEARCH_CITATION_INVALID");
+    verifyCitation(citation, sources, evidence);
+  }
+  return {
+    sourceIds: [...sourceIds],
+    evidenceIds: [...evidenceIds],
+    partial: bundle?.partial === true,
+    citationCount: citations.length,
+  };
+}
+
+export async function verifyResearchEvidenceReadback(
+  actorClerkId: string,
+  artifactId: string,
+) {
+  const saved = await query<unknown & object, unknown>("spectraArtifacts:get", {
+    actorClerkId,
+    artifactId,
+  });
+  if (!saved || typeof saved !== "object")
+    throw new Error("RESEARCH_EVIDENCE_ARTIFACT_MISSING");
+  return assertResearchEvidenceReadback(saved as Record<string, unknown>);
 }
 
 export async function verifyCommittedOutcomes(
@@ -150,6 +243,7 @@ export async function verifyCommittedOutcomes(
     operation: ModelOperation;
     affected: Array<{ type: string; id: string }>;
   }>,
+  options: { requireResearchEvidence?: boolean } = {},
 ) {
   for (const outcome of outcomes) {
     const operation = outcome.operation;
@@ -216,6 +310,8 @@ export async function verifyCommittedOutcomes(
         });
         await assertNativeReplicaHonest(artifactId);
       }
+      if (options.requireResearchEvidence)
+        assertResearchEvidenceReadback(artifact);
     }
     if (operation.type === "artifact.update") {
       if (

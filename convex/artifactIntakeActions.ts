@@ -9,6 +9,7 @@ import { validateIntakeAttestation, vIntakeAttestation } from "./intakeAttestati
 
 type UploadResult = {
   assetId?: string;
+  runAttachmentId?: string;
   jobId?: string;
   status: string;
   committed?: boolean;
@@ -120,7 +121,6 @@ async function verifyEnvelopeAndActor(
   await verifyAttestationSignature(attestation);
   return authenticateAttestation(ctx, attestation);
 }
-
 export const verifyUploadedStorage = action({
   args: {
     assetId: v.id("artifactAssets"),
@@ -261,6 +261,44 @@ export const verifyUploadedOriginal = action({
       storageId: args.storageId,
       uploadReceipt: args.uploadReceipt,
       attestation: args.attestation,
+    });
+  },
+});
+
+export const verifyUploadedRunAttachment = action({
+  args: {
+    runAttachmentId: v.id("spectraRunAttachments"),
+    storageId: v.id("_storage"),
+    uploadReceipt: v.string(),
+  },
+  handler: async (ctx, args): Promise<UploadResult> => {
+    const intent = await ctx.runQuery(
+      api.spectraRuns.getRunAttachmentUploadIntent,
+      {
+        runAttachmentId: args.runAttachmentId,
+        uploadReceipt: args.uploadReceipt,
+      },
+    );
+    const blob = await ctx.storage.get(args.storageId);
+    if (!blob) throw new Error("ATTACHMENT_UPLOAD_STORAGE_MISSING");
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    try {
+      if (bytes.byteLength !== intent.bytes) throw new Error("ATTACHMENT_SIZE_INVALID");
+      const digest = normalizeSha256(await crypto.subtle.digest("SHA-256", bytes));
+      if (!digest || digest !== intent.sha256) throw new Error("ATTACHMENT_DIGEST_MISMATCH");
+      verifyContentSignature(intent.mimeType, bytes);
+    } catch (error) {
+      await ctx.runMutation(internal.spectraRuns.quarantineRunAttachmentUpload, {
+        runAttachmentId: args.runAttachmentId,
+        uploadReceipt: args.uploadReceipt,
+        reason: error instanceof Error ? error.message : "ATTACHMENT_UPLOAD_INTEGRITY_FAILED",
+      });
+      throw error;
+    }
+    return ctx.runMutation(internal.spectraRuns.finalizeRunAttachmentUpload, {
+      runAttachmentId: args.runAttachmentId,
+      storageId: args.storageId,
+      uploadReceipt: args.uploadReceipt,
     });
   },
 });

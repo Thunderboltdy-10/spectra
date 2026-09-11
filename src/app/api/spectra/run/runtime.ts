@@ -9,6 +9,7 @@ import {
 } from "./loop/act";
 import type {
   Body,
+  AttachmentInput,
   NativeProgressUpdate,
   PreparedAttachment,
   ResultAction,
@@ -37,7 +38,7 @@ import {
   selectAgentRuntime,
   selectedAgentOperationApprovalReasons,
 } from "./loop/intake";
-import { mutate, query } from "./loop/io";
+import { act, mutate, query } from "./loop/io";
 import { hydrateApplicationLocalFileCounts } from "./loop/authority";
 import { createAgentLoopExecution } from "./loop/orchestrator";
 import {
@@ -89,6 +90,11 @@ import { confirmationDiffSummary } from "@/features/spectra/ai/authority-executi
 import { interruptionRecovery } from "../../../../../shared/spectra-run-recovery";
 import { encodeArtifactContentForStorage } from "../../../../../shared/sheet-cells";
 import { prepareAttachments as prepareRunAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
+import {
+  attachmentBytesAsInput,
+  attachmentInputBytes,
+  attachmentSha256,
+} from "@/features/spectra/compute/files/attachment-retention";
 import { promptLooksLikeFocusedStructuralEdit } from "@/features/spectra/operations/intent-alignment";
 import { isQuietRetryableApplyFailure } from "@/features/spectra/operations/plan-diagnostics";
 import { evaluatePlanPolicy } from "@/features/spectra/operations/policy";
@@ -141,19 +147,12 @@ function ndjson(task: (emit: (event: unknown) => void) => Promise<void>) {
   return createNdjsonResponse(task, publicError);
 }
 
-const ATTACHMENT_RETRY_MESSAGE =
-  "Attached files are not retained for retry. Reattach them and start a new run.";
-
 function recoveryForAttempt(
   operationStatuses: Parameters<typeof interruptionRecovery>[0],
   hasPartialResponse: boolean,
-  hasAttachmentInput: boolean,
+  _hasAttachmentInput: boolean,
 ) {
-  const recovery = interruptionRecovery(
-    operationStatuses,
-    hasPartialResponse,
-  );
-  return hasAttachmentInput ? { ...recovery, retryable: false } : recovery;
+  return interruptionRecovery(operationStatuses, hasPartialResponse);
 }
 
 async function runAttempt(
@@ -527,6 +526,9 @@ async function runAttempt(
           runId: params.runId,
           executionId: params.executionId,
           threadId: params.threadId,
+          sourceAttachmentIds: params.attachments?.flatMap((attachment) =>
+            attachment.id ? [attachment.id] : [],
+          ),
         },
       );
       earlyPendingByIndex.set(provisionalIndex, pending.artifactId);
@@ -704,6 +706,18 @@ async function runAttempt(
       workspaceTitle,
       attachmentNames:
         params.attachments?.map((attachment) => attachment.name) ?? [],
+      attachmentIds:
+        params.attachments?.flatMap((attachment) =>
+          attachment.id ? [attachment.id] : [],
+        ) ?? [],
+      research: undefined as
+        | {
+            status: "partial" | "saved";
+            sourceIds: string[];
+            evidenceIds: string[];
+            citationCount: number;
+          }
+        | undefined,
       focusMode: context.focusMode,
       ...(agentSelection
         ? {
@@ -963,6 +977,9 @@ async function runAttempt(
                         runId: params.runId,
                         executionId: params.executionId,
                         threadId: params.threadId,
+                        sourceAttachmentIds: params.attachments?.flatMap((attachment) =>
+                          attachment.id ? [attachment.id] : [],
+                        ),
                       },
                     )
                   ).artifactId;
@@ -1208,6 +1225,29 @@ async function runAttempt(
               payload: event.payload,
             }),
         );
+    const researchEvidence =
+      "researchEvidence" in modelResult
+        ? modelResult.researchEvidence
+        : undefined;
+    const requiresResearchEvidence = Boolean(researchEvidence);
+    if (researchEvidence) {
+      await mutate("spectraRuns:setResearchEvidence", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        researchEvidence,
+      });
+      provenance = {
+        ...provenance,
+        research: {
+          status:
+            researchEvidence.partial === true ? "partial" : "saved",
+          sourceIds: researchEvidence.sources.map((source) => source.id),
+          evidenceIds: researchEvidence.evidence.map((span) => span.id),
+          citationCount: researchEvidence.citations.length,
+        },
+      };
+    }
     recordPhase("model_ready");
     await partialWrite;
     const progressiveWritesReady = Promise.all(progressiveWrites);
@@ -1454,6 +1494,9 @@ async function runAttempt(
             runId: params.runId,
             executionId: params.executionId,
             threadId: params.threadId,
+            sourceAttachmentIds: params.attachments?.flatMap((attachment) =>
+              attachment.id ? [attachment.id] : [],
+            ),
           });
           pendingArtifactId = pending.artifactId;
           earlyPendingByIndex.set(index, pendingArtifactId);
@@ -1754,9 +1797,13 @@ async function runAttempt(
           workspaceId: params.workspaceId,
           scopeNodeId: params.scopeNodeId,
           selectedArtifactIds: context.selectedArtifactIds,
+          attachmentIds: params.attachments?.flatMap((attachment) =>
+            attachment.id ? [attachment.id] : [],
+          ),
           attachmentNames: params.attachments?.map(
             (attachment) => attachment.name,
           ),
+          researchEvidence,
           contextSummary: context.selectedArtifactIds.length
             ? `Based on ${context.selectedArtifactIds.length} selected artifact${context.selectedArtifactIds.length === 1 ? "" : "s"}${params.threadId ? " and a continued thread" : ""}`
             : params.threadId
@@ -1896,9 +1943,11 @@ async function runAttempt(
               const alreadyLanded = [
                 { type: "artifact", id: operation.input.artifactId },
               ];
-              await verifyCommittedOutcomes(params.actorClerkId, [
-                { operation, affected: alreadyLanded },
-              ]);
+              await verifyCommittedOutcomes(
+                params.actorClerkId,
+                [{ operation, affected: alreadyLanded }],
+                { requireResearchEvidence: requiresResearchEvidence },
+              );
               affected = alreadyLanded;
               recoveredFromLive = true;
             } catch {
@@ -1972,7 +2021,9 @@ async function runAttempt(
         if (operation.type === "artifact.update") {
           const outcome = { operation, affected };
           try {
-            await verifyCommittedOutcomes(params.actorClerkId, [outcome]);
+            await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
+              requireResearchEvidence: requiresResearchEvidence,
+            });
           } catch (firstVerifyError) {
             if (!isQuietRetryableApplyFailure(firstVerifyError))
               throw firstVerifyError;
@@ -1982,7 +2033,9 @@ async function runAttempt(
             // state. Never restart planning or replay earlier operations.
             await new Promise((resolve) => setTimeout(resolve, 400));
             try {
-              await verifyCommittedOutcomes(params.actorClerkId, [outcome]);
+              await verifyCommittedOutcomes(params.actorClerkId, [outcome], {
+                requireResearchEvidence: requiresResearchEvidence,
+              });
             } catch (secondVerifyError) {
               if (!isQuietRetryableApplyFailure(secondVerifyError))
                 throw secondVerifyError;
@@ -2020,9 +2073,11 @@ async function runAttempt(
                   preclaimed: true,
                 },
               );
-              await verifyCommittedOutcomes(params.actorClerkId, [
-                { operation, affected },
-              ]);
+              await verifyCommittedOutcomes(
+                params.actorClerkId,
+                [{ operation, affected }],
+                { requireResearchEvidence: requiresResearchEvidence },
+              );
             }
           }
         }
@@ -2158,7 +2213,9 @@ async function runAttempt(
     });
     loop.enter("verify");
     try {
-      await verifyCommittedOutcomes(params.actorClerkId, operationOutcomes);
+      await verifyCommittedOutcomes(params.actorClerkId, operationOutcomes, {
+        requireResearchEvidence: requiresResearchEvidence,
+      });
     } catch (firstVerifyError) {
       // Projection/Yjs races can fail verify once after a successful apply.
       // Keep the strip streaming and retry once before any failed publish.
@@ -2167,6 +2224,7 @@ async function runAttempt(
           !(await committedCreatesAreUsable(
             params.actorClerkId,
             operationOutcomes,
+            { requireResearchEvidence: requiresResearchEvidence },
           ))
         )
           return false;
@@ -2202,7 +2260,11 @@ async function runAttempt(
         }).catch(() => null);
         await new Promise((resolve) => setTimeout(resolve, 400));
         try {
-          await verifyCommittedOutcomes(params.actorClerkId, operationOutcomes);
+          await verifyCommittedOutcomes(
+            params.actorClerkId,
+            operationOutcomes,
+            { requireResearchEvidence: requiresResearchEvidence },
+          );
         } catch (secondVerifyError) {
           if (!(await softCompleteCreates(secondVerifyError)))
             throw secondVerifyError;
@@ -2399,11 +2461,10 @@ async function runAttempt(
         streamedCreationPreview ||
         pendingArtifactCount > 0,
       );
-      const hasAttachmentInput = (params.attachments?.length ?? 0) > 0;
       const recovery = recoveryForAttempt(
         commitStarted ? ["executing"] : [],
         Boolean(publicText.trim()),
-        hasAttachmentInput,
+        false,
       );
       await mutate("spectraRuns:updateStatus", {
         actorClerkId: params.actorClerkId,
@@ -2411,9 +2472,7 @@ async function runAttempt(
         executionId: params.executionId,
         status: "cancelled",
         resultTitle: "Stopped",
-        resultSummary: hasAttachmentInput
-          ? `Stopped by you. ${ATTACHMENT_RETRY_MESSAGE}`
-          : recovery.retryable
+        resultSummary: recovery.retryable
             ? stoppedWithVisibleWork
               ? "Stopped by you. The partial response remains available, and you can retry when ready."
               : "Stopped before the response began. You can retry when ready."
@@ -2452,11 +2511,10 @@ async function runAttempt(
     const preservedOutcome = operationOutcomes.some(({ affected }) =>
       affected.some((item) => item.id),
     );
-    const hasAttachmentInput = (params.attachments?.length ?? 0) > 0;
     const recovery = recoveryForAttempt(
       commitStarted ? [preservedOutcome ? "executed" : "executing"] : [],
       Boolean(publicText.trim()),
-      hasAttachmentInput,
+      false,
     );
     advanceProtocolState(
       recovery.retryable ? "paused" : "failed_terminal",
@@ -2489,9 +2547,7 @@ async function runAttempt(
       executionId: params.executionId,
       outcome: "failed",
     }).catch(() => null);
-    const resultSummary = hasAttachmentInput
-      ? `${message} ${ATTACHMENT_RETRY_MESSAGE}`
-      : recovery.retryable
+    const resultSummary = recovery.retryable
         ? message
         : `${message} Review any affected work before submitting a follow-up command.`;
     await mutate("spectraRuns:updateStatus", {
@@ -2575,6 +2631,111 @@ function verifyScheduledCallback(request: NextRequest, rawBody: string) {
   return (
     received.length === expected.length && timingSafeEqual(received, expected)
   );
+}
+
+async function persistRunAttachments(
+  runId: string,
+  executionId: string,
+  input: AttachmentInput[] | undefined,
+  prepared: PreparedAttachment[],
+) {
+  const rows = Array.isArray(input) ? input.slice(0, 4) : [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!;
+    const preparedRow = prepared[index];
+    if (!preparedRow || !row.handling)
+      throw new Error("ATTACHMENT_SERIALIZATION_INVALID");
+    const bytes = attachmentInputBytes(row);
+    const beginning = await mutate<
+      Record<string, unknown>,
+      {
+        runAttachmentId: string;
+        reused: boolean;
+        uploadReceipt?: string;
+        uploadUrl?: string;
+      }
+    >("spectraRuns:beginRunAttachmentUpload", {
+      runId,
+      executionId,
+      originalFileId:
+        preparedRow.id ?? row.assetId ?? row.importId ?? `file:${preparedRow.name}:${bytes.byteLength}`,
+      name: preparedRow.name,
+      mimeType: preparedRow.mimeType,
+      size: bytes.byteLength,
+      handling: row.handling,
+      sha256: attachmentSha256(bytes),
+      sourceMap: preparedRow.sourceMap,
+      provenance: {
+        ...preparedRow.provenance,
+        ...(row.sourceRef ? { sourceRef: row.sourceRef } : {}),
+      },
+    });
+    if (beginning.reused) continue;
+    if (!beginning.uploadUrl || !beginning.uploadReceipt)
+      throw new Error("ATTACHMENT_UPLOAD_INTENT_MISSING");
+    const uploaded = await fetch(beginning.uploadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": preparedRow.mimeType,
+        "Content-Length": String(bytes.byteLength),
+      },
+      body: bytes,
+    });
+    if (!uploaded.ok) throw new Error("ATTACHMENT_STORAGE_UPLOAD_FAILED");
+    const payload = (await uploaded.json()) as { storageId?: string };
+    if (!payload.storageId) throw new Error("ATTACHMENT_STORAGE_ID_MISSING");
+    const stored = await act<
+      { runAttachmentId: string; storageId: string; uploadReceipt: string },
+      { status?: string; errorCode?: string }
+    >("artifactIntakeActions:verifyUploadedRunAttachment", {
+      runAttachmentId: beginning.runAttachmentId,
+      storageId: payload.storageId,
+      uploadReceipt: beginning.uploadReceipt,
+    });
+    if (stored.status !== "active")
+      throw new Error(stored.errorCode ?? "ATTACHMENT_UPLOAD_INTEGRITY_FAILED");
+  }
+}
+
+async function loadPersistedRunAttachments(runId: string, executionId: string) {
+  const rows = await query<
+    { runId: string; executionId: string },
+    Array<{
+      runAttachmentId: string;
+      originalFileId?: string;
+      name: string;
+      mimeType: string;
+      size: number;
+      handling: PreparedAttachment["handling"];
+      sourceMap?: PreparedAttachment["sourceMap"];
+      provenance?: PreparedAttachment["provenance"];
+      url: string | null;
+    }>
+  >("spectraRuns:listRunAttachments", { runId, executionId });
+  const raw = await Promise.all(
+    rows.map(async (row) => {
+      if (!row.url) throw new Error("ATTACHMENT_STORAGE_URL_EXPIRED");
+      const response = await fetch(row.url);
+      if (!response.ok) throw new Error("ATTACHMENT_STORAGE_READ_FAILED");
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return {
+        row,
+        input: attachmentBytesAsInput(bytes, {
+          id: row.originalFileId ?? row.runAttachmentId,
+          name: row.name,
+          mimeType: row.mimeType,
+          handling: row.handling,
+        }),
+      };
+    }),
+  );
+  const prepared = await prepareRunAttachments(raw.map(({ input }) => input));
+  return prepared.map((attachment, index) => ({
+    ...attachment,
+    id: raw[index]!.row.originalFileId ?? raw[index]!.row.runAttachmentId,
+    sourceMap: raw[index]!.row.sourceMap ?? attachment.sourceMap,
+    provenance: raw[index]!.row.provenance ?? attachment.provenance,
+  }));
 }
 
 async function resumeOperationsAttempt(params: {
@@ -2765,6 +2926,7 @@ async function resumeOperationsAttempt(params: {
           workspaceId: state.run.workspaceId,
           scopeNodeId: state.run.contextSnapshot?.scopeNodeId,
           selectedArtifactIds: state.run.contextSnapshot?.selectedObjectIds,
+          researchEvidence: state.run.contextSnapshot?.researchEvidence,
           pendingArtifactId: row.pendingArtifactId,
           pendingWorkspaceId: row.pendingWorkspaceId,
           operationIndex: index,
@@ -2934,11 +3096,20 @@ async function resumeOperationsAttempt(params: {
       }
     }
     loop.enter("verify");
+    const requireResearchEvidence = Boolean(
+      state.run.contextSnapshot?.researchEvidence,
+    );
     try {
-      await verifyCommittedOutcomes(params.actorClerkId, outcomes);
+      await verifyCommittedOutcomes(params.actorClerkId, outcomes, {
+        requireResearchEvidence,
+      });
     } catch (firstVerifyError) {
       const softCompleteCreates = async (error: unknown) => {
-        if (!(await committedCreatesAreUsable(params.actorClerkId, outcomes)))
+        if (
+          !(await committedCreatesAreUsable(params.actorClerkId, outcomes, {
+            requireResearchEvidence,
+          }))
+        )
           return false;
         console.warn("[spectra.resume.verify.soft_complete]", {
           error: publicError(error),
@@ -2974,7 +3145,9 @@ async function resumeOperationsAttempt(params: {
         }).catch(() => null);
         await new Promise((resolve) => setTimeout(resolve, 400));
         try {
-          await verifyCommittedOutcomes(params.actorClerkId, outcomes);
+          await verifyCommittedOutcomes(params.actorClerkId, outcomes, {
+            requireResearchEvidence,
+          });
         } catch (secondVerifyError) {
           if (!(await softCompleteCreates(secondVerifyError)))
             throw secondVerifyError;
@@ -3179,13 +3352,16 @@ async function executeScheduledRun(body: Body) {
     payload.surface === "artifacts"
       ? payload.surface
       : "chat";
-  await withWorkerConvexToken(token.jwt, () =>
-    runAttempt(
+  await withWorkerConvexToken(token.jwt, async () => {
+    const runId = required(body.runId, "runId");
+    const executionId = required(body.executionId, "executionId");
+    const attachments = await loadPersistedRunAttachments(runId, executionId);
+    await runAttempt(
       {
         actorClerkId,
-        runId: required(body.runId, "runId"),
+        runId,
         resultCardId: required(body.resultCardId, "resultCardId"),
-        executionId: required(body.executionId, "executionId"),
+        executionId,
         workerId: `event-run:${body.executionId}`,
         prompt: typeof payload.prompt === "string" ? payload.prompt : "",
         surface,
@@ -3219,13 +3395,11 @@ async function executeScheduledRun(body: Body) {
         agentId:
           typeof payload.agentId === "string" ? payload.agentId : undefined,
         disableAgentRouting: payload.disableAgentRouting === true,
-        attachments: Array.isArray(payload.attachments)
-          ? (payload.attachments as PreparedAttachment[])
-          : [],
+        attachments,
       },
       () => undefined,
-    ),
-  );
+    );
+  });
 }
 
 export async function handleSpectraRunRequest(request: NextRequest) {
@@ -3339,6 +3513,18 @@ export async function handleSpectraRunRequest(request: NextRequest) {
     } catch (error) {
       return new Response(publicError(error), { status: 409 });
     }
+    if (created.created && attachments.length > 0) {
+      try {
+        await persistRunAttachments(
+          created.runId,
+          created.executionId,
+          body.attachments,
+          attachments,
+        );
+      } catch (error) {
+        return new Response(publicError(error), { status: 409 });
+      }
+    }
     const threadId = created.threadId;
     const inlinePlan =
       created.created &&
@@ -3408,7 +3594,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       currentView: body.currentView,
       agentId: body.agentId,
       disableAgentRouting: body.disableAgentRouting,
-      attachments,
+      attachments: [],
     };
     if (
       process.env.SPECTRA_TEST_INLINE_RUNS !== "1" &&
@@ -3606,6 +3792,12 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       { actorClerkId: string; runId: string },
       RunDetail
     >("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+    const usesScheduledExecution =
+      process.env.SPECTRA_TEST_INLINE_RUNS !== "1" &&
+      Boolean(process.env.SPECTRA_APP_URL?.trim());
+    const retryAttachments = usesScheduledExecution
+      ? []
+      : await loadPersistedRunAttachments(runId, reset.executionId);
     const initialCard = await latestCard(actor.clerkId, runId);
     const retryPayload = {
       prompt: reset.prompt,
@@ -3621,11 +3813,10 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       agentId:
         state.run.selectedAgentId ?? reset.contextSnapshot?.requestedAgentId,
       disableAgentRouting: reset.contextSnapshot?.disableAgentRouting,
-      attachments: [],
+      attachments: retryAttachments,
     };
     if (
-      process.env.SPECTRA_TEST_INLINE_RUNS !== "1" &&
-      Boolean(process.env.SPECTRA_APP_URL?.trim())
+      usesScheduledExecution
     ) {
       await mutate("spectraRuns:scheduleExecution", {
         runId,
@@ -3663,7 +3854,7 @@ export async function handleSpectraRunRequest(request: NextRequest) {
             state.run.selectedAgentId ??
             reset.contextSnapshot?.requestedAgentId,
           disableAgentRouting: reset.contextSnapshot?.disableAgentRouting,
-          attachments: [],
+          attachments: retryAttachments,
         },
         emit,
       );

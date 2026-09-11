@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api } from "./_generated/api";
+import {
+  createEvidenceSpan,
+  createVerifiedSource,
+} from "../src/features/spectra/sources/records";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -53,6 +57,7 @@ async function seedRun(
     recoveryState?: "partial" | "interrupted";
     retryable?: boolean;
     hasAttachments?: boolean;
+    hasRetainedAttachment?: boolean;
   },
 ) {
   const actor = await seedActor(t);
@@ -101,6 +106,28 @@ async function seedRun(
           ],
         },
         createdAt: now,
+      });
+    }
+    if (options.hasRetainedAttachment) {
+      const storageId = await ctx.storage.store(
+        new Blob([Uint8Array.from([0x89, 0x50, 0x4e, 0x47])], {
+          type: "image/png",
+        }),
+      );
+      await ctx.db.insert("spectraRunAttachments", {
+        runId,
+        executionId: "execution-1",
+        ownerAccountId: actor.accountId,
+        storageId,
+        originalFileId: "upload-1",
+        sha256: "a".repeat(64),
+        status: "active",
+        name: "fixture.png",
+        mimeType: "image/png",
+        size: 4,
+        handling: "image",
+        createdAt: now,
+        updatedAt: now,
       });
     }
     const cardId = await ctx.db.insert("spectraResultCards", {
@@ -290,5 +317,105 @@ describe("AI run create and recovery lifecycle", () => {
         retryKey: "attachment-retry",
       }),
     ).rejects.toThrow("Attached files are not retained for retry");
+  });
+
+  it("rekeys retained attachment bytes for a safe retry", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedRun(t, {
+      status: "failed",
+      recoveryState: "interrupted",
+      retryable: true,
+      hasAttachments: true,
+      hasRetainedAttachment: true,
+    });
+
+    const reset = await t.withIdentity(identity).mutation(
+      api.spectraRuns.resetForRetry,
+      {
+        runId: fixture.runId,
+        executionId: "execution-1",
+        retryKey: "retained-attachment-retry",
+      },
+    );
+    expect(reset.created).toBe(true);
+    const attachment = await t.run(async (ctx) =>
+      ctx.db
+        .query("spectraRunAttachments")
+        .withIndex("by_run_execution", (q) =>
+          q.eq("runId", fixture.runId).eq("executionId", reset.executionId),
+        )
+        .first(),
+    );
+    expect(attachment?.status).toBe("active");
+    expect(attachment?.storageId).toBeDefined();
+  });
+
+  it("persists server-issued research evidence on the committed artifact", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedRun(t, { status: "running" });
+    const source = createVerifiedSource({
+      title: "Photosynthesis reference",
+      url: "https://example.edu/photosynthesis",
+      content: "Plants convert light energy into chemical energy.",
+      accessedAt: new Date(0).toISOString(),
+      sourceType: "web",
+      authority: "primary",
+      provider: "fixture",
+    });
+    const evidence = createEvidenceSpan(
+      source,
+      "Plants convert light energy into chemical energy.",
+    );
+    const artifact = await t.run(async (ctx) => {
+      await ctx.db.patch(fixture.runId, {
+        contextSnapshot: {
+          researchEvidence: {
+            sources: [source],
+            evidence: [evidence],
+            citations: [],
+            partial: false,
+          },
+        },
+      });
+      return ctx.db.insert("spectraArtifacts", {
+        ownerAccountId: fixture.accountId,
+        schoolId: fixture.schoolId,
+        blueprintKey: "document",
+        schemaVersion: 2,
+        title: "Photosynthesis notes",
+        summary: "Source-backed notes.",
+        content: {
+          blocks: [
+            {
+              id: "block-1",
+              type: "paragraph",
+              text: "Plants convert light energy into chemical energy.",
+              sourceRefs: [source.id, evidence.id],
+            },
+          ],
+          outline: [],
+        },
+        textIndex: "Photosynthesis notes",
+        tags: [],
+        status: "active",
+        createdFrom: { source: "ai", runId: fixture.runId },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    });
+
+    await t.withIdentity(identity).mutation(
+      api.spectraArtifacts.attachResearchEvidence,
+      { artifactId: artifact, runId: fixture.runId, executionId: "execution-1" },
+    );
+    const saved = await t.run((ctx) => ctx.db.get(artifact));
+    const bundle = saved?.createdFrom?.sourceBundle as
+      | { sources?: Array<{ id?: string }>; evidence?: Array<{ id?: string }>; citations?: Array<{ sourceId?: string }> }
+      | undefined;
+    expect(bundle?.sources?.map((row) => row.id)).toEqual([source.id]);
+    expect(bundle?.evidence?.map((row) => row.id)).toEqual([evidence.id]);
+    expect(bundle?.citations).toEqual([
+      { sourceId: source.id, evidenceIds: [evidence.id] },
+    ]);
   });
 });

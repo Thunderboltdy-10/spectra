@@ -3,6 +3,8 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity";
+import { MAX_ATTACHMENT_BYTES } from "../shared/intake-limits";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
 import {
@@ -98,6 +100,14 @@ const vSurface = v.union(
   v.literal("chat"),
   v.literal("workspace"),
   v.literal("artifact"),
+);
+const vAttachmentHandling = v.union(
+  v.literal("pdf"),
+  v.literal("text"),
+  v.literal("docx"),
+  v.literal("xlsx"),
+  v.literal("pptx"),
+  v.literal("image"),
 );
 const vRunStatus = v.union(
   v.literal("queued"),
@@ -276,7 +286,18 @@ async function runHasAttachmentInput(
     .query("spectraMessages")
     .withIndex("by_run", (q) => q.eq("runId", runId))
     .collect();
-  return messages.some(messageHasAttachmentInput);
+  const serializedInput = messages.some(messageHasAttachmentInput);
+  const retained = await ctx.db
+    .query("spectraRunAttachments")
+    .withIndex("by_run_execution", (q) => q.eq("runId", runId))
+    .collect();
+  const hasRetainedBytes = retained.some(
+    (attachment) =>
+      attachment.status !== "quarantined" &&
+      attachment.status !== "uploading" &&
+      attachment.storageId !== undefined,
+  );
+  return serializedInput && !hasRetainedBytes;
 }
 
 function recoveryForRun(
@@ -2140,6 +2161,24 @@ export const resetForRetry = mutation({
     );
     const previousExecutionId = run.executionId;
     const executionId = `${now.toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+    const retainedAttachments = await ctx.db
+      .query("spectraRunAttachments")
+      .withIndex("by_run_execution", (q) =>
+        q.eq("runId", args.runId).eq("executionId", args.executionId),
+      )
+      .collect();
+    await Promise.all(
+      retainedAttachments
+        .filter(
+          (attachment) =>
+            attachment.status !== "quarantined" &&
+            attachment.status !== "uploading" &&
+            attachment.storageId,
+        )
+        .map((attachment) =>
+          ctx.db.patch(attachment._id, { executionId }),
+        ),
+    );
     const sequence = (run.eventSequence ?? 0) + 1;
     await ctx.db.patch(args.runId, {
       status: "queued",
@@ -2500,5 +2539,211 @@ export const setContextSnapshot = mutation({
       updatedAt: Date.now(),
     });
     return { runId: args.runId };
+  },
+});
+
+export const setResearchEvidence = mutation({
+  args: {
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    researchEvidence: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const { run } = await requireOwnedRun(ctx, args.runId);
+    if (
+      (run.status !== "queued" && run.status !== "running") ||
+      run.executionId !== args.executionId
+    )
+      throw new Error("This evidence belongs to an older run attempt.");
+    const previous =
+      run.contextSnapshot &&
+      typeof run.contextSnapshot === "object" &&
+      !Array.isArray(run.contextSnapshot)
+        ? run.contextSnapshot
+        : {};
+    await ctx.db.patch(args.runId, {
+      contextSnapshot: { ...previous, researchEvidence: args.researchEvidence },
+      updatedAt: Date.now(),
+    });
+    return { runId: args.runId, saved: true };
+  },
+});
+
+export const beginRunAttachmentUpload = mutation({
+  args: {
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    originalFileId: v.string(),
+    name: v.string(),
+    mimeType: v.string(),
+    size: v.number(),
+    handling: vAttachmentHandling,
+    sha256: v.string(),
+    sourceMap: v.optional(v.any()),
+    provenance: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const { actor, run } = await requireOwnedRun(ctx, args.runId);
+    if (
+      run.executionId !== args.executionId ||
+      (run.status !== "queued" && run.status !== "running")
+    )
+      throw new Error("This run is no longer accepting attachments.");
+    const size = Math.floor(args.size);
+    const sha256 = normalizeSha256(args.sha256);
+    const mimeType = normalizeMediaType(args.mimeType);
+    if (!Number.isSafeInteger(size) || size < 1 || size > MAX_ATTACHMENT_BYTES)
+      throw new Error("ATTACHMENT_SIZE_INVALID");
+    if (!sha256) throw new Error("ATTACHMENT_DIGEST_INVALID");
+    const originalFileId = args.originalFileId.trim().slice(0, 500);
+    const name = args.name.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 180) || "attachment";
+    const existing = await ctx.db
+      .query("spectraRunAttachments")
+      .withIndex("by_run_execution", (q) =>
+        q.eq("runId", args.runId).eq("executionId", args.executionId),
+      )
+      .collect();
+    const match = existing.find(
+      (row) =>
+        row.originalFileId === originalFileId &&
+        row.sha256 === sha256 &&
+        row.size === size &&
+        row.mimeType === mimeType &&
+        row.status === "active" &&
+        row.storageId,
+    );
+    if (match) return { runAttachmentId: match._id, reused: true as const };
+    const now = Date.now();
+    const uploadReceipt = crypto.randomUUID();
+    const runAttachmentId = await ctx.db.insert("spectraRunAttachments", {
+      runId: args.runId,
+      executionId: args.executionId,
+      ownerAccountId: actor._id,
+      originalFileId,
+      sha256,
+      status: "uploading",
+      uploadReceipt,
+      name,
+      mimeType,
+      size,
+      handling: args.handling,
+      ...(args.sourceMap !== undefined ? { sourceMap: args.sourceMap } : {}),
+      ...(args.provenance !== undefined ? { provenance: args.provenance } : {}),
+      updatedAt: now,
+      createdAt: now,
+    });
+    return {
+      runAttachmentId,
+      reused: false as const,
+      uploadReceipt,
+      uploadUrl: await ctx.storage.generateUploadUrl(),
+    };
+  },
+});
+
+export const getRunAttachmentUploadIntent = query({
+  args: {
+    runAttachmentId: v.id("spectraRunAttachments"),
+    uploadReceipt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const row = await ctx.db.get(args.runAttachmentId);
+    if (
+      !row ||
+      row.ownerAccountId !== actor._id ||
+      row.status !== "uploading" ||
+      row.uploadReceipt !== args.uploadReceipt
+    )
+      throw new Error("ATTACHMENT_UPLOAD_RECEIPT_INVALID");
+    return {
+      runAttachmentId: row._id,
+      bytes: row.size,
+      sha256: row.sha256,
+      mimeType: row.mimeType,
+      uploadReceipt: row.uploadReceipt,
+    };
+  },
+});
+
+export const listRunAttachments = query({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
+  handler: async (ctx, args) => {
+    const { actor, run } = await requireOwnedRun(ctx, args.runId);
+    if (run.executionId !== args.executionId)
+      throw new Error("This attachment set belongs to an older run attempt.");
+    const rows = await ctx.db
+      .query("spectraRunAttachments")
+      .withIndex("by_run_execution", (q) =>
+        q.eq("runId", args.runId).eq("executionId", args.executionId),
+      )
+      .collect();
+    return rows
+      .filter(
+        (row) =>
+          row.ownerAccountId === actor._id &&
+          row.status !== "quarantined" &&
+          row.status !== "uploading" &&
+          row.storageId,
+      )
+      .map((row) => ({
+        runAttachmentId: row._id,
+        originalFileId: row.originalFileId,
+        name: row.name,
+        mimeType: row.mimeType,
+        size: row.size,
+        handling: row.handling,
+        sourceMap: row.sourceMap,
+        provenance: row.provenance,
+        url: row.storageId ? ctx.storage.getUrl(row.storageId) : null,
+      }));
+  },
+});
+
+export const finalizeRunAttachmentUpload = internalMutation({
+  args: {
+    runAttachmentId: v.id("spectraRunAttachments"),
+    storageId: v.id("_storage"),
+    uploadReceipt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.runAttachmentId);
+    if (
+      !row ||
+      row.status !== "uploading" ||
+      row.uploadReceipt !== args.uploadReceipt
+    )
+      throw new Error("ATTACHMENT_UPLOAD_RECEIPT_INVALID");
+    const now = Date.now();
+    await ctx.db.patch(row._id, {
+      storageId: args.storageId,
+      status: "active",
+      updatedAt: now,
+    });
+    return {
+      runAttachmentId: row._id,
+      status: "active" as const,
+      committed: true as const,
+      storageId: args.storageId,
+    };
+  },
+});
+
+export const quarantineRunAttachmentUpload = internalMutation({
+  args: {
+    runAttachmentId: v.id("spectraRunAttachments"),
+    uploadReceipt: v.string(),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.get(args.runAttachmentId);
+    if (!row || row.status !== "uploading" || row.uploadReceipt !== args.uploadReceipt)
+      return { quarantined: false };
+    await ctx.db.patch(row._id, {
+      status: "quarantined",
+      quarantineReason: args.reason.slice(0, 1_000),
+      updatedAt: Date.now(),
+    });
+    return { quarantined: true };
   },
 });

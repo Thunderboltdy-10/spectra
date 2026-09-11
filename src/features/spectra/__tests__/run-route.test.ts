@@ -106,6 +106,7 @@ function setup(
   const requireActor = vi.fn().mockResolvedValue({ clerkId: "actor" });
   const convexQuery = vi.fn(async (name: string, args?: Record<string, unknown>) => {
     if (name.includes("spectraRuns:get")) return { run, cards: [card], operations };
+    if (name.includes("spectraRuns:listRunAttachments")) return [];
     if (name.includes("spectraArtifacts:get")) return savedArtifact;
     if (name.includes("spectraArtifacts:listAgentRoutingDescriptors")) return [];
     if (name.includes("spectraArtifacts:list")) return args?.blueprintKey === "agent" ? [] : catalogArtifacts;
@@ -146,6 +147,7 @@ function setup(
     throw new Error(`Unexpected query: ${name}`);
   });
   const convexMutation = vi.fn(async (name: string, args: Record<string, unknown>) => {
+    if (name.includes("spectraRuns:beginRunAttachmentUpload")) return { runAttachmentId: "run-attachment-real", reused: true };
     if (name.includes("spectraRuns:beginRun")) {
       run.sourceSurface = args.sourceSurface as "workspace" | "chat";
       run.workspaceId = args.workspaceId as string | undefined;

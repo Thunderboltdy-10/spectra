@@ -1,5 +1,5 @@
 import type { ArtifactTypeKey } from "../artifacts/types";
-import type { EvidenceSpan, SourceRecord, VerifiedCitation } from "./records/source-record";
+import { verifyCitation, type EvidenceSpan, type SourceRecord, type VerifiedCitation } from "./records/source-record";
 
 export type WorkSourceContract = {
   type: ArtifactTypeKey;
@@ -32,8 +32,17 @@ export function createPortableSourceBundle(input: PortableSourceBundle): Portabl
   const evidenceIds = new Set(input.evidence.filter((span) => sourceIds.has(span.sourceId)).map((span) => span.id));
   const citations = input.citations.map((citation) => {
     if (!sourceIds.has(citation.sourceId) || !citation.evidenceIds.length || !citation.evidenceIds.every((id) => evidenceIds.has(id))) throw new Error("SOURCE_BUNDLE_CONTAINS_UNVERIFIED_CITATION");
+    try {
+      verifyCitation(citation, input.sources, input.evidence);
+    } catch {
+      throw new Error("SOURCE_BUNDLE_CONTAINS_UNVERIFIED_CITATION");
+    }
     return citation;
   });
+  for (const span of input.evidence) {
+    if (!input.sources.some((source) => source.id === span.sourceId))
+      throw new Error("SOURCE_BUNDLE_EVIDENCE_SOURCE_MISSING");
+  }
   return { sources: [...input.sources], evidence: [...input.evidence], citations };
 }
 

@@ -9,6 +9,7 @@ export type AiTargetClass =
   | "sharing"
   | "local_file"
   | "managebac_sync"
+  | "managebac_selection"
   | "managebac_mapping"
   | "memory"
   | "credential"
@@ -105,6 +106,12 @@ export function decideAiAuthority(input: AiAuthorityInput): AiAuthorityResult {
         decision: "notify",
         reason:
           "ManageBac sync proceeds with visible status and mapping evidence.",
+      };
+    case "managebac_selection":
+      return {
+        decision: "confirm",
+        reason:
+          "Changing selected ManageBac classes changes which school data may enter personal planning.",
       };
     case "managebac_mapping":
       return {

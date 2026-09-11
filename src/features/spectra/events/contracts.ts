@@ -70,6 +70,11 @@ export type SpectraCommands = {
   "bridge.policy.change": {
     preset: BridgeTrustPreset;
   };
+  "managebac.selectClasses": {
+    recordIds: string[];
+    expectedRevision?: number;
+    retention?: "keep_in_spectra" | "archive_projection";
+  };
 };
 
 export type SpectraEvents = {

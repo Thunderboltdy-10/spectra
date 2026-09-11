@@ -105,6 +105,15 @@ const APP_SPECS: readonly AppSpec[] = [
     exposed: true,
   },
   {
+    id: "app.managebac.select-classes",
+    description:
+      "Choose the ManageBac classes whose verified details may enter the account's Spectra planning scope.",
+    risk: "confirm",
+    availability: "editable",
+    choreography: { target: "settings-control", region: "managebac" },
+    exposed: true,
+  },
+  {
     id: "app.managebac.mapping",
     description: "Change how normalized ManageBac records map into Spectra.",
     risk: "always-confirm",

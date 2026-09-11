@@ -142,6 +142,7 @@ describe("application command dispatcher", () => {
       spectraBus.handle("memory.write", () => { calls.push("memory"); }),
       spectraBus.handle("sharing.change", () => { calls.push("sharing"); }),
       spectraBus.handle("managebac.sync", () => { calls.push("managebac"); }),
+      spectraBus.handle("managebac.selectClasses", () => { calls.push("managebac-selection"); }),
     ];
     try {
       const dispatch = createApplicationCommandDispatcher({
@@ -155,7 +156,12 @@ describe("application command dispatcher", () => {
       await dispatch("app.memory.write", { action: "create", content: "Prefer concise answers" });
       await dispatch("app.sharing.change", { resourceType: "artifact", resourceId: "work-1", action: "revoke", grantId: "grant-1" });
       await dispatch("app.managebac.sync", { purpose: "classes" });
-      expect(calls).toEqual(["settings", "sync", "memory", "sharing", "managebac"]);
+      await dispatch("app.managebac.select-classes", {
+        recordIds: ["class-101"],
+        expectedRevision: 2,
+        retention: "keep_in_spectra",
+      });
+      expect(calls).toEqual(["settings", "sync", "memory", "sharing", "managebac", "managebac-selection"]);
     } finally {
       for (const remove of removers) remove();
     }

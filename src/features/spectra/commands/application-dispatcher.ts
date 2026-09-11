@@ -192,11 +192,23 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         return;
       }
       case "app.managebac.sync": {
-        const purpose = params.purpose === "class_resources" || params.purpose === "timetable" || params.purpose === "classes" || params.purpose === "cas"
+        const purpose = params.purpose === "class_resources" || params.purpose === "timetable" || params.purpose === "classes" || params.purpose === "cas" || params.purpose === "upcoming_deadlines"
           ? params.purpose
           : "upcoming_deadlines";
         const listeners = await spectraBus.commandAsync("managebac.sync", { purpose });
         if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: managebac.sync");
+        return;
+      }
+      case "app.managebac.select-classes": {
+        const recordIds = Array.isArray(params.recordIds)
+          ? params.recordIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 100)
+          : [];
+        const listeners = await spectraBus.commandAsync("managebac.selectClasses", {
+          recordIds,
+          ...(typeof params.expectedRevision === "number" ? { expectedRevision: params.expectedRevision } : {}),
+          ...(params.retention === "archive_projection" || params.retention === "keep_in_spectra" ? { retention: params.retention } : {}),
+        });
+        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: managebac.selectClasses");
         return;
       }
       case "app.settings.manage-account": {

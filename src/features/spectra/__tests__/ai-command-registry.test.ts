@@ -20,6 +20,7 @@ describe("N8 app command registry", () => {
         "app.memory.write",
         "app.sharing.change",
         "app.managebac.sync",
+        "app.managebac.select-classes",
         "app.managebac.mapping",
         "app.reference.insert",
         "app.bridge.pair",

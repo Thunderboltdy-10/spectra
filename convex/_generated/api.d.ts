@@ -17,6 +17,7 @@ import type * as artifactAssets from "../artifactAssets.js";
 import type * as artifactComments from "../artifactComments.js";
 import type * as artifactEmbeds from "../artifactEmbeds.js";
 import type * as artifactImports from "../artifactImports.js";
+import type * as artifactIntakeActions from "../artifactIntakeActions.js";
 import type * as artifactSnapshots from "../artifactSnapshots.js";
 import type * as artifactUserStates from "../artifactUserStates.js";
 import type * as audit from "../audit.js";
@@ -93,6 +94,7 @@ declare const fullApi: ApiFromModules<{
   artifactComments: typeof artifactComments;
   artifactEmbeds: typeof artifactEmbeds;
   artifactImports: typeof artifactImports;
+  artifactIntakeActions: typeof artifactIntakeActions;
   artifactSnapshots: typeof artifactSnapshots;
   artifactUserStates: typeof artifactUserStates;
   audit: typeof audit;

@@ -553,13 +553,6 @@ export type SpectraRun = {
   updatedAt: number;
 };
 
-export type SpectraActiveExecution = {
-  _id: string;
-  status: Extract<SpectraRun["status"], "queued" | "running" | "awaiting_confirmation" | "awaiting_resolution">;
-  phase?: SpectraRun["phase"];
-  updatedAt: number;
-};
-
 export type SpectraThread = {
   _id: string;
   title: string;
@@ -575,13 +568,13 @@ export type SpectraThread = {
   updatedAt: number;
   lastMessageAt?: number;
   lastRunId?: string;
-  contextWorkspaceIds?: string[];
-  contextArtifactIds?: string[];
-  readSchemaVersion?: number;
   contexts?: {
     workspaces?: Array<{ id: string; title: string }>;
     artifacts?: Array<{ id: string; title: string }>;
   };
+  contextWorkspaceIds?: string[];
+  contextArtifactIds?: string[];
+  readSchemaVersion?: number;
 };
 
 export type SpectraMessage = {
@@ -592,7 +585,6 @@ export type SpectraMessage = {
   runId?: string;
   metadata?: Record<string, unknown>;
   createdAt: number;
-  ordinal?: number;
 };
 
 export type SpectraThreadTrace = {
@@ -620,10 +612,10 @@ export type SpectraThreadDetail = {
   thread: SpectraThread;
   messages: SpectraMessage[];
   traces: SpectraThreadTrace[];
+  viewerName?: string;
   messagePage?: { hasOlder: boolean; olderBefore?: string };
   tracePage?: { limit: number };
-  activeExecution?: { run: SpectraActiveExecution } | null;
-  viewerName?: string;
+  activeExecution?: { run: SpectraRun } | null;
 };
 
 export type SpectraThreadPage = {
@@ -2497,6 +2489,7 @@ export type SpectraArtifactImport = {
     | "uploaded"
     | "parsing"
     | "preview"
+    | "awaiting_commit"
     | "imported"
     | "quarantined"
     | "failed";
@@ -2510,6 +2503,15 @@ export type SpectraArtifactImport = {
   downloadUrl?: string | null;
   createdAt: number;
   completedAt?: number;
+};
+
+export type SpectraArtifactCommitReceipt = {
+  kind: "artifact-import";
+  operationId: string | null;
+  importJobId: string;
+  artifactId: string;
+  versionId: string;
+  commitReceipt: string;
 };
 
 export async function beginArtifactImportOriginal(input: {
@@ -2554,7 +2556,17 @@ export async function completeArtifactImport(input: {
   quarantineReason?: string;
   importedContent?: unknown;
 }) {
-  return readJson<{ ok: true; jobId: string; status: string }>(
+  return readJson<{
+    ok: true;
+    jobId: string;
+    status: string;
+    versionId?: string;
+    reused?: boolean;
+    importJobId?: string;
+    artifactId?: string;
+    commitReceipt?: string | null;
+    receipt?: SpectraArtifactCommitReceipt | null;
+  }>(
     await fetch("/api/spectra/imports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2616,18 +2628,22 @@ export async function uploadArtifactAsset(input: {
   mediaType: string;
   sha256: string;
   blob: Blob;
+  uploadReceipt?: string;
 }) {
   const query = new URLSearchParams({
     artifactId: input.artifactId,
     path: input.path,
     name: input.name,
+    ...(input.uploadReceipt ? { uploadReceipt: input.uploadReceipt } : {}),
   });
-  return readJson<{ ok: true; assetId: string; reused: boolean }>(
+  return readJson<{ ok: true; assetId: string; reused: boolean; uploadReceipt?: string; status?: string; storageId?: string }>(
     await fetch(`/api/spectra/assets?${query.toString()}`, {
       method: "PUT",
       headers: {
         "Content-Type": input.mediaType,
         "X-Spectra-Sha256": input.sha256,
+        "X-Spectra-Bytes": String(input.blob.size),
+        ...(input.uploadReceipt ? { "X-Spectra-Upload-Receipt": input.uploadReceipt } : {}),
       },
       body: input.blob,
     }),

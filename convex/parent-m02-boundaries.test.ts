@@ -1,0 +1,45 @@
+import { describe, expect, it } from "vitest";
+import { convexTest } from "convex-test";
+import schema from "./schema";
+import { api } from "./_generated/api";
+const modules = import.meta.glob("./**/*.ts");
+const identity = { subject: "parent-m02", email: "parent-m02@example.test", emailVerified: true };
+async function seed(t: ReturnType<typeof convexTest>) {
+  return t.run(async ctx => {
+    const now = Date.now();
+    const schoolId = await ctx.db.insert("schools", { name: "Parent review", slug: crypto.randomUUID(), verifiedDomains: [], status: "active", timezone: "Europe/Madrid", policyVersion: 1, createdAt: now, updatedAt: now });
+    const accountId = await ctx.db.insert("accounts", { clerkId: identity.subject, email: identity.email, emailVerified: true, name: "Parent fixture", status: "active", createdAt: now, updatedAt: now });
+    await ctx.db.insert("schoolMemberships", { accountId, schoolId, role: "student", status: "active", joinedAt: now, createdAt: now, updatedAt: now });
+    const artifactId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: accountId, schoolId, blueprintKey: "document", schemaVersion: 2, title: "Disposable", content: { blocks: [] }, textIndex: "", tags: [], status: "active", createdAt: now, updatedAt: now });
+    return { accountId, schoolId, artifactId, now };
+  });
+}
+describe("Parent M02 boundary counterexamples", () => {
+  it("completes an ordinary small import through the actual backend mutation", async () => {
+    const t = convexTest(schema, modules); const f = await seed(t);
+    const jobId = await t.run(ctx => ctx.db.insert("artifactImportJobs", { artifactId: f.artifactId, ownerAccountId: f.accountId, schoolId: f.schoolId, typeKey: "document", format: "docx", originalAssetRef: "fixture", status: "uploaded", unsupportedFeatures: [], parserVersion: "fixture", createdAt: f.now, updatedAt: f.now }));
+    await expect(t.withIdentity(identity).mutation(api.artifactImports.complete, { jobId, typeKey: "document", status: "imported", fidelityReport: [], unsupportedFeatures: [], importedContent: { blocks: [{ id: "p1", type: "paragraph", text: "Small fixture" }] } })).resolves.toMatchObject({ status: "awaiting_commit" });
+  });
+  it("requires authorization and a matching receipt even after activation", async () => {
+    const t = convexTest(schema, modules); const f = await seed(t);
+    const args = await t.run(async ctx => {
+      const storageId = await ctx.storage.store(new Blob(["fixture"], { type: "text/plain" }));
+      const assetId = await ctx.db.insert("artifactAssets", { artifactId: f.artifactId, schoolId: f.schoolId, uploadedByAccountId: f.accountId, storageId, uploadReceipt: "owner-receipt", path: "fixture.txt", name: "Fixture", mediaType: "text/plain", bytes: 7, sha256: "a".repeat(64), status: "active", createdAt: f.now, updatedAt: f.now });
+      return { assetId, storageId, uploadReceipt: "incorrect-receipt" };
+    });
+    await expect(t.mutation(api.artifactAssets.finalizeUpload, args)).rejects.toThrow();
+  });
+  it("replays a committed import after the first commit advances currentVersionId", async () => {
+    const t = convexTest(schema, modules); const f = await seed(t);
+    const args = await t.run(async ctx => {
+      const before = { title: "Disposable", content: { blocks: [{ id: "p1", type: "paragraph", text: "Before" }] }, tags: [] };
+      const after = { title: "Disposable", content: { blocks: [{ id: "p1", type: "paragraph", text: "Imported" }] }, tags: [] };
+      const targetVersionId = await ctx.db.insert("spectraArtifactVersions", { artifactId: f.artifactId, ownerAccountId: f.accountId, schoolId: f.schoolId, source: "manual", snapshotStrategy: "normalized", after: before, createdAt: f.now });
+      await ctx.db.patch(f.artifactId, { currentVersionId: targetVersionId, content: before.content });
+      const importJobId = await ctx.db.insert("artifactImportJobs", { artifactId: f.artifactId, targetVersionId, ownerAccountId: f.accountId, schoolId: f.schoolId, typeKey: "document", format: "docx", originalAssetRef: "fixture", originalName: "Fixture.docx", status: "imported", importedContent: after.content, unsupportedFeatures: [], parserVersion: "fixture", createdAt: f.now, updatedAt: f.now });
+      return { artifactId: f.artifactId, importJobId };
+    });
+    const authed = t.withIdentity(identity); const first = await authed.mutation(api.changeGroups.commitImport, args);
+    await expect(authed.mutation(api.changeGroups.commitImport, args)).resolves.toMatchObject({ versionId: first.versionId, reused: true });
+  });
+});

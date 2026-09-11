@@ -215,10 +215,54 @@ export const xlsxCellProjectionSchema = z
     value: xlsxCellValueSchema,
     formula: z.string().optional(),
     formulaSupport: z.enum(["recognized", "cached-only"]).optional(),
+    /** A formula result is either a native cached value or deliberately absent. */
+    formulaCache: z.enum(["present", "absent"]).optional(),
     style: z.record(z.string(), z.unknown()).optional(),
     format: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
+
+export const xlsxTableProjectionSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    range: z.string(),
+    columns: z.array(z.string()),
+    headerRow: z.boolean(),
+    totalsRow: z.boolean(),
+    style: z.string().nullable().optional(),
+    filters: z.array(
+      z.object({ column: z.number().int().nonnegative(), allowedValues: z.array(xlsxCellValueSchema) }).strict(),
+    ).optional(),
+    sort: z.object({ column: z.number().int().nonnegative(), direction: z.enum(["asc", "desc"]) }).strict().optional(),
+    partName: z.string().optional(),
+  })
+  .strict();
+
+const xlsxChartSeriesProjectionSchema = z
+  .object({
+    name: z.string().optional(),
+    categories: z.string().optional(),
+    values: z.string().optional(),
+  })
+  .strict();
+
+export const xlsxChartProjectionSchema = z
+  .object({
+    id: z.string(),
+    type: z.enum(["column", "bar", "line", "area", "pie", "scatter", "combo", "histogram"]),
+    sourceRange: z.string(),
+    title: z.string(),
+    showLegend: z.boolean().optional(),
+    position: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).strict(),
+    series: z.array(xlsxChartSeriesProjectionSchema).optional(),
+    partName: z.string().optional(),
+    drawingPartName: z.string().optional(),
+    anchorId: z.string().optional(),
+  })
+  .strict();
+
+const xlsxNativeRuleSchema = z.record(z.string(), z.unknown());
 export const xlsxSheetProjectionSchema = z
   .object({
     id: z.string(),
@@ -227,6 +271,22 @@ export const xlsxSheetProjectionSchema = z
     merges: z.array(z.string()).readonly(),
     frozenRows: z.number().int().nonnegative().optional(),
     frozenColumns: z.number().int().nonnegative().optional(),
+    rowCount: z.number().int().positive().optional(),
+    columnCount: z.number().int().positive().optional(),
+    hiddenRows: z.array(z.number().int().nonnegative()).optional(),
+    hiddenColumns: z.array(z.number().int().nonnegative()).optional(),
+    columnWidths: z.record(z.string(), z.number()).optional(),
+    rowHeights: z.record(z.string(), z.number()).optional(),
+    hidden: z.boolean().optional(),
+    showGridlines: z.boolean().optional(),
+    showHeadings: z.boolean().optional(),
+    tabColor: z.string().optional(),
+    tables: z.array(xlsxTableProjectionSchema).optional(),
+    charts: z.array(xlsxChartProjectionSchema).optional(),
+    validations: z.array(xlsxNativeRuleSchema).optional(),
+    conditionalFormats: z.array(xlsxNativeRuleSchema).optional(),
+    /** The workbook relationship target, stable across worksheet reorder. */
+    partName: z.string().optional(),
   })
   .strict();
 export const xlsxProjectionSchema = z
@@ -235,6 +295,8 @@ export const xlsxProjectionSchema = z
     definedNames: z.array(
       z.object({ name: z.string(), ref: z.string(), sheet: z.string().optional() }).strict(),
     ),
+    calculationMode: z.enum(["automatic", "manual"]).optional(),
+    activeSheetId: z.string().optional(),
     nativeBinding: z
       .object({
         ...nativeBindingBase,
@@ -246,6 +308,8 @@ export const xlsxProjectionSchema = z
   })
   .strict();
 export type XlsxCellProjection = z.infer<typeof xlsxCellProjectionSchema>;
+export type XlsxTableProjection = z.infer<typeof xlsxTableProjectionSchema>;
+export type XlsxChartProjection = z.infer<typeof xlsxChartProjectionSchema>;
 export type XlsxSheetProjection = z.infer<typeof xlsxSheetProjectionSchema>;
 export type XlsxProjection = z.infer<typeof xlsxProjectionSchema>;
 
@@ -257,6 +321,18 @@ export const xlsxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("merge-cells"), sheetId: z.string(), range: z.string() }).strict(),
   z.object({ kind: z.literal("unmerge-cells"), sheetId: z.string(), range: z.string() }).strict(),
   z.object({ kind: z.literal("set-freeze-panes"), sheetId: z.string(), rows: z.number().int().nonnegative(), columns: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("add-sheet"), sheetId: z.string(), name: z.string(), index: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("remove-sheet"), sheetId: z.string() }).strict(),
+  z.object({ kind: z.literal("rename-sheet"), sheetId: z.string(), name: z.string() }).strict(),
+  z.object({ kind: z.literal("reorder-sheets"), order: z.array(z.string()) }).strict(),
+  z.object({ kind: z.literal("set-sheet-properties"), sheetId: z.string(), properties: z.record(z.string(), z.unknown()) }).strict(),
+  z.object({ kind: z.literal("mutate-sheet-axis"), sheetId: z.string(), axis: z.enum(["row", "column"]), at: z.number().int().nonnegative(), delta: z.number().int().min(-1).max(1) }).strict(),
+  z.object({ kind: z.literal("set-defined-names"), names: z.array(z.object({ name: z.string(), ref: z.string(), sheet: z.string().optional() }).strict()) }).strict(),
+  z.object({ kind: z.literal("set-workbook-properties"), calculationMode: z.enum(["automatic", "manual"]).optional(), activeSheetId: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("upsert-table"), sheetId: z.string(), table: xlsxTableProjectionSchema }).strict(),
+  z.object({ kind: z.literal("remove-table"), sheetId: z.string(), tableId: z.string() }).strict(),
+  z.object({ kind: z.literal("upsert-chart"), sheetId: z.string(), chart: xlsxChartProjectionSchema }).strict(),
+  z.object({ kind: z.literal("remove-chart"), sheetId: z.string(), chartId: z.string() }).strict(),
 ]);
 export const XLSX_LENS_DELTA_KINDS = xlsxOperationSchema.options.map(
   (operation) => operation.shape.kind.value,

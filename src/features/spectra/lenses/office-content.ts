@@ -15,6 +15,8 @@ import {
   type XlsxProjection,
 } from "./projection-contracts";
 import { xlsxFormulaSupport } from "./xlsx-formula-support";
+import { parseAddress, columnName } from "../sheets/model";
+import { quoteSheetPrefix } from "../sheets/formula-refs";
 
 function codedOfficeContentError(code: string, message: string) {
   return Object.assign(new Error(message), { code });
@@ -224,7 +226,7 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
   const date1904 = projection.nativeBinding.date1904 === true;
   return {
     workbook: {
-      calculationMode: "automatic",
+      calculationMode: projection.calculationMode ?? "automatic",
       locale: "en-US",
       namedRanges: Object.fromEntries(
         projection.definedNames.map((item) => [item.name, item.ref]),
@@ -259,13 +261,50 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
           ];
         }),
       ),
-      tables: [],
-      charts: [],
+      tables: (sheet.tables ?? []).map((table) => ({
+        id: table.id,
+        name: table.name,
+        range: table.range,
+        ...(table.style && /^TableStyle/i.test(table.style)
+          ? { style: /Medium|Light|Dark/i.test(table.style) ? "striped" as const : "plain" as const }
+          : {}),
+        ...(table.totalsRow ? { totalsRow: true } : {}),
+        filters: (table.filters ?? []).map((filter) => ({
+          column: filter.column,
+          allowedValues: filter.allowedValues.filter(
+            (value): value is string | number | boolean | null =>
+              typeof value === "string" ||
+              typeof value === "number" ||
+              typeof value === "boolean" ||
+              value === null,
+          ),
+        })),
+        ...(table.sort ? { sort: table.sort } : {}),
+      })),
+      charts: (sheet.charts ?? []).map((chart) => ({
+        id: chart.id,
+        type: chart.type,
+        sourceRange: canonicalChartRange(chart.sourceRange, sheet.name),
+        title: chart.title,
+        ...(chart.showLegend === false ? { showLegend: false } : {}),
+        position: chart.position,
+      })),
       mergedRanges: [...sheet.merges],
       frozenRows: sheet.frozenRows,
       frozenColumns: sheet.frozenColumns,
+      rowCount: sheet.rowCount,
+      columnCount: sheet.columnCount,
+      hiddenRows: sheet.hiddenRows ?? [],
+      hiddenColumns: sheet.hiddenColumns ?? [],
+      columnWidths: sheet.columnWidths ?? {},
+      rowHeights: sheet.rowHeights ?? {},
+      ...(sheet.hidden ? { hidden: true } : {}),
+      ...(sheet.showGridlines !== undefined ? { showGridlines: sheet.showGridlines } : {}),
+      ...(sheet.showHeadings !== undefined ? { showHeadings: sheet.showHeadings } : {}),
+      ...(sheet.tabColor ? { tabColor: sheet.tabColor } : {}),
+      conditionalFormats: (sheet.conditionalFormats ?? []) as unknown as SheetsContent["sheets"][number]["conditionalFormats"],
     })),
-    activeSheetId: projection.sheets[0]?.id ?? "",
+    activeSheetId: projection.activeSheetId ?? projection.sheets[0]?.id ?? "",
     nativeBinding: projection.nativeBinding,
   };
 }
@@ -537,6 +576,7 @@ export function xlsxProjectionFromContent(
     sheets: base.sheets.map((sheet) => {
       const next = byId.get(sheet.id);
       if (!next) return sheet;
+      const nextRecord = next as Record<string, unknown>;
       const previousByRef = new Map(
         sheet.cells.map((cell) => [cell.ref, cell]),
       );
@@ -569,24 +609,164 @@ export function xlsxProjectionFromContent(
             ? {
                 formula: nextFormula,
                 formulaSupport: xlsxFormulaSupport(nextFormula),
+                formulaCache:
+                  nextFormula === previous?.formula
+                    ? previous?.formulaCache
+                    : "absent" as const,
               }
             : {}),
           ...("format" in value &&
           !sheetFormatsEquivalent(value.format, previous?.format)
             ? { format: value.format ?? {} }
-            : {}),
+          : {}),
         };
       });
+      const tables = Array.isArray(nextRecord.tables)
+        ? nextRecord.tables.flatMap((candidate) => {
+            const table = record(candidate);
+            if (typeof table.name !== "string" || typeof table.range !== "string") return [];
+            const previous = (sheet.tables ?? []).find((item) => item.id === table.id || item.name === table.name);
+            return [{
+              id: typeof table.id === "string" ? table.id : previous?.id ?? `xlsx:table:${sheet.id}:${table.name}`,
+              name: table.name,
+              range: table.range,
+              columns: Array.isArray(table.columns)
+                ? table.columns.filter((entry): entry is string => typeof entry === "string")
+                : previous?.columns ?? [],
+              headerRow: table.headerRow !== false,
+              totalsRow: table.totalsRow === true,
+              ...(Object.prototype.hasOwnProperty.call(table, "style")
+                ? { style: table.style === null || table.style === "plain" ? null : typeof table.style === "string" && table.style.startsWith("TableStyle") ? table.style : table.style === "striped" ? "TableStyleMedium2" : table.style === "accent" ? "TableStyleMedium4" : previous?.style ?? null }
+                : previous?.style ? { style: previous.style } : {}),
+              filters: Array.isArray(table.filters) ? table.filters : previous?.filters ?? [],
+              ...(previous?.partName ? { partName: previous.partName } : {}),
+            }];
+          })
+        : sheet.tables ?? [];
+      const charts = Array.isArray(nextRecord.charts)
+        ? nextRecord.charts.flatMap((candidate, chartIndex) => {
+            const chart = record(candidate);
+            if (typeof chart.sourceRange !== "string") return [];
+            const previous = (sheet.charts ?? []).find((item) => item.id === chart.id)
+              ?? (sheet.charts ?? [])[chartIndex];
+            const position = record(chart.position);
+            return [{
+              ...(previous ?? { id: typeof chart.id === "string" ? chart.id : `xlsx:chart:${sheet.id}:new`, type: "line" as const, sourceRange: canonicalChartRange(chart.sourceRange, sheet.name), title: "Chart", position: { x: 0, y: 0, width: 760, height: 320 } }),
+              ...(!previous && typeof chart.id === "string" ? { id: chart.id } : {}),
+              ...(typeof chart.type === "string" ? { type: chart.type } : {}),
+              sourceRange: canonicalChartRange(chart.sourceRange, sheet.name),
+              ...(typeof chart.title === "string" ? { title: chart.title } : {}),
+              ...(typeof chart.showLegend === "boolean" ? { showLegend: chart.showLegend } : {}),
+              ...(Object.keys(position).length ? { position: { x: Number(position.x) || 0, y: Number(position.y) || 0, width: Number(position.width) || 760, height: Number(position.height) || 320 } } : {}),
+            }];
+          })
+        : sheet.charts ?? [];
       return {
         ...sheet,
+        name: typeof nextRecord.name === "string" ? nextRecord.name : sheet.name,
         cells,
         merges: next.mergedRanges ?? sheet.merges,
         frozenRows: next.frozenRows ?? sheet.frozenRows,
         frozenColumns: next.frozenColumns ?? sheet.frozenColumns,
+        ...(typeof nextRecord.rowCount === "number" ? { rowCount: nextRecord.rowCount } : {}),
+        ...(typeof nextRecord.columnCount === "number" ? { columnCount: nextRecord.columnCount } : {}),
+        ...(Array.isArray(nextRecord.hiddenRows) ? { hiddenRows: nextRecord.hiddenRows.filter((entry): entry is number => typeof entry === "number") } : {}),
+        ...(Array.isArray(nextRecord.hiddenColumns) ? { hiddenColumns: nextRecord.hiddenColumns.filter((entry): entry is number => typeof entry === "number") } : {}),
+        ...(nextRecord.columnWidths && typeof nextRecord.columnWidths === "object" ? { columnWidths: record(nextRecord.columnWidths) as Record<string, number> } : {}),
+        ...(nextRecord.rowHeights && typeof nextRecord.rowHeights === "object" ? { rowHeights: record(nextRecord.rowHeights) as Record<string, number> } : {}),
+        ...(Object.prototype.hasOwnProperty.call(nextRecord, "hidden")
+          ? (typeof nextRecord.hidden === "boolean" ? { hidden: nextRecord.hidden } : { hidden: undefined })
+          : {}),
+        ...(typeof nextRecord.showGridlines === "boolean" ? { showGridlines: nextRecord.showGridlines } : {}),
+        ...(typeof nextRecord.showHeadings === "boolean" ? { showHeadings: nextRecord.showHeadings } : {}),
+        ...(Object.prototype.hasOwnProperty.call(nextRecord, "tabColor")
+          ? (typeof nextRecord.tabColor === "string" ? { tabColor: nextRecord.tabColor } : { tabColor: undefined })
+          : {}),
+        tables,
+        charts,
       };
     }),
   });
-  return projection;
+  const projectedById = new Map(projection.sheets.map((sheet) => [sheet.id, sheet]));
+  const orderedSheets = raw.sheets.map((next, index) => {
+    const existing = projectedById.get(next.id);
+    if (existing) return existing;
+    const nextRecord = next as Record<string, unknown>;
+    const cells = Object.entries(next.cells).map(([rawRef, value]) => {
+      const ref = rawRef.toUpperCase();
+      const formula = typeof value.formula === "string" && value.formula ? value.formula.replace(/^=/, "") : undefined;
+      return {
+        id: `xlsx:new:${next.id}:${ref}`,
+        ref,
+        value: value.value === undefined ? null : value.value,
+        ...(formula ? { formula, formulaSupport: xlsxFormulaSupport(formula), formulaCache: "absent" as const } : {}),
+        ...(value.format ? { format: value.format } : {}),
+      };
+    });
+    return {
+      id: next.id,
+      name: typeof nextRecord.name === "string" ? nextRecord.name : `Sheet ${index + 1}`,
+      cells,
+      merges: next.mergedRanges ?? [],
+      frozenRows: next.frozenRows ?? 0,
+      frozenColumns: next.frozenColumns ?? 0,
+      ...(typeof nextRecord.rowCount === "number" ? { rowCount: nextRecord.rowCount } : {}),
+      ...(typeof nextRecord.columnCount === "number" ? { columnCount: nextRecord.columnCount } : {}),
+      tables: Array.isArray(nextRecord.tables) ? nextRecord.tables.flatMap((candidate) => {
+        const table = record(candidate);
+        if (typeof table.name !== "string" || typeof table.range !== "string") return [];
+        return [{ id: typeof table.id === "string" ? table.id : `xlsx:table:${next.id}:${table.name}`, name: table.name, range: table.range, columns: Array.isArray(table.columns) ? table.columns.filter((entry): entry is string => typeof entry === "string") : [], headerRow: table.headerRow !== false, totalsRow: table.totalsRow === true, ...(table.style === "striped" ? { style: "TableStyleMedium2" } : table.style === "accent" ? { style: "TableStyleMedium4" } : {}), filters: Array.isArray(table.filters) ? table.filters : [] }];
+      }) : [],
+      charts: Array.isArray(nextRecord.charts) ? nextRecord.charts.flatMap((candidate) => {
+        const chart = record(candidate);
+        if (typeof chart.sourceRange !== "string") return [];
+        const position = record(chart.position);
+        return [{ id: typeof chart.id === "string" ? chart.id : `xlsx:chart:${next.id}:new`, type: typeof chart.type === "string" ? chart.type : "line", sourceRange: canonicalChartRange(chart.sourceRange, typeof nextRecord.name === "string" ? nextRecord.name : `Sheet ${index + 1}`), title: typeof chart.title === "string" ? chart.title : "Chart", ...(typeof chart.showLegend === "boolean" ? { showLegend: chart.showLegend } : {}), position: { x: Number(position.x) || 0, y: Number(position.y) || 0, width: Number(position.width) || 760, height: Number(position.height) || 320 } }];
+      }) : [],
+    };
+  });
+  const rawRecord = raw as unknown as Record<string, unknown>;
+  const rawWorkbook = record(rawRecord.workbook);
+  return xlsxProjectionSchema.parse({
+    ...projection,
+    sheets: orderedSheets,
+    ...(rawWorkbook.calculationMode === "manual" ? { calculationMode: "manual" as const } : {}),
+    ...(typeof rawRecord.activeSheetId === "string" ? { activeSheetId: rawRecord.activeSheetId } : {}),
+  });
+}
+
+function canonicalChartRange(value: string, defaultSheet: string) {
+  const bang = value.lastIndexOf("!");
+  const rawSheet = bang >= 0
+    ? value.slice(0, bang).replace(/^'|'$/g, "").replaceAll("''", "'")
+    : defaultSheet;
+  const local = bang >= 0 ? value.slice(bang + 1) : value;
+  const absoluteLocal = local.split(":").map((part) => part.replace(/^\$?([A-Z]{1,3})\$?([1-9][0-9]*)$/i, (_match, column: string, row: string) => `$${column.toUpperCase()}$${row}`)).join(":");
+  return `${quoteSheetPrefix(rawSheet)}${absoluteLocal}`;
+}
+
+function axisEditPoint(
+  before: XlsxProjection["sheets"][number],
+  after: XlsxProjection["sheets"][number],
+  axis: "row" | "column",
+  delta: 1 | -1,
+) {
+  const nextCells = new Map(after.cells.map((cell) => [cell.ref, cell]));
+  const candidates: number[] = [];
+  for (const cell of before.cells) {
+    const coordinate = parseAddress(cell.ref);
+    if (!coordinate) continue;
+    const next = {
+      row: coordinate.row + (axis === "row" ? delta : 0),
+      column: coordinate.column + (axis === "column" ? delta : 0),
+    };
+    if (next.row < 0 || next.column < 0) continue;
+    const ref = `${columnName(next.column)}${next.row + 1}`;
+    const moved = nextCells.get(ref);
+    if (moved && JSON.stringify({ value: moved.value, formula: moved.formula }) === JSON.stringify({ value: cell.value, formula: cell.formula }))
+      candidates.push(axis === "row" ? coordinate.row : coordinate.column);
+  }
+  return candidates.length ? Math.min(...candidates) : 0;
 }
 
 export function xlsxOperationsBetween(
@@ -595,12 +775,53 @@ export function xlsxOperationsBetween(
 ): XlsxOperation[] {
   const beforeSheets = new Map(before.sheets.map((sheet) => [sheet.id, sheet]));
   const operations: XlsxOperation[] = [];
+  const afterIds = new Set(after.sheets.map((sheet) => sheet.id));
+  for (const sheet of before.sheets)
+    if (!afterIds.has(sheet.id)) operations.push({ kind: "remove-sheet", sheetId: sheet.id });
+  for (const [index, sheet] of after.sheets.entries())
+    if (!beforeSheets.has(sheet.id)) operations.push({ kind: "add-sheet", sheetId: sheet.id, name: sheet.name, index });
   for (const sheet of after.sheets) {
     const previous = beforeSheets.get(sheet.id);
-    if (!previous)
-      throw new Error(
-        "Adding worksheets to a mounted Excel file is not available in strict native mode yet.",
-      );
+    if (previous && previous.name !== sheet.name)
+      operations.push({ kind: "rename-sheet", sheetId: sheet.id, name: sheet.name });
+  }
+  const beforeOrder = before.sheets.map((sheet) => sheet.id).filter((id) => afterIds.has(id));
+  const afterOrder = after.sheets.map((sheet) => sheet.id);
+  if (JSON.stringify(beforeOrder) !== JSON.stringify(afterOrder))
+    operations.push({ kind: "reorder-sheets", order: afterOrder });
+  if (before.calculationMode !== after.calculationMode || before.activeSheetId !== after.activeSheetId)
+    operations.push({ kind: "set-workbook-properties", ...(after.calculationMode ? { calculationMode: after.calculationMode } : {}), ...(after.activeSheetId ? { activeSheetId: after.activeSheetId } : {}) });
+  for (const sheet of after.sheets) {
+    const previous = beforeSheets.get(sheet.id);
+    if (!previous) {
+      for (const cell of sheet.cells) {
+        operations.push(cell.formula ? { kind: "set-formula", sheetId: sheet.id, ref: cell.ref, formula: cell.formula } : { kind: "set-cell", sheetId: sheet.id, ref: cell.ref, value: cell.value });
+        if (cell.format) operations.push({ kind: "set-cell-format", sheetId: sheet.id, ref: cell.ref, format: { ...cell.format, __full: cell.format } });
+      }
+      for (const range of sheet.merges) operations.push({ kind: "merge-cells", sheetId: sheet.id, range });
+      if ((sheet.frozenRows ?? 0) || (sheet.frozenColumns ?? 0)) operations.push({ kind: "set-freeze-panes", sheetId: sheet.id, rows: sheet.frozenRows ?? 0, columns: sheet.frozenColumns ?? 0 });
+      const newProperties: Record<string, unknown> = {};
+      for (const key of ["rowCount", "columnCount", "hiddenRows", "hiddenColumns", "columnWidths", "rowHeights", "hidden", "showGridlines", "showHeadings", "tabColor"] as const) {
+        if (sheet[key] !== undefined) newProperties[key] = sheet[key];
+      }
+      if (Object.keys(newProperties).length) operations.push({ kind: "set-sheet-properties", sheetId: sheet.id, properties: newProperties });
+      for (const table of sheet.tables ?? []) operations.push({ kind: "upsert-table", sheetId: sheet.id, table });
+      for (const chart of sheet.charts ?? []) operations.push({ kind: "upsert-chart", sheetId: sheet.id, chart });
+      continue;
+    }
+    const rowDelta = (sheet.rowCount ?? previous.rowCount ?? 100) - (previous.rowCount ?? 100);
+    const columnDelta = (sheet.columnCount ?? previous.columnCount ?? 26) - (previous.columnCount ?? 26);
+    if (Math.abs(rowDelta) === 1)
+      operations.push({ kind: "mutate-sheet-axis", sheetId: sheet.id, axis: "row", at: axisEditPoint(previous, sheet, "row", rowDelta as 1 | -1), delta: rowDelta as 1 | -1 });
+    if (Math.abs(columnDelta) === 1)
+      operations.push({ kind: "mutate-sheet-axis", sheetId: sheet.id, axis: "column", at: axisEditPoint(previous, sheet, "column", columnDelta as 1 | -1), delta: columnDelta as 1 | -1 });
+    const propertyKeys = ["rowCount", "columnCount", "hiddenRows", "hiddenColumns", "columnWidths", "rowHeights", "hidden", "showGridlines", "showHeadings", "tabColor"] as const;
+    const properties: Record<string, unknown> = {};
+    for (const key of propertyKeys) {
+      if (JSON.stringify(previous[key]) === JSON.stringify(sheet[key])) continue;
+      properties[key] = sheet[key] ?? (Array.isArray(previous[key]) ? [] : key === "columnWidths" || key === "rowHeights" ? {} : key === "hidden" || key === "showGridlines" || key === "showHeadings" ? false : key === "tabColor" ? null : 0);
+    }
+    if (Object.keys(properties).length) operations.push({ kind: "set-sheet-properties", sheetId: sheet.id, properties });
     const oldCells = new Map(previous.cells.map((cell) => [cell.ref, cell]));
     for (const cell of sheet.cells) {
       const old = oldCells.get(cell.ref);
@@ -702,7 +923,23 @@ export function xlsxOperationsBetween(
         rows: nextFrozenRows,
         columns: nextFrozenColumns,
       });
+    const oldTables = new Map((previous.tables ?? []).map((table) => [table.id, table]));
+    const newTables = new Map((sheet.tables ?? []).map((table) => [table.id, table]));
+    for (const table of previous.tables ?? [])
+      if (!newTables.has(table.id)) operations.push({ kind: "remove-table", sheetId: sheet.id, tableId: table.id });
+    for (const table of sheet.tables ?? [])
+      if (!oldTables.has(table.id) || JSON.stringify(oldTables.get(table.id)) !== JSON.stringify(table))
+        operations.push({ kind: "upsert-table", sheetId: sheet.id, table });
+    const oldCharts = new Map((previous.charts ?? []).map((chart) => [chart.id, chart]));
+    const newCharts = new Map((sheet.charts ?? []).map((chart) => [chart.id, chart]));
+    for (const chart of previous.charts ?? [])
+      if (!newCharts.has(chart.id)) operations.push({ kind: "remove-chart", sheetId: sheet.id, chartId: chart.id });
+    for (const chart of sheet.charts ?? [])
+      if (!oldCharts.has(chart.id) || JSON.stringify(oldCharts.get(chart.id)) !== JSON.stringify(chart))
+        operations.push({ kind: "upsert-chart", sheetId: sheet.id, chart });
   }
+  if (JSON.stringify(before.definedNames) !== JSON.stringify(after.definedNames))
+    operations.push({ kind: "set-defined-names", names: after.definedNames });
   return operations;
 }
 

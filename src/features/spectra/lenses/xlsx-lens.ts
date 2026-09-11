@@ -26,6 +26,13 @@ import {
   xlsxFormulaSupport,
 } from "./xlsx-formula-support";
 import { invalidateXlsxFormulaCaches } from "./xlsx-cache-policy";
+import {
+  applyXlsxNativeOperation,
+  nativeSheetById,
+  projectXlsxSheet,
+  updateNativeChartCaches,
+  SML as NATIVE_SML,
+} from "./xlsx-native";
 
 const SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
@@ -223,6 +230,15 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
   for (const sheet of workbook.sheets()) {
     const doc = await workbook.office.xml(sheet.partName);
     const freeze = worksheetFreeze(doc.root);
+    const nativeExtras = await projectXlsxSheet(workbook, sheet);
+    const cellNodes = new Map(
+      descendants(doc.root)
+        .filter((node) => node.namespaceUri() === SML && node.localName === "c")
+        .flatMap((node) => {
+          const ref = node.getAttribute("r");
+          return ref ? [[ref.toUpperCase(), node] as const] : [];
+        }),
+    );
     const refs = descendants(doc.root)
       .filter((node) => node.namespaceUri() === SML && node.localName === "c")
       .map((node) => node.getAttribute("r"))
@@ -231,6 +247,11 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
       const info = sheet.getCellInfo(ref);
       const formula = sheet.getFormula(ref) ?? undefined;
       const support = formula ? formulaSupport(formula) : undefined;
+      const cellNode = cellNodes.get(ref.toUpperCase());
+      const formulaNode = cellNode?.find(SML, "f");
+      const formulaCache: "present" | "absent" | undefined = formulaNode
+        ? (cellNode?.find(SML, "v") || cellNode?.find(SML, "is") ? "present" : "absent")
+        : undefined;
       const id = `xlsx:${sheet.sheetId}:${ref.toUpperCase()}`;
       entries.push({
         regionId: id,
@@ -249,6 +270,7 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
             ? dateToSerial(info.value, date1904)
             : info.value,
         ...(formula ? { formula, formulaSupport: support } : {}),
+        ...(formula && formulaCache ? { formulaCache } : {}),
         style: sheet.getCellStyle(ref) as unknown as Record<string, unknown>,
         format: normalizedCellFormat(sheet.getCellStyle(ref) as unknown as Record<string, unknown>),
       };
@@ -260,24 +282,37 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
       merges: sheet.merges(),
       frozenRows: freeze.rows,
       frozenColumns: freeze.columns,
+      ...nativeExtras,
     });
   }
+  const workbookRoot = workbook._internal().workbook.doc.root;
+  const calculationMode = workbookRoot.find(NATIVE_SML, "calcPr")?.getAttribute("calcMode") === "manual"
+    ? "manual" as const
+    : "automatic" as const;
+  const activeTab = Number(workbookRoot.find(NATIVE_SML, "bookViews")?.find(NATIVE_SML, "workbookView")?.getAttribute("activeTab") ?? 0);
+  const activeSheetId = sheets[activeTab]?.id ?? sheets[0]?.id;
+  const hasTables = sheets.some((sheet) => Boolean(sheet.tables?.length));
+  const hasCharts = sheets.some((sheet) => Boolean(sheet.charts?.length));
+  const hasSheetStructure = sheets.length > 1 || sheets.some((sheet) => sheet.hidden === true);
+  const hasDimensions = sheets.some((sheet) => Object.keys(sheet.columnWidths ?? {}).length || Object.keys(sheet.rowHeights ?? {}).length || sheet.hiddenRows?.length || sheet.hiddenColumns?.length);
+  const hasViews = sheets.some((sheet) => sheet.showGridlines !== undefined || sheet.showHeadings !== undefined);
+  const definedNames = workbook.definedNames().map((item) => ({ name: item.name, ref: item.ref, ...(item.sheet ? { sheet: item.sheet } : {}) }));
   const regionEntries: ReadonlyArray<[string, LensFidelityEntry["class"], string?]> = [
     ["cells", "NATIVE"], ["formulas", "NATIVE"], ["styles", "NATIVE"],
     ["numberFormats", "NATIVE"], ["merges", "NATIVE"], ["freezePanes", "NATIVE"],
-    ["charts", "PRESERVED", "Excel chart parts are preserved, but Spectra does not author or rewrite them."],
-    ["tables", "PRESERVED", "Excel table definitions are preserved until their structure has a native writer."],
-    ["validation", "PRESERVED", "Excel data validation is preserved until its rules have a native writer."],
-    ["conditionalFormat", "PRESERVED", "Excel conditional formatting is preserved until its rules have a native writer."],
-    ["namedRanges", "PRESERVED", "Workbook names are preserved until their scope and references have a complete native writer."],
+    ["charts", hasCharts ? "NATIVE" : "PRESERVED", hasCharts ? undefined : "Excel chart parts are preserved until a chart is present for native editing."],
+    ["tables", hasTables ? "NATIVE" : "PRESERVED", hasTables ? undefined : "Excel table definitions are preserved until a table is present for native editing."],
+    ["validation", "PRESERVED", "Excel data validation is preserved; native rule authoring remains an Excel-owned operation."],
+    ["conditionalFormat", "PRESERVED", "Excel conditional formatting is preserved; native rule authoring remains an Excel-owned operation."],
+    ["namedRanges", definedNames.length ? "NATIVE" : "PRESERVED", definedNames.length ? undefined : "Workbook names are preserved until a native name is present."],
     ["pivotTables", "PRESERVED", "Pivot tables remain owned by Excel."],
     ["comments", "PRESERVED", "Cell comments and notes remain owned by Excel."],
-    ["sheetStructure", "PRESERVED", "Worksheet lifecycle and row or column topology changes are unavailable for mounted workbooks."],
-    ["dimensions", "PRESERVED", "Row and column size or visibility changes are unavailable for mounted workbooks."],
-    ["sheetViews", "PRESERVED", "Gridline and heading view settings are preserved as Excel wrote them."],
-    ["sheetMetadata", "PRESERVED", "Worksheet tab and visibility metadata are preserved as Excel wrote them."],
-    ["calculationSettings", "PRESERVED", "Workbook calculation settings remain owned by Excel."],
-    ["sortFilter", "PRESERVED", "Excel filter state is preserved until its native references and criteria have a complete writer."],
+    ["sheetStructure", hasSheetStructure ? "NATIVE" : "PRESERVED", hasSheetStructure ? undefined : "Worksheet lifecycle and row or column topology are native when the workbook exposes stable worksheet parts."],
+    ["dimensions", hasDimensions ? "NATIVE" : "PRESERVED", hasDimensions ? undefined : "Row and column dimensions remain unchanged until a dimension is present for native editing."],
+    ["sheetViews", hasViews ? "NATIVE" : "PRESERVED", hasViews ? undefined : "Gridline and heading view settings are preserved as Excel wrote them."],
+    ["sheetMetadata", hasSheetStructure ? "NATIVE" : "PRESERVED", hasSheetStructure ? undefined : "Worksheet tab and visibility metadata are preserved as Excel wrote them."],
+    ["calculationSettings", calculationMode === "manual" ? "NATIVE" : "PRESERVED", calculationMode === "manual" ? undefined : "Workbook calculation settings remain unchanged unless the editor explicitly changes them."],
+    ["sortFilter", hasTables ? "NATIVE" : "PRESERVED", hasTables ? undefined : "Excel filter state is preserved until a table is present for native editing."],
   ];
   for (const [feature, fidelityClass, reason] of regionEntries)
     entries.push({
@@ -289,7 +324,7 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
     });
   const partNames = workbook.office.package.parts().map((part) => part.name);
   const preserved: Array<[string, RegExp]> = [
-    ["pivot", /\/pivot/i], ["chart", /\/charts\//i],
+    ["pivot", /\/pivot/i],
     ["external-link", /\/externalLinks\//i], ["comment", /\/comments/i], ["sparkline", /sparkline/i],
     ["unknown-extension", /unknown|future|extension/i],
   ];
@@ -319,20 +354,36 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
     entries.push({ regionId: "xlsx:feature:macro", feature: "macro", class: "PRESERVED", partName, readOnly: true, reason: "Macros remain byte-identical and are never executed by Spectra." });
   }
   const fidelityMap: LensFidelityMap = { version: 1, profile, entries };
-  const definedNames = workbook.definedNames().map((item) => ({ name: item.name, ref: item.ref, ...(item.sheet ? { sheet: item.sheet } : {}) }));
   const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify({
+    calculationMode,
+    activeSheetId,
     sheets: sheets.map((sheet) => ({
       name: sheet.name,
       cells: sheet.cells.map(({ ref, value, formula, format }) => ({ ref, value, formula, format })),
       merges: sheet.merges,
       frozenRows: sheet.frozenRows,
       frozenColumns: sheet.frozenColumns,
+      rowCount: sheet.rowCount,
+      columnCount: sheet.columnCount,
+      hiddenRows: sheet.hiddenRows,
+      hiddenColumns: sheet.hiddenColumns,
+      columnWidths: sheet.columnWidths,
+      rowHeights: sheet.rowHeights,
+      hidden: sheet.hidden,
+      showGridlines: sheet.showGridlines,
+      showHeadings: sheet.showHeadings,
+      tables: sheet.tables,
+      charts: sheet.charts,
+      validations: sheet.validations,
+      conditionalFormats: sheet.conditionalFormats,
     })),
     definedNames,
   })));
   const projection = xlsxProjectionSchema.parse({
     sheets,
     definedNames,
+    calculationMode,
+    ...(activeSheetId ? { activeSheetId } : {}),
     nativeBinding: {
       version: 1,
       format: workbook.office.format.extension as XlsxProjection["nativeBinding"]["format"],
@@ -347,19 +398,40 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
 }
 
 function findSheet(workbook: Workbook, sheetId: string) {
-  const id = Number(sheetId.replace(/^xlsx:sheet:/, ""));
-  const sheet = workbook.sheets().find((candidate) => candidate.sheetId === id);
-  if (!sheet) throw new XlsxLensError("XLSX_SHEET_MISSING", "The target Excel sheet no longer exists.");
-  return sheet;
+  try { return nativeSheetById(workbook, sheetId); }
+  catch { throw new XlsxLensError("XLSX_SHEET_MISSING", "The target Excel sheet no longer exists."); }
 }
 
 async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: XlsxSemanticDelta) {
   const workbook = await Workbook.open(carry.safePayload ?? carry.payload);
   const operations = delta.kind === "ai-edit" ? delta.operations : [delta];
   let formulaCachesNeedInvalidation = false;
+  const aliases = new Map<string, number>();
   for (const operation of operations) {
-    const sheet = findSheet(workbook, operation.sheetId);
-    if ("ref" in operation) parseCellRef(operation.ref);
+    if ([
+      "add-sheet", "remove-sheet", "rename-sheet", "reorder-sheets",
+      "set-defined-names", "set-workbook-properties", "set-sheet-properties",
+      "mutate-sheet-axis", "upsert-table", "remove-table", "upsert-chart", "remove-chart",
+    ].includes(operation.kind)) {
+      try { await applyXlsxNativeOperation(workbook, operation, aliases); }
+      catch (error) { throw new XlsxLensError("XLSX_NATIVE_WRITE_REFUSED", error instanceof Error ? error.message : "The native Excel edit is not safe to apply."); }
+      if (["rename-sheet", "reorder-sheets", "set-defined-names", "mutate-sheet-axis"].includes(operation.kind)) formulaCachesNeedInvalidation = true;
+      continue;
+    }
+    if (!("sheetId" in operation))
+      throw new XlsxLensError("XLSX_NATIVE_WRITE_REFUSED", "The Excel operation does not target an editable cell.");
+    const sheet = (() => {
+      try { return aliases.has(operation.sheetId) ? nativeSheetById(workbook, operation.sheetId, aliases) : findSheet(workbook, operation.sheetId); }
+      catch { throw new XlsxLensError("XLSX_SHEET_MISSING", "The target Excel sheet no longer exists."); }
+    })();
+    if (!("ref" in operation)) {
+      if (operation.kind === "merge-cells") sheet.merge(operation.range);
+      else if (operation.kind === "unmerge-cells") sheet.unmerge(operation.range);
+      else if (operation.kind === "set-freeze-panes") await setWorksheetFreeze(workbook, sheet.partName, operation.rows, operation.columns);
+      else throw new XlsxLensError("XLSX_NATIVE_WRITE_REFUSED", "The Excel operation does not target an editable cell.");
+      continue;
+    }
+    parseCellRef(operation.ref);
     if (operation.kind === "set-formula") {
       sheet.setFormula(operation.ref, operation.formula);
       formulaCachesNeedInvalidation = true;
@@ -372,10 +444,6 @@ async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: Xlsx
       if (Object.keys(operation.format).length) sheet.setCellStyle(operation.ref, styleUpdate(operation.format));
       else await clearCellStyle(workbook, sheet.partName, operation.ref);
     }
-    else if (operation.kind === "merge-cells") sheet.merge(operation.range);
-    else if (operation.kind === "unmerge-cells") sheet.unmerge(operation.range);
-    else if (operation.kind === "set-freeze-panes")
-      await setWorksheetFreeze(workbook, sheet.partName, operation.rows, operation.columns);
     else {
       if (sheet.getFormula(operation.ref)) throw new XlsxLensError("XLSX_FORMULA_LITERALIZATION_BLOCKED", "A formula cell cannot be replaced by a literal through a value edit. Edit its formula text instead.");
       sheet.setCell(operation.ref, operation.value);
@@ -384,6 +452,8 @@ async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: Xlsx
   }
   if (formulaCachesNeedInvalidation)
     await invalidateXlsxFormulaCaches(workbook);
+  if (formulaCachesNeedInvalidation || operations.some((operation) => operation.kind === "upsert-chart" || operation.kind === "upsert-table"))
+    await updateNativeChartCaches(workbook);
   return workbook.save();
 }
 
@@ -415,7 +485,13 @@ export const xlsxLens: SpectraLens<XlsxProjection, XlsxSemanticDelta> = {
     const beforeSheets = new Map(before.projection.sheets.map((sheet) => [sheet.id, sheet]));
     for (const sheet of after.projection.sheets) {
       const old = beforeSheets.get(sheet.id);
-      if (!old) continue;
+      if (!old) {
+        changes.push({ regionId: sheet.id, kind: "insert", after: sheet });
+        continue;
+      }
+      beforeSheets.delete(sheet.id);
+      if (old.name !== sheet.name || old.partName !== sheet.partName)
+        changes.push({ regionId: `${sheet.id}:structure`, kind: "update", before: { name: old.name, partName: old.partName }, after: { name: sheet.name, partName: sheet.partName } });
       if (JSON.stringify(old.merges) !== JSON.stringify(sheet.merges))
         changes.push({ regionId: `${sheet.id}:merges`, kind: "update", before: old.merges, after: sheet.merges });
       if (old.frozenRows !== sheet.frozenRows || old.frozenColumns !== sheet.frozenColumns)
@@ -425,7 +501,25 @@ export const xlsxLens: SpectraLens<XlsxProjection, XlsxSemanticDelta> = {
           before: { rows: old.frozenRows, columns: old.frozenColumns },
           after: { rows: sheet.frozenRows, columns: sheet.frozenColumns },
         });
+      for (const [region, beforeValue, afterValue] of [
+        ["tables", old.tables, sheet.tables],
+        ["charts", old.charts, sheet.charts],
+        ["dimensions", {
+          rowCount: old.rowCount, columnCount: old.columnCount, hiddenRows: old.hiddenRows, hiddenColumns: old.hiddenColumns,
+          columnWidths: old.columnWidths, rowHeights: old.rowHeights,
+        }, {
+          rowCount: sheet.rowCount, columnCount: sheet.columnCount, hiddenRows: sheet.hiddenRows, hiddenColumns: sheet.hiddenColumns,
+          columnWidths: sheet.columnWidths, rowHeights: sheet.rowHeights,
+        }],
+        ["views", { hidden: old.hidden, showGridlines: old.showGridlines, showHeadings: old.showHeadings, tabColor: old.tabColor }, { hidden: sheet.hidden, showGridlines: sheet.showGridlines, showHeadings: sheet.showHeadings, tabColor: sheet.tabColor }],
+      ] as const) {
+        if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue))
+          changes.push({ regionId: `${sheet.id}:${region}`, kind: "update", before: beforeValue, after: afterValue });
+      }
     }
+    for (const sheet of beforeSheets.values()) changes.push({ regionId: sheet.id, kind: "delete", before: sheet });
+    if (JSON.stringify(before.projection.definedNames) !== JSON.stringify(after.projection.definedNames))
+      changes.push({ regionId: "xlsx:defined-names", kind: "update", before: before.projection.definedNames, after: after.projection.definedNames });
     const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`);
     const modeled = new Set([
       "/xl/workbook.xml",
@@ -443,12 +537,16 @@ export const xlsxLens: SpectraLens<XlsxProjection, XlsxSemanticDelta> = {
       { id: "edit-formula-text", available: true },
       { id: "recalculate-recognized-formula", available: true },
       { id: "recalculate-unrecognized-formula", available: false, reason: cachedOnly ? "Excel owns recalculation for formulas outside Spectra's recognized set; the cached value remains visible." : "No cached-only formulas are present." },
+      { id: "edit-native-chart", available: true, reason: "Supported Excel chart families remain native and editable; unsupported families are refused safely." },
+      { id: "edit-native-table", available: true, reason: "Table range, headers, totals, style, filter values, and sort state use native table parts." },
+      { id: "edit-sheet-structure", available: true, reason: "Worksheet lifecycle, order, visibility, names, dimensions, and views use stable native worksheet parts." },
       { id: "edit-pivot", available: false, reason: "Pivot tables are preserved for Excel and are not editable in Spectra yet." },
     ], aiOperations: ["set_cell", "set_formula"] };
   },
 };
 
 function workbookPart(sheet: XlsxSheetProjection, projection: XlsxProjection) {
+  if (sheet.partName) return sheet.partName;
   const index = projection.sheets.findIndex((candidate) => candidate.id === sheet.id);
   return `/xl/worksheets/sheet${index + 1}.xml`;
 }

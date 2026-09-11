@@ -11,6 +11,8 @@ const REFERENCE_HEAD = /[A-Za-z0-9_$.!]/;
 
 export type FormulaRefHit = {
   sheet: string | null;
+  /** Whether this endpoint carried its own worksheet prefix in the source. */
+  sheetExplicit?: boolean;
   /** Start column letters, empty for a whole-row ref. */
   letters: string;
   columnLock: string;
@@ -77,7 +79,8 @@ export function quoteSheetPrefix(name: string) {
 }
 
 function renderHit(hit: FormulaRefHit, sheet = hit.sheet) {
-  const prefix = sheet != null && sheet !== "" ? quoteSheetPrefix(sheet) : "";
+  const explicit = hit.sheetExplicit ?? (hit.sheet != null);
+  const prefix = explicit && sheet != null && sheet !== "" ? quoteSheetPrefix(sheet) : "";
   if (hit.wholeColumn)
     return `${prefix}${hit.columnLock}${hit.letters}:${hit.endColumnLock}${hit.endLetters}`;
   if (hit.wholeRow)
@@ -96,6 +99,10 @@ export function mapFormulaReferences(
   if (!formula) return formula;
   let out = "";
   let index = 0;
+  // An A1 range writes its worksheet prefix only once (`Sheet1!A1:B5`).
+  // Carry that prefix across the second endpoint so structural rewrites do
+  // not shift the first endpoint and silently leave the other one stale.
+  let rangeSheet: string | null = null;
   while (index < formula.length) {
     const char = formula[index]!;
     if (char === '"') {
@@ -111,13 +118,15 @@ export function mapFormulaReferences(
       continue;
     }
     const sheet = readSheetPrefix(formula, index);
+    const effectiveSheet: string | null = sheet?.name ?? (rangeSheet && formula[index - 1] === ":" ? rangeSheet : null);
     const refAt = sheet ? sheet.next : index;
     const rest = formula.slice(refAt);
 
     const colRange = /^(\$?)([A-Z]{1,3}):(\$?)([A-Z]{1,3})(?![A-Z0-9_(])/.exec(rest);
     if (colRange) {
       out += mapper({
-        sheet: sheet?.name ?? null,
+        sheet: effectiveSheet,
+        sheetExplicit: Boolean(sheet),
         letters: colRange[2]!,
         columnLock: colRange[1]!,
         digits: "",
@@ -130,13 +139,15 @@ export function mapFormulaReferences(
         wholeRow: false,
       });
       index = refAt + colRange[0].length;
+      rangeSheet = null;
       continue;
     }
 
     const rowRange = /^(\$?)([1-9][0-9]*):(\$?)([1-9][0-9]*)(?![0-9A-Z_(])/.exec(rest);
     if (rowRange) {
       out += mapper({
-        sheet: sheet?.name ?? null,
+        sheet: effectiveSheet,
+        sheetExplicit: Boolean(sheet),
         letters: "",
         columnLock: "",
         digits: rowRange[2]!,
@@ -149,6 +160,7 @@ export function mapFormulaReferences(
         wholeRow: true,
       });
       index = refAt + rowRange[0].length;
+      rangeSheet = null;
       continue;
     }
 
@@ -161,7 +173,8 @@ export function mapFormulaReferences(
         continue;
       }
       out += mapper({
-        sheet: sheet?.name ?? null,
+        sheet: effectiveSheet,
+        sheetExplicit: Boolean(sheet),
         letters: cell[2]!,
         columnLock: cell[1]!,
         digits: cell[4]!,
@@ -174,6 +187,7 @@ export function mapFormulaReferences(
         wholeRow: false,
       });
       index = refAt + cell[0].length;
+      rangeSheet = formula[index] === ":" ? (effectiveSheet ?? null) : null;
       continue;
     }
 

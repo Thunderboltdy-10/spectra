@@ -691,10 +691,12 @@ describe("permanent trash is atomic for mixed folder, thread and work", () => {
     expect(await db.get(folder._id)).toBeNull();
     expect(await db.get(work._id)).toBeNull();
     expect(await db.get(thread._id)).toBeNull();
-    expect(await db.get(artifactId)).toBeNull();
+    const deletedArtifact = await db.get(artifactId);
+    expect(deletedArtifact).toEqual(expect.objectContaining({ status: "deleted", deletionGeneration: 1 }));
+    expect(db.all("artifactDeletionJobs")).toHaveLength(1);
     expect(await db.get(threadId)).toBeNull();
     expect(db.all("spectraMessages")).toHaveLength(0);
-    expect(db.all("spectraArtifactSummaries")).toHaveLength(0);
+    expect(db.all("spectraArtifactSummaries")).toHaveLength(1);
     expect((await db.get(workspaceNode._id))?.childCount).toBe(0);
     expect(
       await listChildNodes(ctx, id(accountId), id(workspaceNode._id)),

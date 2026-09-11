@@ -57,6 +57,10 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("text"),
       text: z.string().max(2_000_000),
+      /** Resolved native run formatting; omitted when the run uses defaults. */
+      format: docxRunFormatSchema.optional(),
+      /** External hyperlink target for this run, when one is present. */
+      href: z.string().max(4_000).optional(),
     })
     .strict(),
   z
@@ -64,6 +68,8 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
       kind: z.literal("equation"),
       latex: z.string().max(2_000_000),
       display: z.enum(["inline", "block"]),
+      /** Exact OMML is carried only for native readback/export; no conversion is implied. */
+      ommlXml: z.string().max(4_000_000).optional(),
     })
     .strict(),
   z
@@ -75,6 +81,15 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
       widthEmu: z.number().int().positive().optional(),
       heightEmu: z.number().int().positive().optional(),
       placement: z.enum(["inline", "anchored"]),
+      crop: z
+        .object({
+          left: z.number().min(0).max(1).optional(),
+          top: z.number().min(0).max(1).optional(),
+          right: z.number().min(0).max(1).optional(),
+          bottom: z.number().min(0).max(1).optional(),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
 ]);
@@ -146,14 +161,35 @@ export type DocxRunFormat = z.infer<typeof docxRunFormatSchema>;
 export type DocxParagraphFormat = z.infer<typeof docxParagraphFormatSchema>;
 
 export const docxOperationSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("replace-paragraph"), regionId: z.string(), text: z.string() }).strict(),
-  z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string() }).strict(),
-  z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("replace-paragraph"), regionId: z.string(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
+  z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
+  z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("delete-region"), regionId: z.string() }).strict(),
   z.object({ kind: z.literal("reorder-regions"), order: z.array(z.string()) }).strict(),
   z.object({ kind: z.literal("apply-style"), regionId: z.string(), style: z.string() }).strict(),
   z.object({ kind: z.literal("format-runs"), regionId: z.string(), format: docxRunFormatSchema }).strict(),
   z.object({ kind: z.literal("format-paragraph"), regionId: z.string(), format: docxParagraphFormatSchema }).strict(),
+  z.object({ kind: z.literal("insert-table-row"), regionId: z.string(), row: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ kind: z.literal("delete-table-row"), regionId: z.string(), row: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("insert-table-column"), regionId: z.string(), column: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ kind: z.literal("delete-table-column"), regionId: z.string(), column: z.number().int().nonnegative() }).strict(),
+  z.object({
+    kind: z.literal("update-image"),
+    regionId: z.string(),
+    partName: z.string(),
+    altText: z.string().max(4_000).optional(),
+    widthEmu: z.number().int().positive().optional(),
+    heightEmu: z.number().int().positive().optional(),
+    crop: z
+      .object({
+        left: z.number().min(0).max(1).optional(),
+        top: z.number().min(0).max(1).optional(),
+        right: z.number().min(0).max(1).optional(),
+        bottom: z.number().min(0).max(1).optional(),
+      })
+      .strict()
+      .optional(),
+  }).strict(),
 ]);
 export const DOCX_LENS_DELTA_KINDS = docxOperationSchema.options.map(
   (operation) => operation.shape.kind.value,

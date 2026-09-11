@@ -1,6 +1,6 @@
 import { Document, Paragraph, type Run, WML_NAMESPACE } from "@ariadng/office/docx";
 import { comparePackages } from "@ariadng/office/preservation";
-import { XmlElement, XmlText } from "@ariadng/office/xml";
+import { serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
 import { firstNativeFontFamily } from "../office-fonts";
 import type {
@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import {
   docxProjectionSchema,
+  type DocxOperation,
   type DocxParagraphFormat,
   type DocxProjection,
   type DocxProjectionBlock,
@@ -33,6 +34,8 @@ const WORDPROCESSING_DRAWING_NAMESPACE =
   "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
 const OFFICE_RELATIONSHIP_NAMESPACE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const HYPERLINK_RELATIONSHIP =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 
 export type DocxNativePlaceholder = {
   id: string;
@@ -41,7 +44,7 @@ export type DocxNativePlaceholder = {
   feature: string;
 };
 
-export type { DocxParagraphFormat, DocxProjection, DocxProjectionBlock, DocxRunFormat, DocxSemanticDelta } from "./projection-contracts";
+export type { DocxParagraphFormat, DocxProjection, DocxProjectionBlock, DocxRichInline, DocxRunFormat, DocxSemanticDelta } from "./projection-contracts";
 
 export class DocxLensError extends Error {
   constructor(
@@ -87,6 +90,20 @@ function hasOmml(element: XmlElement) {
   return [element, ...descendants(element)].some(
     (candidate) => candidate.namespaceUri() === OMML_NAMESPACE,
   );
+}
+
+function serializedOmml(element: XmlElement) {
+  const clone = element.clone();
+  const namespaces = {
+    m: OMML_NAMESPACE,
+    w: WML_NAMESPACE,
+    r: OFFICE_RELATIONSHIP_NAMESPACE,
+    a: DRAWINGML_NAMESPACE,
+  } as const;
+  for (const [prefix, namespace] of Object.entries(namespaces))
+    if (!clone.resolvePrefix(prefix))
+      clone.setAttribute(`xmlns:${prefix}`, namespace);
+  return serializeNode(clone);
 }
 
 function bytesLookEncrypted(payload: Uint8Array) {
@@ -550,6 +567,21 @@ function nativeImageContent(
     properties?.getAttribute("title")?.trim() ||
     properties?.getAttribute("name")?.trim() ||
     "Word image";
+  const cropElement = descendants(drawing).find(
+    (candidate) =>
+      candidate.namespaceUri() === DRAWINGML_NAMESPACE &&
+      candidate.localName === "srcRect",
+  );
+  const crop = cropElement
+    ? Object.fromEntries(
+        (["l", "t", "r", "b"] as const).flatMap((axis) => {
+          const value = Number(cropElement.getAttribute(axis));
+          return Number.isFinite(value) && value >= 0 && value <= 100000
+            ? [[{ l: "left", t: "top", r: "right", b: "bottom" }[axis], value / 100000]]
+            : [];
+        }),
+      )
+    : undefined;
   return descendants(drawing).flatMap((candidate) => {
     if (
       candidate.namespaceUri() !== DRAWINGML_NAMESPACE ||
@@ -580,6 +612,7 @@ function nativeImageContent(
         ...(widthEmu ? { widthEmu } : {}),
         ...(heightEmu ? { heightEmu } : {}),
         placement,
+        ...(crop && Object.keys(crop).length ? { crop } : {}),
       },
     ];
   });
@@ -590,7 +623,12 @@ function mergeRichText(content: DocxRichInline[]) {
   for (const item of content) {
     if (!item.kind || (item.kind === "text" && !item.text)) continue;
     const previous = merged.at(-1);
-    if (item.kind === "text" && previous?.kind === "text") {
+    if (
+      item.kind === "text" &&
+      previous?.kind === "text" &&
+      JSON.stringify(item.format ?? null) === JSON.stringify(previous.format ?? null) &&
+      item.href === previous.href
+    ) {
       previous.text += item.text;
       continue;
     }
@@ -599,15 +637,61 @@ function mergeRichText(content: DocxRichInline[]) {
   return merged;
 }
 
-function projectedRichContent(document: Document, root: XmlElement) {
+function compactRunFormat(run: Run): DocxRunFormat | undefined {
+  const resolved = run.format();
+  const format: DocxRunFormat = {
+    ...(resolved.bold ? { bold: true } : {}),
+    ...(resolved.italic ? { italic: true } : {}),
+    ...(resolved.strike ? { strike: true } : {}),
+    ...(resolved.underline !== null ? { underline: true } : {}),
+    ...(resolved.font ? { fontFamily: resolved.font } : {}),
+    ...(resolved.sizePt ? { fontSizePoints: resolved.sizePt } : {}),
+    ...(resolved.color ? { color: resolved.color } : {}),
+    ...(resolved.highlight ? { highlight: resolved.highlight } : {}),
+  };
+  const shading = run.element
+    .find(WML_NAMESPACE, "rPr")
+    ?.find(WML_NAMESPACE, "shd")
+    ?.getAttributeNs(WML_NAMESPACE, "fill");
+  if (shading && shading.toLowerCase() !== "auto") format.shading = shading.toUpperCase();
+  return Object.keys(format).length ? format : undefined;
+}
+
+function hyperlinkHref(document: Document, element: XmlElement) {
+  const relationshipId = element.getAttributeNs(
+    OFFICE_RELATIONSHIP_NAMESPACE,
+    "id",
+  );
+  if (!relationshipId) return undefined;
+  const relationship = document.office.mainPart.relationships().byId(relationshipId);
+  if (!relationship || relationship.type !== HYPERLINK_RELATIONSHIP || relationship.targetMode !== "External")
+    return undefined;
+  return /^(?:https?:|mailto:)/i.test(relationship.target)
+    ? relationship.target
+    : undefined;
+}
+
+function projectedRichContent(
+  document: Document,
+  root: XmlElement,
+  paragraph?: Paragraph,
+) {
   const content: DocxRichInline[] = [];
-  const visit = (element: XmlElement) => {
+  const formats = new Map(
+    (paragraph?.runs() ?? []).map((run) => [run.element, compactRunFormat(run)] as const),
+  );
+  const visit = (
+    element: XmlElement,
+    href?: string,
+    format?: DocxRunFormat,
+  ) => {
     const namespace = element.namespaceUri();
     if (namespace === OMML_NAMESPACE && element.localName === "oMathPara") {
       content.push({
         kind: "equation",
         latex: ommlToLatex(element),
         display: "block",
+        ommlXml: serializedOmml(element),
       });
       return;
     }
@@ -616,20 +700,36 @@ function projectedRichContent(document: Document, root: XmlElement) {
         kind: "equation",
         latex: ommlToLatex(element),
         display: "inline",
+        ommlXml: serializedOmml(element),
       });
       return;
     }
     if (namespace === WML_NAMESPACE) {
       if (element.localName === "t") {
-        content.push({ kind: "text", text: element.text() });
+        content.push({
+          kind: "text",
+          text: element.text(),
+          ...(format ? { format } : {}),
+          ...(href ? { href } : {}),
+        });
         return;
       }
       if (element.localName === "tab") {
-        content.push({ kind: "text", text: "\t" });
+        content.push({
+          kind: "text",
+          text: "\t",
+          ...(format ? { format } : {}),
+          ...(href ? { href } : {}),
+        });
         return;
       }
       if (["br", "cr"].includes(element.localName)) {
-        content.push({ kind: "text", text: "\n" });
+        content.push({
+          kind: "text",
+          text: "\n",
+          ...(format ? { format } : {}),
+          ...(href ? { href } : {}),
+        });
         return;
       }
       if (element.localName === "noBreakHyphen") {
@@ -649,6 +749,16 @@ function projectedRichContent(document: Document, root: XmlElement) {
       if (["pict", "object", "txbxContent"].includes(element.localName))
         return;
     }
+    if (element.namespaceUri() === WML_NAMESPACE && element.localName === "hyperlink") {
+      const nextHref = hyperlinkHref(document, element);
+      element.elements().forEach((child) => visit(child, nextHref ?? href, format));
+      return;
+    }
+    if (element.namespaceUri() === WML_NAMESPACE && element.localName === "r") {
+      const nextFormat = formats.get(element);
+      element.elements().forEach((child) => visit(child, href, nextFormat));
+      return;
+    }
     if (element.localName === "AlternateContent") {
       const branch =
         element.elements().find((child) => child.localName === "Choice") ??
@@ -656,9 +766,9 @@ function projectedRichContent(document: Document, root: XmlElement) {
       if (branch) visit(branch);
       return;
     }
-    element.elements().forEach(visit);
+    element.elements().forEach((child) => visit(child, href, format));
   };
-  root.elements().forEach(visit);
+  root.elements().forEach((child) => visit(child));
   return mergeRichText(content);
 }
 
@@ -676,6 +786,15 @@ function hasRichObject(content: readonly DocxRichInline[]) {
   return content.some((item) => item.kind !== "text");
 }
 
+function hasRichSemantics(content: readonly DocxRichInline[]) {
+  return content.some(
+    (item) =>
+      item.kind !== "text" ||
+      Boolean(item.href) ||
+      Boolean(item.format && Object.keys(item.format).length),
+  );
+}
+
 function projectedCellRichContent(
   document: Document,
   cell: NativeTableCell,
@@ -683,10 +802,13 @@ function projectedCellRichContent(
   const paragraphs = cell.paragraphElements();
   if (!paragraphs.length) return projectedRichContent(document, cell.element);
   return mergeRichText(
-    paragraphs.flatMap((paragraph, index) => [
-      ...(index ? [{ kind: "text" as const, text: "\n" }] : []),
-      ...projectedRichContent(document, paragraph),
-    ]),
+    paragraphs.flatMap((paragraph, index) => {
+      const wrapped = Paragraph._wrap(document, paragraph);
+      return [
+        ...(index ? [{ kind: "text" as const, text: "\n" }] : []),
+        ...projectedRichContent(document, paragraph, wrapped),
+      ];
+    }),
   );
 }
 
@@ -863,6 +985,7 @@ async function insertParagraph(
       ? { style: await resolveParagraphStyleId(document, operation.style) }
       : {}),
   });
+  if (operation.inlineContent) replaceParagraphRich(document, paragraph, operation.inlineContent);
   const paraId = insertedParagraphId(operation.regionId);
   paragraph.element.setAttributeNs(W14_NAMESPACE, "paraId", paraId);
   const afterRegionId = operation.afterRegionId;
@@ -1200,6 +1323,135 @@ async function replaceTableCellText(
   if (paragraphs.length > 1) document._markMainDirty();
 }
 
+function replaceTableCellRich(
+  document: Document,
+  cell: NativeTableCell,
+  inlineContent: readonly DocxRichInline[],
+) {
+  const paragraphElements = cell.paragraphElements();
+  if (!paragraphElements.length)
+    throw new DocxLensError(
+      "DOCX_TABLE_WRITE_UNSUPPORTED",
+      "This Word table cell has no writable paragraph container.",
+    );
+  const paragraph = Paragraph._wrap(document, paragraphElements[0]!);
+  replaceParagraphRich(document, paragraph, inlineContent);
+  for (const extra of paragraphElements.slice(1)) extra.parent?.removeChild(extra);
+  if (paragraphElements.length > 1) document._markMainDirty();
+}
+
+function tableRows(table: NativeTable) {
+  return shallowWmlChildren(table.element, "tr");
+}
+
+function tableCells(row: XmlElement) {
+  return shallowWmlChildren(row, "tc");
+}
+
+function emptyTableCell(template?: XmlElement) {
+  const cell = new XmlElement("tc", "w");
+  const properties = template?.find(WML_NAMESPACE, "tcPr");
+  if (properties) cell.appendChild(properties.clone());
+  const paragraph = new XmlElement("p", "w");
+  const run = new XmlElement("r", "w");
+  const text = new XmlElement("t", "w");
+  text.appendChild(new XmlText(""));
+  run.appendChild(text);
+  paragraph.appendChild(run);
+  cell.appendChild(paragraph);
+  return cell;
+}
+
+function insertTableRow(document: Document, table: NativeTable, rowIndex?: number) {
+  const rows = tableRows(table);
+  if (!rows.length) throw new DocxLensError("DOCX_TABLE_WRITE_UNSUPPORTED", "The Word table has no row template.");
+  const index = rowIndex === undefined ? rows.length : Math.min(rowIndex, rows.length);
+  const template = rows[Math.max(0, index - 1)] ?? rows[0]!;
+  const row = new XmlElement("tr", "w");
+  for (const cell of tableCells(template)) row.appendChild(emptyTableCell(cell));
+  table.element.insertBefore(row, rows[index] ?? null);
+  document._markMainDirty();
+}
+
+function deleteTableRow(document: Document, table: NativeTable, rowIndex: number) {
+  const rows = tableRows(table);
+  if (rows.length <= 1 || !rows[rowIndex])
+    throw new DocxLensError("DOCX_TABLE_WRITE_UNSUPPORTED", "A Word table must keep at least one row.");
+  table.element.removeChild(rows[rowIndex]!);
+  document._markMainDirty();
+}
+
+function insertTableColumn(document: Document, table: NativeTable, columnIndex?: number) {
+  const index = columnIndex === undefined ? table.columnCount() : Math.min(columnIndex, table.columnCount());
+  for (const row of tableRows(table)) {
+    const cells = tableCells(row);
+    const template = cells[Math.max(0, Math.min(index - 1, cells.length - 1))];
+    row.insertBefore(emptyTableCell(template), cells[index] ?? null);
+  }
+  document._markMainDirty();
+}
+
+function deleteTableColumn(document: Document, table: NativeTable, columnIndex: number) {
+  const rows = tableRows(table);
+  if (!rows.length || table.columnCount() <= 1)
+    throw new DocxLensError("DOCX_TABLE_WRITE_UNSUPPORTED", "A Word table must keep at least one column.");
+  for (const row of rows) {
+    const cells = tableCells(row);
+    if (cells[columnIndex]) row.removeChild(cells[columnIndex]!);
+  }
+  document._markMainDirty();
+}
+
+function updateImage(
+  document: Document,
+  region: NativeRegion,
+  operation: Extract<DocxSemanticDelta, { kind: "update-image" }>,
+) {
+  const drawings = descendants(region.element).filter(
+    (element) => element.namespaceUri() === WML_NAMESPACE && element.localName === "drawing",
+  );
+  const drawing = drawings.find((candidate) =>
+    nativeImageContent(document, candidate).some((image) => image.kind === "image" && image.partName === operation.partName),
+  );
+  if (!drawing)
+    throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word image ${operation.partName} no longer exists.`);
+  const docPr = descendants(drawing).find(
+    (candidate) => candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE && candidate.localName === "docPr",
+  );
+  const extent = descendants(drawing).find(
+    (candidate) => candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE && candidate.localName === "extent",
+  );
+  if (operation.altText !== undefined && docPr) docPr.setAttribute("descr", operation.altText);
+  if (operation.widthEmu !== undefined && extent) extent.setAttribute("cx", String(operation.widthEmu));
+  if (operation.heightEmu !== undefined && extent) extent.setAttribute("cy", String(operation.heightEmu));
+  if (operation.crop) {
+    let srcRect = descendants(drawing).find(
+      (candidate) => candidate.namespaceUri() === DRAWINGML_NAMESPACE && candidate.localName === "srcRect",
+    );
+    if (!srcRect) {
+      const blip = descendants(drawing).find(
+        (candidate) => candidate.namespaceUri() === DRAWINGML_NAMESPACE && candidate.localName === "blip",
+      );
+      const blipFill = blip?.parent;
+      if (!blipFill) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The Word image crop cannot be represented safely.");
+      srcRect = new XmlElement("srcRect", "a");
+      blipFill.insertBefore(srcRect, blip);
+    }
+    const cropAxes = [
+      ["l", "left"],
+      ["t", "top"],
+      ["r", "right"],
+      ["b", "bottom"],
+    ] as const;
+    for (const [axis, key] of cropAxes) {
+      const value = operation.crop[key];
+      if (value === undefined) srcRect.removeAttribute(axis);
+      else srcRect.setAttribute(axis, String(Math.round(value * 100000)));
+    }
+  }
+  document._markMainDirty();
+}
+
 /**
  * Word's `w:pPr` and `w:rPr` children are a *sequence*, not a set: a property
  * written in the wrong position produces a document.xml that Word repairs on
@@ -1313,91 +1565,169 @@ function paragraphProperties(paragraph: Paragraph) {
  * run property when every run agrees on it, and a write only happens when the
  * writer changed that agreed value.
  */
-function applyRunFormat(document: Document, paragraph: Paragraph, format: DocxRunFormat) {
-  // Character formatting reaches the text runs only. A run holding a picture or
-  // a text box is skipped rather than styled: the anchor is not text a person
-  // selected, and its `w:rPr` carries positioning Word wrote for the drawing.
-  const runs = paragraph.runs().filter(writableRun);
-  if (!runs.length) return;
-  for (const run of runs) {
-    const properties = runProperties(run.element);
-    if (format.bold !== undefined) setToggle(properties, "b", format.bold);
-    if (format.italic !== undefined) setToggle(properties, "i", format.italic);
-    if (format.strike !== undefined) setToggle(properties, "strike", format.strike);
-    if (format.underline !== undefined) {
-      orderedChild(properties, "u", RPR_ORDER).setAttributeNs(
-        WML_NAMESPACE,
-        "val",
-        format.underline ? "single" : "none",
-      );
-    }
-    if (format.fontFamily !== undefined) {
-      if (!format.fontFamily) dropChild(properties, "rFonts");
-      else {
-        const fonts = orderedChild(properties, "rFonts", RPR_ORDER);
-        const name = safeFontName(format.fontFamily);
-        for (const slot of ["ascii", "hAnsi", "eastAsia", "cs"])
-          fonts.setAttributeNs(WML_NAMESPACE, slot, name);
-        // A literal name and a theme reference in the same element would let
-        // Word prefer the theme font and silently ignore the choice.
-        for (const slot of [
-          "asciiTheme",
-          "hAnsiTheme",
-          "eastAsiaTheme",
-          "csTheme",
-          // Some producers emit this incorrectly cased spelling. Remove it
-          // too so it cannot remain as a conflicting extension attribute.
-          "cstheme",
-        ])
-          fonts.removeAttributeNs(WML_NAMESPACE, slot);
-      }
-    }
-    if (format.fontSizePoints !== undefined) {
-      if (!format.fontSizePoints) {
-        dropChild(properties, "sz");
-        dropChild(properties, "szCs");
-      } else {
-        const halfPoints = String(
-          Math.round(Math.min(400, Math.max(4, format.fontSizePoints)) * 2),
-        );
-        orderedChild(properties, "sz", RPR_ORDER).setAttributeNs(WML_NAMESPACE, "val", halfPoints);
-        orderedChild(properties, "szCs", RPR_ORDER).setAttributeNs(WML_NAMESPACE, "val", halfPoints);
-      }
-    }
-    if (format.color !== undefined) {
-      if (!format.color) dropChild(properties, "color");
-      else {
-        const color = orderedChild(properties, "color", RPR_ORDER);
-        color.setAttributeNs(WML_NAMESPACE, "val", safeHexColor(format.color));
-        color.removeAttributeNs(WML_NAMESPACE, "themeColor");
-      }
-    }
-    if (format.highlight !== undefined) {
-      if (!format.highlight || format.highlight === "none")
-        dropChild(properties, "highlight");
-      else {
-        if (!WORD_HIGHLIGHTS.has(format.highlight))
-          throw new DocxLensError(
-            "DOCX_UNSUPPORTED_EDIT",
-            "Word highlights are a fixed set of named colours; this one has no Word equivalent.",
-          );
-        orderedChild(properties, "highlight", RPR_ORDER).setAttributeNs(
-          WML_NAMESPACE,
-          "val",
-          format.highlight,
-        );
-      }
-    }
-    if (format.shading !== undefined) {
-      if (!format.shading) dropChild(properties, "shd");
-      else {
-        const shading = orderedChild(properties, "shd", RPR_ORDER);
-        shading.setAttributeNs(WML_NAMESPACE, "val", "clear");
-        shading.setAttributeNs(WML_NAMESPACE, "color", "auto");
-        shading.setAttributeNs(WML_NAMESPACE, "fill", safeHexColor(format.shading));
-      }
+function applyRunFormatToElement(
+  document: Document,
+  run: XmlElement,
+  format: DocxRunFormat,
+) {
+  const properties = runProperties(run);
+  if (format.bold !== undefined) setToggle(properties, "b", format.bold);
+  if (format.italic !== undefined) setToggle(properties, "i", format.italic);
+  if (format.strike !== undefined) setToggle(properties, "strike", format.strike);
+  if (format.underline !== undefined) {
+    orderedChild(properties, "u", RPR_ORDER).setAttributeNs(
+      WML_NAMESPACE,
+      "val",
+      format.underline ? "single" : "none",
+    );
+  }
+  if (format.fontFamily !== undefined) {
+    if (!format.fontFamily) dropChild(properties, "rFonts");
+    else {
+      const fonts = orderedChild(properties, "rFonts", RPR_ORDER);
+      const name = safeFontName(format.fontFamily);
+      for (const slot of ["ascii", "hAnsi", "eastAsia", "cs"])
+        fonts.setAttributeNs(WML_NAMESPACE, slot, name);
+      for (const slot of [
+        "asciiTheme",
+        "hAnsiTheme",
+        "eastAsiaTheme",
+        "csTheme",
+        "cstheme",
+      ])
+        fonts.removeAttributeNs(WML_NAMESPACE, slot);
     }
   }
+  if (format.fontSizePoints !== undefined) {
+    if (!format.fontSizePoints) {
+      dropChild(properties, "sz");
+      dropChild(properties, "szCs");
+    } else {
+      const halfPoints = String(
+        Math.round(Math.min(400, Math.max(4, format.fontSizePoints)) * 2),
+      );
+      orderedChild(properties, "sz", RPR_ORDER).setAttributeNs(WML_NAMESPACE, "val", halfPoints);
+      orderedChild(properties, "szCs", RPR_ORDER).setAttributeNs(WML_NAMESPACE, "val", halfPoints);
+    }
+  }
+  if (format.color !== undefined) {
+    if (!format.color) dropChild(properties, "color");
+    else {
+      const color = orderedChild(properties, "color", RPR_ORDER);
+      color.setAttributeNs(WML_NAMESPACE, "val", safeHexColor(format.color));
+      color.removeAttributeNs(WML_NAMESPACE, "themeColor");
+    }
+  }
+  if (format.highlight !== undefined) {
+    if (!format.highlight || format.highlight === "none") dropChild(properties, "highlight");
+    else {
+      if (!WORD_HIGHLIGHTS.has(format.highlight))
+        throw new DocxLensError(
+          "DOCX_UNSUPPORTED_EDIT",
+          "Word highlights are a fixed set of named colours; this one has no Word equivalent.",
+        );
+      orderedChild(properties, "highlight", RPR_ORDER).setAttributeNs(WML_NAMESPACE, "val", format.highlight);
+    }
+  }
+  if (format.shading !== undefined) {
+    if (!format.shading) dropChild(properties, "shd");
+    else {
+      const shading = orderedChild(properties, "shd", RPR_ORDER);
+      shading.setAttributeNs(WML_NAMESPACE, "val", "clear");
+      shading.setAttributeNs(WML_NAMESPACE, "color", "auto");
+      shading.setAttributeNs(WML_NAMESPACE, "fill", safeHexColor(format.shading));
+    }
+  }
+  document._markMainDirty();
+}
+
+function safeHyperlink(value: string) {
+  if (!/^(?:https?:|mailto:)/i.test(value) || /[\u0000-\u001f\u007f]/u.test(value))
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "Only http(s) and mailto hyperlinks can be written into a native Word file.",
+    );
+  return value;
+}
+
+function hyperlinkRelationship(document: Document, href: string) {
+  const target = safeHyperlink(href);
+  const existing = document.office.mainPart
+    .relationships()
+    .all()
+    .find(
+      (relationship) =>
+        relationship.type === HYPERLINK_RELATIONSHIP &&
+        relationship.targetMode === "External" &&
+        relationship.target === target,
+    );
+  return (
+    existing ??
+    document.office.mainPart.relationships().add({
+      type: HYPERLINK_RELATIONSHIP,
+      target,
+      targetMode: "External",
+    })
+  ).id;
+}
+
+function appendRichText(
+  document: Document,
+  parent: XmlElement,
+  text: string,
+  format?: DocxRunFormat,
+  href?: string,
+) {
+  const run = new XmlElement("r", "w");
+  if (format) applyRunFormatToElement(document, run, format);
+  const chunks = text.split(/([\t\n])/u);
+  for (const chunk of chunks) {
+    if (!chunk) continue;
+    if (chunk === "\t") {
+      run.appendChild(new XmlElement("tab", "w"));
+      continue;
+    }
+    if (chunk === "\n") {
+      run.appendChild(new XmlElement("br", "w"));
+      continue;
+    }
+    const value = new XmlElement("t", "w");
+    if (/^\s|\s$/u.test(chunk)) value.setAttribute("xml:space", "preserve");
+    value.appendChild(new XmlText(chunk));
+    run.appendChild(value);
+  }
+  if (href) {
+    const link = new XmlElement("hyperlink", "w");
+    link.setAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id", hyperlinkRelationship(document, href));
+    link.appendChild(run);
+    parent.appendChild(link);
+  } else parent.appendChild(run);
+}
+
+function replaceParagraphRich(
+  document: Document,
+  paragraph: Paragraph,
+  inlineContent: readonly DocxRichInline[],
+) {
+  if (inlineContent.some((item) => item.kind !== "text"))
+    throw new DocxLensError(
+      "DOCX_REGION_READ_ONLY",
+      "Native pictures and equations remain in their Word representation; edit neighboring text without replacing that native object.",
+    );
+  const properties = paragraph.element.find(WML_NAMESPACE, "pPr");
+  for (const child of [...paragraph.element.children])
+    if (child !== properties) paragraph.element.removeChild(child);
+  for (const item of inlineContent)
+    if (item.kind === "text" && item.text)
+      appendRichText(document, paragraph.element, item.text, item.format, item.href);
+  if (!inlineContent.length) appendRichText(document, paragraph.element, "");
+  document._markMainDirty();
+}
+
+function applyRunFormat(document: Document, paragraph: Paragraph, format: DocxRunFormat) {
+  const runs = paragraph.runs().filter(writableRun);
+  if (!runs.length) return;
+  for (const run of runs) applyRunFormatToElement(document, run.element, format);
   document._markMainDirty();
 }
 
@@ -1651,6 +1981,49 @@ function parseTableText(value: string) {
   );
 }
 
+function richTextWithoutImages(content: readonly DocxRichInline[]) {
+  return content
+    .filter((item) => item.kind !== "image")
+    .map((item) => (item.kind === "text" ? item.text : item.latex))
+    .join("");
+}
+
+function richContentWithoutImages(content: readonly DocxRichInline[]) {
+  return content.filter((item) => item.kind !== "image");
+}
+
+function imageOperationsBetween(
+  regionId: string,
+  beforeContent: readonly DocxRichInline[] = [],
+  afterContent: readonly DocxRichInline[] = [],
+): Extract<DocxOperation, { kind: "update-image" }>[] {
+  const beforeImages = beforeContent.filter(
+    (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
+  );
+  return afterContent.flatMap((item) => {
+    if (item.kind !== "image") return [];
+    const previous = beforeImages.find((candidate) => candidate.partName === item.partName);
+    if (!previous) return [];
+    const operation: Extract<DocxOperation, { kind: "update-image" }> = {
+      kind: "update-image",
+      regionId,
+      partName: item.partName,
+      ...(item.altText !== previous.altText ? { altText: item.altText } : {}),
+      ...(item.widthEmu !== previous.widthEmu ? { widthEmu: item.widthEmu } : {}),
+      ...(item.heightEmu !== previous.heightEmu ? { heightEmu: item.heightEmu } : {}),
+      ...(JSON.stringify(item.crop) !== JSON.stringify(previous.crop)
+        ? { crop: item.crop ?? {} }
+        : {}),
+    };
+    return operation.altText !== undefined ||
+      operation.widthEmu !== undefined ||
+      operation.heightEmu !== undefined ||
+      operation.crop !== undefined
+      ? [operation]
+      : [];
+  });
+}
+
 function fidelityFeature(
   entries: LensFidelityEntry[],
   feature: string,
@@ -1724,27 +2097,27 @@ const REGION_FIDELITY: ReadonlyArray<{
   { region: "tables", class: "NATIVE" },
   {
     region: "tableStructure",
-    class: "PRESERVED",
+    class: "EQUIVALENT",
     reason:
-      "Word table rows, columns, merges, and table formatting are preserved. Spectra only writes text into an existing safe cell.",
+      "Word table row and column edits use the native table lens; merges and advanced grid geometry remain preserved.",
   },
   {
     region: "hyperlinks",
     class: "PRESERVED",
     reason:
-      "Word hyperlink relationships and their exact text ranges are preserved. Spectra will not rewrite a linked range until that boundary is modeled natively.",
+      "Supported hyperlink runs are editable when the paragraph contains only native text; linked drawings, fields, and other anchored ranges remain preserved.",
   },
   {
     region: "lists",
-    class: "PRESERVED",
+    class: "EQUIVALENT",
     reason:
       "Word list numbering definitions are preserved. Text in an existing list item remains editable, but changing list structure belongs in Word.",
   },
   {
     region: "images",
-    class: "PRESERVED",
+    class: "EQUIVALENT",
     reason:
-      "Pictures in a linked Word file are kept exactly as they are. Spectra does not write Word drawing markup, so a picture cannot be added or resized here.",
+      "Existing PNG and JPEG pictures keep their native bytes while supported metadata, dimensions, and crop can be updated. Adding a new native drawing remains unavailable.",
   },
   {
     region: "equations",
@@ -1814,8 +2187,16 @@ async function projectDocument(
       const regionId = paragraphRegionId(paragraph, path);
       const styleId = paragraph.styleId();
       const list = paragraph.list();
-      const richContent = projectedRichContent(document, element);
-      const readOnly = hasRichObject(richContent) || hasOmml(element) || hasWml(
+      const richContent = projectedRichContent(document, element, paragraph);
+      const unsafeHyperlink = descendants(element).some(
+        (candidate) =>
+          candidate.namespaceUri() === WML_NAMESPACE &&
+          candidate.localName === "hyperlink" &&
+          descendants(candidate).some((nested) =>
+            ["drawing", "pict", "object", "fldSimple"].includes(nested.localName),
+          ),
+      );
+      const readOnly = hasRichObject(richContent) || unsafeHyperlink || hasOmml(element) || hasWml(
         element,
         "ins",
         "del",
@@ -1829,7 +2210,6 @@ async function projectDocument(
         "fldChar",
         "instrText",
         "sdt",
-        "hyperlink",
         "commentRangeStart",
         "commentRangeEnd",
         "commentReference",
@@ -1865,7 +2245,7 @@ async function projectDocument(
           ? semanticRichText(richContent)
           : paragraph.text(),
         ...(displayEquation ? { latex: displayEquation.latex } : {}),
-        ...(hasRichObject(richContent) ? { inlineContent: richContent } : {}),
+        ...(hasRichSemantics(richContent) ? { inlineContent: richContent } : {}),
         attrs: {
           nativePath: path,
           ...(semanticStyleId ? { styleId: semanticStyleId } : {}),
@@ -1948,7 +2328,7 @@ async function projectDocument(
           type: "table",
           text: rows.map((row) => row.join(" | ")).join("\n"),
           rows,
-          ...(richRows.some((row) => row.some(hasRichObject))
+          ...(richRows.some((row) => row.some(hasRichSemantics))
             ? { richRows }
             : {}),
           attrs: {
@@ -2195,7 +2575,12 @@ async function applyDelta(
       continue;
     }
     const regionId = resolveRegionId(operation.regionId);
-    assertEditable(opened.fidelityMap, regionId);
+    // Image metadata is a narrow, direct DrawingML mutation. It is safe even
+    // when the containing paragraph is otherwise preserved because the writer
+    // targets one existing picture by package part and never rewrites the
+    // paragraph's mixed native content.
+    if (operation.kind !== "update-image")
+      assertEditable(opened.fidelityMap, regionId);
     const region = uniqueRegionById(document, regionId);
     const block = opened.projection.blocks.find((candidate) => candidate.id === regionId);
     if (!block) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word region ${operation.regionId} no longer exists.`);
@@ -2205,7 +2590,9 @@ async function applyDelta(
           "DOCX_UNSUPPORTED_EDIT",
           `The target Word region ${operation.regionId} is not a paragraph.`,
         );
-      replaceParagraphText(document, region.paragraph, operation.text);
+      if (operation.inlineContent)
+        replaceParagraphRich(document, region.paragraph, operation.inlineContent);
+      else replaceParagraphText(document, region.paragraph, operation.text);
     } else if (operation.kind === "apply-style") {
       if (!region.paragraph)
         throw new DocxLensError(
@@ -2235,7 +2622,23 @@ async function applyDelta(
           "DOCX_UNSUPPORTED_EDIT",
           "The target Word table cell no longer exists.",
         );
-      await replaceTableCellText(document, cell, operation.text);
+      if (operation.inlineContent)
+        replaceTableCellRich(document, cell, operation.inlineContent);
+      else await replaceTableCellText(document, cell, operation.text);
+    } else if (
+      operation.kind === "insert-table-row" ||
+      operation.kind === "delete-table-row" ||
+      operation.kind === "insert-table-column" ||
+      operation.kind === "delete-table-column"
+    ) {
+      if (!region.table)
+        throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word region ${operation.regionId} is not a table.`);
+      if (operation.kind === "insert-table-row") insertTableRow(document, region.table, operation.row);
+      if (operation.kind === "delete-table-row") deleteTableRow(document, region.table, operation.row);
+      if (operation.kind === "insert-table-column") insertTableColumn(document, region.table, operation.column);
+      if (operation.kind === "delete-table-column") deleteTableColumn(document, region.table, operation.column);
+    } else if (operation.kind === "update-image") {
+      updateImage(document, region, operation);
     }
   }
   return document.save();
@@ -2323,34 +2726,82 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
         },
       };
       before.delete(block.id);
-      if (effectiveBlock.type === "table" && (effectiveBlock.text !== previous.text || JSON.stringify(effectiveBlock.rows) !== JSON.stringify(previous.rows))) {
+      if (effectiveBlock.type === "table" && (effectiveBlock.text !== previous.text || JSON.stringify(effectiveBlock.rows) !== JSON.stringify(previous.rows) || JSON.stringify(effectiveBlock.richRows) !== JSON.stringify(previous.richRows))) {
         const oldRows = previous.rows ?? parseTableText(previous.text);
         const newRows = effectiveBlock.rows ?? parseTableText(effectiveBlock.text);
-        if (
-          oldRows.length !== newRows.length ||
-          oldRows.some((row, index) => row.length !== newRows[index]?.length)
-        )
-          throw new DocxLensError(
-            "DOCX_UNSUPPORTED_EDIT",
-            "Changing a mounted Word table's row or column topology is unavailable in strict native mode.",
-          );
+        if (newRows.length > oldRows.length)
+          for (let row = oldRows.length; row < newRows.length; row += 1)
+            operations.push({ kind: "insert-table-row", regionId: block.id, row });
+        if (newRows.length < oldRows.length)
+          for (let row = oldRows.length - 1; row >= newRows.length; row -= 1)
+            operations.push({ kind: "delete-table-row", regionId: block.id, row });
+        const oldColumns = Math.max(0, ...oldRows.map((row) => row.length));
+        const newColumns = Math.max(0, ...newRows.map((row) => row.length));
+        if (newColumns > oldColumns)
+          for (let column = oldColumns; column < newColumns; column += 1)
+            operations.push({ kind: "insert-table-column", regionId: block.id, column });
+        if (newColumns < oldColumns)
+          for (let column = oldColumns - 1; column >= newColumns; column -= 1)
+            operations.push({ kind: "delete-table-column", regionId: block.id, column });
         newRows.forEach((row, rowIndex) =>
           row.forEach((text, columnIndex) => {
-            if (text !== oldRows[rowIndex]?.[columnIndex])
+            const nextRich = effectiveBlock.richRows?.[rowIndex]?.[columnIndex];
+            const previousRich = previous.richRows?.[rowIndex]?.[columnIndex];
+            operations.push(
+              ...imageOperationsBetween(block.id, previousRich, nextRich),
+            );
+            const hasImages = Boolean(
+              nextRich?.some((item) => item.kind === "image") ||
+                previousRich?.some((item) => item.kind === "image"),
+            );
+            const visibleText = nextRich
+              ? richTextWithoutImages(nextRich)
+              : text;
+            const previousVisibleText = previousRich
+              ? richTextWithoutImages(previousRich)
+              : oldRows[rowIndex]?.[columnIndex] ?? "";
+            const nonImageRichChanged = hasImages
+              ? JSON.stringify(
+                  richContentWithoutImages(nextRich ?? []),
+                ) !==
+                JSON.stringify(richContentWithoutImages(previousRich ?? []))
+              : JSON.stringify(nextRich) !== JSON.stringify(previousRich);
+            if (visibleText !== previousVisibleText || nonImageRichChanged)
               operations.push({
                 kind: "edit-table-cell",
                 regionId: block.id,
                 row: rowIndex,
                 column: columnIndex,
                 text,
+                ...(nextRich ? { inlineContent: nextRich } : {}),
               });
           }),
         );
-      } else if (effectiveBlock.type !== "table" && effectiveBlock.text !== previous.text) {
+      } else if (effectiveBlock.type !== "table" && (effectiveBlock.text !== previous.text || JSON.stringify(effectiveBlock.inlineContent) !== JSON.stringify(previous.inlineContent))) {
+        const previousInline = previous.inlineContent ?? [];
+        const nextInline = effectiveBlock.inlineContent ?? [];
+        operations.push(
+          ...imageOperationsBetween(block.id, previousInline, nextInline),
+        );
+        const hasImages = previousInline.some((item) => item.kind === "image") ||
+          nextInline.some((item) => item.kind === "image");
+        const visibleText = hasImages
+          ? richTextWithoutImages(nextInline)
+          : effectiveBlock.text;
+        const previousVisibleText = hasImages
+          ? richTextWithoutImages(previousInline)
+          : previous.text;
+        const richChanged = hasImages
+          ? JSON.stringify(richContentWithoutImages(nextInline)) !==
+            JSON.stringify(richContentWithoutImages(previousInline))
+          : JSON.stringify(effectiveBlock.inlineContent) !==
+            JSON.stringify(previous.inlineContent);
+        if (visibleText === previousVisibleText && !richChanged) continue;
         operations.push({
           kind: "replace-paragraph",
           regionId: block.id,
           text: effectiveBlock.text,
+          ...(richChanged && effectiveBlock.inlineContent ? { inlineContent: effectiveBlock.inlineContent } : {}),
         });
       }
       const nextStyle = effectiveBlock.attrs?.styleId;

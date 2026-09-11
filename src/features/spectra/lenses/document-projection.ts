@@ -146,6 +146,53 @@ function rowsFor(block: DocxProjection["blocks"][number]) {
   );
 }
 
+function richRowsFor(block: DocxProjection["blocks"][number]) {
+  return block.richRows ?? block.rows?.map((row) => row.map((text) => [{ kind: "text" as const, text }])) ?? [];
+}
+
+function richTextWithoutImages(content: readonly DocxRichInline[]) {
+  return content
+    .filter((item) => item.kind !== "image")
+    .map((item) => (item.kind === "text" ? item.text : item.latex))
+    .join("");
+}
+
+function richContentWithoutImages(content: readonly DocxRichInline[]) {
+  return content.filter((item) => item.kind !== "image");
+}
+
+function imageOperationsBetween(
+  regionId: string,
+  beforeContent: readonly DocxRichInline[] = [],
+  afterContent: readonly DocxRichInline[] = [],
+): DocxOperation[] {
+  const beforeImages = beforeContent.filter(
+    (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
+  );
+  return afterContent.flatMap((item) => {
+    if (item.kind !== "image") return [];
+    const previous = beforeImages.find((candidate) => candidate.partName === item.partName);
+    if (!previous) return [];
+    const operation: Extract<DocxOperation, { kind: "update-image" }> = {
+      kind: "update-image",
+      regionId,
+      partName: item.partName,
+      ...(item.altText !== previous.altText ? { altText: item.altText } : {}),
+      ...(item.widthEmu !== previous.widthEmu ? { widthEmu: item.widthEmu } : {}),
+      ...(item.heightEmu !== previous.heightEmu ? { heightEmu: item.heightEmu } : {}),
+      ...(JSON.stringify(item.crop) !== JSON.stringify(previous.crop)
+        ? { crop: item.crop ?? {} }
+        : {}),
+    };
+    return operation.altText !== undefined ||
+      operation.widthEmu !== undefined ||
+      operation.heightEmu !== undefined ||
+      operation.crop !== undefined
+      ? [operation]
+      : [];
+  });
+}
+
 export function docxOperationsBetween(
   before: DocxProjection,
   after: DocxProjection,
@@ -171,23 +218,82 @@ export function docxOperationsBetween(
     if (block.type === "table" && old.type === "table") {
       const oldRows = rowsFor(old);
       const newRows = rowsFor(block);
+      if (newRows.length > oldRows.length)
+        for (let row = oldRows.length; row < newRows.length; row += 1)
+          operations.push({ kind: "insert-table-row", regionId: block.id, row });
+      if (newRows.length < oldRows.length)
+        for (let row = oldRows.length - 1; row >= newRows.length; row -= 1)
+          operations.push({ kind: "delete-table-row", regionId: block.id, row });
+      const oldColumns = Math.max(0, ...oldRows.map((row) => row.length));
+      const newColumns = Math.max(0, ...newRows.map((row) => row.length));
+      if (newColumns > oldColumns)
+        for (let column = oldColumns; column < newColumns; column += 1)
+          operations.push({ kind: "insert-table-column", regionId: block.id, column });
+      if (newColumns < oldColumns)
+        for (let column = oldColumns - 1; column >= newColumns; column -= 1)
+          operations.push({ kind: "delete-table-column", regionId: block.id, column });
+      const oldRichRows = richRowsFor(old);
+      const newRichRows = richRowsFor(block);
       newRows.forEach((row, rowIndex) =>
         row.forEach((text, columnIndex) => {
-          if (text !== oldRows[rowIndex]?.[columnIndex])
+          const inlineContent = newRichRows[rowIndex]?.[columnIndex];
+          const previousInline = oldRichRows[rowIndex]?.[columnIndex];
+          const imageOperations = imageOperationsBetween(
+            block.id,
+            previousInline,
+            inlineContent,
+          );
+          operations.push(...imageOperations);
+          const visibleText = inlineContent
+            ? richTextWithoutImages(inlineContent)
+            : text;
+          const previousVisibleText = previousInline
+            ? richTextWithoutImages(previousInline)
+            : oldRows[rowIndex]?.[columnIndex] ?? "";
+          const nonImageRichChanged =
+            JSON.stringify(
+              inlineContent ? richContentWithoutImages(inlineContent) : inlineContent,
+            ) !==
+            JSON.stringify(
+              previousInline
+                ? richContentWithoutImages(previousInline)
+                : previousInline,
+            );
+          if (visibleText !== previousVisibleText || nonImageRichChanged)
             operations.push({
               kind: "edit-table-cell",
               regionId: block.id,
               row: rowIndex,
               column: columnIndex,
               text,
+              ...(inlineContent ? { inlineContent } : {}),
             });
         }),
       );
-    } else if (block.type !== "table" && block.text !== old.text) {
+    } else if (
+      block.type !== "table" &&
+      (block.text !== old.text ||
+        JSON.stringify(block.inlineContent) !== JSON.stringify(old.inlineContent))
+    ) {
+      const previousInline = old.inlineContent ?? [];
+      const nextInline = block.inlineContent ?? [];
+      const imageOperations = imageOperationsBetween(block.id, previousInline, nextInline);
+      operations.push(...imageOperations);
+      const hasImages = previousInline.some((item) => item.kind === "image") ||
+        nextInline.some((item) => item.kind === "image");
+      const visibleText = hasImages ? richTextWithoutImages(nextInline) : block.text;
+      const previousVisibleText = hasImages ? richTextWithoutImages(previousInline) : old.text;
+      const nonImageRichChanged = hasImages
+        ? JSON.stringify(richContentWithoutImages(nextInline)) !==
+          JSON.stringify(richContentWithoutImages(previousInline))
+        : JSON.stringify(block.inlineContent) !== JSON.stringify(old.inlineContent);
+      const richChanged = nonImageRichChanged;
+      if (visibleText === previousVisibleText && !richChanged) return;
       operations.push({
         kind: "replace-paragraph",
         regionId: block.id,
         text: block.text,
+        ...(richChanged && block.inlineContent ? { inlineContent: block.inlineContent } : {}),
       });
     }
   });

@@ -29,6 +29,15 @@ export function richInlineHasObject(content) {
   return content.some((item) => item.kind !== "text");
 }
 
+function richInlineHasSemantics(content) {
+  return content.some(
+    (item) =>
+      item.kind !== "text" ||
+      Boolean(item.href) ||
+      (item.format && Object.keys(item.format).length > 0),
+  );
+}
+
 export function docxNativeMediaUrl(binding, image) {
   const source = record(binding);
   const artifactId =
@@ -48,14 +57,39 @@ export function docxNativeMediaUrl(binding, image) {
 
 export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
   const nodes = content.flatMap((item) => {
-    if (item.kind === "text")
-      return item.text ? [{ type: "text", text: item.text }] : [];
+    if (item.kind === "text") {
+      if (!item.text) return [];
+      const format = record(item.format);
+      const marks = [
+        ...(format.bold === true ? [{ type: "bold" }] : []),
+        ...(format.italic === true ? [{ type: "italic" }] : []),
+        ...(format.underline === true ? [{ type: "underline" }] : []),
+        ...(format.strike === true ? [{ type: "strike" }] : []),
+      ];
+      const style = {
+        ...(typeof format.fontFamily === "string"
+          ? { fontFamily: format.fontFamily }
+          : {}),
+        ...(typeof format.fontSizePoints === "number"
+          ? { fontSize: `${format.fontSizePoints}pt` }
+          : {}),
+        ...(typeof format.color === "string" ? { color: `#${format.color}` } : {}),
+      };
+      if (Object.keys(style).length) marks.push({ type: "textStyle", attrs: style });
+      if (typeof format.highlight === "string")
+        marks.push({ type: "highlight", attrs: { color: format.highlight } });
+      else if (typeof format.shading === "string")
+        marks.push({ type: "highlight", attrs: { color: `#${format.shading}` } });
+      if (item.href) marks.push({ type: "link", attrs: { href: item.href } });
+      return [{ type: "text", text: item.text, ...(marks.length ? { marks } : {}) }];
+    }
     if (item.kind === "equation")
       return [
         {
           type: "inlineEquation",
           attrs: {
             latex: item.latex,
+            ...(typeof item.ommlXml === "string" ? { ommlXml: item.ommlXml } : {}),
             ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
           },
         },
@@ -97,6 +131,9 @@ function cellJsonFromRichContent(content, binding, nativeReadOnly) {
           latex: displayEquation.latex,
           display: "block",
           alignment: "center",
+          ...(typeof displayEquation.ommlXml === "string"
+            ? { ommlXml: displayEquation.ommlXml }
+            : {}),
           ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
         },
       },
@@ -136,6 +173,9 @@ export function docxRichBlockToJson(value, binding) {
         latex: equation?.latex ?? block.text,
         display: "block",
         alignment: attrs.alignment ?? "center",
+        ...(typeof equation?.ommlXml === "string"
+          ? { ommlXml: equation.ommlXml }
+          : {}),
       },
     };
   }
@@ -162,7 +202,7 @@ export function docxRichBlockToJson(value, binding) {
   const inlineContent = Array.isArray(block.inlineContent)
     ? block.inlineContent
     : [];
-  if (!richInlineHasObject(inlineContent)) return null;
+  if (!richInlineHasSemantics(inlineContent)) return null;
   const content = docxRichInlineToJson(inlineContent, binding, nativeReadOnly);
   if (block.type === "heading")
     return {
@@ -323,6 +363,59 @@ function imageFromJsonNode(node) {
     ...(Number.isSafeInteger(widthEmu) && widthEmu > 0 ? { widthEmu } : {}),
     ...(Number.isSafeInteger(heightEmu) && heightEmu > 0 ? { heightEmu } : {}),
     placement: attrs.placement === "anchored" ? "anchored" : "inline",
+    ...(attrs.crop && typeof attrs.crop === "object" ? { crop: attrs.crop } : {}),
+  };
+}
+
+function pointsFromCssSize(value) {
+  if (typeof value !== "string") return undefined;
+  const match = /^(-?[\d.]+)\s*(px|pt|rem|em)?$/u.exec(value.trim());
+  if (!match) return undefined;
+  const size = Number(match[1]);
+  if (!Number.isFinite(size) || size <= 0) return undefined;
+  const unit = match[2] ?? "px";
+  const points = unit === "pt" ? size : unit === "rem" || unit === "em" ? size * 12 : size * 0.75;
+  return Math.round(points * 10) / 10;
+}
+
+function colorHex(value) {
+  if (typeof value !== "string") return undefined;
+  const hex = value.trim().replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/iu.test(hex))
+    return hex.split("").map((digit) => `${digit}${digit}`).join("").toUpperCase();
+  return /^[0-9a-f]{6}$/iu.test(hex) ? hex.toUpperCase() : undefined;
+}
+
+function runFormatFromMarks(marks) {
+  const list = Array.isArray(marks) ? marks : [];
+  const style = record(list.find((mark) => mark?.type === "textStyle")?.attrs);
+  const highlight = record(list.find((mark) => mark?.type === "highlight")?.attrs);
+  const link = record(list.find((mark) => mark?.type === "link")?.attrs);
+  const highlightColor = typeof highlight.color === "string" ? highlight.color : undefined;
+  const wordHighlights = new Set([
+    "yellow", "green", "cyan", "magenta", "blue", "red", "darkBlue", "darkCyan",
+    "darkGreen", "darkMagenta", "darkRed", "darkYellow", "darkGray", "lightGray",
+    "black", "white", "none",
+  ]);
+  const format = {
+    ...(list.some((mark) => mark?.type === "bold") ? { bold: true } : {}),
+    ...(list.some((mark) => mark?.type === "italic") ? { italic: true } : {}),
+    ...(list.some((mark) => mark?.type === "underline") ? { underline: true } : {}),
+    ...(list.some((mark) => mark?.type === "strike") ? { strike: true } : {}),
+    ...(typeof style.fontFamily === "string" ? { fontFamily: style.fontFamily } : {}),
+    ...(pointsFromCssSize(style.fontSize) !== undefined
+      ? { fontSizePoints: pointsFromCssSize(style.fontSize) }
+      : {}),
+    ...(colorHex(style.color) ? { color: colorHex(style.color) } : {}),
+    ...(highlightColor && wordHighlights.has(highlightColor)
+      ? { highlight: highlightColor }
+      : colorHex(highlightColor)
+        ? { shading: colorHex(highlightColor) }
+        : {}),
+  };
+  return {
+    ...(Object.keys(format).length ? { format } : {}),
+    ...(typeof link.href === "string" && link.href ? { href: link.href } : {}),
   };
 }
 
@@ -331,7 +424,11 @@ export function documentRichInlineFromJson(node) {
   const visit = (current) => {
     if (typeof current?.text === "string") {
       if (current.text)
-        appendRichInline(output, { kind: "text", text: current.text });
+        appendRichInline(output, {
+          kind: "text",
+          text: current.text,
+          ...runFormatFromMarks(current.marks),
+        });
       return;
     }
     if (current?.type === "inlineEquation" || current?.type === "equation") {
@@ -339,6 +436,9 @@ export function documentRichInlineFromJson(node) {
         kind: "equation",
         latex: String(current.attrs?.latex ?? ""),
         display: current.type === "equation" ? "block" : "inline",
+        ...(typeof current.attrs?.ommlXml === "string"
+          ? { ommlXml: current.attrs.ommlXml }
+          : {}),
       });
       return;
     }
@@ -397,7 +497,7 @@ export function documentBlocksFromJson(json) {
         type: "table",
         text: rows.map((row) => row.join(" | ")).join("\n"),
         rows,
-        ...(richRows.some((row) => row.some(richInlineHasObject))
+    ...(richRows.some((row) => row.some(richInlineHasSemantics))
           ? { richRows }
           : {}),
         ...(node.attrs?.nativeReadOnly === true
@@ -407,7 +507,7 @@ export function documentBlocksFromJson(json) {
     }
 
     const inlineContent = documentRichInlineFromJson(node);
-    const hasRichContent = richInlineHasObject(inlineContent);
+    const hasRichContent = richInlineHasSemantics(inlineContent);
     const text = (
       hasRichContent ? richInlineText(inlineContent) : documentNodeText(node)
     ).trimEnd();

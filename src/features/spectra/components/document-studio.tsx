@@ -60,7 +60,6 @@ import {
   type CommandParam,
 } from "../commands";
 import { DOCUMENT_EXPORT_COPIES } from "../capabilities";
-import { isArtifactTypeKey } from "../artifacts/registry";
 import {
   DOCUMENT_STYLE_OPTIONS,
   documentCommandBindings,
@@ -70,7 +69,6 @@ import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
   completeArtifactImport,
-  getSpectraArtifactEmbed,
   uploadArtifactImportOriginal,
 } from "../data/api";
 import {
@@ -114,21 +112,17 @@ import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
 import { StableBlockId } from "../editor/stable-block-id";
 import { spectraBus } from "../events";
 import { parseSpectraWorkUrl, type ReferenceNode } from "../references";
-import {
-  renderReferenceFallbackPng,
-  type ReferenceFallback,
-} from "../references/export/reference-fallback";
 import { useSpectraPreferences } from "../settings/preference-store";
-import { bytesToArrayBuffer, enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
+import { enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import type { SourceRecord } from "../sources/records/source-record";
 import { createDocumentRelativeSelection } from "../work/models/yjs";
-import { availableWorkModes, getWorkDefinition } from "../work/registry";
+import { availableWorkModes } from "../work/registry";
 import { DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import {
-  blocksFromJson,
   documentContentFromJson,
   documentJsonFromContent,
 } from "./artifact-studio";
+import { exportDocxCopy, importDocxPayload } from "../lenses/docx-adapter";
 import { record } from "./artifact-content-model";
 import {
   artifactBlobSha256,
@@ -1788,122 +1782,11 @@ export function DocumentStudio({
       });
       document.save(`${safeTitle}.pdf`);
     } else {
-      const {
-        Document,
-        ExternalHyperlink,
-        HeadingLevel,
-        ImageRun,
-        Packer,
-        Paragraph,
-        TextRun,
-      } = await import("docx");
       const editorJson = editor.getJSON();
-      const referenceIds = [
-        ...new Set(
-          (editorJson.content ?? []).flatMap((node) =>
-            node.type === "spectraReference" &&
-            typeof node.attrs?.embedId === "string"
-              ? [node.attrs.embedId]
-              : [],
-          ),
-        ),
-      ];
-      const liveReferences = new Map<
-        string,
-        Awaited<ReturnType<typeof getSpectraArtifactEmbed>>["embed"]
-      >();
-      await Promise.all(
-        referenceIds.map(async (embedId) => {
-          try {
-            const result = await getSpectraArtifactEmbed(embedId);
-            liveReferences.set(embedId, result.embed);
-          } catch {
-            // The export remains honest when access changed: the fallback uses
-            // a generic title and the source id retained by the host record.
-          }
-        }),
-      );
-      const children: InstanceType<typeof Paragraph>[] = [];
-      for (const node of editorJson.content ?? []) {
-        if (node.type === "spectraReference") {
-          const embedId =
-            typeof node.attrs?.embedId === "string" ? node.attrs.embedId : "";
-          const embed = liveReferences.get(embedId);
-          const sourceArtifactId =
-            embed?.sourceArtifactId ||
-            (typeof node.attrs?.sourceArtifactId === "string"
-              ? node.attrs.sourceArtifactId
-              : "");
-          const sourceUrl = `${window.location.origin}/library/${encodeURIComponent(sourceArtifactId)}`;
-          const fallback: ReferenceFallback = {
-            title: embed?.source?.title ?? "Spectra reference",
-            typeLabel:
-              embed?.source && isArtifactTypeKey(embed.source.blueprintKey)
-                ? getWorkDefinition(embed.source.blueprintKey).userFacingName
-                : "Referenced work",
-            sourceArtifactId,
-            sourceUrl,
-            versionLabel: embed?.versionPolicy === "pinned" ? "Pinned" : "Live",
-          };
-          const png = await renderReferenceFallbackPng(fallback);
-          children.push(
-            new Paragraph({
-              children: [
-                new ImageRun({
-                  data: png,
-                  transformation: { width: 480, height: 210 },
-                  altText: {
-                    title: fallback.title,
-                    description: `${fallback.typeLabel} reference in Spectra`,
-                    name: fallback.title,
-                  },
-                }),
-              ],
-            }),
-            new Paragraph({
-              children: [
-                new ExternalHyperlink({
-                  link: sourceUrl,
-                  children: [
-                    new TextRun({
-                      text: `Open in Spectra: ${sourceUrl}`,
-                      style: "Hyperlink",
-                    }),
-                  ],
-                }),
-              ],
-            }),
-          );
-          continue;
-        }
-        const blocks = blocksFromJson({ type: "doc", content: [node] });
-        children.push(
-          ...blocks.map((block) =>
-            block.type === "heading"
-              ? new Paragraph({
-                  text: block.text,
-                  heading:
-                    Number(record(block.attrs).level) === 1
-                      ? HeadingLevel.HEADING_1
-                      : Number(record(block.attrs).level) === 3
-                        ? HeadingLevel.HEADING_3
-                        : HeadingLevel.HEADING_2,
-                })
-              : new Paragraph({
-                  children: [new TextRun(block.text)],
-                  ...(block.type === "quote" ? { style: "IntenseQuote" } : {}),
-                }),
-          ),
-        );
-      }
-      const document = new Document({
-        sections: [
-          {
-            children,
-          },
-        ],
+      const copy = await exportDocxCopy(editorJson, { pageSetup });
+      const blob = new Blob([new Uint8Array(copy.bytes).buffer as ArrayBuffer], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
-      const blob = await Packer.toBlob(document);
       const url = URL.createObjectURL(blob);
       const anchor = window.document.createElement("a");
       anchor.href = url;
@@ -1947,33 +1830,23 @@ export function DocumentStudio({
       importJobId = beginning.jobId;
       await uploadArtifactImportOriginal(importJobId, file);
       if (name.endsWith(".docx")) {
-        const mammoth = await import("mammoth/mammoth.browser");
         const checked = await readBoundedArchive(
           new Uint8Array(await file.arrayBuffer()),
           OFFICE_ARCHIVE_LIMITS,
         );
-        const result = await mammoth.convertToHtml({
-          arrayBuffer: bytesToArrayBuffer(checked.bytes),
-        });
-        editor.commands.setContent(
-          sanitizeDocumentHtml(result.value || "<p></p>"),
-        );
+        const result = await importDocxPayload(checked.bytes);
+        editor.commands.setContent(result.json);
+        const conversionNotes = result.conversion.notes;
         setImportReport(
-          result.messages.length
-            ? `Imported a separate editable copy with ${result.messages.length} fidelity note${result.messages.length === 1 ? "" : "s"}. It is not linked to the source file; the retained original remains available in import history.`
-            : "Imported a separate editable copy. It is not linked to the source file; the retained original remains available in import history.",
+          conversionNotes.some((note) => note.level !== "exact")
+            ? `Imported a separate editable copy with ${conversionNotes.length} shared native conversion note${conversionNotes.length === 1 ? "" : "s"}. It is not linked to the source file; the retained original remains available in import history.`
+            : "Imported a separate editable copy through the shared native DOCX adapter. It is not linked to the source file; the retained original remains available in import history.",
         );
-        fidelityReport.push({
-          scope: "editable document structure",
-          level: result.messages.length ? "adapted" : "exact",
-          message: result.messages.length
-            ? `${result.messages.length} converter note${result.messages.length === 1 ? "" : "s"} recorded; text, headings, lists, tables, and supported media were converted where available.`
-            : "Supported Word structure converted to editable native content.",
-        });
+        fidelityReport.push(...conversionNotes);
         unsupportedFeatures.push(
-          "Word macros",
-          "tracked-change authorship not represented by the converter",
-          "unsupported floating layout",
+          ...conversionNotes
+            .filter((note) => note.level === "unsupported")
+            .map((note) => note.scope),
         );
       } else if (name.endsWith(".odt")) {
         const { strFromU8 } = await import("fflate");

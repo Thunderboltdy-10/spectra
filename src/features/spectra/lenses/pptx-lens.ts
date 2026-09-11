@@ -1,9 +1,16 @@
 import { Presentation, DRAWINGML_NAMESPACE, PML_NAMESPACE } from "@ariadng/office/pptx";
-import { resolveRelationshipTarget } from "@ariadng/office/opc";
+import { resolveRelationshipTarget, type OpcPart } from "@ariadng/office/opc";
 import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
+import { Workbook } from "@ariadng/office/xlsx";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
-import type { PresentationObject } from "../presentation/model";
+import { presentationObjectText } from "../presentation/model";
+import type {
+  PresentationChartContent,
+  PresentationObject,
+  PresentationParagraph,
+  PresentationTableCell,
+} from "../presentation/model";
 import { sha256Payload } from "./docx-lens";
 import { pptxOperationsBetween } from "./office-content";
 import type { LensCapabilitySet, LensCompatibilityProfile, LensExternalDiff, LensFidelityEntry, LensFidelityMap, LensOpenResult, LensPreservedCarry, SpectraLens } from "./types";
@@ -20,7 +27,14 @@ function textNodes(root: XmlElement) { return descendants(root).filter((node) =>
 function titleShape(root: XmlElement) { return descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "sp" && descendants(node).some((child) => child.namespaceUri() === PML_NAMESPACE && child.localName === "ph" && ["title", "ctrTitle"].includes(child.getAttribute("type") ?? ""))); }
 function firstDescendant(root: XmlElement, namespace: string, localName: string) { return descendants(root).find((node) => node.namespaceUri() === namespace && node.localName === localName); }
 function shapeId(root: XmlElement) { return firstDescendant(root, PML_NAMESPACE, "cNvPr")?.getAttribute("id") ?? undefined; }
-function shapeText(root: XmlElement) { return textNodes(root).map((node) => node.text()).join(" ").trim(); }
+function shapeText(root: XmlElement) {
+  return descendants(root)
+    .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "p")
+    .map((paragraph) => textNodes(paragraph).map((node) => node.text()).join(""))
+    .filter((value) => value.length > 0)
+    .join("\n")
+    .trim();
+}
 function emu(value: string | undefined, fallback = 0) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
 function placeholderKey(root: XmlElement) {
   const placeholder = firstDescendant(root, PML_NAMESPACE, "ph");
@@ -74,30 +88,271 @@ function pictureMedia(
   };
 }
 
-function slideObjects(
+function runColor(runProperties: XmlElement | undefined) {
+  const color = runProperties
+    ? descendants(runProperties).find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "srgbClr")?.getAttribute("val")
+    : undefined;
+  return color ? `#${color}` : undefined;
+}
+
+function runFormat(runProperties: XmlElement | undefined) {
+  if (!runProperties) return {};
+  const latin = runProperties.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "latin");
+  const size = Number(runProperties.getAttribute("sz"));
+  const underline = runProperties.getAttribute("u");
+  return {
+    ...(latin?.getAttribute("typeface") ? { fontFamily: latin.getAttribute("typeface")! } : {}),
+    ...(Number.isFinite(size) && size > 0 ? { fontSizePt: size / 100 } : {}),
+    ...(runProperties.getAttribute("b") === "1" ? { bold: true } : {}),
+    ...(runProperties.getAttribute("i") === "1" ? { italic: true } : {}),
+    ...(underline && underline !== "none" ? { underline: true } : {}),
+    ...(runProperties.getAttribute("strike") === "sngStrike" || runProperties.getAttribute("strike") === "dblStrike" ? { strike: true } : {}),
+    ...(runColor(runProperties) ? { color: runColor(runProperties) } : {}),
+  };
+}
+
+function richParagraphs(root: XmlElement): PresentationParagraph[] {
+  return descendants(root)
+    .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "p")
+    .map((paragraph) => {
+      const paragraphProperties = paragraph.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "pPr");
+      const bullet = paragraphProperties?.elements().some((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && ["buChar", "buAutoNum"].includes(node.localName))
+        ? paragraphProperties?.elements().some((node) => node.localName === "buAutoNum") ? "numbered" : "bullet"
+        : "none";
+      const level = Number(paragraphProperties?.getAttribute("lvl"));
+      const runs = descendants(paragraph)
+        .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && ["r", "fld"].includes(node.localName))
+        .flatMap((run) => {
+          const textNode = descendants(run).find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "t");
+          if (!textNode) return [];
+          const properties = run.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "rPr");
+          return [{ text: textNode.text(), ...runFormat(properties) }];
+        });
+      return {
+        runs,
+        ...(paragraphProperties?.getAttribute("algn") === "ctr" ? { alignment: "center" as const } : {}),
+        ...(paragraphProperties?.getAttribute("algn") === "r" ? { alignment: "right" as const } : {}),
+        ...(paragraphProperties?.getAttribute("algn") === "just" ? { alignment: "justify" as const } : {}),
+        ...(Number.isFinite(level) && level >= 0 ? { level } : {}),
+        ...(bullet !== "none" ? { bullet } : {}),
+      } satisfies PresentationParagraph;
+    })
+    .filter((paragraph) => paragraph.runs.length > 0);
+}
+
+function cropFor(shape: XmlElement) {
+  const source = descendants(shape).find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "srcRect");
+  if (!source) return undefined;
+  const number = (key: string) => {
+    const value = Number(source.getAttribute(key));
+    return Number.isFinite(value) ? value / 1000 : 0;
+  };
+  return { left: number("l"), top: number("t"), right: number("r"), bottom: number("b") };
+}
+
+function tableCells(shape: XmlElement): Array<Array<PresentationTableCell>> {
+  return descendants(shape)
+    .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "tr")
+    .map((row) => descendants(row)
+      .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "tc")
+      .map((cell) => ({
+        text: shapeText(cell),
+        paragraphs: richParagraphs(cell),
+        style: (() => {
+          const properties = child(cell, DRAWINGML_NAMESPACE, "tcPr");
+          const fill = properties && child(properties, DRAWINGML_NAMESPACE, "solidFill")?.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "srgbClr")?.getAttribute("val");
+          return fill ? { fill: `#${fill}` } : undefined;
+        })(),
+        ...(Number(cell.getAttribute("rowSpan")) > 1 ? { rowSpan: Number(cell.getAttribute("rowSpan")) } : {}),
+        ...(Number(cell.getAttribute("gridSpan")) > 1 ? { colSpan: Number(cell.getAttribute("gridSpan")) } : {}),
+      })));
+}
+
+const SPECTRA_CHART_SOURCE_NAMESPACE = "urn:spectra:office-bridge";
+
+function chartText(root: XmlElement) {
+  return descendants(root)
+    .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "t")
+    .map((node) => node.text())
+    .join("")
+    .trim();
+}
+
+function cachedValues(root: XmlElement, cacheName: "strCache" | "numCache") {
+  const cache = descendants(root).find((node) => node.localName === cacheName) ??
+    (cacheName === "strCache" ? descendants(root).find((node) => node.localName === "multiLvlStrCache") : undefined);
+  if (!cache) return [];
+  return descendants(cache)
+    .filter((node) => node.localName === "pt")
+    .sort((left, right) => Number(left.getAttribute("idx")) - Number(right.getAttribute("idx")))
+    .map((point) => descendants(point).find((node) => node.localName === (cacheName === "numCache" ? "v" : "v"))?.text() ?? "")
+    .filter((value) => value.length > 0);
+}
+
+async function chartFor(
+  deck: Presentation,
+  slidePartName: string,
+  shape: XmlElement,
+): Promise<PresentationChartContent & { nativeChartPart?: string }> {
+  const chartReference = firstDescendant(shape, "http://schemas.openxmlformats.org/drawingml/2006/chart", "chart");
+  const relationshipId = chartReference?.getAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "id");
+  const slidePart = deck.office.package.getPart(slidePartName);
+  const chartPart = relationshipId && slidePart ? deck.office.package.relatedPart(slidePart, relationshipId) : undefined;
+  if (!chartPart) return { chartType: "bar", categories: [], series: [], showLegend: false };
+  const chart = (await deck.office.xml(chartPart.name)).root;
+  const series = descendants(chart)
+    .filter((node) => node.localName === "ser")
+    .map((ser, index) => {
+      const tx = child(ser, "http://schemas.openxmlformats.org/drawingml/2006/chart", "tx");
+      const nameCache = tx ? child(tx, "http://schemas.openxmlformats.org/drawingml/2006/chart", "strRef") : undefined;
+      const name = nameCache ? cachedValues(nameCache, "strCache")[0] ?? `Series ${index + 1}` : `Series ${index + 1}`;
+      // The series name also owns a c:strRef, so searching the whole series
+      // would accidentally project the name cache as the category cache.
+      const category = child(ser, "http://schemas.openxmlformats.org/drawingml/2006/chart", "cat");
+      const value = child(ser, "http://schemas.openxmlformats.org/drawingml/2006/chart", "val");
+      const categoryReference = category ? descendants(category).find((node) => ["strRef", "multiLvlStrRef"].includes(node.localName)) : undefined;
+      const valueReference = value ? descendants(value).find((node) => node.localName === "numRef") : undefined;
+      const categories = categoryReference ? cachedValues(categoryReference, "strCache") : [];
+      const values = valueReference ? cachedValues(valueReference, "numCache").map(Number).filter(Number.isFinite) : [];
+      return { name, categories, values, id: descendants(ser).find((node) => node.localName === "idx")?.getAttribute("val") ?? undefined };
+    });
+  const categories = series[0]?.categories ?? [];
+  const chartType = descendants(chart).some((node) => node.localName === "lineChart") ? "line" : descendants(chart).some((node) => node.localName === "pieChart") ? "pie" : descendants(chart).some((node) => node.localName === "areaChart") ? "area" : descendants(chart).some((node) => node.localName === "barChart" && descendants(node).some((child) => child.localName === "barDir" && child.getAttribute("val") === "col")) ? "column" : "bar";
+  const chartRoot = child(chart, "http://schemas.openxmlformats.org/drawingml/2006/chart", "chart");
+  const title = chartRoot ? child(chartRoot, "http://schemas.openxmlformats.org/drawingml/2006/chart", "title") : undefined;
+  const axisTitles = chartRoot
+    ? descendants(chartRoot).filter((node) => (node.localName === "catAx" || node.localName === "valAx") && child(node, "http://schemas.openxmlformats.org/drawingml/2006/chart", "title")).map((node) => chartText(child(node, "http://schemas.openxmlformats.org/drawingml/2006/chart", "title")!))
+    : [];
+  const source = descendants(chart).find((node) => node.namespaceUri() === SPECTRA_CHART_SOURCE_NAMESPACE && node.localName === "source");
+  return {
+    chartType,
+    ...(title ? { title: chartText(title) } : {}),
+    categories,
+    series,
+    showLegend: descendants(chart).some((node) => node.localName === "legend"),
+    ...(axisTitles[0] ? { axisTitle: axisTitles[0] } : {}),
+    ...(axisTitles[1] ? { valueAxisTitle: axisTitles[1] } : {}),
+    ...(source?.getAttribute("artifactId") ? { sourceArtifactId: source.getAttribute("artifactId")! } : {}),
+    ...(source?.getAttribute("chartId") ? { sourceChartId: source.getAttribute("chartId")! } : {}),
+    ...(source?.getAttribute("revision") ? { sourceRevision: source.getAttribute("revision")! } : {}),
+    ...(source?.getAttribute("kind") === "sheets_range" ? { sourceKind: "sheets_range" as const } : {}),
+    ...(source?.getAttribute("live") === "1" ? { sourceLive: true } : {}),
+    nativeChartPart: chartPart.name,
+  };
+}
+
+function sceneNodes(root: XmlElement) {
+  const tree = descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "spTree");
+  if (!tree) return [] as Array<{ node: XmlElement; parentId?: string }>;
+  const result: Array<{ node: XmlElement; parentId?: string }> = [];
+  const walk = (parent: XmlElement, parentId?: string) => {
+    for (const node of parent.elements()) {
+      if (node.namespaceUri() !== PML_NAMESPACE) continue;
+      if (["sp", "pic", "graphicFrame"].includes(node.localName)) result.push({ node, parentId });
+      else if (node.localName === "grpSp") {
+        result.push({ node, parentId });
+        const groupId = shapeId(node);
+        walk(node, groupId);
+      }
+    }
+  };
+  walk(tree);
+  return result;
+}
+
+async function slideObjects(
   deck: Presentation,
   slidePartName: string,
   root: XmlElement,
   slideId: string,
   layoutRoot?: XmlElement,
   canvas?: { width: number; height: number },
-): PresentationObject[] {
+): Promise<PresentationObject[]> {
   const layoutPlaceholders = new Map<string, XmlElement>();
   if (layoutRoot) descendants(layoutRoot).filter((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "sp").forEach((shape) => {
     const key = placeholderKey(shape);
     if (key) layoutPlaceholders.set(key, shape);
   });
-  return descendants(root).filter((node) => node.namespaceUri() === PML_NAMESPACE && ["sp", "pic", "graphicFrame"].includes(node.localName)).flatMap((shape, index) => {
+  const objects: PresentationObject[] = [];
+  const scenes = sceneNodes(root);
+  for (const { node: shape, parentId } of scenes) {
     const nativeShapeId = shapeId(shape);
-    if (!nativeShapeId) return [];
+    if (!nativeShapeId) continue;
+    if (shape.localName === "grpSp") {
+      const childIds = scenes
+        .filter((child) => child.parentId === nativeShapeId)
+        .flatMap((child) => shapeId(child.node) ? [`${slideId}:shape:${shapeId(child.node)}`] : []);
+      if (childIds.length < 2) continue;
+      objects.push({
+        id: `${slideId}:shape:${nativeShapeId}`,
+        type: "group",
+        ...shapeGeometry(shape, undefined, canvas),
+        content: { nativeShapeId, childIds },
+        parentId,
+        readingOrder: objects.length,
+      });
+      continue;
+    }
     const placeholder = firstDescendant(shape, PML_NAMESPACE, "ph");
     const isTitle = ["title", "ctrTitle"].includes(placeholder?.getAttribute("type") ?? "");
     const type = shape.localName === "pic" ? "image" : shape.localName === "graphicFrame" ? (descendants(shape).some((node) => node.localName === "chart") ? "chart" : "table") : "text";
     // `descr` is PowerPoint's own alt text, so reading it here is what lets a
     // Spectra description round-trip instead of being invented alongside one.
     const descr = firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("descr")?.trim();
-    return [{ id: `${slideId}:shape:${nativeShapeId}`, type, ...shapeGeometry(shape, layoutPlaceholders.get(placeholderKey(shape) ?? ""), canvas), content: { text: shapeText(shape), nativeShapeId, nativeParagraphIndex: 0, ...(type === "image" ? pictureMedia(deck, slidePartName, shape) : {}) }, ...(descr ? { altText: descr } : {}), locked: isTitle, readingOrder: index } satisfies PresentationObject];
-  });
+    const content = type === "chart"
+      ? { ...(await chartFor(deck, slidePartName, shape)), nativeShapeId }
+      : type === "table"
+        ? { rows: tableCells(shape), nativeTable: true, nativeShapeId }
+        : {
+            text: shapeText(shape),
+            paragraphs: richParagraphs(shape),
+            nativeShapeId,
+            nativeParagraphIndex: 0,
+            nativeShapeKind: isTitle ? "placeholder" as const : "shape" as const,
+            ...(type === "image" ? { ...pictureMedia(deck, slidePartName, shape), ...(cropFor(shape) ? { crop: cropFor(shape) } : {}) } : {}),
+          };
+    const chart = type === "chart" ? content as PresentationChartContent : undefined;
+    const hiddenObject = ["1", "true", "on"].includes((firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("hidden") ?? "").toLowerCase());
+    objects.push({
+      id: `${slideId}:shape:${nativeShapeId}`,
+      type,
+      ...shapeGeometry(shape, layoutPlaceholders.get(placeholderKey(shape) ?? ""), canvas),
+      content,
+      ...(chart?.sourceArtifactId ? {
+        sourceBinding: {
+          artifactId: chart.sourceArtifactId,
+          kind: chart.sourceKind ?? "artifact",
+          ...(chart.sourceRevision ? { versionId: chart.sourceRevision } : {}),
+          ...(chart.sourceLive !== undefined ? { live: chart.sourceLive } : {}),
+        },
+      } : {}),
+      ...(hiddenObject ? { hidden: true } : {}),
+      ...(descr ? { altText: descr } : {}),
+      ...(parentId ? { parentId: `${slideId}:shape:${parentId}` } : {}),
+      locked: isTitle,
+      readingOrder: objects.length,
+    } satisfies PresentationObject);
+  }
+  return objects;
+}
+
+async function presentationThemeFonts(deck: Presentation) {
+  const presentationPart = deck.office.package.getPart("/ppt/presentation.xml");
+  const relationship = presentationPart?.relationships().byType(THEME_RELATIONSHIP)[0];
+  const themePart = relationship && presentationPart
+    ? deck.office.package.relatedPart(presentationPart, relationship.id)
+    : undefined;
+  if (!themePart) return undefined;
+  const root = (await deck.office.xml(themePart.name)).root;
+  const font = (slot: string) => {
+    const element = descendants(root).find((node) => node.localName === slot);
+    return element?.elements().find((child) => child.localName === "latin")?.getAttribute("typeface");
+  };
+  const heading = font("majorFont");
+  const body = font("minorFont");
+  return heading || body
+    ? { ...(heading ? { heading } : {}), ...(body ? { body } : {}) }
+    : undefined;
 }
 
 async function projectPresentation(deck: Presentation, profile: LensCompatibilityProfile) {
@@ -123,7 +378,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     const hidden = ["0", "false", "off"].includes(
       (root.getAttribute("show") ?? "").toLowerCase(),
     );
-    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: slideObjects(deck, slide.partName, root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
+    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, layoutRoot, canvas), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
   }));
   const partNames = deck.office.package.parts().map((part) => part.name);
   for (const [feature, pattern] of [["master", /\/slideMasters\//i], ["layout", /\/slideLayouts\//i], ["media", /\/media\//i], ["smartArt", /\/diagrams\//i], ["chart", /\/charts\//i], ["notes", /\/notesSlides\//i], ["unknown-extension", /unknown|future|extension/i]] as const) {
@@ -150,9 +405,9 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     ["masters", partNames.some((name) => /\/slideMasters\//i.test(name)) ? "PRESERVED" : "NATIVE", "Slide masters are preserved exactly as PowerPoint saved them."],
     ["layouts", partNames.some((name) => /\/slideLayouts\//i.test(name)) ? "PRESERVED" : "NATIVE", "Slide layouts come from this file's own masters and are preserved."],
     ["media", partNames.some((name) => /\/media\//i.test(name)) ? "PRESERVED" : "NATIVE", "Media parts are copied through byte for byte."],
-    ["images", partNames.some((name) => /\/media\//i.test(name)) ? "PRESERVED" : "NATIVE", "Pictures keep the bytes and cropping PowerPoint saved."],
-    ["charts", partNames.some((name) => /\/charts\//i.test(name)) ? "PRESERVED" : "NATIVE", "Charts keep their own cached data and workbook."],
-    ["tables", "PRESERVED", "Tables are preserved as the graphic frames PowerPoint wrote."],
+    ["images", "NATIVE", "Pictures keep their embedded bytes while crop and alt text edits write native DrawingML."],
+    ["charts", "NATIVE", "Charts write native chart parts, caches, and embedded workbook values."],
+    ["tables", "NATIVE", "Table cell text and formatting stay in the native DrawingML table."],
     ["ole", partNames.some((name) => /\/embeddings\//i.test(name)) ? "PRESERVED" : "NATIVE", "Embedded objects are preserved untouched."],
     ["smartArt", partNames.some((name) => /\/diagrams\//i.test(name)) ? "PRESERVED" : "NATIVE", "SmartArt diagrams are preserved untouched."],
     ["equations", "PRESERVED", "Equations already in the file are preserved; Spectra does not author new ones."],
@@ -161,7 +416,8 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     entries.push({ regionId: `pptx:region:${feature}`, feature, class: cls, ...(cls === "PRESERVED" ? { readOnly: true } : {}), ...(reason && cls !== "NATIVE" ? { reason } : {}) });
   }
   const semanticDigest = await sha256Payload(new TextEncoder().encode(JSON.stringify(slides.map(({ id, title, text, objects, hidden, speakerNotes }) => ({ id, title, text, objects, hidden, speakerNotes })))));
-  const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest, canvasWidthEmu: canvas.width, canvasHeightEmu: canvas.height } });
+  const themeFonts = await presentationThemeFonts(deck);
+  const projection = pptxProjectionSchema.parse({ slides, nativeBinding: { version: 1, format: deck.office.format.extension as PptxProjection["nativeBinding"]["format"], profile, macroEnabled: deck.office.format.macroEnabled, semanticDigest, canvasWidthEmu: canvas.width, canvasHeightEmu: canvas.height, ...(themeFonts ? { themeFonts } : {}) } });
   return { projection, fidelityMap };
 }
 
@@ -366,7 +622,7 @@ async function ensureNotesPage(deck: Presentation, slidePartName: string) {
 }
 
 function shapeIn(root: XmlElement, id: string) {
-  return descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && ["sp", "pic", "graphicFrame"].includes(node.localName) && shapeId(node) === id);
+  return descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName) && shapeId(node) === id);
 }
 
 /** PowerPoint's own alt text lives on `p:cNvPr/@descr`, so that is what moves. */
@@ -434,7 +690,7 @@ async function reorderSlides(deck: Presentation, partNames: string[]) {
  * deck's own `layouts()` — Spectra never writes a new master or layout, which is
  * why masters stay preserved even when the deck grows.
  */
-function addNativeSlide(deck: Presentation, layoutPartName: string | undefined, title: string | undefined, text: string[] | undefined) {
+function addNativeSlide(deck: Presentation, layoutPartName: string | undefined, title: string | undefined, text: string[] | undefined, objects?: PresentationObject[]) {
   const layouts = deck.layouts();
   const layoutIndex = layoutPartName ? layouts.indexOf(layoutPartName) : -1;
   const slide = deck.addSlide(layoutIndex >= 0 ? { layoutPartName } : layouts.length ? { layoutIndex: 0 } : {});
@@ -448,7 +704,19 @@ function addNativeSlide(deck: Presentation, layoutPartName: string | undefined, 
       deck.office.markDirty(slide.partName);
     }
   }
+  const addedText = new Set((text ?? []).map((line) => line.trim()).filter(Boolean));
   for (const line of text ?? []) if (line.trim()) { addTextBox(slide.root(), line); deck.office.markDirty(slide.partName); }
+  for (const object of objects ?? []) {
+    if (object.type !== "text") continue;
+    const value = presentationObjectText(object);
+    if (typeof value === "string" && value.trim() && value.trim() !== title?.trim() && !addedText.has(value.trim())) {
+      const added = addTextBox(slide.root(), value);
+      const paragraphs = object.content && typeof object.content === "object" ? (object.content as { paragraphs?: PresentationParagraph[] }).paragraphs : undefined;
+      if (paragraphs?.length) setRichText(added, paragraphs);
+      addedText.add(value.trim());
+      deck.office.markDirty(slide.partName);
+    }
+  }
   return slide;
 }
 
@@ -462,6 +730,634 @@ function addTextBox(root: XmlElement, text: string) {
   const nvSpPr = new XmlElement("nvSpPr", "p"); const cNvPr = new XmlElement("cNvPr", "p"); cNvPr.setAttribute("id", String(id)); cNvPr.setAttribute("name", `Spectra Text ${id}`); nvSpPr.appendChild(cNvPr); nvSpPr.appendChild(new XmlElement("cNvSpPr", "p")); nvSpPr.appendChild(new XmlElement("nvPr", "p"));
   const spPr = new XmlElement("spPr", "p"); const xfrm = new XmlElement("xfrm", "a"); const off = new XmlElement("off", "a"); off.setAttribute("x", "914400"); off.setAttribute("y", "4572000"); const ext = new XmlElement("ext", "a"); ext.setAttribute("cx", "7315200"); ext.setAttribute("cy", "685800"); xfrm.appendChild(off); xfrm.appendChild(ext); spPr.appendChild(xfrm); const geom = new XmlElement("prstGeom", "a"); geom.setAttribute("prst", "rect"); geom.appendChild(new XmlElement("avLst", "a")); spPr.appendChild(geom); sp.appendChild(nvSpPr); sp.appendChild(spPr);
   const txBody = new XmlElement("txBody", "p"); txBody.appendChild(new XmlElement("bodyPr", "a")); txBody.appendChild(new XmlElement("lstStyle", "a")); const p = new XmlElement("p", "a"); const r = new XmlElement("r", "a"); r.appendChild(new XmlElement("rPr", "a")); const t = new XmlElement("t", "a"); t.appendChild(new XmlText(text)); r.appendChild(t); p.appendChild(r); p.appendChild(new XmlElement("endParaRPr", "a")); txBody.appendChild(p); sp.appendChild(txBody); spTree.appendChild(sp);
+  return sp;
+}
+
+function replaceShapeText(shape: XmlElement, value: string) {
+  const txBody = descendants(shape).find((node) => [PML_NAMESPACE, DRAWINGML_NAMESPACE].includes(node.namespaceUri() ?? "") && node.localName === "txBody");
+  if (!txBody) throw new PptxLensError("PPTX_TEXT_MISSING", "The target PowerPoint object has no text body.");
+  const paragraphs = txBody.elements().filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "p");
+  const lines = value.split(/\r?\n/);
+  if (paragraphs.length === lines.length && paragraphs.length > 0) {
+    paragraphs.forEach((paragraph, index) => {
+      const textNodesInParagraph = textNodes(paragraph);
+      if (textNodesInParagraph.length) {
+        replaceNodeText(textNodesInParagraph[0]!, lines[index] ?? "");
+        textNodesInParagraph.slice(1).forEach((node) => {
+          const parent = node.parent;
+          if (parent) parent.removeChild(node);
+        });
+      } else {
+        const run = new XmlElement("r", "a");
+        run.appendChild(new XmlElement("rPr", "a"));
+        const textNode = new XmlElement("t", "a");
+        textNode.appendChild(new XmlText(lines[index] ?? ""));
+        run.appendChild(textNode);
+        paragraph.insertBefore(run, paragraph.elements()[0] ?? null);
+      }
+    });
+    return;
+  }
+  paragraphs.forEach((paragraph) => txBody.removeChild(paragraph));
+  const template = paragraphs[0];
+  const templateParagraphProps = template?.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "pPr");
+  const templateRun = template ? descendants(template).find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "r") : undefined;
+  const templateRunProps = templateRun ? child(templateRun, DRAWINGML_NAMESPACE, "rPr") : undefined;
+  for (const line of lines) {
+    const paragraph = new XmlElement("p", "a");
+    if (templateParagraphProps) paragraph.appendChild(templateParagraphProps.clone());
+    const run = new XmlElement("r", "a");
+    run.appendChild(templateRunProps?.clone() ?? new XmlElement("rPr", "a"));
+    const textNode = new XmlElement("t", "a");
+    textNode.appendChild(new XmlText(line));
+    run.appendChild(textNode);
+    paragraph.appendChild(run);
+    paragraph.appendChild(new XmlElement("endParaRPr", "a"));
+    txBody.appendChild(paragraph);
+  }
+}
+
+function moveShapeToOrder(root: XmlElement, shapeIdValue: string, order: number) {
+  const tree = descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "spTree");
+  const shape = tree?.elements().find((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName) && shapeId(node) === shapeIdValue);
+  if (!tree || !shape) return;
+  const objects = tree.elements().filter((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName));
+  const bounded = Math.max(0, Math.min(objects.length - 1, order));
+  const reference = objects[bounded] === shape ? objects[bounded + 1] ?? null : objects[bounded] ?? null;
+  tree.removeChild(shape);
+  tree.insertBefore(shape, reference === shape ? null : reference);
+}
+
+function removeShape(root: XmlElement, shapeIdValue: string) {
+  const shape = shapeIn(root, shapeIdValue);
+  if (!shape || !shape.parent) throw new PptxLensError("PPTX_SHAPE_MISSING", "The object being deleted no longer exists on this slide.");
+  if (shape.localName === "grpSp") {
+    // The editor's delete and ungroup affordances both remove the group node
+    // while keeping its members. Moving the native children out first gives
+    // those two actions the same semantics in PowerPoint and in Spectra.
+    const parent = shape.parent;
+    const children = shape.elements().filter((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName));
+    const reference = shape;
+    for (const childNode of children) {
+      shape.removeChild(childNode);
+      parent.insertBefore(childNode, reference);
+    }
+  }
+  shape.parent.removeChild(shape);
+}
+
+function setObjectHidden(shape: XmlElement, hidden: boolean) {
+  const properties = firstDescendant(shape, PML_NAMESPACE, "cNvPr");
+  if (!properties) throw new PptxLensError("PPTX_SHAPE_PROPS_MISSING", "This PowerPoint object has no visibility properties.");
+  if (hidden) properties.setAttribute("hidden", "1");
+  else properties.removeAttribute("hidden");
+}
+
+function addNativeGroup(root: XmlElement, operation: {
+  childShapeIds: string[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  readingOrder?: number;
+}) {
+  const tree = descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "spTree");
+  if (!tree) throw new PptxLensError("PPTX_SHAPE_TREE_MISSING", "The slide has no editable shape tree.");
+  const children = operation.childShapeIds.map((id) => tree.elements().find((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName) && shapeId(node) === id));
+  if (children.some((node) => !node)) throw new PptxLensError("PPTX_SHAPE_MISSING", "A grouped PowerPoint object no longer exists on this slide.");
+  const ids = descendants(tree).filter((node) => node.localName === "cNvPr").map((node) => Number(node.getAttribute("id") ?? 0));
+  const id = Math.max(1, ...ids) + 1;
+  const group = new XmlElement("grpSp", "p");
+  const nv = new XmlElement("nvGrpSpPr", "p");
+  const cNvPr = new XmlElement("cNvPr", "p");
+  cNvPr.setAttribute("id", String(id));
+  cNvPr.setAttribute("name", `Spectra Group ${id}`);
+  nv.appendChild(cNvPr);
+  nv.appendChild(new XmlElement("cNvGrpSpPr", "p"));
+  nv.appendChild(new XmlElement("nvPr", "p"));
+  group.appendChild(nv);
+  const grpSpPr = new XmlElement("grpSpPr", "p");
+  const xfrm = new XmlElement("xfrm", "a");
+  const off = new XmlElement("off", "a");
+  off.setAttribute("x", "0"); off.setAttribute("y", "0");
+  const ext = new XmlElement("ext", "a");
+  ext.setAttribute("cx", "1"); ext.setAttribute("cy", "1");
+  const childOff = new XmlElement("chOff", "a");
+  childOff.setAttribute("x", "0"); childOff.setAttribute("y", "0");
+  const childExt = new XmlElement("chExt", "a");
+  childExt.setAttribute("cx", "1"); childExt.setAttribute("cy", "1");
+  xfrm.appendChild(off); xfrm.appendChild(ext); xfrm.appendChild(childOff); xfrm.appendChild(childExt);
+  grpSpPr.appendChild(xfrm);
+  group.appendChild(grpSpPr);
+  for (const childNode of children as XmlElement[]) {
+    tree.removeChild(childNode);
+    group.appendChild(childNode);
+  }
+  tree.appendChild(group);
+  setShapeGeometry(group, operation);
+  if (operation.readingOrder !== undefined) moveShapeToOrder(root, String(id), operation.readingOrder);
+  return group;
+}
+
+async function setThemeFonts(deck: Presentation, fonts: { heading?: string; body?: string }) {
+  const presentationPart = deck.office.package.getPart("/ppt/presentation.xml");
+  const relationship = presentationPart?.relationships().byType(THEME_RELATIONSHIP)[0];
+  const themePart = relationship && presentationPart ? deck.office.package.relatedPart(presentationPart, relationship.id) : undefined;
+  if (!themePart) throw new PptxLensError("PPTX_THEME_MISSING", "This PowerPoint file has no theme part to update.");
+  const root = (await deck.office.xml(themePart.name)).root;
+  const update = (slot: string, value: string | undefined) => {
+    if (!value) return;
+    const family = descendants(root).find((node) => node.localName === slot)?.elements().find((node) => node.localName === "latin");
+    if (family) family.setAttribute("typeface", value);
+  };
+  update("majorFont", fonts.heading);
+  update("minorFont", fonts.body);
+  deck.office.markDirty(themePart.name);
+}
+
+async function duplicateNativeSlide(deck: Presentation, sourceSlideId: string, title: string | undefined) {
+  const source = slideFor(deck, sourceSlideId);
+  const copy = deck.addSlide(source.layoutPartName ? { layoutPartName: source.layoutPartName } : {});
+  const sourcePart = deck.office.package.getPart(source.partName);
+  const copyPart = deck.office.package.getPart(copy.partName);
+  if (!sourcePart || !copyPart) throw new PptxLensError("PPTX_SLIDE_MISSING", "The slide could not be duplicated safely.");
+  copyPart.write(await sourcePart.read());
+  const originalRelationships = sourcePart.relationships().all();
+  copyPart.relationships().all().forEach((relation) => copyPart.relationships().remove(relation.id));
+  let notesCopy: { partName: string; sourcePartName: string } | undefined;
+  for (const relation of originalRelationships) {
+    const target = relation.targetMode === "External" ? relation.target : resolveRelationshipTarget(source.partName, relation.target);
+    if (relation.type === NOTES_SLIDE_RELATIONSHIP) {
+      const sourceNotes = deck.office.package.getPart(target);
+      if (!sourceNotes) continue;
+      const notesName = nextPartName(deck, "/ppt/notesSlides", "notesSlide");
+      const note = deck.office.package.addPart(notesName, sourceNotes.contentType, await sourceNotes.read());
+      note.relationships().all().forEach((candidate) => note.relationships().remove(candidate.id));
+      const noteRelations = sourceNotes.relationships().all();
+      for (const noteRelation of noteRelations) {
+        if (noteRelation.type === SLIDE_RELATIONSHIP) {
+          note.relationships().add({ id: noteRelation.id, type: SLIDE_RELATIONSHIP, target: relativePartTarget(note.name, copy.partName) });
+        } else {
+          note.relationships().add({ id: noteRelation.id, type: noteRelation.type, target: noteRelation.target, ...(noteRelation.targetMode === "External" ? { targetMode: "External" as const } : {}) });
+        }
+      }
+      copyPart.relationships().add({ id: relation.id, type: relation.type, target: relativePartTarget(copy.partName, note.name) });
+      notesCopy = { partName: note.name, sourcePartName: sourceNotes.name };
+      continue;
+    }
+    copyPart.relationships().add({ id: relation.id, type: relation.type, target: relation.target, ...(relation.targetMode === "External" ? { targetMode: "External" as const } : {}) });
+  }
+  if (title) {
+    const copiedRoot = (await deck.office.xml(copy.partName)).root;
+    const titleShapeRoot = titleShape(copiedRoot);
+    if (titleShapeRoot) replaceShapeText(titleShapeRoot, title);
+    else addTextBox(copiedRoot, title);
+    deck.office.markDirty(copy.partName);
+  }
+  void notesCopy;
+  return copy;
+}
+
+function child(root: XmlElement, namespace: string, localName: string) {
+  return root.elements().find((node) => node.namespaceUri() === namespace && node.localName === localName);
+}
+
+function ensureChild(root: XmlElement, namespace: string, prefix: string, localName: string) {
+  return child(root, namespace, localName) ?? (() => {
+    const element = new XmlElement(localName, prefix);
+    root.appendChild(element);
+    return element;
+  })();
+}
+
+function clearChildren(root: XmlElement) {
+  root.elements().slice().forEach((element) => root.removeChild(element));
+  root.children
+    .filter((node): node is XmlText => node.kind === "text")
+    .slice()
+    .forEach((node) => root.removeChild(node));
+}
+
+function setTextElement(root: XmlElement, value: string) {
+  clearChildren(root);
+  root.appendChild(new XmlText(value));
+}
+
+function nativeColor(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const tokens: Record<string, string> = {
+    "var(--accent-mint)": "159B76",
+    "var(--accent)": "6A4DE8",
+    "var(--bg-elevated)": "FFFEFD",
+    "var(--bg-primary)": "FBFAF8",
+    "var(--bg-secondary)": "F6F4F0",
+    "var(--text-primary)": "211F1C",
+    "var(--text-secondary)": "65615B",
+    "var(--border-strong)": "D4D0C8",
+  };
+  const raw = tokens[value.trim()] ?? value.trim();
+  const match = raw.match(/^#?([0-9a-f]{6})$/i);
+  return match?.[1]?.toUpperCase();
+}
+
+function ensureRunProperties(run: XmlElement) {
+  return child(run, DRAWINGML_NAMESPACE, "rPr") ?? (() => {
+    const properties = new XmlElement("rPr", "a");
+    run.insertBefore(properties, run.elements()[0] ?? null);
+    return properties;
+  })();
+}
+
+function ensureColor(properties: XmlElement, color: string) {
+  const fill = ensureChild(properties, DRAWINGML_NAMESPACE, "a", "solidFill");
+  const rgb = ensureChild(fill, DRAWINGML_NAMESPACE, "a", "srgbClr");
+  rgb.setAttribute("val", color);
+  fill.elements()
+    .filter((element) => element !== rgb && ["schemeClr", "scrgbClr", "hslClr", "sysClr", "prstClr"].includes(element.localName))
+    .forEach((element) => fill.removeChild(element));
+}
+
+function setTextFormat(shape: XmlElement, format: {
+  fontFamily?: string | null;
+  fontSizePt?: number | null;
+  bold?: boolean | null;
+  italic?: boolean | null;
+  underline?: boolean | null;
+  strike?: boolean | null;
+  color?: string | null;
+  align?: "left" | "center" | "right" | "justify" | null;
+  level?: number | null;
+}) {
+  const paragraphs = descendants(shape).filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "p");
+  if (!paragraphs.length) throw new PptxLensError("PPTX_TEXT_MISSING", "The target shape has no editable text paragraphs.");
+  for (const paragraph of paragraphs) {
+    const paragraphProperties = ensureChild(paragraph, DRAWINGML_NAMESPACE, "a", "pPr");
+    if (format.align !== undefined) {
+      if (format.align === null) paragraphProperties.removeAttribute("algn");
+      else paragraphProperties.setAttribute("algn", format.align === "center" ? "ctr" : format.align === "right" ? "r" : format.align === "justify" ? "just" : "l");
+    }
+    if (format.level !== undefined) {
+      if (format.level === null) paragraphProperties.removeAttribute("lvl");
+      else paragraphProperties.setAttribute("lvl", String(format.level));
+    }
+    for (const run of descendants(paragraph).filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && ["r", "fld"].includes(node.localName))) {
+      const properties = ensureRunProperties(run);
+      if (format.fontSizePt !== undefined) {
+        if (format.fontSizePt === null) properties.removeAttribute("sz");
+        else properties.setAttribute("sz", String(Math.round(format.fontSizePt * 100)));
+      }
+      if (format.bold !== undefined) {
+        if (format.bold === null || !format.bold) properties.removeAttribute("b");
+        else properties.setAttribute("b", "1");
+      }
+      if (format.italic !== undefined) {
+        if (format.italic === null || !format.italic) properties.removeAttribute("i");
+        else properties.setAttribute("i", "1");
+      }
+      if (format.underline !== undefined) {
+        if (format.underline === null) properties.removeAttribute("u");
+        else properties.setAttribute("u", format.underline ? "sng" : "none");
+      }
+      if (format.strike !== undefined) {
+        if (format.strike === null) properties.removeAttribute("strike");
+        else properties.setAttribute("strike", format.strike ? "sngStrike" : "noStrike");
+      }
+      if (format.fontFamily !== undefined && format.fontFamily !== null) {
+        const latin = ensureChild(properties, DRAWINGML_NAMESPACE, "a", "latin");
+        latin.setAttribute("typeface", format.fontFamily);
+      } else if (format.fontFamily === null) {
+        const latin = child(properties, DRAWINGML_NAMESPACE, "latin");
+        if (latin) properties.removeChild(latin);
+      }
+      if (format.color !== undefined) {
+        const color = nativeColor(format.color);
+        if (color) ensureColor(properties, color);
+        else if (format.color === null) {
+          const fill = child(properties, DRAWINGML_NAMESPACE, "solidFill");
+          if (fill) properties.removeChild(fill);
+        }
+      }
+    }
+    if (!paragraph.elements().some((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "endParaRPr")) paragraph.appendChild(new XmlElement("endParaRPr", "a"));
+  }
+}
+
+function setRichText(shape: XmlElement, paragraphs: PresentationParagraph[]) {
+  const txBody = descendants(shape).find((node) => [PML_NAMESPACE, DRAWINGML_NAMESPACE].includes(node.namespaceUri() ?? "") && node.localName === "txBody");
+  if (!txBody) throw new PptxLensError("PPTX_TEXT_MISSING", "The target PowerPoint object has no editable text body.");
+  txBody.elements()
+    .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "p")
+    .forEach((paragraph) => txBody.removeChild(paragraph));
+  for (const input of paragraphs) {
+    const paragraph = new XmlElement("p", "a");
+    if (input.alignment || input.level !== undefined || input.bullet && input.bullet !== "none") {
+      const properties = new XmlElement("pPr", "a");
+      if (input.alignment) properties.setAttribute("algn", input.alignment === "center" ? "ctr" : input.alignment === "right" ? "r" : input.alignment === "justify" ? "just" : "l");
+      if (input.level !== undefined) properties.setAttribute("lvl", String(input.level));
+      if (input.bullet === "bullet") {
+        const bullet = new XmlElement("buChar", "a");
+        bullet.setAttribute("char", "•");
+        properties.appendChild(bullet);
+      } else if (input.bullet === "numbered") {
+        const numbered = new XmlElement("buAutoNum", "a");
+        numbered.setAttribute("type", "arabicPeriod");
+        properties.appendChild(numbered);
+      }
+      paragraph.appendChild(properties);
+    }
+    for (const inputRun of input.runs) {
+      const run = new XmlElement("r", "a");
+      const properties = new XmlElement("rPr", "a");
+      if (inputRun.fontSizePt !== undefined) properties.setAttribute("sz", String(Math.round(inputRun.fontSizePt * 100)));
+      if (inputRun.bold !== undefined) properties.setAttribute("b", inputRun.bold ? "1" : "0");
+      if (inputRun.italic !== undefined) properties.setAttribute("i", inputRun.italic ? "1" : "0");
+      if (inputRun.underline !== undefined) properties.setAttribute("u", inputRun.underline ? "sng" : "none");
+      if (inputRun.strike !== undefined) properties.setAttribute("strike", inputRun.strike ? "sngStrike" : "noStrike");
+      if (inputRun.fontFamily) ensureChild(properties, DRAWINGML_NAMESPACE, "a", "latin").setAttribute("typeface", inputRun.fontFamily);
+      const color = nativeColor(inputRun.color);
+      if (color) ensureColor(properties, color);
+      run.appendChild(properties);
+      const text = new XmlElement("t", "a");
+      text.appendChild(new XmlText(inputRun.text));
+      run.appendChild(text);
+      paragraph.appendChild(run);
+    }
+    paragraph.appendChild(new XmlElement("endParaRPr", "a"));
+    txBody.appendChild(paragraph);
+  }
+}
+
+function setShapeStyle(shape: XmlElement, style: Record<string, unknown>) {
+  const properties = firstDescendant(shape, PML_NAMESPACE, "spPr");
+  if (!properties) throw new PptxLensError("PPTX_SHAPE_PROPS_MISSING", "This PowerPoint object has no editable shape properties.");
+  if (Object.prototype.hasOwnProperty.call(style, "fill")) {
+    const fillColor = nativeColor(style.fill);
+    const fill = child(properties, DRAWINGML_NAMESPACE, "solidFill");
+    if (fillColor) ensureColor(properties, fillColor);
+    else if (fill) properties.removeChild(fill);
+  }
+  const line = ensureChild(properties, DRAWINGML_NAMESPACE, "a", "ln");
+  if (Object.prototype.hasOwnProperty.call(style, "stroke")) {
+    const strokeColor = nativeColor(style.stroke);
+    if (!strokeColor) {
+      const lineFill = child(line, DRAWINGML_NAMESPACE, "solidFill");
+      if (lineFill) line.removeChild(lineFill);
+    } else {
+    const lineFill = ensureChild(line, DRAWINGML_NAMESPACE, "a", "solidFill");
+    const lineRgb = ensureChild(lineFill, DRAWINGML_NAMESPACE, "a", "srgbClr");
+    lineRgb.setAttribute("val", strokeColor);
+    }
+  }
+  if (typeof style.strokeWidth === "number") line.setAttribute("w", String(Math.max(0, Math.round(style.strokeWidth * 12700))));
+  const radius = typeof style.cornerRadius === "number" ? style.cornerRadius : style.radius;
+  if (typeof radius === "number") {
+    const geometry = child(properties, DRAWINGML_NAMESPACE, "prstGeom");
+    if (geometry) geometry.setAttribute("prst", radius > 0 ? "roundRect" : "rect");
+  }
+  if (typeof style.opacity === "number") {
+    const alpha = Math.max(0, Math.min(100000, Math.round(style.opacity * 100000)));
+    const fill = child(properties, DRAWINGML_NAMESPACE, "solidFill");
+    const rgb = fill ? child(fill, DRAWINGML_NAMESPACE, "srgbClr") : undefined;
+    if (rgb) ensureChild(rgb, DRAWINGML_NAMESPACE, "a", "alpha").setAttribute("val", String(alpha));
+  }
+}
+
+function setImageCrop(shape: XmlElement, crop: { left: number; top: number; right: number; bottom: number }) {
+  const blipFill = firstDescendant(shape, PML_NAMESPACE, "blipFill");
+  if (!blipFill) throw new PptxLensError("PPTX_IMAGE_MISSING", "This picture has no editable fill to crop.");
+  const source = ensureChild(blipFill, DRAWINGML_NAMESPACE, "a", "srcRect");
+  for (const [key, value] of Object.entries({ l: crop.left, t: crop.top, r: crop.right, b: crop.bottom })) {
+    const amount = Math.max(0, Math.min(100000, Math.round(value * 1000)));
+    if (amount) source.setAttribute(key, String(amount));
+    else source.removeAttribute(key);
+  }
+}
+
+function setTableCellFormat(shape: XmlElement, rowIndex: number, columnIndex: number, format: Record<string, unknown>) {
+  const row = descendants(shape).filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "tr")[rowIndex];
+  const cell = row ? descendants(row).filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "tc")[columnIndex] : undefined;
+  if (!cell) throw new PptxLensError("PPTX_TABLE_CELL_MISSING", "The target PowerPoint table cell no longer exists.");
+  const properties = ensureChild(cell, DRAWINGML_NAMESPACE, "a", "tcPr");
+  const fillColor = nativeColor(format.fill ?? format.fillColor);
+  if (fillColor) ensureColor(properties, fillColor);
+  setTextFormat(cell, {
+    ...(typeof format.fontFamily === "string" ? { fontFamily: format.fontFamily } : {}),
+    ...(typeof format.fontSizePt === "number" ? { fontSizePt: format.fontSizePt } : {}),
+    ...(typeof format.bold === "boolean" ? { bold: format.bold } : {}),
+    ...(typeof format.italic === "boolean" ? { italic: format.italic } : {}),
+    ...(typeof format.underline === "boolean" ? { underline: format.underline } : {}),
+    ...(typeof format.color === "string" ? { color: format.color } : {}),
+  });
+}
+
+function setTableCellText(shape: XmlElement, rowIndex: number, columnIndex: number, value: string) {
+  const row = descendants(shape).filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "tr")[rowIndex];
+  const cell = row ? descendants(row).filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "tc")[columnIndex] : undefined;
+  if (!cell) throw new PptxLensError("PPTX_TABLE_CELL_MISSING", "The target PowerPoint table cell no longer exists.");
+  replaceShapeText(cell, value);
+}
+
+function updateCache(cache: XmlElement, values: Array<string | number>, numeric: boolean) {
+  const points = cache.elements().filter((node) => node.localName === "pt");
+  points.forEach((point) => cache.removeChild(point));
+  const count = child(cache, "http://schemas.openxmlformats.org/drawingml/2006/chart", "ptCount") ?? (() => {
+    const value = new XmlElement("ptCount", "c");
+    cache.insertBefore(value, cache.elements()[0] ?? null);
+    return value;
+  })();
+  count.setAttribute("val", String(values.length));
+  values.forEach((value, index) => {
+    const point = new XmlElement("pt", "c");
+    point.setAttribute("idx", String(index));
+    const text = new XmlElement("v", "c");
+    text.appendChild(new XmlText(String(value)));
+    point.appendChild(text);
+    cache.appendChild(point);
+  });
+  if (numeric) cache.setAttribute("formatCode", "General");
+}
+
+function formulaCells(formula: string) {
+  const match = formula.match(/^(?:'([^']+)'|([^!]+))!\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?$/i);
+  if (!match) return [] as string[];
+  const sheetName = match[1] ?? match[2];
+  void sheetName;
+  const startColumn = match[3]!.toUpperCase();
+  const startRow = Number(match[4]);
+  const endColumn = (match[5] ?? startColumn).toUpperCase();
+  const endRow = Number(match[6] ?? startRow);
+  const columnNumber = (value: string) => [...value].reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0);
+  const columnName = (value: number) => {
+    let output = "";
+    for (let current = value; current > 0; current = Math.floor((current - 1) / 26)) output = String.fromCharCode(65 + ((current - 1) % 26)) + output;
+    return output;
+  };
+  const refs: string[] = [];
+  for (let row = startRow; row <= endRow; row += 1) {
+    for (let column = columnNumber(startColumn); column <= columnNumber(endColumn); column += 1) refs.push(`${columnName(column)}${row}`);
+  }
+  return refs;
+}
+
+async function updateEmbeddedWorkbook(
+  deck: Presentation,
+  chartPart: OpcPart,
+  root: XmlElement,
+  series: Array<{ name: string; categories: string[]; values: number[] }>,
+) {
+  const packageRelationship = chartPart.relationships().byType("http://schemas.openxmlformats.org/officeDocument/2006/relationships/package")[0];
+  if (!packageRelationship || packageRelationship.targetMode === "External") return;
+  const workbookPart = deck.office.package.relatedPart(chartPart, packageRelationship.id);
+  if (!workbookPart) return;
+  let workbook: Workbook;
+  try { workbook = await Workbook.open(await workbookPart.read()); } catch { return; }
+  const serNodes = descendants(root).filter((node) => node.localName === "ser");
+  let changed = false;
+  series.forEach((item, index) => {
+    const ser = serNodes[index];
+    if (!ser) return;
+    const write = (referenceName: "cat" | "val", values: Array<string | number>) => {
+      const reference = descendants(ser).find((node) => node.localName === referenceName && descendants(node).some((child) => child.localName === "f"));
+      const formula = reference ? descendants(reference).find((node) => node.localName === "f")?.text() : undefined;
+      if (!formula) return;
+      const sheetMatch = formula.match(/^(?:'([^']+)'|([^!]+))!/);
+      const sheet = workbook.sheet(sheetMatch?.[1] ?? sheetMatch?.[2] ?? "");
+      if (!sheet) return;
+      formulaCells(formula).forEach((ref, valueIndex) => {
+        if (values[valueIndex] !== undefined) sheet.setCell(ref, values[valueIndex] as string | number);
+      });
+      changed = true;
+    };
+    write("cat", item.categories);
+    write("val", item.values);
+  });
+  if (changed) workbookPart.write(await workbook.save());
+}
+
+function chartTextElement(root: XmlElement, value: string) {
+  const chartNamespace = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+  const owner = root.localName === "catAx" || root.localName === "valAx"
+    ? ensureChild(root, chartNamespace, "c", "title")
+    : root;
+  const tx = ensureChild(owner, chartNamespace, "c", "tx");
+  const rich = ensureChild(tx, "http://schemas.openxmlformats.org/drawingml/2006/chart", "c", "rich");
+  const paragraph = ensureChild(rich, DRAWINGML_NAMESPACE, "a", "p");
+  const run = ensureChild(paragraph, DRAWINGML_NAMESPACE, "a", "r");
+  const text = ensureChild(run, DRAWINGML_NAMESPACE, "a", "t");
+  setTextElement(text, value);
+}
+
+function setChartType(root: XmlElement, type: "bar" | "column" | "line" | "pie" | "area") {
+  const chartNamespace = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+  const chartRoot = child(root, chartNamespace, "chart");
+  const plotArea = chartRoot && child(chartRoot, chartNamespace, "plotArea");
+  if (!plotArea) return;
+  const localName = type === "line" ? "lineChart" : type === "pie" ? "pieChart" : type === "area" ? "areaChart" : "barChart";
+  const existing = plotArea.elements().find((node) => ["barChart", "lineChart", "pieChart", "areaChart"].includes(node.localName));
+  let chart = existing;
+  if (existing && existing.localName !== localName) {
+    const replacement = new XmlElement(localName, "c");
+    for (const node of existing.elements().slice()) {
+      existing.removeChild(node);
+      replacement.appendChild(node);
+    }
+    plotArea.insertBefore(replacement, existing);
+    plotArea.removeChild(existing);
+    chart = replacement;
+  }
+  if (!chart) return;
+  const barDirection = child(chart, chartNamespace, "barDir");
+  if (localName === "barChart") {
+    const direction = barDirection ?? new XmlElement("barDir", "c");
+    direction.setAttribute("val", type === "column" ? "col" : "bar");
+    if (!barDirection) chart.insertBefore(direction, chart.elements()[0] ?? null);
+  } else if (barDirection) chart.removeChild(barDirection);
+}
+
+async function setChartContent(deck: Presentation, slidePartName: string, shapeIdValue: string, input: {
+  chartType?: "bar" | "column" | "line" | "pie" | "area";
+  title?: string | null;
+  categories: string[];
+  series: Array<{ name: string; categories: string[]; values: number[] }>;
+  showLegend?: boolean;
+  axisTitle?: string | null;
+  valueAxisTitle?: string | null;
+  sourceArtifactId?: string;
+  sourceChartId?: string;
+  sourceRevision?: string;
+  sourceKind?: "artifact" | "sheets_range";
+  sourceLive?: boolean;
+}) {
+  const slidePart = deck.office.package.getPart(slidePartName);
+  const shape = slidePart ? shapeIn((await deck.office.xml(slidePartName)).root, shapeIdValue) : undefined;
+  const chartRef = shape ? firstDescendant(shape, "http://schemas.openxmlformats.org/drawingml/2006/chart", "chart") : undefined;
+  const rid = chartRef?.getAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "id");
+  const chartPart = rid && slidePart ? deck.office.package.relatedPart(slidePart, rid) : undefined;
+  if (!chartPart) throw new PptxLensError("PPTX_CHART_MISSING", "The chart has no native chart part to update.");
+  const root = (await deck.office.xml(chartPart.name)).root;
+  const chartNamespace = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+  if (input.chartType) setChartType(root, input.chartType);
+  const chartRoot = child(root, chartNamespace, "chart") ?? root;
+  const chartTitle = firstDescendant(chartRoot, chartNamespace, "title");
+  if (input.title !== undefined) {
+    if (input.title === null) {
+      if (chartTitle) chartRoot.removeChild(chartTitle);
+    } else chartTextElement(chartTitle ?? ensureChild(chartRoot, chartNamespace, "c", "title"), input.title);
+  }
+  const seriesNodes = descendants(root).filter((node) => node.localName === "ser");
+  input.series.forEach((series, index) => {
+    const node = seriesNodes[index];
+    if (!node) return;
+    const tx = ensureChild(node, chartNamespace, "c", "tx");
+    const cache = ensureChild(ensureChild(tx, chartNamespace, "c", "strRef"), chartNamespace, "c", "strCache");
+    updateCache(cache, [series.name], false);
+    const category = ensureChild(ensureChild(node, chartNamespace, "c", "cat"), chartNamespace, "c", "strRef");
+    updateCache(ensureChild(category, chartNamespace, "c", "strCache"), series.categories.length ? series.categories : input.categories, false);
+    const value = ensureChild(ensureChild(node, chartNamespace, "c", "val"), chartNamespace, "c", "numRef");
+    updateCache(ensureChild(value, chartNamespace, "c", "numCache"), series.values, true);
+  });
+  const legend = child(firstDescendant(root, chartNamespace, "chart") ?? root, chartNamespace, "legend");
+  if (input.showLegend === false && legend) chartRoot.removeChild(legend);
+  if (input.showLegend === true && !legend) chartRoot.appendChild(new XmlElement("legend", "c"));
+  const axes = descendants(root).filter((node) => node.localName === "catAx" || node.localName === "valAx");
+  if (input.axisTitle !== undefined) {
+    const axis = axes.find((node) => node.localName === "catAx");
+    if (axis) {
+      const title = child(axis, chartNamespace, "title");
+      if (input.axisTitle === null) { if (title) axis.removeChild(title); }
+      else chartTextElement(axis, input.axisTitle);
+    }
+  }
+  if (input.valueAxisTitle !== undefined) {
+    const axis = axes.find((node) => node.localName === "valAx");
+    if (axis) {
+      const title = child(axis, chartNamespace, "title");
+      if (input.valueAxisTitle === null) { if (title) axis.removeChild(title); }
+      else chartTextElement(axis, input.valueAxisTitle);
+    }
+  }
+  const extensionList = ensureChild(root, chartNamespace, "c", "extLst");
+  const extension = extensionList.elements().find((node) => node.namespaceUri() === chartNamespace && node.localName === "ext" && node.getAttribute("uri") === "{7C2F2D16-5F5B-4D07-9EA9-SPECTRA-BRIDGE}") ?? (() => {
+    const created = new XmlElement("ext", "c");
+    created.setAttribute("uri", "{7C2F2D16-5F5B-4D07-9EA9-SPECTRA-BRIDGE}");
+    extensionList.appendChild(created);
+    return created;
+  })();
+  const sourcePrefix = extension.ensurePrefix(SPECTRA_CHART_SOURCE_NAMESPACE, "spectra");
+  const source = extension.elements().find((node) => node.namespaceUri() === SPECTRA_CHART_SOURCE_NAMESPACE && node.localName === "source") ?? (() => {
+    const created = new XmlElement("source", sourcePrefix);
+    extension.appendChild(created);
+    return created;
+  })();
+  for (const [attribute, value] of [["artifactId", input.sourceArtifactId], ["chartId", input.sourceChartId], ["revision", input.sourceRevision], ["kind", input.sourceKind], ["live", input.sourceLive ? "1" : undefined]] as const) {
+    if (value) source.setAttribute(attribute, value);
+    else source.removeAttribute(attribute);
+  }
+  // Do not leave stale bridge metadata behind after a chart is unbound.
+  if (!input.sourceArtifactId && !input.sourceChartId && !input.sourceRevision && !input.sourceKind && input.sourceLive === undefined) extension.removeChild(source);
+  deck.office.markDirty(chartPart.name);
+  await updateEmbeddedWorkbook(deck, chartPart, root, input.series);
 }
 
 async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: PptxSemanticDelta) {
@@ -472,9 +1368,18 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
   const born = new Map<string, string>();
   const resolveSlideId = (slideId: string) => born.get(slideId) ?? slideId;
   for (const operation of operations) {
+    if (operation.kind === "set-theme-fonts") {
+      await setThemeFonts(deck, operation);
+      continue;
+    }
     if (operation.kind === "add-slide") {
-      const slide = addNativeSlide(deck, operation.layoutPartName, operation.title, operation.text);
+      const slide = addNativeSlide(deck, operation.layoutPartName, operation.title, operation.text, operation.objects);
       born.set(operation.slideId, `pptx:slide:${slide.partName}`);
+      continue;
+    }
+    if (operation.kind === "duplicate-slide") {
+      const slide = await duplicateNativeSlide(deck, resolveSlideId(operation.slideId), operation.title);
+      born.set(operation.newSlideId, `pptx:slide:${slide.partName}`);
       continue;
     }
     if (operation.kind === "remove-slide") {
@@ -491,7 +1396,11 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       continue;
     }
     const slide = slideFor(deck, resolveSlideId(operation.slideId));
-    if (operation.kind === "set-title") {
+    if (operation.kind === "group-objects") {
+      addNativeGroup((await deck.office.xml(slide.partName)).root, operation);
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "set-title") {
       try {
         slide.setTitle(operation.text);
       } catch {
@@ -502,7 +1411,16 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
         deck.office.markDirty(slide.partName);
       }
     }
-    else if (operation.kind === "set-text") { const owner = operation.shapeId ? descendants(slide.root()).find((node) => node.namespaceUri() === PML_NAMESPACE && ["sp", "pic", "graphicFrame"].includes(node.localName) && shapeId(node) === operation.shapeId) : undefined; const nodes = owner ? textNodes(owner) : textNodes(slide.root()); const node = nodes[operation.paragraphIndex]; if (!node) throw new PptxLensError("PPTX_TEXT_MISSING", "The target PowerPoint text run no longer exists."); replaceNodeText(node, operation.text); deck.office.markDirty(slide.partName); }
+    else if (operation.kind === "set-text") {
+      const owner = operation.shapeId ? shapeIn(slide.root(), operation.shapeId) : undefined;
+      if (owner) replaceShapeText(owner, operation.text);
+      else {
+        const node = textNodes(slide.root())[operation.paragraphIndex];
+        if (!node) throw new PptxLensError("PPTX_TEXT_MISSING", "The target PowerPoint text run no longer exists.");
+        replaceNodeText(node, operation.text);
+      }
+      deck.office.markDirty(slide.partName);
+    }
     else if (operation.kind === "set-notes") {
       // Only the notes part is marked dirty, so the slide itself — with its
       // transition, its timing and everything Spectra does not model — is still
@@ -533,6 +1451,55 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
         });
       deck.office.markDirty(slide.partName);
     }
+    else if (operation.kind === "format-text") {
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      if (!shape) throw new PptxLensError("PPTX_SHAPE_MISSING", "The text object being formatted no longer exists on this slide.");
+      setTextFormat(shape, operation.format);
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "format-rich-text") {
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      if (!shape) throw new PptxLensError("PPTX_TEXT_MISSING", "The text object being formatted no longer exists on this slide.");
+      setRichText(shape, operation.paragraphs);
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "set-shape-style") {
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      if (!shape) throw new PptxLensError("PPTX_SHAPE_MISSING", "The shape being formatted no longer exists on this slide.");
+      setShapeStyle(shape, operation.style);
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "set-image-crop") {
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      if (!shape) throw new PptxLensError("PPTX_IMAGE_MISSING", "The picture being cropped no longer exists on this slide.");
+      setImageCrop(shape, operation.crop);
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "set-table-cell-format") {
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      if (!shape) throw new PptxLensError("PPTX_TABLE_MISSING", "The table being formatted no longer exists on this slide.");
+      setTableCellFormat(shape, operation.row, operation.column, operation.format);
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "set-table-cell-text") {
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      if (!shape) throw new PptxLensError("PPTX_TABLE_MISSING", "The table being edited no longer exists on this slide.");
+      setTableCellText(shape, operation.row, operation.column, operation.text);
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "set-chart") {
+      await setChartContent(deck, slide.partName, operation.shapeId, operation);
+    }
+    else if (operation.kind === "set-object-state") {
+      if (operation.readingOrder !== undefined) moveShapeToOrder(slide.root(), operation.shapeId, operation.readingOrder);
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      if (shape && operation.hidden !== undefined) setObjectHidden(shape, operation.hidden);
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "remove-object") {
+      removeShape(slide.root(), operation.shapeId);
+      deck.office.markDirty(slide.partName);
+    }
     else { addTextBox(slide.root(), operation.text); deck.office.markDirty(slide.partName); }
   }
   return deck.save();
@@ -546,5 +1513,5 @@ export const pptxLens: SpectraLens<PptxProjection, PptxSemanticDelta> = {
     const operations = pptxOperationsBetween(carry.projection, projection);
     return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }) : carry.payload; },
   async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> { const [before, after, comparison] = await Promise.all([this.open(payloadA), this.open(payloadB), comparePackages(payloadA, payloadB)]); const previous = new Map(before.projection.slides.map((slide) => [slide.id, slide])); const changes: LensExternalDiff["changes"] = []; for (const slide of after.projection.slides) { const old = previous.get(slide.id); previous.delete(slide.id); if (!old) changes.push({ regionId: slide.id, kind: "insert", after: slide }); else if (JSON.stringify(old) !== JSON.stringify(slide)) changes.push({ regionId: slide.id, kind: "update", before: old, after: slide }); } for (const slide of previous.values()) changes.push({ regionId: slide.id, kind: "delete", before: slide }); const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`); const semanticParts = ["/ppt/presentation.xml", ...after.projection.slides.flatMap((slide) => [slide.id.replace(/^pptx:slide:/, ""), ...(slide.notesPartName ? [slide.notesPartName] : [])])]; const modeled = new Set([...semanticParts, ...semanticParts.map(relationshipsPartName)]); const preservedPartChanges = changedParts.filter((part) => !modeled.has(part) && !/^\/ppt\/notesMasters\//i.test(part)); return { changes, changedParts, preservedPartChanges }; },
-  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; const hasTransition = fidelityMap.entries.some((entry) => entry.feature === "transition"); return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: hasTransition, reason: hasTransition ? "Only exact PowerPoint transition equivalents may replace the preserved transition." : "No native transition is present." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "add_slide", "delete_slide", "reorder_slides"] }; },
+  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; const hasTransition = fidelityMap.entries.some((entry) => entry.feature === "transition"); return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: hasTransition, reason: hasTransition ? "Only exact PowerPoint transition equivalents may replace the preserved transition." : "No native transition is present." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
 };

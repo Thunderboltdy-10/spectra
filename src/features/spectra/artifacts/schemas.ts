@@ -25,6 +25,10 @@ const officeNativeBindingBase = {
   canvasHeightEmu: z.number().positive().optional(),
   sourceArtifactId: z.string().min(1).optional(),
   sourcePayloadHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  themeFonts: z
+    .object({ heading: z.string().max(160).optional(), body: z.string().max(160).optional() })
+    .strict()
+    .optional(),
 };
 
 export {

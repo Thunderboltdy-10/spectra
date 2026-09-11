@@ -141,8 +141,8 @@ function nativeFor<T extends OfficeWorkType>(
   }
   return {
     touches: ["shapes"],
-    unavailableReason: PRESENTATION_TEXT_FORMAT_NATIVE_REASON,
-  } as NativeCapability<T>;
+    delta: "format-text",
+  } as unknown as NativeCapability<T>;
 }
 
 function definitionsFor<T extends OfficeWorkType>(

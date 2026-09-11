@@ -26,6 +26,7 @@ const text = z.string();
 const num = z.number();
 const bool = z.boolean();
 const maybeText = z.string().nullable();
+const record = z.record(z.string(), z.unknown());
 
 type SpecOptions<T extends OfficeWorkType> = {
   params?: z.ZodType;
@@ -1434,7 +1435,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "slide.duplicate",
     "Copy this slide, its objects and its notes.",
-    { reason: R.duplicateSlide, touches: ["slides"] },
+    { delta: "duplicate-slide", touches: ["slides"] },
   ],
   [
     "design.open",
@@ -1507,6 +1508,26 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
     { reason: R.newTable, touches: ["tables"] },
   ],
   [
+    "table.cellText",
+    "Edit the text in a selected PowerPoint table cell.",
+    {
+      params: text,
+      delta: "set-table-cell-text",
+      touches: ["tables"],
+      exposed: false,
+    },
+  ],
+  [
+    "table.cellFormat",
+    "Format a selected PowerPoint table cell.",
+    {
+      params: record,
+      delta: "set-table-cell-format",
+      touches: ["tables"],
+      exposed: false,
+    },
+  ],
+  [
     "insert.embed",
     "Embed other Spectra work on this slide.",
     { reason: R.embed },
@@ -1540,7 +1561,13 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "design.applyTheme",
     "Apply a theme to the deck.",
-    { params: text, reason: R.theme, manifest: "apply_theme", field: true },
+    {
+      params: text,
+      delta: "set-theme-fonts",
+      touches: ["slides"],
+      manifest: "apply_theme",
+      field: true,
+    },
   ],
   [
     "design.background",
@@ -1600,7 +1627,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "arrange.group",
     "Group the selected objects.",
-    { reason: R.group, touches: SHAPES },
+    { delta: "group-objects", touches: SHAPES },
   ],
   [
     "arrange.ungroup",
@@ -1813,7 +1840,12 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "format.textPreset",
     "Apply a text style preset to the selection.",
-    { params: text, reason: R.textStyle, touches: SHAPES, field: true },
+    {
+      params: text,
+      delta: "format-rich-text",
+      touches: SHAPES,
+      field: true,
+    },
   ],
   [
     "object.setText",
@@ -1829,7 +1861,12 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "format.fill",
     "Set the fill of the selected shape.",
-    { params: maybeText, reason: R.shapeStyle, touches: SHAPES, field: true },
+    {
+      params: maybeText,
+      delta: "set-shape-style",
+      touches: SHAPES,
+      field: true,
+    },
   ],
   [
     "format.border",
@@ -1864,12 +1901,12 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "arrange.hideObject",
     "Hide the selected object.",
-    { params: bool, reason: R.objectState, touches: SHAPES },
+    { params: bool, delta: "set-object-state", touches: SHAPES },
   ],
   [
     "arrange.delete",
     "Remove the selected object.",
-    { reason: R.deleteObject, touches: SHAPES, risk: "confirm" },
+    { delta: "remove-object", touches: SHAPES, risk: "confirm" },
   ],
   [
     "image.fit",
@@ -1884,7 +1921,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "image.cropX",
     "Crop this picture horizontally.",
-    { params: num, reason: R.crop, touches: ["media"], field: true },
+    { params: num, delta: "set-image-crop", touches: ["media"], field: true },
   ],
   [
     "image.cropY",
@@ -1910,17 +1947,17 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   [
     "data.bindSource",
     "Bind this chart to a workbook range.",
-    { reason: R.chartData, touches: ["charts"] },
+    { delta: "set-chart", touches: ["charts"] },
   ],
   [
     "data.live",
     "Keep this chart live with its workbook.",
-    { params: bool, reason: R.chartData, touches: ["charts"] },
+    { params: bool, delta: "set-chart", touches: ["charts"] },
   ],
   [
     "data.refreshChart",
     "Refresh this chart from its workbook.",
-    { reason: R.chartData, touches: ["charts"] },
+    { delta: "set-chart", touches: ["charts"] },
   ],
   [
     "transition.native",

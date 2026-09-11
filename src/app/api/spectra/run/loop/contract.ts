@@ -23,6 +23,10 @@ export type Body = {
   threadId?: string;
   runId?: string;
   executionId?: string;
+  attemptId?: string;
+  clarificationId?: string;
+  choiceMessageId?: string;
+  choiceKey?: string;
   revision?: string;
   attachments?: AttachmentInput[];
   focusMode?: EffectiveFocusMode;

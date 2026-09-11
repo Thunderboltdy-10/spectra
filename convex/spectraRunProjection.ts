@@ -11,6 +11,8 @@ export function projectRunTabSummary(run: Doc<"spectraAiRuns">) {
   return {
     _id: run._id,
     executionId: run.executionId,
+    attemptId: run.attemptId,
+    outcome: run.outcome,
     status: run.status,
     phase: run.phase,
     sourceSurface: run.sourceSurface,

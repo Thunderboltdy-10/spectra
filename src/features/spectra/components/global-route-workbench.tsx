@@ -73,11 +73,12 @@ export function GlobalRouteWorkbench() {
     prompt: string,
     attachments: CommandAttachment[],
     threadId?: string,
+    continuation?: { clarificationId?: string; choiceKey?: string; choiceMessageId?: string; executionId?: string },
   ) =>
     runEngine.run(
       prompt,
       attachments,
-      threadId ? { threadId } : undefined,
+      threadId ? { threadId, ...continuation } : continuation,
     );
 
   return (
@@ -109,8 +110,8 @@ export function GlobalRouteWorkbench() {
           void runEngine.onCardAction(card, action, card.runId)
         }
         onRevise={(card, revision) => void runEngine.revise(card, revision)}
-        onInput={(threadId, response, attachments) =>
-          run(response, attachments ?? [], threadId)
+        onInput={(threadId, response, attachments, continuation) =>
+          run(response, attachments ?? [], threadId, continuation)
         }
       />
       <CommandBar

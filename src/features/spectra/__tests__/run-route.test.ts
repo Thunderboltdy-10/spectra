@@ -993,7 +993,7 @@ describe("Spectra run route", () => {
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", threadId: "thread-real", prompt: "Create a study resource." }) }));
     expect(response.status).toBe(200);
     await response.text();
-    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed")).toBe(true);
+    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string; outcome?: string }).status === "awaiting_resolution" && (args as { outcome?: string }).outcome === "awaiting_input")).toBe(true);
   });
 
   it("salvages a safe zero-operation clarification when optional metadata makes the repaired partial plan invalid", async () => {
@@ -1006,7 +1006,7 @@ describe("Spectra run route", () => {
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", threadId: "thread-real", prompt: "Flashcard deck" }) }));
     expect(response.status).toBe(200);
     await response.text();
-    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed")).toBe(true);
+    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string; outcome?: string }).status === "awaiting_resolution" && (args as { outcome?: string }).outcome === "awaiting_input")).toBe(true);
   });
 
   it("answers an explicit exact-reply command without invoking the heavy planner", async () => {

@@ -17,16 +17,20 @@ export type LiveDockInputRequest =
   | {
       kind: "choice";
       messageId?: string;
+      clarificationId?: string;
+      executionId?: string;
       prompt: string;
-      options: Array<{ title: string; description?: string | null }>;
+      options: Array<{ key?: string; title: string; description?: string | null }>;
     }
   | {
       kind: "choice_batch";
       messageId?: string;
+      clarificationId?: string;
+      executionId?: string;
       questions: Array<{
         id: string;
         prompt: string;
-        options: Array<{ title: string; description?: string | null }>;
+        options: Array<{ key?: string; title: string; description?: string | null }>;
       }>;
     }
   | { kind: "short_answer"; prompt: string }

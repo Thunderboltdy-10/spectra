@@ -514,6 +514,8 @@ export const beginRun = mutation({
       phase: "created",
       heartbeatAt: now,
       attemptCount: 1,
+      attemptId: executionId,
+      outcome: "proposed",
       createdAt: now,
       updatedAt: now,
     });
@@ -798,6 +800,18 @@ export const updateStatus = mutation({
     ),
     retryable: v.optional(v.boolean()),
     preservedPartial: v.optional(v.boolean()),
+    outcome: v.optional(
+      v.union(
+        v.literal("proposed"),
+        v.literal("awaiting_input"),
+        v.literal("executing"),
+        v.literal("canonical_saved"),
+        v.literal("native_pending"),
+        v.literal("native_verified"),
+        v.literal("cancelled"),
+        v.literal("failed"),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
@@ -827,8 +841,58 @@ export const updateStatus = mutation({
       );
     if (terminal)
       await recordRunModelMeters(ctx, run, args.usage ?? run.usage, now);
+    const provenanceRecord = args.provenance && typeof args.provenance === "object" && !Array.isArray(args.provenance)
+      ? (args.provenance as { artifactIds?: unknown })
+      : undefined;
+    let committedArtifactId: Id<"spectraArtifacts"> | undefined;
+    if (
+      !run.artifactId &&
+      args.status === "completed" &&
+      Array.isArray(provenanceRecord?.artifactIds) &&
+      provenanceRecord.artifactIds.length === 1 &&
+      typeof provenanceRecord.artifactIds[0] === "string"
+    ) {
+      const candidateId = ctx.db.normalizeId(
+        "spectraArtifacts",
+        provenanceRecord.artifactIds[0],
+      );
+      if (candidateId) {
+        const candidate = await ctx.db.get(candidateId);
+        const createdFrom =
+          candidate?.createdFrom &&
+          typeof candidate.createdFrom === "object" &&
+          !Array.isArray(candidate.createdFrom)
+            ? (candidate.createdFrom as { source?: unknown; runId?: unknown })
+            : undefined;
+        if (
+          candidate &&
+          candidate.ownerAccountId === run.ownerAccountId &&
+          candidate.schoolId === run.schoolId &&
+          candidate.status === "active" &&
+          candidate.currentVersionId &&
+          createdFrom?.source === "ai" &&
+          String(createdFrom.runId ?? "") === String(run._id)
+        )
+          committedArtifactId = candidateId;
+      }
+    }
     await ctx.db.patch(args.runId, {
       status: args.status,
+      outcome:
+        args.outcome ??
+        (args.status === "awaiting_confirmation" || args.status === "awaiting_resolution"
+          ? "awaiting_input"
+            : args.status === "running"
+              ? "executing"
+              : args.status === "queued"
+                ? "proposed"
+            : args.status === "cancelled"
+              ? "cancelled"
+              : args.status === "failed"
+                ? "failed"
+                : args.status === "completed"
+                  ? "canonical_saved"
+                  : run.outcome),
       phase:
         args.phase ??
         (args.status === "completed"
@@ -850,6 +914,7 @@ export const updateStatus = mutation({
       usage: args.usage ?? run.usage,
       decision: args.decision ?? run.decision,
       planIntent: args.planIntent ?? run.planIntent,
+      ...(committedArtifactId ? { artifactId: committedArtifactId } : {}),
       approval:
         args.status === "awaiting_confirmation"
           ? {
@@ -1082,6 +1147,7 @@ export const claimExecution = mutation({
       leaseExpiresAt: now + 2 * 60_000,
       heartbeatAt: now,
       phase: run.phase === "created" ? "preparing" : run.phase,
+      outcome: "executing",
       updatedAt: now,
     });
     return { claimed: true, leaseExpiresAt: now + 2 * 60_000 };
@@ -1668,6 +1734,7 @@ export const claimConfirmation = mutation({
     const now = Date.now();
     await ctx.db.patch(args.runId, {
       status: "queued",
+      outcome: "proposed",
       phase: "applying",
       approval: {
         ...run.approval,
@@ -1749,6 +1816,7 @@ export const rejectConfirmation = mutation({
     );
     await ctx.db.patch(args.runId, {
       status: "cancelled",
+      outcome: "cancelled",
       phase: "stopped",
       approval: { ...run.approval, status: "rejected", decidedAt: now },
       finalSummary: "No proposed changes were applied.",
@@ -2187,6 +2255,8 @@ export const resetForRetry = mutation({
       completedAt: undefined,
       attemptCount: (run.attemptCount ?? 1) + 1,
       executionId,
+      attemptId: executionId,
+      outcome: "proposed",
       lastRetryKey: args.retryKey,
       phase: "created",
       heartbeatAt: now,

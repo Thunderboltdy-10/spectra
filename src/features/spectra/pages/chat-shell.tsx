@@ -865,6 +865,14 @@ export function ChatShell() {
                 : choice.description
                   ? `${choice.title}: ${choice.description}`
                   : choice.title,
+              [],
+              {
+                threadId: threadId ?? undefined,
+                clarificationId: choice.clarificationId,
+                choiceKey: choice.key,
+                choiceMessageId: choice.choiceMessageId,
+                executionId: choice.executionId,
+              },
             )
           }
           activeCards={activeCards}

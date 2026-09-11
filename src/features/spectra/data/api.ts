@@ -499,6 +499,8 @@ export type SpectraWorkspaceItem = {
 export type SpectraRun = {
   _id: string;
   executionId?: string;
+  attemptId?: string;
+  outcome?: "proposed" | "awaiting_input" | "executing" | "canonical_saved" | "native_pending" | "native_verified" | "cancelled" | "failed";
   status:
     | "queued"
     | "running"
@@ -710,16 +712,20 @@ export type SpectraRunTab = {
     | {
         kind: "choice";
         messageId: string;
+        clarificationId?: string;
+        executionId?: string;
         prompt: string;
-        options: Array<{ title: string; description?: string | null }>;
+        options: Array<{ key?: string; title: string; description?: string | null }>;
       }
     | {
         kind: "choice_batch";
         messageId: string;
+        clarificationId?: string;
+        executionId?: string;
         questions: Array<{
           id: string;
           prompt: string;
-          options: Array<{ title: string; description?: string | null }>;
+          options: Array<{ key?: string; title: string; description?: string | null }>;
         }>;
       }
     | null;

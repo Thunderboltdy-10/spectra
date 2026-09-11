@@ -196,21 +196,45 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function choiceRequest(metadata: unknown, messageId: string) {
+type ChoiceOption = { key: string; title: string; description: string | null };
+type ChoiceRequest =
+  | { kind: "choice"; messageId: string; clarificationId?: string; executionId?: string; prompt: string; options: ChoiceOption[] }
+  | { kind: "choice_batch"; messageId: string; clarificationId?: string; executionId?: string; questions: Array<{ id: string; prompt: string; options: ChoiceOption[] }> };
+
+function choiceRequest(metadata: unknown, messageId: string): ChoiceRequest | null {
   const choices = record(record(metadata).choices);
-  const parseOptions = (value: unknown) =>
-    Array.isArray(value)
-      ? value.flatMap((option) => {
+  const identity = record(record(metadata).clarification);
+  const identityFields: Pick<Extract<ChoiceRequest, { kind: "choice" }>, "clarificationId" | "executionId"> = typeof identity.id === "string" && typeof identity.executionId === "string"
+    ? { clarificationId: identity.id, executionId: identity.executionId }
+    : {};
+  const stableKey = (value: unknown, index: number, prefix = "choice") => {
+    const supplied = typeof value === "string" ? value.trim() : "";
+    if (supplied) return supplied.slice(0, 120);
+    const slug = typeof value === "string"
+      ? value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 72)
+      : "option";
+    return `${prefix}:${index}:${slug || "option"}`.slice(0, 120);
+  };
+  const parseOptions = (value: unknown) => {
+    const usedKeys = new Set<string>();
+    return Array.isArray(value)
+      ? value.flatMap((option, index) => {
           const row = record(option);
-          return typeof row.title === "string" && row.title.trim()
-            ? [{
+          if (typeof row.title !== "string" || !row.title.trim()) return [];
+          const baseKey = stableKey(row.key, index);
+          let key = baseKey;
+          let suffix = 2;
+          while (usedKeys.has(key)) key = `${baseKey}:${suffix++}`.slice(0, 120);
+          usedKeys.add(key);
+          return [{
+                key,
                 title: row.title.trim(),
                 description:
                   typeof row.description === "string" ? row.description : null,
-              }]
-            : [];
+              }];
         })
       : [];
+  };
   const options = parseOptions(choices.options);
   const questions = Array.isArray(choices.questions)
     ? choices.questions.flatMap((question, index) => {
@@ -218,16 +242,19 @@ function choiceRequest(metadata: unknown, messageId: string) {
         const prompt = typeof row.question === "string" ? row.question.trim() : "";
         const questionOptions = parseOptions(row.options);
         return prompt && questionOptions.length >= 2
-          ? [{
-              id: typeof row.id === "string" && row.id.trim() ? row.id.trim() : `question-${index + 1}`,
-              prompt,
-              options: questionOptions,
-            }]
+              ? [{
+                  id: typeof row.id === "string" && row.id.trim() ? row.id.trim() : `question-${index + 1}`,
+                  prompt,
+                  options: questionOptions.map((option, optionIndex) => ({
+                    ...option,
+                    key: stableKey(option.key, optionIndex, `question-${index + 1}`),
+                  })),
+                }]
           : [];
       })
     : [];
   if (questions.length >= 2)
-    return { kind: "choice_batch", messageId, questions: questions.slice(0, 4) };
+    return { kind: "choice_batch", messageId, ...identityFields, questions: questions.slice(0, 4) };
   if (
     typeof choices.question === "string" &&
     choices.question.trim() &&
@@ -237,10 +264,54 @@ function choiceRequest(metadata: unknown, messageId: string) {
     return {
       kind: "choice",
       messageId,
+      ...identityFields,
       prompt: choices.question.trim(),
       options,
     };
   return null;
+}
+
+function clarificationTargets(run: Doc<"spectraAiRuns">) {
+  const snapshot = record(run.contextSnapshot);
+  const ids = [
+    run.artifactId ? String(run.artifactId) : undefined,
+    ...(Array.isArray(snapshot.selectedObjectIds) ? snapshot.selectedObjectIds : []),
+    ...((Array.isArray(snapshot.explicitContextObjects) ? snapshot.explicitContextObjects : []) as Array<Record<string, unknown>>).flatMap((item) => typeof item.id === "string" ? [item.id] : []),
+    ...((Array.isArray(snapshot.targetResolutions) ? snapshot.targetResolutions : []) as Array<Record<string, unknown>>).flatMap((item) => typeof item.resolvedArtifactId === "string" ? [item.resolvedArtifactId] : []),
+  ];
+  return [...new Set(ids.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 32);
+}
+
+function withClarificationIdentity(metadata: unknown, messageId: Id<"spectraMessages">, run: Doc<"spectraAiRuns">) {
+  const base = record(metadata);
+  const request = choiceRequest(base, String(messageId));
+  if (!request) return { metadata: base, clarification: null };
+  const offered = request.kind === "choice"
+    ? request.options
+    : request.questions.flatMap((question) => question.options.map((option) => ({ ...option, key: `${question.id}:${option.key}` })));
+  const clarificationId = `clarification:${crypto.randomUUID()}`;
+  const clarification = {
+    id: clarificationId,
+    messageId,
+    executionId: run.executionId ?? "legacy",
+    status: "pending" as const,
+    options: offered.map((option) => ({ key: option.key, title: option.title, ...(option.description ? { description: option.description } : {}) })),
+    targetIds: clarificationTargets(run),
+    targetRevisions: record(run.contextSnapshot).targetRevisions,
+    authority: { ownerAccountId: String(run.ownerAccountId), ...(run.schoolId ? { schoolId: String(run.schoolId) } : {}), capturedAt: Date.now() },
+    createdAt: Date.now(),
+  };
+  return {
+    metadata: {
+      ...base,
+      choices:
+        request.kind === "choice"
+          ? { ...record(base.choices), options: request.options }
+          : base.choices,
+      clarification,
+    },
+    clarification,
+  };
 }
 
 async function requireActor(ctx: Parameters<typeof getAuthenticatedActor>[0]) {
@@ -363,9 +434,10 @@ export const appendMessage = mutation({
           // current end of the conversation so a successful retry cannot stay
           // stranded above newer trace rows or stale clarification UI.
           const now = Date.now();
+          const enriched = withClarificationIdentity(args.metadata, existing._id, run);
           await ctx.db.patch(existing._id, {
             content,
-            metadata: args.metadata,
+            metadata: enriched.metadata,
             createdAt: now,
           });
           await ctx.db.patch(args.threadId, {
@@ -377,8 +449,9 @@ export const appendMessage = mutation({
           await ctx.db.patch(args.runId, {
             dockSummary: {
               ...(run.dockSummary ?? { recentSteps: [] }),
-              inputRequest: choiceRequest(args.metadata, existing._id) ?? undefined,
+              inputRequest: choiceRequest(enriched.metadata, existing._id) ?? undefined,
             },
+            ...(enriched.clarification ? { clarification: enriched.clarification } : { clarification: undefined }),
           });
           return existing._id;
         }
@@ -403,6 +476,21 @@ export const appendMessage = mutation({
       createdAt: now,
       ordinal: nextOrdinal,
     });
+    if (args.role === "assistant" && args.runId) {
+      const run = await ctx.db.get(args.runId);
+      if (run) {
+        const enriched = withClarificationIdentity(args.metadata, messageId, run);
+        await ctx.db.patch(messageId, { metadata: enriched.metadata });
+        if (enriched.clarification)
+          await ctx.db.patch(run._id, {
+            clarification: enriched.clarification,
+            dockSummary: {
+              ...(run.dockSummary ?? { recentSteps: [] }),
+              inputRequest: choiceRequest(enriched.metadata, messageId) ?? undefined,
+            },
+          });
+      }
+    }
     const firstUserMessage = args.role === "user" && currentMessageCount === 0;
     await ctx.db.patch(args.threadId, {
       title:
@@ -418,16 +506,6 @@ export const appendMessage = mutation({
       updatedAt: now,
       readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
     });
-    if (args.role === "assistant" && args.runId) {
-      const run = await ctx.db.get(args.runId);
-      if (run)
-        await ctx.db.patch(run._id, {
-          dockSummary: {
-            ...(run.dockSummary ?? { recentSteps: [] }),
-            inputRequest: choiceRequest(args.metadata, messageId) ?? undefined,
-          },
-        });
-    }
     if (args.role === "user" || args.role === "assistant")
       await incrementOperationalCounter(ctx, {
         schoolId: actor.schoolId,
@@ -442,6 +520,8 @@ export const appendMessage = mutation({
 export const selectMessageChoice = mutation({
   args: {
     messageId: v.id("spectraMessages"),
+    clarificationId: v.optional(v.string()),
+    executionId: v.optional(v.string()),
     choiceKey: v.string(),
     choiceTitle: v.string(),
   },
@@ -453,6 +533,25 @@ export const selectMessageChoice = mutation({
       message.metadata && typeof message.metadata === "object"
         ? (message.metadata as Record<string, unknown>)
         : {};
+    const clarification = record(metadata.clarification);
+    if (!clarification.id || !Array.isArray(clarification.options))
+      throw new Error("This clarification is no longer available. Start a new request.");
+    if (args.clarificationId !== clarification.id || !args.executionId || args.executionId !== clarification.executionId)
+      throw new Error("This clarification belongs to an older run attempt. Start a new request.");
+    if (message.runId) {
+      const run = await ctx.db.get(message.runId);
+      if (!run || run.executionId !== args.executionId || run.status !== "awaiting_resolution")
+        throw new Error("This clarification is no longer active. Start a new request.");
+    }
+    const offeredOptions = clarification.options as Array<Record<string, unknown>>;
+    const offered = offeredOptions.find((option) => option.key === args.choiceKey);
+    const batchTitles = args.choiceKey === "batch"
+      ? [...args.choiceTitle.matchAll(/\d+\)\s*([^;]+)/g)].map((match) => match[1]!.trim()).filter(Boolean)
+      : [];
+    const validBatch = args.choiceKey === "batch" && batchTitles.length > 0 && batchTitles.every((title) => offeredOptions.some((option) => option.title === title || title === "Skipped"));
+    const validSkip = args.choiceKey === "skip" && args.choiceTitle.trim() === "Skipped";
+    if ((!offered || offered.title !== args.choiceTitle.trim()) && !validBatch && !validSkip)
+      throw new Error("That choice was not offered for this request. Choose one of the current options.");
     const existing = metadata.choiceSelection;
     if (existing && typeof existing === "object") {
       const row = existing as { key?: unknown; title?: unknown };
@@ -469,8 +568,10 @@ export const selectMessageChoice = mutation({
       metadata: {
         ...metadata,
         choiceSelection: {
+          clarificationId: clarification.id,
+          executionId: args.executionId,
           key: args.choiceKey.slice(0, 120),
-          title: args.choiceTitle.slice(0, 200),
+          title: args.choiceTitle.trim().slice(0, 200),
           selectedAt: now,
         },
       },
@@ -493,6 +594,7 @@ export const selectMessageChoice = mutation({
         });
         await ctx.db.patch(run._id, {
           eventSequence: sequence,
+          clarification: { ...run.clarification!, status: "selected", selectedAt: now, selectedKey: args.choiceKey },
           dockSummary: {
             ...(run.dockSummary ?? { recentSteps: [] }),
             inputRequest: undefined,
@@ -506,6 +608,35 @@ export const selectMessageChoice = mutation({
       alreadySelected: false,
       choiceTitle: args.choiceTitle.slice(0, 200),
     };
+  },
+});
+
+export const validateChoiceContinuation = query({
+  args: {
+    messageId: v.id("spectraMessages"),
+    clarificationId: v.string(),
+    executionId: v.string(),
+    choiceKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const message = await ctx.db.get(args.messageId);
+    if (!message) throw new Error("This clarification is no longer available. Start a new request.");
+    await requireOwnedThread(ctx, message.threadId);
+    const metadata = record(message.metadata);
+    const clarification = record(metadata.clarification);
+    const selection = record(metadata.choiceSelection);
+    if (clarification.id !== args.clarificationId || clarification.executionId !== args.executionId)
+      throw new Error("This clarification belongs to an older run attempt. Start a new request.");
+    if (message.runId) {
+      const run = await ctx.db.get(message.runId);
+      if (!run || run.executionId !== args.executionId || run.status !== "awaiting_resolution")
+        throw new Error("This clarification is no longer active. Start a new request.");
+    }
+    if (!(clarification.options as Array<Record<string, unknown>> | undefined)?.some((option) => option.key === args.choiceKey) && args.choiceKey !== "skip" && args.choiceKey !== "batch")
+      throw new Error("That choice was not offered for this request. Choose one of the current options.");
+    if (selection.key !== args.choiceKey)
+      throw new Error("That choice was not selected for this request. Choose one of the current options again.");
+    return { valid: true, selected: true };
   },
 });
 

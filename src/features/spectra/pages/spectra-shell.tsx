@@ -4507,8 +4507,8 @@ export function SpectraShell({
                   void runEngine.onCardAction(card, action, card.runId),
                 onRevise: (card, revision) =>
                   void runEngine.revise(card, revision),
-                onInput: (threadId, response, attachments) =>
-                  runEngine.run(response, attachments ?? [], { threadId }),
+                onInput: (threadId, response, attachments, continuation) =>
+                  runEngine.run(response, attachments ?? [], { threadId, ...continuation }),
               }}
               selection={
                 multiSelectMode ? (

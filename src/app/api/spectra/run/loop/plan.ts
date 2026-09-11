@@ -894,6 +894,13 @@ export function parseStreamedPlanText(
       !Array.isArray(raw.choices)
     ) {
       const choices = raw.choices as Record<string, unknown>;
+      const choiceKey = (value: unknown, index: number, prefix = "choice") => {
+        const supplied = typeof value === "string" ? value.trim() : "";
+        if (supplied) return supplied.slice(0, 120);
+        const title = typeof value === "string" ? value : "option";
+        const slug = title.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 72);
+        return `${prefix}:${index}:${slug || "option"}`.slice(0, 120);
+      };
       const cleanChoiceOptions = (value: unknown) =>
         Array.isArray(value)
           ? value.flatMap((option) => {
@@ -909,6 +916,7 @@ export function parseStreamedPlanText(
               return title
                 ? [
                     {
+                      key: choiceKey(row.key ?? title, value.indexOf(option)),
                       title,
                       description:
                         typeof row.description === "string" &&
@@ -935,14 +943,14 @@ export function parseStreamedPlanText(
             typeof row.question === "string" ? row.question.trim() : "";
           const options = cleanChoiceOptions(row.options);
           return prompt && options.length >= 2
-            ? [
+          ? [
                 {
                   id:
                     typeof row.id === "string" && row.id.trim()
                       ? row.id.trim()
                       : `question-${index + 1}`,
                   question: prompt,
-                  options,
+                  options: options.map((option, optionIndex) => ({ ...option, key: choiceKey((option as Record<string, unknown>).key ?? option.title, optionIndex, `question-${index + 1}`) })),
                 },
               ]
             : [];

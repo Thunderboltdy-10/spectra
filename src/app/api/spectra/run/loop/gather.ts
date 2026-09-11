@@ -94,6 +94,10 @@ export async function buildContext(
     | "selectedArtifactIds"
     | "explicitContextObjects"
     | "currentView"
+    | "clarificationId"
+    | "choiceMessageId"
+    | "choiceKey"
+    | "executionId"
   >,
   prompt = "",
 ) {
@@ -570,24 +574,15 @@ export async function buildContext(
   // A choice is an answer to one specific unresolved request, not a new
   // free-floating instruction. Bind it to the run that asked the question so
   // long, reused threads cannot resurrect an unrelated earlier goal.
-  const selectedClarification = [...continuedMessages]
-    .reverse()
-    .find((message) => {
-      if (
-        message.role !== "assistant" ||
-        !message.metadata ||
-        typeof message.metadata !== "object"
-      )
-        return false;
-      const metadata = message.metadata as Record<string, unknown>;
-      const selection = metadata.choiceSelection;
-      if (!selection || typeof selection !== "object") return false;
-      const selectedTitle = (selection as Record<string, unknown>).title;
-      return (
-        typeof selectedTitle === "string" &&
-        prompt.toLowerCase().includes(selectedTitle.toLowerCase())
-      );
-    });
+  const selectedClarification = body.clarificationId && body.choiceKey
+    ? [...continuedMessages].reverse().find((message) => {
+        if (message.role !== "assistant" || (body.choiceMessageId && message._id !== body.choiceMessageId) || !message.metadata || typeof message.metadata !== "object") return false;
+        const metadata = message.metadata as Record<string, unknown>;
+        const clarification = metadata.clarification as Record<string, unknown> | undefined;
+        const selection = metadata.choiceSelection as Record<string, unknown> | undefined;
+        return clarification?.id === body.clarificationId && clarification?.executionId === body.executionId && selection?.clarificationId === body.clarificationId && selection?.key === body.choiceKey && Boolean(message.runId);
+      })
+    : undefined;
   const clarificationMetadata =
     selectedClarification?.metadata &&
     typeof selectedClarification.metadata === "object"

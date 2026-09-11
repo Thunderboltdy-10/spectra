@@ -844,6 +844,8 @@ export async function POST(request: NextRequest) {
         "spectraThreads:selectMessageChoice",
         {
           messageId: requireString(body.messageId, "messageId"),
+          ...(optionalString(body.clarificationId) ? { clarificationId: optionalString(body.clarificationId) } : {}),
+          ...(optionalString(body.executionId) ? { executionId: optionalString(body.executionId) } : {}),
           choiceKey: requireString(body.choiceKey, "choiceKey"),
           choiceTitle: requireString(body.choiceTitle, "choiceTitle"),
         },

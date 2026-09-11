@@ -987,7 +987,13 @@ export function useSpectraRun({
     (
       prompt: string,
       attachments: CommandAttachment[] = [],
-      options?: { threadId?: string | null },
+      options?: {
+        threadId?: string | null;
+        clarificationId?: string;
+        choiceKey?: string;
+        choiceMessageId?: string;
+        executionId?: string;
+      },
     ): Promise<boolean> => {
       const clean = prompt.trim();
       if (!clean) return Promise.resolve(false);
@@ -1069,6 +1075,10 @@ export function useSpectraRun({
             // open thread and submit before React's synchronization effect has
             // run, and that message still belongs to a fresh thread.
             threadId: continuedThreadId,
+            clarificationId: options?.clarificationId,
+            choiceKey: options?.choiceKey,
+            choiceMessageId: options?.choiceMessageId,
+            executionId: options?.executionId,
             focusMode,
             selectedArtifactIds,
             explicitContextObjects,
@@ -1145,11 +1155,17 @@ export function useSpectraRun({
       if (!clean || queuedSteering.current.has(runId)) return false;
       queuedSteering.current.add(runId);
       try {
+        const { runTabs } = await getSpectraRunTabs({ limit: 120, force: true }).catch(() => ({ runTabs: [] as SpectraRunTab[] }));
+        const target = runTabs.find((tab) => tab.runId === runId);
         if (mode === "cancel_current_action") {
           const response = await fetch("/api/spectra/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "stop", runId }),
+            body: JSON.stringify({
+              action: "stop",
+              runId,
+              ...(target?.run.executionId ? { executionId: target.run.executionId, attemptId: target.run.attemptId ?? target.run.executionId } : {}),
+            }),
           });
           if (!response.ok && response.status !== 409)
             throw new Error(
@@ -1160,16 +1176,16 @@ export function useSpectraRun({
           queuedSteering.current.delete(runId);
           return true;
         }
-        const { runTabs } = await getSpectraRunTabs({
-          limit: 120,
-          force: true,
-        });
-        const target = runTabs.find((tab) => tab.runId === runId);
         if (!target) throw new Error("That run is no longer available.");
         const stopResponse = await fetch("/api/spectra/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "stop", runId }),
+          body: JSON.stringify({
+            action: "stop",
+            runId,
+            executionId: target.run.executionId,
+            attemptId: target.run.attemptId ?? target.run.executionId,
+          }),
         });
         if (!stopResponse.ok && stopResponse.status !== 409)
           throw new Error(
@@ -1415,6 +1431,14 @@ export function useSpectraRun({
           current.filter((card) => card.runId !== `pending:${submissionKey}`),
         );
       try {
+        let executionId: string | undefined;
+        let attemptId: string | undefined;
+        if (targetRunId) {
+          const { runTabs } = await getSpectraRunTabs({ limit: 120, force: true });
+          const target = runTabs.find((tab) => tab.runId === targetRunId);
+          executionId = target?.run.executionId;
+          attemptId = target?.run.attemptId ?? executionId;
+        }
         const response = await fetch("/api/spectra/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1422,6 +1446,8 @@ export function useSpectraRun({
             action: "stop",
             runId: targetRunId,
             submissionKey,
+            ...(executionId ? { executionId } : {}),
+            ...(attemptId ? { attemptId } : {}),
           }),
         });
         if (!response.ok) {

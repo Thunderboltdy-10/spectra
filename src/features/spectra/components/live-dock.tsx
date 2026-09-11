@@ -28,6 +28,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useNow } from "@/hooks/use-now";
+import { toast } from "sonner";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { LAYER_CLASS } from "@/components/ui/layers";
@@ -356,6 +357,7 @@ export type LiveDockProps = {
     threadId: string,
     response: string,
     attachments?: CommandAttachment[],
+    continuation?: { clarificationId?: string; choiceKey?: string; choiceMessageId?: string; executionId?: string },
   ) => void | Promise<unknown>;
   openThreadId?: string;
   openChat?: { id: string; title: string };
@@ -691,6 +693,20 @@ export function LiveDock({
   ) {
     if (!onInput) return;
     const model = deriveLiveDockTab(tabSource(tab));
+    const selectedOptionIndex = model.inputRequest?.kind === "choice"
+      ? model.inputRequest.options.findIndex((option) => option.title === response)
+      : -1;
+    const selectedOptionKey = model.inputRequest?.kind === "choice"
+      ? model.inputRequest.options[selectedOptionIndex]?.key
+      : undefined;
+    if (
+      model.inputRequest?.kind === "choice" &&
+      response !== "Skipped" &&
+      !selectedOptionKey
+    ) {
+      toast.error("This clarification is no longer available. Reload the conversation and try again.");
+      return;
+    }
     setRespondingInputRuns((current) => new Set(current).add(tab.runId));
     setExpandedInputRunId(null);
     try {
@@ -699,22 +715,20 @@ export function LiveDock({
           model.inputRequest?.kind === "choice_batch") &&
         model.inputRequest.messageId
       ) {
-        const index =
-          model.inputRequest.kind === "choice"
-            ? model.inputRequest.options.findIndex(
-                (option) => option.title === response,
-              )
-            : -1;
         await postSpectra({
-          action: "selectMessageChoice",
-          messageId: model.inputRequest.messageId,
-          choiceKey:
-            response === "Skipped"
-              ? "skip"
-              : model.inputRequest.kind === "choice_batch"
-                ? "batch"
-                : `${index}:${response}`,
-          choiceTitle: response,
+            action: "selectMessageChoice",
+            messageId: model.inputRequest.messageId,
+            ...(model.inputRequest.clarificationId ? { clarificationId: model.inputRequest.clarificationId } : {}),
+            ...(model.inputRequest.executionId ?? tab.run.executionId
+              ? { executionId: model.inputRequest.executionId ?? tab.run.executionId }
+              : {}),
+            choiceKey:
+              response === "Skipped"
+                ? "skip"
+                : model.inputRequest.kind === "choice_batch"
+                  ? "batch"
+                  : selectedOptionKey ?? "",
+            choiceTitle: response,
         });
       }
       const accepted = await onInput(
@@ -723,6 +737,20 @@ export function LiveDock({
           ? "Skip that question and continue with reasonable defaults."
           : response,
         attachments,
+        model.inputRequest &&
+        (model.inputRequest.kind === "choice" || model.inputRequest.kind === "choice_batch")
+          ? {
+              clarificationId: model.inputRequest.clarificationId,
+              choiceKey:
+                response === "Skipped"
+                  ? "skip"
+                  : model.inputRequest.kind === "choice_batch"
+                    ? "batch"
+                : selectedOptionKey,
+              choiceMessageId: model.inputRequest.messageId,
+              executionId: model.inputRequest.executionId ?? tab.run.executionId,
+            }
+          : undefined,
       );
       if (accepted === false) throw new Error("Input was not accepted");
       setCollapsedInputRuns((current) => new Set(current).add(tab.runId));

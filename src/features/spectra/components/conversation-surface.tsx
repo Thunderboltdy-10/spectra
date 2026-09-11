@@ -199,7 +199,7 @@ function messageAttachments(message: SpectraThreadDetail["messages"][number]) {
     : [];
 }
 
-export type ConversationChoice = { title: string; description?: string | null };
+export type ConversationChoice = { key?: string; title: string; description?: string | null; clarificationId?: string; executionId?: string; choiceMessageId?: string };
 
 function messageChoices(
   message: SpectraThreadDetail["messages"][number],
@@ -219,6 +219,7 @@ function messageChoices(
         typeof (option as { title?: unknown }).title === "string"
           ? [
               {
+                key: typeof (option as { key?: unknown }).key === "string" ? (option as { key: string }).key : undefined,
                 title: (option as { title: string }).title,
                 description:
                   typeof (option as { description?: unknown }).description ===
@@ -256,6 +257,7 @@ function messageChoices(
             typeof (option as { title?: unknown }).title === "string"
               ? [
                   {
+                    key: typeof (option as { key?: unknown }).key === "string" ? (option as { key: string }).key : undefined,
                     title: (option as { title: string }).title,
                     description:
                       typeof (option as { description?: unknown })
@@ -2239,6 +2241,9 @@ export function ConversationSurface({
                             .some((candidate) => candidate.role === "user"),
                         );
                         if (!choices) return null;
+                        const clarification = message.metadata?.clarification && typeof message.metadata.clarification === "object"
+                          ? (message.metadata.clarification as { id?: unknown; executionId?: unknown })
+                          : {};
                         const saveAnswer = async (
                           choiceKey: string,
                           choiceTitle: string,
@@ -2246,11 +2251,20 @@ export function ConversationSurface({
                           await postSpectra({
                             action: "selectMessageChoice",
                             messageId: message._id,
+                            ...(typeof clarification.id === "string" ? { clarificationId: clarification.id } : {}),
+                            ...(typeof clarification.executionId === "string" ? { executionId: clarification.executionId } : {}),
+                            choiceMessageId: message._id,
                             choiceKey,
                             choiceTitle,
                           });
                           spectraBus.emit("threads.changed", {});
-                          await onChoice?.({ title: choiceTitle });
+                          await onChoice?.({
+                            title: choiceTitle,
+                            key: choiceKey,
+                            choiceMessageId: message._id,
+                            ...(typeof clarification.id === "string" ? { clarificationId: clarification.id } : {}),
+                            ...(typeof clarification.executionId === "string" ? { executionId: clarification.executionId } : {}),
+                          });
                         };
                         if ("questions" in choices && choices.questions) {
                           return (
@@ -2266,13 +2280,10 @@ export function ConversationSurface({
                             question={choices.question}
                             options={choices.options}
                             selectedTitle={choices.selectedTitle}
-                            onChoose={(choice, index) =>
-                              saveAnswer(
-                                `${index}:${choice.title}`,
-                                choice.description
-                                  ? `${choice.title}: ${choice.description}`
-                                  : choice.title,
-                              )
+                            onChoose={(choice) =>
+                              choice.key
+                                ? saveAnswer(choice.key, choice.title)
+                                : Promise.reject(new Error("This clarification is no longer available. Reload the conversation and try again."))
                             }
                             onSkip={() => saveAnswer("skip", "Skipped")}
                           />

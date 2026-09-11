@@ -141,7 +141,7 @@ async function seedRun(
       createdAt: now,
       updatedAt: now,
     });
-    return { ...actor, runId, cardId };
+    return { ...actor, threadId, runId, cardId };
   });
 }
 
@@ -417,5 +417,130 @@ describe("AI run create and recovery lifecycle", () => {
     expect(bundle?.citations).toEqual([
       { sourceId: source.id, evidenceIds: [evidence.id] },
     ]);
+  });
+
+  it("binds clarification choices to the asking message and exact execution", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedRun(t, { status: "running" });
+    await t.run((ctx) =>
+      ctx.db.patch(fixture.runId, {
+        status: "awaiting_resolution",
+        outcome: "awaiting_input",
+        decision: "clarify",
+      }),
+    );
+    const messageId = await t.withIdentity(identity).mutation(
+      api.spectraThreads.appendMessage,
+      {
+        threadId: fixture.threadId,
+        runId: fixture.runId,
+        executionId: "execution-1",
+        role: "assistant",
+        content: "Which draft should I revise?",
+        metadata: {
+          choices: {
+            question: "Which draft should I revise?",
+            options: [
+              { title: "Lab notes", description: "The biology draft." },
+              { title: "Lab notes", description: "The chemistry draft." },
+            ],
+          },
+        },
+      },
+    );
+    const stored = await t.run((ctx) => ctx.db.get(messageId));
+    const metadata = stored?.metadata as Record<string, unknown>;
+    const clarification = metadata.clarification as {
+      id: string;
+      executionId: string;
+      options: Array<{ key: string; title: string }>;
+    };
+    expect(clarification.id).toMatch(/^clarification:/);
+    expect(clarification.executionId).toBe("execution-1");
+    expect(clarification.options.map((option) => option.key)).toEqual([
+      "choice:0:option",
+      "choice:1:option",
+    ]);
+    await expect(
+      t.withIdentity(identity).mutation(api.spectraThreads.selectMessageChoice, {
+        messageId,
+        clarificationId: clarification.id,
+        executionId: clarification.executionId,
+        choiceKey: clarification.options[0]!.key,
+        choiceTitle: "Forged title",
+      }),
+    ).rejects.toThrow("was not offered");
+    await expect(
+      t.withIdentity(identity).mutation(api.spectraThreads.selectMessageChoice, {
+        messageId,
+        clarificationId: clarification.id,
+        executionId: clarification.executionId,
+        choiceKey: clarification.options[0]!.key,
+        choiceTitle: clarification.options[0]!.title,
+      }),
+    ).resolves.toMatchObject({ selected: true });
+    await expect(
+      t.withIdentity(identity).query(api.spectraThreads.validateChoiceContinuation, {
+        messageId,
+        clarificationId: clarification.id,
+        executionId: clarification.executionId,
+        choiceKey: clarification.options[0]!.key,
+      }),
+    ).resolves.toEqual({ valid: true, selected: true });
+    await t.run((ctx) => ctx.db.patch(fixture.runId, { executionId: "execution-2" }));
+    await expect(
+      t.withIdentity(identity).query(api.spectraThreads.validateChoiceContinuation, {
+        messageId,
+        clarificationId: clarification.id,
+        executionId: clarification.executionId,
+        choiceKey: clarification.options[0]!.key,
+      }),
+    ).rejects.toThrow("no longer active");
+  });
+
+  it("promotes only a committed artifact created by the completing run", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedRun(t, { status: "running" });
+    const artifactId = await t.run(async (ctx) => {
+      const now = Date.now();
+      const id = await ctx.db.insert("spectraArtifacts", {
+        ownerAccountId: fixture.accountId,
+        schoolId: fixture.schoolId,
+        blueprintKey: "document",
+        schemaVersion: 1,
+        title: "Committed",
+        summary: "Ready",
+        content: { blocks: [{ id: "b1", type: "paragraph", text: "Ready" }], outline: [] },
+        textIndex: "Committed Ready",
+        tags: [],
+        status: "active",
+        createdFrom: { source: "ai", runId: fixture.runId },
+        createdAt: now,
+        updatedAt: now,
+      });
+      const versionId = await ctx.db.insert("spectraArtifactVersions", {
+        artifactId: id,
+        ownerAccountId: fixture.accountId,
+        schoolId: fixture.schoolId,
+        source: "ai",
+        runId: fixture.runId,
+        after: { title: "Committed", summary: "Ready", content: {}, tags: [] },
+        summary: "Committed",
+        createdAt: now,
+      });
+      await ctx.db.patch(id, { currentVersionId: versionId });
+      return id;
+    });
+    const result = await t.withIdentity(identity).mutation(api.spectraRuns.updateStatus, {
+      runId: fixture.runId,
+      executionId: "execution-1",
+      status: "completed",
+      finalSummary: "Saved",
+      provenance: { artifactIds: [String(artifactId)] },
+    });
+    expect(result).toMatchObject({ runId: fixture.runId });
+    const run = await t.run((ctx) => ctx.db.get(fixture.runId));
+    expect(run?.artifactId).toBe(artifactId);
+    expect(run?.outcome).toBe("canonical_saved");
   });
 });

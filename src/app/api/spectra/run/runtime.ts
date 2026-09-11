@@ -175,6 +175,9 @@ async function runAttempt(
     currentView?: string;
     agentId?: string;
     disableAgentRouting?: boolean;
+    clarificationId?: string;
+    choiceMessageId?: string;
+    choiceKey?: string;
     attachments?: PreparedAttachment[];
     signal?: AbortSignal;
   },
@@ -360,7 +363,8 @@ async function runAttempt(
         actorClerkId: params.actorClerkId,
         runId: params.runId,
         executionId: params.executionId,
-        status: "completed",
+        status: immediatePlan.decision === "clarify" ? "awaiting_resolution" : "completed",
+        outcome: immediatePlan.decision === "clarify" ? "awaiting_input" : "canonical_saved",
         decision: immediatePlan.decision,
         planIntent: immediatePlan.intent,
         finalSummary: immediatePlan.finalResponse,
@@ -568,6 +572,10 @@ async function runAttempt(
         selectedArtifactIds: params.selectedArtifactIds,
         explicitContextObjects: params.explicitContextObjects,
         currentView: params.currentView,
+        clarificationId: params.clarificationId,
+        choiceMessageId: params.choiceMessageId,
+        choiceKey: params.choiceKey,
+        executionId: params.executionId,
       },
       params.prompt,
     );
@@ -691,6 +699,10 @@ async function runAttempt(
         currentView: params.currentView,
         requestedAgentId: params.agentId,
         disableAgentRouting: params.disableAgentRouting,
+        clarificationId: params.clarificationId,
+        choiceMessageId: params.choiceMessageId,
+        choiceKey: params.choiceKey,
+        executionId: params.executionId,
         packetVersion: 2,
         capturedAt: Date.now(),
       },
@@ -1599,7 +1611,8 @@ async function runAttempt(
         actorClerkId: params.actorClerkId,
         runId: params.runId,
         executionId: params.executionId,
-        status: "completed",
+        status: plan.decision === "clarify" ? "awaiting_resolution" : "completed",
+        outcome: plan.decision === "clarify" ? "awaiting_input" : "canonical_saved",
         decision: plan.decision,
         planIntent: plan.intent,
         finalSummary: plan.finalResponse,
@@ -3462,6 +3475,20 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       !["chat", "workspace", "artifacts", "artifact"].includes(surface)
     )
       return new Response("Invalid surface", { status: 400 });
+    if (body.clarificationId || body.choiceKey || body.choiceMessageId) {
+      if (!body.clarificationId || !body.choiceKey || !body.choiceMessageId || !body.executionId)
+        return new Response("This clarification reply is incomplete. Choose one of the current options again.", { status: 409 });
+      try {
+        await query("spectraThreads:validateChoiceContinuation", {
+          messageId: body.choiceMessageId,
+          clarificationId: body.clarificationId,
+          executionId: body.executionId,
+          choiceKey: body.choiceKey,
+        });
+      } catch (error) {
+        return new Response(publicError(error), { status: 409 });
+      }
+    }
     const sourceSurface = surface === "artifacts" ? "artifact" : surface;
     let attachments: PreparedAttachment[];
     try {
@@ -3562,6 +3589,9 @@ export async function handleSpectraRunRequest(request: NextRequest) {
             explicitContextObjects: body.explicitContextObjects,
             currentView: body.currentView,
             disableAgentRouting: body.disableAgentRouting,
+            clarificationId: body.clarificationId,
+            choiceMessageId: body.choiceMessageId,
+            choiceKey: body.choiceKey,
             attachments,
           },
           emit,
@@ -3594,6 +3624,9 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       currentView: body.currentView,
       agentId: body.agentId,
       disableAgentRouting: body.disableAgentRouting,
+      clarificationId: body.clarificationId,
+      choiceMessageId: body.choiceMessageId,
+      choiceKey: body.choiceKey,
       attachments: [],
     };
     if (
@@ -3665,6 +3698,11 @@ export async function handleSpectraRunRequest(request: NextRequest) {
   }
   if (!expectedExecutionId)
     return new Response("This run has no active execution.", { status: 409 });
+  if (body.attemptId?.trim() && body.attemptId.trim() !== expectedExecutionId)
+    return new Response(
+      "This run attempt is no longer current. Refresh it and try again.",
+      { status: 409 },
+    );
 
   if (action === "stop") {
     let stopped: { alreadyStopped: boolean; executionId?: string };

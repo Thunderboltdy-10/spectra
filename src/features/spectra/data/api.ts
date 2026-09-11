@@ -553,10 +553,18 @@ export type SpectraRun = {
   updatedAt: number;
 };
 
+export type SpectraActiveExecution = {
+  _id: string;
+  status: Extract<SpectraRun["status"], "queued" | "running" | "awaiting_confirmation" | "awaiting_resolution">;
+  phase?: SpectraRun["phase"];
+  updatedAt: number;
+};
+
 export type SpectraThread = {
   _id: string;
   title: string;
   summaryShort?: string;
+  previewText?: string;
   origin: "chat" | "workspace" | "artifact";
   workspaceId?: string;
   artifactId?: string;
@@ -567,6 +575,9 @@ export type SpectraThread = {
   updatedAt: number;
   lastMessageAt?: number;
   lastRunId?: string;
+  contextWorkspaceIds?: string[];
+  contextArtifactIds?: string[];
+  readSchemaVersion?: number;
   contexts?: {
     workspaces?: Array<{ id: string; title: string }>;
     artifacts?: Array<{ id: string; title: string }>;
@@ -581,6 +592,7 @@ export type SpectraMessage = {
   runId?: string;
   metadata?: Record<string, unknown>;
   createdAt: number;
+  ordinal?: number;
 };
 
 export type SpectraThreadTrace = {
@@ -608,6 +620,9 @@ export type SpectraThreadDetail = {
   thread: SpectraThread;
   messages: SpectraMessage[];
   traces: SpectraThreadTrace[];
+  messagePage?: { hasOlder: boolean; olderBefore?: string };
+  tracePage?: { limit: number };
+  activeExecution?: { run: SpectraActiveExecution } | null;
   viewerName?: string;
 };
 

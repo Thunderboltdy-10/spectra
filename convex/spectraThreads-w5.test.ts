@@ -119,12 +119,17 @@ describe("W5-01 lossless history and bounded result reads", () => {
     }
     expect(cursor).toBeUndefined();
     expect(scanned).toBe(701);
-    const remaining = await t.run(async (ctx) =>
-      (await ctx.db.query("spectraThreads").collect()).filter(
-        (thread) => thread.readSchemaVersion !== 1,
-      ).length,
-    );
-    expect(remaining).toBe(0);
+    const metadata = await t.run(async (ctx) => {
+      const threads = await ctx.db.query("spectraThreads").collect();
+      return {
+        remaining: threads.filter((thread) => thread.readSchemaVersion !== 1).length,
+        unknownMessageCount: threads.filter(
+          (thread) => thread.messageCount === undefined,
+        ).length,
+      };
+    });
+    expect(metadata.remaining).toBe(0);
+    expect(metadata.unknownMessageCount).toBe(701);
   });
 
   it("keeps every allowed thread when context projections are revoked", async () => {

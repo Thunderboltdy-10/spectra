@@ -16,6 +16,7 @@ import {
   syncSourceNodes,
 } from "./orgTreeShared";
 import { incrementOperationalCounter } from "./operationalCounters";
+import { evaluateAccessForActorWithLoadedResource } from "./authorityShared";
 
 const vOrigin = v.union(
   v.literal("chat"),
@@ -101,7 +102,7 @@ function assertThreadListCursor(
     cursor.schoolId !== String(actor.schoolId) ||
     cursor.includeArchived !== includeArchived ||
     (cursor.status !== "active" && cursor.status !== "archived") ||
-    typeof cursor.cursor !== "string"
+    cursor.cursor !== null && typeof cursor.cursor !== "string"
   )
     throw new Error("This thread list cursor belongs to another query. Reload the list and try again.");
   return cursor;
@@ -149,6 +150,15 @@ function compactThread(thread: Doc<"spectraThreads">) {
     updatedAt: thread.updatedAt,
     lastMessageAt: thread.lastMessageAt,
     readSchemaVersion: thread.readSchemaVersion,
+  };
+}
+
+function compactActiveExecution(run: Doc<"spectraAiRuns">) {
+  return {
+    _id: run._id,
+    status: run.status,
+    phase: run.phase,
+    updatedAt: run.updatedAt,
   };
 }
 
@@ -374,12 +384,13 @@ export const appendMessage = mutation({
         }
       }
     }
-    const currentMessageCount =
-      thread.messageCount ??
-      (await ctx.db
-        .query("spectraMessages")
-        .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
-        .collect()).length;
+    const currentMessageCount = thread.messageCount;
+    const lastOrdinal = await ctx.db
+      .query("spectraMessages")
+      .withIndex("by_thread_ordinal", (q) => q.eq("threadId", args.threadId))
+      .order("desc")
+      .first();
+    const nextOrdinal = (lastOrdinal?.ordinal ?? 0) + 1;
     const now = Date.now();
     const messageId = await ctx.db.insert("spectraMessages", {
       threadId: args.threadId,
@@ -390,7 +401,7 @@ export const appendMessage = mutation({
       clientMessageId: args.clientMessageId,
       metadata: args.metadata,
       createdAt: now,
-      ordinal: currentMessageCount + 1,
+      ordinal: nextOrdinal,
     });
     const firstUserMessage = args.role === "user" && currentMessageCount === 0;
     await ctx.db.patch(args.threadId, {
@@ -398,8 +409,9 @@ export const appendMessage = mutation({
         firstUserMessage && thread.title === "New thread"
           ? cleanTitle(content)
           : thread.title,
-      messageCount: (thread.messageCount ?? 0) + 1,
-      messageCount: currentMessageCount + 1,
+      ...(currentMessageCount === undefined
+        ? {}
+        : { messageCount: currentMessageCount + 1 }),
       previewText: previewContent(content),
       lastMessageAt: now,
       lastRunId: args.runId ?? thread.lastRunId,
@@ -544,21 +556,56 @@ export const list = query({
         } satisfies ThreadListCursor);
     const workspaceIds = [...new Set(visible.flatMap((thread) =>
       [thread.workspaceId, ...(thread.contextWorkspaceIds ?? [])].filter(Boolean).map(String),
-    ))].slice(0, limit * 8);
+    ))].slice(0, 48);
     const artifactIds = [...new Set(visible.flatMap((thread) =>
       [thread.artifactId, ...(thread.contextArtifactIds ?? [])].filter(Boolean).map(String),
-    ))].slice(0, limit * 8);
+    ))].slice(0, 48);
     const [workspaces, artifacts] = await Promise.all([
       Promise.all(workspaceIds.map(async (id) => {
         try {
-          const access = await requireWorkspaceCapability(ctx, id as Id<"spectraWorkspaces">, "read");
-          return access.workspace.status === "active" ? { id, title: access.workspace.title } : null;
+          const workspace = await ctx.db.get(id as Id<"spectraWorkspaces">);
+          const loaded = workspace
+            ? {
+                resource: workspace,
+                ownerAccountId: workspace.ownerAccountId,
+                schoolId: workspace.schoolId,
+                lifecycle: workspace.status,
+              }
+            : null;
+          const access = await evaluateAccessForActorWithLoadedResource(
+            ctx,
+            actor,
+            "workspace",
+            id,
+            loaded,
+          );
+          return access.allowed && access.capabilities.includes("read") && access.loaded.resource.status === "active"
+            ? { id, title: access.loaded.resource.title }
+            : null;
         } catch { return null; }
       })),
       Promise.all(artifactIds.map(async (id) => {
         try {
-          const access = await requireArtifactCapability(ctx, id as Id<"spectraArtifacts">, "read");
-          return access.artifact.status !== "deleted" ? { id, title: access.artifact.title } : null;
+          const artifact = await ctx.db.get(id as Id<"spectraArtifacts">);
+          const loaded = artifact
+            ? {
+                resource: artifact,
+                ownerAccountId: artifact.ownerAccountId,
+                schoolId: artifact.schoolId,
+                lifecycle: artifact.status,
+              }
+            : null;
+          const resourceType = artifact?.blueprintKey === "agent" ? "agent" : "artifact";
+          const access = await evaluateAccessForActorWithLoadedResource(
+            ctx,
+            actor,
+            resourceType,
+            id,
+            loaded,
+          );
+          return access.allowed && access.capabilities.includes("read") && access.loaded.resource.status !== "deleted"
+            ? { id, title: access.loaded.resource.title }
+            : null;
         } catch { return null; }
       })),
     ]);
@@ -607,9 +654,9 @@ export const get = query({
     const messages = [...messagePage.page].reverse();
     const activeRun = thread.lastRunId ? await ctx.db.get(thread.lastRunId) : null;
     return {
-      thread: derivedArtifact
-        ? { ...thread, artifactId: derivedArtifact._id }
-        : thread,
+      thread: compactThread(
+        derivedArtifact ? { ...thread, artifactId: derivedArtifact._id } : thread,
+      ),
       messages,
       // Historical trace families are fetched on demand through getRunTrace.
       // Keep the field for old clients during the migration window.
@@ -632,7 +679,7 @@ export const get = query({
         activeRun.ownerAccountId === actor._id &&
         activeRun.schoolId === actor.schoolId &&
         ["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(activeRun.status)
-          ? { run: activeRun }
+          ? { run: compactActiveExecution(activeRun) }
           : null,
       viewerName: actor.name,
     };
@@ -661,9 +708,7 @@ export const getActiveExecution = query({
       !["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(run.status)
     )
       return null;
-    return {
-      run,
-    };
+    return { run: compactActiveExecution(run) };
   },
 });
 
@@ -722,13 +767,6 @@ export const backfillReadMetadata = internalMutation({
         lastRunId: thread.lastRunId ?? runs[0]?._id,
         readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
       };
-      if (thread.messageCount === undefined) {
-        patch.messageCount = await ctx.db
-          .query("spectraMessages")
-          .withIndex("by_thread", (q) => q.eq("threadId", thread._id))
-          .collect()
-          .then((messages) => messages.length);
-      }
       await ctx.db.patch(thread._id, patch);
       updated += 1;
     }

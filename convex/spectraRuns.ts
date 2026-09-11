@@ -522,12 +522,13 @@ export const beginRun = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    const currentMessageCount =
-      thread?.messageCount ??
-      (await ctx.db
-        .query("spectraMessages")
-        .withIndex("by_thread", (q) => q.eq("threadId", threadId))
-        .collect()).length;
+    const currentMessageCount = thread?.messageCount;
+    const lastOrdinal = await ctx.db
+      .query("spectraMessages")
+      .withIndex("by_thread_ordinal", (q) => q.eq("threadId", threadId))
+      .order("desc")
+      .first();
+    const nextOrdinal = (lastOrdinal?.ordinal ?? 0) + 1;
     await ctx.db.insert("spectraMessages", {
       threadId,
       schoolId: actor.schoolId,
@@ -537,11 +538,12 @@ export const beginRun = mutation({
       clientMessageId: `user:${runId}`,
       metadata: args.messageMetadata,
       createdAt: now,
-      ordinal: currentMessageCount + 1,
+      ordinal: nextOrdinal,
     });
     await ctx.db.patch(threadId, {
-      messageCount: (thread?.messageCount ?? 0) + 1,
-      messageCount: currentMessageCount + 1,
+      ...(currentMessageCount === undefined
+        ? {}
+        : { messageCount: currentMessageCount + 1 }),
       previewText: cleanPrompt.replace(/\s+/g, " ").trim().slice(0, 240),
       contextWorkspaceIds: workspaceId
         ? [...new Set([...(thread?.contextWorkspaceIds ?? []), workspaceId])].slice(-8)

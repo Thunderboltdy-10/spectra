@@ -139,6 +139,59 @@ describe("ConversationSurface history and saved results", () => {
     expect(screen.getByText("Thread B")).toBeTruthy();
   });
 
+  it("ignores a stale trace response after switching A to B and back to A", async () => {
+    const pending: Array<(value: unknown) => void> = [];
+    mocks.getTrace.mockImplementation(
+      () => new Promise((resolve) => pending.push(resolve)),
+    );
+    const tracePage = (title: string) => ({
+      run: { ...run, status: "completed" as const },
+      operations: [],
+      cards: [],
+      events: [
+        {
+          _id: `event-${title}`,
+          runId: run._id,
+          executionId: run.executionId,
+          sequence: 1,
+          type: "progress",
+          payload: { title },
+          createdAt: 1,
+        },
+      ],
+      artifacts: [],
+    });
+    const first = render(
+      <ConversationSurface detail={detail("thread-a", "Thread A")} threadId="thread-a" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Show details" }));
+    await waitFor(() => expect(pending).toHaveLength(3));
+
+    first.rerender(<ConversationSurface detail={detail("thread-b", "Thread B")} threadId="thread-b" />);
+    await screen.findByText("Thread B");
+    first.rerender(
+      <ConversationSurface detail={detail("thread-a", "Thread A")} threadId="thread-a" />,
+    );
+    await screen.findByText("Thread A");
+    fireEvent.click(screen.getByRole("button", { name: "Show details" }));
+    await waitFor(() => expect(pending).toHaveLength(6));
+
+    await act(async () => {
+      for (const resolve of pending.splice(0, 3)) resolve(tracePage("STALE"));
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "Loading…" })).toBeTruthy();
+
+    await act(async () => {
+      for (const resolve of pending.splice(0, 3)) resolve(tracePage("FRESH"));
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Loading…" })).toBeNull(),
+    );
+    expect(screen.queryByRole("button", { name: "Show details" })).toBeNull();
+  });
+
   it("shows live execution changes and saved result cards without reloading history", async () => {
     const activeRun: SpectraRun = { ...run, status: "running" };
     mocks.useQuery.mockReturnValue({ run: activeRun });

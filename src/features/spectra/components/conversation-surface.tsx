@@ -149,7 +149,7 @@ function mergeTracePage(
   };
 }
 
-function savedRunStatusCopy(run: SpectraRun | undefined) {
+function savedRunStatusCopy(run: Pick<SpectraRun, "status"> | undefined) {
   if (!run) return "Saved progress and results";
   if (run.status === "awaiting_confirmation") return "Waiting for your approval";
   if (run.status === "awaiting_resolution") return "Waiting for a conflict to be resolved";
@@ -165,7 +165,7 @@ function SavedRunDisclosure({
   state,
   onLoad,
 }: {
-  run?: SpectraRun;
+  run?: Pick<SpectraRun, "status">;
   state?: TraceLoadState;
   onLoad: () => void;
 }) {
@@ -1836,6 +1836,7 @@ export function ConversationSurface({
   }, [detail, observedActiveExecution]);
   const [traceStates, setTraceStates] = useState<Record<string, TraceLoadState>>({});
   const traceRequestRef = useRef(new Map<string, number>());
+  const traceRequestSequenceRef = useRef(0);
   useEffect(() => {
     traceRequestRef.current.clear();
     setTraceStates({});
@@ -1857,7 +1858,7 @@ export function ConversationSurface({
     ) => {
       if (!observedThreadId) return;
       const key = `${observedThreadId}:${runId}`;
-      const requestId = (traceRequestRef.current.get(key) ?? 0) + 1;
+      const requestId = ++traceRequestSequenceRef.current;
       traceRequestRef.current.set(key, requestId);
       const families: TraceFamily[] = options.family
         ? [options.family]
@@ -1991,20 +1992,20 @@ export function ConversationSurface({
   const persistedUserRunIds = useMemo(
     () =>
       new Set(
-        detail?.messages.flatMap((message) =>
+        displayedMessages.flatMap((message) =>
           message.role === "user" && message.runId ? [message.runId] : [],
         ) ?? [],
       ),
-    [detail],
+    [displayedMessages],
   );
   const persistedAssistantRunIds = useMemo(
     () =>
       new Set(
-        detail?.messages.flatMap((message) =>
+        displayedMessages.flatMap((message) =>
           message.role === "assistant" && message.runId ? [message.runId] : [],
         ) ?? [],
       ),
-    [detail],
+    [displayedMessages],
   );
   const unresolvedTraces = useMemo(
     () =>
@@ -2611,7 +2612,7 @@ export function ThreadConversation({
     return spectraBus.on("threads.changed", refreshVisibleThread);
   }, [refresh]);
   useEffect(() => {
-    const active = detail?.traces.some(
+    const active = Boolean(detail?.activeExecution) || detail?.traces.some(
       (trace) =>
         trace.run.status === "queued" ||
         trace.run.status === "running" ||
@@ -2627,7 +2628,7 @@ export function ThreadConversation({
       10_000,
     );
     return () => window.clearInterval(timer);
-  }, [detail?.traces, refresh]);
+  }, [detail?.activeExecution, detail?.traces, refresh]);
   const runEngine = useSpectraRun({
     surface: "chat",
     threadId,
@@ -2639,6 +2640,7 @@ export function ThreadConversation({
   });
   const activeRunId =
     parentLiveExchange?.runId ??
+    detail?.activeExecution?.run._id ??
     detail?.traces.find((trace) =>
       [
         "queued",

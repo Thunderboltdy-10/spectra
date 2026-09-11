@@ -3157,6 +3157,10 @@ export default defineSchema({
     artifactId: v.optional(v.id("spectraArtifacts")),
     pinned: v.optional(v.boolean()),
     messageCount: v.optional(v.number()),
+    previewText: v.optional(v.string()),
+    contextWorkspaceIds: v.optional(v.array(v.id("spectraWorkspaces"))),
+    contextArtifactIds: v.optional(v.array(v.id("spectraArtifacts"))),
+    readSchemaVersion: v.optional(v.number()),
     lastRunId: v.optional(v.id("spectraAiRuns")),
     retainedAgentId: v.optional(v.id("spectraArtifacts")),
     retainedAgentVersionId: v.optional(v.id("spectraArtifactVersions")),
@@ -3194,10 +3198,12 @@ export default defineSchema({
     clientMessageId: v.optional(v.string()),
     metadata: v.optional(v.any()),
     createdAt: v.number(),
+    ordinal: v.optional(v.number()),
   })
     .index("by_thread", ["threadId"])
     .index("by_school_created", ["schoolId", "createdAt"])
     .index("by_thread_created", ["threadId", "createdAt"])
+    .index("by_thread_ordinal", ["threadId", "ordinal"])
     .index("by_thread_client", ["threadId", "clientMessageId"])
     .index("by_run", ["runId"]),
 

@@ -630,7 +630,7 @@ export async function GET(request: NextRequest) {
         runId,
         family: (params.get("family") as "operations" | "cards" | "events" | null) || undefined,
         eventAfter: params.has("eventAfter")
-          ? params.get("eventAfter")!
+          ? Number(params.get("eventAfter"))
           : undefined,
         operationsBefore: params.get("operationsBefore") || undefined,
         cardsBefore: params.get("cardsBefore") || undefined,

@@ -125,6 +125,42 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: sync.policy.change");
         return;
       }
+      case "app.bridge.pair":
+      case "app.bridge.setup":
+      case "app.bridge.policy.change": {
+        const action =
+          commandId === "app.bridge.pair"
+            ? "pair"
+            : commandId === "app.bridge.policy.change"
+              ? "policy"
+              : typeof params.action === "string"
+                ? params.action
+                : "pair";
+        if (commandId === "app.bridge.policy.change") {
+          if (
+            params.preset !== "managed-copy" &&
+            params.preset !== "native-sync" &&
+            params.preset !== "advanced"
+          ) {
+            throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.bridge.policy.change requires preset");
+          }
+          const listeners = await spectraBus.commandAsync("bridge.policy.change", {
+            preset: params.preset,
+          });
+          if (listeners === 0) host.navigate("settings", "devices");
+          return;
+        }
+        if (action !== "pair" && action !== "select-location" && action !== "retry-connection" && action !== "retry-folder")
+          throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.bridge.setup requires a supported action");
+        if (action === "retry-folder" && (typeof params.grantId !== "string" || !params.grantId.trim()))
+          throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.bridge.setup retry-folder requires grantId");
+        const listeners = await spectraBus.commandAsync("bridge.setup", {
+          action,
+          ...(typeof params.grantId === "string" ? { grantId: params.grantId } : {}),
+        });
+        if (listeners === 0) host.navigate("settings", "devices");
+        return;
+      }
       case "app.memory.write": {
         if (typeof params.content !== "string" || !params.content.trim())
           throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.memory.write requires content");

@@ -123,6 +123,12 @@ impl LocalBridgeControl for SpectraLocalControl {
 }
 
 #[cfg(windows)]
+const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(windows)]
+const WINDOWS_AUTOSTART_SCRIPT: &str = r#"$service=New-Object -ComObject Schedule.Service;$service.Connect();$root=$service.GetFolder('\\');$definition=$service.NewTask(0);$definition.RegistrationInfo.Description='Starts Spectra Bridge immediately at user logon';$definition.Settings.Enabled=$true;$definition.Settings.StartWhenAvailable=$true;$definition.Settings.MultipleInstances=2;$trigger=$definition.Triggers.Create(9);$trigger.Enabled=$true;$trigger.UserId=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;$action=$definition.Actions.Create(0);$action.Path=$env:SPECTRA_BRIDGE_EXE;$action.Arguments='--autostart';$action.WorkingDirectory=$env:SPECTRA_BRIDGE_WORKDIR;$null=$root.RegisterTaskDefinition('Spectra Bridge',$definition,6,$null,$null,3,$null)"#;
+
+#[cfg(windows)]
 fn repair_windows_autostart_command() -> anyhow::Result<()> {
     use std::os::windows::process::CommandExt;
     use winreg::RegKey;
@@ -140,10 +146,20 @@ fn repair_windows_autostart_command() -> anyhow::Result<()> {
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Bridge executable has no parent directory"))?;
     let status = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", "$service=New-Object -ComObject Schedule.Service;$service.Connect();$root=$service.GetFolder('\\');$definition=$service.NewTask(0);$definition.RegistrationInfo.Description='Starts Spectra Bridge immediately at user logon';$definition.Settings.Enabled=$true;$definition.Settings.StartWhenAvailable=$true;$definition.Settings.MultipleInstances=2;$trigger=$definition.Triggers.Create(9);$trigger.Enabled=$true;$trigger.UserId=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;$action=$definition.Actions.Create(0);$action.Path=$env:SPECTRA_BRIDGE_EXE;$action.Arguments='--autostart';$action.WorkingDirectory=$env:SPECTRA_BRIDGE_WORKDIR;$null=$root.RegisterTaskDefinition('Spectra Bridge',$definition,6,$null,$null,3,$null)"])
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            WINDOWS_AUTOSTART_SCRIPT,
+        ])
         .env("SPECTRA_BRIDGE_EXE", &executable)
         .env("SPECTRA_BRIDGE_WORKDIR", working_directory)
-        .creation_flags(0x08000000)
+        // The top-level GUI subsystem does not affect this PowerShell child.
+        // Hide the launcher itself as well as the scheduled Bridge process.
+        .creation_flags(WINDOWS_CREATE_NO_WINDOW)
         .status()?;
     anyhow::ensure!(status.success(), "Windows logon task could not be created");
     let _ = run.delete_value("Spectra Bridge");
@@ -151,6 +167,17 @@ fn repair_windows_autostart_command() -> anyhow::Result<()> {
         std::fs::remove_file(shortcut)?;
     }
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn windows_autostart_launcher_is_hidden_and_starts_the_gui_binary_directly() {
+    assert!(
+        WINDOWS_AUTOSTART_SCRIPT.contains("-autostart")
+            || WINDOWS_AUTOSTART_SCRIPT.contains("--autostart")
+    );
+    assert!(WINDOWS_AUTOSTART_SCRIPT.contains("$action.Path=$env:SPECTRA_BRIDGE_EXE"));
+    assert_eq!(WINDOWS_CREATE_NO_WINDOW, 0x08000000);
 }
 
 #[cfg(not(windows))]
@@ -179,22 +206,9 @@ fn configure_embedded_release_environment() {
 }
 
 fn record_process_start() {
-    let Some(base) = std::env::var_os("APPDATA")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| {
-                let home = std::path::PathBuf::from(home);
-                if cfg!(target_os = "macos") {
-                    home.join("Library/Application Support")
-                } else {
-                    home.join(".local/share")
-                }
-            })
-        })
-    else {
+    let Some(directory) = bridge_log_directory() else {
         return;
     };
-    let directory = base.join("com.spectra.bridge");
     if std::fs::create_dir_all(&directory).is_err() {
         return;
     }
@@ -215,6 +229,35 @@ fn record_process_start() {
             std::time::SystemTime::now()
         );
     }
+}
+
+fn bridge_log_directory() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        return std::env::var_os("APPDATA")
+            .map(std::path::PathBuf::from)
+            .map(|base| base.join("com.spectra.bridge"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .map(|home| home.join("Library/Application Support/com.spectra.bridge"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .map(|home| home.join(".local/share/com.spectra.bridge"));
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn record_runtime_error(journal: &Journal, context: &str, error: &dyn std::fmt::Display) {
+    let detail = format!("{context}: {error}");
+    let bounded = detail.chars().take(1_000).collect::<String>();
+    let _ = journal.set_config("last_runtime_error", &bounded);
 }
 
 #[derive(serde::Serialize)]
@@ -2207,7 +2250,7 @@ fn open_log_file(path: &std::path::Path) -> std::io::Result<()> {
         use std::os::windows::process::CommandExt;
         std::process::Command::new("explorer.exe")
             .arg(path)
-            .creation_flags(0x08000000)
+            .creation_flags(WINDOWS_CREATE_NO_WINDOW)
             .spawn()?;
     }
     #[cfg(target_os = "macos")]
@@ -2231,10 +2274,21 @@ fn open_logs_impl(app: &tauri::AppHandle, journal: &Journal) -> Result<(), Strin
     let contents = journal
         .diagnostic_log(200)
         .map_err(|error| error.to_string())?;
-    let contents = if contents.is_empty() {
+    let last_runtime_error = journal
+        .config("last_runtime_error")
+        .ok()
+        .flatten()
+        .map(|error| format!("runtime: {error}"));
+    let contents = if contents.is_empty() && last_runtime_error.is_none() {
         "No bridge operations have been recorded yet.\n".to_owned()
     } else {
-        format!("{contents}\n")
+        format!(
+            "{}{}\n",
+            contents,
+            last_runtime_error
+                .map(|error| format!("{error}\n"))
+                .unwrap_or_default()
+        )
     };
     std::fs::write(&path, contents).map_err(|error| error.to_string())?;
     open_log_file(&path).map_err(|error| format!("Could not open the Bridge log: {error}"))
@@ -2605,9 +2659,10 @@ fn main() {
                 sync_state,
                 sync_wake.clone(),
             ));
+            let server_journal = journal.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = serve(state).await {
-                    eprintln!("{error:#}");
+                    record_runtime_error(&server_journal, "Bridge server stopped", &error);
                 }
             });
             let show = MenuItem::with_id(app, "show", "Open Spectra Bridge", true, None::<&str>)?;
@@ -2627,7 +2682,11 @@ fn main() {
                     }
                     "logs" => {
                         if let Err(error) = open_logs_impl(app, &tray_journal) {
-                            eprintln!("Could not open the Bridge log: {error}");
+                            record_runtime_error(
+                                &tray_journal,
+                                "Could not open the Bridge log",
+                                &error,
+                            );
                         }
                     }
                     "stop" => app.exit(0),

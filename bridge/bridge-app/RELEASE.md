@@ -2,7 +2,9 @@
 
 This project builds the Bridge shell from `bridge/bridge-app`. The browser is
 the normal pairing and setup surface; the native window stays hidden at
-startup and the service runs quietly in the tray. Do not use this document to
+startup and the service runs quietly in the tray. The friend-test artifact is
+unsigned; on macOS, Control-click → Open (or Privacy & Security → Open Anyway)
+may be required on first launch. Do not use this document to
 claim Mac runtime verification from Windows.
 
 ## Final friend's-Mac test (unsigned)

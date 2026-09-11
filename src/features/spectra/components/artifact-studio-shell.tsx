@@ -16,7 +16,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { type SpectraArtifact } from "../data/api";
-import type { CompatibilityProfile, FidelityClass } from "../commands/types";
+import type { CommandExecutionResult, CompatibilityProfile, FidelityClass } from "../commands/types";
 import {
   availableWorkModes,
   getWorkDefinition,
@@ -96,7 +96,7 @@ export type StudioContract = {
   compatibilityProfile: CompatibilityProfile;
   fidelity: Readonly<Record<string, FidelityClass>>;
   /** Optional app-level semantic dispatcher supplied by the shell. */
-  executeApplicationCommand?: (commandId: string, params: unknown) => void | Promise<void>;
+  executeApplicationCommand?: (commandId: string, params: unknown) => void | Promise<void | CommandExecutionResult>;
   /** The shell's docked inspectors. A studio opens them, never rebuilds them. */
   inspector: {
     open: StudioInspectorPanel | null;

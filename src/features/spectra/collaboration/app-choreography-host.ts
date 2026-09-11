@@ -22,6 +22,8 @@ import {
 import { disengageFollow, isProgrammaticFollowOpen } from "./follow";
 import { getSpectraMotionSnapshot } from "../motion/motion-level";
 import { capabilityById } from "../capabilities/catalog";
+import { spectraBus } from "../events";
+import { announceManualViewportInteraction } from "../viewport-readiness";
 import type { ActorIdentity } from "./interaction-model";
 
 const UI_EVENT_CAPABILITY: Record<string, string> = {
@@ -178,9 +180,28 @@ export function startAppChoreographyMaintenance(): () => void {
   const onInput = (event: Event) => {
     if (isProgrammaticOpen() || isProgrammaticFollowOpen()) return;
     if (isFollowControlEvent(event)) return;
+    const interaction = event.type === "pointerdown"
+      ? "pointer"
+      : event.type === "wheel"
+        ? "wheel"
+        : "keyboard";
+    const target = event.target instanceof Element
+      ? event.target.closest<HTMLElement>("[data-spectra-studio], [data-spectra-artifact-studio]")
+      : null;
+    announceManualViewportInteraction({
+      surface: appSurfaceFromPathname(window.location.pathname),
+      interaction,
+      ...(target?.dataset.spectraStudio || target?.dataset.spectraArtifactStudio
+        ? { targetId: target.dataset.spectraStudio ?? target.dataset.spectraArtifactStudio }
+        : {}),
+    });
     disengageFollowAi();
     disengageFollow("user_input");
   };
+  const removeStopFollowing = spectraBus.handle("follow.stopRequested", () => {
+    disengageFollowAi();
+    disengageFollow("explicit");
+  });
   window.addEventListener("pointerdown", onInput, true);
   window.addEventListener("keydown", onInput, true);
   window.addEventListener("wheel", onInput, {
@@ -195,6 +216,7 @@ export function startAppChoreographyMaintenance(): () => void {
     window.removeEventListener("pointerdown", onInput, true);
     window.removeEventListener("keydown", onInput, true);
     window.removeEventListener("wheel", onInput, true);
+    removeStopFollowing();
     for (const timer of settleTimers.values()) window.clearTimeout(timer);
     settleTimers.clear();
   };

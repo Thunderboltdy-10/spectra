@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { spectraBus } from "../events";
 import { WorkbenchLiveStack } from "../pages/workbench-live-stack";
@@ -58,6 +58,14 @@ export function GlobalRouteWorkbench() {
       });
     },
   });
+
+  useEffect(() => {
+    if (!eligible) return;
+    return spectraBus.handle("run.stopRequested", ({ runId }) => {
+      if (runId && runEngine.activeRunId && runEngine.activeRunId !== runId) return;
+      void runEngine.stop(runId);
+    });
+  }, [eligible, runEngine]);
 
   if (!eligible) return null;
 

@@ -63,6 +63,8 @@ export function ArtifactCommentsPanel({
   preferredRegionId,
   currentAccountId,
   relativePosition,
+  requestedComment,
+  onRequestedCommentResult,
   onClose,
 }: {
   open: boolean;
@@ -72,6 +74,8 @@ export function ArtifactCommentsPanel({
   preferredRegionId?: string;
   currentAccountId?: string;
   relativePosition?: Uint8Array;
+  requestedComment?: { id: string; body: string; regionId?: string; submit?: boolean } | null;
+  onRequestedCommentResult?: (error?: unknown) => void;
   onClose: () => void;
 }) {
   const [comments, setComments] = useState<SpectraArtifactComment[]>([]);
@@ -91,6 +95,8 @@ export function ArtifactCommentsPanel({
   const [searching, setSearching] = useState(false);
   const [notificationMode, setNotificationMode] = useState<NotificationMode>("mentions_replies");
   const searchSequence = useRef(0);
+  const submittedRequestRef = useRef<string | null>(null);
+  const createCommentRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -125,6 +131,21 @@ export function ArtifactCommentsPanel({
       getSpectraArtifactCommentPreference(artifactId).then((result) => setNotificationMode(result.mode)),
     ]).catch(() => undefined);
   }, [artifactId, open, preferredRegionId, refresh, regions]);
+
+  useEffect(() => {
+    if (!open || !requestedComment) return;
+    setBody(requestedComment.body);
+    if (requestedComment.regionId && regions.some((region) => region.regionId === requestedComment.regionId)) {
+      setRegionId(requestedComment.regionId);
+    }
+  }, [open, regions, requestedComment]);
+
+  useEffect(() => {
+    if (!open || !requestedComment?.submit || submittedRequestRef.current === requestedComment.id) return;
+    if (body !== requestedComment.body) return;
+    submittedRequestRef.current = requestedComment.id;
+    void createCommentRef.current();
+  }, [body, open, requestedComment]);
 
   useEffect(() => {
     if (!open) return;
@@ -196,12 +217,15 @@ export function ArtifactCommentsPanel({
       setMentions([]);
       setMentionSearch("");
       await refresh();
+      if (requestedComment?.submit) onRequestedCommentResult?.();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not post this comment.");
+      if (requestedComment?.submit) onRequestedCommentResult?.(error);
     } finally {
       setBusy(null);
     }
   }
+  createCommentRef.current = createComment;
 
   async function saveEdit(comment: SpectraArtifactComment) {
     if (!editingBody.trim()) return;

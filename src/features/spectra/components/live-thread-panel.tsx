@@ -1,12 +1,13 @@
 "use client";
 
 import { Crosshair, MessageSquare, Play, X } from "lucide-react";
-import type { CSSProperties } from "react";
+import { useEffect, type CSSProperties } from "react";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
 import { ThreadConversation } from "./conversation-surface";
 import { StudioSplitShell } from "./artifact-studio-shell";
 import { runIdForLiveThread } from "./live-dock";
+import { acknowledgeViewportReady } from "../viewport-readiness";
 
 export function LiveThreadPanel({
   threadId,
@@ -36,6 +37,13 @@ export function LiveThreadPanel({
   overlay?: boolean;
 }) {
   const follow = useFollowAi();
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => acknowledgeViewportReady({
+      targetId: threadId,
+      view: "conversation",
+    }));
+    return () => cancelAnimationFrame(frame);
+  }, [threadId]);
   return (
     <StudioSplitShell
       width={width}

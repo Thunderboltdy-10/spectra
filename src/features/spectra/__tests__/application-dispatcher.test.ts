@@ -29,6 +29,29 @@ describe("application command dispatcher", () => {
     expect(navigate).toHaveBeenCalledWith("workspace", "ws-1");
   });
 
+  it("returns the typed effect and readiness acknowledgement from public actions", async () => {
+    const readiness = {
+      actionId: "action-1",
+      targetId: "chat",
+      view: "conversation" as const,
+      routeGeneration: 4,
+      status: "ready" as const,
+    };
+    const dispatch = createApplicationCommandDispatcher({
+      openArtifact: vi.fn(),
+      navigate: vi.fn(),
+      openRoute: vi.fn().mockResolvedValue(readiness),
+      replacePreferences: vi.fn(),
+      preferences: DEFAULT_SPECTRA_PREFERENCES,
+    });
+    await expect(dispatch("app.page.chat", {})).resolves.toMatchObject({
+      commandId: "app.page.chat",
+      effect: "navigate",
+      status: "completed",
+      readiness,
+    });
+  });
+
   it("merges account settings patches without inventing a parallel store", async () => {
     const replacePreferences = vi.fn();
     const dispatch = createApplicationCommandDispatcher({

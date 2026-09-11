@@ -47,6 +47,8 @@ import {
 import { useClerk } from "@clerk/nextjs";
 import { SpectraLogo } from "@/components/spectra-logo";
 import { SignedInContinue } from "@/components/signed-in-continue";
+import { UniversalKBar } from "@/features/spectra/components/universal-kbar";
+import { ViewportReadinessMount } from "@/features/spectra/components/viewport-readiness-mount";
 import { cn } from "@/lib/utils";
 import {
   getSpectraNotificationCenter,
@@ -1181,6 +1183,7 @@ export function AppShell({
       />
       <KeyboardShortcutsHelp />
       <SignedInContinue />
+      <UniversalKBar />
       <ShellNavigation />
       <main
         style={{
@@ -1211,6 +1214,7 @@ export function AppShell({
         )}
         <ProductOfflineBanner />
         <AppChoreographyMount />
+        <ViewportReadinessMount />
         <div
           style={{ minHeight: 0 }}
           className={cn(

@@ -114,6 +114,7 @@ import {
   type BoardGroupBy,
 } from "../organization/tree-client";
 import { spectraBus } from "../events";
+import { acknowledgeViewportReady } from "../viewport-readiness";
 import {
   syncSpectraManageBac,
   selectSpectraManageBacClasses,
@@ -2013,6 +2014,10 @@ export function SpectraShell({
         });
       },
     );
+    const removeImport = spectraBus.handle("library.import", ({ kind }) => {
+      if (kind === "file") importInputRef.current?.click();
+      else workspaceImportInputRef.current?.click();
+    });
     return () => {
       removeSettings();
       removeSync();
@@ -2020,6 +2025,7 @@ export function SpectraShell({
       removeSharing();
       removeManageBac();
       removeManageBacSelection();
+      removeImport();
     };
   }, [patchItemSyncPolicies, preferences, replacePreferences, router]);
 
@@ -2719,6 +2725,20 @@ export function SpectraShell({
       if (artifact) openArtifactPanel(artifact);
     },
   });
+
+  useEffect(() => {
+    if (surface !== "workspace" || !requestedWorkspaceId || !overview || selectedWorkspaceId !== requestedWorkspaceId) return;
+    const frame = requestAnimationFrame(() => acknowledgeViewportReady({
+      targetId: requestedWorkspaceId,
+      view: "workspace",
+    }));
+    return () => cancelAnimationFrame(frame);
+  }, [overview, requestedWorkspaceId, selectedWorkspaceId, surface]);
+
+  useEffect(() => spectraBus.handle("run.stopRequested", ({ runId }) => {
+    if (runId && runEngine.activeRunId && runEngine.activeRunId !== runId) return;
+    void runEngine.stop(runId);
+  }), [runEngine]);
 
   useEffect(() => {
     const exchange = runEngine.liveExchange;

@@ -147,6 +147,7 @@ import {
 import { Equation, InlineEquation } from "../editor/equation-node";
 import type { SpectraSandboxAsset } from "../embed/sandbox-protocol";
 import { spectraBus } from "../events";
+import { acknowledgeViewportReady } from "../viewport-readiness";
 import {
   normalizePresentationContent,
   presentationObjectText,
@@ -3033,9 +3034,52 @@ function ArtifactStudioEditor({
   const [dirty, setDirty] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [requestedComment, setRequestedComment] = useState<{
+    id: string;
+    body: string;
+    regionId?: string;
+    submit?: boolean;
+    resolve?: () => void;
+    reject?: (error: unknown) => void;
+  } | null>(null);
   const [activeCommentRegionId, setActiveCommentRegionId] = useState<string>();
   const [commentRelativePosition, setCommentRelativePosition] =
     useState<Uint8Array>();
+  useEffect(() => {
+    const removeOpen = spectraBus.handle("comments.open", (input) => {
+      if (input.artifactId !== artifact._id) return;
+      setRequestedComment(null);
+      setCommentsOpen(true);
+    });
+    const removeAdd = spectraBus.handle("comments.add", (input) => {
+      if (input.artifactId !== artifact._id) return;
+      return new Promise<void>((resolve, reject) => {
+        setRequestedComment({
+          id: globalThis.crypto?.randomUUID?.() ?? `comment-${Date.now()}`,
+          body: input.body,
+          ...(input.regionId ? { regionId: input.regionId } : {}),
+          submit: true,
+          resolve,
+          reject,
+        });
+        setCommentsOpen(true);
+      });
+    });
+    return () => {
+      removeOpen();
+      removeAdd();
+    };
+  }, [artifact._id]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => acknowledgeViewportReady({
+      targetId: artifact._id,
+      view: "artifact",
+    }));
+    return () => cancelAnimationFrame(frame);
+  }, [artifact._id]);
+  useEffect(() => {
+    if (commentsOpen) acknowledgeViewportReady({ targetId: artifact._id, view: "artifact" });
+  }, [artifact._id, commentsOpen]);
   const [embedsOpen, setEmbedsOpen] = useState(false);
   const detailsEligible =
     artifact.blueprintKey !== "planner_task" &&
@@ -6098,7 +6142,17 @@ function ArtifactStudioEditor({
         preferredRegionId={activeCommentRegionId}
         currentAccountId={currentAccountId}
         relativePosition={commentRelativePosition}
-        onClose={() => setCommentsOpen(false)}
+        requestedComment={requestedComment}
+        onRequestedCommentResult={(error) => {
+          const pending = requestedComment;
+          setRequestedComment(null);
+          if (error) pending?.reject?.(error);
+          else pending?.resolve?.();
+        }}
+        onClose={() => {
+          setCommentsOpen(false);
+          setRequestedComment(null);
+        }}
       />
       <ArtifactEmbedsPanel
         open={embedsOpen}

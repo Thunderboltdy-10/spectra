@@ -63,6 +63,49 @@ export type FidelityRegionKey =
  */
 export type CommandParam = string | number | boolean | null | undefined;
 
+export type CommandParameterKind =
+  | "text"
+  | "textarea"
+  | "toggle"
+  | "select"
+  | "destination"
+  | "item";
+
+export type CommandParameterSpec = {
+  name: string;
+  label: string;
+  kind: CommandParameterKind;
+  required?: boolean;
+  placeholder?: string;
+  options?: readonly { value: string; label: string }[];
+};
+
+export type CommandEffectKind = "navigate" | "open" | "toggle" | "mutate" | "select";
+
+export type CommandEffectContract = {
+  kind: CommandEffectKind;
+  /** Existing confirmation semantics are explicit; safe actions execute now. */
+  confirmation: "none" | "existing" | "required";
+  /** The observable result a human can expect after execution. */
+  outcome: string;
+};
+
+export type CommandExecutionStatus =
+  | "completed"
+  | "pending"
+  | "failed"
+  | "cancelled"
+  | "unavailable";
+
+export type CommandExecutionResult = {
+  commandId: string;
+  status: CommandExecutionStatus;
+  effect: CommandEffectKind;
+  message: string;
+  readiness?: import("../viewport-readiness").ViewportReadinessAcknowledgement;
+  data?: unknown;
+};
+
 export type CommandControlOption = {
   value: string;
   label: string;
@@ -145,7 +188,7 @@ export type CommandContext = {
   executeApplicationCommand?: (
     commandId: string,
     params: unknown,
-  ) => void | Promise<void>;
+  ) => void | Promise<void | CommandExecutionResult>;
 };
 
 export type CommandPresentation = {
@@ -166,7 +209,13 @@ export type Command<P = unknown> = {
   icon: LucideIcon;
   description: string;
   params?: z.ZodType<P>;
-  execute: (ctx: CommandContext, params: P) => void | Promise<void>;
+  execute: (ctx: CommandContext, params: P) => void | Promise<void | CommandExecutionResult>;
+  /** Compact parameter UX for the universal palette and other app surfaces. */
+  parameters?: readonly CommandParameterSpec[];
+  /** Shared effect/result contract; workbar bindings derive a safe default. */
+  effect?: CommandEffectContract;
+  /** Internal descriptors stay auditable without being palette-visible. */
+  visibility?: "public" | "internal";
   /** Native regions this command may write. Drives strict-native gating. */
   touches?: readonly FidelityRegionKey[];
   /** Canonical native lens delta used to materialize this capability. */
@@ -256,6 +305,9 @@ export type CommandBinding = {
     riskClass: "safe" | "confirm" | "always-confirm" | "destructive";
   };
   choreography?: { target: string; region?: string };
+  parameters?: readonly CommandParameterSpec[];
+  effect?: CommandEffectContract;
+  visibility?: "public" | "internal";
 };
 
 export type CommandLayout = {

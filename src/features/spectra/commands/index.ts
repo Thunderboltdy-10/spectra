@@ -4,3 +4,4 @@ export * from "./app-registry";
 export * from "./application-dispatcher";
 export * from "./dispatch";
 export * from "./shared";
+export * from "./kbar";

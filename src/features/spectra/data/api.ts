@@ -1063,6 +1063,7 @@ export async function getSpectraArtifacts(params?: {
   placement?: "all" | "inbox" | "shared" | "workspace";
   blueprintKey?: SpectraBlueprintKey | "all";
   search?: string;
+  signal?: AbortSignal;
 }) {
   const qs = new URLSearchParams({
     action: "artifacts",
@@ -1072,7 +1073,7 @@ export async function getSpectraArtifacts(params?: {
     qs.set("blueprintKey", params.blueprintKey);
   if (params?.search?.trim()) qs.set("search", params.search.trim());
   return readJson<{ artifacts: SpectraArtifact[] }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }),
   );
 }
 
@@ -1534,12 +1535,12 @@ export async function submitSpectraQuizPractice(input: {
   });
 }
 
-export async function searchSpectra(query: string) {
+export async function searchSpectra(query: string, options?: { signal?: AbortSignal }) {
   const qs = new URLSearchParams({ action: "search", search: query });
   return readJson<{
     artifacts: SpectraArtifact[];
     workspaces: SpectraWorkspace[];
-  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }));
 }
 
 export async function getSpectraResultCards(params?: {
@@ -2318,6 +2319,7 @@ export async function getSpectraThreads(params?: {
   limit?: number;
   cursor?: string;
   force?: boolean;
+  signal?: AbortSignal;
 }) {
   const qs = new URLSearchParams({ action: "threads" });
   if (params?.includeArchived) qs.set("includeArchived", "true");
@@ -2329,7 +2331,7 @@ export async function getSpectraThreads(params?: {
     key,
     FIRST_PAINT_FETCH_TTL_MS,
     () =>
-      fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }).then(
+      fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }).then(
         (response) => readJson<SpectraThreadPage>(response),
       ),
     { force: params?.force },

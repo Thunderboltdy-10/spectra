@@ -16,6 +16,11 @@ export type SpectraCommands = {
     surface?: "full" | "panel" | "tile";
     anchor?: WorkAnchor;
   };
+  "comments.open": { artifactId: string };
+  "comments.add": { artifactId: string; body: string; regionId?: string };
+  "library.import": { kind: "file" | "workspace" };
+  "run.stopRequested": { runId?: string };
+  "follow.stopRequested": Record<string, never>;
   "navigation.show": {
     actorId?: string;
     route: "library" | "calendar" | "settings" | "workspace" | "artifact";
@@ -100,6 +105,12 @@ export type SpectraEvents = {
     state: string;
   };
   "settings.changed": { preferences: SpectraPreferences };
+  "navigation.readiness": import("../viewport-readiness").ViewportReadinessAcknowledgement;
+  "navigation.manualInteraction": {
+    surface: string;
+    interaction: "pointer" | "keyboard" | "wheel";
+    targetId?: string;
+  };
 };
 
 export type SpectraQueries = {

@@ -68,6 +68,7 @@ import {
   type SpectraWorkspace,
 } from "../data/api";
 import { useSpectraPreferences } from "../settings/preference-store";
+import { acknowledgeViewportReady } from "../viewport-readiness";
 
 const ArtifactStudio = dynamic(
   () =>
@@ -527,11 +528,25 @@ export function ChatShell() {
         selectThread(resolvedThreadId);
       },
     );
+    const removeStop = spectraBus.handle("run.stopRequested", ({ runId }) => {
+      if (runId && runEngine.activeRunId && runEngine.activeRunId !== runId) return;
+      void runEngine.stop(runId);
+    });
     return () => {
       removeWork();
       removeConversation();
+      removeStop();
     };
-  }, [openArtifact, selectThread]);
+  }, [openArtifact, runEngine, selectThread]);
+
+  useEffect(() => {
+    if (requestedThreadId && !detail) return;
+    const frame = requestAnimationFrame(() => acknowledgeViewportReady({
+      targetId: requestedThreadId ?? "chat",
+      view: "conversation",
+    }));
+    return () => cancelAnimationFrame(frame);
+  }, [detail, requestedThreadId]);
 
   useEffect(() => {
     const prompt = requestedPrompt?.trim();

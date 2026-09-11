@@ -211,7 +211,12 @@ export function commandForBinding(type: WorkType, binding: CommandBinding, order
     icon: binding.icon ?? Circle,
     description: binding.hint ?? binding.label,
     ...(binding.params ? { params: binding.params } : {}),
-    execute: (_ctx, params) => binding.onSelect(params),
+    ...(binding.parameters ? { parameters: binding.parameters } : {}),
+    ...(binding.effect ? { effect: binding.effect } : {}),
+    ...(binding.visibility ? { visibility: binding.visibility } : {}),
+    execute: (_ctx, params) => {
+      binding.onSelect(params);
+    },
     availability: (ctx) => {
       if (binding.requires && !ctx.can(binding.requires)) return { state: "hidden" };
       if (binding.disabled) return { state: "disabled", reason: binding.hint ?? "Unavailable in the current selection" };

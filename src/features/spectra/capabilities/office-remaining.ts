@@ -54,7 +54,11 @@ function defineRemaining<T extends OfficeWorkType>(
       options.requires === false ? undefined : (options.requires ?? "edit");
     let native: NativeCapability<T> | undefined;
     if (options.delta) {
-      native = { touches: options.touches ?? [], delta: options.delta };
+      native = {
+        touches: options.touches ?? [],
+        delta: options.delta,
+        ...(options.reason ? { unavailableReason: options.reason } : {}),
+      };
     } else if (options.reason) {
       native = {
         touches: options.touches ?? [],
@@ -727,7 +731,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "chart.insert",
     "Chart the selected range.",
     {
-      reason: SHEETS_NATIVE_REASONS.chart,
+      delta: "upsert-chart",
       touches: ["charts"],
       manifest: "create_chart",
     },
@@ -958,7 +962,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "insert.row",
     "Insert a row at the selection.",
     {
-      reason: SHEETS_NATIVE_REASONS.rowColumnStructure,
+      delta: "mutate-sheet-axis",
       touches: ["sheetStructure"],
       manifest: "insert_structure",
     },
@@ -967,7 +971,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "insert.column",
     "Insert a column at the selection.",
     {
-      reason: SHEETS_NATIVE_REASONS.rowColumnStructure,
+      delta: "mutate-sheet-axis",
       touches: ["sheetStructure"],
       manifest: "insert_structure",
     },
@@ -976,7 +980,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "delete.row",
     "Delete the selected rows.",
     {
-      reason: SHEETS_NATIVE_REASONS.rowColumnStructure,
+      delta: "mutate-sheet-axis",
       touches: ["sheetStructure"],
       manifest: "insert_structure",
       risk: "confirm",
@@ -986,7 +990,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "delete.column",
     "Delete the selected columns.",
     {
-      reason: SHEETS_NATIVE_REASONS.rowColumnStructure,
+      delta: "mutate-sheet-axis",
       touches: ["sheetStructure"],
       manifest: "insert_structure",
       risk: "confirm",
@@ -997,7 +1001,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Set the width of the selected columns.",
     {
       params: num,
-      reason: SHEETS_NATIVE_REASONS.dimensions,
+      delta: "set-sheet-properties",
       touches: ["dimensions"],
       manifest: "format_range",
       field: true,
@@ -1008,7 +1012,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Set the height of the selected rows.",
     {
       params: num,
-      reason: SHEETS_NATIVE_REASONS.dimensions,
+      delta: "set-sheet-properties",
       touches: ["dimensions"],
       manifest: "format_range",
       field: true,
@@ -1018,7 +1022,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "format.column.autofit",
     "Fit the selected columns to their contents.",
     {
-      reason: SHEETS_NATIVE_REASONS.dimensions,
+      delta: "set-sheet-properties",
       touches: ["dimensions"],
       manifest: "format_range",
     },
@@ -1027,7 +1031,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "hide.row",
     "Hide the selected rows.",
     {
-      reason: SHEETS_NATIVE_REASONS.dimensions,
+      delta: "set-sheet-properties",
       touches: ["dimensions"],
       manifest: "format_range",
     },
@@ -1036,7 +1040,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "hide.column",
     "Hide the selected columns.",
     {
-      reason: SHEETS_NATIVE_REASONS.dimensions,
+      delta: "set-sheet-properties",
       touches: ["dimensions"],
       manifest: "format_range",
     },
@@ -1045,7 +1049,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "unhide.all",
     "Unhide hidden rows and columns.",
     {
-      reason: SHEETS_NATIVE_REASONS.dimensions,
+      delta: "set-sheet-properties",
       touches: ["dimensions"],
       manifest: "format_range",
     },
@@ -1125,7 +1129,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "table.create",
     "Create an Excel table from the selection.",
     {
-      reason: SHEETS_NATIVE_REASONS.table,
+      delta: "upsert-table",
       touches: ["tables"],
       manifest: "create_table",
     },
@@ -1135,7 +1139,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Set the style of the current table.",
     {
       params: text,
-      reason: SHEETS_NATIVE_REASONS.table,
+      delta: "upsert-table",
       touches: ["tables"],
       manifest: "create_table",
       field: true,
@@ -1146,9 +1150,19 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Show or hide the totals row on the current table.",
     {
       params: bool,
-      reason: SHEETS_NATIVE_REASONS.table,
+      delta: "upsert-table",
       touches: ["tables"],
       manifest: "create_table",
+    },
+  ],
+  [
+    "table.delete",
+    "Remove the current native Excel table while keeping its cells.",
+    {
+      delta: "remove-table",
+      touches: ["tables"],
+      manifest: "delete_table",
+      risk: "destructive",
     },
   ],
   [
@@ -1224,7 +1238,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Set when the workbook recalculates.",
     {
       params: text,
-      reason: SHEETS_NATIVE_REASONS.calculation,
+      delta: "set-workbook-properties",
       touches: ["calculationSettings"],
       field: true,
     },
@@ -1238,7 +1252,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "namedRange.create",
     "Name the selected range.",
     {
-      reason: SHEETS_NATIVE_REASONS.namedRange,
+      delta: "set-defined-names",
       touches: ["namedRanges"],
       manifest: "create_named_range",
     },
@@ -1253,7 +1267,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Set the type of the selected chart.",
     {
       params: text,
-      reason: SHEETS_NATIVE_REASONS.chart,
+      delta: "upsert-chart",
       touches: ["charts"],
       manifest: "edit_chart",
       field: true,
@@ -1264,7 +1278,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Set the title of the selected chart.",
     {
       params: text,
-      reason: SHEETS_NATIVE_REASONS.chart,
+      delta: "upsert-chart",
       touches: ["charts"],
       manifest: "edit_chart",
       field: true,
@@ -1275,7 +1289,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Set the data range of the selected chart.",
     {
       params: text,
-      reason: SHEETS_NATIVE_REASONS.chart,
+      delta: "upsert-chart",
       touches: ["charts"],
       manifest: "edit_chart",
       field: true,
@@ -1286,7 +1300,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Show or hide the legend on the selected chart.",
     {
       params: bool,
-      reason: SHEETS_NATIVE_REASONS.chart,
+      delta: "upsert-chart",
       touches: ["charts"],
       manifest: "edit_chart",
     },
@@ -1295,7 +1309,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "chart.remove",
     "Remove the selected chart.",
     {
-      reason: SHEETS_NATIVE_REASONS.chart,
+      delta: "remove-chart",
       touches: ["charts"],
       manifest: "edit_chart",
       risk: "confirm",
@@ -1304,7 +1318,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
   [
     "chart.linkToDeck",
     "Link this chart into a presentation.",
-    { reason: SHEETS_NATIVE_REASONS.chart, touches: ["charts"], manifest: "link_output" },
+    { reason: SHEETS_NATIVE_REASONS.chartLinkToDeck, touches: ["charts"], manifest: "link_output" },
   ],
   [
     "chart.native",
@@ -1315,6 +1329,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "sheet.new",
     "Add a worksheet.",
     {
+      delta: "add-sheet",
       reason: SHEETS_NATIVE_REASONS.sheetStructure,
       touches: ["sheetStructure"],
       manifest: "create_sheet",
@@ -1325,7 +1340,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Rename the current worksheet.",
     {
       params: text,
-      reason: SHEETS_NATIVE_REASONS.sheetStructure,
+      delta: "rename-sheet",
       touches: ["sheetStructure"],
       manifest: "rename_sheet",
       field: true,
@@ -1335,7 +1350,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "sheet.duplicate",
     "Duplicate the current worksheet.",
     {
-      reason: SHEETS_NATIVE_REASONS.sheetStructure,
+      delta: "add-sheet",
       touches: ["sheetStructure"],
       manifest: "create_sheet",
     },
@@ -1343,28 +1358,28 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
   [
     "sheet.moveLeft",
     "Move the current worksheet left.",
-    { reason: SHEETS_NATIVE_REASONS.sheetStructure, touches: ["sheetStructure"] },
+    { delta: "reorder-sheets", touches: ["sheetStructure"] },
   ],
   [
     "sheet.moveRight",
     "Move the current worksheet right.",
-    { reason: SHEETS_NATIVE_REASONS.sheetStructure, touches: ["sheetStructure"] },
+    { delta: "reorder-sheets", touches: ["sheetStructure"] },
   ],
   [
     "sheet.hide",
     "Hide the current worksheet.",
-    { reason: SHEETS_NATIVE_REASONS.sheetStructure, touches: ["sheetStructure"] },
+    { delta: "set-sheet-properties", touches: ["sheetStructure"] },
   ],
   [
     "sheet.showHidden",
     "Show hidden worksheets.",
-    { reason: SHEETS_NATIVE_REASONS.sheetStructure, touches: ["sheetStructure"] },
+    { delta: "set-sheet-properties", touches: ["sheetStructure"] },
   ],
   [
     "sheet.delete",
     "Delete the current worksheet.",
     {
-      reason: SHEETS_NATIVE_REASONS.sheetStructure,
+      delta: "remove-sheet",
       touches: ["sheetStructure"],
       risk: "destructive",
     },
@@ -1374,7 +1389,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "Set the tab colour of the current worksheet.",
     {
       params: maybeText,
-      reason: SHEETS_NATIVE_REASONS.sheetStructure,
+      delta: "set-sheet-properties",
       touches: ["sheetStructure"],
       field: true,
     },

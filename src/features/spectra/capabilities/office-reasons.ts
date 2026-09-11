@@ -34,15 +34,17 @@ export const DOCUMENT_NATIVE_REASONS = {
 
 export const SHEETS_NATIVE_REASONS = {
   sheetStructure:
-    "Spectra preserves worksheet order and identity in a linked Excel file. Add, remove, hide, rename, or reorder sheets in Excel.",
+    "Spectra writes worksheet order, identity, visibility, names, and tab metadata through the native Excel package. Unsupported workbook objects remain preserved.",
   rowColumnStructure:
-    "Inserting or deleting rows and columns can change formulas, tables, charts, and validation that Spectra preserves. Make this structural change in Excel.",
+    "Spectra updates native cell references, formulas, tables, charts, merges, dimensions, and validation ranges for one-row or one-column changes. Complex Excel objects remain preserved.",
   dimensions:
-    "Spectra preserves row height, column width, and visibility as Excel saved them. Resize or hide rows and columns in Excel.",
+    "Spectra writes native row heights, column widths, and hidden row or column state. Excel remains the owner of unsupported advanced layout settings.",
   chart:
-    "Spectra preserves linked Excel charts and their cached data but cannot rewrite chart parts. Edit the chart in Excel.",
+    "Spectra writes native editable Excel chart parts, series references, titles, legends, types, anchors, and cached source values. Complex chart families may be refused safely.",
+  chartLinkToDeck:
+    "Spectra can edit the native workbook chart, but linking it into a deck is an output action. Add or relink the chart from the presentation surface.",
   table:
-    "Spectra preserves Excel table parts but cannot create or restyle them in a linked workbook. Edit the table in Excel.",
+    "Spectra writes native Excel tables, including range, headers, totals, style, and table relationships. Advanced filter criteria remain preserved when not modeled.",
   filter:
     "Spectra preserves Excel AutoFilter state but cannot write its native criteria. Change the filter in Excel.",
   sort:
@@ -54,9 +56,9 @@ export const SHEETS_NATIVE_REASONS = {
   conditional:
     "Spectra preserves Excel conditional formatting but cannot write its native rules. Change conditional formatting in Excel.",
   namedRange:
-    "Spectra preserves Excel defined names but cannot add or edit them in the linked workbook. Manage the name in Excel.",
+    "Spectra writes modeled Excel defined names and preserves built-in names and unknown workbook extensions.",
   calculation:
-    "Spectra preserves calculation settings as Excel saved them. Change automatic or manual calculation in Excel.",
+    "Spectra writes automatic or manual calculation mode and marks formula caches absent when an edit makes them unsafe to claim.",
   note:
     "Spectra preserves Excel cell notes but cannot add or edit them in the linked workbook. Edit the note in Excel.",
   protect:

@@ -1180,6 +1180,7 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
     "create_named_range",
     "insert_structure",
     "create_table",
+    "delete_table",
     "sort_filter",
     "create_chart",
     "edit_chart",

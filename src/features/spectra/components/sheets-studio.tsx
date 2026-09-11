@@ -78,6 +78,11 @@ import {
   type WorkbookSheet,
 } from "../sheets/model";
 import { exportOds, importOds } from "../sheets/ods";
+import { xlsxLens } from "../lenses/xlsx-lens";
+import {
+  xlsxArtifactContent,
+  xlsxProjectionFromContent,
+} from "../lenses/office-content";
 import {
   downloadDocumentBlob,
   downloadDocumentText,
@@ -147,11 +152,7 @@ import {
 } from "../sheets/cell-overlay";
 import { sheetsContentEqual } from "../sheets/semantic-equality";
 import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
-import { bytesToArrayBuffer, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
-import {
-  xlsxExportCalculationProperties,
-  xlsxFormulaExportValue,
-} from "../sheets/formula-export-policy";
+import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -3005,186 +3006,44 @@ export const SheetsStudio = memo(function SheetsStudio({
       );
     }
     try {
-      const ExcelJS = await import("exceljs");
-      const imported = new ExcelJS.Workbook();
+      // Ordinary XLSX import uses the same native lens as linked workbooks.
+      // This keeps worksheet identity, table parts, chart parts, formulas,
+      // styles, hidden state, dimensions, and workbook calculation settings
+      // on one semantic path instead of flattening them through a second
+      // reader.
       const checked = await readBoundedArchive(
         new Uint8Array(await file.arrayBuffer()),
         OFFICE_ARCHIVE_LIMITS,
       );
-      await imported.xlsx.load(bytesToArrayBuffer(checked.bytes));
-      let externalLinks = 0;
-      let hyperlinks = 0;
-      let unsupportedValues = 0;
-      let cachedOnlyFormulas = 0;
-      const sheets: WorkbookSheet[] = [];
-      imported.eachSheet((worksheet, worksheetIndex) => {
-        const cells: Record<string, SheetCell> = {};
-        worksheet.eachRow({ includeEmpty: false }, (row) => {
-          row.eachCell({ includeEmpty: false }, (sourceCell) => {
-            const raw = sourceCell.value as unknown;
-            const valueRecord =
-              raw && typeof raw === "object" && !Array.isArray(raw)
-                ? (raw as Record<string, unknown>)
-                : null;
-            const formula =
-              typeof valueRecord?.formula === "string"
-                ? valueRecord.formula
-                : undefined;
-            const externalFormula = formula?.includes("[") === true;
-            const formulaProjection = projectExcelJsFormulaValue(raw);
-            if (formulaProjection?.nativeFormulaSupport === "cached-only")
-              cachedOnlyFormulas += 1;
-            if (externalFormula) externalLinks += 1;
-            let value: string | number | boolean | null | undefined;
-            if (formula && !externalFormula) value = formulaProjection?.value;
-            else if (externalFormula) value = `=${formula}`;
-            else if (raw instanceof Date) value = raw.getTime();
-            else if (
-              typeof raw === "string" ||
-              typeof raw === "number" ||
-              typeof raw === "boolean" ||
-              raw === null
-            )
-              value = raw;
-            else if (typeof valueRecord?.text === "string") {
-              value = valueRecord.text;
-              if (typeof valueRecord.hyperlink === "string") hyperlinks += 1;
-            } else if (Array.isArray(valueRecord?.richText))
-              value = (valueRecord.richText as Array<Record<string, unknown>>)
-                .map((part) => (typeof part.text === "string" ? part.text : ""))
-                .join("");
-            else if (valueRecord?.error) value = String(valueRecord.error);
-            else {
-              value = sourceCell.text || undefined;
-              unsupportedValues += 1;
-            }
-            const underline = sourceCell.font?.underline;
-            const fillColor =
-              "fgColor" in sourceCell.fill
-                ? (sourceCell.fill.fgColor as { argb?: string } | undefined)
-                    ?.argb
-                : undefined;
-            const fontColor = (
-              sourceCell.font?.color as { argb?: string } | undefined
-            )?.argb;
-            const note = sourceCell.note;
-            cells[sourceCell.address] = {
-              ...(value !== undefined ? { value } : {}),
-              ...(formula && !externalFormula
-                ? {
-                    formula: formulaProjection?.formula ?? `=${formula}`,
-                    nativeFormulaSupport:
-                      formulaProjection?.nativeFormulaSupport,
-                  }
-                : {}),
-              format: {
-                bold: sourceCell.font?.bold || undefined,
-                italic: sourceCell.font?.italic || undefined,
-                underline: Boolean(underline) || undefined,
-                align:
-                  sourceCell.alignment?.horizontal === "center" ||
-                  sourceCell.alignment?.horizontal === "right"
-                    ? sourceCell.alignment.horizontal
-                    : "left",
-                numberFormat:
-                  raw instanceof Date
-                    ? "date"
-                    : sourceCell.numFmt?.includes("%")
-                      ? "percent"
-                      : /[$€£¥]/.test(sourceCell.numFmt ?? "")
-                        ? "currency"
-                        : "general",
-                fillColor: fillColor ? `#${fillColor.slice(-6)}` : undefined,
-                textColor: fontColor ? `#${fontColor.slice(-6)}` : undefined,
-              },
-              ...(note
-                ? {
-                    note:
-                      typeof note === "string"
-                        ? note
-                        : (note.texts ?? []).map((part) => part.text).join(""),
-                  }
-                : {}),
-              provenance: { source: file.name, importedAt: Date.now() },
-            };
-          });
-        });
-        sheets.push({
-          id: `sheet-${crypto.randomUUID()}`,
-          name: worksheet.name || `Sheet ${worksheetIndex}`,
-          cells,
-          tables: [],
-          charts: [],
-          rowCount: Math.max(100, worksheet.actualRowCount + 20),
-          columnCount: Math.max(26, worksheet.actualColumnCount + 5),
-          frozenRows:
-            worksheet.views[0]?.state === "frozen"
-              ? worksheet.views[0].ySplit
-              : 0,
-          frozenColumns:
-            worksheet.views[0]?.state === "frozen"
-              ? worksheet.views[0].xSplit
-              : 0,
-          hiddenRows: [],
-          hiddenColumns: [],
-          columnWidths: Object.fromEntries(
-            worksheet.columns.flatMap((column, index) =>
-              column.width ? [[String(index), column.width * 8]] : [],
-            ),
-          ),
-          rowHeights: {},
-          mergedRanges: Array.isArray(
-            (worksheet.model as { merges?: unknown }).merges,
-          )
-            ? (worksheet.model as { merges: unknown[] }).merges
-                .filter(
-                  (value): value is string =>
-                    typeof value === "string" && Boolean(parseRange(value)),
-                )
-                .slice(0, 10_000)
-            : [],
-          conditionalFormats: [],
-          rowIdentities: {},
-          columnIdentities: {},
-        });
-      });
-      if (!sheets.length)
-        throw new Error("The workbook did not contain a readable worksheet.");
+      const opened = await xlsxLens.open(checked.bytes, "enhanced");
+      const imported = normalizeSheetsContent(xlsxArtifactContent(opened.projection));
       const next: SheetsContent = {
-        ...workbook,
-        sheets,
-        activeSheetId: sheets[0]!.id,
+        ...imported,
+        sheets: imported.sheets.map((sheet) => ({
+          ...sheet,
+          rowIdentities: sheet.rowIdentities ?? {},
+          columnIdentities: sheet.columnIdentities ?? {},
+        })),
+        activeSheetId: imported.activeSheetId || imported.sheets[0]?.id || "",
       };
+      if (!next.sheets.length)
+        throw new Error("The workbook did not contain a readable worksheet.");
       commit(next);
       setRange({ start: { row: 0, column: 0 }, end: { row: 0, column: 0 } });
-      const caveats = [
-        externalLinks
-          ? `${externalLinks} external formula${externalLinks === 1 ? " was" : "s were"} quarantined as text`
-          : "",
-        hyperlinks
-          ? `${hyperlinks} hyperlink${hyperlinks === 1 ? " was" : "s were"} imported as visible text`
-          : "",
-        cachedOnlyFormulas
-          ? `${cachedOnlyFormulas} formula${cachedOnlyFormulas === 1 ? " was" : "s were"} retained with Excel's saved result; edits to precedents mark that cache stale`
-          : "",
-        unsupportedValues
-          ? `${unsupportedValues} uncommon value${unsupportedValues === 1 ? " used" : "s used"} displayed text`
-          : "",
+      const preserved = opened.fidelityMap.entries
+        .filter((entry) => entry.class === "PRESERVED" && entry.readOnly && entry.feature !== "macro")
+        .map((entry) => entry.feature);
+      const notice = `Imported ${next.sheets.length} worksheet${next.sheets.length === 1 ? "" : "s"} from ${file.name}.`;
+      const unsupported = [...new Set([
+        ...(preserved.length ? [`Preserved native features remain in the original package: ${preserved.join(", ")}`] : []),
         "Macros and executable content were not loaded",
-        "Excel charts are not imported by this reader and can be rebuilt from their source range",
-        "Excel conditional-format rules are reported but not imported; create a native rule after reviewing the values",
-      ].filter(Boolean);
-      setImportNotice(
-        `Imported ${sheets.length} worksheet${sheets.length === 1 ? "" : "s"} from ${file.name}. Fidelity report: ${caveats.join("; ")}.`,
-      );
-      return {
-        next,
-        notice: `Imported ${sheets.length} worksheet${sheets.length === 1 ? "" : "s"} from ${file.name}.`,
-        unsupported: caveats,
-      };
+      ])];
+      setImportNotice(`${notice} Fidelity report: ${unsupported.join("; ") || "native XLSX semantics were retained"}.`);
+      return { next, notice, unsupported };
     } catch (error) {
+      const message = "Try exporting a clean .xlsx copy.";
       setImportNotice(
-        `Could not import ${file.name}. The original remains untouched. ${error instanceof Error ? error.message : "Try exporting a clean .xlsx copy."}`,
+        `Could not import ${file.name}. The original remains untouched. ${message}`,
         "warning",
       );
       throw error;
@@ -3352,44 +3211,32 @@ export const SheetsStudio = memo(function SheetsStudio({
       );
       return;
     }
-    const ExcelJS = await import("exceljs");
-    const book = new ExcelJS.Workbook();
-    for (const sheet of workbook.sheets) {
-      const worksheet = book.addWorksheet(sheet.name);
-      for (const [address, cell] of Object.entries(sheet.cells)) {
-        const excelCell = worksheet.getCell(address);
-        const calculatedCell = calculated.get(`${sheet.id}:${address}`);
-        if (cell.formula) {
-          excelCell.value = xlsxFormulaExportValue(
-            cell,
-            calculatedCell?.value,
-          );
-        } else if (cell.value !== undefined) excelCell.value = cell.value;
-        if (cell.format?.bold)
-          excelCell.font = { ...excelCell.font, bold: true };
-        if (cell.format?.italic)
-          excelCell.font = { ...excelCell.font, italic: true };
-        if (cell.format?.numberFormat === "percent") excelCell.numFmt = "0.00%";
-        else if (cell.format?.numberFormat === "currency")
-          excelCell.numFmt = '"$"#,##0.00';
-      }
-      if ((sheet.frozenRows ?? 0) > 0 || (sheet.frozenColumns ?? 0) > 0) {
-        worksheet.views = [
-          {
-            state: "frozen",
-            xSplit: sheet.frozenColumns ?? 0,
-            ySplit: sheet.frozenRows ?? 0,
-          },
-        ];
-      }
-    }
-    book.calcProperties = xlsxExportCalculationProperties(
-      workbook.workbook.calculationMode,
+    // Export through the same projection/delta/native package writer used by
+    // linked XLSX files. A fresh workbook is only the empty native carry; the
+    // editor content then enters through the ordinary semantic boundary.
+    const empty = await xlsxLens.open(
+      await (await import("@ariadng/office/xlsx")).Workbook.create().save(),
+      "enhanced",
     );
-    const buffer = await book.xlsx.writeBuffer();
+    // Workbook.create() supplies one native worksheet as the seed. Give that
+    // seed the editor's first identity so a fresh export replaces it instead
+    // of leaving an accidental blank Sheet1 beside the requested sheets.
+    const firstNativeId = empty.projection.sheets[0]?.id;
+    const exportContent = firstNativeId
+      ? {
+          ...workbook,
+          sheets: workbook.sheets.map((sheet, index) => index === 0 ? { ...sheet, id: firstNativeId } : sheet),
+          activeSheetId: workbook.activeSheetId === workbook.sheets[0]?.id ? firstNativeId : workbook.activeSheetId,
+        }
+      : workbook;
+    const projection = xlsxProjectionFromContent(exportContent, empty.projection);
+    const buffer = await xlsxLens.materialize({
+      projection,
+      carry: empty.preservedCarry,
+    });
     downloadDocumentBlob(
       `${safeTitle}.xlsx`,
-      new Blob([buffer], {
+      new Blob([buffer as unknown as BlobPart], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       }),
     );
@@ -4037,6 +3884,13 @@ export const SheetsStudio = memo(function SheetsStudio({
       ? selected(normalizeRange(parsed), range.end.row, range.end.column)
       : false;
   });
+  function removeActiveTable() {
+    if (!activeTable) return;
+    updateActiveSheet((sheet) => ({
+      ...sheet,
+      tables: sheet.tables.filter((candidate) => candidate.id !== activeTable.id),
+    }));
+  }
   const selectedChart = activeSheet.charts.find(
     (chart) => chart.id === selectedChartId,
   );
@@ -4053,9 +3907,6 @@ export const SheetsStudio = memo(function SheetsStudio({
     (sheet) => sheet.hidden,
   ).length;
   const mountedNative = Boolean(workbook.nativeBinding);
-  const sheetAddBlockedReason = mountedNative
-    ? "This workbook is linked to an Excel file, and Spectra keeps its sheet list exactly as Excel wrote it. Import a copy to restructure it."
-    : undefined;
 
   const commandHandlers: SheetsCommandHandlers = {
     readOnly: grantLocked,
@@ -4348,6 +4199,7 @@ export const SheetsStudio = memo(function SheetsStudio({
         setInspector("filter");
       },
       createTable: toggleTable,
+      deleteTable: removeActiveTable,
       hasTable: Boolean(activeTable),
       tableStyle: {
         value: activeTable?.style ?? "striped",
@@ -4457,19 +4309,26 @@ export const SheetsStudio = memo(function SheetsStudio({
     },
     sheet: {
       add: addSheet,
-      canAdd: !mountedNative,
-      ...(sheetAddBlockedReason
-        ? { addBlockedReason: sheetAddBlockedReason }
-        : {}),
+      canAdd: true,
       rename: () => {
         setRenameDraft(activeSheet.name);
         toggleInspector("sheet");
       },
       duplicate: () => {
+        const copiedTables = activeSheet.tables.map((table) => {
+          const { id: _id, ...rest } = table;
+          return { ...rest, id: `table-${crypto.randomUUID()}`, name: `${table.name} copy` };
+        });
+        const copiedCharts = activeSheet.charts.map((chart) => {
+          const { id: _id, ...rest } = chart;
+          return { ...rest, id: `chart-${crypto.randomUUID()}` };
+        });
         const copy: WorkbookSheet = {
           ...activeSheet,
           id: `sheet-${Date.now().toString(36)}`,
           name: `${activeSheet.name} copy`,
+          tables: copiedTables,
+          charts: copiedCharts,
         };
         commit({
           ...workbook,

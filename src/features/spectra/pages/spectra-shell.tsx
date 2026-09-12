@@ -2006,7 +2006,6 @@ export function SpectraShell({
     const removeManageBacSelection = spectraBus.handle(
       "managebac.selectClasses",
       async ({ recordIds, expectedRevision, retention }) => {
-        if (recordIds.length === 0) throw new Error("MANAGEBAC_CLASSES_REQUIRED");
         await selectSpectraManageBacClasses({
           recordIds,
           ...(typeof expectedRevision === "number" ? { expectedRevision } : {}),

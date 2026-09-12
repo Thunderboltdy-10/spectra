@@ -1910,6 +1910,7 @@ async function ensureClassWorkspace(
           text(normalized.description, 600) ||
           `${text(normalized.course ?? normalized.programme, 120)} - Source-linked from ManageBac`,
         sourceContext,
+        status: "active",
         updatedAt: now,
       });
       await ctx.db.patch(existing._id, {
@@ -2041,8 +2042,12 @@ async function ensurePlannerProjection(
     ) ??
     null;
   if (existing) {
-    if (existing.providerKey !== providerKey)
-      await ctx.db.patch(existing._id, { providerKey, updatedAt: Date.now() });
+    if (existing.providerKey !== providerKey || existing.state !== "active")
+      await ctx.db.patch(existing._id, {
+        providerKey,
+        state: "active",
+        updatedAt: Date.now(),
+      });
     return {
       projection: (await ctx.db.get(existing._id))!,
       created: false,
@@ -3792,7 +3797,6 @@ export const recordsForPurpose = query({
           item.integrationId === integration._id &&
           item.schoolId === actor.schoolId,
       );
-    const selection = await selectionSnapshot(ctx, integration._id, actor.accountId);
     const selectedKeys = new Set(
       (await ctx.db
         .query("managebacClassSelections")
@@ -4043,6 +4047,24 @@ export const setSelectedClasses = mutation({
           `${source.providerClassId}|${canonicalAcademicPeriodKey(source.academicPeriodKey) ?? "unknown"}`,
       ),
     );
+    const currentSelectedKeys = new Set(
+      currentRows
+        .filter((row) => row.selected)
+        .map((row) => `${row.providerClassId}|${row.academicPeriodKey ?? "unknown"}`),
+    );
+    const deselectedKeys = new Set(
+      [...currentSelectedKeys].filter((key) => !selectedKeys.has(key)),
+    );
+    const deselectedRecordIds = membershipRows
+      .filter(
+        (source) =>
+          source.recordType === "class" &&
+          source.providerClassId &&
+          deselectedKeys.has(
+            `${source.providerClassId}|${canonicalAcademicPeriodKey(source.academicPeriodKey) ?? "unknown"}`,
+          ),
+      )
+      .map((source) => source._id);
     const revision = currentRevision + 1;
     const now = Date.now();
     const nextRetention = args.retention ?? "keep_in_spectra";
@@ -4108,6 +4130,8 @@ export const setSelectedClasses = mutation({
       selectionRevision: revision,
       selectedClassIds: [...selectedKeys],
       selectedRecordIds: selectedRecords.map((source) => source._id),
+      deselectedRecordIds,
+      retention: nextRetention,
     };
   },
 });
@@ -4245,19 +4269,36 @@ export const listMyClassCandidates = query({
         integration: safeIntegration(integration),
         classes: [] as Array<Record<string, unknown>>,
         identityRequired: true,
+        identityStatus: mapping?.status ?? "pending",
+        identityMatchCount: mapping?.matchCount ?? 0,
         lastSyncAt: integration.lastSyncAt,
         nextSyncAt: integration.nextSyncAt,
       };
-    const selection = await selectionSnapshot(ctx, integration._id, actor.accountId);
+    const selectionRows = await ctx.db
+      .query("managebacClassSelections")
+      .withIndex("by_account_integration", (q) =>
+        q.eq("accountId", actor.accountId).eq("integrationId", integration._id),
+      )
+      .collect();
+    const selection = {
+      revision: selectionRows.reduce(
+        (highest, row) => Math.max(highest, row.selectionRevision),
+        0,
+      ),
+      selectedClassIds: selectionRows
+        .filter((row) => row.selected)
+        .map((row) => row.providerClassId),
+    };
     const selectedKeys = new Set(
-      (await ctx.db
-        .query("managebacClassSelections")
-        .withIndex("by_account_integration", (q) =>
-          q.eq("accountId", actor.accountId).eq("integrationId", integration._id),
-        )
-        .collect())
+      selectionRows
         .filter((row) => row.selected)
         .map((row) => `${row.providerClassId}|${row.academicPeriodKey ?? "unknown"}`),
+    );
+    const retentionByKey = new Map(
+      selectionRows.map((row) => [
+        `${row.providerClassId}|${row.academicPeriodKey ?? "unknown"}`,
+        row.retention,
+      ]),
     );
     const [records, projections, membershipRows] = await Promise.all([
       ctx.db
@@ -4365,6 +4406,9 @@ export const listMyClassCandidates = query({
           selected: selectedKeys.has(
             `${item.providerClassId ?? item.providerRecordId}|${item.academicPeriodKey ?? "unknown"}`,
           ),
+          retention: retentionByKey.get(
+            `${item.providerClassId ?? item.providerRecordId}|${item.academicPeriodKey ?? "unknown"}`,
+          ),
           academicPeriodKey: item.academicPeriodKey,
           fetchedAt: item.fetchedAt,
         };
@@ -4376,6 +4420,8 @@ export const listMyClassCandidates = query({
       classes,
       selectionRevision: selection.revision,
       selectedClassIds: [...selectedKeys],
+      identityStatus: mapping.status,
+      identityMatchCount: mapping.matchCount,
       lastSyncAt: integration.lastSyncAt,
       nextSyncAt: integration.nextSyncAt,
     };
@@ -4662,6 +4708,9 @@ export const purgeAutoCreatedClassWorkspaces = mutation({
 export const releaseClassWorkspaces = mutation({
   args: {
     recordIds: v.array(v.id("externalRecords")),
+    retention: v.optional(
+      v.union(v.literal("keep_in_spectra"), v.literal("archive_projection")),
+    ),
   },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
@@ -4719,6 +4768,72 @@ export const releaseClassWorkspaces = mutation({
       }
       if (workspace.ownerAccountId !== actor.accountId) {
         skipped += 1;
+        continue;
+      }
+      if (args.retention === "archive_projection") {
+        const relatedTypes = [
+          "assignment",
+          "deadline",
+          "assessment",
+          "timetable",
+          "timetable_event",
+          "lesson",
+          "class_event",
+          "calendar_event",
+          "resource",
+          "file",
+          "class_resource",
+          "school_resource",
+        ];
+        const related = (
+          await Promise.all(
+            relatedTypes.map((recordType) =>
+              ctx.db
+                .query("externalRecords")
+                .withIndex("by_class_type", (q) =>
+                  q.eq("providerClassId", source.providerClassId).eq("recordType", recordType),
+                )
+                .take(500),
+            ),
+          )
+        )
+          .flat()
+          .filter(
+            (record) =>
+              record.integrationId === integration?._id &&
+              record.schoolId === actor.schoolId &&
+              (!source.academicPeriodKey ||
+                !record.academicPeriodKey ||
+                record.academicPeriodKey === source.academicPeriodKey),
+          );
+        const sourceIds = [source._id, ...related.map((record) => record._id)];
+        const projections = (
+          await Promise.all(
+            sourceIds.map((recordId) =>
+              ctx.db
+                .query("externalProjections")
+                .withIndex("by_record_type", (q) => q.eq("recordId", recordId))
+                .collect(),
+            ),
+          )
+        )
+          .flat()
+          .filter(
+            (projection) =>
+              projection.integrationId === integration?._id &&
+              projection.schoolId === actor.schoolId &&
+              projection.accountId === actor.accountId,
+          );
+        for (const projection of projections)
+          await ctx.db.patch(projection._id, {
+            state: "tombstoned",
+            updatedAt: now,
+          });
+        await ctx.db.patch(workspace._id, {
+          status: "archived",
+          updatedAt: now,
+        });
+        removed += 1;
         continue;
       }
       const dissolved = await dissolveWorkspaceNode(ctx, workspace, {

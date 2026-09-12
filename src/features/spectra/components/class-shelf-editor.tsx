@@ -8,7 +8,9 @@ import {
   classShelfLoadState,
   fetchMyClassCandidates,
   type ClassShelfCandidate,
+  type ClassShelfIdentityStatus,
   type ClassShelfLoadState,
+  type ClassShelfRetention,
 } from "./class-shelf-picker";
 
 async function manageBacPost(body: Record<string, unknown>) {
@@ -31,6 +33,7 @@ export function ClassShelfEditor({
   classes,
   selectionRevision: controlledSelectionRevision,
   classLoadError = "",
+  identityStatus: controlledIdentityStatus,
   onSaved,
 }: {
   integration?: unknown;
@@ -38,6 +41,7 @@ export function ClassShelfEditor({
   classes?: ClassShelfCandidate[];
   selectionRevision?: number;
   classLoadError?: string;
+  identityStatus?: ClassShelfIdentityStatus;
   onSaved?: () => void | Promise<void>;
 }) {
   const { update } = useSpectraPreferences();
@@ -47,7 +51,12 @@ export function ClassShelfEditor({
   );
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectionRevision, setSelectionRevision] = useState<number>();
+  const [identityStatus, setIdentityStatus] = useState<ClassShelfIdentityStatus>();
+  const [retention, setRetention] = useState<ClassShelfRetention>(
+    "keep_in_spectra",
+  );
   const [submitting, setSubmitting] = useState(false);
+  const [resolvingIdentity, setResolvingIdentity] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const inFlight = useRef(false);
   const controlled = Array.isArray(classes);
@@ -59,6 +68,7 @@ export function ClassShelfEditor({
       classes: ClassShelfCandidate[];
       selectionRevision?: number;
       classLoadError?: string;
+      identityStatus?: ClassShelfIdentityStatus;
     }) => {
       const resolved = next.classLoadError
         ? { kind: "error" as const, message: next.classLoadError }
@@ -66,6 +76,14 @@ export function ClassShelfEditor({
       setState(resolved);
       setLoadedClasses(next.classes);
       setSelectionRevision(next.selectionRevision);
+      setIdentityStatus(next.identityStatus);
+      setRetention(
+        next.classes.some(
+          (item) => item.selected && item.retention === "archive_projection",
+        )
+          ? "archive_projection"
+          : "keep_in_spectra",
+      );
       setSelectedIds(
         next.classes
           .filter((item) => item.selected)
@@ -83,6 +101,7 @@ export function ClassShelfEditor({
         classes: classes ?? [],
         selectionRevision: controlledSelectionRevision,
         classLoadError,
+        identityStatus: controlledIdentityStatus,
       });
       return;
     }
@@ -113,11 +132,26 @@ export function ClassShelfEditor({
     identityRequired,
     integration,
     controlledSelectionRevision,
+    controlledIdentityStatus,
   ]);
 
-  const linkedIds = loadedClasses
-    .filter((item) => item.workspaceId)
-    .map((item) => item.recordId);
+  async function resolveIdentity() {
+    if (resolvingIdentity) return;
+    setResolvingIdentity(true);
+    setSubmitError("");
+    try {
+      await manageBacPost({ action: "resolveIdentity", bootstrap: true });
+      apply(await fetchMyClassCandidates());
+    } catch (error) {
+      setSubmitError(
+        describeFailure(error, {
+          fallback: "Your school account could not be matched. Try again or continue in General.",
+        }).message,
+      );
+    } finally {
+      setResolvingIdentity(false);
+    }
+  }
 
   async function save() {
     if (inFlight.current) return;
@@ -131,30 +165,24 @@ export function ClassShelfEditor({
         ...(selectionRevision !== undefined
           ? { expectedRevision: selectionRevision }
           : {}),
+        retention,
       });
       if (typeof selectionResult?.selectionRevision === "number")
         setSelectionRevision(selectionResult.selectionRevision);
-      const linked = new Set(linkedIds);
-      const selected = new Set(selectedIds);
-      const toAdd = selectedIds.filter((id) => !linked.has(id));
-      const toRemove = linkedIds.filter((id) => !selected.has(id));
-      if (toAdd.length)
-        await manageBacPost({
-          action: "materializeClasses",
-          recordIds: toAdd,
-        });
-      if (toRemove.length)
-        await manageBacPost({
-          action: "releaseClasses",
-          recordIds: toRemove,
-        });
       update("integrations", {
         classShelvesStatus: selectedIds.length > 0 ? "chosen" : "skipped",
         classShelfRecordIds: selectedIds,
       });
       await onSaved?.();
-    } catch {
-      setSubmitError("Those class shelves could not be saved. Try again.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setSubmitError(
+        message.includes("INTEGRATION_SELECTION_CONFLICT")
+          ? "Class choices changed elsewhere. Reload the class list, then reapply your choices."
+          : describeFailure(error, {
+              fallback: "Those class shelves could not be saved. Try again.",
+            }).message,
+      );
     } finally {
       inFlight.current = false;
       setSubmitting(false);
@@ -174,11 +202,19 @@ export function ClassShelfEditor({
       <ClassShelfPicker
         state={state}
         selectedIds={selectedIds}
+        initialSelectedIds={loadedClasses
+          .filter((item) => item.selected)
+          .map((item) => item.recordId)}
         onSelectedIdsChange={setSelectedIds}
         submitting={submitting}
         submitError={submitError}
         primaryLabel="Save classes"
         onSubmit={() => void save()}
+        retention={retention}
+        onRetentionChange={setRetention}
+        onResolveIdentity={() => void resolveIdentity()}
+        resolvingIdentity={resolvingIdentity}
+        identityStatus={identityStatus}
       />
     </section>
   );

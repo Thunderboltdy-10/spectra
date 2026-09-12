@@ -1867,19 +1867,41 @@ export async function POST(request: NextRequest) {
             (item): item is string => typeof item === "string" && item.length > 0,
           )
         : [];
-      return ok(
-        await convexMutation("managebac:setSelectedClasses", {
-          recordIds,
-          expectedRevision:
-            typeof body.expectedRevision === "number"
-              ? body.expectedRevision
-              : undefined,
-          retention:
-            body.retention === "archive_projection"
-              ? "archive_projection"
-              : "keep_in_spectra",
-        }),
-      );
+      const retention =
+        body.retention === "archive_projection" ||
+        body.retention === "keep_in_spectra"
+          ? body.retention
+          : undefined;
+      const selection = (await convexMutation("managebac:setSelectedClasses", {
+        recordIds,
+        ...(typeof body.expectedRevision === "number"
+          ? { expectedRevision: body.expectedRevision }
+          : {}),
+        ...(retention ? { retention } : {}),
+      })) as {
+        selectionRevision: number;
+        selectedClassIds: string[];
+        selectedRecordIds: string[];
+        deselectedRecordIds?: string[];
+        retention?: "keep_in_spectra" | "archive_projection";
+      };
+      const materialization = selection.selectedRecordIds.length
+        ? await convexMutation("managebac:materializeClassWorkspaces", {
+            recordIds: selection.selectedRecordIds,
+          })
+        : { requested: 0, created: 0, refreshed: 0, projected: 0, skipped: 0 };
+      const release = selection.deselectedRecordIds?.length
+        ? await convexMutation("managebac:releaseClassWorkspaces", {
+            recordIds: selection.deselectedRecordIds,
+            retention: selection.retention ?? retention ?? "keep_in_spectra",
+          })
+        : { requested: 0, removed: 0, skipped: 0, done: true };
+      return ok({
+        ...selection,
+        materialization,
+        release,
+        outcome: "selection_saved",
+      });
     }
     let context = await connectorContext(actor, integrationId);
     if (action === "resolveIdentity")
@@ -1990,6 +2012,10 @@ export async function POST(request: NextRequest) {
       for (let round = 0; round < 400; round += 1) {
         last = await convexMutation("managebac:releaseClassWorkspaces", {
           recordIds,
+          retention:
+            body.retention === "archive_projection"
+              ? "archive_projection"
+              : "keep_in_spectra",
         });
         if (last?.done !== false) return ok(last);
       }

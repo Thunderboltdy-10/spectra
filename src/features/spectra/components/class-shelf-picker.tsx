@@ -14,8 +14,18 @@ export type ClassShelfCandidate = {
   grade: string;
   workspaceId: string | null;
   selected?: boolean;
+  retention?: ClassShelfRetention;
   academicPeriodKey?: string;
 };
+
+export type ClassShelfRetention = "keep_in_spectra" | "archive_projection";
+
+export type ClassShelfIdentityStatus =
+  | "pending"
+  | "verified"
+  | "no_match"
+  | "ambiguous"
+  | "revoked";
 
 export type ClassShelfLoadState =
   | { kind: "loading" }
@@ -28,8 +38,12 @@ export type ClassShelfLoadState =
 export async function fetchMyClassCandidates(): Promise<{
   integration: unknown;
   identityRequired: boolean;
+  identityStatus?: ClassShelfIdentityStatus;
+  identityMatchCount?: number;
   classes: ClassShelfCandidate[];
   selectionRevision?: number;
+  lastSyncAt?: number;
+  nextSyncAt?: number;
 }> {
   const response = await fetch("/api/spectra/managebac?action=myClasses");
   const payload = await response.json().catch(() => ({}));
@@ -40,10 +54,22 @@ export async function fetchMyClassCandidates(): Promise<{
   return {
     integration: data.integration ?? null,
     identityRequired: data.identityRequired === true,
+    identityStatus:
+      typeof data.identityStatus === "string"
+        ? (data.identityStatus as ClassShelfIdentityStatus)
+        : undefined,
+    identityMatchCount:
+      typeof data.identityMatchCount === "number"
+        ? data.identityMatchCount
+        : undefined,
     selectionRevision:
       typeof data.selectionRevision === "number"
         ? data.selectionRevision
         : undefined,
+    lastSyncAt:
+      typeof data.lastSyncAt === "number" ? data.lastSyncAt : undefined,
+    nextSyncAt:
+      typeof data.nextSyncAt === "number" ? data.nextSyncAt : undefined,
     classes: rows.map((row: Record<string, unknown>) => ({
       recordId: String(row.recordId ?? ""),
       title: String(row.title ?? "Class"),
@@ -54,6 +80,10 @@ export async function fetchMyClassCandidates(): Promise<{
           ? row.workspaceId
           : null,
       selected: row.selected === true,
+      retention:
+        row.retention === "archive_projection" || row.retention === "keep_in_spectra"
+          ? row.retention
+          : undefined,
       academicPeriodKey:
         typeof row.academicPeriodKey === "string" && row.academicPeriodKey
           ? row.academicPeriodKey
@@ -82,6 +112,7 @@ function matchesQuery(item: ClassShelfCandidate, query: string) {
 export function ClassShelfPicker({
   state,
   selectedIds,
+  initialSelectedIds,
   onSelectedIdsChange,
   submitting,
   submitError,
@@ -89,9 +120,15 @@ export function ClassShelfPicker({
   onSubmit,
   skipLabel,
   onSkip,
+  retention = "keep_in_spectra",
+  onRetentionChange,
+  onResolveIdentity,
+  resolvingIdentity = false,
+  identityStatus,
 }: {
   state: ClassShelfLoadState;
   selectedIds: readonly string[];
+  initialSelectedIds?: readonly string[];
   onSelectedIdsChange: (ids: string[]) => void;
   submitting: boolean;
   submitError?: string;
@@ -99,11 +136,23 @@ export function ClassShelfPicker({
   onSubmit: () => void;
   skipLabel?: string;
   onSkip?: () => void;
+  retention?: ClassShelfRetention;
+  onRetentionChange?: (retention: ClassShelfRetention) => void;
+  onResolveIdentity?: () => void;
+  resolvingIdentity?: boolean;
+  identityStatus?: ClassShelfIdentityStatus;
 }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const initiallySelected = useMemo(
+    () => new Set(initialSelectedIds ?? []),
+    [initialSelectedIds],
+  );
+  const deselectedCount = [...initiallySelected].filter(
+    (recordId) => !selected.has(recordId),
+  ).length;
   const visible = useMemo(() => {
     const classes = state.kind === "ready" ? state.classes : [];
     const needle = query.trim().toLowerCase();
@@ -160,9 +209,18 @@ export function ClassShelfPicker({
         }
       : state.kind === "identity_required"
         ? {
-            title: "Spectra could not match your ManageBac account",
+            title:
+              identityStatus === "no_match"
+                ? "Your school account was not found"
+                : identityStatus === "ambiguous"
+                  ? "Your school account needs review"
+                  : "Match your ManageBac account",
             detail:
-              "You can still work in General. Ask a school administrator if your school email should appear in ManageBac.",
+              identityStatus === "no_match"
+                ? "Spectra searched only for your signed-in school email. Check that your invitation and ManageBac email match, then try again or continue in General."
+                : identityStatus === "ambiguous"
+                  ? "ManageBac returned more than one exact email match. Ask a school administrator to review the school connection."
+                  : "Spectra uses your signed-in school email to find one matching ManageBac account. No provider account is exposed or guessed.",
           }
         : state.kind === "empty"
           ? {
@@ -189,6 +247,19 @@ export function ClassShelfPicker({
           icon={GraduationCap}
           title={emptyCopy.title}
           detail={emptyCopy.detail}
+          action={
+            state.kind === "identity_required" && onResolveIdentity ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="primary"
+                disabled={submitting || resolvingIdentity}
+                onClick={onResolveIdentity}
+              >
+                {resolvingIdentity ? "Matching…" : "Match my school account"}
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <>
@@ -283,6 +354,43 @@ export function ClassShelfPicker({
         <p className="mt-3 text-caption text-[var(--danger)]" role="alert">
           {submitError}
         </p>
+      ) : null}
+      {state.kind === "ready" && onRetentionChange && deselectedCount > 0 ? (
+        <fieldset className="mt-5 rounded-card border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+          <legend className="px-1 text-micro font-semibold text-[var(--text-primary)]">
+            What should happen to classes you stop following?
+          </legend>
+          <div className="mt-2 space-y-2">
+            <label className="flex cursor-pointer gap-2.5 text-micro text-[var(--text-secondary)]">
+              <input
+                type="radio"
+                name="managebac-retention"
+                value="keep_in_spectra"
+                checked={retention === "keep_in_spectra"}
+                onChange={() => onRetentionChange("keep_in_spectra")}
+                className="mt-0.5 accent-[var(--text-primary)]"
+              />
+              <span>
+                <strong className="block text-[var(--text-primary)]">Keep in Spectra</strong>
+                Keep your notes, completion, schedule, reminders, and links. This only stops new school updates.
+              </span>
+            </label>
+            <label className="flex cursor-pointer gap-2.5 text-micro text-[var(--text-secondary)]">
+              <input
+                type="radio"
+                name="managebac-retention"
+                value="archive_projection"
+                checked={retention === "archive_projection"}
+                onChange={() => onRetentionChange("archive_projection")}
+                className="mt-0.5 accent-[var(--text-primary)]"
+              />
+              <span>
+                <strong className="block text-[var(--text-primary)]">Archive in Spectra</strong>
+                Hide the class projection in Spectra only. Nothing is deleted or changed in ManageBac.
+              </span>
+            </label>
+          </div>
+        </fieldset>
       ) : null}
       <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
         {onSkip && skipLabel ? (

@@ -118,4 +118,39 @@ describe("class shelf picker", () => {
     ).toBeTruthy();
     expect(screen.queryByLabelText("Search classes")).toBeNull();
   });
+
+  it("asks how deselected work should be retained instead of silently archiving it", () => {
+    function Harness() {
+      const [selectedIds, setSelectedIds] = useState(["class-chem"]);
+      const [retention, setRetention] = useState<
+        "keep_in_spectra" | "archive_projection"
+      >("keep_in_spectra");
+      return (
+        <ClassShelfPicker
+          state={{ kind: "ready", classes }}
+          selectedIds={selectedIds}
+          initialSelectedIds={["class-chem"]}
+          onSelectedIdsChange={setSelectedIds}
+          submitting={false}
+          submitError=""
+          primaryLabel="Save classes"
+          onSubmit={() => undefined}
+          retention={retention}
+          onRetentionChange={setRetention}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("option", { name: /Chemistry SL/ }));
+    expect(
+      screen.getByText("What should happen to classes you stop following?"),
+    ).toBeTruthy();
+    const archive = screen.getByLabelText(/Archive in Spectra/);
+    fireEvent.click(archive);
+    expect((archive as HTMLInputElement).checked).toBe(true);
+    expect(
+      screen.getByText(/Nothing is deleted or changed in ManageBac/),
+    ).toBeTruthy();
+  });
 });

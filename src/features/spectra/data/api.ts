@@ -1277,6 +1277,22 @@ export async function selectSpectraManageBacClasses(input: {
     selectionRevision: number;
     selectedClassIds: string[];
     selectedRecordIds: string[];
+    deselectedRecordIds?: string[];
+    retention?: "keep_in_spectra" | "archive_projection";
+    materialization?: {
+      requested: number;
+      created: number;
+      refreshed: number;
+      projected: number;
+      skipped: number;
+    };
+    release?: {
+      requested: number;
+      removed: number;
+      skipped: number;
+      done?: boolean;
+    };
+    outcome?: "selection_saved";
   }>({ action: "selectClasses", ...input });
 }
 

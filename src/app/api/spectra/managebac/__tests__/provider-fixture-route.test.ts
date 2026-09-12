@@ -357,10 +357,42 @@ describe("ManageBac route provider fixture", () => {
       (item: { providerClassId?: string }) => item.providerClassId === "101",
     );
     expect(selectedClass).toBeDefined();
-    await mutation("managebac:setSelectedClasses", {
-      recordIds: [selectedClass!.recordId],
-      expectedRevision: catalogue.selectionRevision,
-    });
+    const selectionResponse = await POST(
+      new NextRequest("http://localhost/api/spectra/managebac", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "selectClasses",
+          recordIds: [selectedClass!.recordId],
+          expectedRevision: catalogue.selectionRevision,
+          retention: "keep_in_spectra",
+        }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(selectionResponse.status).toBe(200);
+    const selectionBody = await selectionResponse.json();
+    expect(selectionBody.outcome).toBe("selection_saved");
+    expect(selectionBody.retention).toBe("keep_in_spectra");
+    expect(selectionBody.materialization.requested).toBe(1);
+    expect(
+      fixture.requests.some((request) => /\/tasks|\/timetable|\/resources/.test(request.path)),
+    ).toBe(false);
+
+    const staleSelectionResponse = await POST(
+      new NextRequest("http://localhost/api/spectra/managebac", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "selectClasses",
+          recordIds: [],
+          expectedRevision: catalogue.selectionRevision,
+        }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(staleSelectionResponse.status).toBe(409);
+    expect((await staleSelectionResponse.json()).error.message).toContain(
+      "Reload the class list",
+    );
 
     const selectedSyncResponse = await POST(
       new NextRequest("http://localhost/api/spectra/managebac", {
@@ -370,9 +402,12 @@ describe("ManageBac route provider fixture", () => {
       }),
     );
     expect(selectedSyncResponse.status).toBe(200);
-    expect(fixture.requests.some((request) => request.path.endsWith("/tasks"))).toBe(true);
-    expect(fixture.requests.some((request) => request.path.endsWith("/timetable"))).toBe(true);
-    expect(fixture.requests.some((request) => request.path.endsWith("/resources"))).toBe(true);
+    expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/tasks")).toBe(true);
+    expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/timetable")).toBe(true);
+    expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/resources")).toBe(true);
+    expect(fixture.requests.some((request) => request.path === "/v2p2/classes/202/tasks")).toBe(false);
+    expect(fixture.requests.some((request) => request.path === "/v2p2/classes/202/timetable")).toBe(false);
+    expect(fixture.requests.some((request) => request.path === "/v2p2/classes/202/resources")).toBe(false);
 
     const records = await t.withIdentity(identity).query(api.managebac.recordsForPurpose, {
       purpose: "timetable",
@@ -399,5 +434,35 @@ describe("ManageBac route provider fixture", () => {
         String(record.normalized.title).includes("updated"),
       ),
     ).toBe(true);
+
+    const archiveResponse = await POST(
+      new NextRequest("http://localhost/api/spectra/managebac", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "selectClasses",
+          recordIds: [],
+          expectedRevision: selectionBody.selectionRevision,
+          retention: "archive_projection",
+        }),
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(archiveResponse.status).toBe(200);
+    const archiveBody = await archiveResponse.json();
+    expect(archiveBody.release.removed).toBe(1);
+    expect(archiveBody.retention).toBe("archive_projection");
+    const archived = await t.run(async (ctx) => ({
+      source: (await ctx.db.get(selectedClass!.recordId as never)) as {
+        tombstone?: boolean;
+      } | null,
+      workspaces: await ctx.db
+        .query("spectraWorkspaces")
+        .withIndex("by_account_starter", (q) =>
+          q.eq("ownerAccountId", seeded.accountId).eq("starterKey", "managebac-class"),
+        )
+        .collect(),
+    }));
+    expect(archived.source?.tombstone).toBe(false);
+    expect(archived.workspaces.some((workspace) => workspace.status === "archived")).toBe(true);
   });
 });

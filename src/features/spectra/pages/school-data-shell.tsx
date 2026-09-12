@@ -93,6 +93,7 @@ type SchoolPayload = {
   };
   mapping: null | { status: string; updatedAt?: number };
   identityRequired: boolean;
+  identityStatus?: "pending" | "verified" | "no_match" | "ambiguous" | "revoked";
   classLoadError: string;
   capabilities: Capability[];
   syncRuns: SyncRun[];
@@ -335,6 +336,9 @@ export function SchoolDataShell() {
         identityRequired: classResult.ok
           ? classResult.result.identityRequired
           : false,
+        identityStatus: classResult.ok
+          ? classResult.result.identityStatus
+          : undefined,
         selectionRevision: classResult.ok
           ? classResult.result.selectionRevision
           : undefined,
@@ -501,6 +505,7 @@ export function SchoolDataShell() {
                   <ClassShelfEditor
                     integration={payload.integration}
                     identityRequired={payload.identityRequired}
+                    identityStatus={payload.identityStatus}
                     classes={payload.classes}
                     selectionRevision={payload.selectionRevision}
                     classLoadError={payload.classLoadError}

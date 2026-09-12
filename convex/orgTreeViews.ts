@@ -1,6 +1,8 @@
 import type { Id } from "./_generated/dataModel";
 import { requireSpectraActor } from "./spectraShared";
 import {
+  ARTIFACT_SUMMARY_READ_MODEL_VERSION,
+  artifactSummaryProjection,
   artifactSummaryFor,
   isContainerKind,
   type OrgNode,
@@ -174,30 +176,61 @@ export async function hydrateNodes(
         const summary = artifactId
           ? await artifactSummaryFor(ctx, artifactId)
           : null;
-        const artifact = summary?.projection as
+        const summaryIsCurrent =
+          summary?.readModelVersion === ARTIFACT_SUMMARY_READ_MODEL_VERSION;
+        let artifact = summaryIsCurrent
+          ? (summary?.projection as
+              | {
+                  blueprintKey?: string;
+                  title?: string;
+                  summary?: string;
+                  updatedAt?: number;
+                  status?: string;
+                  aiState?: string;
+                }
+              | undefined)
+          : undefined;
+        let ownerAccountId = summaryIsCurrent
+          ? summary?.ownerAccountId
+          : undefined;
+        let status = summaryIsCurrent ? summary?.status : undefined;
+        if (!summaryIsCurrent && artifactId) {
+          // A bounded mixed-record fallback keeps old/missing rows safe while
+          // the versioned backfill catches up. A missing canonical row is
+          // rendered as unavailable rather than inferred as live.
+          const canonical = await ctx.db.get(artifactId);
+          if (canonical) {
+            artifact = artifactSummaryProjection(canonical);
+            ownerAccountId = canonical.ownerAccountId;
+            status = canonical.status;
+          }
+        }
+        const artifactProjection = artifact as
           | {
               blueprintKey?: string;
               title?: string;
               summary?: string;
               updatedAt?: number;
-              status?: string;
-              ownerAccountId?: Id<"accounts">;
               aiState?: string;
             }
           | undefined;
         view.source = {
-          blueprintKey: artifact?.blueprintKey ?? node.typeKey,
-          title: artifact?.title ?? node.name,
-          summary: artifact?.summary,
-          updatedAt: artifact?.updatedAt ?? node.activityAt ?? node.updatedAt,
-          available: summary ? artifact?.status !== "deleted" : true,
-          owned: summary
-            ? artifact?.ownerAccountId === node.accountId
+          blueprintKey:
+            (summaryIsCurrent ? summary?.blueprintKey : undefined) ??
+            artifactProjection?.blueprintKey ??
+            node.typeKey,
+          title: artifactProjection?.title ?? node.name,
+          summary: artifactProjection?.summary,
+          updatedAt:
+            artifactProjection?.updatedAt ?? node.activityAt ?? node.updatedAt,
+          available: status !== undefined ? status !== "deleted" : false,
+          owned: ownerAccountId
+            ? ownerAccountId === node.accountId
             : node.accessProjection !== true,
           shared:
-            (summary !== null && artifact?.ownerAccountId !== node.accountId) ||
+            (ownerAccountId !== undefined && ownerAccountId !== node.accountId) ||
             sharedOut?.has(node.sourceId) === true,
-          aiState: artifact?.aiState,
+          aiState: artifactProjection?.aiState,
         };
       } else if (node.kind === "thread") {
         const threadId = ctx.db.normalizeId("spectraThreads", node.sourceId);

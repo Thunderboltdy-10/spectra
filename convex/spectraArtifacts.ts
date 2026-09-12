@@ -28,6 +28,9 @@ import {
   listDirectlyGrantedResourceIds,
 } from "./authorityShared";
 import {
+  ARTIFACT_SUMMARY_READ_MODEL_VERSION,
+  artifactSummaryProjection,
+  artifactSummarySearchText,
   findPrimaryNode,
   placementStatusFor,
   placementsForSource,
@@ -272,6 +275,10 @@ const ARTIFACT_OWNER_CAPABILITIES = [
   "publish",
 ] as const;
 const LIBRARY_METADATA_READ_LIMIT = 1_000;
+type ArtifactListSummary = Omit<
+  Doc<"spectraArtifactSummaries">,
+  "_id" | "_creationTime"
+>;
 
 export const list = query({
   args: {
@@ -420,17 +427,44 @@ export const list = query({
         [...candidateIds].map(async (resourceId) => {
           const artifactId = ctx.db.normalizeId("spectraArtifacts", resourceId);
           if (!artifactId) return null;
-          return ctx.db
+          const summary = await ctx.db
             .query("spectraArtifactSummaries")
             .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
             .unique();
+          if (
+            summary &&
+            summary.readModelVersion === ARTIFACT_SUMMARY_READ_MODEL_VERSION
+          )
+            return summary;
+          // Mixed-record rollout fallback: one bounded canonical read repairs
+          // discovery for a legacy/missing summary without putting the body on
+          // the list response. The mutation backfill remains responsible for
+          // making this path disappear over time.
+          const artifact = await ctx.db.get(artifactId);
+          if (!artifact) return null;
+          return {
+            artifactId: artifact._id,
+            ownerAccountId: artifact.ownerAccountId,
+            schoolId: artifact.schoolId,
+            blueprintKey: artifact.blueprintKey,
+            status: artifact.status,
+            updatedAt: artifact.updatedAt,
+            searchText: artifactSummarySearchText(artifact),
+            createdAt: artifact.createdAt,
+            createdFromThreadId: artifact.createdFrom?.threadId,
+            createdFromWorkspaceId: artifact.createdFrom?.workspaceId,
+            aiRunId: artifact.aiRunId,
+            currentVersionId: artifact.currentVersionId,
+            contentHash: artifact.contentHash,
+            schemaVersion: artifact.schemaVersion,
+            deletionGeneration: artifact.deletionGeneration,
+            projection: artifactSummaryProjection(artifact),
+          } satisfies ArtifactListSummary;
         }),
       )
-    ).filter(
-      (row): row is Doc<"spectraArtifactSummaries"> => Boolean(row),
-    );
+    ).filter((row) => row !== null) as ArtifactListSummary[];
     const rows = [...new Map(summaries.map((row) => [row.artifactId, row])).values()];
-    const rowByArtifact = new Map<string, Doc<"spectraArtifactSummaries">>(
+    const rowByArtifact = new Map<string, ArtifactListSummary>(
       rows.map((row) => [String(row.artifactId), row]),
     );
 
@@ -489,11 +523,10 @@ export const list = query({
       const summary = rowByArtifact.get(node.sourceId);
       const workspaceAccess = grantedWorkspaces.get(node.workspaceContextId);
       if (!summary || !workspaceAccess) continue;
-      const projection = summary.projection as { ownerAccountId?: string };
       const projectsAccess =
         node.accessProjection === true ||
         (node.accessProjection === undefined &&
-          projection.ownerAccountId === workspaceAccess.workspace.ownerAccountId);
+          summary.ownerAccountId === workspaceAccess.workspace.ownerAccountId);
       if (!projectsAccess) continue;
       inheritedLevels.set(
         node.sourceId,
@@ -549,7 +582,6 @@ export const list = query({
       .filter((row) => {
         if (!needle) return true;
         const projection = row.projection as {
-          ownerAccountId?: string;
           title?: string;
           summary?: string;
           tags?: string[];
@@ -557,7 +589,7 @@ export const list = query({
         const maySearchBody =
           row.blueprintKey !== "timetable" &&
           (row.blueprintKey !== "quiz" ||
-            projection.ownerAccountId === actor.accountId);
+            row.ownerAccountId === actor.accountId);
         return `${projection.title ?? ""}\n${projection.summary ?? ""}\n${row.blueprintKey}\n${(projection.tags ?? []).join(" ")}\n${maySearchBody ? row.searchText : ""}\n${(placementsByArtifact.get(row.artifactId) ?? []).map((placement) => placement.workspaceTitle).join("\n")}`
           .toLowerCase()
           .includes(needle);
@@ -567,12 +599,11 @@ export const list = query({
       await Promise.all(
         candidateArtifacts.map(async (row) => {
           const projection = row.projection as Record<string, unknown> & {
-            ownerAccountId?: Id<"accounts">;
             blueprintKey?: string;
             updatedAt?: number;
           };
           const ownership =
-            projection.ownerAccountId === actor.accountId
+            row.ownerAccountId === actor.accountId
               ? ("owned" as const)
               : ("shared" as const);
           const resourceType =
@@ -604,8 +635,8 @@ export const list = query({
               ? await latestPublishedAgentRelease(ctx, row.artifactId)
               : undefined;
           const owner =
-            row.blueprintKey === "agent" && projection.ownerAccountId
-              ? await ctx.db.get(projection.ownerAccountId)
+            row.blueprintKey === "agent"
+              ? await ctx.db.get(row.ownerAccountId)
               : null;
           return {
             ...projection,

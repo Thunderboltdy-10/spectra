@@ -12,6 +12,8 @@ import {
 } from "./spectraShared";
 import {
   evaluateAccess,
+  evaluateArtifactAccessForActor,
+  evaluateArtifactAccessForActorWithSummary,
   evaluateAccessForActorWithLoadedResource,
 } from "./authorityShared";
 import { projectArtifactForAccess } from "./quizPrivacy";
@@ -35,6 +37,8 @@ import {
   subtreeNodes,
   trashNode,
   workspaceContextNodes,
+  ARTIFACT_SUMMARY_READ_MODEL_VERSION,
+  artifactSummaryFor,
   artifactSummaryProjection,
   type OrgNode,
 } from "./orgTreeShared";
@@ -878,40 +882,96 @@ async function hydrateWorkNode(
 ) {
   const artifactId = normalizeArtifactId(ctx, node.sourceId ?? "");
   if (!artifactId) return null;
-  const candidate = await ctx.db.get(artifactId);
-  const resourceType =
-    candidate?.blueprintKey === "agent" ? ("agent" as const) : ("artifact" as const);
-  const decision = await evaluateAccessForActorWithLoadedResource(
-    ctx,
-    actor,
-    resourceType,
-    artifactId,
-    candidate
-      ? {
-          resource: candidate,
-          ownerAccountId: candidate.ownerAccountId,
-          schoolId: candidate.schoolId,
-          lifecycle: candidate.status,
-        }
-      : null,
-  );
-  if (!decision.allowed) return null;
-  const artifact = decision.loaded.resource as Doc<"spectraArtifacts">;
-  if (artifact.status === "deleted") return null;
-  const projected = decision.level
-    ? projectArtifactForAccess(artifact, decision.level)
-    : artifact;
-  const visibleArtifact = includeDetails
-    ? projected
-    : artifactSummaryProjection(projected);
+  let summary: Awaited<ReturnType<typeof artifactSummaryFor>> = null;
+  let artifact: Doc<"spectraArtifacts"> | null = null;
+  let decision:
+    | Awaited<ReturnType<typeof evaluateArtifactAccessForActor>>
+    | Awaited<ReturnType<typeof evaluateAccess>>;
+  let visibleArtifact: Record<string, unknown>;
+
+  if (includeDetails) {
+    // An opened workspace item is an explicit content read. Keep the rich
+    // editor/detail path unchanged, but reuse this one row for authority.
+    artifact = await ctx.db.get(artifactId);
+    const resourceType =
+      artifact?.blueprintKey === "agent" ? ("agent" as const) : ("artifact" as const);
+    decision = await evaluateAccessForActorWithLoadedResource(
+      ctx,
+      actor,
+      resourceType,
+      artifactId,
+      artifact
+        ? {
+            resource: artifact,
+            ownerAccountId: artifact.ownerAccountId,
+            schoolId: artifact.schoolId,
+            lifecycle: artifact.status,
+          }
+        : null,
+    );
+    if (!decision.allowed) return null;
+    if (!artifact) return null;
+    if (artifact.status === "deleted") return null;
+    const projected = decision.level
+      ? projectArtifactForAccess(artifact, decision.level)
+      : artifact;
+    visibleArtifact = projected;
+  } else {
+    // Workspace overview/list requests use the compact authority row. They do
+    // not decode content, protected bases, Yjs snapshots or native payloads.
+    summary = await artifactSummaryFor(ctx, artifactId);
+    if (summary?.readModelVersion === ARTIFACT_SUMMARY_READ_MODEL_VERSION) {
+      const resourceType =
+        summary.blueprintKey === "agent" ? ("agent" as const) : ("artifact" as const);
+      decision = await evaluateArtifactAccessForActorWithSummary(
+        ctx,
+        actor,
+        artifactId,
+        resourceType,
+        summary,
+      );
+      if (!decision.allowed) return null;
+      visibleArtifact = summary.projection;
+    } else {
+      // Bounded mixed-record fallback: old/missing summaries may hydrate once
+      // while the migration catches up, then the next read is small. Reuse the
+      // same canonical row for authority and projection so this branch is one
+      // payload read, not a fallback read plus a second permission read.
+      artifact = await ctx.db.get(artifactId);
+      if (!artifact || artifact.status === "deleted") return null;
+      const resourceType =
+        artifact.blueprintKey === "agent" ? ("agent" as const) : ("artifact" as const);
+      decision = await evaluateAccessForActorWithLoadedResource(
+        ctx,
+        actor,
+        resourceType,
+        artifactId,
+        {
+          resource: artifact,
+          ownerAccountId: artifact.ownerAccountId,
+          schoolId: artifact.schoolId,
+          lifecycle: artifact.status,
+        },
+      );
+      if (!decision.allowed) return null;
+      visibleArtifact = artifactSummaryProjection(artifact);
+    }
+  }
+  const authority = decision.loaded;
+  if (!authority) return null;
+  const authorityResource = authority.resource;
+  const authorityBlueprintKey =
+    "blueprintKey" in authorityResource ? authorityResource.blueprintKey : undefined;
   const ownership =
-    artifact.ownerAccountId === actor.accountId
+    authority.ownerAccountId === actor.accountId
       ? ("owned" as const)
       : ("shared" as const);
+  const resourceType =
+    authorityBlueprintKey === "agent" ? ("agent" as const) : ("artifact" as const);
   const invitations = await ctx.db
     .query("shareInvitations")
     .withIndex("by_resource", (q) =>
-      q.eq("resourceType", resourceType).eq("resourceId", artifact._id),
+      q.eq("resourceType", resourceType).eq("resourceId", artifactId),
     )
     .collect();
   const now = Date.now();

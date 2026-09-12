@@ -2,7 +2,11 @@ import { v } from "convex/values";
 import { sheetCellEntries } from "../shared/sheet-cells";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { requireCapability, type Capability } from "./authorityShared";
+import {
+  evaluateAccessForActorWithLoadedResource,
+  requireCapability,
+  type Capability,
+} from "./authorityShared";
 import { getAuthenticatedActor } from "./identityShared";
 import { placeSourceNode } from "./orgTreeShared";
 
@@ -78,15 +82,31 @@ export async function requireArtifactCapability(
   artifactId: Id<"spectraArtifacts">,
   capability: Capability = "read",
 ) {
+  const actor = await requireSpectraActor(ctx);
   const candidate = await ctx.db.get(artifactId);
   const resourceType =
     candidate?.blueprintKey === "agent" ? "agent" : "artifact";
-  const decision = await requireCapability(
+  // The caller already loaded the authoritative payload row for the selected
+  // editor/detail operation. Reuse it for permission evaluation instead of
+  // asking the generic authority path to read the same heavy row again.
+  const decision = await evaluateAccessForActorWithLoadedResource(
     ctx,
+    actor,
     resourceType,
     artifactId,
-    capability,
+    candidate
+      ? {
+          resource: candidate,
+          ownerAccountId: candidate.ownerAccountId,
+          schoolId: candidate.schoolId,
+          lifecycle: candidate.status,
+        }
+      : null,
   );
+  if (!decision.allowed || !decision.capabilities.includes(capability))
+    throw new Error(
+      "AUTH_RESOURCE_FORBIDDEN: You do not have permission for this action.",
+    );
   return {
     actor: decision.actor,
     artifact: decision.loaded.resource as Doc<"spectraArtifacts">,

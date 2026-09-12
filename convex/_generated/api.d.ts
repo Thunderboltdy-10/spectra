@@ -65,6 +65,7 @@ import type * as replicas from "../replicas.js";
 import type * as schools from "../schools.js";
 import type * as secretBridge from "../secretBridge.js";
 import type * as secretStore from "../secretStore.js";
+import type * as spectraArtifactDeletion from "../spectraArtifactDeletion.js";
 import type * as spectraArtifactLinks from "../spectraArtifactLinks.js";
 import type * as spectraArtifacts from "../spectraArtifacts.js";
 import type * as spectraOperations from "../spectraOperations.js";
@@ -142,6 +143,7 @@ declare const fullApi: ApiFromModules<{
   schools: typeof schools;
   secretBridge: typeof secretBridge;
   secretStore: typeof secretStore;
+  spectraArtifactDeletion: typeof spectraArtifactDeletion;
   spectraArtifactLinks: typeof spectraArtifactLinks;
   spectraArtifacts: typeof spectraArtifacts;
   spectraOperations: typeof spectraOperations;

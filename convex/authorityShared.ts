@@ -1,7 +1,12 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
-import { findNodesForSource, workspaceContextNodes } from "./orgTreeShared";
+import {
+  ARTIFACT_SUMMARY_READ_MODEL_VERSION,
+  artifactSummaryFor,
+  findNodesForSource,
+  workspaceContextNodes,
+} from "./orgTreeShared";
 
 export type AuthorityCtx = QueryCtx | MutationCtx;
 export type ResourceType = "workspace" | "artifact" | "agent";
@@ -86,6 +91,87 @@ export async function loadResource(ctx: AuthorityCtx, resourceType: ResourceType
 
 export type LoadedResource = NonNullable<Awaited<ReturnType<typeof loadResource>>>;
 
+/**
+ * The authority facts needed by discovery/status readers.  This deliberately
+ * has no title, content, snapshot, plan, transcript or projection field: the
+ * summary row is a permission source, not a cache of the payload row.
+ */
+export type ArtifactAuthorityResource = {
+  _id: Id<"spectraArtifacts">;
+  ownerAccountId: Id<"accounts">;
+  schoolId?: Id<"schools">;
+  blueprintKey: string;
+  status: Doc<"spectraArtifacts">["status"];
+};
+
+export type LoadedArtifactAuthority = {
+  resource: ArtifactAuthorityResource;
+  ownerAccountId: Id<"accounts">;
+  schoolId?: Id<"schools">;
+  lifecycle: Doc<"spectraArtifacts">["status"];
+  /** True only when a legacy/missing summary required the bounded fallback. */
+  usedLegacyFallback?: boolean;
+};
+
+type ArtifactAuthoritySummary = Awaited<ReturnType<typeof artifactSummaryFor>>;
+
+/**
+ * Load only the current artifact authority facts for list/tree/status paths.
+ * A missing or old projection is a bounded compatibility fallback, not a
+ * second steady-state read model.  The migration below repairs those rows in
+ * pages so this branch naturally disappears after rollout.
+ */
+export async function loadArtifactAuthority(
+  ctx: AuthorityCtx,
+  artifactId: Id<"spectraArtifacts">,
+): Promise<LoadedArtifactAuthority | null> {
+  return loadArtifactAuthorityFromSummary(
+    ctx,
+    artifactId,
+    await artifactSummaryFor(ctx, artifactId),
+  );
+}
+
+async function loadArtifactAuthorityFromSummary(
+  ctx: AuthorityCtx,
+  artifactId: Id<"spectraArtifacts">,
+  summary: ArtifactAuthoritySummary,
+): Promise<LoadedArtifactAuthority | null> {
+  if (
+    summary &&
+    summary.readModelVersion === ARTIFACT_SUMMARY_READ_MODEL_VERSION
+  ) {
+    const resource = {
+      _id: summary.artifactId,
+      ownerAccountId: summary.ownerAccountId,
+      schoolId: summary.schoolId,
+      blueprintKey: summary.blueprintKey,
+      status: summary.status,
+    } satisfies ArtifactAuthorityResource;
+    return {
+      resource,
+      ownerAccountId: resource.ownerAccountId,
+      schoolId: resource.schoolId,
+      lifecycle: resource.status,
+    };
+  }
+  const artifact = await ctx.db.get(artifactId);
+  if (!artifact) return null;
+  return {
+    resource: {
+      _id: artifact._id,
+      ownerAccountId: artifact.ownerAccountId,
+      schoolId: artifact.schoolId,
+      blueprintKey: artifact.blueprintKey,
+      status: artifact.status,
+    },
+    ownerAccountId: artifact.ownerAccountId,
+    schoolId: artifact.schoolId,
+    lifecycle: artifact.status,
+    usedLegacyFallback: true,
+  };
+}
+
 function activeGrant(grant: Doc<"accessGrants">, now: number) {
   return !grant.revokedAt && (!grant.expiresAt || grant.expiresAt > now);
 }
@@ -114,15 +200,12 @@ async function inheritedArtifactAccess(
   ctx: AuthorityCtx,
   actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
   artifactId: Id<"spectraArtifacts">,
-  loadedArtifact?: Doc<"spectraArtifacts">,
+  ownerAccountId: Id<"accounts">,
 ) {
   const override = await ctx.db.query("artifactAccessOverrides").withIndex("by_artifact_account", (q) => q.eq("artifactId", artifactId).eq("accountId", actor.accountId)).unique();
   if (override?.effect === "deny") return { level: null, denied: true, sources: [] as Array<{ kind: "workspace"; workspaceId: Id<"spectraWorkspaces">; grantId: Id<"accessGrants">; level: AccessLevel }> };
 
-  const [artifact, nodes] = await Promise.all([
-    loadedArtifact ?? ctx.db.get(artifactId),
-    findNodesForSource(ctx, "work", artifactId),
-  ]);
+  const nodes = await findNodesForSource(ctx, "work", artifactId);
   let level: AccessLevel | null = null;
   const sources: Array<{ kind: "workspace"; workspaceId: Id<"spectraWorkspaces">; grantId: Id<"accessGrants">; level: AccessLevel }> = [];
   const now = Date.now();
@@ -135,7 +218,7 @@ async function inheritedArtifactAccess(
     // artifact with the workspace audience. Older placements predate this flag;
     // only an owner-to-owner placement is safe to treat as projecting access.
     const projectsAccess = placement.accessProjection === true
-      || (placement.accessProjection === undefined && artifact?.ownerAccountId === workspace.ownerAccountId);
+      || (placement.accessProjection === undefined && ownerAccountId === workspace.ownerAccountId);
     if (!projectsAccess) continue;
     const grants = await ctx.db.query("accessGrants").withIndex("by_resource", (q) => q.eq("resourceType", "workspace").eq("resourceId", workspace._id)).collect();
     for (const grant of grants) {
@@ -213,7 +296,7 @@ async function evaluateLoadedResourceAccess(
         ctx,
         actor,
         loadedResource._id as Id<"spectraArtifacts">,
-        loadedResource as Doc<"spectraArtifacts">,
+        loadedResource.ownerAccountId,
       )
     : { level: null, denied: false, sources: [] };
   if (inherited.denied && !direct.level) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "artifact_exception" as const, sources: inherited.sources };
@@ -264,6 +347,164 @@ export async function evaluateAccessForActorWithLoadedResource(
     resourceId,
     loaded,
   );
+}
+
+async function evaluateLoadedArtifactAuthority(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  resourceType: "artifact" | "agent",
+  resourceId: string,
+  loaded: LoadedArtifactAuthority | null,
+) {
+  if (!loaded)
+    return {
+      allowed: false as const,
+      level: null,
+      capabilities: [] as Capability[],
+      actor,
+      reason: "not_found" as const,
+      sources: [],
+    };
+  const expectedResourceId = ctx.db.normalizeId("spectraArtifacts", resourceId);
+  if (
+    !expectedResourceId ||
+    loaded.resource._id !== expectedResourceId ||
+    (resourceType === "agent" && loaded.resource.blueprintKey !== "agent") ||
+    (resourceType === "artifact" && loaded.resource.blueprintKey === "agent")
+  )
+    return {
+      allowed: false as const,
+      level: null,
+      capabilities: [] as Capability[],
+      actor,
+      reason: "not_found" as const,
+      sources: [],
+    };
+  if (loaded.lifecycle === "deleted")
+    return {
+      allowed: false as const,
+      level: null,
+      capabilities: [] as Capability[],
+      actor,
+      loaded,
+      reason: "deleted" as const,
+      sources: [],
+    };
+
+  const direct = await directAccess(ctx, actor, resourceType, resourceId);
+  if (loaded.schoolId && loaded.schoolId !== actor.schoolId) {
+    let directAccountLevel: AccessLevel | null = null;
+    for (const source of direct.sources) {
+      if (source.kind !== "direct") continue;
+      directAccountLevel = directAccountLevel
+        ? combineLevel(directAccountLevel, source.level)
+        : source.level;
+    }
+    if (!directAccountLevel)
+      return {
+        allowed: false as const,
+        level: null,
+        capabilities: [] as Capability[],
+        actor,
+        loaded,
+        reason: "school_boundary" as const,
+        sources: [],
+      };
+    return {
+      allowed: true as const,
+      level: directAccountLevel,
+      capabilities: capabilitiesForLevel(directAccountLevel),
+      actor,
+      loaded,
+      reason: "grant" as const,
+      sources: direct.sources.filter((source) => source.kind === "direct"),
+    };
+  }
+  if (loaded.ownerAccountId === actor.accountId)
+    return {
+      allowed: true as const,
+      level: "modify" as const,
+      capabilities: ownerCapabilities,
+      actor,
+      loaded,
+      reason: "owner" as const,
+      sources: [{ kind: "owner" as const }],
+    };
+
+  const inherited = await inheritedArtifactAccess(
+    ctx,
+    actor,
+    loaded.resource._id,
+    loaded.ownerAccountId,
+  );
+  if (inherited.denied && !direct.level)
+    return {
+      allowed: false as const,
+      level: null,
+      capabilities: [] as Capability[],
+      actor,
+      loaded,
+      reason: "artifact_exception" as const,
+      sources: inherited.sources,
+    };
+  const inheritedLevel = inherited.denied ? null : inherited.level;
+  const level = direct.level && inheritedLevel
+    ? combineLevel(direct.level, inheritedLevel)
+    : direct.level ?? inheritedLevel;
+  if (!level)
+    return {
+      allowed: false as const,
+      level: null,
+      capabilities: [] as Capability[],
+      actor,
+      loaded,
+      reason: "private" as const,
+      sources: [],
+    };
+  return {
+    allowed: true as const,
+    level,
+    capabilities: capabilitiesForLevel(level),
+    actor,
+    loaded,
+    reason: direct.level ? ("grant" as const) : ("workspace_inheritance" as const),
+    sources: [...direct.sources, ...inherited.sources],
+  };
+}
+
+/**
+ * Permission evaluation for list/tree/status reads.  It uses the versioned
+ * compact artifact authority row and the live grant/placement policy, never a
+ * client projection and never the artifact body in the steady state.
+ */
+export async function evaluateArtifactAccessForActor(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  artifactId: Id<"spectraArtifacts">,
+  resourceType?: "artifact" | "agent",
+) {
+  const loaded = await loadArtifactAuthority(ctx, artifactId);
+  const type = resourceType ??
+    (loaded?.resource.blueprintKey === "agent" ? "agent" : "artifact");
+  return evaluateLoadedArtifactAuthority(ctx, actor, type, artifactId, loaded);
+}
+
+/** Reuse a summary row already read by a list/context query. */
+export async function evaluateArtifactAccessForActorWithSummary(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  artifactId: Id<"spectraArtifacts">,
+  resourceType: "artifact" | "agent" | undefined,
+  summary: ArtifactAuthoritySummary,
+) {
+  const loaded = await loadArtifactAuthorityFromSummary(
+    ctx,
+    artifactId,
+    summary,
+  );
+  const type = resourceType ??
+    (loaded?.resource.blueprintKey === "agent" ? "agent" : "artifact");
+  return evaluateLoadedArtifactAuthority(ctx, actor, type, artifactId, loaded);
 }
 
 export async function evaluateAccess(ctx: AuthorityCtx, resourceType: ResourceType, resourceId: string) {

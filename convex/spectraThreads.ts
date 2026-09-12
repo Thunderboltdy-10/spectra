@@ -9,6 +9,7 @@ import {
   requireWorkspaceCapability,
 } from "./spectraShared";
 import {
+  artifactSummaryFor,
   findPrimaryNode,
   placeSourceNode,
   purgeSourceNodes,
@@ -16,7 +17,11 @@ import {
   syncSourceNodes,
 } from "./orgTreeShared";
 import { incrementOperationalCounter } from "./operationalCounters";
-import { evaluateAccessForActorWithLoadedResource } from "./authorityShared";
+import {
+  evaluateAccessForActorWithLoadedResource,
+  evaluateArtifactAccessForActorWithSummary,
+} from "./authorityShared";
+import { RUN_TAB_PROJECTION_VERSION } from "./spectraRunProjection";
 
 const vOrigin = v.union(
   v.literal("chat"),
@@ -153,7 +158,9 @@ function compactThread(thread: Doc<"spectraThreads">) {
   };
 }
 
-function compactActiveExecution(run: Doc<"spectraAiRuns">) {
+function compactActiveExecution(
+  run: Pick<Doc<"spectraAiRuns">, "_id" | "status" | "phase" | "updatedAt">,
+) {
   return {
     _id: run._id,
     status: run.status,
@@ -930,25 +937,37 @@ export const list = query({
       })),
       Promise.all(artifactIds.map(async (id) => {
         try {
-          const artifact = await ctx.db.get(id as Id<"spectraArtifacts">);
-          const loaded = artifact
-            ? {
-                resource: artifact,
-                ownerAccountId: artifact.ownerAccountId,
-                schoolId: artifact.schoolId,
-                lifecycle: artifact.status,
-              }
-            : null;
-          const resourceType = artifact?.blueprintKey === "agent" ? "agent" : "artifact";
-          const access = await evaluateAccessForActorWithLoadedResource(
+          const artifactId = id as Id<"spectraArtifacts">;
+          const summary = await artifactSummaryFor(ctx, artifactId);
+          const resourceType =
+            summary?.blueprintKey === "agent"
+              ? ("agent" as const)
+              : summary
+                ? ("artifact" as const)
+                : undefined;
+          const access = await evaluateArtifactAccessForActorWithSummary(
             ctx,
             actor,
+            artifactId,
             resourceType,
-            id,
-            loaded,
+            summary,
           );
-          return access.allowed && access.capabilities.includes("read") && access.loaded.resource.status !== "deleted"
-            ? { id, title: access.loaded.resource.title }
+          const projection = summary?.projection as { title?: unknown } | undefined;
+          const loadedResource = access.allowed ? access.loaded.resource : null;
+          const canonicalTitle =
+            loadedResource &&
+            "title" in loadedResource &&
+            typeof loadedResource.title === "string"
+              ? loadedResource.title
+              : undefined;
+          return access.allowed && access.capabilities.includes("read")
+            ? {
+                id,
+                title:
+                  typeof projection?.title === "string"
+                    ? projection.title
+                    : canonicalTitle ?? id,
+              }
             : null;
         } catch { return null; }
       })),
@@ -975,31 +994,70 @@ export const get = query({
   args: { threadId: v.id("spectraThreads") },
   handler: async (ctx, args) => {
     const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
-    const derivedArtifact = thread.artifactId
+    const derivedArtifactSummary = thread.artifactId
       ? null
       : (
           await ctx.db
-            .query("spectraArtifacts")
+            .query("spectraArtifactSummaries")
             .withIndex("by_created_thread", (q) =>
-              q.eq("createdFrom.threadId", args.threadId),
+              q.eq("createdFromThreadId", args.threadId),
             )
             .order("desc")
             .take(12)
         ).find(
           (artifact) =>
             artifact.ownerAccountId === actor._id &&
+            artifact.schoolId === actor.schoolId &&
             artifact.status !== "deleted",
         );
+    // Rows created before the read model are a bounded compatibility path. A
+    // successful summary backfill removes this canonical scan from steady
+    // state without changing the thread's visible artifact choice.
+    const derivedArtifact =
+      derivedArtifactSummary ??
+      (thread.artifactId
+        ? null
+        : (
+            await ctx.db
+              .query("spectraArtifacts")
+              .withIndex("by_created_thread", (q) =>
+                q.eq("createdFrom.threadId", args.threadId),
+              )
+              .order("desc")
+              .take(12)
+          ).find(
+            (artifact) =>
+              artifact.ownerAccountId === actor._id &&
+              artifact.status !== "deleted",
+          ));
     const messagePage = await ctx.db
       .query("spectraMessages")
       .withIndex("by_thread_created", (q) => q.eq("threadId", args.threadId))
       .order("desc")
       .paginate({ cursor: null, numItems: INITIAL_MESSAGE_LIMIT });
     const messages = [...messagePage.page].reverse();
-    const activeRun = thread.lastRunId ? await ctx.db.get(thread.lastRunId) : null;
+    const activeTab = thread.lastRunId
+      ? (
+          await ctx.db
+            .query("spectraRunTabs")
+            .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
+            .collect()
+        ).find((tab) =>
+          tab.runId === thread.lastRunId &&
+          tab.projectionVersion === RUN_TAB_PROJECTION_VERSION &&
+          tab.runSummary?._id === thread.lastRunId,
+        )
+      : null;
+    const activeRun = activeTab?.runSummary ??
+      (thread.lastRunId ? await ctx.db.get(thread.lastRunId) : null);
+    const derivedArtifactId = derivedArtifact
+      ? "artifactId" in derivedArtifact
+        ? derivedArtifact.artifactId
+        : derivedArtifact._id
+      : undefined;
     return {
       thread: compactThread(
-        derivedArtifact ? { ...thread, artifactId: derivedArtifact._id } : thread,
+        derivedArtifactId ? { ...thread, artifactId: derivedArtifactId } : thread,
       ),
       messages,
       // Historical trace families are fetched on demand through getRunTrace.
@@ -1020,8 +1078,11 @@ export const get = query({
       tracePage: { limit: TRACE_CHILD_LIMIT },
       activeExecution:
         activeRun &&
-        activeRun.ownerAccountId === actor._id &&
-        activeRun.schoolId === actor.schoolId &&
+        (("ownerAccountId" in activeRun
+          ? activeRun.ownerAccountId
+          : activeTab?.ownerAccountId) === actor._id &&
+          (("schoolId" in activeRun ? activeRun.schoolId : activeTab?.schoolId) ===
+            actor.schoolId)) &&
         ["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(activeRun.status)
           ? { run: compactActiveExecution(activeRun) }
           : null,
@@ -1043,12 +1104,25 @@ export const getActiveExecution = query({
   handler: async (ctx, args) => {
     const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
     if (!thread.lastRunId) return null;
-    const run = await ctx.db.get(thread.lastRunId);
+    const tab = (
+      await ctx.db
+        .query("spectraRunTabs")
+        .withIndex("by_thread", (q) => q.eq("threadId", args.threadId))
+        .collect()
+    ).find(
+      (row) =>
+        row.runId === thread.lastRunId &&
+        row.projectionVersion === RUN_TAB_PROJECTION_VERSION &&
+        row.runSummary?._id === thread.lastRunId,
+    );
+    const run = tab?.runSummary ?? await ctx.db.get(thread.lastRunId);
     if (
       !run ||
-      run.threadId !== thread._id ||
-      run.ownerAccountId !== actor._id ||
-      run.schoolId !== actor.schoolId ||
+      ("ownerAccountId" in run
+        ? run.threadId !== thread._id ||
+          run.ownerAccountId !== actor._id ||
+          ("schoolId" in run ? run.schoolId : tab?.schoolId) !== actor.schoolId
+        : tab?.ownerAccountId !== actor._id || tab.schoolId !== actor.schoolId) ||
       !["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(run.status)
     )
       return null;
@@ -1291,10 +1365,10 @@ export const getRunTrace = query({
               .order("asc")
               .paginate({ cursor: null, numItems: limit }))
       : null;
-    const artifactRows =
+    const artifactSummaries =
       family === "operations" && !operationCursor && args.includeArtifacts !== false
       ? await ctx.db
-          .query("spectraArtifacts")
+          .query("spectraArtifactSummaries")
           .withIndex("by_ai_run", (q) => q.eq("aiRunId", run._id))
           .order("desc")
           .take(100)
@@ -1302,23 +1376,30 @@ export const getRunTrace = query({
     const operations = operationPage ? [...operationPage.page].reverse() : [];
     const cards = cardPage ? [...cardPage.page].reverse() : [];
     const events = eventPage?.page ?? [];
-    const artifacts = artifactRows
+    const artifacts = artifactSummaries
       .filter(
         (artifact) =>
           artifact.ownerAccountId === actor._id &&
           artifact.schoolId === actor.schoolId &&
           artifact.status !== "deleted",
       )
-      .map((artifact) => ({
-        _id: artifact._id,
-        blueprintKey: artifact.blueprintKey,
-        title: artifact.title,
-        summary: artifact.summary,
-        tags: artifact.tags,
-        status: artifact.status,
-        createdAt: artifact.createdAt,
-        updatedAt: artifact.updatedAt,
-      }));
+      .map((artifact) => {
+        const projection = artifact.projection as {
+          title?: string;
+          summary?: string;
+          tags?: string[];
+        };
+        return {
+          _id: artifact.artifactId,
+          blueprintKey: artifact.blueprintKey,
+          title: projection.title ?? "Untitled artifact",
+          summary: projection.summary,
+          tags: projection.tags ?? [],
+          status: artifact.status,
+          createdAt: artifact.createdAt ?? artifact.updatedAt,
+          updatedAt: artifact.updatedAt,
+        };
+      });
     return {
       run,
       operations,

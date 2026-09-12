@@ -1540,6 +1540,10 @@ export default defineSchema({
   // organization write seams; `projection` is an explicit allowlist assembled
   // in orgTreeShared rather than a spread of the source document.
   spectraArtifactSummaries: defineTable({
+    // Versioned authority/read metadata.  Legacy rows may omit these fields
+    // until the bounded backfill has visited them; readers must use the
+    // canonical row only for that mixed-record repair path.
+    readModelVersion: v.optional(v.number()),
     artifactId: v.id("spectraArtifacts"),
     ownerAccountId: v.id("accounts"),
     schoolId: v.optional(v.id("schools")),
@@ -1552,6 +1556,14 @@ export default defineSchema({
     ),
     updatedAt: v.number(),
     searchText: v.string(),
+    createdAt: v.optional(v.number()),
+    createdFromThreadId: v.optional(v.id("spectraThreads")),
+    createdFromWorkspaceId: v.optional(v.id("spectraWorkspaces")),
+    aiRunId: v.optional(v.id("spectraAiRuns")),
+    currentVersionId: v.optional(v.id("spectraArtifactVersions")),
+    contentHash: v.optional(v.string()),
+    schemaVersion: v.optional(v.number()),
+    deletionGeneration: v.optional(v.number()),
     projection: v.any(),
   })
     .index("by_artifact", ["artifactId"])
@@ -1565,7 +1577,9 @@ export default defineSchema({
       "blueprintKey",
       "status",
       "updatedAt",
-    ]),
+    ])
+    .index("by_created_thread", ["createdFromThreadId", "updatedAt"])
+    .index("by_ai_run", ["aiRunId", "updatedAt"]),
 
   bridgeDevices: defineTable({
     accountId: v.id("accounts"),
@@ -3629,6 +3643,12 @@ export default defineSchema({
 
   spectraResultCards: defineTable({
     runId: v.id("spectraAiRuns"),
+    // New cards can be discovered without opening the run payload. Optional
+    // keeps old cards readable until the bounded card backfill completes.
+    ownerAccountId: v.optional(v.id("accounts")),
+    schoolId: v.optional(v.id("schools")),
+    runSummaryVersion: v.optional(v.number()),
+    runSummary: v.optional(v.any()),
     surface: v.union(
       v.literal("chat"),
       v.literal("workspace"),
@@ -3676,8 +3696,100 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_run", ["runId"])
+    .index("by_owner_updated", ["ownerAccountId", "updatedAt"])
+    .index("by_owner_surface_updated", ["ownerAccountId", "surface", "updatedAt"])
+    .index("by_owner_workspace_updated", ["ownerAccountId", "workspaceId", "updatedAt"])
+    .index("by_owner_artifact_updated", ["ownerAccountId", "artifactId", "updatedAt"])
+    .index("by_updated", ["updatedAt"])
     .index("by_workspace_status", ["workspaceId", "status"])
     .index("by_artifact_status", ["artifactId", "status"]),
+
+  // Live dock/list readers must not hydrate a result card's untrusted full
+  // provenance/evidence payload. The canonical card remains for explicit run
+  // trace/detail reads; this same-transaction row is the bounded hot shape.
+  spectraResultCardSummaries: defineTable({
+    readModelVersion: v.number(),
+    cardId: v.id("spectraResultCards"),
+    runId: v.id("spectraAiRuns"),
+    ownerAccountId: v.optional(v.id("accounts")),
+    schoolId: v.optional(v.id("schools")),
+    surface: v.union(
+      v.literal("chat"),
+      v.literal("workspace"),
+      v.literal("artifact"),
+    ),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("awaiting_confirmation"),
+      v.literal("awaiting_resolution"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    variant: v.union(
+      v.literal("status"),
+      v.literal("artifact"),
+      v.literal("thread"),
+      v.literal("operation"),
+      v.literal("error"),
+    ),
+    title: v.string(),
+    summary: v.optional(v.string()),
+    actions: v.array(
+      v.object({
+        key: v.string(),
+        label: v.string(),
+        targetType: v.optional(
+          v.union(
+            v.literal("artifact"),
+            v.literal("thread"),
+            v.literal("run"),
+            v.literal("workspace"),
+          ),
+        ),
+        targetId: v.optional(v.string()),
+      }),
+    ),
+    // Kept beside the card so result-card lists do not need a run join. It is
+    // the same bounded run projection used by the live tab, never the run row.
+    runSummary: v.optional(v.any()),
+    // This is compactResultCardForRead's allowlist, never the canonical
+    // evidence/provenance object.
+    provenance: v.optional(v.any()),
+    hiddenAt: v.optional(v.number()),
+    keptAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_card", ["cardId"])
+    .index("by_run", ["runId"])
+    .index("by_owner_updated", ["ownerAccountId", "updatedAt"])
+    .index("by_owner_surface_updated", ["ownerAccountId", "surface", "updatedAt"])
+    .index("by_owner_workspace_updated", ["ownerAccountId", "workspaceId", "updatedAt"])
+    .index("by_owner_artifact_updated", ["ownerAccountId", "artifactId", "updatedAt"])
+    .index("by_updated", ["updatedAt"]),
+
+  // A single durable fence lets hot readers retain a bounded legacy fallback
+  // during rollout, then stop probing canonical cards once the cursor-shaped
+  // backfill has completed. New card writes are maintained by the same
+  // transaction trigger after that fence is set.
+  spectraReadModelMigrations: defineTable({
+    key: v.string(),
+    version: v.number(),
+    state: v.union(
+      v.literal("running"),
+      v.literal("complete"),
+      v.literal("failed"),
+    ),
+    cursor: v.optional(v.string()),
+    scanned: v.number(),
+    repaired: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 
   spectraRunEvents: defineTable({
     runId: v.id("spectraAiRuns"),
@@ -3696,6 +3808,9 @@ export default defineSchema({
     runId: v.id("spectraAiRuns"),
     threadId: v.id("spectraThreads"),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
+    // Kept flat so an artifact-scoped dock can use an index without opening
+    // the canonical run row or decoding its context/plan payload.
+    artifactId: v.optional(v.id("spectraArtifacts")),
     surface: v.union(
       v.literal("chat"),
       v.literal("workspace"),
@@ -3799,6 +3914,8 @@ export default defineSchema({
     .index("by_account_updated", ["ownerAccountId", "updatedAt"])
     .index("by_account_run", ["ownerAccountId", "runId"])
     .index("by_account_thread", ["ownerAccountId", "threadId"])
+    .index("by_account_workspace", ["ownerAccountId", "workspaceId", "updatedAt"])
+    .index("by_account_artifact", ["ownerAccountId", "artifactId", "updatedAt"])
     .index("by_run", ["runId"])
     .index("by_thread", ["threadId"])
     .index("by_projection_version", ["projectionVersion", "updatedAt"]),

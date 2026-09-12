@@ -1626,11 +1626,23 @@ export function invalidateSpectraRunTabsCache() {
 }
 
 export async function getSpectraRunTabs(
-  options: { includeHidden?: boolean; limit?: number; force?: boolean } = {},
+  options: {
+    includeHidden?: boolean;
+    limit?: number;
+    force?: boolean;
+    threadId?: string;
+    workspaceId?: string;
+    artifactId?: string;
+    surface?: "chat" | "workspace" | "artifact";
+  } = {},
 ) {
   const qs = new URLSearchParams({ action: "runTabs" });
   if (options.includeHidden) qs.set("includeHidden", "true");
   if (options.limit) qs.set("limit", String(options.limit));
+  if (options.threadId) qs.set("threadId", options.threadId);
+  if (options.workspaceId) qs.set("workspaceId", options.workspaceId);
+  if (options.artifactId) qs.set("artifactId", options.artifactId);
+  if (options.surface) qs.set("surface", options.surface);
   const key = qs.toString();
   return coalesceInFlight(
     runTabsRequests,

@@ -482,7 +482,16 @@ export function useSpectraRun({
           !tabSnapshot.length ||
           Date.now() - tabsFetchedAt >= (hasActiveTabs ? 60_000 : 180_000)
         ) {
-          const result = await getSpectraRunTabs({ limit: 120 });
+          const result = await getSpectraRunTabs({
+            limit: 120,
+            threadId,
+            artifactId: threadId ? undefined : artifactId,
+            workspaceId: threadId || artifactId ? undefined : workspaceId,
+            surface:
+              surface === "artifacts"
+                ? "artifact"
+                : (surface as "chat" | "workspace" | "artifact"),
+          });
           tabSnapshot = result.runTabs;
           for (const tab of tabSnapshot) {
             displayedRunTabs.current.set(tab.runId, tab);

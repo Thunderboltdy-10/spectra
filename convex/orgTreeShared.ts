@@ -21,6 +21,7 @@ import {
 
 export type OrgCtx = QueryCtx | MutationCtx;
 export type OrgWriteCtx = MutationCtx;
+type SummaryWriteCtx = Pick<MutationCtx, "db">;
 export type OrgNode = Doc<"orgNodes">;
 export type OrgNodeKind = OrgNode["kind"];
 
@@ -37,6 +38,13 @@ const ARTIFACT_SUMMARY_EFFECT_DETAIL_CHARS = 180;
 const ARTIFACT_SUMMARY_PROVENANCE_ITEMS = 8;
 const ARTIFACT_SUMMARY_PROVENANCE_CHARS = 120;
 const ARTIFACT_SUMMARY_CONTEXT_CHARS = 400;
+
+/**
+ * Version of the small artifact record used by list, tree and authority
+ * reads.  Keep this separate from the artifact content/schema version: a
+ * content migration must not silently make a list reader hydrate the body.
+ */
+export const ARTIFACT_SUMMARY_READ_MODEL_VERSION = 2;
 
 function boundedSummaryText(value: string | undefined, limit: number) {
   return value?.slice(0, limit);
@@ -194,7 +202,7 @@ export function artifactSummarySearchText(
 }
 
 export async function upsertArtifactSummary(
-  ctx: OrgWriteCtx,
+  ctx: SummaryWriteCtx,
   artifact: Doc<"spectraArtifacts">,
 ) {
   const existing = await ctx.db
@@ -202,6 +210,7 @@ export async function upsertArtifactSummary(
     .withIndex("by_artifact", (q) => q.eq("artifactId", artifact._id))
     .unique();
   const value = {
+    readModelVersion: ARTIFACT_SUMMARY_READ_MODEL_VERSION,
     artifactId: artifact._id,
     ownerAccountId: artifact.ownerAccountId,
     schoolId: artifact.schoolId,
@@ -209,10 +218,51 @@ export async function upsertArtifactSummary(
     status: artifact.status,
     updatedAt: artifact.updatedAt,
     searchText: artifactSummarySearchText(artifact),
+    createdAt: artifact.createdAt,
+    createdFromThreadId: artifact.createdFrom?.threadId,
+    createdFromWorkspaceId: artifact.createdFrom?.workspaceId,
+    aiRunId: artifact.aiRunId,
+    currentVersionId: artifact.currentVersionId,
+    contentHash: artifact.contentHash,
+    schemaVersion: artifact.schemaVersion,
+    deletionGeneration: artifact.deletionGeneration,
     projection: artifactSummaryProjection(artifact),
   };
-  if (existing) await ctx.db.patch(existing._id, value);
-  else await ctx.db.insert("spectraArtifactSummaries", value);
+  if (existing) {
+    // A trigger and an explicit writer can both see the same artifact change.
+    // Avoid a second summary invalidation when the first seam already wrote the
+    // exact authoritative value.
+    const unchanged =
+      existing.readModelVersion === value.readModelVersion &&
+      existing.artifactId === value.artifactId &&
+      existing.ownerAccountId === value.ownerAccountId &&
+      existing.schoolId === value.schoolId &&
+      existing.blueprintKey === value.blueprintKey &&
+      existing.status === value.status &&
+      existing.updatedAt === value.updatedAt &&
+      existing.searchText === value.searchText &&
+      existing.createdAt === value.createdAt &&
+      existing.createdFromThreadId === value.createdFromThreadId &&
+      existing.createdFromWorkspaceId === value.createdFromWorkspaceId &&
+      existing.aiRunId === value.aiRunId &&
+      existing.currentVersionId === value.currentVersionId &&
+      existing.contentHash === value.contentHash &&
+      existing.schemaVersion === value.schemaVersion &&
+      existing.deletionGeneration === value.deletionGeneration &&
+      JSON.stringify(existing.projection) === JSON.stringify(value.projection);
+    if (!unchanged) await ctx.db.patch(existing._id, value);
+  } else await ctx.db.insert("spectraArtifactSummaries", value);
+}
+
+export async function deleteArtifactSummary(
+  ctx: SummaryWriteCtx,
+  artifactId: Id<"spectraArtifacts">,
+) {
+  const existing = await ctx.db
+    .query("spectraArtifactSummaries")
+    .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
+    .unique();
+  if (existing) await ctx.db.delete(existing._id);
 }
 
 export async function syncArtifactSummary(
@@ -221,11 +271,7 @@ export async function syncArtifactSummary(
 ) {
   const artifact = await ctx.db.get(artifactId);
   if (!artifact) {
-    const existing = await ctx.db
-      .query("spectraArtifactSummaries")
-      .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
-      .unique();
-    if (existing) await ctx.db.delete(existing._id);
+    await deleteArtifactSummary(ctx, artifactId);
     return null;
   }
   await upsertArtifactSummary(ctx, artifact);
@@ -831,7 +877,13 @@ async function syncWorkSummaryForSource(
 ) {
   if (kind !== "work") return;
   const artifactId = ctx.db.normalizeId("spectraArtifacts", sourceId);
-  if (artifactId) await syncArtifactSummary(ctx, artifactId);
+  if (!artifactId) return;
+  // Placement/name/move writes do not alter artifact metadata.  The summary
+  // is already maintained by artifact writers; only hydrate a legacy/missing
+  // row when a one-time repair is actually needed.
+  const summary = await artifactSummaryFor(ctx, artifactId);
+  if (!summary || summary.readModelVersion !== ARTIFACT_SUMMARY_READ_MODEL_VERSION)
+    await syncArtifactSummary(ctx, artifactId);
 }
 
 /**

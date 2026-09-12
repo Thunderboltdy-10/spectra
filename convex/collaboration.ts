@@ -1,4 +1,4 @@
-import { internalMutation, mutation } from "./_generated/server";
+import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import * as Y from "yjs";
 import { requireArtifactCapability } from "./spectraShared";

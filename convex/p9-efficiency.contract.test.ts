@@ -15,7 +15,7 @@ function exportedBlock(contents: string, name: string, nextName?: string) {
 }
 
 describe("P9.I2 Convex efficiency contracts", () => {
-  it("serves bounded run projections and repairs active tab drift", () => {
+  it("serves bounded run projections from targeted tab metadata", () => {
     const runs = source("./spectraRuns.ts");
     const listTabs = exportedBlock(
       runs,
@@ -25,8 +25,13 @@ describe("P9.I2 Convex efficiency contracts", () => {
 
     expect(listTabs).toContain("runSummary");
     expect(listTabs).toContain("threadTitle");
-    expect(listTabs).toContain("runIdsNeedingRepair");
-    expect(listTabs).toContain("projectRunTabSummary");
+    expect(listTabs).toContain("readTabRunSummary");
+    expect(listTabs).toContain("compactStoredResultCardSummary");
+    expect(listTabs).toContain("spectraResultCardSummaries");
+    expect(listTabs).toContain("by_account_workspace");
+    expect(listTabs).toContain("by_account_artifact");
+    expect(listTabs).not.toContain("projectRunTabSummary");
+    expect(listTabs).not.toContain("ctx.db.get(tab.runId)");
     expect(listTabs).not.toContain("ctx.db.get(tab.threadId)");
     expect(listTabs).not.toContain("contextSnapshot");
   });

@@ -402,6 +402,10 @@ export async function GET(request: NextRequest) {
       const runTabs = await spectraQuery("spectraRuns:listTabs", {
         includeHidden: params.get("includeHidden") === "true",
         limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+        threadId: params.get("threadId") ?? undefined,
+        workspaceId: params.get("workspaceId") ?? undefined,
+        artifactId: params.get("artifactId") ?? undefined,
+        surface: params.get("surface") ?? undefined,
       });
       return ok({ runTabs });
     }

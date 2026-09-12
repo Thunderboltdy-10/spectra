@@ -12,9 +12,15 @@ import {
   type OrgNodeCountKind,
 } from "./orgNodeAggregates";
 import {
+  deleteResultCardSummary,
   projectRunTabSummary,
   RUN_TAB_PROJECTION_VERSION,
+  upsertResultCardSummary,
 } from "./spectraRunProjection";
+import {
+  deleteArtifactSummary,
+  upsertArtifactSummary,
+} from "./orgTreeShared";
 import {
   plannerReminderSourceChanged,
   plannerReminderSourceGeneration,
@@ -50,9 +56,32 @@ triggers.register("spectraAiRuns", async (ctx, change) => {
     tabs.map((tab) =>
       ctx.innerDb.patch(tab._id, {
         projectionVersion: RUN_TAB_PROJECTION_VERSION,
+        artifactId: change.newDoc.artifactId,
         runSummary,
       }),
     ),
+  );
+  const cards = await ctx.innerDb
+    .query("spectraResultCards")
+    .withIndex("by_run", (q) => q.eq("runId", change.id))
+    .collect();
+  await Promise.all(
+    cards
+      .filter(
+        (card) =>
+          card.runSummaryVersion !== RUN_TAB_PROJECTION_VERSION ||
+          card.ownerAccountId !== change.newDoc.ownerAccountId ||
+          card.schoolId !== change.newDoc.schoolId ||
+          JSON.stringify(card.runSummary) !== JSON.stringify(runSummary),
+      )
+      .map((card) =>
+        ctx.innerDb.patch(card._id, {
+          ownerAccountId: change.newDoc.ownerAccountId,
+          schoolId: change.newDoc.schoolId,
+          runSummaryVersion: RUN_TAB_PROJECTION_VERSION,
+          runSummary,
+        }),
+      ),
   );
 });
 
@@ -71,7 +100,27 @@ triggers.register("spectraThreads", async (ctx, change) => {
   );
 });
 
+triggers.register("spectraResultCards", async (ctx, change) => {
+  if (change.newDoc)
+    await upsertResultCardSummary({ db: ctx.innerDb }, change.newDoc);
+  else await deleteResultCardSummary({ db: ctx.innerDb }, change.id);
+});
+
 triggers.register("spectraArtifacts", async (ctx, change) => {
+  // The changed document is already present in the mutation transaction.  Use
+  // it directly so every create/import/edit/checkpoint/rename/native
+  // promotion/deletion seam maintains the compact authority row without a
+  // second payload-bearing database read.  Physical deletion removes the
+  // summary in the same transaction; a deleted tombstone remains authoritative
+  // until the retention coordinator removes it.
+  if (change.newDoc) {
+    await upsertArtifactSummary({ db: ctx.innerDb }, change.newDoc);
+  } else {
+    await deleteArtifactSummary(
+      { db: ctx.innerDb },
+      change.id,
+    );
+  }
   if (plannerReminderSourceChanged(change.oldDoc, change.newDoc)) {
     await ctx.scheduler.runAfter(
       0,

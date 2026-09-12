@@ -1,12 +1,21 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
+import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 
 const modules = import.meta.glob("./**/*.ts");
 const credential = "bridge-batch-test-credential-00000001";
+
+function setupTest() {
+  const t = convexTest(schema, modules);
+  aggregateTest.register(t, "orgNodeCountByType");
+  aggregateTest.register(t, "orgNodeCountByWorkspace");
+  aggregateTest.register(t, "orgNodeCountByParent");
+  return t;
+}
 
 async function seedBridge(t: ReturnType<typeof convexTest>) {
   return t.run(async (ctx) => {
@@ -151,7 +160,7 @@ async function seedDeletedWrite(t: ReturnType<typeof convexTest>, state: "pendin
 
 describe("Bridge incremental cloud seam", () => {
   it("fails pending native writes after the work is deleted and releases replica payload refs", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const seeded = await seedDeletedWrite(t, "pending");
 
     const result = await t.mutation(api.bridgeSync.claimWrite, { credential });
@@ -175,7 +184,7 @@ describe("Bridge incremental cloud seam", () => {
   });
 
   it("fails an in-flight native write completion after the work is deleted", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const seeded = await seedDeletedWrite(t, "claimed");
 
     const result = await t.mutation(api.bridgeSync.completeWrite, {
@@ -197,7 +206,7 @@ describe("Bridge incremental cloud seam", () => {
   });
 
   it("does not claim a pending native structure operation after the work is deleted", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedBridge(t);
     const discovery = await t.mutation(api.bridgeSync.discoverResourcesPage, {
       credential,
@@ -248,7 +257,7 @@ describe("Bridge incremental cloud seam", () => {
   });
 
   it("isolates a malformed discovery entry while registering the rest of the page", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedBridge(t);
     const result = await t.mutation(api.bridgeSync.discoverResourcesPage, {
       credential,
@@ -283,7 +292,7 @@ describe("Bridge incremental cloud seam", () => {
   });
 
   it("preserves one work identity through rename and reports disappearance as unavailable", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedBridge(t);
     const discovery = await t.mutation(api.bridgeSync.discoverResourcesPage, {
       credential,
@@ -386,7 +395,7 @@ describe("Bridge incremental cloud seam", () => {
   });
 
   it("records a writer lock without claiming the file is up to date", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedBridge(t);
     const discovered = await t.mutation(api.bridgeSync.discoverResourcesPage, {
       credential,
@@ -434,7 +443,7 @@ describe("Bridge incremental cloud seam", () => {
   });
 
   it("clears a writer lock when Word finishes without a new revision", async () => {
-    const t = convexTest(schema, modules);
+    const t = setupTest();
     const fixture = await seedBridge(t);
     const discovered = await t.mutation(api.bridgeSync.discoverResourcesPage, {
       credential,

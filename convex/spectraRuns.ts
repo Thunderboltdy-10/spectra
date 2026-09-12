@@ -29,8 +29,13 @@ import { recordAgentInvocation, settleAgentInvocation } from "./agents";
 import { recordMeterEvent } from "./metering";
 import { writeAuditEvent } from "./auditShared";
 import {
+  compactResultCardForRead,
+  compactStoredResultCardSummary,
+  compactStoredRunTabSummary,
   projectRunTabSummary,
+  RESULT_CARD_SUMMARY_READ_MODEL_VERSION,
   RUN_TAB_PROJECTION_VERSION,
+  upsertResultCardSummary,
 } from "./spectraRunProjection";
 
 function usageTokenCounts(usage: unknown) {
@@ -248,6 +253,125 @@ async function requireActor(ctx: Parameters<typeof getAuthenticatedActor>[0]) {
   if (!actor)
     throw new Error("AUTH_NO_SCHOOL: An active school membership is required.");
   return actor;
+}
+
+function legacyTabRunFallback(
+  tab: Doc<"spectraRunTabs">,
+  card:
+    | Pick<Doc<"spectraResultCards">, "status" | "artifactId" | "updatedAt">
+    | null,
+) {
+  return {
+    _id: tab.runId,
+    executionId: undefined,
+    attemptId: undefined,
+    outcome: undefined,
+    status: card?.status ?? ("completed" as const),
+    phase: undefined,
+    sourceSurface: tab.surface,
+    threadId: tab.threadId,
+    workspaceId: tab.workspaceId,
+    artifactId: tab.artifactId ?? card?.artifactId,
+    userPrompt: "",
+    decision: undefined,
+    finalSummary: undefined,
+    error: undefined,
+    modelUsed: undefined,
+    providerUsed: undefined,
+    attemptCount: undefined,
+    recoveryState: undefined,
+    retryable: undefined,
+    traceDegraded: undefined,
+    selectedAgentId: undefined,
+    selectedAgentVersionId: undefined,
+    dockSummary: undefined,
+    createdAt: tab.createdAt,
+    updatedAt: Math.max(tab.updatedAt, card?.updatedAt ?? 0),
+  };
+}
+
+/** Current tabs are summary-only; a legacy row gets one bounded repair read. */
+async function readTabRunSummary(
+  ctx: Parameters<typeof requireActor>[0],
+  tab: Doc<"spectraRunTabs">,
+  card:
+    | Pick<Doc<"spectraResultCards">, "status" | "artifactId" | "updatedAt">
+    | null,
+) {
+  if (
+    tab.projectionVersion === RUN_TAB_PROJECTION_VERSION &&
+    tab.runSummary?._id === tab.runId
+  )
+    return compactStoredRunTabSummary(tab.runSummary);
+  const run = await ctx.db.get(tab.runId);
+  return run ? projectRunTabSummary(run) : legacyTabRunFallback(tab, card);
+}
+
+async function readCardRunSummary(
+  ctx: Parameters<typeof requireActor>[0],
+  card: Doc<"spectraResultCards"> | Doc<"spectraResultCardSummaries">,
+  actor: Awaited<ReturnType<typeof requireActor>>,
+): Promise<ReturnType<typeof projectRunTabSummary> | null> {
+  if ("cardId" in card) {
+    if (
+      card.ownerAccountId === actor._id &&
+      card.schoolId === actor.schoolId &&
+      card.readModelVersion === RESULT_CARD_SUMMARY_READ_MODEL_VERSION &&
+      card.runSummary &&
+      typeof card.runSummary === "object" &&
+      !Array.isArray(card.runSummary) &&
+      card.runSummary._id === card.runId
+    )
+      return compactStoredRunTabSummary(
+        card.runSummary as NonNullable<Doc<"spectraRunTabs">["runSummary"]>,
+      );
+    const canonical = await ctx.db.get(card.cardId);
+    return canonical ? readCardRunSummary(ctx, canonical, actor) : null;
+  }
+  if (
+    card.ownerAccountId === actor._id &&
+    card.schoolId === actor.schoolId &&
+    card.runSummaryVersion === RUN_TAB_PROJECTION_VERSION &&
+    card.runSummary
+  )
+    return compactStoredRunTabSummary(
+      card.runSummary as NonNullable<Doc<"spectraRunTabs">["runSummary"]>,
+    );
+  const tab = await ctx.db
+    .query("spectraRunTabs")
+    .withIndex("by_run", (q) => q.eq("runId", card.runId))
+    .take(10);
+  const projected = tab.find(
+    (row) =>
+      row.ownerAccountId === actor._id &&
+      (!row.schoolId || row.schoolId === actor.schoolId) &&
+      row.projectionVersion === RUN_TAB_PROJECTION_VERSION &&
+      row.runSummary?._id === card.runId,
+  )?.runSummary;
+  if (projected) return compactStoredRunTabSummary(projected);
+  const run = await ctx.db.get(card.runId);
+  return run &&
+    run.ownerAccountId === actor._id &&
+    run.schoolId === actor.schoolId
+    ? projectRunTabSummary(run)
+    : null;
+}
+
+const RESULT_CARD_READ_MODEL_MIGRATION_KEY = "spectraResultCardSummaries";
+
+async function resultCardReadModelIsComplete(
+  ctx: Parameters<typeof requireActor>[0],
+) {
+  const migration = await ctx.db
+    .query("spectraReadModelMigrations")
+    .withIndex("by_key", (q) =>
+      q.eq("key", RESULT_CARD_READ_MODEL_MIGRATION_KEY),
+    )
+    .unique();
+  return (
+    migration?.version === RESULT_CARD_SUMMARY_READ_MODEL_VERSION &&
+    migration.state === "complete"
+  );
 }
 
 async function requireOwnedRun(
@@ -685,6 +809,10 @@ export const beginRun = mutation({
     const runSummary = projectRunTabSummary(createdRun);
     const resultCardId = await ctx.db.insert("spectraResultCards", {
       runId,
+      ownerAccountId: actor._id,
+      schoolId: actor.schoolId,
+      runSummaryVersion: RUN_TAB_PROJECTION_VERSION,
+      runSummary,
       surface: args.sourceSurface,
       workspaceId,
       artifactId: effectiveArtifactId,
@@ -767,6 +895,7 @@ export const beginRun = mutation({
       await ctx.db.patch(canonicalTab._id, {
         runId,
         workspaceId,
+        artifactId: effectiveArtifactId,
         surface: args.sourceSurface,
         selected: true,
         hiddenAt: undefined,
@@ -791,6 +920,7 @@ export const beginRun = mutation({
         runId,
         threadId,
         workspaceId,
+        artifactId: effectiveArtifactId,
         surface: args.sourceSurface,
         selected: true,
         projectionVersion: RUN_TAB_PROJECTION_VERSION,
@@ -1396,18 +1526,54 @@ export const listTabs = query({
   args: {
     includeHidden: v.optional(v.boolean()),
     limit: v.optional(v.number()),
+    threadId: v.optional(v.id("spectraThreads")),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    surface: v.optional(vSurface),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
-    const tabs = await ctx.db
-      .query("spectraRunTabs")
-      .withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id))
-      .order("desc")
-      .take(Math.min(args.limit ?? 80, 200));
+    const readLimit = Math.min(args.limit ?? 80, 200);
+    const tabs = args.threadId
+      ? await ctx.db
+          .query("spectraRunTabs")
+          .withIndex("by_account_thread", (q) =>
+            q.eq("ownerAccountId", actor._id).eq("threadId", args.threadId!),
+          )
+          .order("desc")
+          .take(readLimit)
+      : args.workspaceId
+        ? await ctx.db
+            .query("spectraRunTabs")
+            .withIndex("by_account_workspace", (q) =>
+              q
+                .eq("ownerAccountId", actor._id)
+                .eq("workspaceId", args.workspaceId!),
+            )
+            .order("desc")
+            .take(readLimit)
+        : args.artifactId
+          ? await ctx.db
+              .query("spectraRunTabs")
+              .withIndex("by_account_artifact", (q) =>
+                q
+                  .eq("ownerAccountId", actor._id)
+                  .eq("artifactId", args.artifactId!),
+              )
+              .order("desc")
+              .take(readLimit)
+          : await ctx.db
+              .query("spectraRunTabs")
+              .withIndex("by_account_updated", (q) =>
+                q.eq("ownerAccountId", actor._id),
+              )
+              .order("desc")
+              .take(readLimit);
     const canonicalByThread = new Map<string, (typeof tabs)[number]>();
     for (const tab of tabs.filter(
       (row) =>
         row.schoolId === actor.schoolId &&
+        (!args.surface || row.surface === args.surface) &&
         (args.includeHidden || !row.hiddenAt),
     )) {
       const existing = canonicalByThread.get(tab.threadId);
@@ -1415,50 +1581,29 @@ export const listTabs = query({
         canonicalByThread.set(tab.threadId, tab);
     }
     const canonicalTabs = [...canonicalByThread.values()];
-    // Run tabs are intentionally denormalized, but a tab can be re-selected
-    // after its run reaches a terminal state. Re-project only active or
-    // identity-mismatched rows so the dock cannot keep showing Stop from a
-    // stale snapshot while idle tabs retain the bounded read path.
-    const runIdsNeedingRepair = [
-      ...new Set(
-        canonicalTabs
-          .filter(
-            (tab) =>
-              tab.runSummary?._id !== tab.runId ||
-              (tab.runSummary?.status !== undefined &&
-                isActiveRunStatus(tab.runSummary.status)),
-          )
-          .map((tab) => tab.runId),
-      ),
-    ];
-    const freshRuns = new Map<string, Doc<"spectraAiRuns">>();
-    await Promise.all(
-      runIdsNeedingRepair.map(async (runId) => {
-        const run = await ctx.db.get(runId);
-        if (run) freshRuns.set(String(runId), run);
-      }),
-    );
     return Promise.all(
       canonicalTabs.map(async (tab) => {
-        const cards = await ctx.db
-          .query("spectraResultCards")
+        const cardSummaries = await ctx.db
+          .query("spectraResultCardSummaries")
           .withIndex("by_run", (q) => q.eq("runId", tab.runId))
           .order("desc")
           .take(1);
-        const card = cards[0] ?? null;
-        const runSummary = freshRuns.has(String(tab.runId))
-          ? projectRunTabSummary(freshRuns.get(String(tab.runId))!)
-          : tab.runSummary ?? {
-              _id: tab.runId,
-              status: card?.status ?? ("completed" as const),
-              sourceSurface: tab.surface,
-              threadId: tab.threadId,
-              workspaceId: tab.workspaceId,
-              artifactId: card?.artifactId,
-              userPrompt: "",
-              createdAt: tab.createdAt,
-              updatedAt: Math.max(tab.updatedAt, card?.updatedAt ?? 0),
-            };
+        const cardSummary =
+          cardSummaries.find(
+            (row) =>
+              row.readModelVersion === RESULT_CARD_SUMMARY_READ_MODEL_VERSION &&
+              row.ownerAccountId === actor._id &&
+              row.schoolId === actor.schoolId,
+          ) ?? null;
+        const cards = cardSummary
+          ? []
+          : await ctx.db
+              .query("spectraResultCards")
+              .withIndex("by_run", (q) => q.eq("runId", tab.runId))
+              .order("desc")
+              .take(1);
+        const card = cardSummary ?? cards[0] ?? null;
+        const runSummary = await readTabRunSummary(ctx, tab, card);
         const { dockSummary, ...run } = runSummary;
         const {
           runSummary: _storedRunSummary,
@@ -1480,7 +1625,11 @@ export const listTabs = query({
             updatedAt: tab.updatedAt,
             lastRunId: tab.runId,
           },
-          card,
+          card: cardSummary
+            ? compactStoredResultCardSummary(cardSummary)
+            : cards[0]
+              ? compactResultCardForRead(cards[0])
+              : null,
           inputRequest: dockSummary?.inputRequest ?? null,
           checkpointSummary: dockSummary?.checkpointSummary,
           recentSteps: dockSummary?.recentSteps ?? [],
@@ -1491,14 +1640,23 @@ export const listTabs = query({
 });
 
 export const backfillRunTabProjections = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const tabs = await ctx.db
+  args: {
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.max(1, Math.min(args.limit ?? 100, 100));
+    const page = await ctx.db
       .query("spectraRunTabs")
-      .withIndex("by_projection_version", (q) =>
-        q.eq("projectionVersion", undefined),
-      )
-      .take(100);
+      .withIndex("by_account_updated")
+      .order("asc")
+      .paginate({ cursor: args.cursor ?? null, numItems: limit });
+    const tabs = page.page
+      .filter(
+        (tab) =>
+          tab.projectionVersion !== RUN_TAB_PROJECTION_VERSION ||
+          tab.runSummary?._id !== tab.runId,
+      );
     let updated = 0;
     let removed = 0;
     for (const tab of tabs) {
@@ -1514,11 +1672,108 @@ export const backfillRunTabProjections = internalMutation({
       await ctx.db.patch(tab._id, {
         projectionVersion: RUN_TAB_PROJECTION_VERSION,
         threadTitle: thread.title.slice(0, 120),
+        artifactId: run.artifactId,
         runSummary: projectRunTabSummary(run),
       });
       updated += 1;
     }
-    return { scanned: tabs.length, updated, removed };
+    return {
+      scanned: page.page.length,
+      updated,
+      removed,
+      cursor: page.isDone ? null : page.continueCursor,
+      done: page.isDone,
+    };
+  },
+});
+
+/** Fill card ownership/run metadata without a collect-all migration. */
+export const backfillResultCardReadModels = internalMutation({
+  args: {
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.max(1, Math.min(args.limit ?? 100, 100));
+    const migration = await ctx.db
+      .query("spectraReadModelMigrations")
+      .withIndex("by_key", (q) =>
+        q.eq("key", RESULT_CARD_READ_MODEL_MIGRATION_KEY),
+      )
+      .unique();
+    const restarting = args.cursor === undefined || args.cursor === null;
+    const baseScanned = restarting ? 0 : migration?.scanned ?? 0;
+    const baseRepaired = restarting ? 0 : migration?.repaired ?? 0;
+    const startedAt = Date.now();
+    const page = await ctx.db
+      .query("spectraResultCards")
+      .withIndex("by_updated")
+      .order("asc")
+      .paginate({ cursor: args.cursor ?? null, numItems: limit });
+    let updated = 0;
+    let skipped = 0;
+    for (const card of page.page) {
+      const needsRunProjection =
+        card.runSummaryVersion === RUN_TAB_PROJECTION_VERSION &&
+        Boolean(card.ownerAccountId && card.schoolId && card.runSummary);
+      let source = card;
+      let changed = false;
+      if (!needsRunProjection) {
+        const run = await ctx.db.get(card.runId);
+        if (!run) {
+          skipped += 1;
+          continue;
+        }
+        const runSummary = projectRunTabSummary(run);
+        await ctx.db.patch(card._id, {
+          ownerAccountId: run.ownerAccountId,
+          schoolId: run.schoolId,
+          runSummaryVersion: RUN_TAB_PROJECTION_VERSION,
+          runSummary,
+        });
+        source = {
+          ...card,
+          ownerAccountId: run.ownerAccountId,
+          schoolId: run.schoolId,
+          runSummaryVersion: RUN_TAB_PROJECTION_VERSION,
+          runSummary,
+        } as Doc<"spectraResultCards">;
+        changed = true;
+      }
+      if (await upsertResultCardSummary(ctx, source)) changed = true;
+      if (changed) updated += 1;
+      else skipped += 1;
+    }
+    // Replaying the first page after a completed migration is an idempotent
+    // check, not a reason to reopen the legacy fallback fence. If the replay
+    // discovers an actually stale/missing row, `updated` becomes non-zero and
+    // the fence correctly returns to running until the caller finishes pages.
+    const fenceStillValid =
+      migration?.version === RESULT_CARD_SUMMARY_READ_MODEL_VERSION &&
+      migration.state === "complete" &&
+      restarting &&
+      updated === 0;
+    const migrationComplete = page.isDone || fenceStillValid;
+    const migrationValue = {
+      key: RESULT_CARD_READ_MODEL_MIGRATION_KEY,
+      version: RESULT_CARD_SUMMARY_READ_MODEL_VERSION,
+      state: migrationComplete ? ("complete" as const) : ("running" as const),
+      cursor: migrationComplete ? undefined : page.continueCursor,
+      scanned: baseScanned + page.page.length,
+      repaired: baseRepaired + updated,
+      createdAt: migration?.createdAt ?? startedAt,
+      updatedAt: Date.now(),
+    };
+    if (migration)
+      await ctx.db.patch(migration._id, migrationValue);
+    else await ctx.db.insert("spectraReadModelMigrations", migrationValue);
+    return {
+      scanned: page.page.length,
+      updated,
+      skipped,
+      cursor: page.isDone ? null : page.continueCursor,
+      done: page.isDone,
+    };
   },
 });
 
@@ -1850,6 +2105,7 @@ export const selectTab = mutation({
         await ctx.db.patch(tab._id, {
           runId: targetRunId,
           workspaceId: targetRun.workspaceId,
+          artifactId: targetRun.artifactId,
           surface:
             targetRun.sourceSurface === "chat" ||
             targetRun.sourceSurface === "workspace" ||
@@ -1893,6 +2149,7 @@ export const selectTab = mutation({
         runId: targetRunId,
         threadId: targetThreadId,
         workspaceId: targetRun.workspaceId,
+        artifactId: targetRun.artifactId,
         surface,
         selected: true,
         projectionVersion: RUN_TAB_PROJECTION_VERSION,
@@ -2573,33 +2830,81 @@ export const listResultCards = query({
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
     const limit = Math.max(1, Math.min(args.limit ?? 20, 100));
-    const runs = await ctx.db
-      .query("spectraAiRuns")
-      .withIndex("by_account_created", (q) => q.eq("ownerAccountId", actor._id))
-      .order("desc")
-      .take(limit * 4);
-    const allowed = runs
-      .filter((run) => run.schoolId === actor.schoolId)
-      .filter((run) => !args.surface || run.sourceSurface === args.surface)
-      .filter(
-        (run) => !args.workspaceId || run.workspaceId === args.workspaceId,
+    const readLimit = limit * 8;
+    const indexed = args.workspaceId
+      ? await ctx.db
+          .query("spectraResultCardSummaries")
+          .withIndex("by_owner_workspace_updated", (q) =>
+            q.eq("ownerAccountId", actor._id).eq("workspaceId", args.workspaceId!),
+          )
+          .order("desc")
+          .take(readLimit)
+      : args.artifactId
+        ? await ctx.db
+            .query("spectraResultCardSummaries")
+            .withIndex("by_owner_artifact_updated", (q) =>
+              q.eq("ownerAccountId", actor._id).eq("artifactId", args.artifactId!),
+            )
+            .order("desc")
+            .take(readLimit)
+        : args.surface
+          ? await ctx.db
+              .query("spectraResultCardSummaries")
+              .withIndex("by_owner_surface_updated", (q) =>
+                q.eq("ownerAccountId", actor._id).eq("surface", args.surface!),
+              )
+              .order("desc")
+              .take(readLimit)
+          : await ctx.db
+              .query("spectraResultCardSummaries")
+              .withIndex("by_owner_updated", (q) =>
+                q.eq("ownerAccountId", actor._id),
+              )
+              .order("desc")
+              .take(readLimit);
+    // Old cards have no owner/index facts yet. Read a bounded tail only while
+    // the versioned backfill is incomplete and the new authoritative range is
+    // not enough to fill the requested page. Once the fence is complete, a
+    // short result set must not trigger a canonical-card probe.
+    const legacy =
+      !(await resultCardReadModelIsComplete(ctx)) && indexed.length < limit
+      ? await ctx.db
+          .query("spectraResultCards")
+          .withIndex("by_updated")
+          .order("desc")
+          .take(readLimit)
+      : [];
+    const rows = [
+      ...new Map(
+        [...indexed, ...legacy].map((card) => [
+          String("cardId" in card ? card.cardId : card._id),
+          card,
+        ]),
+      ).values(),
+    ]
+      .filter((card) =>
+        card.ownerAccountId === undefined || card.ownerAccountId === actor._id,
       )
-      .filter((run) => !args.artifactId || run.artifactId === args.artifactId);
-    const cards = (
-      await Promise.all(
-        allowed.map(async (run) => {
-          const rows = await ctx.db
-            .query("spectraResultCards")
-            .withIndex("by_run", (q) => q.eq("runId", run._id))
-            .collect();
-          return rows.map((card) => ({ ...card, run }));
-        }),
-      )
-    ).flat();
-    return cards
+      .filter((card) => card.schoolId === undefined || card.schoolId === actor.schoolId)
+      .filter((card) => !args.surface || card.surface === args.surface)
+      .filter((card) => !args.workspaceId || card.workspaceId === args.workspaceId)
+      .filter((card) => !args.artifactId || card.artifactId === args.artifactId)
       .filter((card) => args.includeHidden || !card.hiddenAt)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, limit);
+    return Promise.all(
+      rows.map(async (card) => {
+        const runSummary = await readCardRunSummary(ctx, card, actor);
+        if (!runSummary) return null;
+        const { dockSummary: _dockSummary, ...run } = runSummary;
+        return {
+          ...("cardId" in card
+            ? compactStoredResultCardSummary(card)
+            : compactResultCardForRead(card)),
+          run,
+        };
+      }),
+    ).then((cards) => cards.filter(Boolean));
   },
 });
 
@@ -2611,17 +2916,45 @@ export const listRecent = query({
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
     const limit = Math.max(1, Math.min(args.limit ?? 20, 100));
-    const runs = await ctx.db
-      .query("spectraAiRuns")
-      .withIndex("by_account_created", (q) => q.eq("ownerAccountId", actor._id))
+    const indexed = await ctx.db
+      .query("spectraResultCardSummaries")
+      .withIndex("by_owner_updated", (q) => q.eq("ownerAccountId", actor._id))
       .order("desc")
-      .take(limit * 3);
-    return runs
-      .filter((run) => run.schoolId === actor.schoolId)
-      .filter((run) =>
-        args.surface ? run.sourceSurface === args.surface : true,
+      .take(limit * 8);
+    const legacy =
+      !(await resultCardReadModelIsComplete(ctx)) && indexed.length < limit
+      ? await ctx.db
+          .query("spectraResultCards")
+          .withIndex("by_updated")
+          .order("desc")
+          .take(limit * 4)
+      : [];
+    const cards = [
+      ...new Map(
+        [...indexed, ...legacy].map((card) => [
+          String("cardId" in card ? card.cardId : card._id),
+          card,
+        ]),
+      ).values(),
+    ]
+      .filter((card) =>
+        card.ownerAccountId === undefined || card.ownerAccountId === actor._id,
       )
-      .slice(0, limit);
+      .filter((card) => card.schoolId === undefined || card.schoolId === actor.schoolId)
+      .filter((card) => !args.surface || card.surface === args.surface)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const seenRuns = new Set<string>();
+    const runs = [];
+    for (const card of cards) {
+      if (seenRuns.has(String(card.runId))) continue;
+      seenRuns.add(String(card.runId));
+      const runSummary = await readCardRunSummary(ctx, card, actor);
+      if (!runSummary) continue;
+      const { dockSummary: _dockSummary, ...run } = runSummary;
+      runs.push(run);
+      if (runs.length >= limit) break;
+    }
+    return runs;
   },
 });
 

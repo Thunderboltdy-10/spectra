@@ -45,6 +45,7 @@ const ARTIFACT_SUMMARY_CONTEXT_CHARS = 400;
  * content migration must not silently make a list reader hydrate the body.
  */
 export const ARTIFACT_SUMMARY_READ_MODEL_VERSION = 2;
+const ARTIFACT_REVISION_FACTS_READ_MODEL_VERSION = 1;
 
 function boundedSummaryText(value: string | undefined, limit: number) {
   return value?.slice(0, limit);
@@ -201,10 +202,47 @@ export function artifactSummarySearchText(
     .toLowerCase();
 }
 
+async function upsertArtifactRevisionFacts(
+  ctx: SummaryWriteCtx,
+  artifact: Doc<"spectraArtifacts">,
+) {
+  const existing = await ctx.db
+    .query("spectraArtifactRevisionFacts")
+    .withIndex("by_artifact", (q) => q.eq("artifactId", artifact._id))
+    .unique();
+  const value = {
+    readModelVersion: ARTIFACT_REVISION_FACTS_READ_MODEL_VERSION,
+    artifactId: artifact._id,
+    ownerAccountId: artifact.ownerAccountId,
+    schoolId: artifact.schoolId,
+    currentVersionId: artifact.currentVersionId,
+    contentHash: artifact.contentHash,
+    schemaVersion: artifact.schemaVersion,
+    deletionGeneration: artifact.deletionGeneration,
+    updatedAt: artifact.updatedAt,
+  };
+  if (
+    existing &&
+    existing.readModelVersion === value.readModelVersion &&
+    existing.artifactId === value.artifactId &&
+    existing.ownerAccountId === value.ownerAccountId &&
+    existing.schoolId === value.schoolId &&
+    existing.currentVersionId === value.currentVersionId &&
+    existing.contentHash === value.contentHash &&
+    existing.schemaVersion === value.schemaVersion &&
+    existing.deletionGeneration === value.deletionGeneration &&
+    existing.updatedAt === value.updatedAt
+  )
+    return;
+  if (existing) await ctx.db.patch(existing._id, value);
+  else await ctx.db.insert("spectraArtifactRevisionFacts", value);
+}
+
 export async function upsertArtifactSummary(
   ctx: SummaryWriteCtx,
   artifact: Doc<"spectraArtifacts">,
 ) {
+  await upsertArtifactRevisionFacts(ctx, artifact);
   const existing = await ctx.db
     .query("spectraArtifactSummaries")
     .withIndex("by_artifact", (q) => q.eq("artifactId", artifact._id))
@@ -222,10 +260,12 @@ export async function upsertArtifactSummary(
     createdFromThreadId: artifact.createdFrom?.threadId,
     createdFromWorkspaceId: artifact.createdFrom?.workspaceId,
     aiRunId: artifact.aiRunId,
-    currentVersionId: artifact.currentVersionId,
-    contentHash: artifact.contentHash,
-    schemaVersion: artifact.schemaVersion,
-    deletionGeneration: artifact.deletionGeneration,
+    // Kept explicitly undefined so old rows shed these revision-only fields
+    // on their first post-migration write instead of retaining hot-row churn.
+    currentVersionId: undefined,
+    contentHash: undefined,
+    schemaVersion: undefined,
+    deletionGeneration: undefined,
     projection: artifactSummaryProjection(artifact),
   };
   if (existing) {
@@ -263,6 +303,21 @@ export async function deleteArtifactSummary(
     .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
     .unique();
   if (existing) await ctx.db.delete(existing._id);
+  const revisionFacts = await ctx.db
+    .query("spectraArtifactRevisionFacts")
+    .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
+    .unique();
+  if (revisionFacts) await ctx.db.delete(revisionFacts._id);
+}
+
+export async function artifactRevisionFactsFor(
+  ctx: OrgCtx,
+  artifactId: Id<"spectraArtifacts">,
+) {
+  return ctx.db
+    .query("spectraArtifactRevisionFacts")
+    .withIndex("by_artifact", (q) => q.eq("artifactId", artifactId))
+    .unique();
 }
 
 export async function syncArtifactSummary(
@@ -1049,8 +1104,11 @@ export async function syncSourceNodes(
       });
   }
   if (kind === "work") {
-    const artifactId = ctx.db.normalizeId("spectraArtifacts", sourceId);
-    if (artifactId) await syncArtifactSummary(ctx, artifactId);
+    // Artifact writes already maintain the summary through the canonical
+    // spectraArtifacts trigger. A node/title/activity write must only repair a
+    // missing or old row; rereading the canonical body here doubled the hot
+    // write cost for every content checkpoint.
+    await syncWorkSummaryForSource(ctx, "work", sourceId);
   }
   return name;
 }
@@ -1164,7 +1222,6 @@ export async function renameNode(
     const artifactId = ctx.db.normalizeId("spectraArtifacts", node.sourceId);
     if (artifactId) {
       await ctx.db.patch(artifactId, { title: name, updatedAt: now });
-      await syncArtifactSummary(ctx, artifactId);
     }
   }
   if (node.kind === "thread" && node.sourceId) {

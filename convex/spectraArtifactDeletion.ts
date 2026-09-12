@@ -5,7 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { requireArtifactCapability } from "./spectraShared";
-import { syncArtifactSummary, tombstoneArtifactEmbeds } from "./orgTreeShared";
+import { tombstoneArtifactEmbeds } from "./orgTreeShared";
 import { releaseSnapshotObject, releaseVersionIfUnpinned } from "./artifactSnapshots";
 import { releaseArtifactIntakePage } from "./artifactIntakeLifecycle";
 import { releasePayloadIfUnreferenced } from "./payloadLifecycle";
@@ -422,7 +422,7 @@ export const process = internalMutation({
       lastError: undefined,
       ...(args.attemptId !== undefined && job.activeAttemptId === args.attemptId ? { activeAttemptId: undefined, activeAttemptAt: undefined } : {}),
     });
-    if (complete) await syncArtifactSummary(ctx, job.artifactId); else await schedule(ctx, job._id, job.generation, 25, { phase: nextPhase, cursor: nextCursor });
+    if (!complete) await schedule(ctx, job._id, job.generation, 25, { phase: nextPhase, cursor: nextCursor });
     return { complete, deletedRows: job.deletedRows + result.changed };
   },
 });

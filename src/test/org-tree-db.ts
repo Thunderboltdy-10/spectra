@@ -64,6 +64,9 @@ const INDEXES: Record<string, Record<string, string[]>> = {
       "updatedAt",
     ],
   },
+  spectraArtifactRevisionFacts: {
+    by_artifact: ["artifactId"],
+  },
   spectraThreads: {},
 };
 

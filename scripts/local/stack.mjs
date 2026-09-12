@@ -242,6 +242,19 @@ async function runProcess(command, args, options = {}) {
   });
 }
 
+function waitForProcessExit(child, label) {
+  return new Promise((resolveExit, rejectExit) => {
+    child.once("error", rejectExit);
+    child.once("exit", (code, signal) => {
+      if (code === 0) resolveExit();
+      else
+        rejectExit(
+          new Error(`${label} stopped with ${signal ?? `code ${code}`}.`),
+        );
+    });
+  });
+}
+
 async function terminatePid(pid) {
   if (!processExists(pid)) return;
   if (process.platform === "win32") {
@@ -284,9 +297,10 @@ async function portIsFree(port, host = "127.0.0.1") {
   });
 }
 
-async function assertPortsFree(ports) {
+async function assertPortsFree(ports, allowedPorts = new Set()) {
   for (const [name, port] of Object.entries(ports)) {
     if (name === "blockStart") continue;
+    if (allowedPorts.has(port)) continue;
     const host = name === "web" ? "localhost" : "127.0.0.1";
     if (!(await portIsFree(port, host))) {
       throw new Error(`Instance port ${port} (${name}) is already in use.`);
@@ -412,6 +426,78 @@ async function stopChild(child) {
 }
 
 async function configureAndSyncConvex(paths, ports, appEnv) {
+  const reusable = await existingLocalBackend(paths, ports);
+  if (reusable !== null) {
+    const selfHostedEnvPath = resolve(
+      paths.projectRoot,
+      ".convex-self-hosted.env",
+    );
+    await writeFile(
+      selfHostedEnvPath,
+      `CONVEX_SELF_HOSTED_URL=http://127.0.0.1:${ports.convexCloud}\n` +
+        `CONVEX_SELF_HOSTED_ADMIN_KEY=${reusable.adminKey}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    const childEnv = withLocalConvexCliEnv({
+      ...process.env,
+      ...appEnv,
+      CONVEX_SELF_HOSTED_URL: `http://127.0.0.1:${ports.convexCloud}`,
+      CONVEX_SELF_HOSTED_ADMIN_KEY: reusable.adminKey,
+    });
+    delete childEnv.CONVEX_DEPLOYMENT;
+    delete childEnv.CONVEX_DEPLOY_KEY;
+    try {
+      const convex = spawnService(
+        "Convex",
+        process.execPath,
+        [
+          convexCli,
+          "dev",
+          "--once",
+          "--env-file",
+          selfHostedEnvPath,
+          "--codegen",
+          "disable",
+          "--typecheck",
+          "disable",
+          "--tail-logs",
+          "disable",
+        ],
+        { cwd: paths.projectRoot, env: childEnv },
+      );
+      await waitForProcessExit(convex, "Offline local Convex sync");
+      const currentAppEnv = parseEnv(await readFile(paths.appEnv, "utf8"));
+      const backendEnv = convexEnvFrom(currentAppEnv);
+      await writeFile(paths.convexEnv, serializeEnv(backendEnv), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+      await runProcess(
+        process.execPath,
+        [
+          convexCli,
+          "env",
+          "set",
+          "--force",
+          "--env-file",
+          selfHostedEnvPath,
+          "--from-file",
+          paths.convexEnv,
+        ],
+        {
+          cwd: paths.projectRoot,
+          env: childEnv,
+          label: "Convex environment synchronization",
+        },
+      );
+      process.stdout.write(
+        `Reused saved local Convex deployment ${reusable.deploymentName} through its local endpoint.\n`,
+      );
+      return { deploymentName: reusable.deploymentName, child: null };
+    } finally {
+      await rm(selfHostedEnvPath, { force: true });
+    }
+  }
   const firstConfiguration = !existsSync(paths.convexConfig);
   if (firstConfiguration) {
     process.stdout.write(
@@ -464,6 +550,32 @@ async function configureAndSyncConvex(paths, ports, appEnv) {
     await stopChild(convex);
     throw error;
   }
+}
+
+async function existingLocalBackend(paths, ports) {
+  if (!existsSync(paths.convexConfig)) return null;
+  let config;
+  try {
+    config = JSON.parse(await readFile(paths.convexConfig, "utf8"));
+  } catch {
+    return null;
+  }
+  const deploymentName = String(config.deploymentName ?? "").trim();
+  const adminKey = String(config.adminKey ?? "").trim();
+  if (
+    !deploymentName ||
+    !adminKey ||
+    config.ports?.cloud !== ports.convexCloud ||
+    config.ports?.site !== ports.convexSite
+  ) {
+    return null;
+  }
+  const runningName = await fetchText(
+    `http://127.0.0.1:${ports.convexCloud}/instance_name`,
+  );
+  return runningName?.trim() === deploymentName
+    ? { deploymentName, adminKey }
+    : null;
 }
 
 async function readRuntimeState(paths) {
@@ -528,7 +640,13 @@ async function startInstance(instanceId, options, environment) {
       `Instance ${instanceId} cannot start. Fill ${paths.appEnv}:\n- ${problems.join("\n- ")}`,
     );
   }
-  await assertPortsFree(ports);
+  const reusableLocalBackend = await existingLocalBackend(paths, ports);
+  await assertPortsFree(
+    ports,
+    reusableLocalBackend
+      ? new Set([ports.convexCloud, ports.convexSite])
+      : undefined,
+  );
 
   const { deploymentName, child: convex } = await configureAndSyncConvex(
     paths,
@@ -540,7 +658,7 @@ async function startInstance(instanceId, options, environment) {
     ...parseEnv(await readFile(paths.appEnv, "utf8")),
     NODE_ENV: mode === "production" ? "production" : process.env.NODE_ENV,
   });
-  const children = [convex];
+  const children = [convex].filter(Boolean);
   let shuttingDown = false;
   let shutdownPromise = null;
 

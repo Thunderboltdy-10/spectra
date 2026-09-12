@@ -20,7 +20,7 @@ export type LiveDockInputRequest =
       clarificationId?: string;
       executionId?: string;
       prompt: string;
-      options: Array<{ key?: string; title: string; description?: string | null }>;
+      options: Array<{ key?: string; title: string; displayTitle?: string; description?: string | null }>;
     }
   | {
       kind: "choice_batch";
@@ -30,7 +30,7 @@ export type LiveDockInputRequest =
       questions: Array<{
         id: string;
         prompt: string;
-        options: Array<{ key?: string; title: string; description?: string | null }>;
+        options: Array<{ key?: string; title: string; displayTitle?: string; description?: string | null }>;
       }>;
     }
   | { kind: "short_answer"; prompt: string }

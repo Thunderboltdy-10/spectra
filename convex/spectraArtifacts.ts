@@ -36,7 +36,6 @@ import {
   placementsForSource,
   placeSourceNode,
   purgeSourceNodes,
-  syncArtifactSummary,
   syncSourceNodes,
   upsertArtifactSummary,
 } from "./orgTreeShared";
@@ -1307,7 +1306,6 @@ export const publishAgent = mutation({
       currentVersionId: versionId,
       updatedAt: now,
     });
-    await syncArtifactSummary(ctx, artifact._id);
     return {
       releaseId,
       versionId,
@@ -1996,7 +1994,6 @@ export const create = mutation({
       createdAt: now,
     });
     await ctx.db.patch(artifactId, { currentVersionId: versionId });
-    await syncArtifactSummary(ctx, artifactId);
     await incrementOperationalCounter(ctx, {
       schoolId: actor.schoolId,
       category: "artifact_created",
@@ -2092,7 +2089,6 @@ export const createImportedResource = mutation({
         lastActivityAt: now,
       });
     }
-    await syncArtifactSummary(ctx, artifactId);
     await incrementOperationalCounter(ctx, {
       schoolId: actor.schoolId,
       category: "artifact_created",
@@ -2378,7 +2374,6 @@ export const pausePendingForConflict = mutation({
           : artifact.summary,
       updatedAt: now,
     });
-    await syncArtifactSummary(ctx, artifact._id);
     return { paused: true };
   },
 });
@@ -2437,7 +2432,6 @@ export const patchPendingContent = mutation({
       },
       updatedAt: Date.now(),
     });
-    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId, progress };
   },
 });
@@ -2574,7 +2568,6 @@ export const updateAiEffect = mutation({
       },
       updatedAt: now,
     });
-    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId };
   },
 });
@@ -2675,7 +2668,6 @@ export const stageAiPatch = mutation({
       aiEffects: effects,
       updatedAt: now,
     });
-    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId };
   },
 });
@@ -2829,7 +2821,6 @@ export const discardPendingForRun = mutation({
     for (const artifact of pending) {
       await purgeSourceNodes(ctx, "work", artifact._id);
       await ctx.db.delete(artifact._id);
-      await syncArtifactSummary(ctx, artifact._id);
     }
     return { discarded: pending.length };
   },
@@ -2875,9 +2866,6 @@ export const pausePendingForApproval = mutation({
         }),
       ),
     );
-    await Promise.all(
-      pending.map((artifact) => syncArtifactSummary(ctx, artifact._id)),
-    );
     return { paused: pending.length };
   },
 });
@@ -2922,7 +2910,6 @@ export const failPendingForRun = mutation({
         if ((artifact.aiProgress ?? 0) <= 0.05 || hollowDefaults) {
           await purgeSourceNodes(ctx, "work", artifact._id);
           await ctx.db.delete(artifact._id);
-          await syncArtifactSummary(ctx, artifact._id);
           removed += 1;
           return;
         }
@@ -2939,7 +2926,6 @@ export const failPendingForRun = mutation({
             : artifact.summary,
           updatedAt: Date.now(),
         });
-        await syncArtifactSummary(ctx, artifact._id);
       }),
     );
     return { failed: pending.length - removed, removed };
@@ -3112,9 +3098,6 @@ export const settleStagedForRun = mutation({
         });
       }),
     );
-    await Promise.all(
-      staged.map((artifact) => syncArtifactSummary(ctx, artifact._id)),
-    );
     return { settled: staged.length };
   },
 });
@@ -3217,7 +3200,6 @@ export const markAiState = mutation({
         updatedAt: now,
       });
     }
-    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId };
   },
 });
@@ -3237,7 +3219,6 @@ export const dismissAiEdit = mutation({
       aiEffects: undefined,
       updatedAt: now,
     });
-    await syncArtifactSummary(ctx, args.artifactId);
     return { artifactId: args.artifactId, dismissed: true as const };
   },
 });
@@ -3337,7 +3318,6 @@ export const archive = mutation({
       status: "archived",
       updatedAt: Date.now(),
     });
-    await syncArtifactSummary(ctx, args.artifactId);
     await bumpPolicyVersion(
       ctx,
       artifact.blueprintKey === "agent" ? "agent" : "artifact",
@@ -3412,7 +3392,6 @@ export const ensurePersonalTimetable = mutation({
         tags: [...tags],
         updatedAt: Date.now(),
       });
-      await syncArtifactSummary(ctx, preferred._id);
       return { artifactId: preferred._id, created: false };
     }
     const now = Date.now();
@@ -3443,7 +3422,6 @@ export const ensurePersonalTimetable = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    await syncArtifactSummary(ctx, artifactId);
     return { artifactId, created: true };
   },
 });

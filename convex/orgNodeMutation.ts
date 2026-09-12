@@ -13,7 +13,9 @@ import {
 } from "./orgNodeAggregates";
 import {
   deleteResultCardSummary,
+  projectResultCardRunSummary,
   projectRunTabSummary,
+  RESULT_CARD_SUMMARY_READ_MODEL_VERSION,
   RUN_TAB_PROJECTION_VERSION,
   upsertResultCardSummary,
 } from "./spectraRunProjection";
@@ -52,34 +54,48 @@ triggers.register("spectraAiRuns", async (ctx, change) => {
     .withIndex("by_run", (q) => q.eq("runId", change.id))
     .collect();
   const runSummary = projectRunTabSummary(change.newDoc);
+  const cardRunSummary = projectResultCardRunSummary(change.newDoc);
   await Promise.all(
-    tabs.map((tab) =>
-      ctx.innerDb.patch(tab._id, {
-        projectionVersion: RUN_TAB_PROJECTION_VERSION,
-        artifactId: change.newDoc.artifactId,
-        runSummary,
-      }),
-    ),
+    tabs
+      .filter(
+        (tab) =>
+          tab.projectionVersion !== RUN_TAB_PROJECTION_VERSION ||
+          tab.artifactId !== change.newDoc!.artifactId ||
+          JSON.stringify(tab.runSummary) !== JSON.stringify(runSummary),
+      )
+      .map((tab) =>
+        ctx.innerDb.patch(tab._id, {
+          projectionVersion: RUN_TAB_PROJECTION_VERSION,
+          artifactId: change.newDoc!.artifactId,
+          runSummary,
+          updatedAt: Math.max(tab.updatedAt, change.newDoc!.updatedAt),
+        }),
+      ),
   );
-  const cards = await ctx.innerDb
-    .query("spectraResultCards")
+  // Run lifecycle writes are frequent and may only touch heartbeat/lease
+  // fields. Update the already-compact card rows directly; reading canonical
+  // cards here reopened evidence/provenance payloads on every run change and
+  // also bypassed the result-card trigger.
+  const cardSummaries = await ctx.innerDb
+    .query("spectraResultCardSummaries")
     .withIndex("by_run", (q) => q.eq("runId", change.id))
     .collect();
   await Promise.all(
-    cards
+    cardSummaries
       .filter(
         (card) =>
-          card.runSummaryVersion !== RUN_TAB_PROJECTION_VERSION ||
-          card.ownerAccountId !== change.newDoc.ownerAccountId ||
-          card.schoolId !== change.newDoc.schoolId ||
-          JSON.stringify(card.runSummary) !== JSON.stringify(runSummary),
+          card.readModelVersion !== RESULT_CARD_SUMMARY_READ_MODEL_VERSION ||
+          card.ownerAccountId !== change.newDoc!.ownerAccountId ||
+          card.schoolId !== change.newDoc!.schoolId ||
+          JSON.stringify(card.runSummary) !== JSON.stringify(cardRunSummary),
       )
       .map((card) =>
         ctx.innerDb.patch(card._id, {
-          ownerAccountId: change.newDoc.ownerAccountId,
-          schoolId: change.newDoc.schoolId,
-          runSummaryVersion: RUN_TAB_PROJECTION_VERSION,
-          runSummary,
+          readModelVersion: RESULT_CARD_SUMMARY_READ_MODEL_VERSION,
+          ownerAccountId: change.newDoc!.ownerAccountId,
+          schoolId: change.newDoc!.schoolId,
+          runSummary: cardRunSummary,
+          updatedAt: Math.max(card.updatedAt, change.newDoc!.updatedAt),
         }),
       ),
   );

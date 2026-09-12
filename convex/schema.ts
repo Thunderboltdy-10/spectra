@@ -1581,6 +1581,21 @@ export default defineSchema({
     .index("by_created_thread", ["createdFromThreadId", "updatedAt"])
     .index("by_ai_run", ["aiRunId", "updatedAt"]),
 
+  // Revision facts are needed by synchronization/detail consumers but are not
+  // part of the hot Library/board summary. Keeping them separate prevents a
+  // content checkpoint from changing an undisplayed field on every list row.
+  spectraArtifactRevisionFacts: defineTable({
+    readModelVersion: v.number(),
+    artifactId: v.id("spectraArtifacts"),
+    ownerAccountId: v.id("accounts"),
+    schoolId: v.optional(v.id("schools")),
+    currentVersionId: v.optional(v.id("spectraArtifactVersions")),
+    contentHash: v.optional(v.string()),
+    schemaVersion: v.optional(v.number()),
+    deletionGeneration: v.optional(v.number()),
+    updatedAt: v.number(),
+  }).index("by_artifact", ["artifactId"]),
+
   bridgeDevices: defineTable({
     accountId: v.id("accounts"),
     installationId: v.optional(v.string()),

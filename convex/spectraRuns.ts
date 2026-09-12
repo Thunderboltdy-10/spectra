@@ -20,7 +20,6 @@ import {
 } from "./spectraRunLifecycle";
 import {
   findPrimaryNode,
-  syncArtifactSummary,
   syncSourceNodes,
 } from "./orgTreeShared";
 import { releaseClaimsForRun } from "./regionClaims";
@@ -328,27 +327,9 @@ async function readCardRunSummary(
     const canonical = await ctx.db.get(card.cardId);
     return canonical ? readCardRunSummary(ctx, canonical, actor) : null;
   }
-  if (
-    card.ownerAccountId === actor._id &&
-    card.schoolId === actor.schoolId &&
-    card.runSummaryVersion === RUN_TAB_PROJECTION_VERSION &&
-    card.runSummary
-  )
-    return compactStoredRunTabSummary(
-      card.runSummary as NonNullable<Doc<"spectraRunTabs">["runSummary"]>,
-    );
-  const tab = await ctx.db
-    .query("spectraRunTabs")
-    .withIndex("by_run", (q) => q.eq("runId", card.runId))
-    .take(10);
-  const projected = tab.find(
-    (row) =>
-      row.ownerAccountId === actor._id &&
-      (!row.schoolId || row.schoolId === actor.schoolId) &&
-      row.projectionVersion === RUN_TAB_PROJECTION_VERSION &&
-      row.runSummary?._id === card.runId,
-  )?.runSummary;
-  if (projected) return compactStoredRunTabSummary(projected);
+  // Canonical cards are a legacy fallback only. Their embedded runSummary can
+  // be stale because run-only trigger writes intentionally no longer touch
+  // the heavy card row, so resolve the current run instead of trusting it.
   const run = await ctx.db.get(card.runId);
   return run &&
     run.ownerAccountId === actor._id &&
@@ -1972,7 +1953,6 @@ export const reconcileStaleRuns = internalMutation({
                   : artifact.summary,
               updatedAt: now,
             });
-            await syncArtifactSummary(ctx, artifact._id);
           }),
       );
       const indexedWorkspaces = await ctx.db

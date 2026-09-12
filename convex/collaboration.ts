@@ -11,7 +11,6 @@ import { bumpPolicyVersion } from "./authorityShared";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { syncArtifactSummary } from "./orgTreeShared";
 
 const RETIRED_ROOM_CLEANUP_BATCH = 128;
 
@@ -61,7 +60,6 @@ async function migrateLegacyTimetableState(
     lastSynchronizedAt: now,
     updatedAt: now,
   });
-  await syncArtifactSummary(ctx, artifact._id);
   return true;
 }
 

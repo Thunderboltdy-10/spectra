@@ -8,6 +8,7 @@ import {
   createEvidenceSpan,
   createVerifiedSource,
 } from "../src/features/spectra/sources/records";
+import { projectRunTabSummary, RUN_TAB_PROJECTION_VERSION } from "./spectraRunProjection";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -618,6 +619,7 @@ describe("AI run create and recovery lifecycle", () => {
         },
       }),
     );
+    const longTitlePrefix = "Same draft label ".repeat(14);
     const askingMessageId = await t.withIdentity(identity).mutation(
       api.spectraThreads.appendMessage,
       {
@@ -630,8 +632,20 @@ describe("AI run create and recovery lifecycle", () => {
           choices: {
             question: "Which draft?",
             options: [
-              { key: String(targets.biology), title: "Lab notes", description: "Biology" },
-              { key: String(targets.chemistry), title: "Lab notes", description: "Chemistry" },
+              ...Array.from({ length: 10 }, (_, index) => ({
+                key: `other-${index}`,
+                title: `Other option ${index}`,
+              })),
+              {
+                key: String(targets.biology),
+                title: `${longTitlePrefix}Biology draft`,
+                description: "Biology",
+              },
+              {
+                key: String(targets.chemistry),
+                title: `${longTitlePrefix}Chemistry draft`,
+                description: "Chemistry",
+              },
             ],
           },
         },
@@ -639,13 +653,55 @@ describe("AI run create and recovery lifecycle", () => {
     );
     const stored = await t.run((ctx) => ctx.db.get(askingMessageId));
     const metadata = stored?.metadata as Record<string, unknown>;
-    const clarification = metadata.clarification as { id: string; options: Array<{ key: string; title: string }> };
+    const clarification = metadata.clarification as { id: string; executionId: string; options: Array<{ key: string; title: string }> };
+    expect(clarification.options).toHaveLength(12);
+    expect(clarification.options[10]!.title.length).toBeGreaterThan(160);
+    expect(clarification.options[10]!.title.slice(0, 160)).toBe(clarification.options[11]!.title.slice(0, 160));
+    const selectedOption = clarification.options[11]!;
+    await t.run(async (ctx) => {
+      const run = await ctx.db.get(fixture.runId);
+      if (!run) throw new Error("asking run missing");
+      const inputRequest = {
+        kind: "choice",
+        messageId: askingMessageId,
+        clarificationId: clarification.id,
+        executionId: clarification.executionId,
+        prompt: "Which draft?",
+        options: clarification.options,
+      };
+      const now = Date.now();
+      const updatedRun = { ...run, dockSummary: { checkpointSummary: "Waiting for a choice", recentSteps: [], inputRequest }, updatedAt: now };
+      await ctx.db.patch(run._id, { dockSummary: updatedRun.dockSummary, updatedAt: now });
+      await ctx.db.insert("spectraRunTabs", {
+        ownerAccountId: fixture.accountId,
+        schoolId: fixture.schoolId,
+        runId: run._id,
+        threadId: fixture.threadId,
+        surface: "workspace",
+        selected: true,
+        projectionVersion: RUN_TAB_PROJECTION_VERSION,
+        threadTitle: "Lifecycle fixture",
+        runSummary: projectRunTabSummary(updatedRun),
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    const queriedTabs = await t.withIdentity(identity).query(api.spectraRuns.listTabs, {
+      threadId: fixture.threadId,
+      surface: "workspace",
+    });
+    const displayedChoice = (queriedTabs[0]?.inputRequest as {
+      options: Array<{ key?: string; title: string; displayTitle?: string }>;
+    } | null | undefined);
+    expect(displayedChoice?.options).toHaveLength(12);
+    expect(displayedChoice?.options[11]).toMatchObject({ key: selectedOption.key, title: selectedOption.title });
+    expect(displayedChoice?.options[10]?.title.slice(-16)).not.toBe(displayedChoice?.options[11]?.title.slice(-16));
     await t.withIdentity(identity).mutation(api.spectraThreads.selectMessageChoice, {
       messageId: askingMessageId,
       clarificationId: clarification.id,
       executionId: "execution-1",
-      choiceKey: clarification.options[1]!.key,
-      choiceTitle: clarification.options[1]!.title,
+      choiceKey: selectedOption.key,
+      choiceTitle: selectedOption.title,
     });
     for (let index = 0; index < 40; index += 1)
       await t.withIdentity(identity).mutation(api.spectraThreads.appendMessage, {
@@ -662,9 +718,17 @@ describe("AI run create and recovery lifecycle", () => {
       clarificationId: clarification.id,
       clarificationMessageId: askingMessageId,
       clarificationExecutionId: "execution-1",
-      choiceKey: clarification.options[1]!.key,
+      choiceKey: selectedOption.key,
     });
     expect(first.created).toBe(true);
+    const refreshedTabs = await t.withIdentity(identity).query(api.spectraRuns.listTabs, {
+      threadId: fixture.threadId,
+    });
+    expect(refreshedTabs[0]).toMatchObject({
+      runId: first.runId,
+      run: { status: "queued" },
+      card: { status: "queued" },
+    });
     const second = await t.withIdentity(identity).mutation(api.spectraRuns.beginRun, {
       sourceSurface: "chat",
       userPrompt: "Revise the selected draft",
@@ -673,16 +737,16 @@ describe("AI run create and recovery lifecycle", () => {
       clarificationId: clarification.id,
       clarificationMessageId: askingMessageId,
       clarificationExecutionId: "execution-1",
-      choiceKey: clarification.options[1]!.key,
+      choiceKey: selectedOption.key,
     });
     expect(second).toMatchObject({ created: false, runId: first.runId });
     const resolved = await t.withIdentity(identity).query(api.spectraThreads.getChoiceContinuation, {
       messageId: askingMessageId,
       clarificationId: clarification.id,
       executionId: "execution-1",
-      choiceKey: clarification.options[1]!.key,
+      choiceKey: selectedOption.key,
     });
-    expect(resolved.selection).toMatchObject({ key: clarification.options[1]!.key });
+    expect(resolved.selection).toMatchObject({ key: selectedOption.key, title: selectedOption.title });
     const askingRun = await t.run((ctx) => ctx.db.get(fixture.runId));
     expect(askingRun).toMatchObject({ status: "completed", outcome: "answer_only" });
     await t.withIdentity(identity).mutation(api.spectraRuns.claimExecution, {

@@ -1,13 +1,16 @@
 import { spawn } from "node:child_process";
 import { existsSync, openSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "..", "..");
-const runtimeRoot = resolve(repositoryRoot, ".spectra-local");
+const runtimeRoot = resolve(
+  repositoryRoot,
+  String(process.env.SPECTRA_LOCAL_ROOT ?? ".spectra-local").trim() || ".spectra-local",
+);
 const defaultBridgePort = 47615;
 const defaultTimeoutSeconds = 900;
 

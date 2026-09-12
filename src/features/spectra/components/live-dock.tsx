@@ -68,6 +68,14 @@ const activeStatuses = new Set([
 ]);
 const LIVE_DOCK_ACTIVE_POLL_MS = 1_000;
 
+function displayChoiceTitle(value: string) {
+  const limit = 160;
+  if (value.length <= limit) return value;
+  const suffixLength = Math.min(40, Math.floor((limit - 1) / 3));
+  const prefixLength = limit - 1 - suffixLength;
+  return `${value.slice(0, prefixLength)}…${value.slice(-suffixLength)}`;
+}
+
 let sharedTabs: SpectraRunTab[] = [];
 let sharedRefresh: Promise<void> | null = null;
 let refreshGeneration = 0;
@@ -1238,7 +1246,7 @@ export function LiveDock({
                                         }
                                         className={`rounded-chip border px-2 py-1.5 text-left text-micro font-semibold ${selected === option.key ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
                                       >
-                                        {option.title}
+                                        {option.displayTitle ?? displayChoiceTitle(option.title)}
                                       </button>
                                     ))}
                                     <button
@@ -1300,7 +1308,7 @@ export function LiveDock({
                                 className="rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-2 text-left hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
                               >
                                 <span className="block text-micro font-semibold text-[var(--text-primary)]">
-                                  {option.title}
+                                  {option.displayTitle ?? displayChoiceTitle(option.title)}
                                 </span>
                                 {option.description ? (
                                   <span className="mt-0.5 block line-clamp-2 text-micro leading-3.5 text-[var(--text-tertiary)]">

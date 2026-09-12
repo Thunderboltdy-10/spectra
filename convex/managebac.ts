@@ -10,7 +10,6 @@ import {
   ensureWorkspaceNode,
   findPrimaryNode,
   placeSourceNode,
-  syncArtifactSummary,
   DISSOLVE_CHILD_BATCH,
 } from "./orgTreeShared";
 import {
@@ -2477,7 +2476,6 @@ async function safelyRefreshProjection(
       }),
       updatedAt: now,
     });
-    await syncArtifactSummary(ctx, artifact._id);
     return true;
   }
   if (projection.projectionType === "timetable_event") {
@@ -2564,7 +2562,6 @@ async function safelyRefreshProjection(
         recordType: source.recordType,
         normalized,
       });
-    await syncArtifactSummary(ctx, legacy.artifact._id);
     return true;
   }
   return true;
@@ -2590,7 +2587,6 @@ async function markProjectionSourceRemoved(
       },
       updatedAt: Date.now(),
     });
-    await syncArtifactSummary(ctx, artifact._id);
     return;
   }
   if (projection.projectionType === "timetable_event") {
@@ -2647,7 +2643,6 @@ async function markProjectionSourceRemoved(
           updatedAt: now,
         });
     }
-    await syncArtifactSummary(ctx, legacy.artifact._id);
   }
 }
 

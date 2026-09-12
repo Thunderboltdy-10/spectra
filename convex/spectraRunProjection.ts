@@ -1,8 +1,8 @@
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 
-export const RUN_TAB_PROJECTION_VERSION = 2;
-export const RESULT_CARD_SUMMARY_READ_MODEL_VERSION = 1;
+export const RUN_TAB_PROJECTION_VERSION = 3;
+export const RESULT_CARD_SUMMARY_READ_MODEL_VERSION = 2;
 
 const RUN_PROMPT_CHARS = 2_000;
 const RUN_SUMMARY_CHARS = 1_200;
@@ -11,10 +11,24 @@ const RUN_STEP_CHARS = 320;
 const RUN_STEP_COUNT = 6;
 const RUN_INPUT_PROMPT_CHARS = 600;
 const RUN_INPUT_OPTION_CHARS = 160;
-const RUN_INPUT_OPTION_COUNT = 8;
 
 function bounded(value: unknown, limit: number) {
   return typeof value === "string" ? value.slice(0, limit) : undefined;
+}
+
+function exactString(value: unknown) {
+  return typeof value === "string" ? value : undefined;
+}
+
+function compactChoiceOption(option: Record<string, unknown>) {
+  const title = exactString(option.title) ?? "Option";
+  return {
+    // Keys and titles are selection payload, not display copy. Keep them
+    // byte-for-byte so a continuation can round-trip the offered identity.
+    key: exactString(option.key),
+    title,
+    description: bounded(option.description, RUN_INPUT_OPTION_CHARS),
+  };
 }
 
 function stableJson(value: unknown): string {
@@ -41,20 +55,15 @@ function compactInputRequest(value: unknown) {
             (option): option is Record<string, unknown> =>
               Boolean(option && typeof option === "object" && !Array.isArray(option)),
           )
-          .slice(0, RUN_INPUT_OPTION_COUNT)
-          .map((option) => ({
-            key: bounded(option.key, 80),
-            title: bounded(option.title, RUN_INPUT_OPTION_CHARS) ?? "Option",
-            description: bounded(option.description, RUN_INPUT_OPTION_CHARS),
-          }))
+          .map(compactChoiceOption)
       : [];
-    const messageId = bounded(source.messageId, 160);
+    const messageId = exactString(source.messageId);
     if (!messageId) return undefined;
     return {
       kind,
       messageId,
-      clarificationId: bounded(source.clarificationId, 160),
-      executionId: bounded(source.executionId, 160),
+      clarificationId: exactString(source.clarificationId),
+      executionId: exactString(source.executionId),
       prompt: bounded(source.prompt, RUN_INPUT_PROMPT_CHARS) ?? "Choose an option.",
       options,
     };
@@ -66,9 +75,8 @@ function compactInputRequest(value: unknown) {
             (question): question is Record<string, unknown> =>
               Boolean(question && typeof question === "object" && !Array.isArray(question)),
           )
-          .slice(0, 4)
           .map((question) => ({
-            id: bounded(question.id, 160) ?? "question",
+            id: exactString(question.id) ?? "question",
             prompt: bounded(question.prompt, RUN_INPUT_PROMPT_CHARS) ?? "Choose an option.",
             options: Array.isArray(question.options)
               ? question.options
@@ -76,22 +84,17 @@ function compactInputRequest(value: unknown) {
                     (option): option is Record<string, unknown> =>
                       Boolean(option && typeof option === "object" && !Array.isArray(option)),
                   )
-                  .slice(0, RUN_INPUT_OPTION_COUNT)
-                  .map((option) => ({
-                    key: bounded(option.key, 80),
-                    title: bounded(option.title, RUN_INPUT_OPTION_CHARS) ?? "Option",
-                    description: bounded(option.description, RUN_INPUT_OPTION_CHARS),
-                  }))
+                  .map(compactChoiceOption)
               : [],
           }))
       : [];
-    const messageId = bounded(source.messageId, 160);
+    const messageId = exactString(source.messageId);
     if (!messageId) return undefined;
     return {
       kind,
       messageId,
-      clarificationId: bounded(source.clarificationId, 160),
-      executionId: bounded(source.executionId, 160),
+      clarificationId: exactString(source.clarificationId),
+      executionId: exactString(source.executionId),
       questions,
     };
   }
@@ -186,6 +189,18 @@ export function compactStoredRunTabSummary(
   };
 }
 
+function compactResultCardRunSummary(
+  summary: NonNullable<Doc<"spectraRunTabs">["runSummary"]>,
+) {
+  const { dockSummary: _dockSummary, ...cardRunSummary } =
+    compactStoredRunTabSummary(summary);
+  return cardRunSummary;
+}
+
+export function projectResultCardRunSummary(run: Doc<"spectraAiRuns">) {
+  return compactResultCardRunSummary(projectRunTabSummary(run));
+}
+
 function compactProvenance(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value))
     return undefined;
@@ -225,10 +240,10 @@ export function compactResultCardForRead(card: Doc<"spectraResultCards">) {
     title: card.title.slice(0, 240),
     summary: card.summary?.slice(0, 1_200),
     actions: card.actions.slice(0, 16).map((action) => ({
-      key: action.key.slice(0, 80),
+      key: action.key,
       label: action.label.slice(0, 240),
       targetType: action.targetType,
-      targetId: action.targetId?.slice(0, 160),
+      targetId: action.targetId,
     })),
     hiddenAt: card.hiddenAt,
     keptAt: card.keptAt,
@@ -246,14 +261,42 @@ export async function upsertResultCardSummary(
   card: Doc<"spectraResultCards">,
 ) {
   const compact = compactResultCardForRead(card);
-  const runSummary =
+  const candidateRunSummary =
     card.runSummary &&
     typeof card.runSummary === "object" &&
     !Array.isArray(card.runSummary)
-      ? compactStoredRunTabSummary(
+      ? compactResultCardRunSummary(
           card.runSummary as NonNullable<Doc<"spectraRunTabs">["runSummary"]>,
         )
       : undefined;
+  const existing = await ctx.db
+    .query("spectraResultCardSummaries")
+    .withIndex("by_card", (q) => q.eq("cardId", card._id))
+    .unique();
+  const storedRunSummary =
+    existing?.runSummary &&
+    typeof existing.runSummary === "object" &&
+    !Array.isArray(existing.runSummary) &&
+    existing.runSummary._id === card.runId
+      ? compactResultCardRunSummary(
+          existing.runSummary as NonNullable<Doc<"spectraRunTabs">["runSummary"]>,
+        )
+      : undefined;
+  const candidateUpdatedAt =
+    typeof candidateRunSummary?.updatedAt === "number"
+      ? candidateRunSummary.updatedAt
+      : 0;
+  const storedUpdatedAt =
+    typeof storedRunSummary?.updatedAt === "number"
+      ? storedRunSummary.updatedAt
+      : 0;
+  // A card patch can follow a run-only trigger patch. In that case the
+  // canonical card still carries its older embedded runSummary; keep the
+  // newer compact value so card metadata writes cannot roll status backward.
+  const runSummary =
+    storedRunSummary && storedUpdatedAt > candidateUpdatedAt
+      ? storedRunSummary
+      : candidateRunSummary;
   const value = {
     readModelVersion: RESULT_CARD_SUMMARY_READ_MODEL_VERSION,
     cardId: card._id,
@@ -275,10 +318,6 @@ export async function upsertResultCardSummary(
     createdAt: compact.createdAt,
     updatedAt: compact.updatedAt,
   };
-  const existing = await ctx.db
-    .query("spectraResultCardSummaries")
-    .withIndex("by_card", (q) => q.eq("cardId", card._id))
-    .unique();
   if (existing) {
     const { _id: _summaryId, _creationTime: _created, ...previous } = existing;
     if (stableJson(previous) === stableJson(value)) return false;

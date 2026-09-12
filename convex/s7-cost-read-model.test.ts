@@ -459,6 +459,7 @@ describe("S7-COST compact authoritative read model", () => {
         tabs: (await ctx.db.query("spectraRunTabs").take(20)).length,
         cards: (await ctx.db.query("spectraResultCards").take(20)).length,
         cardSummaries: (await ctx.db.query("spectraResultCardSummaries").take(20)).length,
+        revisionFacts: (await ctx.db.query("spectraArtifactRevisionFacts").take(20)).length,
         readModelMigrations: (await ctx.db.query("spectraReadModelMigrations").take(20)).length,
       };
       return {
@@ -487,6 +488,7 @@ describe("S7-COST compact authoritative read model", () => {
       tabs: 2,
       cards: 2,
       cardSummaries: 2,
+      revisionFacts: 2,
       readModelMigrations: 1,
     });
     expect(measured.artifactBytes.large).toBeGreaterThan(100_000);
@@ -497,10 +499,13 @@ describe("S7-COST compact authoritative read model", () => {
     // characters; it is the only body-size-dependent part of this metadata
     // row, so its delta is capped while the canonical body can grow freely.
     expect(measured.summaryBytes.large - measured.summaryBytes.small).toBeLessThan(1_600);
-    expect(measured.storedTabBytes).toBeLessThan(measured.canonicalRunBytes / 10);
+    // Choice payloads retain every offered option and exact selection titles;
+    // the row remains bounded per field, but a large option list is allowed to
+    // make it larger than the older ten-percent proxy.
+    expect(measured.storedTabBytes).toBeLessThan(measured.canonicalRunBytes / 5);
     expect(measured.storedCardSummaryBytes).toBeLessThan(10_000);
     expect(measured.storedCardSummaryBytes).toBeLessThan(measured.storedCardBytes / 10);
-    expect(measured.compactTabResponseBytes).toBeLessThan(20_000);
+    expect(measured.compactTabResponseBytes).toBeLessThan(measured.canonicalRunBytes / 5);
     expect(measured.compactCardResponseBytes).toBeLessThan(20_000);
     console.info("S7_COST_MEASUREMENT", JSON.stringify(measured));
 

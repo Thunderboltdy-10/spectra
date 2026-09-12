@@ -13,7 +13,6 @@ import {
   findPrimaryNode,
   placeSourceNode,
   purgeSourceNodes,
-  syncArtifactSummary,
   syncSourceNodes,
 } from "./orgTreeShared";
 import { incrementOperationalCounter } from "./operationalCounters";
@@ -293,8 +292,7 @@ function choiceRequest(metadata: unknown, messageId: string): ChoiceRequest | nu
   if (
     typeof choices.question === "string" &&
     choices.question.trim() &&
-    options.length >= 2 &&
-    options.length <= 6
+    options.length >= 2
   )
     return {
       kind: "choice",
@@ -714,7 +712,7 @@ export const selectMessageChoice = mutation({
           clarificationId: clarification.id,
           executionId: args.executionId,
           key: args.choiceKey,
-          title: validated.canonicalTitle.slice(0, 200),
+          title: validated.canonicalTitle,
           ...(validated.selections ? { selections: validated.selections } : {}),
           selectedAt: now,
         },
@@ -750,7 +748,7 @@ export const selectMessageChoice = mutation({
     return {
       selected: true,
       alreadySelected: false,
-      choiceTitle: validated.canonicalTitle.slice(0, 200),
+      choiceTitle: validated.canonicalTitle,
     };
   },
 });
@@ -1647,7 +1645,6 @@ export const migrateLegacyThreadReferences = internalMutation({
         ...links.map((link) => ctx.db.delete(link._id)),
       ]);
       await ctx.db.delete(artifact._id);
-      await syncArtifactSummary(ctx, artifact._id);
       removed += 1;
     }
     return {

@@ -147,6 +147,7 @@ import {
 import { Equation, InlineEquation } from "../editor/equation-node";
 import type { SpectraSandboxAsset } from "../embed/sandbox-protocol";
 import { spectraBus } from "../events";
+import type { SpectraCommandOutcome } from "../events/contracts";
 import { acknowledgeViewportReady } from "../viewport-readiness";
 import {
   normalizePresentationContent,
@@ -3050,6 +3051,11 @@ function ArtifactStudioEditor({
       if (input.artifactId !== artifact._id) return;
       setRequestedComment(null);
       setCommentsOpen(true);
+      return {
+        status: "completed",
+        message: "Comments opened.",
+        data: { artifactId: artifact._id },
+      } satisfies SpectraCommandOutcome;
     });
     const removeAdd = spectraBus.handle("comments.add", (input) => {
       if (input.artifactId !== artifact._id) return;

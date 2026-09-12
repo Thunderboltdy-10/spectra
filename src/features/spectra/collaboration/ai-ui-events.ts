@@ -82,6 +82,18 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
+  if (event.key === "bridge_setup") {
+    noteAiSurface({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      route: "settings",
+      target: "devices",
+      note:
+        typeof event.payload?.note === "string"
+          ? event.payload.note
+          : "Open Bridge settings to finish setup",
+    });
+    return;
+  }
   if (event.key !== "navigate" && event.key !== "navigate_spectra") return;
   const destination = event.payload?.destination;
   const targetId = event.payload?.targetId;

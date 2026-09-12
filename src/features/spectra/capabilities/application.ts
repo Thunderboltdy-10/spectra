@@ -338,27 +338,25 @@ const APP_SPECS: readonly AppSpec[] = [
     description:
       "Bridge pairing changes local security authority and must be performed by the user.",
     risk: "always-confirm",
-    availability: { reason: "Bridge pairing is never AI-performable." },
+    availability: "readable",
     choreography: { target: "settings-security" },
     exposed: false,
   },
   {
     id: "app.bridge.setup",
     description:
-      "Continue Bridge setup from the browser: pair the device, choose a location, or retry a truthful recovery step.",
-    risk: "always-confirm",
-    availability: { reason: "Bridge setup is a human browser action." },
+      "Prepare the exact Bridge settings handoff for pairing, folder selection, or a truthful recovery retry; the user completes local consent.",
+    risk: "safe",
+    availability: "readable",
     choreography: { target: "settings-security", region: "bridge-setup" },
-    exposed: false,
+    exposed: true,
   },
   {
     id: "app.bridge.policy.change",
     description:
       "Change the Bridge trust preset through the existing account policy path.",
     risk: "always-confirm",
-    availability: {
-      reason: "Bridge trust changes require an explicit human confirmation.",
-    },
+    availability: "readable",
     choreography: { target: "settings-control", region: "bridge-trust" },
     exposed: false,
   },

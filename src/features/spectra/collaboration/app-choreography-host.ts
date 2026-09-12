@@ -23,6 +23,7 @@ import { disengageFollow, isProgrammaticFollowOpen } from "./follow";
 import { getSpectraMotionSnapshot } from "../motion/motion-level";
 import { capabilityById } from "../capabilities/catalog";
 import { spectraBus } from "../events";
+import type { SpectraCommandOutcome } from "../events/contracts";
 import { announceManualViewportInteraction } from "../viewport-readiness";
 import type { ActorIdentity } from "./interaction-model";
 
@@ -33,6 +34,7 @@ const UI_EVENT_CAPABILITY: Record<string, string> = {
   memory_written: "app.memory.write",
   sharing_changed: "app.sharing.change",
   managebac_sync_requested: "app.managebac.sync",
+  bridge_setup: "app.bridge.setup",
   navigate: "app.navigate",
   navigate_spectra: "app.navigate",
 };
@@ -201,6 +203,10 @@ export function startAppChoreographyMaintenance(): () => void {
   const removeStopFollowing = spectraBus.handle("follow.stopRequested", () => {
     disengageFollowAi();
     disengageFollow("explicit");
+    return {
+      status: "completed",
+      message: "Follow mode stopped. Durable work continues.",
+    } satisfies SpectraCommandOutcome;
   });
   window.addEventListener("pointerdown", onInput, true);
   window.addEventListener("keydown", onInput, true);

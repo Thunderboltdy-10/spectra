@@ -418,6 +418,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     title: "Delete Library items",
     icon: FileX2,
     description: "Move selected Library items through the recoverable tree deletion path.",
+    parameters: [{ name: "targetIds", label: "Library item IDs", kind: "item", required: true, placeholder: "Comma-separated node IDs" }],
     presentation: { kind: "button", compact: { iconOnly: true }, medium: { label: "Delete" } },
     defaultPlacement: { tab: "Library", group: "Organization", order: 1 },
     risk: "always-confirm",
@@ -431,6 +432,23 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     icon: FolderTree,
     description:
       "Create, rename, move, or link Library nodes through the canonical organization path.",
+    parameters: [
+      {
+        name: "action",
+        label: "Action",
+        kind: "select",
+        required: true,
+        options: [
+          { value: "create_folder", label: "Create folder" },
+          { value: "rename", label: "Rename" },
+          { value: "move", label: "Move" },
+          { value: "link", label: "Link" },
+        ],
+      },
+      { name: "targetIds", label: "Library item IDs", kind: "item", placeholder: "Comma-separated node IDs" },
+      { name: "destinationId", label: "Destination ID", kind: "item" },
+      { name: "name", label: "Name", kind: "text" },
+    ],
     presentation: {
       kind: "menu",
       compact: { iconOnly: true },
@@ -447,6 +465,10 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     title: "Change sync policy",
     icon: DatabaseZap,
     description: "Change storage and sync behavior through the shared N6 policy path.",
+    parameters: [
+      { name: "targetIds", label: "Library item IDs", kind: "item", required: true, placeholder: "Comma-separated node IDs" },
+      { name: "patch", label: "Policy JSON", kind: "textarea", required: true, placeholder: '{"syncMode":"spectra"}' },
+    ],
     presentation: { kind: "menu", compact: { iconOnly: true }, medium: { label: "Sync policy" } },
     defaultPlacement: { tab: "Settings", group: "Files & devices", order: 1 },
     risk: "always-confirm",
@@ -459,6 +481,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     title: "Update memory",
     icon: Brain,
     description: "Create or revise permission-bound memory with attribution and history.",
+    parameters: [{ name: "content", label: "Memory", kind: "textarea", required: true, placeholder: "What should Spectra remember?" }],
     presentation: { kind: "button", compact: { iconOnly: true }, medium: { label: "Remember" } },
     defaultPlacement: { tab: "Context", group: "Memory", order: 0 },
     risk: "safe",
@@ -471,6 +494,11 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     title: "Change sharing",
     icon: Share2,
     description: "Change access to a work item or workspace through the shared permissions path.",
+    parameters: [
+      { name: "resourceType", label: "Resource type", kind: "select", required: true, options: [{ value: "workspace", label: "Workspace" }, { value: "artifact", label: "Work" }, { value: "agent", label: "Agent" }] },
+      { name: "resourceId", label: "Resource ID", kind: "item", required: true },
+      { name: "action", label: "Action", kind: "select", required: true, options: [{ value: "invite", label: "Invite" }, { value: "change_level", label: "Change level" }, { value: "revoke", label: "Revoke" }] },
+    ],
     presentation: { kind: "menu", compact: { iconOnly: true }, medium: { label: "Share" } },
     defaultPlacement: { tab: "General", group: "Collaboration", order: 0 },
     risk: "always-confirm",
@@ -495,6 +523,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     title: "Choose ManageBac classes",
     icon: SlidersHorizontal,
     description: "Choose the ManageBac classes whose verified details may enter your Spectra planning scope.",
+    parameters: [{ name: "recordIds", label: "Class record IDs", kind: "item", required: true, placeholder: "Comma-separated record IDs" }],
     presentation: { kind: "menu", compact: { iconOnly: true }, medium: { label: "Choose classes" } },
     defaultPlacement: { tab: "Settings", group: "Integrations", order: 1 },
     risk: "confirm",
@@ -639,6 +668,21 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     icon: KeyRound,
     description:
       "Pair Bridge, choose a folder, or retry a connection from the normal browser settings surface.",
+    parameters: [
+      {
+        name: "action",
+        label: "Setup step",
+        kind: "select",
+        required: true,
+        options: [
+          { value: "pair", label: "Pair Bridge" },
+          { value: "select-location", label: "Choose a folder" },
+          { value: "retry-connection", label: "Retry connection" },
+          { value: "retry-folder", label: "Retry folder" },
+        ],
+      },
+      { name: "grantId", label: "Folder grant ID", kind: "item", placeholder: "Required for retry-folder" },
+    ],
     availability: () => ({
       state: "disabled",
       reason: "Bridge setup is a human browser action.",
@@ -661,6 +705,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     icon: DatabaseZap,
     description:
       "Apply a Bridge trust preset with a concrete local-versus-cloud preview.",
+    parameters: [{ name: "preset", label: "Trust preset", kind: "select", required: true, options: [{ value: "managed-copy", label: "Managed copy" }, { value: "native-sync", label: "Native sync" }, { value: "advanced", label: "Advanced" }] }],
     availability: () => ({
       state: "disabled",
       reason: "Bridge trust changes require an explicit human confirmation.",

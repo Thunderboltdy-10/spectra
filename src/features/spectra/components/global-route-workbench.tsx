@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { spectraBus } from "../events";
+import type { SpectraCommandOutcome } from "../events/contracts";
 import { WorkbenchLiveStack } from "../pages/workbench-live-stack";
 import {
   CommandBar,
@@ -61,9 +62,13 @@ export function GlobalRouteWorkbench() {
 
   useEffect(() => {
     if (!eligible) return;
-    return spectraBus.handle("run.stopRequested", ({ runId }) => {
+    return spectraBus.handle("run.stopRequested", async ({ runId }) => {
       if (runId && runEngine.activeRunId && runEngine.activeRunId !== runId) return;
-      void runEngine.stop(runId);
+      await runEngine.stop(runId);
+      return {
+        status: "completed",
+        message: "Stop requested. Committed work remains available.",
+      } satisfies SpectraCommandOutcome;
     });
   }, [eligible, runEngine]);
 

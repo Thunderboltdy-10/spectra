@@ -79,6 +79,7 @@ import { OrganizerRail, type OrganizerLocation } from "./organizer-rail";
 import { OrganizerRow, ROW_HEIGHT, type RowCallbacks } from "./organizer-row";
 import { WorkBoard } from "./work-board";
 import { spectraBus } from "../events";
+import type { SpectraCommandOutcome } from "../events/contracts";
 import { subscribeIdleSurfaceRefresh } from "../data/idle-surface";
 import { LIBRARY_IMPORT_ACCEPT } from "./library-import";
 import {
@@ -516,7 +517,10 @@ export function LibraryOrganizer({
             input.name.trim(),
             input.destinationId ?? currentParentRef.current,
           );
-          return;
+          return {
+            status: "completed",
+            message: "Library folder created.",
+          } satisfies SpectraCommandOutcome;
         }
         if (input.targetIds.length === 0)
           throw new Error("LIBRARY_TARGETS_REQUIRED");
@@ -527,16 +531,26 @@ export function LibraryOrganizer({
             input.targetIds[0]!,
             input.name.trim(),
           );
-          return;
+          return {
+            status: "completed",
+            message: "Library item renamed.",
+          } satisfies SpectraCommandOutcome;
         }
         if (!input.destinationId)
           throw new Error("LIBRARY_DESTINATION_REQUIRED");
         if (input.action === "move") {
           await actionsRef.current.move(input.targetIds, input.destinationId);
-          return;
+          return {
+            status: "completed",
+            message: "Library items moved.",
+          } satisfies SpectraCommandOutcome;
         }
         for (const nodeId of input.targetIds)
           await actionsRef.current.createReference(nodeId, input.destinationId);
+        return {
+          status: "completed",
+          message: "Library references created.",
+        } satisfies SpectraCommandOutcome;
       },
     );
     const removeDelete = spectraBus.handle(
@@ -544,6 +558,10 @@ export function LibraryOrganizer({
       async ({ targetIds }) => {
         if (!targetIds.length) throw new Error("LIBRARY_TARGETS_REQUIRED");
         await actionsRef.current.trash(targetIds);
+        return {
+          status: "completed",
+          message: "Library items moved to Trash.",
+        } satisfies SpectraCommandOutcome;
       },
     );
     return () => {

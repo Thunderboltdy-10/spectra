@@ -93,6 +93,7 @@ export type CommandEffectContract = {
 export type CommandExecutionStatus =
   | "completed"
   | "pending"
+  | "needs-human"
   | "failed"
   | "cancelled"
   | "unavailable";

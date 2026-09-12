@@ -49,6 +49,7 @@ export function ChatBrowserPanel({
   onWidthChange,
   onOpenChat,
   onClose,
+  overlay = false,
 }: {
   scope: ChatBrowserScope;
   workspaceId?: string;
@@ -58,6 +59,8 @@ export function ChatBrowserPanel({
   onWidthChange?: (width: number) => void;
   onOpenChat: (thread: SpectraThread) => void;
   onClose: () => void;
+  /** Workbench allocation promotes the browser over the canvas when crowded. */
+  overlay?: boolean;
 }) {
   const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [query, setQuery] = useState("");
@@ -224,10 +227,12 @@ export function ChatBrowserPanel({
       ) : null}
       <aside
         ref={panelRef}
+        data-studio-panel={!isMobile ? "" : undefined}
+        data-split-overlay={!isMobile && overlay ? "" : undefined}
         role={isMobile ? "dialog" : undefined}
         aria-modal={isMobile ? true : undefined}
         aria-label="Chat browser"
-        className={`${isMobile ? "fixed inset-0 z-modal w-full" : "absolute inset-y-0 right-0 z-panel"} flex min-w-0 flex-col overflow-hidden border-[var(--border-default)] bg-[var(--bg-primary)] shadow-hover ${isMobile ? "border-t" : "border-l"}`}
+        className={`${isMobile ? "fixed inset-0 z-modal w-full" : overlay ? "absolute inset-y-0 right-0 z-panel" : "relative z-chrome h-full shrink-0"} flex min-w-0 flex-col overflow-hidden border-[var(--border-default)] bg-[var(--bg-primary)] shadow-hover ${isMobile ? "border-t" : "border-l"}`}
         style={isMobile ? undefined : { width: `min(${width ?? 440}px, calc(100vw - 24px))` }}
       >
       {onWidthChange && !isMobile ? <button type="button" aria-label="Resize chat browser" title="Resize" className="absolute inset-y-0 left-0 z-chrome w-2 -translate-x-1/2 cursor-ew-resize bg-transparent transition-colors hover:bg-[color-mix(in_oklab,var(--brand-primary)_24%,transparent)]" onPointerDown={(event) => { event.preventDefault(); setResizing(true); }} /> : null}

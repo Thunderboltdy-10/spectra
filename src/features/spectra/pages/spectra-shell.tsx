@@ -114,7 +114,11 @@ import {
   type BoardGroupBy,
 } from "../organization/tree-client";
 import { spectraBus } from "../events";
-import { acknowledgeViewportReady } from "../viewport-readiness";
+import type { SpectraCommandOutcome } from "../events/contracts";
+import {
+  acknowledgeViewportReady,
+  requestViewportAction,
+} from "../viewport-readiness";
 import {
   syncSpectraManageBac,
   selectSpectraManageBacClasses,
@@ -1196,11 +1200,12 @@ export function SpectraShell({
   const sidebarRailedRef = useRef(false);
   /** A drag sets the intent and outranks default priority in the allocator. */
   const notePaneIntent = useCallback(
-    (pane: "studio" | "thread" | "run", width: number) => {
+    (pane: "studio" | "thread" | "run" | "chat-browser", width: number) => {
       paneRecencyRef.current[pane] = Date.now();
       if (pane === "studio") setStudioPanelWidth(width);
       else if (pane === "thread") setLiveThreadPanelWidth(width);
-      else setRunPanelWidth(width);
+      else if (pane === "run") setRunPanelWidth(width);
+      else setChatBrowserWidth(width);
     },
     [],
   );
@@ -1770,9 +1775,22 @@ export function SpectraShell({
             throw new Error(
               `APPLICATION_COMMAND_TARGET_NOT_FOUND: ${artifactId}`,
             );
-          if (surfaceMode === "full") openArtifactTab(artifact);
-          else openArtifactPanel(artifact);
+          return requestViewportAction({
+            targetId: artifactId,
+            view: "artifact",
+            navigate: () => {
+              if (surfaceMode === "full") openArtifactTab(artifact);
+              else openArtifactPanel(artifact);
+            },
+          });
         },
+        addComment: ({ artifactId, body, regionId }) => postSpectra({
+          action: "createArtifactComment",
+          artifactId,
+          commentBody: body,
+          regionId: regionId ?? "artifact:structure",
+          fallbackExcerpt: regionId ?? "artifact structure",
+        }),
         navigate: (destination, targetId) => {
           if (destination === "calendar") router.push("/calendar");
           else if (destination === "settings")
@@ -1848,6 +1866,13 @@ export function SpectraShell({
         priority: 2,
         overlay: false,
       });
+    if (chatBrowserOpen)
+      panes.push({
+        id: "chat-browser",
+        floor: SIDE_PANEL_FLOOR_PX,
+        priority: 3,
+        overlay: false,
+      });
     return panes;
   }, [
     studio.mode,
@@ -1855,6 +1880,7 @@ export function SpectraShell({
     studioPaneFloor,
     liveThread,
     activeRunPanelId,
+    chatBrowserOpen,
   ]);
 
   /* In tab mode the open work *is* the content column, so the reserve a side
@@ -1930,7 +1956,9 @@ export function SpectraShell({
               ? studioPanelWidth
               : pane.id === "thread"
                 ? liveThreadPanelWidth
-                : runPanelWidth,
+                : pane.id === "run"
+                  ? runPanelWidth
+                  : chatBrowserWidth,
           recency: paneRecencyRef.current[pane.id] ?? 0,
         })),
       }),
@@ -1942,6 +1970,7 @@ export function SpectraShell({
       studioPanelWidth,
       liveThreadPanelWidth,
       runPanelWidth,
+      chatBrowserWidth,
     ],
   );
 
@@ -2734,9 +2763,13 @@ export function SpectraShell({
     return () => cancelAnimationFrame(frame);
   }, [overview, requestedWorkspaceId, selectedWorkspaceId, surface]);
 
-  useEffect(() => spectraBus.handle("run.stopRequested", ({ runId }) => {
+  useEffect(() => spectraBus.handle("run.stopRequested", async ({ runId }) => {
     if (runId && runEngine.activeRunId && runEngine.activeRunId !== runId) return;
-    void runEngine.stop(runId);
+    await runEngine.stop(runId);
+    return {
+      status: "completed",
+      message: "Stop requested. Committed work remains available.",
+    } satisfies SpectraCommandOutcome;
   }), [runEngine]);
 
   useEffect(() => {
@@ -2868,6 +2901,25 @@ export function SpectraShell({
       else toast.info("Open a workspace to share it with school members.");
     };
     const removeOpenArtifact = spectraBus.handle("work.open", onOpenArtifact);
+    const removeOpenConversation = spectraBus.handle(
+      "run.openConversation",
+      async ({ runId, threadId }) => {
+        const resolvedThreadId =
+          threadId?.trim() || (await getSpectraRunDetail(runId)).run.threadId;
+        if (!resolvedThreadId) throw new Error("RUN_THREAD_NOT_FOUND");
+        const thread = await getSpectraThread(resolvedThreadId);
+        const readiness = await requestViewportAction({
+          targetId: resolvedThreadId,
+          view: "conversation",
+          navigate: () => setLiveThread({ id: thread.thread._id, title: thread.thread.title }),
+        });
+        return {
+          status: readiness.status === "ready" ? "completed" : "failed",
+          message: readiness.status === "ready" ? "Conversation opened." : readiness.reason ?? "Conversation could not be opened.",
+          readiness,
+        } satisfies SpectraCommandOutcome;
+      },
+    );
     const removeAiNavigate = spectraBus.handle("navigation.show", onAiNavigate);
     const removeLensActivated = spectraBus.on(
       "artifact.lensActivated",
@@ -2881,6 +2933,7 @@ export function SpectraShell({
     const removeShare = spectraBus.handle("surface.share", shareFromShell);
     return () => {
       removeOpenArtifact();
+      removeOpenConversation();
       removeAiNavigate();
       removeLensActivated();
       removeRefresh();
@@ -4691,8 +4744,9 @@ export function SpectraShell({
                 scope={chatBrowserScope}
                 workspaceId={selectedWorkspaceId}
                 artifactId={chatBrowserArtifactId}
-                width={chatBrowserWidth}
-                onWidthChange={setChatBrowserWidth}
+                width={paneWidths["chat-browser"] ?? chatBrowserWidth}
+                onWidthChange={(next) => notePaneIntent("chat-browser", next)}
+                overlay={paneOverlay["chat-browser"] ?? false}
                 title={chatBrowserScope === "artifact" ? "Chats about this work" : chatBrowserScope === "workspace" ? "Workspace chats" : "Library chats"}
                 onClose={() => setChatBrowserOpen(false)}
                 onOpenChat={(thread) => {

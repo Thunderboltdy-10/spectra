@@ -27,6 +27,8 @@ import {
   type BridgeTrustPreset,
 } from "../../../../shared/bridge-trust";
 import { spectraBus } from "../events";
+import type { SpectraCommandOutcome } from "../events/contracts";
+import { takePendingBridgeIntent } from "../commands/bridge-intents";
 import {
   formatMountProgress,
   isProtectedOriginalPreset,
@@ -83,8 +85,8 @@ export function BridgeSettings() {
     setup: (input: {
       action: "pair" | "select-location" | "retry-connection" | "retry-folder";
       grantId?: string;
-    }) => Promise<void>;
-    policy: (input: { preset: BridgeTrustPreset }) => Promise<void>;
+    }) => Promise<SpectraCommandOutcome>;
+    policy: (input: { preset: BridgeTrustPreset }) => Promise<SpectraCommandOutcome>;
   } | null>(null);
   const stopPairingPoll = useCallback(() => {
     if (pairingTimer.current !== null)
@@ -101,7 +103,7 @@ export function BridgeSettings() {
   const connected = local.state === "connected";
   const reachability = local.reachability;
   const discovery = local.discovery;
-  async function beginPairing() {
+  async function beginPairing(): Promise<SpectraCommandOutcome> {
     setBusy(true);
     setPairingExpired(false);
     try {
@@ -110,7 +112,10 @@ export function BridgeSettings() {
       if (found.kind !== "running") {
         setError(pairingFailureMessage("Failed to fetch", found, local.online));
         setPairing(null);
-        return;
+        return {
+          status: "failed",
+          message: pairingFailureMessage("Failed to fetch", found, local.online),
+        };
       }
       const result = await requestPairing({
         browserOrigin: window.location.origin,
@@ -142,22 +147,36 @@ export function BridgeSettings() {
         },
         Math.max(0, result.expiresAt - Date.now()),
       );
+      return {
+        status: "needs-human",
+        message: "Pairing is ready. Finish the Bridge pairing step on this device.",
+        data: { challenge: result.challenge },
+      };
     } catch (reason) {
       const found = await discoverBridge().catch(() => discovery);
       setError(pairingFailureMessage(reason, found, local.online));
       setPairing(null);
+      return {
+        status: "failed",
+        message: pairingFailureMessage(reason, found, local.online),
+      };
     } finally {
       setBusy(false);
     }
   }
-  async function folderAction(key: string, action: () => Promise<void>) {
+  async function folderAction(key: string, action: () => Promise<void>): Promise<SpectraCommandOutcome> {
     setFolderBusy(key);
     setError(undefined);
     try {
       await action();
       await local.refresh();
+      return { status: "completed", message: "Bridge folder action completed." };
     } catch (reason) {
       setError(pairingFailureMessage(reason, local.discovery, local.online));
+      return {
+        status: "failed",
+        message: pairingFailureMessage(reason, local.discovery, local.online),
+      };
     } finally {
       setFolderBusy(null);
     }
@@ -234,7 +253,7 @@ export function BridgeSettings() {
   }
   async function applyPolicyPreset(
     preset: "spectra" | "device" | "both" | "linked",
-  ) {
+  ): Promise<SpectraCommandOutcome> {
     setPolicyBusy(true);
     setError(undefined);
     try {
@@ -246,21 +265,26 @@ export function BridgeSettings() {
       setTrustNote(
         preset === "both"
           ? "Native write & sync is enabled for the account default. Existing folders stay where they are; review each existing item before changing its storage strategy."
-          : "Managed-copy protection is now the account default. Existing folders stay where they are.",
+        : "Managed-copy protection is now the account default. Existing folders stay where they are.",
       );
+      return { status: "completed", message: "Bridge trust preset applied." };
     } catch (reason) {
       setError(humanizePublicFailure(reason));
+      return {
+        status: "failed",
+        message: humanizePublicFailure(reason),
+      };
     } finally {
       setPolicyBusy(false);
     }
   }
-  async function selectTrustPreset(preset: BridgeTrustPreset) {
+  async function selectTrustPreset(preset: BridgeTrustPreset): Promise<SpectraCommandOutcome> {
     if (preset === "advanced") {
       setPendingTrustPreset(null);
       setTrustNote(
         "Advanced controls are visible below. Your detailed policy remains in force until you explicitly change a field.",
       );
-      return;
+      return { status: "completed", message: "Advanced Bridge trust controls opened." };
     }
     const target = preset === "managed-copy" ? "spectra" : "both";
     if (target === "both" && effectivePolicy?.preset !== "both") {
@@ -268,9 +292,12 @@ export function BridgeSettings() {
       setTrustNote(
         "This choice can write approved linked files on this PC. Apply it explicitly after reviewing the local and cloud preview.",
       );
-      return;
+      return {
+        status: "needs-human",
+        message: "Review the local and cloud preview, then apply the Bridge trust preset.",
+      };
     }
-    await applyPolicyPreset(target);
+    return applyPolicyPreset(target);
   }
   async function setStorageChoice(
     choice: StorageChoice,
@@ -297,11 +324,18 @@ export function BridgeSettings() {
       if (action === "pair") return beginPairing();
       if (action === "select-location")
         return folderAction("select", selectBridgeFolder);
-      if (action === "retry-folder" && grantId)
-        return folderAction(`retry:${grantId}`, () =>
-          retryBridgeFolder(grantId),
-        );
+      if (action === "retry-folder") {
+        if (grantId)
+          return folderAction(`retry:${grantId}`, () =>
+            retryBridgeFolder(grantId),
+          );
+        return {
+          status: "failed",
+          message: "Bridge folder retry requires a folder grant.",
+        };
+      }
       await local.refresh();
+      return { status: "completed", message: "Bridge connection refreshed." };
     },
     policy: ({ preset }) => selectTrustPreset(preset),
   };
@@ -316,6 +350,14 @@ export function BridgeSettings() {
       removeSetup();
       removePolicy();
     };
+  }, []);
+  useEffect(() => {
+    const intent = takePendingBridgeIntent();
+    if (!intent) return;
+    const run = intent.kind === "setup"
+      ? bridgeActionHandlers.current?.setup(intent.input)
+      : bridgeActionHandlers.current?.policy(intent.input);
+    void run;
   }, []);
   return (
     <div className="grid gap-8">

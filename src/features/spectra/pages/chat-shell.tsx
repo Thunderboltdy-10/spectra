@@ -29,6 +29,7 @@ import { SpectraMark } from "@/components/spectra-mark";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
 import { spectraBus } from "../events";
+import type { SpectraCommandOutcome } from "../events/contracts";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { ConversationSurface } from "../components/conversation-surface";
 import { ProductErrorState } from "../components/product-state";
@@ -68,7 +69,10 @@ import {
   type SpectraWorkspace,
 } from "../data/api";
 import { useSpectraPreferences } from "../settings/preference-store";
-import { acknowledgeViewportReady } from "../viewport-readiness";
+import {
+  acknowledgeViewportReady,
+  requestViewportAction,
+} from "../viewport-readiness";
 
 const ArtifactStudio = dynamic(
   () =>
@@ -414,12 +418,23 @@ export function ChatShell() {
     () =>
       createApplicationCommandDispatcher({
         openArtifact: (artifactId, surface) => {
-          if (surface === "full") {
-            router.push(`/library/${encodeURIComponent(artifactId)}`);
-            return;
-          }
-          return openArtifact(artifactId);
+          return requestViewportAction({
+            targetId: artifactId,
+            view: "artifact",
+            navigate: () => {
+              if (surface === "full")
+                router.push(`/library/${encodeURIComponent(artifactId)}`);
+              else openArtifact(artifactId);
+            },
+          });
         },
+        addComment: ({ artifactId, body, regionId }) => postSpectra({
+          action: "createArtifactComment",
+          artifactId,
+          commentBody: body,
+          regionId: regionId ?? "artifact:structure",
+          fallbackExcerpt: regionId ?? "artifact structure",
+        }),
         navigate: (destination, targetId) => {
           if (destination === "library") {
             router.push(
@@ -525,12 +540,25 @@ export function ChatShell() {
         const resolvedThreadId =
           threadId?.trim() || (await getSpectraRunDetail(runId)).run.threadId;
         if (!resolvedThreadId) throw new Error("RUN_THREAD_NOT_FOUND");
-        selectThread(resolvedThreadId);
+        const readiness = await requestViewportAction({
+          targetId: resolvedThreadId,
+          view: "conversation",
+          navigate: () => selectThread(resolvedThreadId),
+        });
+        return {
+          status: readiness.status === "ready" ? "completed" : "failed",
+          message: readiness.status === "ready" ? "Conversation opened." : readiness.reason ?? "Conversation could not be opened.",
+          readiness,
+        } satisfies SpectraCommandOutcome;
       },
     );
-    const removeStop = spectraBus.handle("run.stopRequested", ({ runId }) => {
+    const removeStop = spectraBus.handle("run.stopRequested", async ({ runId }) => {
       if (runId && runEngine.activeRunId && runEngine.activeRunId !== runId) return;
-      void runEngine.stop(runId);
+      await runEngine.stop(runId);
+      return {
+        status: "completed",
+        message: "Stop requested. Committed work remains available.",
+      } satisfies SpectraCommandOutcome;
     });
     return () => {
       removeWork();

@@ -3,6 +3,13 @@ import type { SpectraPreferences } from "../settings/schema";
 import type { ReferenceNode } from "../references";
 import type { BridgeTrustPreset } from "../../../../shared/bridge-trust";
 
+export type SpectraCommandOutcome = {
+  status: "completed" | "pending" | "needs-human" | "failed";
+  message: string;
+  data?: unknown;
+  readiness?: import("../viewport-readiness").ViewportReadinessAcknowledgement;
+};
+
 export type SpectraCommands = {
   "library.organize": {
     action: "create_folder" | "rename" | "move" | "link";

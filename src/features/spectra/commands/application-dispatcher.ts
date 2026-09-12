@@ -1,6 +1,11 @@
 import type { SpectraPreferences } from "../settings/schema";
 import { applyPreferencePatch } from "../settings/schema";
 import { spectraBus } from "../events";
+import type { SpectraCommandOutcome } from "../events/contracts";
+import {
+  clearBridgeIntent,
+  retainBridgeIntent,
+} from "./bridge-intents";
 import type { CommandEffectKind, CommandExecutionResult } from "./types";
 
 export type ApplicationCommandDispatcher = (
@@ -13,6 +18,11 @@ export type ApplicationCommandHost = {
   navigate: (destination: "library" | "calendar" | "settings" | "workspace", targetId?: string) => void | Promise<void | CommandExecutionResult["readiness"]>;
   openRoute?: (href: string) => void | Promise<void | CommandExecutionResult["readiness"]>;
   openThread?: (threadId: string) => void | Promise<void | CommandExecutionResult["readiness"]>;
+  addComment?: (input: {
+    artifactId: string;
+    body: string;
+    regionId?: string;
+  }) => void | Promise<void>;
   replacePreferences: (next: SpectraPreferences) => void;
   preferences: SpectraPreferences;
   organizeLibrary?: (input: {
@@ -34,7 +44,7 @@ function completed(
   const status = readiness?.status === "failed"
     ? "failed"
     : readiness?.status === "cancelled"
-      ? "cancelled"
+      ? "failed"
       : "completed";
   return {
     commandId,
@@ -44,6 +54,54 @@ function completed(
     ...(readiness ? { readiness } : {}),
     ...(data === undefined ? {} : { data }),
   };
+}
+
+function isCommandOutcome(value: unknown): value is SpectraCommandOutcome {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SpectraCommandOutcome>;
+  return (
+    (candidate.status === "completed" ||
+      candidate.status === "pending" ||
+      candidate.status === "needs-human" ||
+      candidate.status === "failed") &&
+    typeof candidate.message === "string"
+  );
+}
+
+function fromHandler(
+  commandId: string,
+  effect: CommandEffectKind,
+  fallbackMessage: string,
+  value: unknown,
+  data?: unknown,
+): CommandExecutionResult {
+  if (!isCommandOutcome(value))
+    return completed(commandId, effect, fallbackMessage, undefined, data);
+  return {
+    commandId,
+    effect,
+    status: value.status,
+    message: value.message,
+    ...(value.readiness ? { readiness: value.readiness } : {}),
+    ...(value.data === undefined && data === undefined
+      ? {}
+      : { data: value.data === undefined ? data : value.data }),
+  };
+}
+
+async function dispatchSemantic<K extends keyof import("../events/contracts").SpectraCommands>(
+  commandId: string,
+  effect: CommandEffectKind,
+  key: K,
+  payload: import("../events/contracts").SpectraCommands[K],
+  message: string,
+  data?: unknown,
+) {
+  const result = await spectraBus.commandAsyncResults(key, payload);
+  if (result.listeners === 0)
+    throw new Error(`APPLICATION_COMMAND_HANDLER_UNAVAILABLE: ${String(key)}`);
+  const explicit = [...result.results].reverse().find(isCommandOutcome);
+  return fromHandler(commandId, effect, message, explicit, data);
 }
 
 function readinessFrom(value: CommandExecutionResult["readiness"] | void) {
@@ -68,9 +126,24 @@ function routeFor(commandId: string) {
 }
 
 function objectRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    try {
+      return objectRecord(JSON.parse(value));
+    } catch {
+      return {};
+    }
+  }
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function stringList(value: unknown) {
+  if (Array.isArray(value))
+    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
+  if (typeof value === "string")
+    return value.split(",").map((item) => item.trim()).filter(Boolean);
+  return [];
 }
 
 /**
@@ -141,9 +214,14 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
           const readiness = readinessFrom(await host.openThread(threadId));
           return completed(commandId, "open", "Conversation opened.", readiness, { threadId });
         }
-        const listeners = await spectraBus.commandAsync("run.openConversation", { runId: threadId, threadId });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: run.openConversation");
-        return completed(commandId, "open", "Conversation opened.", undefined, { threadId });
+        return dispatchSemantic(
+          commandId,
+          "open",
+          "run.openConversation",
+          { runId: threadId, threadId },
+          "Conversation opened.",
+          { threadId },
+        );
       }
       case "app.chat.continue": {
         const threadId = typeof params.threadId === "string" ? params.threadId.trim() : "";
@@ -154,39 +232,43 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         return completed(commandId, "toggle", "The current conversation remains the continuation target.");
       }
       case "app.run.stop": {
-        const listeners = await spectraBus.commandAsync("run.stopRequested", {
+        return dispatchSemantic(commandId, "mutate", "run.stopRequested", {
           ...(typeof params.runId === "string" && params.runId.trim() ? { runId: params.runId.trim() } : {}),
-        });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: run.stopRequested");
-        return completed(commandId, "mutate", "Stop requested. Committed work remains available.");
+        }, "Stop requested. Committed work remains available.");
       }
       case "app.follow.stop": {
-        const listeners = await spectraBus.commandAsync("follow.stopRequested", {});
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: follow.stopRequested");
-        return completed(commandId, "toggle", "Follow mode stopped. Durable work continues.");
+        return dispatchSemantic(commandId, "toggle", "follow.stopRequested", {}, "Follow mode stopped. Durable work continues.");
       }
       case "app.comments.open": {
         const artifactId = typeof params.artifactId === "string" ? params.artifactId.trim() : "";
         if (!artifactId) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.comments.open requires artifactId");
-        const listeners = await spectraBus.commandAsync("comments.open", { artifactId });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: comments.open");
-        return completed(commandId, "open", "Comments opened.", undefined, { artifactId });
+        return dispatchSemantic(commandId, "open", "comments.open", { artifactId }, "Comments opened.", { artifactId });
       }
       case "app.comments.add": {
         const artifactId = typeof params.artifactId === "string" ? params.artifactId.trim() : "";
         const body = typeof params.body === "string" ? params.body.trim() : "";
         const regionId = typeof params.regionId === "string" ? params.regionId.trim() : undefined;
         if (!artifactId || !body) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.comments.add requires artifactId and body");
-        const listeners = await spectraBus.commandAsync("comments.add", { artifactId, body, ...(regionId ? { regionId } : {}) });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: comments.add");
+        const dispatched = await spectraBus.commandAsyncResults("comments.add", { artifactId, body, ...(regionId ? { regionId } : {}) });
+        if (dispatched.listeners > 0) {
+          const explicit = [...dispatched.results].reverse().find(isCommandOutcome);
+          return fromHandler(commandId, "mutate", "Comment added.", explicit, { artifactId });
+        }
+        if (!host.addComment)
+          throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: comments.add");
+        await host.addComment({ artifactId, body, ...(regionId ? { regionId } : {}) });
         return completed(commandId, "mutate", "Comment added.", undefined, { artifactId });
       }
       case "app.library.import":
       case "app.workspace.import": {
         const kind = commandId === "app.library.import" ? "file" : "workspace";
-        const listeners = await spectraBus.commandAsync("library.import", { kind });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: library.import");
-        return completed(commandId, "open", kind === "file" ? "Library import opened." : "Workspace import opened.");
+        return dispatchSemantic(
+          commandId,
+          "open",
+          "library.import",
+          { kind },
+          kind === "file" ? "Library import opened." : "Workspace import opened.",
+        );
       }
       case "app.settings.toggle-continuation": {
         if (typeof params.value !== "boolean") throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.settings.toggle-continuation requires value");
@@ -196,56 +278,47 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
       case "app.work.reveal-anchor": {
         const anchor = objectRecord(params.anchor);
         if (typeof anchor.workId !== "string") throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.work.reveal-anchor requires anchor");
-        const listeners = await spectraBus.commandAsync("work.revealAnchor", {
+        return dispatchSemantic(commandId, "open", "work.revealAnchor", {
           anchor: anchor as never,
           focus: params.focus !== false,
-        });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: work.revealAnchor");
-        return completed(commandId, "open", "Work anchor revealed.");
+        }, "Work anchor revealed.");
       }
       case "app.run.open-conversation": {
         if (typeof params.runId !== "string" || !params.runId.trim()) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.run.open-conversation requires runId");
-        const listeners = await spectraBus.commandAsync("run.openConversation", {
+        return dispatchSemantic(commandId, "open", "run.openConversation", {
           runId: params.runId,
           ...(typeof params.threadId === "string" ? { threadId: params.threadId } : {}),
-        });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: run.openConversation");
-        return completed(commandId, "open", "Conversation opened.");
+        }, "Conversation opened.");
       }
       case "app.reference.begin-picking": {
         if (typeof params.hostWorkId !== "string" || !params.hostWorkId.trim()) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.reference.begin-picking requires hostWorkId");
-        const listeners = await spectraBus.commandAsync("reference.beginPicking", { hostWorkId: params.hostWorkId });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: reference.beginPicking");
-        return completed(commandId, "select", "Reference picking started.");
+        return dispatchSemantic(commandId, "select", "reference.beginPicking", { hostWorkId: params.hostWorkId }, "Reference picking started.");
       }
       case "app.context.begin-picking": {
-        const listeners = await spectraBus.commandAsync("context.beginPicking", {
+        return dispatchSemantic(commandId, "select", "context.beginPicking", {
           source: params.source === "composer" ? "composer" : "quick_chat",
-        });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: context.beginPicking");
-        return completed(commandId, "select", "Context picking started.");
+        }, "Context picking started.");
       }
       case "app.settings.change":
       case "app.settings.manageAccount": {
-        const listeners = await spectraBus.commandAsync("settings.change", {
+        const dispatched = await spectraBus.commandAsyncResults("settings.change", {
           patch: objectRecord(params.patch),
           ...(typeof params.section === "string" ? { section: params.section } : {}),
         });
-        if (listeners > 0) return completed(commandId, "mutate", "Settings changed.");
-        const next = applyPreferencePatch(host.preferences, params.patch);
+        if (dispatched.listeners > 0) {
+          const explicit = [...dispatched.results].reverse().find(isCommandOutcome);
+          return fromHandler(commandId, "mutate", "Settings changed.", explicit);
+        }
+        const next = applyPreferencePatch(host.preferences, objectRecord(params.patch));
         host.replacePreferences(next);
         const readiness = readinessFrom(await host.navigate("settings", typeof params.section === "string" ? params.section : undefined));
         return completed(commandId, "mutate", "Settings changed.", readiness);
       }
       case "app.sync.policy.change": {
-        const targetIds = Array.isArray(params.targetIds)
-          ? params.targetIds.filter((value): value is string => typeof value === "string")
-          : [];
+        const targetIds = stringList(params.targetIds);
         const patch = objectRecord(params.patch);
         if (targetIds.length === 0) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.sync.policy.change requires targetIds");
-        const listeners = await spectraBus.commandAsync("sync.policy.change", { targetIds, patch });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: sync.policy.change");
-        return completed(commandId, "mutate", "Sync policy change requested.");
+        return dispatchSemantic(commandId, "mutate", "sync.policy.change", { targetIds, patch }, "Sync policy change requested.");
       }
       case "app.bridge.pair":
       case "app.bridge.setup":
@@ -266,33 +339,92 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
           ) {
             throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.bridge.policy.change requires preset");
           }
-          const listeners = await spectraBus.commandAsync("bridge.policy.change", {
+          const dispatched = await spectraBus.commandAsyncResults("bridge.policy.change", {
             preset: params.preset,
           });
-          if (listeners === 0) host.navigate("settings", "devices");
-          return;
+          if (dispatched.listeners > 0) {
+            const explicit = [...dispatched.results].reverse().find(isCommandOutcome);
+            return fromHandler(commandId, "mutate", "Bridge trust change requested.", explicit, { preset: params.preset });
+          }
+          const actionId = typeof params.actionId === "string" && params.actionId.trim()
+            ? params.actionId.trim()
+            : `bridge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          retainBridgeIntent({
+            kind: "policy",
+            actionId,
+            input: { preset: params.preset },
+          });
+          let readiness: ReturnType<typeof readinessFrom>;
+          try {
+            readiness = readinessFrom(await host.navigate("settings", "devices"));
+          } catch (error) {
+            clearBridgeIntent(actionId);
+            throw error;
+          }
+          if (readiness?.status === "failed" || readiness?.status === "cancelled") {
+            clearBridgeIntent(actionId);
+            return completed(commandId, "mutate", "Bridge trust settings could not be opened.", readiness, { actionId });
+          }
+          return {
+            commandId,
+            effect: "mutate",
+            status: "pending",
+            message: "Bridge trust settings opened. The selected preset will resume when the settings surface is ready.",
+            ...(readiness ? { readiness } : {}),
+            data: { actionId, preset: params.preset, handoff: true },
+          };
         }
         if (action !== "pair" && action !== "select-location" && action !== "retry-connection" && action !== "retry-folder")
           throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.bridge.setup requires a supported action");
         if (action === "retry-folder" && (typeof params.grantId !== "string" || !params.grantId.trim()))
           throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.bridge.setup retry-folder requires grantId");
-        const listeners = await spectraBus.commandAsync("bridge.setup", {
+        const dispatched = await spectraBus.commandAsyncResults("bridge.setup", {
           action,
           ...(typeof params.grantId === "string" ? { grantId: params.grantId } : {}),
         });
-        if (listeners === 0) host.navigate("settings", "devices");
-        return;
+        if (dispatched.listeners > 0) {
+          const explicit = [...dispatched.results].reverse().find(isCommandOutcome);
+          return fromHandler(commandId, "open", "Bridge setup requested.", explicit, { action });
+        }
+        const actionId = typeof params.actionId === "string" && params.actionId.trim()
+          ? params.actionId.trim()
+          : `bridge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        retainBridgeIntent({
+          kind: "setup",
+          actionId,
+          input: {
+            action,
+            ...(typeof params.grantId === "string" ? { grantId: params.grantId } : {}),
+          },
+        });
+        let readiness: ReturnType<typeof readinessFrom>;
+        try {
+          readiness = readinessFrom(await host.navigate("settings", "devices"));
+        } catch (error) {
+          clearBridgeIntent(actionId);
+          throw error;
+        }
+        if (readiness?.status === "failed" || readiness?.status === "cancelled") {
+          clearBridgeIntent(actionId);
+          return completed(commandId, "open", "Bridge settings could not be opened.", readiness, { actionId });
+        }
+        return {
+          commandId,
+          effect: "open",
+          status: "pending",
+          message: "Bridge settings opened. The requested setup step will resume when the settings surface is ready.",
+          ...(readiness ? { readiness } : {}),
+          data: { actionId, action, handoff: true },
+        };
       }
       case "app.memory.write": {
         if (typeof params.content !== "string" || !params.content.trim())
           throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.memory.write requires content");
-        const listeners = await spectraBus.commandAsync("memory.write", {
+        return dispatchSemantic(commandId, "mutate", "memory.write", {
           action: params.action === "revise" ? "revise" : "create",
           content: params.content.trim(),
           ...(typeof params.memoryId === "string" ? { memoryId: params.memoryId } : {}),
-        });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: memory.write");
-        return completed(commandId, "mutate", "Memory update requested.");
+        }, "Memory update requested.");
       }
       case "app.sharing.change": {
         const resourceType = params.resourceType;
@@ -301,7 +433,7 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
             (action !== "invite" && action !== "change_level" && action !== "revoke") ||
             typeof params.resourceId !== "string" || !params.resourceId.trim())
           throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.sharing.change requires resourceType, resourceId and action");
-        const listeners = await spectraBus.commandAsync("sharing.change", {
+        return dispatchSemantic(commandId, "mutate", "sharing.change", {
           resourceType,
           resourceId: params.resourceId,
           action,
@@ -309,38 +441,28 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
           ...(typeof params.invitationId === "string" ? { invitationId: params.invitationId } : {}),
           ...(typeof params.grantId === "string" ? { grantId: params.grantId } : {}),
           ...(params.level === "modify" || params.level === "read" ? { level: params.level } : {}),
-        });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: sharing.change");
-        return completed(commandId, "mutate", "Sharing change requested.");
+        }, "Sharing change requested.");
       }
       case "app.managebac.sync": {
         const purpose = params.purpose === "class_resources" || params.purpose === "timetable" || params.purpose === "classes" || params.purpose === "cas" || params.purpose === "upcoming_deadlines"
           ? params.purpose
           : "upcoming_deadlines";
-        const listeners = await spectraBus.commandAsync("managebac.sync", { purpose });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: managebac.sync");
-        return completed(commandId, "mutate", "ManageBac sync requested.");
+        return dispatchSemantic(commandId, "mutate", "managebac.sync", { purpose }, "ManageBac sync requested.");
       }
       case "app.managebac.select-classes": {
-        const recordIds = Array.isArray(params.recordIds)
-          ? params.recordIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 100)
-          : [];
-        const listeners = await spectraBus.commandAsync("managebac.selectClasses", {
+        const recordIds = stringList(params.recordIds).slice(0, 100);
+        return dispatchSemantic(commandId, "mutate", "managebac.selectClasses", {
           recordIds,
           ...(typeof params.expectedRevision === "number" ? { expectedRevision: params.expectedRevision } : {}),
           ...(params.retention === "archive_projection" || params.retention === "keep_in_spectra" ? { retention: params.retention } : {}),
-        });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: managebac.selectClasses");
-        return;
+        }, "ManageBac class selection requested.");
       }
       case "app.settings.manage-account": {
         const readiness = readinessFrom(await host.navigate("settings", "account"));
         return completed(commandId, "navigate", "Account settings opened.", readiness);
       }
       case "app.settings.clear-compute-cache": {
-        const listeners = await spectraBus.commandAsync("settings.clearLocalComputeCache", {});
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: settings.clearLocalComputeCache");
-        return completed(commandId, "mutate", "Local compute cache clear requested.");
+        return dispatchSemantic(commandId, "mutate", "settings.clearLocalComputeCache", {}, "Local compute cache clear requested.");
       }
       case "app.reference.insert": {
         const hostWorkId = typeof params.hostWorkId === "string" ? params.hostWorkId.trim() : "";
@@ -348,39 +470,41 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         if (!hostWorkId || typeof target.workId !== "string") {
           throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.reference.insert requires hostWorkId and target");
         }
-        const listeners = await spectraBus.commandAsync("reference.insert", {
+        return dispatchSemantic(commandId, "mutate", "reference.insert", {
           hostWorkId,
           target: target as never,
-        });
-        if (listeners === 0) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: reference.insert");
-        return completed(commandId, "mutate", "Reference inserted.");
+        }, "Reference inserted.");
       }
       case "app.library.organize": {
-        const listeners = await spectraBus.commandAsync("library.organize", {
+        const dispatched = await spectraBus.commandAsyncResults("library.organize", {
           action: params.action === "create_folder" || params.action === "rename" || params.action === "move" || params.action === "link" ? params.action : "create_folder",
-          targetIds: Array.isArray(params.targetIds) ? params.targetIds.filter((value): value is string => typeof value === "string") : [],
+          targetIds: stringList(params.targetIds),
           ...(typeof params.destinationId === "string" ? { destinationId: params.destinationId } : {}),
           ...(typeof params.name === "string" ? { name: params.name } : {}),
         });
-        if (listeners === 0) {
+        if (dispatched.listeners === 0) {
           if (!host.organizeLibrary) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: app.library.organize");
           await host.organizeLibrary({
             action: params.action === "create_folder" || params.action === "rename" || params.action === "move" || params.action === "link" ? params.action : "create_folder",
-            targetIds: Array.isArray(params.targetIds) ? params.targetIds.filter((value): value is string => typeof value === "string") : [],
+            targetIds: stringList(params.targetIds),
             ...(typeof params.destinationId === "string" ? { destinationId: params.destinationId } : {}),
             ...(typeof params.name === "string" ? { name: params.name } : {}),
           });
+          return completed(commandId, "mutate", "Library organization completed.");
         }
-        return completed(commandId, "mutate", "Library organization requested.");
+        const explicit = [...dispatched.results].reverse().find(isCommandOutcome);
+        return fromHandler(commandId, "mutate", "Library organization completed.", explicit);
       }
       case "app.library.delete": {
-        const targetIds = Array.isArray(params.targetIds) ? params.targetIds.filter((value): value is string => typeof value === "string") : [];
-        const listeners = await spectraBus.commandAsync("library.delete", { targetIds });
-        if (listeners === 0) {
+        const targetIds = stringList(params.targetIds);
+        const dispatched = await spectraBus.commandAsyncResults("library.delete", { targetIds });
+        if (dispatched.listeners === 0) {
           if (!host.deleteLibraryItems) throw new Error("APPLICATION_COMMAND_HANDLER_UNAVAILABLE: app.library.delete");
           await host.deleteLibraryItems(targetIds);
+          return completed(commandId, "mutate", "Library deletion completed.");
         }
-        return completed(commandId, "mutate", "Library deletion requested.");
+        const explicit = [...dispatched.results].reverse().find(isCommandOutcome);
+        return fromHandler(commandId, "mutate", "Library deletion completed.", explicit);
       }
       default:
         throw new Error(`APPLICATION_COMMAND_UNSUPPORTED: ${commandId}`);

@@ -25,6 +25,7 @@ import {
   type KBarContext,
   type KBarEntry,
 } from "../commands";
+import { postSpectra } from "../data/api";
 import { requestViewportAction, type ViewportView } from "../viewport-readiness";
 
 function routeTarget(href: string): { view: ViewportView; targetId: string } {
@@ -43,6 +44,18 @@ function routeTarget(href: string): { view: ViewportView; targetId: string } {
     return { view: "library", targetId: url.pathname.split("/")[2] ?? "library" };
   }
   return { view: appSurfaceFromPathname(url.pathname) as ViewportView, targetId: url.pathname };
+}
+
+function commandFailureMessage(error: unknown, label: string) {
+  const raw = error instanceof Error ? error.message : "";
+  if (raw.startsWith("APPLICATION_COMMAND_INVALID_PARAMS"))
+    return `${label} needs one more valid detail.`;
+  if (raw.startsWith("APPLICATION_COMMAND_HANDLER_UNAVAILABLE"))
+    return `${label} is not available on this surface yet.`;
+  if (raw.includes("TARGET_NOT_FOUND") || raw === "RUN_THREAD_NOT_FOUND")
+    return "That item is no longer available.";
+  if (raw.includes("could not") || raw.includes("Could not")) return raw;
+  return `${label} could not be completed. Try again when the target surface is ready.`;
 }
 
 function initialContext(pathname: string, searchParams: URLSearchParams, activeRunIds: readonly string[], followingAi: boolean, continueCurrentConversation: boolean, mountedArtifactId?: string): KBarContext {
@@ -85,7 +98,7 @@ export function UniversalKBar() {
     setActiveRunIds(runIds);
   }), []);
 
-  const mountedArtifactId = open
+  const mountedArtifactId = open && typeof document !== "undefined"
     ? document.querySelector<HTMLElement>("[data-spectra-studio]")?.dataset.spectraStudio
     : undefined;
   const context = useMemo(
@@ -220,6 +233,13 @@ export function UniversalKBar() {
     navigate,
     openRoute,
     openThread: (threadId) => openRoute(`/chat?threadId=${encodeURIComponent(threadId)}`),
+    addComment: ({ artifactId, body, regionId }) => postSpectra({
+      action: "createArtifactComment",
+      artifactId,
+      commentBody: body,
+      regionId: regionId ?? "artifact:structure",
+      fallbackExcerpt: regionId ?? "artifact structure",
+    }),
     preferences,
     replacePreferences,
   }), [navigate, openArtifact, openRoute, preferences, replacePreferences]);
@@ -235,7 +255,7 @@ export function UniversalKBar() {
       setParametersFor(null);
       setConfirming(null);
     } catch (error) {
-      setResultMessage(error instanceof Error ? error.message : `${entry.label} could not be completed.`);
+      setResultMessage(commandFailureMessage(error, entry.label));
     } finally {
       setRunning(false);
     }

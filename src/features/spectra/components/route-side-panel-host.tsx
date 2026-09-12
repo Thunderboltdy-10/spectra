@@ -9,11 +9,13 @@ import {
   getSpectraArtifact,
   getSpectraRunDetail,
   getSpectraThread,
+  postSpectra,
   type SpectraArtifact,
   type SpectraThread,
 } from "../data/api";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { spectraBus } from "../events";
+import { requestViewportAction } from "../viewport-readiness";
 import { useSpectraPreferences } from "../settings/preference-store";
 import {
   readRouteSideSession,
@@ -160,7 +162,12 @@ export function RouteSidePanelHost() {
     () =>
       createApplicationCommandDispatcher({
         openArtifact: (artifactId, surface) =>
-          surface === "full" ? fullscreen(artifactId) : openWork(artifactId),
+          requestViewportAction({
+            targetId: artifactId,
+            view: "artifact",
+            navigate: () =>
+              surface === "full" ? fullscreen(artifactId) : openWork(artifactId),
+          }),
         navigate: (destination, targetId) => {
           if (destination === "library") {
             router.push(
@@ -184,10 +191,23 @@ export function RouteSidePanelHost() {
             );
           }
         },
+        openThread: (threadId) =>
+          requestViewportAction({
+            targetId: threadId,
+            view: "conversation",
+            navigate: () => openThread(threadId),
+          }),
+        addComment: ({ artifactId, body, regionId }) => postSpectra({
+          action: "createArtifactComment",
+          artifactId,
+          commentBody: body,
+          regionId: regionId ?? "artifact:structure",
+          fallbackExcerpt: regionId ?? "artifact structure",
+        }),
         preferences,
         replacePreferences,
       }),
-    [fullscreen, openWork, preferences, replacePreferences, router],
+    [fullscreen, openThread, openWork, preferences, replacePreferences, router],
   );
 
   useEffect(() => {

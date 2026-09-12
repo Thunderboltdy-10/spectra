@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_SPECTRA_PREFERENCES } from "../settings/schema";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
+import {
+  __resetBridgeIntents,
+  pendingBridgeIntent,
+  takePendingBridgeIntent,
+} from "../commands/bridge-intents";
 import { spectraBus } from "../events";
 
 describe("application command dispatcher", () => {
@@ -187,6 +192,105 @@ describe("application command dispatcher", () => {
       expect(calls).toEqual(["settings", "sync", "memory", "sharing", "managebac", "managebac-selection"]);
     } finally {
       for (const remove of removers) remove();
+    }
+  });
+
+  it("returns the mounted handler result instead of treating listener count as completion", async () => {
+    const dispatch = createApplicationCommandDispatcher({
+      openArtifact: vi.fn(),
+      navigate: vi.fn(),
+      replacePreferences: vi.fn(),
+      preferences: DEFAULT_SPECTRA_PREFERENCES,
+    });
+    const remove = spectraBus.handle("managebac.selectClasses", () => ({
+      status: "completed" as const,
+      message: "Classes selected with revision 4.",
+      data: { revision: 4 },
+    }));
+    try {
+      await expect(dispatch("app.managebac.select-classes", {
+        recordIds: ["class-1"],
+      })).resolves.toMatchObject({
+        status: "completed",
+        message: "Classes selected with revision 4.",
+        data: { revision: 4 },
+      });
+    } finally {
+      remove();
+    }
+  });
+
+  it("uses the canonical comment mutation when no editor is mounted", async () => {
+    const addComment = vi.fn().mockResolvedValue(undefined);
+    const dispatch = createApplicationCommandDispatcher({
+      openArtifact: vi.fn(),
+      navigate: vi.fn(),
+      addComment,
+      replacePreferences: vi.fn(),
+      preferences: DEFAULT_SPECTRA_PREFERENCES,
+    });
+
+    await expect(dispatch("app.comments.add", {
+      artifactId: "artifact-1",
+      body: "A durable comment",
+    })).resolves.toMatchObject({
+      status: "completed",
+      data: { artifactId: "artifact-1" },
+    });
+    expect(addComment).toHaveBeenCalledWith({
+      artifactId: "artifact-1",
+      body: "A durable comment",
+    });
+  });
+
+  it("retains an off-page Bridge retry and lets the mounted surface consume it once", async () => {
+    __resetBridgeIntents();
+    const navigate = vi.fn().mockResolvedValue({
+      actionId: "settings-1",
+      targetId: "devices",
+      view: "settings" as const,
+      routeGeneration: 1,
+      status: "ready" as const,
+    });
+    const dispatch = createApplicationCommandDispatcher({
+      openArtifact: vi.fn(),
+      navigate,
+      replacePreferences: vi.fn(),
+      preferences: DEFAULT_SPECTRA_PREFERENCES,
+    });
+    try {
+      await expect(dispatch("app.bridge.setup", {
+        action: "retry-folder",
+        grantId: "grant-7",
+        actionId: "bridge-action-7",
+      })).resolves.toMatchObject({
+        status: "pending",
+        data: { actionId: "bridge-action-7", handoff: true },
+      });
+      expect(navigate).toHaveBeenCalledWith("settings", "devices");
+      expect(pendingBridgeIntent()).toMatchObject({
+        actionId: "bridge-action-7",
+        kind: "setup",
+        input: { action: "retry-folder", grantId: "grant-7" },
+      });
+
+      const intent = takePendingBridgeIntent();
+      expect(intent).toMatchObject({ actionId: "bridge-action-7" });
+      expect(takePendingBridgeIntent()).toBeNull();
+      if (!intent || intent.kind !== "setup") throw new Error("Expected a setup handoff.");
+      const calls: string[] = [];
+      const remove = spectraBus.handle("bridge.setup", (input) => {
+        calls.push(`${input.action}:${input.grantId}`);
+        return { status: "completed" as const, message: "Folder retry completed." };
+      });
+      try {
+        await spectraBus.commandAsync("bridge.setup", intent!.input);
+      } finally {
+        remove();
+      }
+      expect(calls).toEqual(["retry-folder:grant-7"]);
+    } finally {
+      __resetBridgeIntents();
     }
   });
 });

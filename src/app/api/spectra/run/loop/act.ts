@@ -110,6 +110,33 @@ export async function executeApplicationCommand(
     });
     return settings;
   }
+  if (command === "setup_bridge") {
+    const action = parsed.action;
+    const grantId = typeof parsed.grantId === "string" ? parsed.grantId.trim() : "";
+    if (action === "retry-folder" && !grantId)
+      throw new Error("BRIDGE_GRANT_REQUIRED");
+    onUiEvent?.({
+      key: "bridge_setup",
+      payload: {
+        action,
+        actionId: executionId,
+        ...(grantId ? { grantId } : {}),
+        targetId: "devices",
+        note: "Open Bridge settings to finish this setup step",
+      },
+    });
+    return {
+      ok: true,
+      status: "needs-human",
+      message: "Bridge settings are ready. The user must complete the setup step and any local consent.",
+      command: {
+        id: "app.bridge.setup",
+        actionId: executionId,
+        action,
+        ...(grantId ? { grantId } : {}),
+      },
+    };
+  }
   if (command === "organize_library") {
     const action = typeof parsed.action === "string" ? parsed.action : "";
     const targetIds = Array.isArray(parsed.targetIds)

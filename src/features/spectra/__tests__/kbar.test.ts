@@ -58,4 +58,16 @@ describe("contextual K-bar registry", () => {
     search.mockRestore();
     threads.mockRestore();
   });
+
+  it("seeds the active artifact and asks only for comment text", () => {
+    const entries = buildKBarEntries(APP_COMMANDS, context({
+      pathname: "/library/work-1",
+      activeArtifactId: "work-1",
+    }), "comment");
+    const entry = entries.find((item) => item.command.id === "app.comments.add");
+    expect(entry?.params).toEqual({ artifactId: "work-1" });
+    expect(entry?.command.parameters).toEqual([
+      expect.objectContaining({ name: "body", kind: "textarea", required: true }),
+    ]);
+  });
 });

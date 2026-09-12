@@ -45,7 +45,8 @@ describe("browser-first Bridge trust contract", () => {
   });
 
   it("keeps setup, retry, and policy actions available through the typed app path", async () => {
-    expect(appCommandById("app.bridge.setup")?.aiAuthority).toBe("prohibited");
+    expect(appCommandById("app.bridge.setup")?.aiAuthority).toBe("allowed");
+    expect(appCommandById("app.bridge.pair")?.aiAuthority).toBe("prohibited");
     expect(appCommandById("app.bridge.policy.change")?.aiAuthority).toBe(
       "prohibited",
     );

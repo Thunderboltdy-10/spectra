@@ -76,7 +76,7 @@ export interface SpectraLens<P, D> {
     payload: Uint8Array,
     profile?: LensCompatibilityProfile,
   ): Promise<LensOpenResult<P>>;
-  mutate(carry: LensPreservedCarry<P>, delta: D): Promise<Uint8Array>;
+  mutate(carry: LensPreservedCarry<P>, delta: D, options?: unknown): Promise<Uint8Array>;
   diffExternal(
     payloadA: Uint8Array,
     payloadB: Uint8Array,
@@ -84,6 +84,7 @@ export interface SpectraLens<P, D> {
   materialize(input: {
     projection: P;
     carry: LensPreservedCarry<P>;
+    options?: unknown;
   }): Promise<Uint8Array>;
   capabilities(
     profile: LensCompatibilityProfile,

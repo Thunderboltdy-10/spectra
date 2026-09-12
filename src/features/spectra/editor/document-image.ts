@@ -42,6 +42,13 @@ export const DocumentImage = Image.extend({
               }
             : {},
       },
+      assetId: { default: null },
+      mediaType: { default: null },
+      partName: { default: null },
+      widthEmu: { default: null },
+      heightEmu: { default: null },
+      placement: { default: "inline" },
+      crop: { default: null },
     };
   },
 });
@@ -59,12 +66,13 @@ export const NativeDocxImage = Node.create({
   group: "inline",
   inline: true,
   atom: true,
-  selectable: false,
+  selectable: true,
   draggable: false,
   addAttributes() {
     return {
       src: { default: "" },
       partName: { default: "" },
+      assetId: { default: "" },
       mediaType: { default: "" },
       alt: { default: "Word image" },
       widthEmu: { default: null },

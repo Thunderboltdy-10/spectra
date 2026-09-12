@@ -37,6 +37,14 @@ const OFFICE_RELATIONSHIP_NAMESPACE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const HYPERLINK_RELATIONSHIP =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+const HEADER_RELATIONSHIP =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header";
+const FOOTER_RELATIONSHIP =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer";
+const HEADER_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml";
+const FOOTER_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml";
 
 export type DocxNativePlaceholder = {
   id: string;
@@ -46,6 +54,16 @@ export type DocxNativePlaceholder = {
 };
 
 export type { DocxParagraphFormat, DocxProjection, DocxProjectionBlock, DocxRichInline, DocxRunFormat, DocxSemanticDelta } from "./projection-contracts";
+
+export type DocxAssetResolver = (request: {
+  assetId: string;
+  mediaType: "image/png" | "image/jpeg";
+  altText?: string;
+}) => Promise<Uint8Array | undefined>;
+
+export type DocxWriteOptions = {
+  resolveAsset?: DocxAssetResolver;
+};
 
 export class DocxLensError extends Error {
   constructor(
@@ -614,6 +632,17 @@ function nativeImageContent(
   });
 }
 
+function imageDrawing(document: Document, root: XmlElement, partName: string) {
+  return descendants(root).find(
+    (candidate) =>
+      candidate.namespaceUri() === WML_NAMESPACE &&
+      candidate.localName === "drawing" &&
+      nativeImageContent(document, candidate).some(
+        (image) => image.kind === "image" && image.partName === partName,
+      ),
+  );
+}
+
 function mergeRichText(content: DocxRichInline[]) {
   const merged: DocxRichInline[] = [];
   for (const item of content) {
@@ -778,10 +807,6 @@ function semanticRichText(content: readonly DocxRichInline[]) {
       return item.altText;
     })
     .join("");
-}
-
-function hasRichObject(content: readonly DocxRichInline[]) {
-  return content.some((item) => item.kind === "image");
 }
 
 function hasRichSemantics(content: readonly DocxRichInline[]) {
@@ -976,6 +1001,7 @@ function insertedParagraphId(regionId: string | undefined) {
 async function insertParagraph(
   document: Document,
   operation: Extract<DocxSemanticDelta, { kind: "insert-paragraph" }>,
+  options?: DocxWriteOptions,
 ) {
   const body = document.body();
   const paragraph = document.addParagraph(operation.text, {
@@ -983,7 +1009,7 @@ async function insertParagraph(
       ? { style: await resolveParagraphStyleId(document, operation.style) }
       : {}),
   });
-  if (operation.inlineContent) replaceParagraphRich(document, paragraph, operation.inlineContent);
+  if (operation.inlineContent) await replaceParagraphRich(document, paragraph, operation.inlineContent, options);
   const paraId = insertedParagraphId(operation.regionId);
   paragraph.element.setAttributeNs(W14_NAMESPACE, "paraId", paraId);
   const afterRegionId = operation.afterRegionId;
@@ -1321,10 +1347,11 @@ async function replaceTableCellText(
   if (paragraphs.length > 1) document._markMainDirty();
 }
 
-function replaceTableCellRich(
+async function replaceTableCellRich(
   document: Document,
   cell: NativeTableCell,
   inlineContent: readonly DocxRichInline[],
+  options?: DocxWriteOptions,
 ) {
   const paragraphElements = cell.paragraphElements();
   if (!paragraphElements.length)
@@ -1333,7 +1360,7 @@ function replaceTableCellRich(
       "This Word table cell has no writable paragraph container.",
     );
   const paragraph = Paragraph._wrap(document, paragraphElements[0]!);
-  replaceParagraphRich(document, paragraph, inlineContent);
+  await replaceParagraphRich(document, paragraph, inlineContent, options);
   for (const extra of paragraphElements.slice(1)) extra.parent?.removeChild(extra);
   if (paragraphElements.length > 1) document._markMainDirty();
 }
@@ -1413,40 +1440,83 @@ function updateImage(
   );
   if (!drawing)
     throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word image ${operation.partName} no longer exists.`);
-  const docPr = descendants(drawing).find(
-    (candidate) => candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE && candidate.localName === "docPr",
-  );
-  const extent = descendants(drawing).find(
-    (candidate) => candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE && candidate.localName === "extent",
-  );
-  if (operation.altText !== undefined && docPr) docPr.setAttribute("descr", operation.altText);
-  if (operation.widthEmu !== undefined && extent) extent.setAttribute("cx", String(operation.widthEmu));
-  if (operation.heightEmu !== undefined && extent) extent.setAttribute("cy", String(operation.heightEmu));
-  if (operation.crop) {
-    let srcRect = descendants(drawing).find(
-      (candidate) => candidate.namespaceUri() === DRAWINGML_NAMESPACE && candidate.localName === "srcRect",
+  applyImagePresentation(drawing, operation);
+  document._markMainDirty();
+}
+
+async function insertImage(
+  document: Document,
+  region: NativeRegion,
+  operation: Extract<DocxSemanticDelta, { kind: "insert-image" }>,
+  options?: DocxWriteOptions,
+) {
+  const paragraph = region.paragraph ?? (() => {
+    if (!region.table || operation.row === undefined || operation.column === undefined) return undefined;
+    const cell = region.table.rows()[operation.row]?.cells()[operation.column];
+    const element = cell?.paragraphElements()[0];
+    return element ? Paragraph._wrap(document, element) : undefined;
+  })();
+  if (!paragraph)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "A new Word picture can only be inserted into a paragraph or an editable text cell.",
     );
-    if (!srcRect) {
-      const blip = descendants(drawing).find(
-        (candidate) => candidate.namespaceUri() === DRAWINGML_NAMESPACE && candidate.localName === "blip",
-      );
-      const blipFill = blip?.parent;
-      if (!blipFill) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The Word image crop cannot be represented safely.");
-      srcRect = new XmlElement("srcRect", "a");
-      blipFill.insertBefore(srcRect, blip);
-    }
-    const cropAxes = [
-      ["l", "left"],
-      ["t", "top"],
-      ["r", "right"],
-      ["b", "bottom"],
-    ] as const;
-    for (const [axis, key] of cropAxes) {
-      const value = operation.crop[key];
-      if (value === undefined) srcRect.removeAttribute(axis);
-      else srcRect.setAttribute(axis, String(Math.round(value * 100000)));
-    }
-  }
+  await appendAuthoredImage(document, paragraph.element, {
+    kind: "image",
+    assetId: operation.assetId,
+    mediaType: operation.mediaType,
+    altText: operation.altText ?? "",
+    ...(operation.widthEmu ? { widthEmu: operation.widthEmu } : {}),
+    ...(operation.heightEmu ? { heightEmu: operation.heightEmu } : {}),
+    placement: "inline",
+    ...(operation.crop ? { crop: operation.crop } : {}),
+  }, options);
+  document._markMainDirty();
+}
+
+async function replaceImage(
+  document: Document,
+  region: NativeRegion,
+  operation: Extract<DocxSemanticDelta, { kind: "replace-image" }>,
+  options?: DocxWriteOptions,
+) {
+  const target = imageDrawing(document, region.element, operation.partName);
+  if (!target)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      `The Word image ${operation.partName} no longer exists in the selected region.`,
+    );
+  const replacement = await resolveAuthoredImage(document, {
+    kind: "image",
+    assetId: operation.assetId,
+    mediaType: operation.mediaType,
+    altText: operation.altText ?? "",
+    ...(operation.widthEmu ? { widthEmu: operation.widthEmu } : {}),
+    ...(operation.heightEmu ? { heightEmu: operation.heightEmu } : {}),
+    placement: "inline",
+    ...(operation.crop ? { crop: operation.crop } : {}),
+  }, options);
+  const replacementDrawing = imageDrawing(document, document.body(), replacement.partName);
+  const replacementBlip = replacementDrawing && descendants(replacementDrawing).find(
+    (candidate) => candidate.namespaceUri() === DRAWINGML_NAMESPACE && candidate.localName === "blip",
+  );
+  const targetBlip = descendants(target).find(
+    (candidate) => candidate.namespaceUri() === DRAWINGML_NAMESPACE && candidate.localName === "blip",
+  );
+  const replacementRelId = replacementBlip?.getAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "embed");
+  if (!replacementDrawing || !replacementBlip || !targetBlip || !replacementRelId)
+    throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The replacement Word image drawing was not created.");
+  targetBlip.setAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "embed", replacementRelId);
+  applyImagePresentation(target, {
+    altText: operation.altText,
+    widthEmu: operation.widthEmu,
+    heightEmu: operation.heightEmu,
+    crop: operation.crop,
+  });
+  removeAddedImageParagraph(document, replacement.partName);
+  // Keep the old media part in the package. A retained picture can be shared
+  // by a header/footer or another preserved relationship that is outside this
+  // body region; orphan media is harmless, deleting shared media is not.
   document._markMainDirty();
 }
 
@@ -1709,23 +1779,171 @@ function appendNativeOmml(paragraph: XmlElement, value: string) {
   paragraph.appendChild(root);
 }
 
-function replaceParagraphRich(
+function imageBytesMatch(bytes: Uint8Array, mediaType: "image/png" | "image/jpeg") {
+  const png = bytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => bytes[index] === value);
+  const jpeg = bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8;
+  return mediaType === "image/png" ? png : jpeg;
+}
+
+async function resolveAuthoredImage(
+  document: Document,
+  image: Extract<DocxRichInline, { kind: "image" }>,
+  options: DocxWriteOptions | undefined,
+) {
+  if (!image.assetId)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "This authored Word image has no durable asset identity. Upload it again before saving.",
+    );
+  const bytes = await options?.resolveAsset?.({
+    assetId: image.assetId,
+    mediaType: image.mediaType,
+    altText: image.altText,
+  });
+  if (!bytes)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "The Word image asset is unavailable or revoked. Restore or upload the image before saving.",
+    );
+  if (!imageBytesMatch(bytes, image.mediaType))
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      "The Word image asset does not match its declared PNG/JPEG media type.",
+    );
+  return document.addImage(bytes, {
+    altText: image.altText,
+    ...(image.widthEmu ? { widthEmu: image.widthEmu } : {}),
+    ...(image.heightEmu ? { heightEmu: image.heightEmu } : {}),
+  });
+}
+
+function removeAddedImageParagraph(document: Document, partName: string) {
+  const drawing = imageDrawing(document, document.body(), partName);
+  let run = drawing?.parent;
+  while (run && run.localName !== "r") run = run.parent;
+  const paragraph = run?.parent?.localName === "p" ? run.parent : undefined;
+  if (!run || !paragraph) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The native Word image drawing was not created.");
+  run.parent?.removeChild(run);
+  if (!paragraph.elements().length) paragraph.parent?.removeChild(paragraph);
+  return { drawing, run };
+}
+
+function applyImagePresentation(
+  drawing: XmlElement,
+  presentation: Pick<Extract<DocxSemanticDelta, { kind: "update-image" }>, "altText" | "widthEmu" | "heightEmu" | "crop">,
+) {
+  const docPr = descendants(drawing).find(
+    (candidate) => candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE && candidate.localName === "docPr",
+  );
+  const extent = descendants(drawing).find(
+    (candidate) => candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE && candidate.localName === "extent",
+  );
+  if (presentation.altText !== undefined && docPr) docPr.setAttribute("descr", presentation.altText);
+  if (presentation.widthEmu !== undefined && extent) extent.setAttribute("cx", String(presentation.widthEmu));
+  if (presentation.heightEmu !== undefined && extent) extent.setAttribute("cy", String(presentation.heightEmu));
+  if (presentation.crop) {
+    let srcRect = descendants(drawing).find(
+      (candidate) => candidate.namespaceUri() === DRAWINGML_NAMESPACE && candidate.localName === "srcRect",
+    );
+    if (!srcRect) {
+      const blip = descendants(drawing).find(
+        (candidate) => candidate.namespaceUri() === DRAWINGML_NAMESPACE && candidate.localName === "blip",
+      );
+      const blipFill = blip?.parent;
+      if (!blipFill) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The Word image crop cannot be represented safely.");
+      srcRect = new XmlElement("srcRect", "a");
+      blipFill.insertBefore(srcRect, blip);
+    }
+    for (const [axis, key] of [["l", "left"], ["t", "top"], ["r", "right"], ["b", "bottom"]] as const) {
+      const value = presentation.crop[key];
+      if (value === undefined) srcRect.removeAttribute(axis);
+      else srcRect.setAttribute(axis, String(Math.round(value * 100000)));
+    }
+  }
+}
+
+async function appendAuthoredImage(
+  document: Document,
+  paragraph: XmlElement,
+  image: Extract<DocxRichInline, { kind: "image" }>,
+  options: DocxWriteOptions | undefined,
+) {
+  const added = await resolveAuthoredImage(document, image, options);
+  const detached = removeAddedImageParagraph(document, added.partName);
+  if (!detached.drawing || !detached.run) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The native Word image drawing was not created.");
+  paragraph.appendChild(detached.run);
+  applyImagePresentation(detached.drawing, image);
+}
+
+function retainedImageRuns(document: Document, paragraph: Paragraph) {
+  return paragraph.element.elements().flatMap((child) => {
+    if (child.namespaceUri() !== WML_NAMESPACE || child.localName !== "r") return [];
+    const drawing = child.elements().find(
+      (candidate) =>
+        candidate.namespaceUri() === WML_NAMESPACE &&
+        candidate.localName === "drawing",
+    );
+    if (!drawing) return [];
+    const image = nativeImageContent(document, drawing).find(
+      (candidate) => candidate.kind === "image",
+    );
+    if (!image || image.kind !== "image" || !image.partName) return [];
+    const nonProperties = child.elements().filter((candidate) => candidate.localName !== "rPr");
+    if (nonProperties.length !== 1 || nonProperties[0] !== drawing)
+      throw new DocxLensError(
+        "DOCX_REGION_READ_ONLY",
+        "This Word picture shares a run with native content that Spectra cannot safely rewrite.",
+      );
+    return [{ partName: image.partName, run: child }];
+  });
+}
+
+async function replaceParagraphRich(
   document: Document,
   paragraph: Paragraph,
   inlineContent: readonly DocxRichInline[],
+  options?: DocxWriteOptions,
 ) {
-  if (inlineContent.some((item) => item.kind === "image"))
+  const hasNativeDrawing = descendants(paragraph.element).some(
+    (element) => element.namespaceUri() === WML_NAMESPACE && element.localName === "drawing",
+  );
+  const nativeRuns = hasNativeDrawing ? retainedImageRuns(document, paragraph) : [];
+  const nativeItems = inlineContent.filter(
+    (item): item is Extract<DocxRichInline, { kind: "image" }> =>
+      item.kind === "image" && Boolean(item.partName),
+  );
+  if (nativeRuns.length > nativeItems.length)
     throw new DocxLensError(
       "DOCX_REGION_READ_ONLY",
-      "Native pictures remain in their Word representation; edit neighboring text without replacing that native object.",
+      "This edit would remove a native Word picture and its neighboring structure. Keep the picture or replace it directly.",
     );
+  const nativeByPart = new Map(nativeRuns.map((entry) => [entry.partName, entry.run]));
+  const usedNativeRuns = new Set<XmlElement>();
+  let nativeImageIndex = 0;
   const properties = paragraph.element.find(WML_NAMESPACE, "pPr");
   for (const child of [...paragraph.element.children])
     if (child !== properties) paragraph.element.removeChild(child);
   for (const item of inlineContent) {
     if (item.kind === "text" && item.text)
       appendRichText(document, paragraph.element, item.text, item.format, item.href);
-    else if (item.kind === "equation") {
+    else if (item.kind === "image") {
+      const retained = item.partName
+        ? nativeByPart.get(item.partName)
+        : undefined;
+      // replace-image updates the package relationship before a mixed text edit
+      // reaches this function. Its projected locator is still the old part, so
+      // fall back to the image's existing ordinal after trying the stable part.
+      const positional =
+        !retained && item.partName ? nativeRuns[nativeImageIndex]?.run : undefined;
+      const run = retained ?? positional;
+      if (run) {
+        paragraph.element.appendChild(run);
+        usedNativeRuns.add(run);
+        nativeImageIndex += 1;
+      } else {
+        await appendAuthoredImage(document, paragraph.element, item, options);
+      }
+    } else if (item.kind === "equation") {
       const unchangedNative = item.ommlXml && item.ommlSourceLatex === item.latex;
       const interchange = unchangedNative
         ? undefined
@@ -1738,6 +1956,11 @@ function replaceParagraphRich(
       appendNativeOmml(paragraph.element, interchange?.xml ?? item.ommlXml!);
     }
   }
+  if (usedNativeRuns.size !== nativeRuns.length)
+    throw new DocxLensError(
+      "DOCX_REGION_READ_ONLY",
+      "This edit did not retain every native Word picture in the mixed paragraph.",
+    );
   if (!inlineContent.length) appendRichText(document, paragraph.element, "");
   document._markMainDirty();
 }
@@ -2014,14 +2237,41 @@ function imageOperationsBetween(
   regionId: string,
   beforeContent: readonly DocxRichInline[] = [],
   afterContent: readonly DocxRichInline[] = [],
-): Extract<DocxOperation, { kind: "update-image" }>[] {
+  location?: { row: number; column: number },
+): DocxOperation[] {
   const beforeImages = beforeContent.filter(
     (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
   );
-  return afterContent.flatMap((item) => {
+  return afterContent.flatMap<DocxOperation>((item): DocxOperation[] => {
     if (item.kind !== "image") return [];
-    const previous = beforeImages.find((candidate) => candidate.partName === item.partName);
-    if (!previous) return [];
+    const previous = item.partName
+      ? beforeImages.find((candidate) => candidate.partName === item.partName)
+      : undefined;
+    if (!previous && item.assetId)
+      return [{
+        kind: "insert-image",
+        regionId,
+        ...(location ?? {}),
+        assetId: item.assetId,
+        mediaType: item.mediaType,
+        ...(item.altText !== undefined ? { altText: item.altText } : {}),
+        ...(item.widthEmu !== undefined ? { widthEmu: item.widthEmu } : {}),
+        ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
+        ...(item.crop !== undefined ? { crop: item.crop } : {}),
+      }];
+    if (!previous || !item.partName) return [];
+    if (item.assetId && item.assetId !== previous.assetId)
+      return [{
+        kind: "replace-image",
+        regionId,
+        partName: item.partName,
+        assetId: item.assetId,
+        mediaType: item.mediaType,
+        ...(item.altText !== undefined ? { altText: item.altText } : {}),
+        ...(item.widthEmu !== undefined ? { widthEmu: item.widthEmu } : {}),
+        ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
+        ...(item.crop !== undefined ? { crop: item.crop } : {}),
+      }];
     const operation: Extract<DocxOperation, { kind: "update-image" }> = {
       kind: "update-image",
       regionId,
@@ -2088,6 +2338,256 @@ function placeholderFor(entry: LensFidelityEntry): DocxNativePlaceholder | null 
     : null;
 }
 
+const SECTION_CHILD_ORDER = [
+  "headerReference", "footerReference", "type", "pgSz", "pgMar", "paperSrc",
+  "pgBorders", "lnNumType", "pgNumType", "cols", "formProt", "vAlign",
+  "noEndnote", "titlePg", "textDirection", "bidi", "rtlGutter", "docGrid",
+];
+
+function orderedSectionChild(section: XmlElement, localName: string) {
+  const existing = section.find(WML_NAMESPACE, localName);
+  if (existing) return existing;
+  const element = new XmlElement(localName, section.prefix);
+  const rank = SECTION_CHILD_ORDER.indexOf(localName);
+  const before = section.elements().find((child) => {
+    const childRank = SECTION_CHILD_ORDER.indexOf(child.localName);
+    return childRank >= 0 && childRank > rank;
+  });
+  section.insertBefore(element, before ?? null);
+  return element;
+}
+
+function sectionProperties(document: Document) {
+  const output: XmlElement[] = [];
+  const visit = (element: XmlElement) => {
+    for (const child of element.elements()) {
+      if (child.namespaceUri() === WML_NAMESPACE && child.localName === "sectPr") {
+        output.push(child);
+        continue;
+      }
+      visit(child);
+    }
+  };
+  visit(document.body());
+  return output;
+}
+
+function finalSectionProperties(document: Document) {
+  const sections = sectionProperties(document);
+  if (sections.length) return sections.at(-1)!;
+  const section = new XmlElement("sectPr", document.body().prefix);
+  document.body().appendChild(section);
+  return section;
+}
+
+function sectionAt(document: Document, index: number | undefined) {
+  const sections = sectionProperties(document);
+  if (!sections.length) return finalSectionProperties(document);
+  const selected = index === undefined ? sections.at(-1) : sections[index];
+  if (!selected)
+    throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `Word section ${index} does not exist.`);
+  return selected;
+}
+
+function numberAttribute(element: XmlElement | undefined, namespace: string, name: string) {
+  const value = Number(element?.getAttributeNs(namespace, name));
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+const PAGE_SIZES_TWIPS: Record<string, [number, number]> = {
+  a4: [11_906, 16_838],
+  letter: [12_240, 15_840],
+  legal: [12_240, 20_160],
+  a5: [8_391, 11_906],
+};
+const MARGIN_TWIPS: Record<string, number> = { narrow: 680, normal: 1_440, wide: 2_268 };
+
+function pageSetupFromDocument(document: Document) {
+  const sections = sectionProperties(document);
+  const section = sections.at(-1);
+  const pgSz = section?.find(WML_NAMESPACE, "pgSz");
+  const width = numberAttribute(pgSz, WML_NAMESPACE, "w") ?? PAGE_SIZES_TWIPS.a4![0];
+  const height = numberAttribute(pgSz, WML_NAMESPACE, "h") ?? PAGE_SIZES_TWIPS.a4![1];
+  const landscape = pgSz?.getAttributeNs(WML_NAMESPACE, "orient") === "landscape" || width > height;
+  const portraitWidth = landscape ? height : width;
+  const portraitHeight = landscape ? width : height;
+  const size = Object.entries(PAGE_SIZES_TWIPS).find(([, dimensions]) =>
+    dimensions[0] === portraitWidth && dimensions[1] === portraitHeight,
+  )?.[0] ?? "a4";
+  const pgMar = section?.find(WML_NAMESPACE, "pgMar");
+  const margin = numberAttribute(pgMar, WML_NAMESPACE, "left") ?? MARGIN_TWIPS.normal;
+  const margins = Object.entries(MARGIN_TWIPS).sort(([, left], [, right]) =>
+    Math.abs(left - margin) - Math.abs(right - margin),
+  )[0]?.[0] ?? "normal";
+  const cols = numberAttribute(section?.find(WML_NAMESPACE, "cols"), WML_NAMESPACE, "num") ?? 1;
+  const readChrome = (slot: "header" | "footer") => {
+    const localName = `${slot}Reference`;
+    const ref = section?.findAll(WML_NAMESPACE, localName).find((candidate) =>
+      (candidate.getAttributeNs(WML_NAMESPACE, "type") ?? "default") === "default",
+    );
+    const relId = ref?.getAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id");
+    const part = relId ? document.office.package.relatedPart(document.office.mainPart, relId) : undefined;
+    const info = slot === "header"
+      ? document.headers().find((candidate) => candidate.partName === part?.name)
+      : document.footers().find((candidate) => candidate.partName === part?.name);
+    return info?.text() ?? "";
+  };
+  return {
+    size,
+    orientation: landscape ? "landscape" as const : "portrait" as const,
+    margins,
+    columns: Math.min(3, Math.max(1, Math.round(cols))),
+    header: readChrome("header"),
+    footer: readChrome("footer"),
+    ...(sections.length > 1 ? { sectionIndex: sections.length - 1 } : {}),
+  };
+}
+
+function setSectionPageSetup(document: Document, setup: {
+  sectionIndex?: number;
+  size?: string;
+  orientation?: "portrait" | "landscape";
+  margins?: string;
+  columns?: number;
+}) {
+  const section = sectionAt(document, setup.sectionIndex);
+  if (setup.size !== undefined || setup.orientation !== undefined) {
+    const current = section.find(WML_NAMESPACE, "pgSz");
+    const currentWidth = numberAttribute(current, WML_NAMESPACE, "w") ?? PAGE_SIZES_TWIPS.a4![0];
+    const currentHeight = numberAttribute(current, WML_NAMESPACE, "h") ?? PAGE_SIZES_TWIPS.a4![1];
+    const currentLandscape = current?.getAttributeNs(WML_NAMESPACE, "orient") === "landscape" || currentWidth > currentHeight;
+    const base = PAGE_SIZES_TWIPS[setup.size?.toLowerCase() ?? ""] ??
+      (currentLandscape ? [currentHeight, currentWidth] : [currentWidth, currentHeight]);
+    const landscape = setup.orientation === "landscape" || (setup.orientation === undefined && currentLandscape);
+    const pageSize = orderedSectionChild(section, "pgSz");
+    pageSize.setAttributeNs(WML_NAMESPACE, "w", String(landscape ? base[1] : base[0]));
+    pageSize.setAttributeNs(WML_NAMESPACE, "h", String(landscape ? base[0] : base[1]));
+    if (landscape) pageSize.setAttributeNs(WML_NAMESPACE, "orient", "landscape");
+    else pageSize.removeAttributeNs(WML_NAMESPACE, "orient");
+  }
+  if (setup.margins !== undefined) {
+    const margin = orderedSectionChild(section, "pgMar");
+    const value = String(MARGIN_TWIPS[setup.margins.toLowerCase()] ?? MARGIN_TWIPS.normal);
+    for (const side of ["top", "right", "bottom", "left"])
+      margin.setAttributeNs(WML_NAMESPACE, side, value);
+  }
+  if (setup.columns !== undefined) {
+    const columns = Math.min(3, Math.max(1, Math.round(setup.columns)));
+    const cols = orderedSectionChild(section, "cols");
+    if (columns === 1) cols.removeAttributeNs(WML_NAMESPACE, "num");
+    else cols.setAttributeNs(WML_NAMESPACE, "num", String(columns));
+  }
+  document._markMainDirty();
+}
+
+function setPlainChromeText(root: XmlElement, text: string) {
+  const paragraph = shallowWmlChildren(root, "p")[0] ?? (() => {
+    const created = new XmlElement("p", root.prefix);
+    root.appendChild(created);
+    return created;
+  })();
+  const existingRun = paragraph.find(WML_NAMESPACE, "r");
+  const run = existingRun ?? new XmlElement("r", paragraph.prefix);
+  if (!existingRun) paragraph.appendChild(run);
+  const runProperties = run.find(WML_NAMESPACE, "rPr");
+  for (const child of [...run.children])
+    if (child !== runProperties) run.removeChild(child);
+  const chunks = text.split(/(\n)/u);
+  for (const chunk of chunks) {
+    if (chunk === "\n") {
+      run.appendChild(new XmlElement("br", run.prefix));
+      continue;
+    }
+    if (!chunk) continue;
+    const t = new XmlElement("t", run.prefix);
+    if (/^\s|\s$/u.test(chunk)) t.setAttribute("xml:space", "preserve");
+    t.appendChild(new XmlText(chunk));
+    run.appendChild(t);
+  }
+}
+
+function referencePart(document: Document, reference: XmlElement) {
+  const relId = reference.getAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id");
+  return relId ? document.office.package.relatedPart(document.office.mainPart, relId) : undefined;
+}
+
+async function updateHeaderFooter(
+  document: Document,
+  operation: Extract<DocxSemanticDelta, { kind: "update-header-footer" }>,
+) {
+  const section = sectionAt(document, operation.sectionIndex);
+  const kind = operation.slot;
+  const refLocal = kind === "header" ? "headerReference" : "footerReference";
+  const relType = kind === "header" ? HEADER_RELATIONSHIP : FOOTER_RELATIONSHIP;
+  const contentType = kind === "header" ? HEADER_CONTENT_TYPE : FOOTER_CONTENT_TYPE;
+  const existing = section.findAll(WML_NAMESPACE, refLocal).find(
+    (candidate) => (candidate.getAttributeNs(WML_NAMESPACE, "type") ?? "default") === "default",
+  );
+  let reference = existing;
+  let part = existing ? referencePart(document, existing) : undefined;
+  const internal = document._internal();
+  if (reference && part) {
+    const sharedCount = sectionProperties(document).flatMap((candidate) =>
+      candidate.findAll(WML_NAMESPACE, refLocal).flatMap((ref) => referencePart(document, ref)?.name === part?.name ? [ref] : []),
+    ).length;
+    if (sharedCount > 1) {
+      const loaded = internal.headerFooterParts().find((candidate) => candidate.pd.part.name === part!.name);
+      if (!loaded) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The existing ${kind} part cannot be loaded safely.`);
+      const clone = parseXml(serializeNode(loaded.pd.doc.root.clone()));
+      const next = internal.addXmlPart(
+        internal.freePartName(`/word/${kind}`, "xml"),
+        contentType,
+        relType,
+        clone,
+      );
+      // addXmlPart creates the main-document relationship, but the cloned
+      // header/footer may also carry image, hyperlink, or other local
+      // relationships. Copy those relationship records so changing one
+      // section does not turn the other section's content into dangling XML.
+      for (const relationship of loaded.pd.part.relationships().all())
+        next.pd.part.relationships().add({
+          id: relationship.id,
+          type: relationship.type,
+          target: relationship.target,
+          targetMode: relationship.targetMode,
+        });
+      reference.setAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id", next.relId);
+      part = next.pd.part;
+      const partDom = next.pd.doc.root;
+      setPlainChromeText(partDom, operation.text);
+      internal.markDirty(next.pd);
+      document._markMainDirty();
+      return;
+    }
+  }
+  if (!reference || !part) {
+    const rootLocal = kind === "header" ? "hdr" : "ftr";
+    const root = parseXml(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:${rootLocal} xmlns:w="${WML_NAMESPACE}" xmlns:r="${OFFICE_RELATIONSHIP_NAMESPACE}"/>`);
+    const next = internal.addXmlPart(
+      internal.freePartName(`/word/${kind}`, "xml"),
+      contentType,
+      relType,
+      root,
+    );
+    reference = new XmlElement(refLocal, section.prefix);
+    orderedSectionChild(section, refLocal);
+    // orderedSectionChild returned a newly-created element; retain it so the
+    // relationship attributes are written on the correctly ordered node.
+    reference = section.findAll(WML_NAMESPACE, refLocal).at(-1)!;
+    reference.setAttributeNs(WML_NAMESPACE, "type", "default");
+    reference.setAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "id", next.relId);
+    part = next.pd.part;
+    setPlainChromeText(next.pd.doc.root, operation.text);
+    internal.markDirty(next.pd);
+  } else {
+    const loaded = internal.headerFooterParts().find((candidate) => candidate.pd.part.name === part!.name);
+    if (!loaded) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The existing ${kind} part cannot be loaded safely.`);
+    setPlainChromeText(loaded.pd.doc.root, operation.text);
+    internal.markDirty(loaded.pd);
+  }
+  document._markMainDirty();
+}
+
 /**
  * The region-level fidelity vocabulary the command surface reasons in.
  *
@@ -2098,12 +2598,8 @@ function placeholderFor(entry: LensFidelityEntry): DocxNativePlaceholder | null 
  * pessimistic: a region is NATIVE only where `materialize` can actually produce
  * a mutation for it today.
  *
- * `images`, `equations`, `footnotes`, `headersFooters` and `sections` are
- * PRESERVED unconditionally, and that is the honest answer rather than a cautious
- * one: the lens writes `/word/document.xml` paragraph text, paragraph properties
- * and table cell text. It writes no drawingML, no OMML, no notes part and no
- * section properties. A file that happens to contain no pictures would otherwise
- * let "insert image" report success while materializing an empty paragraph.
+ * Images, basic section properties, and plain header/footer text have native
+ * mutation paths. Other advanced Word objects remain preserved-only.
  */
 const REGION_FIDELITY: ReadonlyArray<{
   region: string;
@@ -2133,9 +2629,9 @@ const REGION_FIDELITY: ReadonlyArray<{
   },
   {
     region: "images",
-    class: "EQUIVALENT",
+    class: "NATIVE",
     reason:
-      "Existing PNG and JPEG pictures keep their native bytes while supported metadata, dimensions, and crop can be updated. Adding a new native drawing remains unavailable.",
+      "PNG and JPEG pictures are embedded from durable asset identities; replacement, insertion, alt text, dimensions, and crop remain native DrawingML.",
   },
   {
     region: "equations",
@@ -2151,15 +2647,15 @@ const REGION_FIDELITY: ReadonlyArray<{
   },
   {
     region: "headersFooters",
-    class: "PRESERVED",
+    class: "NATIVE",
     reason:
-      "Headers and footers live in their own Word parts and are kept exactly as the file has them.",
+      "Basic header and footer text is written to the selected section, cloning shared parts first so another section is unchanged.",
   },
   {
     region: "sections",
-    class: "PRESERVED",
+    class: "NATIVE",
     reason:
-      "Page size, margins and columns are section properties Spectra preserves rather than rewrites, so the printed Word page stays the one Word laid out.",
+      "Basic page size, orientation, margins, and column count are written to the selected native section properties.",
   },
   {
     region: "fields",
@@ -2214,7 +2710,7 @@ async function projectDocument(
             ["drawing", "pict", "object", "fldSimple"].includes(nested.localName),
           ),
       );
-      const readOnly = hasRichObject(richContent) || unsafeHyperlink || hasWml(
+      const readOnly = unsafeHyperlink || hasWml(
         element,
         "ins",
         "del",
@@ -2292,7 +2788,7 @@ async function projectDocument(
           ? {
               readOnly: true,
               reason:
-                "This paragraph contains Word revision, field, hyperlink, comment, content-control, or native-image markup and is preserved read-only.",
+                "This paragraph contains Word revision, field, hyperlink, comment, or content-control markup and is preserved read-only.",
             }
           : {}),
       });
@@ -2314,10 +2810,9 @@ async function projectDocument(
         const richRows = table.rows().map((row) =>
           row.cells().map((cell) => projectedCellRichContent(document, cell)),
         );
-        const unsafeInterior = table.rows().some((row, rowIndex) =>
-          row.cells().some(
-            (cell, columnIndex) =>
-              hasRichObject(richRows[rowIndex]?.[columnIndex] ?? []) ||
+        const unsafeInterior = table.rows().some((_row, _rowIndex) =>
+          _row.cells().some(
+            (cell, _columnIndex) =>
               hasWml(
                 cell.element,
                 "ins",
@@ -2479,11 +2974,10 @@ async function projectDocument(
   const placeholders = fidelityEntries
     .map(placeholderFor)
     .filter((value): value is DocxNativePlaceholder => Boolean(value));
-  const semanticDigest = await sha256Payload(
-    new TextEncoder().encode(
-      JSON.stringify(blocks),
-    ),
-  );
+  const semanticDigest = await docxProjectionSemanticDigest({
+    blocks,
+    pageSetup: pageSetupFromDocument(document),
+  });
   const projection = docxProjectionSchema.parse({
     blocks,
     outline: blocks.flatMap((block) =>
@@ -2497,6 +2991,7 @@ async function projectDocument(
           ]
         : [],
     ),
+    pageSetup: pageSetupFromDocument(document),
     nativeBinding: {
       version: 1,
       format: document.office.format.extension as DocxProjection["nativeBinding"]["format"],
@@ -2508,6 +3003,32 @@ async function projectDocument(
     },
   });
   return { projection, fidelityMap };
+}
+
+function semanticProjectionValue(value: unknown, parentKey?: string): unknown {
+  if (Array.isArray(value)) return value.map((item) => semanticProjectionValue(item, parentKey));
+  if (!value || typeof value !== "object") return value;
+  const source = value as Record<string, unknown>;
+  const isImage = source.kind === "image";
+  return Object.fromEntries(
+    Object.entries(source).flatMap(([key, child]) => {
+      if ((parentKey === "image" || isImage) && (key === "partName" || key === "assetId")) return [];
+      if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId") return [];
+      return [[key, semanticProjectionValue(child, key)]];
+    }),
+  );
+}
+
+/** Digest of the requested semantic state, independent of package locators. */
+export async function docxProjectionSemanticDigest(projection: Pick<DocxProjection, "blocks" | "pageSetup">) {
+  return sha256Payload(
+    new TextEncoder().encode(
+      JSON.stringify({
+        blocks: semanticProjectionValue(projection.blocks),
+        pageSetup: semanticProjectionValue(projection.pageSetup ?? null),
+      }),
+    ),
+  );
 }
 
 function findEntry(map: LensFidelityMap, regionId: string) {
@@ -2526,6 +3047,7 @@ function assertEditable(map: LensFidelityMap, regionId: string) {
 async function applyDelta(
   carry: LensPreservedCarry<DocxProjection>,
   delta: DocxSemanticDelta,
+  options?: DocxWriteOptions,
 ) {
   const document = await Document.open(carry.safePayload ?? carry.payload);
   const identity = ensureStableRegionIds(document);
@@ -2538,13 +3060,21 @@ async function applyDelta(
     born.get(regionId) ?? aliases.get(regionId) ?? regionId;
 
   for (const operation of operations) {
+    if (operation.kind === "update-section") {
+      setSectionPageSetup(document, operation);
+      continue;
+    }
+    if (operation.kind === "update-header-footer") {
+      await updateHeaderFooter(document, operation);
+      continue;
+    }
     if (operation.kind === "insert-paragraph") {
       const inserted = await insertParagraph(document, {
         ...operation,
         ...(operation.afterRegionId
           ? { afterRegionId: resolveRegionId(operation.afterRegionId) }
           : {}),
-      });
+      }, options);
       if (operation.regionId) born.set(operation.regionId, inserted);
       continue;
     }
@@ -2596,7 +3126,7 @@ async function applyDelta(
     // when the containing paragraph is otherwise preserved because the writer
     // targets one existing picture by package part and never rewrites the
     // paragraph's mixed native content.
-    if (operation.kind !== "update-image")
+    if (!(["update-image", "insert-image", "replace-image"] as string[]).includes(operation.kind))
       assertEditable(opened.fidelityMap, regionId);
     const region = uniqueRegionById(document, regionId);
     const block = opened.projection.blocks.find((candidate) => candidate.id === regionId);
@@ -2608,7 +3138,7 @@ async function applyDelta(
           `The target Word region ${operation.regionId} is not a paragraph.`,
         );
       if (operation.inlineContent)
-        replaceParagraphRich(document, region.paragraph, operation.inlineContent);
+        await replaceParagraphRich(document, region.paragraph, operation.inlineContent, options);
       else replaceParagraphText(document, region.paragraph, operation.text);
     } else if (operation.kind === "apply-style") {
       if (!region.paragraph)
@@ -2640,7 +3170,7 @@ async function applyDelta(
           "The target Word table cell no longer exists.",
         );
       if (operation.inlineContent)
-        replaceTableCellRich(document, cell, operation.inlineContent);
+        await replaceTableCellRich(document, cell, operation.inlineContent, options);
       else await replaceTableCellText(document, cell, operation.text);
     } else if (
       operation.kind === "insert-table-row" ||
@@ -2656,6 +3186,10 @@ async function applyDelta(
       if (operation.kind === "delete-table-column") deleteTableColumn(document, region.table, operation.column);
     } else if (operation.kind === "update-image") {
       updateImage(document, region, operation);
+    } else if (operation.kind === "insert-image") {
+      await insertImage(document, region, operation, options);
+    } else if (operation.kind === "replace-image") {
+      await replaceImage(document, region, operation, options);
     }
   }
   return document.save();
@@ -2700,13 +3234,37 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
     };
   },
 
-  async mutate(carry, delta) {
-    return applyDelta(carry, delta);
+  async mutate(carry, delta, options) {
+    return applyDelta(carry, delta, options as DocxWriteOptions | undefined);
   },
 
-  async materialize({ projection, carry }) {
+  async materialize({ projection, carry, options }) {
     const before = new Map(carry.projection.blocks.map((block) => [block.id, block]));
     const operations: Exclude<DocxSemanticDelta, { kind: "ai-edit" }>[] = [];
+    const beforePage = carry.projection.pageSetup ?? {};
+    const afterPage = projection.pageSetup ?? {};
+    const pageFields = ["size", "orientation", "margins", "columns"] as const;
+    const pagePatch = Object.fromEntries(
+      pageFields.flatMap((field) =>
+        JSON.stringify(beforePage[field]) === JSON.stringify(afterPage[field])
+          ? []
+          : [[field, afterPage[field]]],
+      ),
+    );
+    if (Object.keys(pagePatch).length)
+      operations.push({
+        kind: "update-section",
+        ...(afterPage.sectionIndex !== undefined ? { sectionIndex: afterPage.sectionIndex } : {}),
+        ...pagePatch,
+      } as DocxOperation);
+    for (const slot of ["header", "footer"] as const)
+      if (beforePage[slot] !== afterPage[slot])
+        operations.push({
+          kind: "update-header-footer",
+          ...(afterPage.sectionIndex !== undefined ? { sectionIndex: afterPage.sectionIndex } : {}),
+          slot,
+          text: afterPage[slot] ?? "",
+        });
     for (const [blockIndex, block] of projection.blocks.entries()) {
       const previous = before.get(block.id);
       if (!previous) {
@@ -2720,6 +3278,7 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
           regionId: block.id,
           afterRegionId: blockIndex > 0 ? projection.blocks[blockIndex - 1]!.id : null,
           text: block.text,
+          ...(block.inlineContent ? { inlineContent: block.inlineContent } : {}),
           ...(typeof block.attrs?.styleId === "string"
             ? { style: block.attrs.styleId }
             : {}),
@@ -2765,7 +3324,7 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
             const nextRich = effectiveBlock.richRows?.[rowIndex]?.[columnIndex];
             const previousRich = previous.richRows?.[rowIndex]?.[columnIndex];
             operations.push(
-              ...imageOperationsBetween(block.id, previousRich, nextRich),
+              ...imageOperationsBetween(block.id, previousRich, nextRich, { row: rowIndex, column: columnIndex }),
             );
             const hasImages = Boolean(
               nextRich?.some((item) => item.kind === "image") ||
@@ -2876,7 +3435,7 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
     if (retainedAfter.some((id, index) => id !== retainedBefore[index]))
       operations.push({ kind: "reorder-regions", order });
     if (!operations.length) return carry.payload;
-    return applyDelta(carry, { kind: "ai-edit", operations });
+    return applyDelta(carry, { kind: "ai-edit", operations }, options as DocxWriteOptions | undefined);
   },
 
   async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> {

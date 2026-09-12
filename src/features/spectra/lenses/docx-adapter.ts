@@ -23,9 +23,9 @@ export type DocxAssetRequest = {
 };
 
 /**
- * W6-01's durable asset resolver seam. The DOCX writer never fetches a
- * cookie-bound URL. Until the durable resolver is integrated, callers may
- * resolve a controlled asset id or a data URL in tests/local import flows.
+ * Durable asset resolver seam. Native writers receive bytes from a server or
+ * explicitly controlled test resolver; authenticated content URLs are never
+ * written into a package.
  */
 export type DocxAssetResolver = (
   request: DocxAssetRequest,
@@ -90,7 +90,7 @@ function nativeImageToEditable(
       src: src ?? "",
       alt: typeof attrs.alt === "string" ? attrs.alt : "Word image",
       ...(typeof attrs.widthEmu === "number"
-        ? { widthPercent: Math.max(1, Math.min(100, (attrs.widthEmu / 914400) * 96 / 8.27 * 100)) }
+        ? { widthPercent: Math.max(1, Math.min(100, (attrs.widthEmu / 914400) / 8.27 * 100)) }
         : {}),
     },
   } satisfies DocumentJsonNode;
@@ -425,6 +425,7 @@ async function appendImage(document: Document, node: DocumentJsonNode, resolver:
       ? await resolver({
           assetId: typeof attrs.assetId === "string" ? attrs.assetId : undefined,
           src: typeof attrs.src === "string" ? attrs.src : undefined,
+          mediaType: typeof attrs.mediaType === "string" ? attrs.mediaType : undefined,
           altText: typeof attrs.alt === "string" ? attrs.alt : undefined,
         })
       : undefined);
@@ -568,6 +569,10 @@ export async function exportDocxCopy(
         throw new Error(`The ${node.type ?? "unknown"} node has no shared Word copy writer.`);
       await appendParagraph(document, node, undefined, options.resolveAsset);
     } catch (error) {
+      // A missing/revoked durable image is a failed export, not an unsupported
+      // node. Replacing it with a text placeholder would silently drop user
+      // media while reporting a successful Word copy.
+      if (node.type === "image") throw error;
       await appendParagraph(document, {
         type: "paragraph",
         content: [

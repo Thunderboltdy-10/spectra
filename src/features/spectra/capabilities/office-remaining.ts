@@ -308,7 +308,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   [
     "insert.image",
     "Place a picture from this device.",
-    { reason: DOCUMENT_NATIVE_REASONS.image, touches: ["images"] },
+    { delta: "insert-image", touches: ["images"] },
   ],
   [
     "insert.link",
@@ -407,22 +407,22 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   [
     "table.row.after",
     "Add a row under the caret.",
-    { reason: DOCUMENT_NATIVE_REASONS.tableStructure, touches: ["tableStructure"] },
+    { delta: "insert-table-row", touches: ["tableStructure"] },
   ],
   [
     "table.column.after",
     "Add a column to the right of the caret.",
-    { reason: DOCUMENT_NATIVE_REASONS.tableStructure, touches: ["tableStructure"] },
+    { delta: "insert-table-column", touches: ["tableStructure"] },
   ],
   [
     "table.row.before",
     "Add a row above the caret.",
-    { reason: DOCUMENT_NATIVE_REASONS.tableStructure, touches: ["tableStructure"] },
+    { delta: "insert-table-row", touches: ["tableStructure"] },
   ],
   [
     "table.column.before",
     "Add a column to the left of the caret.",
-    { reason: DOCUMENT_NATIVE_REASONS.tableStructure, touches: ["tableStructure"] },
+    { delta: "insert-table-column", touches: ["tableStructure"] },
   ],
   [
     "table.merge",
@@ -447,7 +447,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "table.row.delete",
     "Remove the row the caret is in.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.tableStructure,
+      delta: "delete-table-row",
       touches: ["tableStructure"],
       risk: "confirm",
     },
@@ -456,7 +456,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "table.column.delete",
     "Remove the column the caret is in.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.tableStructure,
+      delta: "delete-table-column",
       touches: ["tableStructure"],
       risk: "confirm",
     },
@@ -485,7 +485,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Set the width of this picture.",
     {
       params: num,
-      reason: DOCUMENT_NATIVE_REASONS.image,
+      delta: "update-image",
       touches: ["images"],
       field: true,
     },
@@ -495,10 +495,15 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Set alternative text for this picture.",
     {
       params: text,
-      reason: DOCUMENT_NATIVE_REASONS.image,
+      delta: "update-image",
       touches: ["images"],
       field: true,
     },
+  ],
+  [
+    "image.replace",
+    "Replace this picture with another PNG or JPEG.",
+    { delta: "replace-image", touches: ["images"], risk: "confirm" },
   ],
   [
     "image.caption",
@@ -545,7 +550,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Set the paper size for the page canvas, print, and the PDF copy.",
     {
       params: text,
-      reason: DOCUMENT_NATIVE_REASONS.section,
+      delta: "update-section",
       touches: ["sections"],
       field: true,
     },
@@ -555,7 +560,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Set portrait or landscape for the page.",
     {
       params: text,
-      reason: DOCUMENT_NATIVE_REASONS.section,
+      delta: "update-section",
       touches: ["sections"],
       field: true,
     },
@@ -565,7 +570,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Set page margins.",
     {
       params: text,
-      reason: DOCUMENT_NATIVE_REASONS.section,
+      delta: "update-section",
       touches: ["sections"],
       field: true,
     },
@@ -575,7 +580,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Set the number of columns on the page.",
     {
       params: num,
-      reason: DOCUMENT_NATIVE_REASONS.section,
+      delta: "update-section",
       touches: ["sections"],
       field: true,
     },
@@ -584,7 +589,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "layout.header",
     "Edit the page header.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.headerFooter,
+      delta: "update-header-footer",
       touches: ["headersFooters"],
     },
   ],
@@ -592,7 +597,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "layout.footer",
     "Edit the page footer.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.headerFooter,
+      delta: "update-header-footer",
       touches: ["headersFooters"],
     },
   ],

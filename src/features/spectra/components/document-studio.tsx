@@ -69,6 +69,7 @@ import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
   completeArtifactImport,
+  uploadArtifactAsset,
   uploadArtifactImportOriginal,
 } from "../data/api";
 import {
@@ -122,7 +123,7 @@ import {
   documentContentFromJson,
   documentJsonFromContent,
 } from "./artifact-studio";
-import { exportDocxCopy, importDocxPayload } from "../lenses/docx-adapter";
+import { exportDocxCopy, importDocxPayload, type DocxAssetResolver } from "../lenses/docx-adapter";
 import { record } from "./artifact-content-model";
 import {
   artifactBlobSha256,
@@ -205,6 +206,42 @@ function documentMarkdown(json: JSONContent) {
       .join("\n\n");
   };
   return render(json).trim();
+}
+
+async function materializeJsonImages(node: JSONContent, artifactId: string): Promise<JSONContent> {
+  const attrs = node.attrs ?? {};
+  if (node.type === "image" && typeof attrs.assetId !== "string" && typeof attrs.src === "string") {
+    const match = attrs.src.match(/^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/iu);
+    if (match) {
+      const binary = atob(match[2]!);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const blob = new Blob([bytes], { type: match[1]!.toLowerCase() });
+      const sha256 = await artifactBlobSha256(blob);
+      const extension = match[1]!.toLowerCase() === "image/jpeg" ? "jpg" : "png";
+      const uploaded = await uploadArtifactAsset({
+        artifactId,
+        path: `document/images/${sha256}.${extension}`,
+        name: `image-${sha256.slice(0, 12)}.${extension}`,
+        mediaType: match[1]!.toLowerCase(),
+        sha256,
+        blob,
+      });
+      return {
+        ...node,
+        attrs: {
+          ...attrs,
+          src: `/api/spectra/assets/content?assetId=${encodeURIComponent(uploaded.assetId)}`,
+          assetId: uploaded.assetId,
+          mediaType: match[1]!.toLowerCase(),
+        },
+      };
+    }
+  }
+  if (!node.content?.length) return node;
+  return {
+    ...node,
+    content: await Promise.all(node.content.map((child) => materializeJsonImages(child, artifactId))),
+  };
 }
 
 /** Points, from whatever unit the font-size mark stored. */
@@ -1783,7 +1820,17 @@ export function DocumentStudio({
       document.save(`${safeTitle}.pdf`);
     } else {
       const editorJson = editor.getJSON();
-      const copy = await exportDocxCopy(editorJson, { pageSetup });
+      const resolveAsset: DocxAssetResolver = async ({ assetId }) => {
+        if (!assetId) return undefined;
+        const response = await fetch(
+          `/api/spectra/assets/content?assetId=${encodeURIComponent(assetId)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok)
+          throw new Error("The image asset is unavailable or revoked. Restore or upload it before exporting.");
+        return new Uint8Array(await response.arrayBuffer());
+      };
+      const copy = await exportDocxCopy(editorJson, { pageSetup, resolveAsset });
       const blob = new Blob([new Uint8Array(copy.bytes).buffer as ArrayBuffer], {
         type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
@@ -1835,7 +1882,8 @@ export function DocumentStudio({
           OFFICE_ARCHIVE_LIMITS,
         );
         const result = await importDocxPayload(checked.bytes);
-        editor.commands.setContent(result.json);
+        const durableJson = await materializeJsonImages(result.json as JSONContent, artifactId);
+        editor.commands.setContent(durableJson);
         const conversionNotes = result.conversion.notes;
         setImportReport(
           conversionNotes.some((note) => note.level !== "exact")
@@ -2079,8 +2127,9 @@ export function DocumentStudio({
     if (!editor) return null;
     const { selection } = editor.state;
     const selected = (selection as { node?: { type: { name: string } } }).node;
-    if (selected && names.includes(selected.type.name))
+      if (selected && names.includes(selected.type.name))
       return {
+        type: selected.type.name,
         pos: selection.from,
         attrs: (selected as unknown as { attrs: Record<string, unknown> })
           .attrs,
@@ -2090,18 +2139,19 @@ export function DocumentStudio({
       const node = $from.node(depth);
       if (names.includes(node.type.name))
         return {
+          type: node.type.name,
           pos: $from.before(depth),
           attrs: node.attrs as Record<string, unknown>,
         };
     }
     const after = $from.nodeAfter;
     if (after && names.includes(after.type.name))
-      return { pos: $from.pos, attrs: after.attrs as Record<string, unknown> };
+      return { type: after.type.name, pos: $from.pos, attrs: after.attrs as Record<string, unknown> };
     return null;
   };
 
   const textStyleAttrs = editor?.getAttributes("textStyle") ?? {};
-  const activeImage = activeNode(["image"]);
+  const activeImage = activeNode(["image", "nativeDocxImage"]);
   const activeEquation = activeNode(["equation", "inlineEquation"]);
   const inTable = Boolean(editor?.isActive("table"));
   const inList = Boolean(
@@ -2632,17 +2682,24 @@ export function DocumentStudio({
         : {}),
       setWrap: (wrap) =>
         withEdit(() =>
-          editor!.chain().focus().updateAttributes("image", { wrap }).run(),
+          editor!.chain().focus().updateAttributes(activeImage?.type ?? "image", { wrap }).run(),
         ),
       ...(Number(activeImage?.attrs.widthPercent)
         ? { width: Number(activeImage!.attrs.widthPercent) }
+        : activeImage?.type === "nativeDocxImage" && Number(activeImage.attrs.widthEmu)
+          ? { width: Math.max(1, Math.min(100, Number(activeImage.attrs.widthEmu) / (8.27 * 914400) * 100)) }
         : {}),
       setWidth: (percent) =>
         withEdit(() =>
           editor!
             .chain()
             .focus()
-            .updateAttributes("image", { widthPercent: percent })
+            .updateAttributes(
+              activeImage?.type ?? "image",
+              activeImage?.type === "nativeDocxImage"
+                ? { widthPercent: percent, widthEmu: Math.round((percent / 100) * 8.27 * 914400) }
+                : { widthPercent: percent },
+            )
             .run(),
         ),
       ...(typeof activeImage?.attrs.alt === "string"
@@ -2654,6 +2711,7 @@ export function DocumentStudio({
             ? activeImage.attrs.alt
             : "",
         ),
+      replace: () => imageRef.current?.click(),
       remove: () =>
         withEdit(() => editor!.chain().focus().deleteSelection().run()),
     },
@@ -2791,6 +2849,8 @@ export function DocumentStudio({
           await exportDocument(
             format as "docx" | "pdf" | "html" | "md" | "txt",
           );
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "The document copy could not be exported.");
         } finally {
           setExportBusy(null);
         }
@@ -2896,7 +2956,12 @@ export function DocumentStudio({
           ]
         : []),
       ...(activeImage
-        ? ["document.image.wrap", "document.image.width", "document.image.alt"]
+        ? [
+            "document.image.wrap",
+            "document.image.width",
+            "document.image.alt",
+            "document.image.replace",
+          ]
         : []),
       ...(activeEquation
         ? [
@@ -2994,7 +3059,11 @@ export function DocumentStudio({
             ) {
               return false;
             }
-            if (current.isActive("table") || current.isActive("image"))
+            if (
+              current.isActive("table") ||
+              current.isActive("image") ||
+              current.isActive("nativeDocxImage")
+            )
               return true;
             return !state.selection.empty;
           }}
@@ -3016,18 +3085,43 @@ export function DocumentStudio({
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = "";
           if (!file || !editor) return;
-          const reader = new FileReader();
-          reader.onload = () => {
-            if (typeof reader.result !== "string") return;
-            withEdit(() =>
-              editor
-                .chain()
-                .focus()
-                .setImage({ src: reader.result as string })
-                .run(),
-            );
-          };
-          reader.readAsDataURL(file);
+          void (async () => {
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            const mediaType =
+              bytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => bytes[index] === value)
+                ? "image/png"
+                : bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8
+                  ? "image/jpeg"
+                  : "";
+            if (!mediaType) {
+              toast.error("Word pictures must be PNG or JPEG files.");
+              return;
+            }
+            const blob = new Blob([bytes], { type: mediaType });
+            const sha256 = await artifactBlobSha256(blob);
+            const extension = mediaType === "image/jpeg" ? "jpg" : "png";
+            const uploaded = await uploadArtifactAsset({
+              artifactId,
+              path: `document/images/${sha256}.${extension}`,
+              name: file.name || `image-${sha256.slice(0, 12)}.${extension}`,
+              mediaType,
+              sha256,
+              blob,
+            });
+            const attrs = {
+              src: `/api/spectra/assets/content?assetId=${encodeURIComponent(uploaded.assetId)}`,
+              assetId: uploaded.assetId,
+              mediaType,
+            };
+            withEdit(() => {
+              const chain = editor.chain().focus();
+              if (activeImage) chain.updateAttributes(activeImage.type, attrs);
+              else chain.setImage(attrs);
+              chain.run();
+            });
+          })().catch((error) => {
+            toast.error(error instanceof Error ? error.message : "The image could not be uploaded.");
+          });
         }}
       />
       <input
@@ -3194,7 +3288,7 @@ export function DocumentStudio({
                 editor!
                   .chain()
                   .focus()
-                  .updateAttributes("image", { alt: altDraft })
+                  .updateAttributes(activeImage?.type ?? "image", { alt: altDraft })
                   .run(),
               );
               setAltDraft(null);

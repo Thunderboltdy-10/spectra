@@ -121,7 +121,7 @@ export function documentContentToProseMirrorJson(
 }
 
 const documentContentSchema = docxProjectionSchema
-  .pick({ blocks: true, outline: true })
+  .pick({ blocks: true, outline: true, pageSetup: true })
   .partial({ outline: true })
   .extend({
     nativeIntent: docxSemanticDeltaSchema.optional(),
@@ -161,18 +161,56 @@ function richContentWithoutImages(content: readonly DocxRichInline[]) {
   return content.filter((item) => item.kind !== "image");
 }
 
+function replacePlainRichText(
+  content: readonly DocxRichInline[],
+  text: string,
+): DocxRichInline[] | undefined {
+  if (content.some((item) => item.kind !== "text")) return undefined;
+  const first = content.find((item) => item.kind === "text");
+  if (!first || content.filter((item) => item.kind === "text").length !== 1)
+    return undefined;
+  return [{ ...first, text }];
+}
+
 function imageOperationsBetween(
   regionId: string,
   beforeContent: readonly DocxRichInline[] = [],
   afterContent: readonly DocxRichInline[] = [],
+  location?: { row: number; column: number },
 ): DocxOperation[] {
   const beforeImages = beforeContent.filter(
     (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
   );
-  return afterContent.flatMap((item) => {
+  return afterContent.flatMap<DocxOperation>((item): DocxOperation[] => {
     if (item.kind !== "image") return [];
-    const previous = beforeImages.find((candidate) => candidate.partName === item.partName);
-    if (!previous) return [];
+    const previous = item.partName
+      ? beforeImages.find((candidate) => candidate.partName === item.partName)
+      : undefined;
+    if (!previous && item.assetId)
+      return [{
+        kind: "insert-image",
+        regionId,
+        ...(location ?? {}),
+        assetId: item.assetId,
+        mediaType: item.mediaType,
+        ...(item.altText !== undefined ? { altText: item.altText } : {}),
+        ...(item.widthEmu !== undefined ? { widthEmu: item.widthEmu } : {}),
+        ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
+        ...(item.crop !== undefined ? { crop: item.crop } : {}),
+      }];
+    if (!previous || !item.partName) return [];
+    if (item.assetId && item.assetId !== previous.assetId)
+      return [{
+        kind: "replace-image",
+        regionId,
+        partName: item.partName,
+        assetId: item.assetId,
+        mediaType: item.mediaType,
+        ...(item.altText !== undefined ? { altText: item.altText } : {}),
+        ...(item.widthEmu !== undefined ? { widthEmu: item.widthEmu } : {}),
+        ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
+        ...(item.crop !== undefined ? { crop: item.crop } : {}),
+      }];
     const operation: Extract<DocxOperation, { kind: "update-image" }> = {
       kind: "update-image",
       regionId,
@@ -199,6 +237,29 @@ export function docxOperationsBetween(
 ): DocxOperation[] {
   const previous = new Map(before.blocks.map((block) => [block.id, block]));
   const operations: DocxOperation[] = [];
+  const beforePage = before.pageSetup ?? {};
+  const afterPage = after.pageSetup ?? {};
+  const pagePatch = Object.fromEntries(
+    (["size", "orientation", "margins", "columns"] as const).flatMap((field) =>
+      JSON.stringify(beforePage[field]) === JSON.stringify(afterPage[field])
+        ? []
+        : [[field, afterPage[field]]],
+    ),
+  );
+  if (Object.keys(pagePatch).length)
+    operations.push({
+      kind: "update-section",
+      ...(afterPage.sectionIndex !== undefined ? { sectionIndex: afterPage.sectionIndex } : {}),
+      ...pagePatch,
+    } as DocxOperation);
+  for (const slot of ["header", "footer"] as const)
+    if (beforePage[slot] !== afterPage[slot])
+      operations.push({
+        kind: "update-header-footer",
+        ...(afterPage.sectionIndex !== undefined ? { sectionIndex: afterPage.sectionIndex } : {}),
+        slot,
+        text: afterPage[slot] ?? "",
+      });
   after.blocks.forEach((block, index) => {
     const old = previous.get(block.id);
     previous.delete(block.id);
@@ -209,6 +270,7 @@ export function docxOperationsBetween(
           regionId: block.id,
           afterRegionId: index ? after.blocks[index - 1]!.id : null,
           text: block.text,
+          ...(block.inlineContent ? { inlineContent: block.inlineContent } : {}),
           ...(typeof block.attrs?.styleId === "string"
             ? { style: block.attrs.styleId }
             : {}),
@@ -242,6 +304,7 @@ export function docxOperationsBetween(
             block.id,
             previousInline,
             inlineContent,
+            { row: rowIndex, column: columnIndex },
           );
           operations.push(...imageOperations);
           const visibleText = inlineContent
@@ -367,10 +430,28 @@ export function docxProjectionFromContent(
       nativeTrailingWhitespaceEquivalent(previous.text, incoming.text)
         ? previous.text
         : incoming.text;
+    const normalizedInlineContent =
+      previous &&
+      incoming.inlineContent &&
+      previous.inlineContent &&
+      incoming.text !== previous.text &&
+      richTextWithoutImages(incoming.inlineContent) === previous.text
+        ? replacePlainRichText(incoming.inlineContent, incoming.text)
+        : undefined;
+    const normalizedRichRows =
+      incoming.type === "table" &&
+      incoming.rows &&
+      !incoming.richRows
+        ? incoming.rows.map((row) =>
+            row.map((cell) => [{ kind: "text" as const, text: cell }]),
+          )
+        : undefined;
     return docxProjectionBlockSchema.parse({
       ...(previous ?? {}),
       ...incoming,
       text,
+      ...(normalizedInlineContent ? { inlineContent: normalizedInlineContent } : {}),
+      ...(normalizedRichRows ? { richRows: normalizedRichRows } : {}),
       ...(previous?.attrs || incoming.attrs
         ? {
             attrs: {
@@ -402,15 +483,27 @@ export function docxProjectionFromContent(
   const projection = docxProjectionSchema.parse({
     blocks,
     outline: parsed.outline ?? base.outline,
+    ...(parsed.pageSetup ? { pageSetup: parsed.pageSetup } : base.pageSetup ? { pageSetup: base.pageSetup } : {}),
     nativeBinding: base.nativeBinding,
   });
+  const inferredOperations = docxOperationsBetween(base, projection);
+  const explicitOperations = parsed.nativeIntent
+    ? parsed.nativeIntent.kind === "ai-edit"
+      ? parsed.nativeIntent.operations
+      : [parsed.nativeIntent]
+    : undefined;
   return {
     projection,
-    operations:
-      parsed.nativeIntent?.kind === "ai-edit"
-        ? parsed.nativeIntent.operations
-        : parsed.nativeIntent
-          ? [parsed.nativeIntent]
-          : docxOperationsBetween(base, projection),
+    // The editor's native intent predates page/header/footer operations and
+    // may therefore omit those changes. Keep explicit block operations, then
+    // add the inferred chrome/section operations exactly once.
+    operations: explicitOperations
+      ? [
+          ...explicitOperations,
+          ...inferredOperations.filter((operation) =>
+            operation.kind === "update-section" || operation.kind === "update-header-footer",
+          ),
+        ]
+      : inferredOperations,
   };
 }

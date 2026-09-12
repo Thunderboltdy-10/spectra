@@ -220,7 +220,6 @@ export function commandForBinding(type: WorkType, binding: CommandBinding, order
     availability: (ctx) => {
       if (binding.requires && !ctx.can(binding.requires)) return { state: "hidden" };
       if (binding.disabled) return { state: "disabled", reason: binding.hint ?? "Unavailable in the current selection" };
-      if (binding.availability) return binding.availability(ctx);
       if (
         ctx.compatibilityProfile === "strict-native" &&
         binding.strictNative?.available === false
@@ -232,6 +231,7 @@ export function commandForBinding(type: WorkType, binding: CommandBinding, order
             "This change cannot be written safely to the linked native file.",
         };
       }
+      if (binding.availability) return binding.availability(ctx);
       if (ctx.compatibilityProfile === "strict-native") {
         const blocked = regionBlockedBy(ctx.fidelity, binding.touches);
         if (blocked) {

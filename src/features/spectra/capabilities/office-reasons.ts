@@ -9,13 +9,13 @@ export const DOCUMENT_NATIVE_REASONS = {
   tableStructure:
     "Spectra edits safe text inside a linked Word table but preserves its rows, columns, merges, and formatting. Reshape the table in Word.",
   image:
-    "Spectra preserves pictures in a linked Word file but cannot add or restyle them there. Make this change in Word.",
+    "Set or add supported PNG/JPEG pictures natively in Spectra, including durable asset bytes, alternative text, dimensions, crop, insertion, and replacement; change text wrapping or remove a retained picture in Word.",
   equation:
     "Spectra preserves Word equations but cannot add or edit them in the linked file. Add or edit the equation in Word.",
   section:
-    "Spectra preserves section properties exactly as Word saved them. Change sections, margins, columns, or page setup in Word.",
+    "Set basic Word section page size, orientation, margins, and column count in Spectra. To add a section break or change advanced section layout, use Word.",
   headerFooter:
-    "Spectra preserves linked Word headers and footers but cannot rewrite those parts. Edit them in Word.",
+    "Spectra writes basic header/footer text natively and clones shared parts before a section-specific edit. Advanced header/footer content remains preserved.",
   field:
     "Spectra preserves Word fields but cannot insert, update, or recalculate them. Make this change in Word.",
   listStructure:

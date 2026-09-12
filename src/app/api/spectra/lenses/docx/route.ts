@@ -7,9 +7,12 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import {
   DocxLensError,
   docxLens,
+  docxProjectionSemanticDigest,
   sha256Payload,
+  type DocxWriteOptions,
   type DocxProjection,
 } from "@/features/spectra/lenses/docx-lens";
+import { resolveArtifactAssetBytes } from "@/features/spectra/lenses/asset-resolver-server";
 import {
   bindDocxProjectionSource,
   docxProjectionFromContent,
@@ -79,8 +82,22 @@ export function changedRegions(before: DocxProjection, after: DocxProjection) {
       changed.push(block.id);
   }
   changed.push(...prior.keys());
+  if (JSON.stringify(before.pageSetup ?? null) !== JSON.stringify(after.pageSetup ?? null))
+    changed.push("docx:region:sections");
   return [...new Set(changed)];
 }
+
+const nativeWriteOptions: DocxWriteOptions = {
+  resolveAsset: async ({ assetId, mediaType }) => {
+    const resolved = await resolveArtifactAssetBytes(assetId as Id<"artifactAssets">);
+    if (resolved.mediaType.toLowerCase() !== mediaType)
+      throw new DocxLensError(
+        "DOCX_UNSUPPORTED_EDIT",
+        "The durable Word image asset has a different media type from the requested replacement.",
+      );
+    return resolved.bytes;
+  },
+};
 
 /** Queue one verified DOCX payload for the Bridge. Used by both the human
  * editor endpoint and AI artifact updates so native materialization cannot be
@@ -145,9 +162,10 @@ async function materializeDocxArtifactAttempt(
     update = docxProjectionFromContent(rebased.projection, opened.projection);
   }
   const { projection, operations } = update;
+  const requestedDigest = await docxProjectionSemanticDigest(projection);
   const regionIds = changedRegions(opened.projection, projection);
   const output = operations.length
-    ? await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations })
+    ? await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations }, nativeWriteOptions)
     : payload;
   const hash = await sha256Payload(output);
   if (hash === truth.hash)
@@ -164,7 +182,7 @@ async function materializeDocxArtifactAttempt(
         baseRevision: truth.revision,
         resultRevision: hash,
         targets: { regionIds: [], partNames: [] },
-        semantic: { resultDigest: opened.projection.nativeBinding.semanticDigest, readbackDigest: opened.projection.nativeBinding.semanticDigest },
+        semantic: { resultDigest: requestedDigest, readbackDigest: requestedDigest },
         preservedPartNames: [],
         state: "unchanged" as const,
       } satisfies NativeSaveReceipt,
@@ -178,8 +196,8 @@ async function materializeDocxArtifactAttempt(
     String(workId),
     hash,
   );
-  if (nextProjection.nativeBinding.semanticDigest !== projection.nativeBinding.semanticDigest)
-    throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested semantic equation/text edit.");
+  if (nextProjection.nativeBinding.semanticDigest !== requestedDigest)
+    throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested text, image, page, or header/footer edit.");
   assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
   const local = workTruth.replicas.find(
     (replica) => replica.kind === "local" && replica.state !== "unavailable",
@@ -195,7 +213,7 @@ async function materializeDocxArtifactAttempt(
     baseRevision: truth.revision,
     resultRevision: hash,
     targets: { regionIds, partNames: changedPartNames },
-    semantic: { baseDigest: opened.projection.nativeBinding.semanticDigest, resultDigest: projection.nativeBinding.semanticDigest, readbackDigest: nextProjection.nativeBinding.semanticDigest },
+    semantic: { baseDigest: opened.projection.nativeBinding.semanticDigest, resultDigest: requestedDigest, readbackDigest: nextProjection.nativeBinding.semanticDigest },
     preservedPartNames: comparison.parts.filter((part) => part.verdict === "identical").map((part) => `/${part.name}`),
     state: local ? "pending" : "cloud_saved",
   };
@@ -556,6 +574,7 @@ export async function POST(request: Request) {
       const output = await docxLens.materialize({
         projection: resolved.projection,
         carry: externalOpened.preservedCarry,
+        options: nativeWriteOptions,
       });
       const hash = await sha256Payload(output);
       const [next, comparison] = await Promise.all([
@@ -567,6 +586,9 @@ export async function POST(request: Request) {
         String(workId),
         hash,
       );
+      const requestedDigest = await docxProjectionSemanticDigest(resolved.projection);
+      if (nextProjection.nativeBinding.semanticDigest !== requestedDigest)
+        throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested text, image, page, or header/footer edit.");
       assertPreservationKept({ entries: externalOpened.fidelityMap.entries, parts: comparison.parts });
       const stored = await uploadNativePayload(workId, output, hash, local.truth.nativeFormat);
       const queued = await convexMutation<

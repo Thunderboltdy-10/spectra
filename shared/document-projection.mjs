@@ -29,6 +29,20 @@ export function richInlineHasObject(content) {
   return content.some((item) => item.kind !== "text");
 }
 
+function normalizeLineBreaks(value) {
+  return value.replace(/\n+/gu, "\n");
+}
+
+function authoredPlainInline(content, text) {
+  if (
+    content.length === 1 &&
+    content[0]?.kind === "text" &&
+    normalizeLineBreaks(content[0].text) !== normalizeLineBreaks(text)
+  )
+    return [{ ...content[0], text }];
+  return content;
+}
+
 function richInlineHasSemantics(content) {
   return content.some(
     (item) =>
@@ -53,6 +67,10 @@ export function docxNativeMediaUrl(binding, image) {
     partName: image.partName,
   });
   return `/api/spectra/lenses/docx/media?${query.toString()}`;
+}
+
+function docxAssetMediaUrl(assetId) {
+  return `/api/spectra/assets/content?assetId=${encodeURIComponent(assetId)}`;
 }
 
 export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
@@ -95,18 +113,20 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           },
         },
       ];
+    const authored = typeof item.assetId === "string" && item.assetId;
     return [
       {
-        type: "nativeDocxImage",
+        type: authored ? "image" : "nativeDocxImage",
         attrs: {
-          src: docxNativeMediaUrl(binding, item),
-          partName: item.partName,
+          src: authored ? docxAssetMediaUrl(item.assetId) : docxNativeMediaUrl(binding, item),
+          ...(item.partName ? { partName: item.partName } : {}),
+          ...(authored ? { assetId: item.assetId } : {}),
           mediaType: item.mediaType,
           alt: item.altText,
           ...(item.widthEmu ? { widthEmu: item.widthEmu } : {}),
           ...(item.heightEmu ? { heightEmu: item.heightEmu } : {}),
           placement: item.placement,
-          nativeReadOnly: true,
+          ...(!authored || nativeReadOnly ? { nativeReadOnly: true } : {}),
         },
       },
     ];
@@ -196,18 +216,35 @@ export function docxRichBlockToJson(value, binding) {
       attrs: nativeAttrs,
       content: block.richRows.map((row, rowIndex) => ({
         type: "tableRow",
-        content: row.map((cell) => ({
+        content: row.map((cell, columnIndex) => {
+          const expected = Array.isArray(block.rows?.[rowIndex])
+            ? String(block.rows[rowIndex][columnIndex] ?? "")
+            : undefined;
+          const effectiveCell =
+            expected !== undefined &&
+            cell.every((item) => item.kind === "text") &&
+            normalizeLineBreaks(richInlineText(cell)) !==
+              normalizeLineBreaks(expected)
+              ? authoredPlainInline(cell, expected)
+              : cell;
+          return {
           type: rowIndex === 0 ? "tableHeader" : "tableCell",
-          content: cellJsonFromRichContent(cell, binding, nativeReadOnly),
-        })),
+          content: cellJsonFromRichContent(effectiveCell, binding, nativeReadOnly),
+          };
+        }),
       })),
     };
 
   const inlineContent = Array.isArray(block.inlineContent)
     ? block.inlineContent
     : [];
-  if (!richInlineHasSemantics(inlineContent)) return null;
-  const content = docxRichInlineToJson(inlineContent, binding, nativeReadOnly);
+  const effectiveInlineContent =
+    block.type !== "table" &&
+    inlineContent.every((item) => item.kind === "text")
+      ? authoredPlainInline(inlineContent, block.text)
+      : inlineContent;
+  if (!richInlineHasSemantics(effectiveInlineContent)) return null;
+  const content = docxRichInlineToJson(effectiveInlineContent, binding, nativeReadOnly);
   if (block.type === "heading")
     return {
       type: "heading",
@@ -349,22 +386,29 @@ function appendRichInline(output, item) {
 function imageFromJsonNode(node) {
   const attrs = record(node.attrs);
   const partName = attrs.partName;
+  const assetId = attrs.assetId;
   const mediaType = attrs.mediaType;
   if (
-    typeof partName !== "string" ||
-    !/^\/word\/media\/[^/\\\u0000-\u001f]{1,400}$/u.test(partName) ||
+    (typeof partName !== "string" && typeof assetId !== "string") ||
+    (typeof partName === "string" && !/^\/word\/media\/[^/\\\u0000-\u001f]{1,400}$/u.test(partName)) ||
+    (typeof assetId === "string" && !assetId.trim()) ||
     (mediaType !== "image/png" && mediaType !== "image/jpeg")
   )
     return null;
   const widthEmu = Number(attrs.widthEmu);
   const heightEmu = Number(attrs.heightEmu);
+  const widthPercent = Number(attrs.widthPercent);
   const altText = String(attrs.alt ?? "Word image").slice(0, 4_000);
   return {
     kind: "image",
-    partName,
+    ...(typeof partName === "string" ? { partName } : {}),
+    ...(typeof assetId === "string" ? { assetId } : {}),
     mediaType,
     altText,
     ...(Number.isSafeInteger(widthEmu) && widthEmu > 0 ? { widthEmu } : {}),
+    ...(Number.isFinite(widthPercent) && widthPercent > 0 && !(Number.isSafeInteger(widthEmu) && widthEmu > 0)
+      ? { widthEmu: Math.round((widthPercent / 100) * 8.27 * 914400) }
+      : {}),
     ...(Number.isSafeInteger(heightEmu) && heightEmu > 0 ? { heightEmu } : {}),
     placement: attrs.placement === "anchored" ? "anchored" : "inline",
     ...(attrs.crop && typeof attrs.crop === "object" ? { crop: attrs.crop } : {}),
@@ -449,7 +493,7 @@ export function documentRichInlineFromJson(node) {
       });
       return;
     }
-    if (current?.type === "nativeDocxImage") {
+    if (current?.type === "nativeDocxImage" || current?.type === "image") {
       const image = imageFromJsonNode(current);
       if (image) appendRichInline(output, image);
       return;

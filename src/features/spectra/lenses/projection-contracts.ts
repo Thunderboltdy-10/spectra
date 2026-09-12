@@ -77,7 +77,9 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("image"),
-      partName: z.string().regex(/^\/word\/media\/[^/\\\u0000-\u001f]{1,400}$/u),
+      /** Retained native media has a package part; authored media has a durable asset. */
+      partName: z.string().regex(/^\/word\/media\/[^/\\\u0000-\u001f]{1,400}$/u).optional(),
+      assetId: z.string().min(1).max(300).optional(),
       mediaType: z.enum(["image/png", "image/jpeg"]),
       altText: z.string().max(4_000),
       widthEmu: z.number().int().positive().optional(),
@@ -130,6 +132,18 @@ export const docxProjectionSchema = z
           .strict(),
       )
       .max(100_000),
+    pageSetup: z
+      .object({
+        size: z.string().min(1).max(40).optional(),
+        orientation: z.enum(["portrait", "landscape"]).optional(),
+        margins: z.string().min(1).max(40).optional(),
+        columns: z.number().int().min(1).max(3).optional(),
+        header: z.string().max(4_000).optional(),
+        footer: z.string().max(4_000).optional(),
+        sectionIndex: z.number().int().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
     nativeBinding: z
       .object({
         ...nativeBindingBase,
@@ -178,7 +192,7 @@ export const docxOperationSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("update-image"),
     regionId: z.string(),
-    partName: z.string(),
+    partName: z.string().regex(/^\/word\/media\/[^/\\\u0000-\u001f]{1,400}$/u),
     altText: z.string().max(4_000).optional(),
     widthEmu: z.number().int().positive().optional(),
     heightEmu: z.number().int().positive().optional(),
@@ -191,6 +205,53 @@ export const docxOperationSchema = z.discriminatedUnion("kind", [
       })
       .strict()
       .optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("insert-image"),
+    regionId: z.string(),
+    row: z.number().int().nonnegative().optional(),
+    column: z.number().int().nonnegative().optional(),
+    assetId: z.string().min(1).max(300),
+    mediaType: z.enum(["image/png", "image/jpeg"]),
+    altText: z.string().max(4_000).optional(),
+    widthEmu: z.number().int().positive().optional(),
+    heightEmu: z.number().int().positive().optional(),
+    crop: z.object({
+      left: z.number().min(0).max(1).optional(),
+      top: z.number().min(0).max(1).optional(),
+      right: z.number().min(0).max(1).optional(),
+      bottom: z.number().min(0).max(1).optional(),
+    }).strict().optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("replace-image"),
+    regionId: z.string(),
+    partName: z.string().regex(/^\/word\/media\/[^/\\\u0000-\u001f]{1,400}$/u),
+    assetId: z.string().min(1).max(300),
+    mediaType: z.enum(["image/png", "image/jpeg"]),
+    altText: z.string().max(4_000).optional(),
+    widthEmu: z.number().int().positive().optional(),
+    heightEmu: z.number().int().positive().optional(),
+    crop: z.object({
+      left: z.number().min(0).max(1).optional(),
+      top: z.number().min(0).max(1).optional(),
+      right: z.number().min(0).max(1).optional(),
+      bottom: z.number().min(0).max(1).optional(),
+    }).strict().optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("update-section"),
+    sectionIndex: z.number().int().nonnegative().optional(),
+    size: z.string().min(1).max(40).optional(),
+    orientation: z.enum(["portrait", "landscape"]).optional(),
+    margins: z.string().min(1).max(40).optional(),
+    columns: z.number().int().min(1).max(3).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("update-header-footer"),
+    sectionIndex: z.number().int().nonnegative().optional(),
+    slot: z.enum(["header", "footer"]),
+    text: z.string().max(4_000),
   }).strict(),
 ]);
 export const DOCX_LENS_DELTA_KINDS = docxOperationSchema.options.map(

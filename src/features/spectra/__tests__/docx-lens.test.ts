@@ -2,10 +2,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
-import type { XmlElement } from "@ariadng/office/xml";
+import { XmlElement, XmlText } from "@ariadng/office/xml";
 import {
   DocxLensError,
   docxLens,
+  type DocxAssetResolver,
   type DocxRunFormat,
 } from "../lenses/docx-lens";
 import { comparePackages } from "@ariadng/office/preservation";
@@ -318,7 +319,6 @@ describe("DOCX preservation lens", () => {
     )!;
     expect(cover).toMatchObject({
       type: "paragraph",
-      attrs: { nativeReadOnly: true },
       inlineContent: [
         {
           kind: "image",
@@ -329,6 +329,9 @@ describe("DOCX preservation lens", () => {
         },
       ],
     });
+    const imageEntry = opened.fidelityMap.entries.find((entry) => entry.regionId === cover.id);
+    expect(imageEntry).toMatchObject({ class: "NATIVE" });
+    expect(imageEntry?.readOnly).toBeUndefined();
     const serialized = JSON.stringify(opened.projection);
     expect(serialized).not.toContain("iVBORw0KGgo");
     expect(serialized).not.toContain("base64");
@@ -754,6 +757,129 @@ describe("DOCX preservation lens", () => {
       )
       .map((element) => element.getAttributeNs(WML_NAMESPACE, "left"));
     expect(indents).toContain("-2534");
+  });
+
+  it("resolves a durable asset when replacing a retained native picture", async () => {
+    const sourceDocument = Document.create();
+    const sourcePng = new Uint8Array(Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ));
+    sourceDocument.addImage(sourcePng, { widthPx: 160, altText: "Before" });
+    const opened = await docxLens.open(await sourceDocument.save());
+    const imageBlock = opened.projection.blocks.find((block) =>
+      block.inlineContent?.some((item) => item.kind === "image"),
+    )!;
+    const image = imageBlock.inlineContent?.find((item) => item.kind === "image");
+    if (!image || image.kind !== "image") throw new Error("image fixture was not projected");
+    const projection = structuredClone(opened.projection);
+    const target = projection.blocks.find((block) => block.id === imageBlock.id)!;
+    const replacement = target.inlineContent?.find((item) => item.kind === "image");
+    if (!replacement || replacement.kind !== "image" || !replacement.partName)
+      throw new Error("image fixture was not cloned");
+    replacement.assetId = "asset-replacement-1";
+    replacement.altText = "After";
+    let requested: string | undefined;
+    const output = await docxLens.materialize({
+      projection,
+      carry: opened.preservedCarry,
+      options: {
+        resolveAsset: (async ({ assetId, mediaType }) => {
+          requested = `${assetId}:${mediaType}`;
+          return sourcePng;
+        }) satisfies DocxAssetResolver,
+      },
+    });
+    expect(requested).toBe("asset-replacement-1:image/png");
+    const reopened = await docxLens.open(output);
+    const resultImage = reopened.projection.blocks
+      .flatMap((block) => block.inlineContent ?? [])
+      .find((item) => item.kind === "image");
+    expect(resultImage).toMatchObject({ kind: "image", altText: "After" });
+    expect(await (await Document.open(output)).images()[0]!.data()).toEqual(sourcePng);
+    expect(reopened.projection.blocks.some((block) => block.text.includes("After"))).toBe(true);
+  });
+
+  it("keeps a retained picture editable beside changed mixed text", async () => {
+    const sourceDocument = Document.create();
+    const sourcePng = new Uint8Array(Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ));
+    const paragraph = sourceDocument.addParagraph("Before ");
+    sourceDocument.addImage(sourcePng, { widthPx: 120, altText: "Retained" });
+    const imageParagraph = sourceDocument.body().elements().find(
+      (element) => element !== paragraph.element && element.localName === "p",
+    );
+    const imageRun = imageParagraph?.elements().find((element) => element.localName === "r");
+    if (!imageParagraph || !imageRun) throw new Error("image fixture was not created");
+    imageParagraph.removeChild(imageRun);
+    paragraph.element.appendChild(imageRun);
+    const tail = new XmlElement("r", "w");
+    const tailText = new XmlElement("t", "w");
+    tailText.appendChild(new XmlText(" after"));
+    tail.appendChild(tailText);
+    paragraph.element.appendChild(tail);
+    const opened = await docxLens.open(await sourceDocument.save());
+    const target = opened.projection.blocks.find((block) =>
+      block.inlineContent?.some((item) => item.kind === "image"),
+    )!;
+    const inlineContent = target.inlineContent!.map((item) =>
+      item.kind === "text" && item.text === "Before "
+        ? { ...item, text: "Edited " }
+        : item,
+    );
+    const output = await docxLens.mutate(opened.preservedCarry, {
+      kind: "replace-paragraph",
+      regionId: target.id,
+      text: "Edited  after",
+      inlineContent,
+    });
+    const reopened = await docxLens.open(output);
+    const result = reopened.projection.blocks.find((block) => block.id === target.id);
+    expect(result?.text).toContain("Edited");
+    expect(result?.inlineContent?.some((item) => item.kind === "image")).toBe(true);
+    expect(await (await Document.open(output)).images()).toHaveLength(1);
+  });
+
+  it("materializes retained page setup and isolates a shared header part", async () => {
+    const sourceDocument = Document.create();
+    sourceDocument.setHeader("Shared header");
+    sourceDocument.setFooter("Shared footer");
+    const firstParagraph = sourceDocument.addParagraph("First section");
+    const finalSection = sourceDocument.body().find(WML_NAMESPACE, "sectPr");
+    const firstSection = new XmlElement("sectPr", "w");
+    const sharedHeader = finalSection?.find(WML_NAMESPACE, "headerReference");
+    const sharedFooter = finalSection?.find(WML_NAMESPACE, "footerReference");
+    if (sharedHeader) firstSection.appendChild(sharedHeader.clone());
+    if (sharedFooter) firstSection.appendChild(sharedFooter.clone());
+    const paragraphProperties = new XmlElement("pPr", "w");
+    paragraphProperties.appendChild(firstSection);
+    firstParagraph.element.insertBefore(paragraphProperties, firstParagraph.element.children[0] ?? null);
+    sourceDocument._markMainDirty();
+    const opened = await docxLens.open(await sourceDocument.save());
+    const projection = structuredClone(opened.projection);
+    projection.pageSetup = {
+      ...(projection.pageSetup ?? {}),
+      size: "letter",
+      orientation: "landscape",
+      margins: "narrow",
+      columns: 2,
+      header: "First section header",
+      footer: "First section footer",
+      sectionIndex: 0,
+    };
+    const output = await docxLens.materialize({ projection, carry: opened.preservedCarry });
+    const document = await Document.open(output);
+    const first = document.paragraphs()[0]?.element.find(WML_NAMESPACE, "pPr")?.find(WML_NAMESPACE, "sectPr");
+    expect(first?.find(WML_NAMESPACE, "pgSz")?.getAttributeNs(WML_NAMESPACE, "orient")).toBe("landscape");
+    expect(first?.find(WML_NAMESPACE, "cols")?.getAttributeNs(WML_NAMESPACE, "num")).toBe("2");
+    expect(document.headers().map((header) => header.text())).toEqual(
+      expect.arrayContaining(["First section header", "Shared header"]),
+    );
+    expect(document.footers().map((footer) => footer.text())).toEqual(
+      expect.arrayContaining(["First section footer", "Shared footer"]),
+    );
   });
 
   it("reports protected and corrupt files honestly", async () => {

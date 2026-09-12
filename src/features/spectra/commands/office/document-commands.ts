@@ -63,7 +63,11 @@ import {
   type TextFormatAdapter,
   type ToggleFacet,
 } from "../shared";
-import { DOCUMENT_EXPORT_COPIES, projectBindingsFromIr } from "../../capabilities";
+import {
+  DOCUMENT_EXPORT_COPIES,
+  DOCUMENT_NATIVE_REASONS,
+  projectBindingsFromIr,
+} from "../../capabilities";
 import type { CommandBinding, CommandControlOption } from "../types";
 
 /**
@@ -843,6 +847,7 @@ export type DocumentImageHandlers = {
   setWidth: (percent: number) => void;
   alt?: string;
   editAlt: () => void;
+  replace: () => void;
   remove: () => void;
 };
 
@@ -870,7 +875,7 @@ function tableBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
   const table = handlers.table;
   if (!table.active) return [];
   const structural = table.nativeStructureReason
-    ? { available: false, reason: table.nativeStructureReason }
+    ? { available: false, reason: DOCUMENT_NATIVE_REASONS.tableStructure }
     : undefined;
   const structure = (
     id: string,
@@ -990,6 +995,19 @@ function imageBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
         : "No description yet — screen readers will skip this picture",
       touches: ["images"],
       onSelect: () => image.editAlt(),
+    },
+    {
+      id: "image.replace",
+      label: "Replace picture",
+      icon: ImageIcon,
+      contextualTab: "Image",
+      group: "Arrange",
+      priority: "secondary",
+      requires: "edit",
+      risk: "confirm",
+      hint: "Choose another PNG or JPEG for this picture",
+      touches: ["images"],
+      onSelect: () => image.replace(),
     },
     {
       id: "image.caption",
@@ -1674,6 +1692,7 @@ export function documentStubHandlers(): DocumentCommandHandlers {
       width: 100,
       setWidth: noop,
       editAlt: noop,
+      replace: noop,
       remove: noop,
     },
     equation: {

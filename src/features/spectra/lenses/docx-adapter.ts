@@ -1,5 +1,5 @@
 import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
-import { parseXml, XmlElement, XmlText } from "@ariadng/office/xml";
+import { parseXml, serializeNode, XmlElement, XmlText } from "@ariadng/office/xml";
 import { latexToEquation } from "./equation-interchange";
 import { docxLens, type DocxProjection } from "./docx-lens";
 import { documentContentToProseMirrorJson, type DocumentJsonNode } from "./document-projection";
@@ -355,14 +355,28 @@ function appendTextRun(
   } else paragraph.appendChild(run);
 }
 
-function appendNativeOmml(paragraph: XmlElement, value: string) {
+function equationRootForDisplay(value: string, display?: "inline" | "block") {
   const root = parseXml(value).root;
   if (
     root.namespaceUri() !==
     "http://schemas.openxmlformats.org/officeDocument/2006/math"
   )
     throw new Error("The retained equation is not valid OMML.");
-  paragraph.appendChild(root);
+  if (!display) return root;
+  if (display === "inline") {
+    if (root.localName === "oMath") return root;
+    const inline = root.find("http://schemas.openxmlformats.org/officeDocument/2006/math", "oMath");
+    if (!inline) throw new Error("The display equation has no native oMath body.");
+    return inline.clone();
+  }
+  if (root.localName === "oMathPara") return root;
+  return parseXml(
+    `<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">${serializeNode(root)}</m:oMathPara>`,
+  ).root;
+}
+
+function appendNativeOmml(paragraph: XmlElement, value: string, display?: "inline" | "block") {
+  paragraph.appendChild(equationRootForDisplay(value, display));
 }
 
 function appendEquation(
@@ -376,13 +390,15 @@ function appendEquation(
   // represented on open. If the editor changed LaTeX, regenerate semantic
   // OMML instead of accidentally exporting the old native equation.
   if (ommlXml && ommlSourceLatex !== undefined && ommlSourceLatex === latex) {
+    // An unchanged retained subtree is authoritative byte-for-byte. Display
+    // changes are handled by the linked lens operation, not by copy export.
     appendNativeOmml(paragraph, ommlXml);
     return;
   }
   const interchange = latexToEquation(latex, display);
   if (!interchange.supported)
     throw new Error(`Equation contains unsupported commands: ${interchange.unsupported.join(", ")}`);
-  appendNativeOmml(paragraph, interchange.xml);
+  appendNativeOmml(paragraph, interchange.xml, display);
 }
 
 async function appendInlineContent(
@@ -565,7 +581,7 @@ export async function exportDocxCopy(
         await appendParagraph(document, {
           type: "paragraph",
           content: [
-            { type: "inlineEquation", attrs: { latex: String(attrs.latex ?? ""), display: "block", ...(typeof attrs.ommlXml === "string" && attrs.ommlXml ? { ommlXml: attrs.ommlXml } : {}), ...(typeof attrs.ommlSourceLatex === "string" ? { ommlSourceLatex: attrs.ommlSourceLatex } : {}) } },
+            { type: "inlineEquation", attrs: { latex: String(attrs.latex ?? ""), display: attrs.display === "inline" ? "inline" : "block", ...(typeof attrs.ommlXml === "string" && attrs.ommlXml ? { ommlXml: attrs.ommlXml } : {}), ...(typeof attrs.ommlSourceLatex === "string" ? { ommlSourceLatex: attrs.ommlSourceLatex } : {}) } },
           ],
         }, undefined, options.resolveAsset);
         continue;

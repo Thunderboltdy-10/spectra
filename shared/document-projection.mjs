@@ -107,6 +107,7 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
           type: "inlineEquation",
           attrs: {
             latex: item.latex,
+            display: item.display === "block" ? "block" : "inline",
             ...(typeof item.ommlXml === "string" ? { ommlXml: item.ommlXml } : {}),
             ...(typeof item.ommlSourceLatex === "string" ? { ommlSourceLatex: item.ommlSourceLatex } : {}),
             ...(nativeReadOnly ? { nativeReadOnly: true } : {}),
@@ -120,6 +121,7 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
         attrs: {
           src: authored ? docxAssetMediaUrl(item.assetId) : docxNativeMediaUrl(binding, item),
           ...(item.partName ? { partName: item.partName } : {}),
+          ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
           ...(authored ? { assetId: item.assetId } : {}),
           mediaType: item.mediaType,
           alt: item.altText,
@@ -192,7 +194,7 @@ export function docxRichBlockToJson(value, binding) {
       attrs: {
         ...nativeAttrs,
         latex: equation?.latex ?? block.text,
-        display: "block",
+        display: attrs.display === "inline" ? "inline" : "block",
         alignment: attrs.alignment ?? "center",
         ...(typeof equation?.ommlXml === "string"
           ? { ommlXml: equation.ommlXml }
@@ -402,6 +404,7 @@ function imageFromJsonNode(node) {
   return {
     kind: "image",
     ...(typeof partName === "string" ? { partName } : {}),
+    ...(typeof attrs.occurrenceId === "string" && attrs.occurrenceId ? { occurrenceId: attrs.occurrenceId } : {}),
     ...(typeof assetId === "string" ? { assetId } : {}),
     mediaType,
     altText,
@@ -483,7 +486,9 @@ export function documentRichInlineFromJson(node) {
       appendRichInline(output, {
         kind: "equation",
         latex: String(current.attrs?.latex ?? ""),
-        display: current.type === "equation" ? "block" : "inline",
+        display: current.type === "equation"
+          ? current.attrs?.display === "inline" ? "inline" : "block"
+          : "inline",
         ...(typeof current.attrs?.ommlXml === "string"
           ? { ommlXml: current.attrs.ommlXml }
           : {}),
@@ -602,14 +607,17 @@ export function documentBlocksFromJson(json) {
         text,
         attrs: { tone: node.attrs?.type ?? node.attrs?.tone ?? "info" },
       };
-    if (node?.type === "equation") {
-      const latex = String(node.attrs?.latex ?? "");
-      return {
-        id,
-        type: "equation",
-        text: latex,
-        latex,
-        inlineContent: [{ kind: "equation", latex, display: "block" }],
+  if (node?.type === "equation") {
+    const latex = String(node.attrs?.latex ?? "");
+    const inlineContent = documentRichInlineFromJson(node);
+    return {
+      id,
+      type: "equation",
+      text: latex,
+      latex,
+      inlineContent: inlineContent.length
+        ? inlineContent
+        : [{ kind: "equation", latex, display: node.attrs?.display === "inline" ? "inline" : "block" }],
         attrs: {
           display: node.attrs?.display ?? "block",
           alignment: node.attrs?.alignment ?? "center",

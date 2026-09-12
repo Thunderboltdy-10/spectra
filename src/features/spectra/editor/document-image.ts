@@ -45,6 +45,7 @@ export const DocumentImage = Image.extend({
       assetId: { default: null },
       mediaType: { default: null },
       partName: { default: null },
+      occurrenceId: { default: null },
       widthEmu: { default: null },
       heightEmu: { default: null },
       placement: { default: "inline" },
@@ -72,6 +73,7 @@ export const NativeDocxImage = Node.create({
     return {
       src: { default: "" },
       partName: { default: "" },
+      occurrenceId: { default: "" },
       assetId: { default: "" },
       mediaType: { default: "" },
       alt: { default: "Word image" },

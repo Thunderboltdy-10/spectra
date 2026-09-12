@@ -324,7 +324,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "insert.equation",
     "Insert a display equation.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.equationInsert,
+      delta: "insert-paragraph",
       touches: ["equations"],
       manifest: "insert_equation",
     },
@@ -333,7 +333,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "insert.equation.inline",
     "Insert an inline equation.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.equationInsert,
+      delta: "replace-paragraph",
       touches: ["equations"],
       manifest: "insert_equation",
     },
@@ -513,7 +513,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   [
     "image.remove",
     "Remove this picture.",
-    { delta: "delete-region", touches: ["images"], risk: "confirm" },
+    { delta: "delete-image", touches: ["images"], risk: "confirm" },
   ],
   [
     "equation.edit",
@@ -525,7 +525,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Switch this equation between inline and display.",
     {
       params: text,
-      reason: DOCUMENT_NATIVE_REASONS.equationLayout,
+      delta: "set-equation-layout",
       touches: ["equations"],
       field: true,
     },
@@ -535,7 +535,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Set alignment for this equation.",
     {
       params: text,
-      reason: DOCUMENT_NATIVE_REASONS.equationLayout,
+      delta: "set-equation-layout",
       touches: ["equations"],
       field: true,
     },

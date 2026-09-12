@@ -648,6 +648,7 @@ function insertBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
       disabled,
       hint: "A LaTeX equation on its own line",
       touches: ["equations"],
+      nativeDelta: "insert-paragraph",
       manifestOps: ["insert_equation"],
       onSelect: () => insert.equationBlock(),
     },
@@ -662,6 +663,7 @@ function insertBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
       disabled,
       hint: "A LaTeX equation inside the sentence",
       touches: ["equations"],
+      nativeDelta: "replace-paragraph",
       manifestOps: ["insert_equation"],
       onSelect: () => insert.equationInline(),
     },
@@ -1032,6 +1034,7 @@ function imageBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
       risk: "confirm",
       hint: "Removes the picture from the document",
       touches: ["images"],
+      nativeDelta: "delete-image",
       onSelect: () => image.remove(),
     },
   ];
@@ -1065,6 +1068,7 @@ function equationBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
       requires: "edit",
       hint: "In the sentence, or on its own line",
       touches: ["equations"],
+      nativeDelta: "set-equation-layout",
       control: {
         kind: "segmented",
         value: equation.display ?? "block",
@@ -1087,6 +1091,7 @@ function equationBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
       requires: "edit",
       hint: "Where the equation sits across the column",
       touches: ["equations"],
+      nativeDelta: "set-equation-layout",
       control: {
         kind: "segmented",
         value: equation.alignment ?? "center",

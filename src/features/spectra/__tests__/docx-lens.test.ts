@@ -7,6 +7,7 @@ import {
   DocxLensError,
   docxLens,
   type DocxAssetResolver,
+  type DocxRichInline,
   type DocxRunFormat,
 } from "../lenses/docx-lens";
 import { comparePackages } from "@ariadng/office/preservation";
@@ -335,6 +336,158 @@ describe("DOCX preservation lens", () => {
     const serialized = JSON.stringify(opened.projection);
     expect(serialized).not.toContain("iVBORw0KGgo");
     expect(serialized).not.toContain("base64");
+  });
+
+  it("inserts an inline equation beside bold text and a retained native image", async () => {
+    const sourceDocument = Document.create();
+    const png = new Uint8Array(Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ));
+    const paragraph = sourceDocument.addParagraph("Bold ");
+    const textRun = paragraph.element.elements().find((element) => element.localName === "r");
+    const textProperties = new XmlElement("rPr", "w");
+    textProperties.appendChild(new XmlElement("b", "w"));
+    textRun?.insertBefore(textProperties, textRun.children[0] ?? null);
+    sourceDocument.addImage(png, { widthPx: 80, altText: "Inline native" });
+    const imageParagraph = sourceDocument.body().elements().find(
+      (element) => element !== paragraph.element && element.localName === "p",
+    );
+    const imageRun = imageParagraph?.elements().find((element) => element.localName === "r");
+    if (!imageParagraph || !imageRun) throw new Error("inline image fixture was not created");
+    imageParagraph.removeChild(imageRun);
+    paragraph.element.appendChild(imageRun);
+    if (!imageParagraph.elements().length) sourceDocument.body().removeChild(imageParagraph);
+    sourceDocument._markMainDirty();
+
+    const opened = await docxLens.open(await sourceDocument.save());
+    const target = opened.projection.blocks.find((block) =>
+      block.inlineContent?.some((item) => item.kind === "image"),
+    )!;
+    const image = target.inlineContent?.find((item) => item.kind === "image");
+    if (!image || image.kind !== "image") throw new Error("inline image was not projected");
+    const nextInline: DocxRichInline[] = [];
+    for (const item of target.inlineContent!) {
+      if (item.kind === "image")
+        nextInline.push({ kind: "equation", latex: "x^2", display: "inline" });
+      nextInline.push(item);
+    }
+    const projection = structuredClone(opened.projection);
+    const nextTarget = projection.blocks.find((block) => block.id === target.id)!;
+    nextTarget.inlineContent = nextInline as NonNullable<typeof nextTarget.inlineContent>;
+    const output = await docxLens.materialize({ projection, carry: opened.preservedCarry });
+    const reopened = await docxLens.open(output);
+    const result = reopened.projection.blocks.find((block) => block.id === target.id)!;
+    expect(result.inlineContent?.map((item) => item.kind)).toEqual(["text", "equation", "image"]);
+    expect(result.inlineContent?.find((item) => item.kind === "equation")).toMatchObject({
+      display: "inline",
+      latex: "{x}^{2}",
+    });
+    expect(result.inlineContent?.find((item) => item.kind === "text")).toMatchObject({
+      format: { bold: true },
+    });
+    expect(result.inlineContent?.find((item) => item.kind === "image")).toMatchObject({
+      occurrenceId: image.occurrenceId,
+    });
+  });
+
+  it("inserts a block matrix/root equation between Word paragraphs and persists alignment-only edits", async () => {
+    const sourceDocument = Document.create();
+    sourceDocument.addParagraph("Before");
+    sourceDocument.addParagraph("After");
+    const opened = await docxLens.open(await sourceDocument.save());
+    const latex = String.raw`\begin{bmatrix}1&2\\3&4\end{bmatrix}`;
+    const projection = structuredClone(opened.projection);
+    projection.blocks.splice(1, 0, {
+      id: "equation-between-paragraphs",
+      type: "equation",
+      text: latex,
+      latex,
+      inlineContent: [{ kind: "equation", latex, display: "block" }],
+      attrs: { display: "block", alignment: "center" },
+    });
+    const inserted = await docxLens.materialize({ projection, carry: opened.preservedCarry });
+    const withEquation = await docxLens.open(inserted);
+    const equation = withEquation.projection.blocks.find((block) => block.type === "equation")!;
+    expect(withEquation.projection.blocks.map((block) => block.text)).toEqual([
+      "Before",
+      expect.stringContaining("matrix"),
+      "After",
+    ]);
+    expect(equation).toMatchObject({ type: "equation", attrs: { display: "block", alignment: "center" } });
+    expect(equation.inlineContent?.[0]).toMatchObject({ kind: "equation", display: "block" });
+    expect(equation.inlineContent?.[0]?.kind === "equation" && equation.inlineContent[0].ommlXml).toContain("oMathPara");
+
+    const alignedProjection = structuredClone(withEquation.projection);
+    const aligned = alignedProjection.blocks.find((block) => block.id === equation.id)!;
+    aligned.attrs = { ...(aligned.attrs ?? {}), alignment: "left" };
+    const alignedBytes = await docxLens.materialize({
+      projection: alignedProjection,
+      carry: withEquation.preservedCarry,
+    });
+    const alignedOpen = await docxLens.open(alignedBytes);
+    const alignedEquation = alignedOpen.projection.blocks.find((block) => block.id === equation.id)!;
+    expect(alignedEquation).toMatchObject({ type: "equation", attrs: { display: "block", alignment: "left" } });
+    expect(alignedEquation.inlineContent?.[0]).toMatchObject({ kind: "equation", latex: equation.latex });
+    const alignedXml = await Document.open(alignedBytes);
+    const alignedParagraph = alignedXml.paragraphs().find((paragraph) =>
+      mainElements(paragraph.element).some((element) => element.localName === "oMathPara"),
+    );
+    expect(alignedParagraph?.element.find(WML_NAMESPACE, "pPr")?.find(WML_NAMESPACE, "jc")
+      ?.getAttributeNs(WML_NAMESPACE, "val")).toBe("left");
+  });
+
+  it("deletes one shared-media image occurrence and restores it by stable identity", async () => {
+    const sourceDocument = Document.create();
+    const png = new Uint8Array(Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ));
+    sourceDocument.addImage(png, { widthPx: 80, altText: "Shared native" });
+    const paragraph = sourceDocument.body().elements().find((element) => element.localName === "p")!;
+    const imageRun = paragraph.elements().find((element) => element.localName === "r")!;
+    const duplicate = imageRun.clone();
+    const docPr = mainElements(duplicate).find(
+      (element) =>
+        element.namespaceUri() === "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" &&
+        element.localName === "docPr",
+    );
+    docPr?.setAttribute("id", "999");
+    paragraph.appendChild(duplicate);
+    sourceDocument._markMainDirty();
+
+    const opened = await docxLens.open(await sourceDocument.save());
+    const target = opened.projection.blocks.find((block) =>
+      (block.inlineContent ?? []).filter((item) => item.kind === "image").length === 2,
+    )!;
+    const images = target.inlineContent!.filter((item) => item.kind === "image");
+    expect(images).toHaveLength(2);
+    expect(images[0]!.occurrenceId).not.toBe(images[1]!.occurrenceId);
+    const deletedProjection = structuredClone(opened.projection);
+    const deletedTarget = deletedProjection.blocks.find((block) => block.id === target.id)!;
+    deletedTarget.inlineContent = deletedTarget.inlineContent!.filter(
+      (item) => item.kind !== "image" || item.occurrenceId !== images[0]!.occurrenceId,
+    );
+    const deletedBytes = await docxLens.materialize({
+      projection: deletedProjection,
+      carry: opened.preservedCarry,
+    });
+    const deletedDocument = await Document.open(deletedBytes);
+    expect(deletedDocument.images()).toHaveLength(1);
+    const afterDelete = await docxLens.open(deletedBytes);
+    const remaining = afterDelete.projection.blocks.find((block) => block.id === target.id)!;
+    expect(remaining.inlineContent?.filter((item) => item.kind === "image")).toHaveLength(1);
+
+    const undoProjection = structuredClone(afterDelete.projection);
+    const undoTarget = undoProjection.blocks.find((block) => block.id === target.id)!;
+    undoTarget.inlineContent = [...undoTarget.inlineContent!, images[0]!];
+    const undoBytes = await docxLens.materialize({ projection: undoProjection, carry: afterDelete.preservedCarry });
+    const undone = await docxLens.open(undoBytes);
+    const restored = undone.projection.blocks.find((block) => block.id === target.id)!;
+    expect(restored.inlineContent?.filter((item) => item.kind === "image")).toHaveLength(2);
+    expect(restored.inlineContent?.filter((item) => item.kind === "image").map((item) => item.occurrenceId))
+      .toEqual(expect.arrayContaining(images.map((item) => item.occurrenceId)));
+    expect((await Document.open(undoBytes)).images()).toHaveLength(2);
   });
 
   it("preserves hyperlink ranges read-only instead of absorbing their text", async () => {

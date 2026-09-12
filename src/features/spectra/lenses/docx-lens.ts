@@ -569,6 +569,18 @@ function positiveInteger(value: string | undefined) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function imageOccurrenceId(drawing: XmlElement) {
+  const docPr = descendants(drawing).find(
+    (candidate) =>
+      candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE &&
+      candidate.localName === "docPr",
+  );
+  const nativeId = docPr?.getAttribute("id")?.trim();
+  return nativeId
+    ? `docpr:${nativeId}`
+    : `drawing:${stableHex(serializeNode(drawing))}`;
+}
+
 function nativeImageContent(
   document: Document,
   drawing: XmlElement,
@@ -636,6 +648,7 @@ function nativeImageContent(
     return [
       {
         kind: "image" as const,
+        occurrenceId: imageOccurrenceId(drawing),
         partName: part.name,
         mediaType: part.contentType.toLowerCase() as "image/png" | "image/jpeg",
         altText,
@@ -648,13 +661,21 @@ function nativeImageContent(
   });
 }
 
-function imageDrawing(document: Document, root: XmlElement, partName: string) {
+function imageDrawing(
+  document: Document,
+  root: XmlElement,
+  partName: string,
+  occurrenceId?: string,
+) {
   return descendants(root).find(
     (candidate) =>
       candidate.namespaceUri() === WML_NAMESPACE &&
       candidate.localName === "drawing" &&
       nativeImageContent(document, candidate).some(
-        (image) => image.kind === "image" && image.partName === partName,
+        (image) =>
+          image.kind === "image" &&
+          image.partName === partName &&
+          (!occurrenceId || image.occurrenceId === occurrenceId),
       ),
   );
 }
@@ -1452,11 +1473,86 @@ function updateImage(
     (element) => element.namespaceUri() === WML_NAMESPACE && element.localName === "drawing",
   );
   const drawing = drawings.find((candidate) =>
-    nativeImageContent(document, candidate).some((image) => image.kind === "image" && image.partName === operation.partName),
+    nativeImageContent(document, candidate).some(
+      (image) =>
+        image.kind === "image" &&
+        image.partName === operation.partName &&
+        (!operation.occurrenceId || image.occurrenceId === operation.occurrenceId),
+    ),
   );
   if (!drawing)
     throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", `The Word image ${operation.partName} no longer exists.`);
   applyImagePresentation(drawing, operation);
+  document._markMainDirty();
+}
+
+async function releaseUnownedImagePart(document: Document, partName: string) {
+  const packageModel = document.office.package;
+  const parts = packageModel.parts();
+  for (const owner of parts) {
+    const relationships = owner.relationships().all();
+    for (const relationship of relationships) {
+      if (packageModel.relatedPart(owner, relationship.id)?.name !== partName)
+        continue;
+      let used = false;
+      if (owner.name === document.office.mainPart.name) {
+        used = descendants(document.body()).some(
+          (candidate) =>
+            candidate.namespaceUri() === DRAWINGML_NAMESPACE &&
+            candidate.localName === "blip" &&
+            candidate.getAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "embed") === relationship.id,
+        );
+      } else if (owner.contentType.includes("xml")) {
+        try {
+          const xml = await document.office.xml(owner.name);
+          used = descendants(xml.root).some(
+            (candidate) =>
+              candidate.namespaceUri() === DRAWINGML_NAMESPACE &&
+              candidate.localName === "blip" &&
+              candidate.getAttributeNs(OFFICE_RELATIONSHIP_NAMESPACE, "embed") === relationship.id,
+          );
+        } catch {
+          // An unrelated or unreadable XML part does not own a live drawing.
+        }
+      }
+      if (!used) owner.relationships().remove(relationship.id);
+    }
+  }
+  const stillOwned = packageModel.parts().some((owner) =>
+    owner.relationships().all().some(
+      (relationship) => packageModel.relatedPart(owner, relationship.id)?.name === partName,
+    ),
+  );
+  if (!stillOwned) packageModel.removePart(partName);
+}
+
+async function deleteImage(
+  document: Document,
+  region: NativeRegion,
+  operation: Extract<DocxSemanticDelta, { kind: "delete-image" }>,
+) {
+  const drawing = imageDrawing(
+    document,
+    region.element,
+    operation.partName,
+    operation.occurrenceId,
+  );
+  if (!drawing)
+    throw new DocxLensError(
+      "DOCX_UNSUPPORTED_EDIT",
+      `The Word image ${operation.partName} no longer exists in the selected region.`,
+    );
+  const run = drawing.parent?.localName === "r" ? drawing.parent : undefined;
+  if (!run || run.elements().some((child) => child !== drawing && child.localName !== "rPr"))
+    throw new DocxLensError(
+      "DOCX_REGION_READ_ONLY",
+      "This Word picture shares a run with native content that Spectra cannot safely remove.",
+    );
+  const paragraph = run.parent?.localName === "p" ? run.parent : undefined;
+  if (!paragraph)
+    throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The Word picture has no editable paragraph container.");
+  paragraph.removeChild(run);
+  await releaseUnownedImagePart(document, operation.partName);
   document._markMainDirty();
 }
 
@@ -1477,6 +1573,28 @@ async function insertImage(
       "DOCX_UNSUPPORTED_EDIT",
       "A new Word picture can only be inserted into a paragraph or an editable text cell.",
     );
+  if (operation.partName) {
+    const source = imageDrawing(document, document.body(), operation.partName);
+    const sourceRun = source?.parent?.localName === "r" ? source.parent : undefined;
+    if (!sourceRun || sourceRun.elements().some((child) => child !== source && child.localName !== "rPr"))
+      throw new DocxLensError(
+        "DOCX_UNSUPPORTED_EDIT",
+        "The retained Word picture cannot be restored without copying unrelated run content.",
+      );
+    const restored = sourceRun.clone();
+    const docPr = descendants(restored).find(
+      (candidate) =>
+        candidate.namespaceUri() === WORDPROCESSING_DRAWING_NAMESPACE &&
+        candidate.localName === "docPr",
+    );
+    const nativeId = operation.occurrenceId?.match(/^docpr:(\d+)$/)?.[1];
+    if (docPr && nativeId) docPr.setAttribute("id", nativeId);
+    paragraph.element.appendChild(restored);
+    document._markMainDirty();
+    return;
+  }
+  if (!operation.assetId)
+    throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The authored Word picture has no durable asset identity.");
   await appendAuthoredImage(document, paragraph.element, {
     kind: "image",
     assetId: operation.assetId,
@@ -1496,7 +1614,12 @@ async function replaceImage(
   operation: Extract<DocxSemanticDelta, { kind: "replace-image" }>,
   options?: DocxWriteOptions,
 ) {
-  const target = imageDrawing(document, region.element, operation.partName);
+  const target = imageDrawing(
+    document,
+    region.element,
+    operation.partName,
+    operation.occurrenceId,
+  );
   if (!target)
     throw new DocxLensError(
       "DOCX_UNSUPPORTED_EDIT",
@@ -1788,11 +1911,70 @@ function appendRichText(
   } else parent.appendChild(run);
 }
 
-function appendNativeOmml(paragraph: XmlElement, value: string) {
+function equationRootForDisplay(value: string, display?: "inline" | "block") {
   const root = parseXml(value).root;
   if (root.namespaceUri() !== OMML_NAMESPACE)
     throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The equation is not valid Office Math markup.");
-  paragraph.appendChild(root);
+  if (!display) return root;
+  if (display === "inline") {
+    if (root.localName === "oMath") return root;
+    const inline = root.find(OMML_NAMESPACE, "oMath");
+    if (!inline)
+      throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The display equation has no native oMath body.");
+    return inline.clone();
+  }
+  if (root.localName === "oMathPara") return root;
+  if (root.localName !== "oMath")
+    throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The equation root is not a supported native math element.");
+  return parseXml(
+    `<m:oMathPara xmlns:m="${OMML_NAMESPACE}">${serializeNode(root)}</m:oMathPara>`,
+  ).root;
+}
+
+function appendNativeOmml(
+  paragraph: XmlElement,
+  value: string,
+  display?: "inline" | "block",
+) {
+  paragraph.appendChild(equationRootForDisplay(value, display));
+}
+
+function applyEquationLayout(
+  document: Document,
+  paragraph: Paragraph,
+  operation: Extract<DocxSemanticDelta, { kind: "set-equation-layout" }>,
+) {
+  const roots = descendants(paragraph.element).filter(
+    (candidate) =>
+      candidate.namespaceUri() === OMML_NAMESPACE &&
+      (candidate.localName === "oMath" || candidate.localName === "oMathPara"),
+  );
+  const root = roots.find((candidate) =>
+    candidate.parent?.namespaceUri() === WML_NAMESPACE ||
+    candidate.parent?.namespaceUri() === OMML_NAMESPACE,
+  );
+  if (!root)
+    throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The selected Word region has no native equation.");
+  if (operation.display) {
+    const desired = equationRootForDisplay(serializeNode(root), operation.display);
+    if (desired.localName !== root.localName) {
+      const parent = root.parent;
+      if (!parent)
+        throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "The native equation has no writable paragraph parent.");
+      parent.insertBefore(desired, root);
+      parent.removeChild(root);
+    }
+  }
+  if (operation.alignment) {
+    // Equation projection uses center as its native default. Keep even a
+    // requested left alignment explicit so the readback identity survives.
+    orderedChild(paragraphProperties(paragraph), "jc", PPR_ORDER).setAttributeNs(
+      WML_NAMESPACE,
+      "val",
+      operation.alignment,
+    );
+    document._markMainDirty();
+  } else document._markMainDirty();
 }
 
 function imageBytesMatch(bytes: Uint8Array, mediaType: "image/png" | "image/jpeg") {
@@ -1969,7 +2151,11 @@ async function replaceParagraphRich(
           "DOCX_UNSUPPORTED_EDIT",
           `Equation contains unsupported commands: ${interchange.unsupported.join(", ")}`,
         );
-      appendNativeOmml(paragraph.element, interchange?.xml ?? item.ommlXml!);
+      appendNativeOmml(
+        paragraph.element,
+        interchange?.xml ?? item.ommlXml!,
+        item.display,
+      );
     }
   }
   if (usedNativeRuns.size !== nativeRuns.length)
@@ -2249,6 +2435,12 @@ function richContentWithoutImages(content: readonly DocxRichInline[]) {
   return content.filter((item) => item.kind !== "image");
 }
 
+function richContentWithoutImagesOrLayout(content: readonly DocxRichInline[]) {
+  return richContentWithoutImages(content).map((item) =>
+    item.kind === "equation" ? { ...item, display: "block" as const } : item,
+  );
+}
+
 function imageOperationsBetween(
   regionId: string,
   beforeContent: readonly DocxRichInline[] = [],
@@ -2258,11 +2450,29 @@ function imageOperationsBetween(
   const beforeImages = beforeContent.filter(
     (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
   );
-  return afterContent.flatMap<DocxOperation>((item): DocxOperation[] => {
+  const afterImages = afterContent.filter(
+    (item): item is Extract<DocxRichInline, { kind: "image" }> => item.kind === "image",
+  );
+  const sameOccurrence = (
+    left: Extract<DocxRichInline, { kind: "image" }>,
+    right: Extract<DocxRichInline, { kind: "image" }>,
+  ) =>
+    left.occurrenceId && right.occurrenceId
+      ? left.occurrenceId === right.occurrenceId
+      : left.partName === right.partName;
+  const removed = beforeImages.flatMap<DocxOperation>((item) => {
+    if (afterImages.some((candidate) => sameOccurrence(item, candidate)) || !item.partName)
+      return [];
+    return [{
+      kind: "delete-image" as const,
+      regionId,
+      partName: item.partName,
+      ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
+    }];
+  });
+  const changed = afterImages.flatMap<DocxOperation>((item): DocxOperation[] => {
     if (item.kind !== "image") return [];
-    const previous = item.partName
-      ? beforeImages.find((candidate) => candidate.partName === item.partName)
-      : undefined;
+    const previous = beforeImages.find((candidate) => sameOccurrence(candidate, item));
     if (!previous && item.assetId)
       return [{
         kind: "insert-image",
@@ -2275,12 +2485,26 @@ function imageOperationsBetween(
         ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
         ...(item.crop !== undefined ? { crop: item.crop } : {}),
       }];
+    if (!previous && item.partName)
+      return [{
+        kind: "insert-image",
+        regionId,
+        ...(location ?? {}),
+        partName: item.partName,
+        ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
+        mediaType: item.mediaType,
+        ...(item.altText !== undefined ? { altText: item.altText } : {}),
+        ...(item.widthEmu !== undefined ? { widthEmu: item.widthEmu } : {}),
+        ...(item.heightEmu !== undefined ? { heightEmu: item.heightEmu } : {}),
+        ...(item.crop !== undefined ? { crop: item.crop } : {}),
+      }];
     if (!previous || !item.partName) return [];
     if (item.assetId && item.assetId !== previous.assetId)
       return [{
         kind: "replace-image",
         regionId,
         partName: item.partName,
+        ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
         assetId: item.assetId,
         mediaType: item.mediaType,
         ...(item.altText !== undefined ? { altText: item.altText } : {}),
@@ -2292,6 +2516,7 @@ function imageOperationsBetween(
       kind: "update-image",
       regionId,
       partName: item.partName,
+      ...(item.occurrenceId ? { occurrenceId: item.occurrenceId } : {}),
       ...(item.altText !== previous.altText ? { altText: item.altText } : {}),
       ...(item.widthEmu !== previous.widthEmu ? { widthEmu: item.widthEmu } : {}),
       ...(item.heightEmu !== previous.heightEmu ? { heightEmu: item.heightEmu } : {}),
@@ -2306,6 +2531,7 @@ function imageOperationsBetween(
       ? [operation]
       : [];
   });
+  return [...removed, ...changed];
 }
 
 function inlineContentForTextOperation(
@@ -2320,6 +2546,39 @@ function inlineContentForTextOperation(
   return afterContent.filter(
     (item) => item.kind !== "image" || (item.partName && retainedParts.has(item.partName)),
   );
+}
+
+function imageDeletionOperations(operations: readonly DocxOperation[]) {
+  return operations.filter((operation) => operation.kind === "delete-image");
+}
+
+function nonImageDeletionOperations(operations: readonly DocxOperation[]) {
+  return operations.filter((operation) => operation.kind !== "delete-image");
+}
+
+function equationLayoutBetween(
+  regionId: string,
+  before: DocxProjectionBlock,
+  after: DocxProjectionBlock,
+): DocxOperation[] {
+  const beforeEquation = (before.inlineContent ?? []).find((item) => item.kind === "equation");
+  const afterEquation = (after.inlineContent ?? []).find((item) => item.kind === "equation");
+  if (!beforeEquation || !afterEquation) return [];
+  const beforeDisplay = before.attrs?.display === "inline" || beforeEquation.display === "inline" ? "inline" : "block";
+  const afterDisplay = after.attrs?.display === "inline" || afterEquation.display === "inline" ? "inline" : "block";
+  const beforeAlignment = before.attrs?.alignment === "left" || before.attrs?.alignment === "right" || before.attrs?.alignment === "center"
+    ? before.attrs.alignment
+    : "center";
+  const afterAlignment = after.attrs?.alignment === "left" || after.attrs?.alignment === "right" || after.attrs?.alignment === "center"
+    ? after.attrs.alignment
+    : "center";
+  if (beforeDisplay === afterDisplay && beforeAlignment === afterAlignment) return [];
+  return [{
+    kind: "set-equation-layout",
+    regionId,
+    ...(beforeDisplay !== afterDisplay ? { display: afterDisplay } : {}),
+    ...(beforeAlignment !== afterAlignment ? { alignment: afterAlignment } : {}),
+  }];
 }
 
 function fidelityFeature(
@@ -2770,25 +3029,28 @@ async function projectDocument(
       const meaningfulRichContent = richContent.filter(
         (item) => item.kind !== "text" || Boolean(item.text.trim()),
       );
-      const displayEquation =
+      const soleEquation =
         meaningfulRichContent.length === 1 &&
-        meaningfulRichContent[0]?.kind === "equation" &&
-        meaningfulRichContent[0].display === "block"
+        meaningfulRichContent[0]?.kind === "equation"
           ? meaningfulRichContent[0]
           : null;
+      const equationContent = meaningfulRichContent.find((item) => item.kind === "equation");
+      const equationAlignment = equationContent
+        ? paragraph.element.find(WML_NAMESPACE, "pPr")?.find(WML_NAMESPACE, "jc")?.getAttributeNs(WML_NAMESPACE, "val")
+        : undefined;
       blocks.push({
         id: regionId,
         type: list
           ? "list"
           : /^heading[1-3]$/i.test(semanticStyleId ?? "")
             ? "heading"
-            : displayEquation
+            : soleEquation
               ? "equation"
               : "paragraph",
         text: hasRichSemantics(richContent)
           ? semanticRichText(richContent)
           : paragraph.text(),
-        ...(displayEquation ? { latex: displayEquation.latex } : {}),
+        ...(soleEquation ? { latex: soleEquation.latex } : {}),
         ...(hasRichSemantics(richContent) ? { inlineContent: richContent } : {}),
         attrs: {
           nativePath: path,
@@ -2797,8 +3059,13 @@ async function projectDocument(
             ? { nativeStyleId: styleId }
             : {}),
           ...(list ? { list } : {}),
-          ...(displayEquation
-            ? { display: "block", alignment: "center" }
+          ...(soleEquation
+            ? {
+                display: soleEquation.display,
+                alignment: equationAlignment === "left" || equationAlignment === "right"
+                  ? equationAlignment
+                  : "center",
+              }
             : {}),
           ...(readOnly ? { nativeReadOnly: true } : {}),
           // Formatting travels with the block so a writer sees the file's own
@@ -3043,7 +3310,8 @@ function semanticProjectionValue(value: unknown, parentKey?: string): unknown {
   const hasInlineContent = Array.isArray(source.inlineContent);
   return Object.fromEntries(
     Object.entries(source).flatMap(([key, child]) => {
-      if ((parentKey === "image" || isImage) && (key === "partName" || key === "assetId")) return [];
+      if ((parentKey === "image" || isImage) && (key === "partName" || key === "assetId" || key === "occurrenceId")) return [];
+      if (key === "ommlXml" || key === "ommlSourceLatex") return [];
       if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId") return [];
       // `attrs.format` is a resolved convenience projection when rich inline
       // content is present. The inline runs are the authored semantic source;
@@ -3052,6 +3320,7 @@ function semanticProjectionValue(value: unknown, parentKey?: string): unknown {
       if (key === "attrs" && hasInlineContent && child && typeof child === "object") {
         const attrs = { ...(child as Record<string, unknown>) };
         delete attrs.format;
+        if (source.type === "equation") delete attrs.paragraphFormat;
         return [[key, semanticProjectionValue(attrs, key)]];
       }
       if (
@@ -3246,6 +3515,15 @@ async function applyDelta(
       await insertImage(document, region, operation, options);
     } else if (operation.kind === "replace-image") {
       await replaceImage(document, region, operation, options);
+    } else if (operation.kind === "delete-image") {
+      await deleteImage(document, region, operation);
+    } else if (operation.kind === "set-equation-layout") {
+      if (!region.paragraph)
+        throw new DocxLensError(
+          "DOCX_UNSUPPORTED_EDIT",
+          `The target Word region ${operation.regionId} is not a paragraph.`,
+        );
+      applyEquationLayout(document, region.paragraph, operation);
     }
   }
   return document.save();
@@ -3385,6 +3663,8 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
               nextRich,
               { row: rowIndex, column: columnIndex },
             );
+            const deletedImages = imageDeletionOperations(imageOperations);
+            const otherImageOperations = nonImageDeletionOperations(imageOperations);
             const hasImages = Boolean(
               nextRich?.some((item) => item.kind === "image") ||
                 previousRich?.some((item) => item.kind === "image"),
@@ -3397,10 +3677,11 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
               : oldRows[rowIndex]?.[columnIndex] ?? "";
             const nonImageRichChanged = hasImages
               ? JSON.stringify(
-                  richContentWithoutImages(nextRich ?? []),
+                  richContentWithoutImagesOrLayout(nextRich ?? []),
                 ) !==
-                JSON.stringify(richContentWithoutImages(previousRich ?? []))
+                JSON.stringify(richContentWithoutImagesOrLayout(previousRich ?? []))
               : JSON.stringify(nextRich) !== JSON.stringify(previousRich);
+            operations.push(...deletedImages);
             if (visibleText !== previousVisibleText || nonImageRichChanged) {
               const textInlineContent = nextRich
                 ? inlineContentForTextOperation(previousRich ?? [], nextRich)
@@ -3414,13 +3695,21 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
                 ...(textInlineContent ? { inlineContent: textInlineContent } : {}),
               });
             }
-            operations.push(...imageOperations);
+            operations.push(...otherImageOperations);
           }),
         );
-      } else if (effectiveBlock.type !== "table" && (effectiveBlock.text !== previous.text || JSON.stringify(effectiveBlock.inlineContent) !== JSON.stringify(previous.inlineContent))) {
+      } else if (effectiveBlock.type !== "table" && (
+        effectiveBlock.text !== previous.text ||
+        JSON.stringify(effectiveBlock.inlineContent) !== JSON.stringify(previous.inlineContent) ||
+        effectiveBlock.attrs?.display !== previous.attrs?.display ||
+        effectiveBlock.attrs?.alignment !== previous.attrs?.alignment
+      )) {
         const previousInline = previous.inlineContent ?? [];
         const nextInline = effectiveBlock.inlineContent ?? [];
         const imageOperations = imageOperationsBetween(block.id, previousInline, nextInline);
+        const deletedImages = imageDeletionOperations(imageOperations);
+        const otherImageOperations = nonImageDeletionOperations(imageOperations);
+        const layoutOperations = equationLayoutBetween(block.id, previous, effectiveBlock);
         const hasImages = previousInline.some((item) => item.kind === "image") ||
           nextInline.some((item) => item.kind === "image");
         const visibleText = hasImages
@@ -3430,24 +3719,23 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
           ? richTextWithoutImages(previousInline)
           : previous.text;
         const richChanged = hasImages
-          ? JSON.stringify(richContentWithoutImages(nextInline)) !==
-            JSON.stringify(richContentWithoutImages(previousInline))
+          ? JSON.stringify(richContentWithoutImagesOrLayout(nextInline)) !==
+            JSON.stringify(richContentWithoutImagesOrLayout(previousInline))
           : JSON.stringify(effectiveBlock.inlineContent) !==
             JSON.stringify(previous.inlineContent);
         if (visibleText === previousVisibleText && !richChanged) {
-          operations.push(...imageOperations);
+          operations.push(...deletedImages, ...otherImageOperations, ...layoutOperations);
           continue;
         }
         const textInlineContent = effectiveBlock.inlineContent
           ? inlineContentForTextOperation(previousInline, nextInline)
           : undefined;
-        operations.push({
+        operations.push(...deletedImages, {
           kind: "replace-paragraph",
           regionId: block.id,
           text: effectiveBlock.text,
           ...(richChanged && textInlineContent ? { inlineContent: textInlineContent } : {}),
-        });
-        operations.push(...imageOperations);
+        }, ...otherImageOperations, ...layoutOperations);
       }
       const nextStyle = effectiveBlock.attrs?.styleId;
       if (

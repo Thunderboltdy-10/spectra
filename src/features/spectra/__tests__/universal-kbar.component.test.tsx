@@ -52,5 +52,6 @@ describe("UniversalKBar", () => {
       await Promise.resolve();
     });
     expect(push).toHaveBeenCalledWith("/chat?new=1");
+    expect(screen.queryByRole("dialog", { name: "Spectra command bar" })).toBeNull();
   });
 });

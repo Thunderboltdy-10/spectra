@@ -5267,7 +5267,7 @@ function ConfirmDialog({
   // modal rendered in place would be clipped to the editor pane.
   return createPortal(
     <div
-      className="fixed inset-0 z-modal flex items-center justify-center bg-black/20 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-black/20 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}

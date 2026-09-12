@@ -118,6 +118,33 @@ describe("P9.I2 run projections and targeted recovery", () => {
     expect(result[0]?.thread.title).toBe("Conversation");
     expect(result[0]?.run).not.toHaveProperty("contextSnapshot");
     expect(JSON.stringify(result[0])).not.toContain("x".repeat(2_000));
+
+    const selectedCompletedRunId = await t.run(async (ctx) => {
+      const now = Date.now() + 10;
+      return ctx.db.insert("spectraAiRuns", {
+        ownerAccountId: actor.accountId,
+        schoolId: actor.schoolId,
+        sourceSurface: "workspace",
+        threadId: fixture.threadId,
+        status: "completed",
+        phase: "completed",
+        userPrompt: "A freshly completed run",
+        finalSummary: "The fresh run is complete.",
+        executionId: "execution-2",
+        outcome: "answer_only",
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    await t.withIdentity(identity).mutation(api.spectraRuns.selectTab, {
+      runId: selectedCompletedRunId,
+    });
+    const selected = await t.withIdentity(identity).query(api.spectraRuns.listTabs, {
+      limit: 10,
+    });
+    expect(selected[0]?.run._id).toBe(selectedCompletedRunId);
+    expect(selected[0]?.run.status).toBe("completed");
+    expect(selected[0]?.run.finalSummary).toBe("The fresh run is complete.");
   });
 
   it("clears direct and operation-linked effects without sweeping owner tables", async () => {

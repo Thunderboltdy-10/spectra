@@ -22,7 +22,7 @@ export type Shortcut = {
 /** The help surface and registrar share this list. Unwired commands stay out. */
 export const SHORTCUTS: readonly Shortcut[] = [
   {
-    keys: ["Mod", "K"],
+    keys: ["Mod", "Shift", "F"],
     description: "Focus sidebar search",
     context: "global",
   },
@@ -141,7 +141,7 @@ export function ShortcutsButton({ compact = false }: { compact?: boolean }) {
       aria-label="Keyboard shortcuts"
       title="Keyboard shortcuts"
       onClick={() => window.dispatchEvent(new Event(OPEN_SHORTCUTS_EVENT))}
-      className={compact ? "size-8" : undefined}
+      className={compact ? "size-8 border-0" : undefined}
     >
       <Keyboard className="size-4" aria-hidden="true" />
       {compact ? null : "Shortcuts"}
@@ -172,7 +172,7 @@ export function KeyboardShortcutsRegistrar({
         onEscape?.();
         return;
       }
-      if (mod && !event.shiftKey && event.key.toLowerCase() === "k") {
+      if (mod && event.shiftKey && event.key.toLowerCase() === "f") {
         event.preventDefault();
         onFocusSearch?.();
         return;

@@ -1759,7 +1759,7 @@ function SettingsDialog({
     !connected && envTokenAvailable && config.token.length === 0;
   return (
     <div
-      className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4"
       role="dialog"
       aria-modal="true"
       aria-label="ManageBac settings"
@@ -1908,7 +1908,7 @@ function ManifestDialog({
 }) {
   return (
     <div
-      className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-modal grid place-items-center bg-[var(--text-primary)]/25 p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Import capability manifest"
@@ -1990,7 +1990,7 @@ function DisconnectDialog({
 }) {
   return (
     <div
-      className="fixed inset-0 z-dropdown grid place-items-center bg-[var(--text-primary)]/25 p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-dropdown grid place-items-center bg-[var(--text-primary)]/25 p-4"
       role="alertdialog"
       aria-modal="true"
       aria-label="Disconnect ManageBac"

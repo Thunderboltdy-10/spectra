@@ -1414,25 +1414,51 @@ export const listTabs = query({
       if (!existing || tab.updatedAt > existing.updatedAt)
         canonicalByThread.set(tab.threadId, tab);
     }
+    const canonicalTabs = [...canonicalByThread.values()];
+    // Run tabs are intentionally denormalized, but a tab can be re-selected
+    // after its run reaches a terminal state. Re-project only active or
+    // identity-mismatched rows so the dock cannot keep showing Stop from a
+    // stale snapshot while idle tabs retain the bounded read path.
+    const runIdsNeedingRepair = [
+      ...new Set(
+        canonicalTabs
+          .filter(
+            (tab) =>
+              tab.runSummary?._id !== tab.runId ||
+              (tab.runSummary?.status !== undefined &&
+                isActiveRunStatus(tab.runSummary.status)),
+          )
+          .map((tab) => tab.runId),
+      ),
+    ];
+    const freshRuns = new Map<string, Doc<"spectraAiRuns">>();
+    await Promise.all(
+      runIdsNeedingRepair.map(async (runId) => {
+        const run = await ctx.db.get(runId);
+        if (run) freshRuns.set(String(runId), run);
+      }),
+    );
     return Promise.all(
-      [...canonicalByThread.values()].map(async (tab) => {
+      canonicalTabs.map(async (tab) => {
         const cards = await ctx.db
           .query("spectraResultCards")
           .withIndex("by_run", (q) => q.eq("runId", tab.runId))
           .order("desc")
           .take(1);
         const card = cards[0] ?? null;
-        const runSummary = tab.runSummary ?? {
-          _id: tab.runId,
-          status: card?.status ?? ("completed" as const),
-          sourceSurface: tab.surface,
-          threadId: tab.threadId,
-          workspaceId: tab.workspaceId,
-          artifactId: card?.artifactId,
-          userPrompt: "",
-          createdAt: tab.createdAt,
-          updatedAt: Math.max(tab.updatedAt, card?.updatedAt ?? 0),
-        };
+        const runSummary = freshRuns.has(String(tab.runId))
+          ? projectRunTabSummary(freshRuns.get(String(tab.runId))!)
+          : tab.runSummary ?? {
+              _id: tab.runId,
+              status: card?.status ?? ("completed" as const),
+              sourceSurface: tab.surface,
+              threadId: tab.threadId,
+              workspaceId: tab.workspaceId,
+              artifactId: card?.artifactId,
+              userPrompt: "",
+              createdAt: tab.createdAt,
+              updatedAt: Math.max(tab.updatedAt, card?.updatedAt ?? 0),
+            };
         const { dockSummary, ...run } = runSummary;
         const {
           runSummary: _storedRunSummary,
@@ -1776,6 +1802,7 @@ export const selectTab = mutation({
     );
     let targetRunId = args.runId;
     let targetThreadId = args.threadId;
+    let targetRun: Doc<"spectraAiRuns"> | null = null;
 
     if (args.threadId) {
       const thread = await ctx.db.get(args.threadId);
@@ -1791,11 +1818,11 @@ export const selectTab = mutation({
         thread.lastRunId ?? forThread[0]?.runId ?? args.runId ?? targetRunId;
     }
 
-    if (targetRunId && !targetThreadId) {
-      const run = await ctx.db.get(targetRunId);
-      if (!run || run.schoolId !== actor.schoolId)
+    if (targetRunId) {
+      targetRun = await ctx.db.get(targetRunId);
+      if (!targetRun || targetRun.schoolId !== actor.schoolId)
         throw new Error("That run is not available.");
-      targetThreadId = run.threadId;
+      if (!targetThreadId) targetThreadId = targetRun.threadId;
     }
 
     // Explicit deselect: clear selected flags without requiring a target run.
@@ -1810,7 +1837,7 @@ export const selectTab = mutation({
       return { selected: false };
     }
 
-    if (!targetRunId || !targetThreadId)
+    if (!targetRunId || !targetThreadId || !targetRun)
       return { selected: false, reason: "no_run" as const };
 
     let selected = false;
@@ -1822,8 +1849,17 @@ export const selectTab = mutation({
       if (canonical && tab._id === canonical._id) {
         await ctx.db.patch(tab._id, {
           runId: targetRunId,
+          workspaceId: targetRun.workspaceId,
+          surface:
+            targetRun.sourceSurface === "chat" ||
+            targetRun.sourceSurface === "workspace" ||
+            targetRun.sourceSurface === "artifact"
+              ? targetRun.sourceSurface
+              : tab.surface,
           selected: true,
           hiddenAt: undefined,
+          projectionVersion: RUN_TAB_PROJECTION_VERSION,
+          runSummary: projectRunTabSummary(targetRun),
           updatedAt: now,
         });
         selected = true;
@@ -1845,23 +1881,22 @@ export const selectTab = mutation({
     }
 
     if (!selected) {
-      const run = await ctx.db.get(targetRunId);
-      if (!run || run.schoolId !== actor.schoolId)
-        throw new Error("That run is not available.");
       const surface =
-        run.sourceSurface === "chat" ||
-        run.sourceSurface === "workspace" ||
-        run.sourceSurface === "artifact"
-          ? run.sourceSurface
+        targetRun.sourceSurface === "chat" ||
+        targetRun.sourceSurface === "workspace" ||
+        targetRun.sourceSurface === "artifact"
+          ? targetRun.sourceSurface
           : "workspace";
       await ctx.db.insert("spectraRunTabs", {
         ownerAccountId: actor._id,
         schoolId: actor.schoolId,
         runId: targetRunId,
         threadId: targetThreadId,
-        workspaceId: run.workspaceId,
+        workspaceId: targetRun.workspaceId,
         surface,
         selected: true,
+        projectionVersion: RUN_TAB_PROJECTION_VERSION,
+        runSummary: projectRunTabSummary(targetRun),
         createdAt: now,
         updatedAt: now,
       });

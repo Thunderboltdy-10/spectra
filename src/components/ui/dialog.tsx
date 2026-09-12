@@ -12,8 +12,8 @@ import { LAYERS, LAYER_CLASS, type SpectraLayer } from "./layers";
  * Three hand-rolled properties end here:
  *
  * 1. **One overlay.** Every modal surface wears the same ink veil
- *    (`--bg-overlay` + a hairline of backdrop blur); dialogs no longer
- *    negotiate their own scrim tint.
+ *    (`--bg-overlay`); dialogs no longer negotiate their own scrim tint or
+ *    blur the page beneath them.
  * 2. **One layer contract.** `layer` is the only way a floating surface
  *    takes a z-index, and it names one of the seven layers wired into
  *    `spectra-tokens.css` (`base < chrome < dropdown < panel < modal <
@@ -43,7 +43,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 bg-[var(--bg-overlay)] backdrop-blur-[2px]",
+      "fixed inset-0 bg-[var(--bg-overlay)]",
       LAYER_CLASS[layer],
       className,
     )}

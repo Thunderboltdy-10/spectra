@@ -66,9 +66,12 @@ const activeStatuses = new Set([
   "awaiting_confirmation",
   "awaiting_resolution",
 ]);
+const LIVE_DOCK_ACTIVE_POLL_MS = 1_000;
 
 let sharedTabs: SpectraRunTab[] = [];
 let sharedRefresh: Promise<void> | null = null;
+let refreshGeneration = 0;
+let appliedRefreshGeneration = 0;
 let pollTimer: number | null = null;
 let pollConsumers = 0;
 const listeners = new Set<(tabs: SpectraRunTab[]) => void>();
@@ -86,7 +89,10 @@ function syncPollingVisibility() {
   const shouldPoll =
     pollConsumers > 0 && document.visibilityState === "visible";
   if (shouldPoll && pollTimer === null) {
-    pollTimer = window.setInterval(() => void refreshRunTabs(), 180_000);
+    pollTimer = window.setInterval(
+      () => void refreshRunTabs(),
+      LIVE_DOCK_ACTIVE_POLL_MS,
+    );
   } else if (!shouldPoll && pollTimer !== null) {
     window.clearInterval(pollTimer);
     pollTimer = null;
@@ -100,8 +106,11 @@ function refreshRunTabs(force = false) {
     invalidateSpectraRunTabsCache();
     sharedRefresh = null;
   }
+  const generation = ++refreshGeneration;
   const pending = getSpectraRunTabs({ limit: 120, force })
     .then((result) => {
+      if (generation < appliedRefreshGeneration) return;
+      appliedRefreshGeneration = generation;
       sharedTabs = result.runTabs;
       listeners.forEach((listener) => listener(sharedTabs));
     })
@@ -481,10 +490,13 @@ export function LiveDock({
     listeners.add(setFetchedTabs);
     void refresh();
     const changed = () => void refresh(true);
+    const runChanged = () => void refresh();
     const removeChanged = spectraBus.on("threads.changed", changed);
+    const removeRunChanged = spectraBus.on("run.changed", runChanged);
     return () => {
       listeners.delete(setFetchedTabs);
       removeChanged();
+      removeRunChanged();
     };
   }, [refresh, story]);
 

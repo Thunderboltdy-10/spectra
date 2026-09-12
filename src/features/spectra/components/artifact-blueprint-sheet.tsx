@@ -376,7 +376,7 @@ export function ArtifactBlueprintSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-modal bg-[var(--bg-overlay)] backdrop-blur-[2px]" onPointerDown={() => { if (!busy) onClose(); }}>
+    <div className="fixed inset-0 z-modal bg-[var(--bg-overlay)]" onPointerDown={() => { if (!busy) onClose(); }}>
       <aside
         role="dialog"
         aria-modal="true"

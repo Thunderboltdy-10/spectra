@@ -15,7 +15,7 @@ function exportedBlock(contents: string, name: string, nextName?: string) {
 }
 
 describe("P9.I2 Convex efficiency contracts", () => {
-  it("serves run tabs from denormalized projections instead of full run/thread documents", () => {
+  it("serves bounded run projections and repairs active tab drift", () => {
     const runs = source("./spectraRuns.ts");
     const listTabs = exportedBlock(
       runs,
@@ -25,8 +25,10 @@ describe("P9.I2 Convex efficiency contracts", () => {
 
     expect(listTabs).toContain("runSummary");
     expect(listTabs).toContain("threadTitle");
-    expect(listTabs).not.toContain("ctx.db.get(tab.runId)");
+    expect(listTabs).toContain("runIdsNeedingRepair");
+    expect(listTabs).toContain("projectRunTabSummary");
     expect(listTabs).not.toContain("ctx.db.get(tab.threadId)");
+    expect(listTabs).not.toContain("contextSnapshot");
   });
 
   it("reconciles stale run effects through run-owned targets only", () => {

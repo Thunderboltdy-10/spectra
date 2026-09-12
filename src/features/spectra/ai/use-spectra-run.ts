@@ -124,6 +124,7 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
     default:
       break;
   }
+  spectraBus.emit("run.changed", { runId });
 }
 
 export type SpectraRunSurface = "chat" | "workspace" | "artifacts" | "artifact";

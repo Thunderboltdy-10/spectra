@@ -24,7 +24,7 @@ const SheetContent = React.forwardRef<
   <DialogPrimitive.Portal>
     <DialogPrimitive.Overlay
       className={cn(
-        "fixed inset-0 bg-[var(--bg-overlay)] backdrop-blur-[2px] xl:hidden",
+        "fixed inset-0 bg-[var(--bg-overlay)] xl:hidden",
         LAYER_CLASS[layer],
       )}
     />

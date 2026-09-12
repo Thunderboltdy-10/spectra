@@ -134,6 +134,11 @@ export function UniversalKBar() {
     if (element?.isConnected) requestAnimationFrame(() => element.focus());
   }, []);
 
+  useEffect(
+    () => spectraBus.on("shell.openCommandBar", openKBar),
+    [openKBar],
+  );
+
   useEffect(() => {
     const onShortcut = (event: globalThis.KeyboardEvent) => {
       if (event.key.toLowerCase() !== "k" || !(event.metaKey || event.ctrlKey) || event.altKey) return;
@@ -254,12 +259,13 @@ export function UniversalKBar() {
       setResultMessage(message);
       setParametersFor(null);
       setConfirming(null);
+      closeKBar();
     } catch (error) {
       setResultMessage(commandFailureMessage(error, entry.label));
     } finally {
       setRunning(false);
     }
-  }, [commandContext]);
+  }, [closeKBar, commandContext]);
 
   const startEntry = useCallback((entry: KBarEntry) => {
     const availability = entry.command.availability(commandContext);
@@ -326,20 +332,13 @@ export function UniversalKBar() {
 
   return (
     <>
-      <button
-        type="button"
-        aria-label="Open Spectra command bar"
-        onClick={openKBar}
-        className="fixed right-4 top-3 z-[var(--z-panel)] inline-flex h-9 items-center gap-2 rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-caption font-semibold text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
-      >
-        <Search className="h-3.5 w-3.5" aria-hidden="true" />
-        <span className="hidden sm:inline">Command bar</span>
-        <kbd className="hidden rounded border border-[var(--border-default)] px-1.5 py-0.5 text-micro font-medium sm:inline">⌘K</kbd>
-      </button>
       {open ? (
-        <div className="fixed inset-0 z-[var(--z-modal)] bg-black/25 px-4 pt-[12vh]" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) closeKBar();
-        }}>
+        <div
+          className="fixed inset-0 z-[var(--z-modal)] bg-black/25 px-4 pt-[12vh]"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeKBar();
+          }}
+        >
           <div
             role="dialog"
             aria-modal="true"
@@ -355,7 +354,7 @@ export function UniversalKBar() {
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={parametersFor ? "Enter a value…" : confirming ? "Review this action" : "Search commands, work, workspaces, conversations…"}
                 readOnly={Boolean(parametersFor || confirming)}
-                className="h-14 min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-[var(--text-tertiary)]"
+                className="h-14 min-w-0 flex-1 border-0 bg-transparent text-body outline-none ring-0 placeholder:text-[var(--text-tertiary)] focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none"
               />
               <button type="button" aria-label="Close command bar" onClick={closeKBar} className="rounded-chip p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
                 <X className="h-4 w-4" />

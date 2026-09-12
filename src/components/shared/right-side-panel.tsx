@@ -166,7 +166,7 @@ export function RightSidePanel({
       custom={width}
       className={cn(
         "relative isolate h-full w-full shrink-0 overflow-hidden",
-        "bg-[var(--bg-elevated)]/80 border-l border-[var(--border-default)]/40 backdrop-blur-[40px]",
+        "bg-[var(--bg-elevated)]/80 border-l border-[var(--border-default)]/40",
         "shadow-[var(--shadow-lg)]",
         className,
       )}
@@ -185,7 +185,7 @@ export function RightSidePanel({
           initial={{ opacity: 0, x: headerDistance }}
           animate={{ opacity: 1, x: 0 }}
           transition={headerTransition}
-          className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-default)]/60 px-4 backdrop-blur-md"
+          className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border-default)]/60 px-4"
         >
           <div className="flex min-w-0 items-center gap-2">
             {icon ? <span className="text-[var(--text-tertiary)]">{icon}</span> : null}

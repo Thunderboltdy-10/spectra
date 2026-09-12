@@ -140,7 +140,7 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
     source.threadTitle?.trim() || source.card?.title?.trim() || "";
   const genericTitle =
     !rawTitle ||
-    ["new conversation", "spectra", "starting run"].includes(
+    ["conversation", "new conversation", "spectra", "starting run"].includes(
       rawTitle.toLocaleLowerCase(),
     );
   const promptTitle = (compactText(source.run.userPrompt) ?? "")
@@ -173,6 +173,10 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
           ? { kind: "file" as const, prompt: clarification }
           : { kind: "short_answer" as const, prompt: clarification }
         : null);
+  const checkpointSummary = distinct(
+    source.checkpointSummary ?? source.recentSteps?.at(-1),
+    title,
+  );
   let state: LiveDockTruthState;
   if (inputRequest || source.run.decision === "clarify") state = "needs_input";
   else if (source.run.status === "queued" || source.run.status === "running")
@@ -205,10 +209,10 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
         ? finalSummary ||
           cardSummary ||
           phaseSteps[source.run.phase ?? "completed"]
-        : cardSummary ||
+        : checkpointSummary ||
+          cardSummary ||
           phaseSteps[source.run.phase ?? source.run.status] ||
           "Working on the request";
-  const checkpointSummary = distinct(source.checkpointSummary, title);
   const failureSummary =
     state === "paused" || state === "failed_terminal"
       ? publicSpectraFailureText(source.run.error, state === "paused")

@@ -220,7 +220,7 @@ export function ChatBrowserPanel({
       {isMobile ? (
         <button
           type="button"
-          className="fixed inset-0 z-modal bg-[var(--bg-overlay)] backdrop-blur-[1px]"
+          className="fixed inset-0 z-modal bg-[var(--bg-overlay)]"
           onClick={onClose}
           aria-label="Close chat browser"
         />

@@ -101,7 +101,9 @@ export type SpectraEvents = {
      stored preference). */
   "shell.sidebarCrowd": { crowded: boolean };
   "shell.focusSidebarSearch": Record<string, never>;
+  "shell.openCommandBar": Record<string, never>;
   "work.updated": { workId: string; origin: "human" | "ai" | "system" };
+  "run.changed": { runId: string };
   "run.requiredInput": {
     runId: string;
     requestId: string;

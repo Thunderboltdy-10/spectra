@@ -266,11 +266,15 @@ describe("Live Dock V2", () => {
     expect(shell).toContain("<AppChoreographyMount");
   });
 
-  it("does not poll idle run tabs or notifications faster than one minute", () => {
+  it("polls active run tabs promptly without making idle surfaces noisy", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
-    expect(dock).toContain(
-      "pollTimer = window.setInterval(() => void refreshRunTabs(), 180_000);",
-    );
+    expect(dock).toContain("const LIVE_DOCK_ACTIVE_POLL_MS = 1_000;");
+    expect(dock).toContain("LIVE_DOCK_ACTIVE_POLL_MS");
+    expect(dock).toContain("const runChanged = () => void refresh();");
+    expect(dock).toContain('spectraBus.on("run.changed", runChanged)');
+    expect(dock).toContain("let refreshGeneration = 0;");
+    expect(dock).toContain("if (generation < appliedRefreshGeneration) return;");
+    expect(dock).not.toContain("refreshRunTabs(), 180_000");
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
     expect(runHook).toContain("Date.now() - tabsFetchedAt >=");
     expect(runHook).toContain("180_000");
@@ -290,6 +294,25 @@ describe("Live Dock V2", () => {
     expect(bridge).toContain(
       'if (document.visibilityState === "visible") void refresh();',
     );
+  });
+
+  it("keeps the command bar on its established surface and gives it a quiet trigger", () => {
+    const kbar = read("src/features/spectra/components/universal-kbar.tsx");
+    expect(kbar).toContain('spectraBus.on("shell.openCommandBar", openKBar)');
+    expect(kbar).toContain("fixed inset-0 z-[var(--z-modal)] bg-black/25 px-4 pt-[12vh]");
+    expect(kbar).toContain('aria-modal="true"');
+    expect(kbar).toContain("mx-auto w-full max-w-2xl");
+    expect(kbar).toContain("border-0 bg-transparent");
+    expect(kbar).toContain("focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none");
+    expect(kbar).not.toContain("spectra-command-palette");
+    const shell = read("src/components/layout/app-shell.tsx");
+    expect(shell).toContain('aria-label="Open Spectra command bar"');
+    expect(shell).toContain('spectraBus.emit("shell.openCommandBar", {})');
+    const shortcuts = read("src/components/keyboard-shortcuts.tsx");
+    expect(shortcuts).toContain('keys: ["Mod", "Shift", "F"]');
+    expect(shortcuts).toContain('className={compact ? "size-8 border-0" : undefined}');
+    const sidePanel = read("src/components/shared/right-side-panel.tsx");
+    expect(sidePanel).not.toContain("backdrop-blur");
   });
 
   it("never shows machine tokens in dock failure copy", () => {

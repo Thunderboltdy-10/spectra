@@ -15709,6 +15709,16 @@ body:has([role="listbox"][data-state="open"]) .spectra-workbench-live-stack * {
   box-shadow: none !important;
 }
 
+/* The command field is already the active surface when the bar opens. Keep
+   the browser's global focus ring from drawing a second, blue contour inside
+   the established modal frame. */
+[role="dialog"][aria-label="Spectra command bar"] input:focus,
+[role="dialog"][aria-label="Spectra command bar"] input:focus-visible {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 .spectra-wave-y a,
 .spectra-wave-y button {
   transition:

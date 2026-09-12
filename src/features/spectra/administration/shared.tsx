@@ -259,7 +259,7 @@ export function AdminDialog({
   if (!open || typeof document === "undefined") return null;
   return createPortal(
     <div
-      className="fixed inset-0 z-composer-dock grid place-items-center bg-[var(--bg-overlay)] p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-composer-dock grid place-items-center bg-[var(--bg-overlay)] p-4"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();

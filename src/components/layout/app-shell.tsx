@@ -19,6 +19,7 @@ import {
   Brain,
   Bell,
   Bot,
+  Command,
   Building2,
   Calculator,
   FlaskConical,
@@ -618,9 +619,6 @@ function ShellNavigation() {
             aria-label="Search recent chats"
             className="h-8 w-full rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-micro outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]"
           />
-          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-tertiary)]">
-            {isMacPlatform ? "⌘" : "Ctrl"} K
-          </span>
         </label>
         <nav
           ref={navRef}
@@ -764,11 +762,12 @@ function ShellNavigation() {
           >
             <button
               type="button"
-              aria-label="Share current page"
-              onClick={() => void spectraBus.command("surface.share", {})}
+              aria-label="Open Spectra command bar"
+              onClick={() => spectraBus.emit("shell.openCommandBar", {})}
+              title={`Command bar · ${isMacPlatform ? "⌘" : "Ctrl"} K`}
               className="grid size-8 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
             >
-              <Share2 size={15} />
+              <Command size={15} />
             </button>
             <button
               type="button"
@@ -899,7 +898,7 @@ function ShellNavigation() {
         <>
           <button
             type="button"
-            className="fixed inset-0 z-modal bg-[var(--bg-overlay)] backdrop-blur-[1px] md:hidden"
+            className="fixed inset-0 z-modal bg-[var(--bg-overlay)] md:hidden"
             onClick={() => setMobileWorkspaceOpen(false)}
             aria-label="Close workspace navigation"
           />
@@ -971,7 +970,7 @@ function ShellNavigation() {
         <>
           <button
             type="button"
-            className="fixed inset-0 z-modal bg-[var(--bg-overlay)] backdrop-blur-[1px] md:hidden"
+            className="fixed inset-0 z-modal bg-[var(--bg-overlay)] md:hidden"
             onClick={() => setNotificationsOpen(false)}
             aria-label="Close notifications"
           />

@@ -1,43 +1,29 @@
-# Spectra launch implementation roadmap
+# Spectra launch roadmap
 
-Status 2026-09-11: W4 reliability and the Clerk factor-state fix are integrated. W5, D01 and D02 produced substantial candidates, but their source review identified unfinished boundaries. WAVE-6.md records the exact findings, acceptance limits and resulting architecture decisions.
+Updated 2026-09-11 after W6/S6 results and parent source review. WAVE-7.md contains evidence, lineage and architecture decisions. Reports are implementation evidence, not a launch certificate.
 
-The pace changes now: resolve named foundational defects alongside independent user workflows. Do not repeat broad foundation completion prompts or wait for every edge case before starting Office, AI, integrations and navigation.
+Already integrated: W4 collaboration/Sheets/sharing/navigation repairs, Clerk factor-state fix, W5 bounded history/results, source retrieval, parser protection and Bridge polling with W6-00 corrections. Most richer Office, AI, ManageBac and K-bar functionality is in private candidates pending specific fixes and combination.
 
-## Current parallel implementation wave
+## Current focused implementation
 
-Ten actual Luna xhigh tasks, with full prompts under prompts/W6-*.md:
-
-| Task | Deliver |
+| Task | Product outcome |
 | --- | --- |
-| 00 | Land independently useful W5 history/source/parser/Bridge changes on main, with scoped corrections and a small real shared-runtime check |
-| 01 | Trusted streaming uploads, usable media formats, replay/authority and causal canonical import saves |
-| 02 | Finite cleanup, actual retained-reference lifetime and canonical embed confirmation |
-| 03 | Shared rich Word editing/import/export path |
-| 04 | Shared workbook structure/formulas/styles and genuine editable charts |
-| 05 | Shared rich presentation objects/notes and genuine native chart output |
-| 06 | Selected-class ManageBac, account sync leases and personal task/calendar planning |
-| 07 | Universal contextual K-bar, shared actions/parameters and mounted-target navigation acknowledgements |
-| 08 | Actual research evidence in useful saved AI deliverables and durable input references |
-| 09 | Browser-first Bridge trust/setup, no startup terminal and Windows/macOS packaging configuration |
+| W7-01 | Clarification reaches the right new run/target; exact stop and truthful save outcomes |
+| W7-02 | Pinned versions keep their bytes until the last owner; atomic bounded deletion retries |
+| W7-03 | Old native acknowledgements cannot regress newer work; accurate storage transitions |
+| W7-04 | Uploaded/retained Word images and basic page/header/footer editing through actual native routes |
+| W7-05 | Editable mathematical meaning survives matrices, delimiters, scripts and native roundtrip |
+| W7-06 | Independent duplicated PowerPoint charts, real hyperlinks and live/pinned source data |
+| W7-07 | Native Sheets rules and exposed chart types work with structural/formula edits |
+| W7-08 | Off-page K-bar/AI/human actions, usable Bridge handoffs and crowded workspace |
+| W7-09 | Ordinary students complete selection/retention/sync and source-linked personal scheduling |
 
-W6-COMMON.md defines the exact candidate, file ownership and report handoff. Only 00 integrates into main and uses the shared runtime; others use private logic/component/parser/transport tests. No extra Convex instances.
+These are parallel private Luna xhigh tasks. Repair the findings and everyday functionality with meaningful adjacent tests. Do not replace implementation with capability flags, preservation-only claims or cosmetic work.
 
-## Two manual hard integrations
+## Next, sequentially
 
-After all Luna tasks finish, Pablo can run these in parallel in separate worktrees:
+Pablo can paste V7-00-integrate-and-local-acceptance.md into Luna xhigh after the batch. It combines scoped deltas, resolves integration, lands them and proves a short authenticated local Convex journey on the one stack. Then paste S7-COST-read-model.md into a stronger task: implement measured compact authoritative reads and bounded migration, with its own small local acceptance. No hosting/storage decision is made.
 
-- prompts/S6-AI-orchestration.md: durable clarification/target identity, steering/stop/retry, meaningful recovery, shared actions and readiness-driven follow choreography.
-- prompts/S6-OFFICE-BRIDGE-convergence.md: structured editable equations, remaining material native fidelity, semantic writer/native receipts and stable-file/local-cloud/trust transition correctness.
+Parent then uses those outcomes to release a few sequential browser/model/native journeys with fixes and neighbor checks inside each. Likely cases: educational Office creation/edit/reopen, vague AI request/steering/follow, ordinary-user invitation/selected school planning, crowded navigation. Windows Office and friend-Mac build/start/pair/edit/reconnect need real-device evidence. Further scope depends on failures; no giant final audit or predetermined round count.
 
-Both consume exact W6 product heads, preserve the current accepted main, implement coherent slices and return reviewable code. Parent combines their results. Their scope is functional completion, not a new architecture inventory or endless UI polish.
-
-## Verification and launch
-
-Keep meaningful regressions with each implementation and check direct neighbors. After integration, run browser/real-local-Convex/native Bridge checks sequentially on the single served checkout. Reuse the existing linked corpus: actual sign-in/invitation/selected sync; rich Office import/edit/export/reopen; pinned/unreferenced deletion and offline replay; a vague AI follow-up with steering and a useful source-backed deliverable; crowded normal navigation/K-bar. Fix small reproduced defects within the verifier task and repeat that case plus its neighbor.
-
-Do not substitute a mock, package hash, success toast or old served source for the user's saved outcome. Mac package/start/pair/edit/reconnect remains a final real-device check on the friend's Mac, with no Actions execution now. No new global audit or cosmetic perfection gate.
-
-## Decisions retained
-
-Keep Yjs/ledger/lenses/Bridge and one human/AI command path. Preserve distinct uploaded/canonical-saved/native-verified/viewport-ready outcomes. Treat database I/O, response bytes, stored files and idle polling as separate costs; no hosting or storage migration is chosen. Students and teachers are peers. School setup/sharing/ManageBac matter; landing, broad admin polish and Notion are excluded. Original school files and external services remain untouched.
+Cloud/local choice, native fidelity and cost remain connected: preserve artifact identity and managed-copy isolation, retain bytes while owned and release after the last owner, hydrate rich content only when needed. Keep the existing protocol and single action/authority path. Full Office breadth, live model quality and public Mac distribution remain unproved. They are substantive remaining work; visual perfection is not a launch gate.

@@ -5,6 +5,7 @@ import { Document, WML_NAMESPACE } from "@ariadng/office/docx";
 import { exportDocxCopy, importDocxPayload } from "../lenses/docx-adapter";
 import { docxLens, type DocxProjection } from "../lenses/docx-lens";
 import { docxOperationsBetween } from "../lenses/document-projection";
+import { latexToEquation } from "../lenses/equation-interchange";
 import type { DocumentJsonNode } from "../lenses/document-projection";
 
 const onePixelPng =
@@ -148,8 +149,21 @@ describe("shared DOCX adapter", () => {
   it("carries native OMML through ordinary import and copy export without converting it", async () => {
     const imported = await importDocxPayload(await fixture("equation-omml.docx"));
     expect(JSON.stringify(imported.json)).toContain("ommlXml");
+    const importedMarkup: string[] = [];
+    const collectMarkup = (node: DocumentJsonNode) => {
+      if ((node.type === "inlineEquation" || node.type === "equation") && typeof node.attrs?.ommlXml === "string")
+        importedMarkup.push(node.attrs.ommlXml);
+      node.content?.forEach(collectMarkup);
+    };
+    collectMarkup(imported.json);
+    expect(importedMarkup.some((markup) => markup.includes("<m:nary>"))).toBe(true);
     const copy = await exportDocxCopy(imported.json);
     const reopened = await docxLens.open(copy.bytes);
+    const copiedMarkup = reopened.projection.blocks.flatMap((block) => block.inlineContent ?? [])
+      .filter((item) => item.kind === "equation")
+      .map((item) => item.ommlXml)
+      .filter((markup): markup is string => Boolean(markup));
+    expect(copiedMarkup).toEqual(importedMarkup);
     expect(
       reopened.projection.blocks.some((block) =>
         block.inlineContent?.some(
@@ -158,6 +172,74 @@ describe("shared DOCX adapter", () => {
       ),
     ).toBe(true);
     expect(copy.conversion.notes.some((note) => note.scope === "equations" && note.level === "unsupported")).toBe(false);
+  });
+
+  it("regenerates a retained equation when the editor changes its source", async () => {
+    const imported = await importDocxPayload(await fixture("equation-omml.docx"));
+    const edited = structuredClone(imported.json);
+    let changed = false;
+    const visit = (node: DocumentJsonNode) => {
+      if ((node.type === "inlineEquation" || node.type === "equation") && !changed) {
+        node.attrs = {
+          ...(node.attrs ?? {}),
+          latex: String.raw`\begin{bmatrix}1&2\\3&4\end{bmatrix}`,
+        };
+        changed = true;
+      }
+      node.content?.forEach(visit);
+    };
+    visit(edited);
+    expect(changed).toBe(true);
+
+    const copy = await exportDocxCopy(edited);
+    const reopened = await docxLens.open(copy.bytes);
+    const equations = reopened.projection.blocks.flatMap((block) => block.inlineContent ?? [])
+      .filter((item) => item.kind === "equation");
+    expect(equations.filter((item) => item.kind === "equation" && item.latex.includes("\\begin{bmatrix}")).length).toBe(1);
+  });
+
+  it("round-trips inline and block equation edits through the native projection writer", async () => {
+    const source = await exportDocxCopy({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Inline: " },
+            { type: "inlineEquation", attrs: { latex: String.raw`\begin{pmatrix}a&b\\c&d\end{pmatrix}` } },
+          ],
+        },
+        {
+          type: "equation",
+          attrs: { latex: String.raw`\sum_{i=1}^{n} i`, display: "block" },
+        },
+      ],
+    });
+    const base = await docxLens.open(source.bytes);
+    const projection = structuredClone(base.projection);
+    const equations = projection.blocks.flatMap((block) =>
+      (block.inlineContent ?? []).map((item) => ({ block, item })),
+    ).filter(({ item }) => item.kind === "equation");
+    expect(equations).toHaveLength(2);
+    for (const { item } of equations) {
+      if (item.kind !== "equation") continue;
+      item.latex = item.display === "inline"
+        ? String.raw`\begin{bmatrix}{a+1}&b\\c&d^2\end{bmatrix}`
+        : String.raw`\begin{aligned}x&=\frac{\sqrt[3]{x_1^2}}{\sum_{i=1}^{n} i}\\y&=1\end{aligned}`;
+    }
+
+    const output = await docxLens.materialize({ projection, carry: base.preservedCarry });
+    const reopened = await docxLens.open(output);
+    const recovered = reopened.projection.blocks.flatMap((block) => block.inlineContent ?? [])
+      .filter((item) => item.kind === "equation");
+    expect(recovered).toHaveLength(2);
+    expect(recovered.some((item) => item.kind === "equation" && item.display === "inline" && item.latex.includes("\\begin{bmatrix}"))).toBe(true);
+    expect(recovered.some((item) => item.kind === "equation" && item.display === "block" && item.latex.includes("\\begin{aligned}") && item.latex.includes("&"))).toBe(true);
+    for (const item of recovered) {
+      if (item.kind !== "equation") continue;
+      expect(latexToEquation(item.latex, item.display).supported).toBe(true);
+    }
+
   });
 
   it("embeds an authored image inside a mixed paragraph instead of replacing it with alt text", async () => {

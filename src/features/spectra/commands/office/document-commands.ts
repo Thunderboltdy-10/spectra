@@ -1043,6 +1043,7 @@ function equationBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
   return [
     {
       id: "equation.edit",
+      capabilityId: "document.equation.edit",
       label: "Edit equation",
       icon: Sigma,
       contextualTab: "Equation",
@@ -1051,7 +1052,7 @@ function equationBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
       requires: "edit",
       hint: "Opens the LaTeX source for this equation",
       touches: ["equations"],
-      manifestOps: ["insert_equation"],
+      nativeDelta: "replace-paragraph",
       onSelect: () => equation.edit(),
     },
     {

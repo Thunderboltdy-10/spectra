@@ -324,7 +324,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "insert.equation",
     "Insert a display equation.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.equation,
+      reason: DOCUMENT_NATIVE_REASONS.equationInsert,
       touches: ["equations"],
       manifest: "insert_equation",
     },
@@ -333,7 +333,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "insert.equation.inline",
     "Insert an inline equation.",
     {
-      reason: DOCUMENT_NATIVE_REASONS.equation,
+      reason: DOCUMENT_NATIVE_REASONS.equationInsert,
       touches: ["equations"],
       manifest: "insert_equation",
     },
@@ -518,14 +518,14 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   [
     "equation.edit",
     "Edit this equation.",
-    { reason: DOCUMENT_NATIVE_REASONS.equation, touches: ["equations"] },
+    { delta: "replace-paragraph", touches: ["equations"] },
   ],
   [
     "equation.display",
     "Switch this equation between inline and display.",
     {
       params: text,
-      reason: DOCUMENT_NATIVE_REASONS.equation,
+      reason: DOCUMENT_NATIVE_REASONS.equationLayout,
       touches: ["equations"],
       field: true,
     },
@@ -535,7 +535,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     "Set alignment for this equation.",
     {
       params: text,
-      reason: DOCUMENT_NATIVE_REASONS.equation,
+      reason: DOCUMENT_NATIVE_REASONS.equationLayout,
       touches: ["equations"],
       field: true,
     },

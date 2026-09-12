@@ -365,8 +365,17 @@ function appendNativeOmml(paragraph: XmlElement, value: string) {
   paragraph.appendChild(root);
 }
 
-function appendEquation(paragraph: XmlElement, latex: string, display: "inline" | "block", ommlXml?: string) {
-  if (ommlXml) {
+function appendEquation(
+  paragraph: XmlElement,
+  latex: string,
+  display: "inline" | "block",
+  ommlXml?: string,
+  ommlSourceLatex?: string,
+) {
+  // A retained subtree is authoritative only for the exact source it
+  // represented on open. If the editor changed LaTeX, regenerate semantic
+  // OMML instead of accidentally exporting the old native equation.
+  if (ommlXml && ommlSourceLatex !== undefined && ommlSourceLatex === latex) {
     appendNativeOmml(paragraph, ommlXml);
     return;
   }
@@ -391,6 +400,7 @@ async function appendInlineContent(
         String(attrs.latex ?? ""),
         attrs.display === "block" ? "block" : "inline",
         typeof attrs.ommlXml === "string" && attrs.ommlXml ? attrs.ommlXml : undefined,
+        typeof attrs.ommlSourceLatex === "string" ? attrs.ommlSourceLatex : undefined,
       );
     } else if (node.type === "image") {
       await appendImageInline(document, paragraph, node, resolver);
@@ -555,7 +565,7 @@ export async function exportDocxCopy(
         await appendParagraph(document, {
           type: "paragraph",
           content: [
-            { type: "inlineEquation", attrs: { latex: String(attrs.latex ?? ""), display: "block", ...(typeof attrs.ommlXml === "string" && attrs.ommlXml ? { ommlXml: attrs.ommlXml } : {}) } },
+            { type: "inlineEquation", attrs: { latex: String(attrs.latex ?? ""), display: "block", ...(typeof attrs.ommlXml === "string" && attrs.ommlXml ? { ommlXml: attrs.ommlXml } : {}), ...(typeof attrs.ommlSourceLatex === "string" ? { ommlSourceLatex: attrs.ommlSourceLatex } : {}) } },
           ],
         }, undefined, options.resolveAsset);
         continue;

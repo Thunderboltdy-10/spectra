@@ -316,7 +316,7 @@ const OMML_SYMBOLS: Readonly<Record<string, string>> = {
   "−": "-",
 };
 
-function ommlTextToLatex(value: string) {
+function ommlTextToLatex(value: string, equationArray = false) {
   const normalized = value.replace(/\s+/gu, " ");
   let latex = "";
   for (const character of normalized) {
@@ -333,7 +333,7 @@ function ommlTextToLatex(value: string) {
       latex += "\\backslash{}";
       continue;
     }
-    if ("%#&{}".includes(character)) {
+    if ("%#{}".includes(character) || (character === "&" && !equationArray)) {
       latex += `\\${character}`;
       continue;
     }
@@ -376,8 +376,8 @@ function latexGroup(value: string) {
   return `{${value || "\\,"}}`;
 }
 
-function latexDelimiter(value: string, side: "left" | "right") {
-  if (!value) return ".";
+function latexDelimiter(value: string) {
+  if (!value || value === ".") return ".";
   const mapped: Record<string, string> = {
     "(": "(",
     ")": ")",
@@ -396,7 +396,10 @@ function latexDelimiter(value: string, side: "left" | "right") {
     "〖": "(",
     "〗": ")",
   };
-  return mapped[value] ?? (side === "left" ? "(" : ")");
+  // The native property is the delimiter identity. Do not silently turn an
+  // unfamiliar native delimiter into parentheses; the untouched subtree can
+  // still be preserved, and a future explicit edit can reject it honestly.
+  return mapped[value] ?? value;
 }
 
 function naryOperator(value: string) {
@@ -414,19 +417,20 @@ function naryOperator(value: string) {
   return mapped[value] ?? ommlTextToLatex(value || "∫");
 }
 
-function renderOmmlElement(element: XmlElement): string {
+function renderOmmlElement(element: XmlElement, equationArray = false): string {
   if (element.namespaceUri() !== OMML_NAMESPACE) return "";
   const renderSlot = (name: string) => {
     const slot = ommlChild(element, name);
-    return slot ? renderOmmlElement(slot) : "";
+    return slot ? renderOmmlElement(slot, equationArray) : "";
   };
   const renderChildren = () =>
     element
       .elements()
-      .map(renderOmmlElement)
+      .map((child) => renderOmmlElement(child, equationArray))
       .join("");
 
-  if (element.localName === "t") return ommlTextToLatex(element.text());
+  if (element.localName === "t") return ommlTextToLatex(element.text(), equationArray);
+  if (element.localName === "alnAt") return "&";
   if (OMML_PROPERTY_ELEMENTS.has(element.localName)) return "";
   if (
     [
@@ -469,10 +473,22 @@ function renderOmmlElement(element: XmlElement): string {
   }
   if (element.localName === "d") {
     const properties = ommlChild(element, "dPr");
-    const beginning = latexDelimiter(ommlValue(properties, "begChr", "("), "left");
-    const ending = latexDelimiter(ommlValue(properties, "endChr", ")"), "right");
+    const beginning = latexDelimiter(ommlValue(properties, "begChr", "("));
+    const ending = latexDelimiter(ommlValue(properties, "endChr", ")"));
     const separator = ommlTextToLatex(ommlValue(properties, "sepChr", ","));
-    const entries = ommlChildren(element, "e").map(renderOmmlElement);
+    const entries = ommlChildren(element, "e").map((entry) => renderOmmlElement(entry));
+    const matrix = entries.length === 1
+      ? entries[0]!.match(/^\\begin\{matrix\}([\s\S]*)\\end\{matrix\}$/u)
+      : null;
+    if (matrix) {
+      const environment = beginning === "(" && ending === ")"
+        ? "pmatrix"
+        : beginning === "[" && ending === "]"
+          ? "bmatrix"
+          : "matrix";
+      if (environment !== "matrix")
+        return `\\begin{${environment}}${matrix[1]}\\end{${environment}}`;
+    }
     return `\\left${beginning}${entries.join(` ${separator} `)}\\right${ending}`;
   }
   if (element.localName === "nary") {
@@ -485,12 +501,12 @@ function renderOmmlElement(element: XmlElement): string {
   }
   if (element.localName === "m") {
     const rows = ommlChildren(element, "mr").map((row) =>
-      ommlChildren(row, "e").map(renderOmmlElement).join(" & "),
+      ommlChildren(row, "e").map((cell) => renderOmmlElement(cell)).join(" & "),
     );
     return `\\begin{matrix}${rows.join(" \\\\ ")}\\end{matrix}`;
   }
   if (element.localName === "eqArr") {
-    const rows = ommlChildren(element, "e").map(renderOmmlElement);
+    const rows = ommlChildren(element, "e").map((row) => renderOmmlElement(row, true));
     return `\\begin{aligned}${rows.join(" \\\\ ")}\\end{aligned}`;
   }
   if (element.localName === "func") {

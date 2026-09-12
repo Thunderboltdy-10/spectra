@@ -5,6 +5,7 @@ import { NodeSelection } from "@tiptap/pm/state";
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from "@tiptap/react";
 import katex from "katex";
 import { useMemo } from "react";
+import { latexToEquation } from "../lenses/equation-interchange";
 
 function renderEquation(latex: string, displayMode: boolean) {
   return katex.renderToString(latex || (displayMode ? "\\text{New equation}" : "\\text{equation}"), { throwOnError: false, displayMode, strict: "ignore" });
@@ -24,10 +25,12 @@ function EquationView({ node, editor, getPos, selected, updateAttributes }: Node
   const display = node.attrs.display === "inline" ? "inline" : "block";
   const alignment = ["left", "center", "right"].includes(node.attrs.alignment) ? node.attrs.alignment : "center";
   const html = useMemo(() => renderEquation(latex, display === "block"), [display, latex]);
+  const validation = useMemo(() => latexToEquation(latex, display), [display, latex]);
   const focused = node.attrs.nativeReadOnly !== true && Boolean(selected) && isFocusedNode({ editor, getPos });
   return <NodeViewWrapper as={display === "inline" ? "span" : "div"} className={`spectra-equation spectra-equation-${display} is-${alignment} ${focused ? "is-selected" : ""}`} data-equation="true">
     <span className="spectra-equation-preview" dangerouslySetInnerHTML={{ __html: html }} />
     {focused ? <textarea value={latex} onChange={(event) => updateAttributes({ latex: event.target.value })} rows={Math.max(2, latex.split("\n").length)} className="spectra-equation-source" aria-label="LaTeX equation source" placeholder="e.g. E = mc^2" /> : null}
+    {focused && !validation.supported ? <div role="alert" className="spectra-equation-feedback">Equation needs attention: {validation.diagnostics[0] ?? "unsupported syntax"}</div> : null}
     {focused ? <div className="spectra-equation-align" role="group" aria-label="Equation alignment">
       {(["left", "center", "right"] as const).map((value) => (
         <button
@@ -48,10 +51,12 @@ function EquationView({ node, editor, getPos, selected, updateAttributes }: Node
 function InlineEquationView({ node, editor, getPos, selected, updateAttributes }: NodeViewProps) {
   const latex = typeof node.attrs.latex === "string" ? node.attrs.latex : "";
   const html = useMemo(() => renderEquation(latex, false), [latex]);
+  const validation = useMemo(() => latexToEquation(latex, "inline"), [latex]);
   const focused = node.attrs.nativeReadOnly !== true && Boolean(selected) && isFocusedNode({ editor, getPos });
   return <NodeViewWrapper as="span" className={`spectra-equation spectra-equation-inline ${focused ? "is-selected" : ""}`} data-inline-equation="true">
     <span className="spectra-equation-preview" dangerouslySetInnerHTML={{ __html: html }} />
     {focused ? <input value={latex} onChange={(event) => updateAttributes({ latex: event.target.value })} className="spectra-equation-source" aria-label="Inline LaTeX equation source" placeholder="e.g. 2n = 4" /> : null}
+    {focused && !validation.supported ? <div role="alert" className="spectra-equation-feedback">Equation needs attention: {validation.diagnostics[0] ?? "unsupported syntax"}</div> : null}
   </NodeViewWrapper>;
 }
 

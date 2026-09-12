@@ -11,7 +11,11 @@ export const DOCUMENT_NATIVE_REASONS = {
   image:
     "Set or add supported PNG/JPEG pictures natively in Spectra, including durable asset bytes, alternative text, dimensions, crop, insertion, and replacement; change text wrapping or remove a retained picture in Word.",
   equation:
-    "Spectra preserves Word equations but cannot add or edit them in the linked file. Add or edit the equation in Word.",
+    "Edit supported Word equation source in place. Unsupported native math remains preserved until it is explicitly replaced.",
+  equationInsert:
+    "Spectra edits supported existing Word equations but cannot insert a new equation into a linked native file yet. Add the new equation in Word or use an unlinked copy.",
+  equationLayout:
+    "Change equation placement or alignment in Word; the native writer edits equation source but does not rewrite layout properties yet.",
   section:
     "Set basic Word section page size, orientation, margins, and column count in Spectra. To add a section break or change advanced section layout, use Word.",
   headerFooter:

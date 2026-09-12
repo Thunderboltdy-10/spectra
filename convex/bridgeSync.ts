@@ -20,6 +20,30 @@ import {
   deriveSyncIdempotencyKey,
 } from "../shared/replica-truth";
 import { retireSupersededExternalOperations } from "./syncOperationLifecycle";
+import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
+import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
+
+type WriteCompletionState = "pending" | "verified" | "failed" | "conflicted";
+
+function validateWriteReceipt(
+  receipt: unknown,
+  request: Doc<"bridgeWriteRequests">,
+  work: Doc<"spectraArtifacts">,
+  replica?: Doc<"workReplicas"> | null,
+): NativeSaveReceipt | undefined {
+  if (receipt === undefined) return undefined;
+  return validateNativeSaveReceipt(receipt, {
+    artifactId: String(request.workId),
+    baseRevision: request.baseRevision,
+    targetRevision: request.targetRevision,
+    resultPayloadHash: request.contentHash,
+    target: { regionIds: request.regionIds, partNames: request.partNames },
+    basePayloadHash: /^[a-f0-9]{64}$/.test(replica?.contentHash ?? request.baseRevision)
+      ? replica?.contentHash ?? request.baseRevision
+      : undefined,
+    nativeFormat: replica?.nativeFormat ?? work.nativeFormat,
+  });
+}
 
 async function digest(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -68,6 +92,7 @@ async function failStorageTransitionForRequest(
   request: Doc<"bridgeWriteRequests">,
   errorCode: string,
   now: number,
+  state: "failed" | "conflicted" = "failed",
 ) {
   const transitions = await ctx.db.query("storageStrategyTransitions")
     .withIndex("by_work_created", (q) => q.eq("workId", request.workId))
@@ -85,7 +110,7 @@ async function failStorageTransitionForRequest(
   if (policy && before.hadItemPolicy && before.policy)
     await ctx.db.patch(policy._id, { ...before.policy, updatedAt: now });
   else if (policy) await ctx.db.delete(policy._id);
-  await ctx.db.patch(transition._id, { state: "failed", errorCode, updatedAt: now });
+  await ctx.db.patch(transition._id, { state, errorCode, updatedAt: now });
 }
 
 async function failBridgeWriteForRevokedAccess(
@@ -1171,9 +1196,23 @@ export const claimWrite = mutation({
         await failStorageTransitionForRequest(ctx, request, "payload-unavailable", now);
         continue;
       }
-      await ctx.db.patch(request._id, { state: "claimed", claimedAt: now, retryAt: undefined, attemptCount: (request.attemptCount ?? 0) + 1, updatedAt: now });
+      const claimGeneration = (request.claimGeneration ?? 0) + 1;
+      const claimToken = crypto.randomUUID();
+      await ctx.db.patch(request._id, {
+        state: "claimed",
+        claimedAt: now,
+        claimGeneration,
+        claimToken,
+        retryAt: undefined,
+        attemptCount: (request.attemptCount ?? 0) + 1,
+        updatedAt: now,
+      });
+      const operation = await ctx.db.query("syncOperations")
+        .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
+        .unique();
       return { request: {
         requestId: request._id,
+        operationId: operation?._id,
         replicaId: request.replicaId,
         grantId: mount.grantId,
         localResourceId: request.localResourceId,
@@ -1182,6 +1221,8 @@ export const claimWrite = mutation({
         targetRevision: request.targetRevision,
         contentHash: request.contentHash,
         idempotencyKey: request.idempotencyKey,
+        claimGeneration,
+        claimToken,
         nativeReceipt: request.nativeReceipt,
         payloadUrl,
       } };
@@ -1196,7 +1237,9 @@ export const completeWrite = mutation({
     requestId: v.id("bridgeWriteRequests"),
     outcome: v.union(v.literal("verified"), v.literal("waiting"), v.literal("conflicted"), v.literal("failed")),
     actualRevision: v.optional(v.string()),
-    nativeReceipt: v.optional(v.any()),
+    nativeReceipt: v.optional(nativeSaveReceiptValidator),
+    claimGeneration: v.optional(v.number()),
+    claimToken: v.optional(v.string()),
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
   },
@@ -1205,19 +1248,51 @@ export const completeWrite = mutation({
     const request = await ctx.db.get(args.requestId);
     if (!request || request.deviceId !== device._id || request.accountId !== device.accountId)
       throw new Error("WRITE_REQUEST_NOT_OWNED_BY_DEVICE");
+    const operation = await ctx.db.query("syncOperations")
+      .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
+      .unique();
+    const completion = (state: WriteCompletionState, extra: Record<string, unknown> = {}) => ({ state, ...extra });
+    // Terminal requests are immutable facts. In particular, a late waiting or
+    // failed acknowledgement must not move the replica back from a verified
+    // write, and a duplicate verified acknowledgement must not touch a newer
+    // write on the same file.
+    if (request.state === "verified" || request.state === "failed" || request.state === "conflicted")
+      return completion(request.state);
     const now = Date.now();
     const work = await ctx.db.get(request.workId);
     if (!work || work.status === "deleted") {
       await failWriteForMissingWork(ctx, request, now);
-      return { state: "failed" as const };
+      return completion("failed");
     }
     if (!(await hasArtifactModify(ctx, actor, request.workId))) {
       await failBridgeWriteForRevokedAccess(ctx, request, now);
-      return { state: "failed" as const };
+      return completion("failed");
     }
-    const operation = await ctx.db.query("syncOperations")
-      .withIndex("by_account_key", (q) => q.eq("accountId", device.accountId).eq("idempotencyKey", request.idempotencyKey))
-      .unique();
+    const hasBoundClaim = request.claimGeneration !== undefined || request.claimToken !== undefined;
+    const claimMatches =
+      (!hasBoundClaim && args.claimGeneration === undefined && args.claimToken === undefined) ||
+      (request.state === "claimed" &&
+        request.claimGeneration !== undefined &&
+        request.claimToken !== undefined &&
+        args.claimGeneration === request.claimGeneration &&
+        args.claimToken === request.claimToken);
+    if (!claimMatches)
+      return completion(request.state === "claimed" ? "pending" : request.state, { ignored: true, reason: "stale-claim" });
+    const suppliedReceipt = request.nativeReceipt ?? args.nativeReceipt;
+    let validatedReceipt: NativeSaveReceipt | undefined;
+    try {
+      validatedReceipt = validateWriteReceipt(suppliedReceipt, request, work);
+    } catch (error) {
+      const errorCode = error instanceof Error ? error.message : "NATIVE_RECEIPT_INVALID";
+      await ctx.db.patch(request._id, {
+        state: "failed",
+        errorCode,
+        errorMessage: "The native save receipt did not match this queued write.",
+        updatedAt: now,
+      });
+      if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
+      return completion("failed", { errorCode });
+    }
     const strategyTransitions = await ctx.db.query("storageStrategyTransitions")
       .withIndex("by_work_created", (q) => q.eq("workId", request.workId))
       .order("desc")
@@ -1229,16 +1304,16 @@ export const completeWrite = mutation({
     if (args.outcome === "waiting") {
       await ctx.db.patch(request._id, {
         state: "pending",
-        nativeReceipt: request.nativeReceipt
-          ? { ...(request.nativeReceipt as Record<string, unknown>), state: "pending" }
-          : args.nativeReceipt,
+        nativeReceipt: validatedReceipt
+          ? { ...validatedReceipt, state: "pending" }
+          : undefined,
         retryAt: now + 5_000,
         errorCode: args.errorCode ?? "office-locked",
         errorMessage: args.errorMessage,
         claimedAt: undefined,
         updatedAt: now,
       });
-      return { state: "pending" as const };
+      return completion("pending");
     }
     if (args.outcome === "verified") {
       if (!args.actualRevision || args.actualRevision !== request.targetRevision) {
@@ -1247,7 +1322,7 @@ export const completeWrite = mutation({
         const mismatchedReplica = await ctx.db.get(request.replicaId);
         if (mismatchedReplica) await ctx.db.patch(mismatchedReplica._id, { state: "error", errorCode: "readback-revision-mismatch", errorAt: now, updatedAt: now });
         await failStorageTransitionForRequest(ctx, request, "readback-revision-mismatch", now);
-        return { state: "failed" as const };
+        return completion("failed", { errorCode: "readback-revision-mismatch" });
       }
       const [mount, replica] = await Promise.all([
         ctx.db.get(request.mountId),
@@ -1262,7 +1337,21 @@ export const completeWrite = mutation({
         });
         if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode: "target-unavailable", updatedAt: now });
         await failStorageTransitionForRequest(ctx, request, "target-unavailable", now);
-        return { state: "failed" as const };
+        return completion("failed", { errorCode: "target-unavailable" });
+      }
+      try {
+        validatedReceipt = validateWriteReceipt(suppliedReceipt, request, work, replica);
+      } catch (error) {
+        const errorCode = error instanceof Error ? error.message : "NATIVE_RECEIPT_INVALID";
+        await ctx.db.patch(request._id, {
+          state: "failed",
+          errorCode,
+          errorMessage: "The native save receipt did not match this local file.",
+          updatedAt: now,
+        });
+        if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
+        await failStorageTransitionForRequest(ctx, request, errorCode, now);
+        return completion("failed", { errorCode });
       }
       const protectedApply = Boolean(
         operation?.errorCode === "protected-original-apply-pending" &&
@@ -1278,6 +1367,25 @@ export const completeWrite = mutation({
         .withIndex("by_work_created", (q) => q.eq("workId", request.workId))
         .order("desc")
         .take(50);
+      const newerTerminalWrite = queuedWrites.find((candidate) =>
+        candidate._id !== request._id &&
+        candidate.replicaId === request.replicaId &&
+        candidate.createdAt > request.createdAt &&
+        candidate.baseRevision === request.targetRevision &&
+        (candidate.state === "verified" || candidate.state === "conflicted"),
+      );
+      if (newerTerminalWrite || (replica && replica.revision !== request.baseRevision)) {
+        const errorCode = "superseded-by-newer-write";
+        await ctx.db.patch(request._id, {
+          state: "failed",
+          errorCode,
+          errorMessage: "A newer local write already owns this file revision.",
+          updatedAt: now,
+        });
+        if (operation) await ctx.db.patch(operation._id, { state: "failed", errorCode, updatedAt: now });
+        await failStorageTransitionForRequest(ctx, request, errorCode, now, "conflicted");
+        return completion("failed", { ignored: true, reason: errorCode });
+      }
       const hasNewerWrite = queuedWrites.some((candidate) =>
         candidate._id !== request._id &&
         candidate.replicaId === request.replicaId &&
@@ -1341,7 +1449,7 @@ export const completeWrite = mutation({
           updatedAt: now,
         });
       }
-      const appliedReceipt = request.nativeReceipt ?? args.nativeReceipt;
+      const appliedReceipt = validatedReceipt;
       await ctx.db.patch(request._id, {
         state: "verified",
         nativeReceipt: appliedReceipt && typeof appliedReceipt === "object"
@@ -1379,16 +1487,17 @@ export const completeWrite = mutation({
       await Promise.all(resolvingConflicts
         .filter((conflict) => conflict.resolutionRequestId === request._id)
         .map((conflict) => ctx.db.patch(conflict._id, { state: "resolved-spectra", resolvedAt: now, updatedAt: now })));
-      return { state: "verified" as const };
+      return completion("verified");
     }
     const conflicted = args.outcome === "conflicted";
     await ctx.db.patch(request._id, {
       state: conflicted ? "conflicted" : "failed",
-      nativeReceipt: request.nativeReceipt && typeof request.nativeReceipt === "object"
-        ? { ...(request.nativeReceipt as Record<string, unknown>), state: conflicted ? "conflicted" : "failed", errorCode: args.errorCode }
-        : args.nativeReceipt,
+      nativeReceipt: validatedReceipt
+        ? { ...validatedReceipt, state: conflicted ? "conflicted" : "failed", errorCode: args.errorCode }
+        : undefined,
       errorCode: args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"),
       errorMessage: args.errorMessage,
+      claimedAt: undefined,
       updatedAt: now,
     });
     await ctx.db.patch(request.replicaId, {
@@ -1399,7 +1508,7 @@ export const completeWrite = mutation({
       updatedAt: now,
     });
     if (operation) await ctx.db.patch(operation._id, { state: conflicted ? "conflicted" : "failed", errorCode: args.errorCode, updatedAt: now });
-    if (strategyTransition) await failStorageTransitionForRequest(ctx, request, args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"), now);
+    if (strategyTransition) await failStorageTransitionForRequest(ctx, request, args.errorCode ?? (conflicted ? "stale-revision" : "write-failed"), now, conflicted ? "conflicted" : "failed");
     if (conflicted) {
       await ctx.db.insert("syncConflicts", {
         accountId: device.accountId,
@@ -1422,7 +1531,7 @@ export const completeWrite = mutation({
     await Promise.all(resolvingConflicts
       .filter((conflict) => conflict.resolutionRequestId === request._id)
       .map((conflict) => ctx.db.patch(conflict._id, { state: "open", resolutionRequestId: undefined, errorCode: args.errorCode ?? "resolution-write-failed", updatedAt: now })));
-    return { state: conflicted ? "conflicted" as const : "failed" as const };
+    return completion(conflicted ? "conflicted" : "failed");
   },
 });
 

@@ -261,6 +261,8 @@ struct PayloadUploadIntent {
 #[serde(rename_all = "camelCase")]
 pub struct ClaimedWrite {
     pub request_id: String,
+    #[serde(default)]
+    pub operation_id: Option<String>,
     pub replica_id: String,
     pub grant_id: String,
     pub local_resource_id: String,
@@ -270,8 +272,22 @@ pub struct ClaimedWrite {
     pub content_hash: String,
     pub idempotency_key: String,
     #[serde(default)]
+    pub claim_generation: Option<u64>,
+    #[serde(default)]
+    pub claim_token: Option<String>,
+    #[serde(default)]
     pub native_receipt: Option<serde_json::Value>,
     pub payload_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteCompletion {
+    pub state: String,
+    #[serde(default)]
+    pub ignored: bool,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -541,7 +557,30 @@ pub async fn complete_write(
     outcome: &str,
     actual_revision: Option<&str>,
     error: Option<(&str, &str)>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<WriteCompletion> {
+    complete_write_with_claim(
+        deployment_url,
+        credential,
+        request_id,
+        outcome,
+        actual_revision,
+        error,
+        None,
+        None,
+    )
+    .await
+}
+
+pub async fn complete_write_with_claim(
+    deployment_url: &str,
+    credential: &str,
+    request_id: &str,
+    outcome: &str,
+    actual_revision: Option<&str>,
+    error: Option<(&str, &str)>,
+    claim_generation: Option<u64>,
+    claim_token: Option<&str>,
+) -> anyhow::Result<WriteCompletion> {
     let mut args = serde_json::json!({
         "credential": credential,
         "requestId": request_id,
@@ -560,8 +599,17 @@ pub async fn complete_write(
             message.chars().take(500).collect::<String>().into(),
         );
     }
-    let _: serde_json::Value = mutation(deployment_url, "bridgeSync:completeWrite", args).await?;
-    Ok(())
+    if let Some(claim_generation) = claim_generation {
+        args.as_object_mut()
+            .expect("complete write args are an object")
+            .insert("claimGeneration".into(), claim_generation.into());
+    }
+    if let Some(claim_token) = claim_token {
+        args.as_object_mut()
+            .expect("complete write args are an object")
+            .insert("claimToken".into(), claim_token.into());
+    }
+    mutation(deployment_url, "bridgeSync:completeWrite", args).await
 }
 
 pub async fn claim_fs_request(

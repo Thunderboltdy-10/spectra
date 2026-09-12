@@ -60,6 +60,21 @@ pub struct QueueItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct NativeAckItem {
+    pub id: i64,
+    pub request_id: String,
+    pub claim_generation: Option<u64>,
+    pub claim_token: Option<String>,
+    pub outcome: String,
+    pub actual_revision: Option<String>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub attempts: u32,
+    pub available_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceRecord {
     pub local_resource_id: String,
     pub grant_id: String,
@@ -119,6 +134,19 @@ impl Journal {
                direction TEXT NOT NULL, payload TEXT NOT NULL,
                attempts INTEGER NOT NULL DEFAULT 0, available_at INTEGER NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS native_ack_queue (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               ack_key TEXT NOT NULL UNIQUE,
+               request_id TEXT NOT NULL,
+               claim_generation INTEGER,
+               claim_token TEXT,
+               outcome TEXT NOT NULL,
+               actual_revision TEXT,
+               error_code TEXT,
+               error_message TEXT,
+               attempts INTEGER NOT NULL DEFAULT 0,
+               available_at INTEGER NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS checkpoints (
                resource_id TEXT PRIMARY KEY, last_op_id TEXT NOT NULL,
@@ -146,7 +174,9 @@ impl Journal {
              CREATE INDEX IF NOT EXISTS resources_by_grant_generation
                ON resources(grant_id, last_seen_generation);
              CREATE INDEX IF NOT EXISTS queue_by_due
-               ON queue(available_at, id);",
+               ON queue(available_at, id);
+             CREATE INDEX IF NOT EXISTS native_ack_queue_by_due
+               ON native_ack_queue(available_at, id);",
         )?;
         Ok(())
     }
@@ -481,6 +511,87 @@ impl Journal {
             .execute("DELETE FROM queue WHERE id=?", [id])?;
         Ok(())
     }
+
+    /// Persist a native completion before making its network acknowledgement.
+    /// The key includes the claim lease so a replay from an expired worker can
+    /// never be mistaken for the current claim.
+    pub fn enqueue_native_ack(
+        &self,
+        request_id: &str,
+        claim_generation: Option<u64>,
+        claim_token: Option<&str>,
+        outcome: &str,
+        actual_revision: Option<&str>,
+        error: Option<(&str, &str)>,
+    ) -> anyhow::Result<()> {
+        let ack_key = format!(
+            "{request_id}:{}:{}",
+            claim_generation.unwrap_or(0),
+            claim_token.unwrap_or("legacy")
+        );
+        self.connection.lock().unwrap().execute(
+            "INSERT OR IGNORE INTO native_ack_queue(
+               ack_key,request_id,claim_generation,claim_token,outcome,
+               actual_revision,error_code,error_message,available_at
+             ) VALUES(?,?,?,?,?,?,?,?,?)",
+            params![
+                ack_key,
+                request_id,
+                claim_generation.map(|value| value as i64),
+                claim_token,
+                outcome,
+                actual_revision,
+                error.map(|value| value.0),
+                error.map(|value| value.1),
+                unix_ms(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn due_native_acks(&self, limit: usize) -> anyhow::Result<Vec<NativeAckItem>> {
+        let connection = self.connection.lock().unwrap();
+        let mut statement = connection.prepare(
+            "SELECT id,request_id,claim_generation,claim_token,outcome,
+                    actual_revision,error_code,error_message,attempts,available_at
+             FROM native_ack_queue WHERE available_at <= ?
+             ORDER BY id LIMIT ?",
+        )?;
+        let rows = statement.query_map(params![unix_ms(), limit.clamp(1, 500) as i64], |row| {
+            Ok(NativeAckItem {
+                id: row.get(0)?,
+                request_id: row.get(1)?,
+                claim_generation: row
+                    .get::<_, Option<i64>>(2)?
+                    .map(|value| value.max(0) as u64),
+                claim_token: row.get(3)?,
+                outcome: row.get(4)?,
+                actual_revision: row.get(5)?,
+                error_code: row.get(6)?,
+                error_message: row.get(7)?,
+                attempts: row.get::<_, i64>(8)?.max(0) as u32,
+                available_at: row.get(9)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn acknowledge_native_ack(&self, id: i64) -> anyhow::Result<()> {
+        self.connection
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM native_ack_queue WHERE id=?", [id])?;
+        Ok(())
+    }
+
+    pub fn retry_native_ack(&self, id: i64, delay: Duration) -> anyhow::Result<()> {
+        self.connection.lock().unwrap().execute(
+            "UPDATE native_ack_queue SET attempts=attempts+1, available_at=? WHERE id=?",
+            params![unix_ms() + delay.as_millis() as i64, id],
+        )?;
+        Ok(())
+    }
+
     pub fn acknowledge_change(
         &self,
         item: &QueueItem,
@@ -632,6 +743,41 @@ mod tests {
             journal.by_key("derived-change").unwrap().unwrap().state,
             OpState::Verified
         );
+    }
+
+    #[test]
+    fn native_ack_queue_is_deduplicated_by_claim_lease_and_retriable() {
+        let journal = Journal::in_memory().unwrap();
+        journal
+            .enqueue_native_ack(
+                "request-a",
+                Some(3),
+                Some("claim-c"),
+                "verified",
+                Some("hash-b"),
+                None,
+            )
+            .unwrap();
+        journal
+            .enqueue_native_ack(
+                "request-a",
+                Some(3),
+                Some("claim-c"),
+                "verified",
+                Some("hash-b"),
+                None,
+            )
+            .unwrap();
+        let queued = journal.due_native_acks(10).unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].claim_generation, Some(3));
+        assert_eq!(queued[0].claim_token.as_deref(), Some("claim-c"));
+        journal
+            .retry_native_ack(queued[0].id, Duration::from_secs(60))
+            .unwrap();
+        assert!(journal.due_native_acks(10).unwrap().is_empty());
+        journal.acknowledge_native_ack(queued[0].id).unwrap();
+        assert!(journal.due_native_acks(10).unwrap().is_empty());
     }
 
     #[test]

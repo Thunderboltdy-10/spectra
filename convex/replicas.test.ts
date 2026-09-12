@@ -1099,6 +1099,8 @@ describe("replica truth machine", () => {
       requestId,
       outcome: "verified",
       actualRevision: nextHash,
+      claimGeneration: claimed.request?.claimGeneration,
+      claimToken: claimed.request?.claimToken,
     });
     expect(completed.state).toBe("failed");
     const afterRevocation = await t.run(async (ctx) => ({
@@ -1304,6 +1306,15 @@ describe("replica truth machine", () => {
     );
     expect(transition.state).toBe("pending");
     expect(transition.materializationRequestId).not.toBeNull();
+    expect(transition.operationId).not.toBeNull();
+    expect(transition.preview).toMatchObject({
+      before: { locations: { cloud: expect.objectContaining({ kind: "cloud" }) } },
+      after: { physicalLocalAction: "write-retained-payload-to-existing-local-resource" },
+    });
+    expect(transition.transitionReceipt).toMatchObject({
+      state: "pending",
+      operationId: String(transition.operationId),
+    });
     const replay = await asUser.mutation(
       api.replicas.transitionStorageStrategy,
       {
@@ -1317,6 +1328,22 @@ describe("replica truth machine", () => {
     expect(replay.materializationRequestId).toBe(
       transition.materializationRequestId,
     );
+    expect(replay.operationId).toBe(transition.operationId);
+    const status = await asUser.query(api.replicas.strategyTransitionForWork, {
+      workId: fixture.workId,
+    });
+    expect(status).toMatchObject({
+      requestId: transition.materializationRequestId,
+      operationId: transition.operationId,
+      requestState: "pending",
+      operationState: "pending",
+      preview: {
+        pendingWork: {
+          localResourceId: expect.any(String),
+          relativePath: "Truth.docx",
+        },
+      },
+    });
 
     const completed = await t.mutation(api.bridgeSync.completeWrite, {
       credential: bridgeCredential,
@@ -1648,6 +1675,8 @@ describe("replica truth machine", () => {
       outcome: "waiting",
       errorCode: "office-locked",
       errorMessage: "Waiting for Office",
+      claimGeneration: claimed.request?.claimGeneration,
+      claimToken: claimed.request?.claimToken,
     });
 
     const immediate = await t.mutation(api.bridgeSync.claimWrite, {
@@ -2479,5 +2508,160 @@ describe("replica truth machine", () => {
       state: "claimed",
       mustConverge: true,
     });
+  });
+
+  it("fences late A acknowledgements after B has verified on the same replica", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const thirdHash = "c".repeat(64);
+    const thirdPayloadId = await t.run(async (ctx) => {
+      const storageId = await ctx.storage.store(new Blob(["third"]));
+      return ctx.db.insert("payloadObjects", {
+        accountId: fixture.accountId,
+        hash: thirdHash,
+        storageId,
+        bytes: 5,
+        mediaType: "application/test",
+        refCount: 0,
+        state: "active",
+        createdAt: Date.now(),
+        verifiedAt: Date.now(),
+      });
+    });
+    const first = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    });
+    const firstRequestId = requireWriteRequestId(first.requestId);
+    const firstClaim = await t.mutation(api.bridgeSync.claimWrite, {
+      credential: bridgeCredential,
+    });
+    if (!firstClaim.request) throw new Error("expected A to be claimable");
+    await t.mutation(api.bridgeSync.completeWrite, {
+      credential: bridgeCredential,
+      requestId: firstRequestId,
+      outcome: "verified",
+      actualRevision: nextHash,
+      claimGeneration: firstClaim.request.claimGeneration,
+      claimToken: firstClaim.request.claimToken,
+    });
+
+    const second = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(thirdPayloadId),
+      contentHash: thirdHash,
+      baseRevision: nextHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    });
+    const secondRequestId = requireWriteRequestId(second.requestId);
+    const secondClaim = await t.mutation(api.bridgeSync.claimWrite, {
+      credential: bridgeCredential,
+    });
+    if (!secondClaim.request) throw new Error("expected B to be claimable");
+    await t.mutation(api.bridgeSync.completeWrite, {
+      credential: bridgeCredential,
+      requestId: secondRequestId,
+      outcome: "verified",
+      actualRevision: thirdHash,
+      claimGeneration: secondClaim.request.claimGeneration,
+      claimToken: secondClaim.request.claimToken,
+    });
+
+    const beforeLateAcks = await t.run(async (ctx) => ({
+      request: await ctx.db.get(secondRequestId),
+      local: await ctx.db.get(fixture.localId),
+      cloud: await ctx.db.get(fixture.cloudId),
+    }));
+    for (const outcome of ["waiting", "failed", "verified"] as const) {
+      const late = await t.mutation(api.bridgeSync.completeWrite, {
+        credential: bridgeCredential,
+        requestId: firstRequestId,
+        outcome,
+        actualRevision: outcome === "verified" ? nextHash : undefined,
+        claimGeneration: firstClaim.request.claimGeneration,
+        claimToken: firstClaim.request.claimToken,
+        errorCode: outcome === "waiting" ? "office-locked" : undefined,
+      });
+      expect(late.state).toBe("verified");
+    }
+    const afterLateAcks = await t.run(async (ctx) => ({
+      request: await ctx.db.get(secondRequestId),
+      local: await ctx.db.get(fixture.localId),
+      cloud: await ctx.db.get(fixture.cloudId),
+    }));
+    expect(afterLateAcks.request).toMatchObject({ state: "verified", targetRevision: thirdHash });
+    expect(afterLateAcks.local).toMatchObject({ state: "current", revision: thirdHash, contentHash: thirdHash });
+    expect(afterLateAcks.cloud).toMatchObject({ state: "current", revision: thirdHash, contentHash: thirdHash });
+    expect(afterLateAcks).toEqual(beforeLateAcks);
+  });
+
+  it("ignores an acknowledgement from a reclaimed claim generation", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const queued = await asUser.mutation(api.replicas.queueMaterialization, {
+      workId: fixture.workId,
+      payloadRef: String(fixture.nextPayloadId),
+      contentHash: nextHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    });
+    const requestId = requireWriteRequestId(queued.requestId);
+    const firstClaim = await t.mutation(api.bridgeSync.claimWrite, {
+      credential: bridgeCredential,
+    });
+    if (!firstClaim.request) throw new Error("expected first claim");
+    await t.run(async (ctx) => {
+      await ctx.db.patch(requestId, { claimedAt: Date.now() - 61_000, updatedAt: Date.now() - 61_000 });
+    });
+    const secondClaim = await t.mutation(api.bridgeSync.claimWrite, {
+      credential: bridgeCredential,
+    });
+    if (!secondClaim.request) throw new Error("expected reclaimed claim");
+    const before = await t.run(async (ctx) => ({
+      request: await ctx.db.get(requestId),
+      local: await ctx.db.get(fixture.localId),
+      cloud: await ctx.db.get(fixture.cloudId),
+    }));
+    const stale = await t.mutation(api.bridgeSync.completeWrite, {
+      credential: bridgeCredential,
+      requestId,
+      outcome: "verified",
+      actualRevision: nextHash,
+      claimGeneration: firstClaim.request.claimGeneration,
+      claimToken: firstClaim.request.claimToken,
+    });
+    expect(stale).toMatchObject({ state: "pending", ignored: true, reason: "stale-claim" });
+    const after = await t.run(async (ctx) => ({
+      request: await ctx.db.get(requestId),
+      local: await ctx.db.get(fixture.localId),
+      cloud: await ctx.db.get(fixture.cloudId),
+    }));
+    expect(after).toEqual(before);
+    expect(after.request).toMatchObject({
+      state: "claimed",
+      claimGeneration: secondClaim.request.claimGeneration,
+      claimToken: secondClaim.request.claimToken,
+    });
+    await t.mutation(api.bridgeSync.completeWrite, {
+      credential: bridgeCredential,
+      requestId,
+      outcome: "verified",
+      actualRevision: nextHash,
+      claimGeneration: secondClaim.request.claimGeneration,
+      claimToken: secondClaim.request.claimToken,
+    });
+    const completed = await t.run(async (ctx) => ctx.db.get(requestId));
+    expect(completed).toMatchObject({ state: "verified", claimGeneration: secondClaim.request.claimGeneration });
   });
 });

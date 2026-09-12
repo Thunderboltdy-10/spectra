@@ -1655,7 +1655,7 @@ export default defineSchema({
     idempotencyKey: v.string(),
     fromPreset: v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked")),
     toPreset: v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked")),
-    state: v.union(v.literal("pending"), v.literal("verified"), v.literal("failed")),
+    state: v.union(v.literal("pending"), v.literal("verified"), v.literal("failed"), v.literal("conflicted"), v.literal("cancelled")),
     before: v.any(),
     after: v.optional(v.any()),
     errorCode: v.optional(v.string()),
@@ -1835,6 +1835,10 @@ export default defineSchema({
     errorCode: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
     claimedAt: v.optional(v.number()),
+    // A claim is a lease, not just a request state. These additive fields let
+    // a late worker acknowledgement be rejected after a reclaim.
+    claimGeneration: v.optional(v.number()),
+    claimToken: v.optional(v.string()),
     retryAt: v.optional(v.number()),
     attemptCount: v.optional(v.number()),
     expiresAt: v.optional(v.number()),

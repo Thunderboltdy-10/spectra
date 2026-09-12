@@ -183,6 +183,14 @@ pub struct WriteRequest<'a> {
     pub idempotency_key: &'a str,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedWrite {
+    pub operation_id: String,
+    /// The hash read back from the durable target, never an echoed request
+    /// target. The Bridge sends this value to Cloud as acknowledgement proof.
+    pub verified_revision: String,
+}
+
 pub struct SafeWriter<P: Platform> {
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
@@ -199,6 +207,10 @@ impl<P: Platform> SafeWriter<P> {
     }
 
     pub fn write(&self, request: WriteRequest<'_>) -> Result<String, FsError> {
+        Ok(self.write_with_readback(request)?.operation_id)
+    }
+
+    pub fn write_with_readback(&self, request: WriteRequest<'_>) -> Result<VerifiedWrite, FsError> {
         // The durable file is the journal resource, not a cloud relativePath
         // that may still name a sibling copy of the same bytes.
         let journal_path = self
@@ -215,17 +227,35 @@ impl<P: Platform> SafeWriter<P> {
             Some(request.base_revision),
             pre_hash.as_deref(),
         )?;
-        if op.state == OpState::Verified && op.post_hash.as_deref() == Some(request.expected_hash) {
-            return Ok(op.op_id);
+        if op.state == OpState::Verified {
+            // A verified journal record makes acknowledgement replay safe, but
+            // it does not authorize overwriting a newer external revision.
+            // Re-read the target before reusing the durable result.
+            if target.exists() {
+                let verified_revision = sha256_file(&target)?;
+                if verified_revision == request.expected_hash {
+                    return Ok(VerifiedWrite {
+                        operation_id: op.op_id,
+                        verified_revision,
+                    });
+                }
+            }
+            return Err(FsError::StaleRevision);
         }
-        if target.exists() && sha256_file(&target)? == request.expected_hash {
-            self.journal.transition(
-                &op.op_id,
-                OpState::Verified,
-                Some(request.expected_hash),
-                None,
-            )?;
-            return Ok(op.op_id);
+        if target.exists() {
+            let verified_revision = sha256_file(&target)?;
+            if verified_revision == request.expected_hash {
+                self.journal.transition(
+                    &op.op_id,
+                    OpState::Verified,
+                    Some(&verified_revision),
+                    None,
+                )?;
+                return Ok(VerifiedWrite {
+                    operation_id: op.op_id,
+                    verified_revision,
+                });
+            }
         }
         if request.base_revision != request.known_revision {
             self.journal.transition(
@@ -241,7 +271,7 @@ impl<P: Platform> SafeWriter<P> {
         }
         let parent = target.parent().ok_or(FsError::GrantEscape)?;
         let temp = parent.join(format!(".spectra-{}.tmp", op.op_id));
-        let result = (|| -> Result<(), FsError> {
+        let result = (|| -> Result<String, FsError> {
             self.platform.before_write(&target)?;
             if temp.exists() {
                 fs::remove_file(&temp)?;
@@ -274,7 +304,8 @@ impl<P: Platform> SafeWriter<P> {
             if !ready {
                 return Err(FsError::VerificationFailed);
             }
-            if sha256_file(&target)? != request.expected_hash {
+            let verified_revision = sha256_file(&target)?;
+            if verified_revision != request.expected_hash {
                 return Err(FsError::VerificationFailed);
             }
             self.journal.transition(
@@ -283,7 +314,7 @@ impl<P: Platform> SafeWriter<P> {
                 Some(request.expected_hash),
                 None,
             )?;
-            Ok(())
+            Ok(verified_revision)
         })();
         if let Err(error) = result {
             let _ = fs::remove_file(&temp);
@@ -295,7 +326,10 @@ impl<P: Platform> SafeWriter<P> {
             );
             return Err(error);
         }
-        Ok(op.op_id)
+        Ok(VerifiedWrite {
+            operation_id: op.op_id,
+            verified_revision: result?,
+        })
     }
 
     pub fn recycle(
@@ -541,13 +575,15 @@ mod tests {
             expected_hash: &hash,
             idempotency_key: "once",
         };
-        let first = writer.write(request()).unwrap();
+        let first = writer.write_with_readback(request()).unwrap();
         let modified = fs::metadata(dir.path().join("a.txt"))
             .unwrap()
             .modified()
             .unwrap();
-        let replay = writer.write(request()).unwrap();
-        assert_eq!(first, replay);
+        let replay = writer.write_with_readback(request()).unwrap();
+        assert_eq!(first.operation_id, replay.operation_id);
+        assert_eq!(first.verified_revision, hash);
+        assert_eq!(replay.verified_revision, hash);
         assert_eq!(
             modified,
             fs::metadata(dir.path().join("a.txt"))

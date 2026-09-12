@@ -60,7 +60,28 @@ export function FileStorageControls({
   const strategyPending =
     strategyBusy || strategyTransition?.state === "pending";
 
-  if (!hasLocalCopy) return null;
+  if (!truth || truth.replicas.length === 0) return null;
+
+  const transitionPreview = strategyTransition?.preview as
+    | {
+        pendingWork?: {
+          state?: string;
+          localResourceId?: string;
+          relativePath?: string;
+        };
+        current?: {
+          cloud?: { state?: string; contentHash?: string };
+          locals?: Array<{
+            copyRole?: string;
+            localResourceId?: string;
+            path?: string;
+            state?: string;
+            availability?: string;
+            unavailableReason?: string;
+          }>;
+        };
+      }
+    | undefined;
 
   async function changeStorageStrategy(
     choice: StorageChoice,
@@ -149,10 +170,19 @@ export function FileStorageControls({
         </button>
       ) : null}
       {strategyTransition?.state === "pending" ? (
-        <p className="mt-2 text-micro text-[var(--text-secondary)]">
-          Moving this work between Spectra and this computer. The item stays
-          open while Spectra Bridge verifies the file.
-        </p>
+        <div className="mt-2 space-y-1 text-micro text-[var(--text-secondary)]">
+          <p>
+            {transitionPreview?.pendingWork?.relativePath
+              ? `Writing the retained work to ${transitionPreview.pendingWork.relativePath}.`
+              : "Moving this work between Spectra and this computer."}{" "}
+            The item stays open while Spectra Bridge verifies the file.
+          </p>
+          {transitionPreview?.pendingWork?.localResourceId ? (
+            <p className="text-[var(--text-tertiary)]">
+              Existing file identity: {transitionPreview.pendingWork.localResourceId}
+            </p>
+          ) : null}
+        </div>
       ) : strategyTransition?.state === "failed" ? (
         <p
           className="mt-2 text-micro text-[var(--danger)]"
@@ -161,6 +191,11 @@ export function FileStorageControls({
           {humanizePublicFailure(
             strategyTransition.errorCode ?? "strategy-transition-failed",
           )}
+        </p>
+      ) : strategyTransition?.state === "conflicted" ? (
+        <p className="mt-2 text-micro text-[var(--danger)]" role="alert">
+          The original file changed during this transition. Review the current
+          file before trying again; nothing was deleted.
         </p>
       ) : null}
       {openError ? (

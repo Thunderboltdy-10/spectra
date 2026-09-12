@@ -29,8 +29,75 @@ import {
   isActionablePendingOperation,
   retireSupersededExternalOperations,
 } from "./syncOperationLifecycle";
+import { nativeSaveReceiptValidator } from "./nativeOfficeValidators";
+import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/native-office-contract";
 
 const strategyPreset = v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked"));
+
+type TransitionState = "pending" | "verified" | "failed" | "conflicted" | "cancelled";
+
+function transitionLocation(replica: Doc<"workReplicas">) {
+  return {
+    replicaId: String(replica._id),
+    kind: replica.kind,
+    copyRole: replica.kind === "local" && replica.protectedOriginal ? "original" : replica.kind === "local" ? "managed-copy" : "cloud",
+    localResourceId: replica.localResourceId,
+    path: replica.relativePath,
+    mountId: replica.mountId ? String(replica.mountId) : undefined,
+    deviceId: replica.deviceId ? String(replica.deviceId) : undefined,
+    state: replica.state,
+    availability: replica.state === "unavailable" ? "unavailable" : "available",
+    unavailableReason: replica.unavailableReason,
+    revision: replica.revision,
+    contentHash: replica.contentHash,
+  };
+}
+
+function transitionLocations(cloud: Doc<"workReplicas"> | null | undefined, locals: Doc<"workReplicas">[]) {
+  return {
+    cloud: cloud ? transitionLocation(cloud) : undefined,
+    locals: locals.map(transitionLocation),
+  };
+}
+
+function firstLocationValue(snapshot: Record<string, unknown>, key: string) {
+  const locations = (snapshot.locations ?? {}) as {
+    cloud?: Record<string, unknown>;
+    locals?: Array<Record<string, unknown>>;
+  };
+  const location = locations.cloud ?? locations.locals?.find((candidate) => typeof candidate[key] === "string");
+  return location && typeof location[key] === "string" ? location[key] : undefined;
+}
+
+function transitionReceipt(
+  transition: { _id: Id<"storageStrategyTransitions">; accountId?: Id<"accounts">; workId: Id<"spectraArtifacts">; fromPreset: string; toPreset: string; state: TransitionState; errorCode?: string; before?: unknown; after?: unknown },
+  requestId?: Id<"bridgeWriteRequests"> | null,
+  operationId?: Id<"syncOperations"> | null,
+) {
+  const after = (transition.after ?? {}) as Record<string, unknown>;
+  const before = (transition.before ?? {}) as Record<string, unknown>;
+  return {
+    kind: "bridge-storage-transition" as const,
+    transitionId: String(transition._id),
+    artifactId: String(transition.workId),
+    from: transition.fromPreset,
+    to: transition.toPreset,
+    sourceIdentity: typeof before.sourceLocalResourceId === "string" ? before.sourceLocalResourceId : undefined,
+    managedCopyIdentity: typeof after.localResourceId === "string" ? after.localResourceId : undefined,
+    materializationRequestId: requestId ? String(requestId) : undefined,
+    state: transition.state,
+    before: {
+      hash: typeof before.cloudContentHash === "string" ? before.cloudContentHash : firstLocationValue(before, "contentHash"),
+      path: firstLocationValue(before, "path"),
+    },
+    after: {
+      hash: typeof after.contentHash === "string" ? after.contentHash : firstLocationValue(after, "contentHash"),
+      path: firstLocationValue(after, "path"),
+    },
+    errorCode: transition.errorCode,
+    operationId: operationId ? String(operationId) : typeof after.operationId === "string" ? after.operationId : undefined,
+  };
+}
 
 /** Change storage strategy without changing the logical work identity. */
 export const transitionStorageStrategy = mutation({
@@ -48,14 +115,27 @@ export const transitionStorageStrategy = mutation({
       .take(20);
     const replayed = recentTransitions.find((transition) =>
       transition.toPreset === args.toPreset &&
-      (transition.state === "pending" || (transition.state === "verified" && fromPreset === args.toPreset)),
+      (transition.state === "pending" || transition.state === "conflicted" || (transition.state === "verified" && fromPreset === args.toPreset)),
     );
     if (replayed) {
       const requestId = ctx.db.normalizeId(
         "bridgeWriteRequests",
         String((replayed.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? ""),
       );
-      return { state: replayed.state, transitionId: replayed._id, materializationRequestId: requestId, transitionReceipt: { kind: "bridge-storage-transition", transitionId: String(replayed._id), artifactId: String(args.workId), from: fromPreset, to: args.toPreset, materializationRequestId: requestId ? String(requestId) : undefined, state: replayed.state === "verified" ? "verified" : "pending" } };
+      const storedOperationId = ctx.db.normalizeId(
+        "syncOperations",
+        String((replayed.after as { operationId?: string } | undefined)?.operationId ?? ""),
+      );
+      let operation = storedOperationId ? await ctx.db.get(storedOperationId) : null;
+      if (!operation && requestId) {
+        const request = await ctx.db.get(requestId);
+        operation = request
+          ? await ctx.db.query("syncOperations")
+              .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey))
+              .unique()
+          : null;
+      }
+      return { state: replayed.state, transitionId: replayed._id, materializationRequestId: requestId, operationId: operation?._id ?? storedOperationId, transitionReceipt: transitionReceipt(replayed, requestId, operation?._id ?? storedOperationId) };
     }
     const idempotencyKey = await deriveStorageTransitionIdempotencyKey({
       workId: String(args.workId),
@@ -70,7 +150,20 @@ export const transitionStorageStrategy = mutation({
         "bridgeWriteRequests",
         String((existingTransition.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? ""),
       );
-      return { state: existingTransition.state, transitionId: existingTransition._id, materializationRequestId: requestId, transitionReceipt: { kind: "bridge-storage-transition", transitionId: String(existingTransition._id), artifactId: String(args.workId), from: fromPreset, to: args.toPreset, materializationRequestId: requestId ? String(requestId) : undefined, state: existingTransition.state === "verified" ? "verified" : "pending" } };
+      const storedOperationId = ctx.db.normalizeId(
+        "syncOperations",
+        String((existingTransition.after as { operationId?: string } | undefined)?.operationId ?? ""),
+      );
+      let operation = storedOperationId ? await ctx.db.get(storedOperationId) : null;
+      if (!operation && requestId) {
+        const request = await ctx.db.get(requestId);
+        operation = request
+          ? await ctx.db.query("syncOperations")
+              .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey))
+              .unique()
+          : null;
+      }
+      return { state: existingTransition.state, transitionId: existingTransition._id, materializationRequestId: requestId, operationId: operation?._id ?? storedOperationId, transitionReceipt: transitionReceipt(existingTransition, requestId, operation?._id ?? storedOperationId) };
     }
     let [cloud, locals] = await Promise.all([
       ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud")).unique(),
@@ -113,8 +206,11 @@ export const transitionStorageStrategy = mutation({
         protectedOriginal: effective.protectedOriginal,
       },
       cloudPayloadRef: cloud?.payloadRef,
+      cloudContentHash: cloud?.contentHash,
+      sourceLocalResourceId: activeLocal?.localResourceId ?? locals.find((replica) => replica.localResourceId)?.localResourceId,
       localReplicaIds: locals.map((replica) => String(replica._id)),
       localStates: locals.map((replica) => ({ id: String(replica._id), state: replica.state })),
+      locations: transitionLocations(cloud, locals),
     };
     const transitionId = existingTransition
       ? (await ctx.db.patch(existingTransition._id, {
@@ -138,9 +234,10 @@ export const transitionStorageStrategy = mutation({
           expiresAt: now + STRATEGY_TRANSITION_EXPIRES_MS,
           createdAt: now,
           updatedAt: now,
-        });
+    });
     let createdLocal = false;
     let materializationRequestId: Id<"bridgeWriteRequests"> | undefined;
+    let materializationOperationId: Id<"syncOperations"> | undefined;
     try {
       if (!cloud && activeLocal && args.toPreset !== "device") {
         const cloudId = await ctx.db.insert("workReplicas", {
@@ -172,7 +269,7 @@ export const transitionStorageStrategy = mutation({
         activeLocal = (await ctx.db.get(localId)) ?? undefined;
         const writeKey = await deriveSyncIdempotencyKey({ workId: String(args.workId), target: String(mount.deviceId), baseRevision: initialRevision, targetRevision: cloud.contentHash, direction: "cloud-to-local" });
         materializationRequestId = await ctx.db.insert("bridgeWriteRequests", { accountId: actor.accountId, workId: args.workId, replicaId: localId, deviceId: mount.deviceId, mountId: mount._id, localResourceId, relativePath, payloadRef: cloud.payloadRef, baseRevision: initialRevision, targetRevision: cloud.contentHash, contentHash: cloud.contentHash, idempotencyKey: writeKey, regionIds: [], partNames: [], projectionBaseContent: work.content, projectionBaseContentHash: work.contentHash, projectionBaseTextIndex: work.textIndex, projectionBaseFidelityMap: cloud.fidelityMap, state: "pending", retryAt: now, attemptCount: 0, expiresAt: now + BRIDGE_WRITE_EXPIRES_MS, createdAt: now, updatedAt: now });
-        await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: args.workId, replicaId: localId, idempotencyKey: writeKey, direction: "cloud-to-local", revisionBefore: initialRevision, revisionAfter: cloud.contentHash, state: "pending", actorKind: "user", createdAt: now, updatedAt: now });
+        materializationOperationId = await ctx.db.insert("syncOperations", { accountId: actor.accountId, workId: args.workId, replicaId: localId, idempotencyKey: writeKey, direction: "cloud-to-local", revisionBefore: initialRevision, revisionAfter: cloud.contentHash, state: "pending", actorKind: "user", createdAt: now, updatedAt: now });
         createdLocal = true;
         locals = [...locals, activeLocal!];
       }
@@ -254,10 +351,41 @@ export const transitionStorageStrategy = mutation({
           updatedAt: now,
         });
       }
-      const after = { preset: args.toPreset, cloudPayloadRef: args.toPreset === "device" || args.toPreset === "linked" ? undefined : attachablePayload ? String(attachablePayload._id) : cloud?.payloadRef, localReplicaIds: locals.map((replica) => String(replica._id)), physicalLocalAction: args.toPreset === "spectra" ? "leave-file-in-place" : "retain", materializationRequestId: materializationRequestId ? String(materializationRequestId) : undefined };
+      const [actualCloud, actualLocals] = await Promise.all([
+        ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "cloud")).unique(),
+        ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).take(20),
+      ]);
+      const afterLocations = transitionLocations(actualCloud, actualLocals);
+      const after = {
+        preset: args.toPreset,
+        cloudPayloadRef: args.toPreset === "device" || args.toPreset === "linked" ? undefined : actualCloud?.payloadRef,
+        localReplicaIds: actualLocals.map((replica) => String(replica._id)),
+        localResourceId: actualLocals.find((replica) => replica._id === activeLocal?._id)?.localResourceId ?? actualLocals.find((replica) => replica.localResourceId)?.localResourceId,
+        sourceLocalResourceId: before.sourceLocalResourceId,
+        physicalLocalAction: args.toPreset === "spectra" ? "leave-file-in-place" : materializationRequestId ? "write-retained-payload-to-existing-local-resource" : "retain",
+        materializationRequestId: materializationRequestId ? String(materializationRequestId) : undefined,
+        operationId: materializationOperationId ? String(materializationOperationId) : undefined,
+        contentHash: actualCloud?.contentHash ?? attachablePayload?.hash,
+        locations: afterLocations,
+      };
       const finalState = createdLocal || strategyPlan.requiresCloudMaterialization ? "pending" : strategyPlan.completion;
       await ctx.db.patch(transitionId, { state: finalState, after, updatedAt: Date.now() });
-      return { state: finalState as "pending" | "verified", transitionId, materializationRequestId: materializationRequestId ?? null, transitionReceipt: { kind: "bridge-storage-transition", transitionId: String(transitionId), artifactId: String(args.workId), from: fromPreset, to: args.toPreset, materializationRequestId: materializationRequestId ? String(materializationRequestId) : undefined, state: finalState === "verified" ? "verified" : "pending", before: { hash: cloud?.contentHash }, after: { hash: attachablePayload?.hash ?? cloud?.contentHash } } };
+      return {
+        state: finalState as "pending" | "verified",
+        transitionId,
+        materializationRequestId: materializationRequestId ?? null,
+        operationId: materializationOperationId ?? null,
+        preview: { before, after },
+        transitionReceipt: transitionReceipt({
+          _id: transitionId,
+          workId: args.workId,
+          fromPreset,
+          toPreset: args.toPreset,
+          state: finalState as TransitionState,
+          before,
+          after,
+        }, materializationRequestId ?? null, materializationOperationId),
+      };
     } catch (error) {
       const failedAt = Date.now();
       const previousPolicy = before.policy;
@@ -512,7 +640,40 @@ export const strategyTransitionForWork = query({
       .withIndex("by_work_created", (q) => q.eq("workId", workId))
       .order("desc")
       .take(10);
-    return transitions.find((transition) => transition.state === "pending") ?? transitions[0] ?? null;
+    const transition = transitions[0] ?? null;
+    if (!transition) return null;
+    const requestId = ctx.db.normalizeId(
+      "bridgeWriteRequests",
+      String((transition.after as { materializationRequestId?: string } | undefined)?.materializationRequestId ?? ""),
+    );
+    const [request, cloud, locals] = await Promise.all([
+      requestId ? ctx.db.get(requestId) : Promise.resolve(null),
+      ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "cloud")).unique(),
+      ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local")).take(20),
+    ]);
+    const after = (transition.after ?? {}) as Record<string, unknown>;
+    const storedOperationId = ctx.db.normalizeId("syncOperations", typeof after.operationId === "string" ? after.operationId : "");
+    let operation = storedOperationId ? await ctx.db.get(storedOperationId) : null;
+    if (!operation && request) {
+      operation = await ctx.db.query("syncOperations")
+        .withIndex("by_account_key", (q) => q.eq("accountId", actor.accountId).eq("idempotencyKey", request.idempotencyKey))
+        .unique();
+    }
+    return {
+      ...transition,
+      requestId,
+      operationId: operation?._id ?? storedOperationId ?? (typeof after.operationId === "string" ? after.operationId : undefined),
+      requestState: request?.state,
+      operationState: operation?.state,
+      preview: {
+        before: transition.before,
+        current: transitionLocations(cloud, locals),
+        after,
+        pendingWork: request
+          ? { requestId: String(request._id), state: request.state, targetRevision: request.targetRevision, localResourceId: request.localResourceId, relativePath: request.relativePath }
+          : undefined,
+      },
+    };
   },
 });
 
@@ -731,7 +892,7 @@ export const queueMaterialization = mutation({
     projectionContent: v.optional(v.any()),
     projectionContentHash: v.optional(v.string()),
     projectionTextIndex: v.optional(v.string()),
-    nativeReceipt: v.optional(v.any()),
+    nativeReceipt: v.optional(nativeSaveReceiptValidator),
     promotionMode: v.optional(
       v.union(v.literal("verified-first"), v.literal("immediate-projection")),
     ),
@@ -786,6 +947,21 @@ export const queueMaterialization = mutation({
     ]);
     if (!activeReplicaWriteTarget(local, mount, device))
       throw new Error("LOCAL_REPLICA_UNAVAILABLE");
+    let nativeReceipt: NativeSaveReceipt | undefined;
+    if (args.nativeReceipt !== undefined) {
+      nativeReceipt = validateNativeSaveReceipt(args.nativeReceipt, {
+        artifactId: String(args.workId),
+        baseRevision: input.baseRevision,
+        targetRevision: input.contentHash,
+        resultPayloadHash: input.contentHash,
+        target: { regionIds: input.regionIds, partNames: input.partNames },
+        basePayloadHash: /^[a-f0-9]{64}$/.test(local.contentHash ?? local.revision) ? (local.contentHash ?? local.revision) : undefined,
+        nativeFormat: local.nativeFormat,
+      });
+      const expectedBaseHash = local.contentHash ?? local.revision;
+      if (/^[a-f0-9]{64}$/.test(expectedBaseHash) && nativeReceipt.basePayloadHash !== expectedBaseHash)
+        throw new Error("NATIVE_RECEIPT_BASE_MISMATCH");
+    }
     const policy = await computeEffectivePolicy(ctx, actor.accountId, {
       account: String(actor.accountId),
       mount: String(local.mountId),
@@ -885,7 +1061,7 @@ export const queueMaterialization = mutation({
       projectionBaseContentHash: input.projectionContentHash ?? work.contentHash,
       projectionBaseTextIndex: input.projectionTextIndex ?? work.textIndex,
       projectionBaseFidelityMap: args.fidelityMap,
-      nativeReceipt: args.nativeReceipt,
+      nativeReceipt,
       state: "pending",
       retryAt: now,
       attemptCount: 0,
@@ -919,7 +1095,7 @@ export const queueMaterialization = mutation({
       revisionAfter: input.contentHash,
       state: "pending",
       actorKind: "user",
-      nativeReceipt: args.nativeReceipt,
+      nativeReceipt,
       createdAt: now,
       updatedAt: now,
     });

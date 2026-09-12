@@ -17,8 +17,8 @@ use spectra_bridge_core::sync::{
     Backoff, ClaimPrecondition, ClaimedPayloadUpload, ClaimedWrite, DeliveredChange,
     DiscoveredRegistration, DiscoveredResource, QueuedChangeEnvelope, ReplicaMigrationPage,
     ReportedChange, claim_fs_request, claim_pending_payload_upload, claim_write,
-    complete_fs_request, complete_write, detach_mount, discover_resources_page, drain_cloud_queue,
-    exchange_pairing, inspect_claim_target, migrate_cloud_replica_page,
+    complete_fs_request, complete_write_with_claim, detach_mount, discover_resources_page,
+    drain_cloud_queue, exchange_pairing, inspect_claim_target, migrate_cloud_replica_page,
     reconcile_missing_resources, register_mount, resume_pairing, set_mount_availability,
     upload_resource_payload,
 };
@@ -1209,10 +1209,11 @@ async fn process_write_request(
     let target = match grants.resolve(&request.grant_id, relative) {
         Ok(target) => target,
         Err(error) => {
-            complete_write(
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "failed",
                 None,
                 Some(("target-unavailable", &error.to_string())),
@@ -1225,10 +1226,11 @@ async fn process_write_request(
     {
         ClaimPrecondition::Ready { revision } => revision,
         ClaimPrecondition::Missing => {
-            complete_write(
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "conflicted",
                 None,
                 Some((
@@ -1240,10 +1242,11 @@ async fn process_write_request(
             return Ok(true);
         }
         ClaimPrecondition::Locked => {
-            complete_write(
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "waiting",
                 None,
                 Some(("office-locked", "Waiting for Office to finish saving")),
@@ -1252,10 +1255,11 @@ async fn process_write_request(
             return Ok(false);
         }
         ClaimPrecondition::Stale { revision } => {
-            complete_write(
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "conflicted",
                 Some(&revision),
                 Some((
@@ -1267,10 +1271,11 @@ async fn process_write_request(
             return Ok(true);
         }
         ClaimPrecondition::Unreadable { message } => {
-            complete_write(
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "waiting",
                 None,
                 Some(("file-read-failed", &message)),
@@ -1294,10 +1299,11 @@ async fn process_write_request(
         Ok(response) => match response.bytes().await {
             Ok(bytes) => bytes.to_vec(),
             Err(error) => {
-                complete_write(
+                complete_claimed_write(
                     deployment,
                     credential,
-                    &request.request_id,
+                    journal,
+                    &request,
                     "waiting",
                     None,
                     Some(("payload-download-failed", &error.to_string())),
@@ -1307,10 +1313,11 @@ async fn process_write_request(
             }
         },
         Err(error) => {
-            complete_write(
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "waiting",
                 None,
                 Some(("payload-download-failed", &error.to_string())),
@@ -1321,10 +1328,11 @@ async fn process_write_request(
     };
     let payload_hash = hex::encode(sha2::Sha256::digest(&payload));
     if payload_hash != request.content_hash {
-        complete_write(
+        complete_claimed_write(
             deployment,
             credential,
-            &request.request_id,
+            journal,
+            &request,
             "failed",
             None,
             Some((
@@ -1336,7 +1344,7 @@ async fn process_write_request(
         return Ok(true);
     }
     let writer = SafeWriter::new(grants.clone(), journal.clone(), Arc::new(HostPlatform));
-    let result = writer.write(WriteRequest {
+    let result = writer.write_with_readback(WriteRequest {
         grant_id: &request.grant_id,
         relative_path: relative,
         resource_id: &request.local_resource_id,
@@ -1347,23 +1355,25 @@ async fn process_write_request(
         idempotency_key: &request.idempotency_key,
     });
     match result {
-        Ok(_) => {
-            complete_write(
+        Ok(write_result) => {
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "verified",
-                Some(&request.target_revision),
+                Some(&write_result.verified_revision),
                 None,
             )
             .await?;
             Ok(true)
         }
         Err(FsError::FileLocked) => {
-            complete_write(
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "waiting",
                 Some(&actual_revision),
                 Some(("office-locked", "Waiting for Office to finish saving")),
@@ -1372,10 +1382,11 @@ async fn process_write_request(
             Ok(false)
         }
         Err(FsError::StaleRevision) => {
-            complete_write(
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "conflicted",
                 Some(&actual_revision),
                 Some((
@@ -1387,10 +1398,11 @@ async fn process_write_request(
             Ok(true)
         }
         Err(error) => {
-            complete_write(
+            complete_claimed_write(
                 deployment,
                 credential,
-                &request.request_id,
+                journal,
+                &request,
                 "failed",
                 Some(&actual_revision),
                 Some(("write-failed", &error.to_string())),
@@ -1510,10 +1522,11 @@ async fn drain_write_requests(
                     // Preserve ordering for one file: a parked write must be
                     // retried before a later revision for the same replica.
                     for blocked in requests {
-                        complete_write(
+                        complete_claimed_write(
                             &deployment,
                             &credential,
-                            &blocked.request_id,
+                            &journal,
+                            &blocked,
                             "waiting",
                             None,
                             Some((
@@ -1669,6 +1682,95 @@ async fn drain_structure_requests(
             }
         }
         handled += 1;
+    }
+    Ok(handled)
+}
+
+async fn complete_claimed_write(
+    deployment: &str,
+    credential: &str,
+    journal: &Journal,
+    request: &ClaimedWrite,
+    outcome: &str,
+    actual_revision: Option<&str>,
+    error: Option<(&str, &str)>,
+) -> anyhow::Result<bool> {
+    journal.enqueue_native_ack(
+        &request.request_id,
+        request.claim_generation,
+        request.claim_token.as_deref(),
+        outcome,
+        actual_revision,
+        error,
+    )?;
+    let ack = journal.due_native_acks(500)?.into_iter().find(|item| {
+        item.request_id == request.request_id
+            && item.outcome == outcome
+            && item.claim_generation == request.claim_generation
+            && item.claim_token.as_deref() == request.claim_token.as_deref()
+    });
+    let Some(ack) = ack else {
+        return Ok(false);
+    };
+    let result = complete_write_with_claim(
+        deployment,
+        credential,
+        &ack.request_id,
+        &ack.outcome,
+        ack.actual_revision.as_deref(),
+        match (ack.error_code.as_deref(), ack.error_message.as_deref()) {
+            (Some(code), Some(message)) => Some((code, message)),
+            _ => None,
+        },
+        ack.claim_generation,
+        ack.claim_token.as_deref(),
+    )
+    .await;
+    match result {
+        Ok(_) => {
+            journal.acknowledge_native_ack(ack.id)?;
+            Ok(true)
+        }
+        Err(error) => {
+            journal.retry_native_ack(ack.id, Backoff::delay_for_attempt(ack.attempts))?;
+            // The file operation has already reached its local durable state;
+            // only the cloud acknowledgement remains to be retried.
+            let _ = error;
+            Ok(false)
+        }
+    }
+}
+
+async fn drain_native_ack_queue(
+    journal: &Journal,
+    deployment: &str,
+    credential: &str,
+) -> anyhow::Result<usize> {
+    let mut handled = 0;
+    for ack in journal.due_native_acks(100)? {
+        let result = complete_write_with_claim(
+            deployment,
+            credential,
+            &ack.request_id,
+            &ack.outcome,
+            ack.actual_revision.as_deref(),
+            match (ack.error_code.as_deref(), ack.error_message.as_deref()) {
+                (Some(code), Some(message)) => Some((code, message)),
+                _ => None,
+            },
+            ack.claim_generation,
+            ack.claim_token.as_deref(),
+        )
+        .await;
+        match result {
+            Ok(_) => {
+                journal.acknowledge_native_ack(ack.id)?;
+                handled += 1;
+            }
+            Err(_) => {
+                journal.retry_native_ack(ack.id, Backoff::delay_for_attempt(ack.attempts))?;
+            }
+        }
     }
     Ok(handled)
 }
@@ -2357,6 +2459,18 @@ async fn run_sync_iteration(
     }
 
     let mut cloud_request_succeeded = false;
+    let native_ack_handled = match drain_native_ack_queue(journal, deployment, &credential).await {
+        Ok(handled) => {
+            cloud_request_succeeded |= handled > 0;
+            let _ = journal.delete_config("native_ack_queue_error");
+            handled
+        }
+        Err(error) => {
+            failed = true;
+            let _ = journal.set_config("native_ack_queue_error", &error.to_string());
+            0
+        }
+    };
     match drain_cloud_queue(journal, deployment, &credential).await {
         Ok(deliveries) => {
             cloud_request_succeeded = true;
@@ -2471,7 +2585,7 @@ async fn run_sync_iteration(
 
     if failed {
         PollResult::FailedRequest
-    } else if structure_handled + payload_handled + write_handled > 0 {
+    } else if native_ack_handled + structure_handled + payload_handled + write_handled > 0 {
         PollResult::WorkCompleted
     } else {
         PollResult::SuccessfulIdle

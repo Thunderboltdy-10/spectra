@@ -47,6 +47,9 @@ import {
 } from "@/features/spectra/lenses/office-projection-merge";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 import { nativeOperationId, type NativeSaveReceipt } from "../../../../../../shared/native-office-contract";
+import { normalizePresentationContent, type PresentationContent } from "@/features/spectra/presentation/model";
+import { refreshPresentationLinkedCharts } from "@/features/spectra/presentation/linked-chart";
+import type { SpectraArtifact } from "@/features/spectra/data/api";
 
 // Compatibility exports for existing callers. The implementation lives in the
 // canonical office-content module; routes only re-export the shared transform.
@@ -80,7 +83,7 @@ type WorkTruth = {
   }>;
   recentOperations?: RecentNativeOperation[];
 };
-type ArtifactTruth = { content: unknown };
+type ArtifactTruth = Pick<SpectraArtifact, "content" | "status" | "blueprintKey" | "currentVersionId">;
 type OfficeProjection = XlsxProjection | PptxProjection;
 
 const spreadsheetFormats = new Set(["xlsx", "xlsm", "xltx", "xltm", "xlam"]);
@@ -130,6 +133,39 @@ function contentForStorage(
   );
 }
 
+/** Resolve only the explicitly bound Sheets sources in this deck. The query is
+ * per referenced artifact, so native materialization never scans the artifact
+ * collection or introduces a second embedding system. */
+async function hydratePresentationLinkedCharts(content: unknown) {
+  const deck = normalizePresentationContent(content);
+  const sourceIds = [...new Set(deck.slides.flatMap((slide) => slide.objects
+    .filter((object) => object.type === "chart" && object.sourceBinding?.kind === "sheets_range" && object.sourceBinding.live !== false)
+    .map((object) => object.sourceBinding!.artifactId)))];
+  if (!sourceIds.length) return deck;
+  const sources = await Promise.all(sourceIds.map(async (artifactId) => {
+    try {
+      const source = await convexQuery<{ artifactId: Id<"spectraArtifacts"> }, ArtifactTruth>(
+        "spectraArtifacts:get",
+        { artifactId: id(artifactId) },
+      );
+      return {
+        _id: artifactId,
+        blueprintKey: source.blueprintKey,
+        status: source.status,
+        currentVersionId: source.currentVersionId,
+        content: source.content,
+      } as unknown as SpectraArtifact;
+    } catch {
+      return {
+        _id: artifactId,
+        blueprintKey: "sheets",
+        status: "deleted",
+      } as unknown as SpectraArtifact;
+    }
+  }));
+  return refreshPresentationLinkedCharts(deck, sources).deck as PresentationContent;
+}
+
 export function officeLensErrorCode(error: unknown) {
   if (error instanceof XlsxLensError || error instanceof PptxLensError)
     return error.code;
@@ -176,8 +212,11 @@ async function materializeOfficeArtifactAttempt(
         "replicas:forWork",
         { workId },
       ),
-    ]);
+  ]);
   const isSheet = spreadsheetFormats.has(cloudTruth.nativeFormat);
+  const materializationContent = isSheet
+    ? content
+    : await hydratePresentationLinkedCharts(content);
   let materializationTruth = cloudTruth;
   let materializationPayload = cloudPayload;
   let baseOpened = isSheet
@@ -185,9 +224,9 @@ async function materializeOfficeArtifactAttempt(
     : await pptxLens.open(cloudPayload);
   let baseProjection = baseOpened.projection as OfficeProjection;
   let update = isSheet
-    ? xlsxProjectionUpdateFromContent(content, baseProjection as XlsxProjection)
+    ? xlsxProjectionUpdateFromContent(materializationContent, baseProjection as XlsxProjection)
     : pptxProjectionUpdateFromContent(
-        content,
+        materializationContent,
         baseProjection as PptxProjection,
       );
   if (attempt > 0) {
@@ -198,11 +237,11 @@ async function materializeOfficeArtifactAttempt(
       : await pptxLens.open(local.payload);
     const ours = isSheet
       ? xlsxProjectionFromContent(
-          content,
+          materializationContent,
           ancestor.projection as XlsxProjection,
         )
       : pptxProjectionFromContent(
-          content,
+          materializationContent,
           ancestor.projection as PptxProjection,
         );
     const rebased = isSheet

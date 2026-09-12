@@ -416,6 +416,7 @@ export type PresentationHandlers = {
   };
   object: {
     setText: (text: string) => void;
+    setLink: (value: string | null) => void;
     applyTextPreset: (preset: string) => void;
     setFill: (color: string | null) => void;
     setStroke: (color: string | null) => void;
@@ -1694,6 +1695,37 @@ export function presentationCommandBindings(
         if (text !== undefined) handlers.object.setText(text);
       },
     },
+    {
+      id: "object.setLink",
+      label: "Object link",
+      icon: Link2,
+      contextualTab: "Shape",
+      group: "Styles",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !single || selection.locked,
+      hint: "Set an external URL, or an internal target as slide:<slide-id>",
+      touches: ["hyperlinks"],
+      manifestOps: ["rewrite_object"],
+      onSelect: (value) => {
+        const link = stringParam(value);
+        if (link !== undefined) handlers.object.setLink(link || null);
+      },
+    },
+    {
+      id: "object.removeLink",
+      label: "Remove object link",
+      icon: Link2,
+      contextualTab: "Shape",
+      group: "Styles",
+      priority: "advanced",
+      requires: "edit",
+      disabled: !single || selection.locked,
+      hint: "Remove the selected object's native hyperlink",
+      touches: ["hyperlinks"],
+      manifestOps: ["rewrite_object"],
+      onSelect: () => handlers.object.setLink(null),
+    },
 
     /* ------------------------------------------------ Shape · Appearance */
     {
@@ -2284,6 +2316,7 @@ export function presentationStubHandlers(
     },
     object: {
       setText: noop,
+      setLink: noop,
       applyTextPreset: noop,
       setFill: noop,
       setStroke: noop,

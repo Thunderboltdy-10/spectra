@@ -312,6 +312,10 @@ const slideObjectSchema = z
     readingOrder: z.number().int().nonnegative().optional(),
     parentId: id.optional(),
     componentId: id.optional(),
+    hyperlink: z.union([
+      z.object({ kind: z.literal("external"), url: z.string().max(4_000) }).strict(),
+      z.object({ kind: z.literal("slide"), slideId: id }).strict(),
+    ]).optional(),
     sourceBinding: z
       .object({
         artifactId: id,

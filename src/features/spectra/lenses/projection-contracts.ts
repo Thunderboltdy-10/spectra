@@ -424,6 +424,11 @@ export const presentationObjectProjectionSchema = z
     readingOrder: z.number().optional(),
     parentId: z.string().optional(),
     componentId: z.string().optional(),
+    hyperlink: z.union([
+      z.string(),
+      z.object({ kind: z.literal("external"), url: z.string() }).strict(),
+      z.object({ kind: z.literal("slide"), slideId: z.string() }).strict(),
+    ]).optional(),
     sourceBinding: z
       .object({
         artifactId: z.string(),
@@ -485,18 +490,27 @@ export type PptxProjection = z.infer<typeof pptxProjectionSchema>;
 export const pptxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-title"), slideId: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-text"), slideId: z.string(), paragraphIndex: z.number().int().nonnegative(), text: z.string(), shapeId: z.string().optional() }).strict(),
-  z.object({ kind: z.literal("add-text-box"), slideId: z.string(), text: z.string() }).strict(),
+  z.object({ kind: z.literal("add-text-box"), slideId: z.string(), text: z.string(), hyperlink: z.union([
+    z.string(),
+    z.object({ kind: z.literal("external"), url: z.string() }).strict(),
+    z.object({ kind: z.literal("slide"), slideId: z.string() }).strict(),
+  ]).optional() }).strict(),
   z.object({ kind: z.literal("set-notes"), slideId: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-slide-hidden"), slideId: z.string(), hidden: z.boolean() }).strict(),
   z.object({ kind: z.literal("set-alt-text"), slideId: z.string(), shapeId: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-geometry"), slideId: z.string(), shapeId: z.string(), x: z.number(), y: z.number(), width: z.number(), height: z.number(), rotation: z.number() }).strict(),
-  z.object({ kind: z.literal("format-rich-text"), slideId: z.string(), shapeId: z.string(), paragraphs: z.array(z.object({ runs: z.array(z.object({ text: z.string(), fontFamily: z.string().optional(), fontSizePt: z.number().positive().optional(), bold: z.boolean().optional(), italic: z.boolean().optional(), underline: z.boolean().optional(), strike: z.boolean().optional(), color: z.string().optional(), hyperlink: z.string().optional() }).strict()), alignment: z.enum(["left", "center", "right", "justify"]).optional(), level: z.number().int().nonnegative().optional(), bullet: z.enum(["none", "bullet", "numbered"]).optional() }).strict()) }).strict(),
+  z.object({ kind: z.literal("format-rich-text"), slideId: z.string(), shapeId: z.string(), paragraphs: z.array(z.object({ runs: z.array(z.object({ text: z.string(), fontFamily: z.string().optional(), fontSizePt: z.number().positive().optional(), bold: z.boolean().optional(), italic: z.boolean().optional(), underline: z.boolean().optional(), strike: z.boolean().optional(), color: z.string().optional(), hyperlink: z.union([z.string(), z.object({ kind: z.literal("external"), url: z.string() }).strict(), z.object({ kind: z.literal("slide"), slideId: z.string() }).strict()]).optional() }).strict()), alignment: z.enum(["left", "center", "right", "justify"]).optional(), level: z.number().int().nonnegative().optional(), bullet: z.enum(["none", "bullet", "numbered"]).optional() }).strict()) }).strict(),
+  z.object({ kind: z.literal("set-object-link"), slideId: z.string(), shapeId: z.string(), hyperlink: z.union([
+    z.string(),
+    z.object({ kind: z.literal("external"), url: z.string() }).strict(),
+    z.object({ kind: z.literal("slide"), slideId: z.string() }).strict(),
+  ]).nullable() }).strict(),
   z.object({ kind: z.literal("format-text"), slideId: z.string(), shapeId: z.string(), format: z.object({ fontFamily: z.string().nullable().optional(), fontSizePt: z.number().positive().nullable().optional(), bold: z.boolean().nullable().optional(), italic: z.boolean().nullable().optional(), underline: z.boolean().nullable().optional(), strike: z.boolean().nullable().optional(), color: z.string().nullable().optional(), align: z.enum(["left", "center", "right", "justify"]).nullable().optional(), level: z.number().int().nonnegative().nullable().optional() }).strict() }).strict(),
   z.object({ kind: z.literal("set-shape-style"), slideId: z.string(), shapeId: z.string(), style: z.record(z.string(), z.unknown()) }).strict(),
   z.object({ kind: z.literal("set-image-crop"), slideId: z.string(), shapeId: z.string(), crop: z.object({ left: z.number().min(0).max(100), top: z.number().min(0).max(100), right: z.number().min(0).max(100), bottom: z.number().min(0).max(100) }).strict() }).strict(),
   z.object({ kind: z.literal("set-table-cell-text"), slideId: z.string(), shapeId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-table-cell-format"), slideId: z.string(), shapeId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), format: z.record(z.string(), z.unknown()) }).strict(),
-  z.object({ kind: z.literal("set-chart"), slideId: z.string(), shapeId: z.string(), chartType: z.enum(["bar", "column", "line", "pie", "area"]).optional(), title: z.string().nullable().optional(), categories: z.array(z.string()), series: z.array(z.object({ id: z.string().optional(), name: z.string(), categories: z.array(z.string()), values: z.array(z.number()) }).strict()), showLegend: z.boolean().optional(), axisTitle: z.string().nullable().optional(), valueAxisTitle: z.string().nullable().optional(), sourceArtifactId: z.string().optional(), sourceChartId: z.string().optional(), sourceRevision: z.string().optional(), sourceKind: z.enum(["artifact", "sheets_range"]).optional(), sourceLive: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal("set-chart"), slideId: z.string(), shapeId: z.string(), chartType: z.enum(["bar", "column", "line", "pie", "area"]).optional(), title: z.string().nullable().optional(), categories: z.array(z.string()), series: z.array(z.object({ id: z.string().optional(), name: z.string(), categories: z.array(z.string()), values: z.array(z.number()) }).strict()), showLegend: z.boolean().optional(), axisTitle: z.string().nullable().optional(), valueAxisTitle: z.string().nullable().optional(), sourceArtifactId: z.string().optional(), sourceChartId: z.string().optional(), sourceRevision: z.string().optional(), sourceKind: z.enum(["artifact", "sheets_range"]).optional(), sourceRange: z.string().optional(), sourceLive: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal("group-objects"), slideId: z.string(), groupId: z.string(), childShapeIds: z.array(z.string()).min(2), x: z.number(), y: z.number(), width: z.number(), height: z.number(), rotation: z.number(), readingOrder: z.number().int().nonnegative().optional() }).strict(),
   z.object({ kind: z.literal("set-object-state"), slideId: z.string(), shapeId: z.string(), hidden: z.boolean().optional(), readingOrder: z.number().int().nonnegative().optional(), parentId: z.string().nullable().optional(), childIds: z.array(z.string()).optional() }).strict(),
   z.object({ kind: z.literal("remove-object"), slideId: z.string(), shapeId: z.string() }).strict(),

@@ -1,6 +1,11 @@
 export type PresentationObjectType =
   "text" | "shape" | "image" | "chart" | "table" | "embed" | "video" | "group";
 
+/** A hyperlink that can survive both the collaborative model and DrawingML. */
+export type PresentationHyperlink =
+  | { kind: "external"; url: string }
+  | { kind: "slide"; slideId: string };
+
 /** A DrawingML run projected into the collaborative presentation model. */
 export type PresentationTextRun = {
   text: string;
@@ -11,7 +16,8 @@ export type PresentationTextRun = {
   underline?: boolean;
   strike?: boolean;
   color?: string;
-  hyperlink?: string;
+  /** Legacy strings are accepted at the boundary and treated as external URLs. */
+  hyperlink?: string | PresentationHyperlink;
 };
 
 /** One native a:p. Keeping paragraphs separate prevents a line break edit from
@@ -51,6 +57,7 @@ export type PresentationChartContent = {
   sourceChartId?: string;
   sourceRevision?: string;
   sourceKind?: "artifact" | "sheets_range";
+  sourceRange?: string;
   sourceLive?: boolean;
 };
 
@@ -83,6 +90,7 @@ export type PresentationObject = {
   readingOrder?: number;
   parentId?: string;
   componentId?: string;
+  hyperlink?: string | PresentationHyperlink;
   sourceBinding?: {
     artifactId: string;
     kind: "artifact" | "sheets_range";
@@ -192,6 +200,7 @@ function objectGeometryEqual(left: PresentationObject, right: PresentationObject
     left.readingOrder === right.readingOrder &&
     left.parentId === right.parentId &&
     left.componentId === right.componentId &&
+    JSON.stringify(left.hyperlink) === JSON.stringify(right.hyperlink) &&
     shallowValueEqual(left.sourceBinding, right.sourceBinding) &&
     shallowValueEqual(left.animation, right.animation) &&
     left.type === right.type &&
@@ -293,6 +302,20 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+export function normalizePresentationHyperlink(
+  value: unknown,
+): PresentationHyperlink | undefined {
+  if (typeof value === "string" && value.trim())
+    return { kind: "external", url: value.trim().slice(0, 4_000) };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind === "external" && typeof candidate.url === "string" && candidate.url.trim())
+    return { kind: "external", url: candidate.url.trim().slice(0, 4_000) };
+  if (candidate.kind === "slide" && typeof candidate.slideId === "string" && candidate.slideId.trim())
+    return { kind: "slide", slideId: candidate.slideId.trim().slice(0, 180) };
+  return undefined;
+}
+
 function cloneContent(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(cloneContent);
@@ -369,7 +392,9 @@ export function presentationObjectParagraphs(
                 ...(typeof value.underline === "boolean" ? { underline: value.underline } : {}),
                 ...(typeof value.strike === "boolean" ? { strike: value.strike } : {}),
                 ...(typeof value.color === "string" ? { color: value.color } : {}),
-                ...(typeof value.hyperlink === "string" ? { hyperlink: value.hyperlink } : {}),
+                ...(normalizePresentationHyperlink(value.hyperlink)
+                  ? { hyperlink: normalizePresentationHyperlink(value.hyperlink) }
+                  : {}),
               } satisfies PresentationTextRun]
             : [];
         }),
@@ -608,6 +633,9 @@ export function normalizePresentationContent(
           ...(typeof object.componentId === "string" &&
           object.componentId.trim()
             ? { componentId: object.componentId.trim().slice(0, 180) }
+            : {}),
+          ...(normalizePresentationHyperlink(object.hyperlink)
+            ? { hyperlink: normalizePresentationHyperlink(object.hyperlink) }
             : {}),
           ...(typeof sourceBinding.artifactId === "string" &&
           sourceBinding.artifactId.trim() &&

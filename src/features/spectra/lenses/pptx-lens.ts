@@ -4,12 +4,13 @@ import { comparePackages } from "@ariadng/office/preservation";
 import { XmlElement, XmlText } from "@ariadng/office/xml";
 import { Workbook } from "@ariadng/office/xlsx";
 import { OFFICE_ARCHIVE_LIMITS, prepareBoundedArchiveBytes } from "../../../../shared/parser-limits";
-import { presentationObjectText } from "../presentation/model";
+import { normalizePresentationHyperlink, presentationObjectText } from "../presentation/model";
 import type {
   PresentationChartContent,
   PresentationObject,
   PresentationParagraph,
   PresentationTableCell,
+  PresentationHyperlink,
 } from "../presentation/model";
 import { sha256Payload } from "./docx-lens";
 import { pptxOperationsBetween } from "./office-content";
@@ -111,7 +112,7 @@ function runFormat(runProperties: XmlElement | undefined) {
   };
 }
 
-function richParagraphs(root: XmlElement): PresentationParagraph[] {
+function richParagraphs(deck: Presentation, slidePartName: string, root: XmlElement): PresentationParagraph[] {
   return descendants(root)
     .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "p")
     .map((paragraph) => {
@@ -126,7 +127,11 @@ function richParagraphs(root: XmlElement): PresentationParagraph[] {
           const textNode = descendants(run).find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "t");
           if (!textNode) return [];
           const properties = run.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "rPr");
-          return [{ text: textNode.text(), ...runFormat(properties) }];
+          return [{
+            text: textNode.text(),
+            ...runFormat(properties),
+            ...(hyperlinkFor(deck, slidePartName, properties) ? { hyperlink: hyperlinkFor(deck, slidePartName, properties) } : {}),
+          }];
         });
       return {
         runs,
@@ -150,14 +155,14 @@ function cropFor(shape: XmlElement) {
   return { left: number("l"), top: number("t"), right: number("r"), bottom: number("b") };
 }
 
-function tableCells(shape: XmlElement): Array<Array<PresentationTableCell>> {
+function tableCells(deck: Presentation, slidePartName: string, shape: XmlElement): Array<Array<PresentationTableCell>> {
   return descendants(shape)
     .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "tr")
     .map((row) => descendants(row)
       .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "tc")
       .map((cell) => ({
         text: shapeText(cell),
-        paragraphs: richParagraphs(cell),
+        paragraphs: richParagraphs(deck, slidePartName, cell),
         style: (() => {
           const properties = child(cell, DRAWINGML_NAMESPACE, "tcPr");
           const fill = properties && child(properties, DRAWINGML_NAMESPACE, "solidFill")?.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "srgbClr")?.getAttribute("val");
@@ -236,7 +241,8 @@ async function chartFor(
     ...(source?.getAttribute("chartId") ? { sourceChartId: source.getAttribute("chartId")! } : {}),
     ...(source?.getAttribute("revision") ? { sourceRevision: source.getAttribute("revision")! } : {}),
     ...(source?.getAttribute("kind") === "sheets_range" ? { sourceKind: "sheets_range" as const } : {}),
-    ...(source?.getAttribute("live") === "1" ? { sourceLive: true } : {}),
+    ...(source?.getAttribute("range") ? { sourceRange: source.getAttribute("range")! } : {}),
+    ...(source?.getAttribute("live") === "1" ? { sourceLive: true } : source?.getAttribute("live") === "0" ? { sourceLive: false } : {}),
     nativeChartPart: chartPart.name,
   };
 }
@@ -302,15 +308,24 @@ async function slideObjects(
     const content = type === "chart"
       ? { ...(await chartFor(deck, slidePartName, shape)), nativeShapeId }
       : type === "table"
-        ? { rows: tableCells(shape), nativeTable: true, nativeShapeId }
+        ? { rows: tableCells(deck, slidePartName, shape), nativeTable: true, nativeShapeId }
         : {
             text: shapeText(shape),
-            paragraphs: richParagraphs(shape),
+            paragraphs: richParagraphs(deck, slidePartName, shape),
             nativeShapeId,
             nativeParagraphIndex: 0,
             nativeShapeKind: isTitle ? "placeholder" as const : "shape" as const,
             ...(type === "image" ? { ...pictureMedia(deck, slidePartName, shape), ...(cropFor(shape) ? { crop: cropFor(shape) } : {}) } : {}),
           };
+    const nativeObjectLink = hyperlinkFor(deck, slidePartName, firstDescendant(shape, PML_NAMESPACE, "cNvPr"));
+    const uniformTextLink = type === "text"
+      ? (() => {
+          const links = (content as { paragraphs?: PresentationParagraph[] }).paragraphs
+            ?.flatMap((paragraph) => paragraph.runs.map((run) => normalizePresentationHyperlink(run.hyperlink)))
+            .filter((link): link is PresentationHyperlink => Boolean(link)) ?? [];
+          return links.length && links.every((link) => JSON.stringify(link) === JSON.stringify(links[0])) ? links[0] : undefined;
+        })()
+      : undefined;
     const chart = type === "chart" ? content as PresentationChartContent : undefined;
     const hiddenObject = ["1", "true", "on"].includes((firstDescendant(shape, PML_NAMESPACE, "cNvPr")?.getAttribute("hidden") ?? "").toLowerCase());
     objects.push({
@@ -322,12 +337,16 @@ async function slideObjects(
         sourceBinding: {
           artifactId: chart.sourceArtifactId,
           kind: chart.sourceKind ?? "artifact",
+          ...(chart.sourceRange ? { range: chart.sourceRange } : {}),
           ...(chart.sourceRevision ? { versionId: chart.sourceRevision } : {}),
           ...(chart.sourceLive !== undefined ? { live: chart.sourceLive } : {}),
         },
       } : {}),
       ...(hiddenObject ? { hidden: true } : {}),
       ...(descr ? { altText: descr } : {}),
+      ...(nativeObjectLink ?? uniformTextLink
+        ? { hyperlink: nativeObjectLink ?? uniformTextLink }
+        : {}),
       ...(parentId ? { parentId: `${slideId}:shape:${parentId}` } : {}),
       locked: isTitle,
       readingOrder: objects.length,
@@ -406,6 +425,7 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
     ["layouts", partNames.some((name) => /\/slideLayouts\//i.test(name)) ? "PRESERVED" : "NATIVE", "Slide layouts come from this file's own masters and are preserved."],
     ["media", partNames.some((name) => /\/media\//i.test(name)) ? "PRESERVED" : "NATIVE", "Media parts are copied through byte for byte."],
     ["images", "NATIVE", "Pictures keep their embedded bytes while crop and alt text edits write native DrawingML."],
+    ["hyperlinks", "NATIVE", "External URLs and links to another slide are written as native PowerPoint relationships."],
     ["charts", "NATIVE", "Charts write native chart parts, caches, and embedded workbook values."],
     ["tables", "NATIVE", "Table cell text and formatting stay in the native DrawingML table."],
     ["ole", partNames.some((name) => /\/embeddings\//i.test(name)) ? "PRESERVED" : "NATIVE", "Embedded objects are preserved untouched."],
@@ -426,10 +446,101 @@ function slideFor(deck: Presentation, slideId: string) { const partName = slideI
 const NOTES_SLIDE_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide";
 const NOTES_MASTER_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster";
 const SLIDE_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide";
+const HYPERLINK_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
 const THEME_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme";
 const OFFICE_RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const NOTES_SLIDE_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml";
 const NOTES_MASTER_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml";
+
+function hyperlinkClick(owner: XmlElement) {
+  return owner.elements().find((node) =>
+    node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "hlinkClick",
+  );
+}
+
+function hyperlinkFor(
+  deck: Presentation,
+  slidePartName: string,
+  owner: XmlElement | undefined,
+): PresentationHyperlink | undefined {
+  const click = owner && hyperlinkClick(owner);
+  const relationshipId = click?.getAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "id");
+  const slidePart = deck.office.package.getPart(slidePartName);
+  const relationship = relationshipId && slidePart?.relationships().byId(relationshipId);
+  if (!relationship) return undefined;
+  if (relationship.type === HYPERLINK_RELATIONSHIP && relationship.targetMode === "External")
+    return { kind: "external", url: relationship.target };
+  if (relationship.type === SLIDE_RELATIONSHIP && relationship.targetMode !== "External") {
+    const target = deck.office.package.relatedPart(slidePart ?? null, relationship.id);
+    return target ? { kind: "slide", slideId: `pptx:slide:${target.name}` } : undefined;
+  }
+  return undefined;
+}
+
+function externalHyperlink(value: PresentationHyperlink) {
+  if (value.kind !== "external") return undefined;
+  if (!/^(?:https?:|mailto:)/i.test(value.url))
+    throw new PptxLensError("PPTX_HYPERLINK_INVALID", "PowerPoint external links must use http(s) or mailto URLs.");
+  return value.url;
+}
+
+function setHyperlink(
+  deck: Presentation,
+  slidePartName: string,
+  owner: XmlElement,
+  value: PresentationHyperlink | null | undefined,
+) {
+  const slidePart = deck.office.package.getPart(slidePartName);
+  if (!slidePart) throw new PptxLensError("PPTX_SLIDE_MISSING", "The slide owning this link no longer exists.");
+  const old = hyperlinkClick(owner);
+  if (old) owner.removeChild(old);
+  if (value) {
+    const click = new XmlElement("hlinkClick", "a");
+    let relationship = value.kind === "external"
+      ? slidePart.relationships().all().find((candidate) =>
+          candidate.type === HYPERLINK_RELATIONSHIP &&
+          candidate.targetMode === "External" &&
+          candidate.target === externalHyperlink(value),
+        )
+      : (() => {
+          const target = slideFor(deck, value.slideId);
+          return slidePart.relationships().all().find((candidate) => {
+            if (candidate.type !== SLIDE_RELATIONSHIP || candidate.targetMode === "External") return false;
+            return deck.office.package.relatedPart(slidePart, candidate.id)?.name === target.partName;
+          });
+        })();
+    if (!relationship) {
+      relationship = value.kind === "external"
+        ? slidePart.relationships().add({
+            type: HYPERLINK_RELATIONSHIP,
+            target: externalHyperlink(value)!,
+            targetMode: "External",
+          })
+        : slidePart.relationships().add({
+            type: SLIDE_RELATIONSHIP,
+            target: relativePartTarget(slidePart.name, slideFor(deck, value.slideId).partName),
+          });
+    }
+    click.setAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "id", relationship.id);
+    if (value.kind === "slide") click.setAttribute("action", "ppaction://hlinksldjump");
+    owner.appendChild(click);
+  }
+}
+
+function cleanupSlideHyperlinkRelationships(deck: Presentation, slidePartName: string, root: XmlElement) {
+  const slidePart = deck.office.package.getPart(slidePartName);
+  if (!slidePart) return;
+  const used = new Set(
+    descendants(root)
+      .filter((node) => node.localName === "hlinkClick")
+      .map((node) => node.getAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "id"))
+      .filter((id): id is string => Boolean(id)),
+  );
+  for (const relation of slidePart.relationships().all()) {
+    if ((relation.type === HYPERLINK_RELATIONSHIP || relation.type === SLIDE_RELATIONSHIP) && !used.has(relation.id))
+      slidePart.relationships().remove(relation.id);
+  }
+}
 
 /**
  * The notes page a slide points at, resolved through its own relationship
@@ -712,7 +823,12 @@ function addNativeSlide(deck: Presentation, layoutPartName: string | undefined, 
     if (typeof value === "string" && value.trim() && value.trim() !== title?.trim() && !addedText.has(value.trim())) {
       const added = addTextBox(slide.root(), value);
       const paragraphs = object.content && typeof object.content === "object" ? (object.content as { paragraphs?: PresentationParagraph[] }).paragraphs : undefined;
-      if (paragraphs?.length) setRichText(added, paragraphs);
+      if (paragraphs?.length) setRichText(deck, slide.partName, added, paragraphs);
+      const objectLink = normalizePresentationHyperlink(object.hyperlink);
+      if (objectLink) {
+        const owner = firstDescendant(added, PML_NAMESPACE, "cNvPr");
+        if (owner) setHyperlink(deck, slide.partName, owner, objectLink);
+      }
       addedText.add(value.trim());
       deck.office.markDirty(slide.partName);
     }
@@ -885,28 +1001,28 @@ async function duplicateNativeSlide(deck: Presentation, sourceSlideId: string, t
   copyPart.write(await sourcePart.read());
   const originalRelationships = sourcePart.relationships().all();
   copyPart.relationships().all().forEach((relation) => copyPart.relationships().remove(relation.id));
-  let notesCopy: { partName: string; sourcePartName: string } | undefined;
+  const mapping = new Map<string, OpcPart>([[sourcePart.name.toLowerCase(), copyPart]]);
   for (const relation of originalRelationships) {
-    const target = relation.targetMode === "External" ? relation.target : resolveRelationshipTarget(source.partName, relation.target);
+    const target = relation.targetMode === "External" ? undefined : deck.office.package.relatedPart(sourcePart, relation.id);
     if (relation.type === NOTES_SLIDE_RELATIONSHIP) {
-      const sourceNotes = deck.office.package.getPart(target);
+      const sourceNotes = target;
       if (!sourceNotes) continue;
-      const notesName = nextPartName(deck, "/ppt/notesSlides", "notesSlide");
-      const note = deck.office.package.addPart(notesName, sourceNotes.contentType, await sourceNotes.read());
-      note.relationships().all().forEach((candidate) => note.relationships().remove(candidate.id));
-      const noteRelations = sourceNotes.relationships().all();
-      for (const noteRelation of noteRelations) {
-        if (noteRelation.type === SLIDE_RELATIONSHIP) {
-          note.relationships().add({ id: noteRelation.id, type: SLIDE_RELATIONSHIP, target: relativePartTarget(note.name, copy.partName) });
-        } else {
-          note.relationships().add({ id: noteRelation.id, type: noteRelation.type, target: noteRelation.target, ...(noteRelation.targetMode === "External" ? { targetMode: "External" as const } : {}) });
-        }
-      }
+      const note = await cloneOwnedPartGraph(deck, sourceNotes, mapping, clonePartName(deck, sourceNotes.name));
       copyPart.relationships().add({ id: relation.id, type: relation.type, target: relativePartTarget(copy.partName, note.name) });
-      notesCopy = { partName: note.name, sourcePartName: sourceNotes.name };
       continue;
     }
-    copyPart.relationships().add({ id: relation.id, type: relation.type, target: relation.target, ...(relation.targetMode === "External" ? { targetMode: "External" as const } : {}) });
+    if (relation.targetMode === "External") {
+      copyPart.relationships().add({ id: relation.id, type: relation.type, target: relation.target, targetMode: "External" });
+      continue;
+    }
+    const targetPart = target && relation.type !== SLIDE_RELATIONSHIP && !isSharedPptxPart(target)
+      ? await cloneOwnedPartGraph(deck, target, mapping)
+      : target;
+    copyPart.relationships().add({
+      id: relation.id,
+      type: relation.type,
+      target: targetPart ? relativePartTarget(copyPart.name, targetPart.name) : relation.target,
+    });
   }
   if (title) {
     const copiedRoot = (await deck.office.xml(copy.partName)).root;
@@ -915,7 +1031,6 @@ async function duplicateNativeSlide(deck: Presentation, sourceSlideId: string, t
     else addTextBox(copiedRoot, title);
     deck.office.markDirty(copy.partName);
   }
-  void notesCopy;
   return copy;
 }
 
@@ -1043,7 +1158,13 @@ function setTextFormat(shape: XmlElement, format: {
   }
 }
 
-function setRichText(shape: XmlElement, paragraphs: PresentationParagraph[]) {
+function setRichText(
+  deck: Presentation,
+  slidePartName: string,
+  shape: XmlElement,
+  paragraphs: PresentationParagraph[],
+  resolveLinkSlideId?: (slideId: string) => string,
+) {
   const txBody = descendants(shape).find((node) => [PML_NAMESPACE, DRAWINGML_NAMESPACE].includes(node.namespaceUri() ?? "") && node.localName === "txBody");
   if (!txBody) throw new PptxLensError("PPTX_TEXT_MISSING", "The target PowerPoint object has no editable text body.");
   txBody.elements()
@@ -1077,6 +1198,11 @@ function setRichText(shape: XmlElement, paragraphs: PresentationParagraph[]) {
       if (inputRun.fontFamily) ensureChild(properties, DRAWINGML_NAMESPACE, "a", "latin").setAttribute("typeface", inputRun.fontFamily);
       const color = nativeColor(inputRun.color);
       if (color) ensureColor(properties, color);
+      const requestedHyperlink = normalizePresentationHyperlink(inputRun.hyperlink);
+      const hyperlink = requestedHyperlink?.kind === "slide"
+        ? { kind: "slide" as const, slideId: resolveLinkSlideId?.(requestedHyperlink.slideId) ?? requestedHyperlink.slideId }
+        : requestedHyperlink;
+      if (hyperlink) setHyperlink(deck, slidePartName, properties, hyperlink);
       run.appendChild(properties);
       const text = new XmlElement("t", "a");
       text.appendChild(new XmlText(inputRun.text));
@@ -1086,6 +1212,93 @@ function setRichText(shape: XmlElement, paragraphs: PresentationParagraph[]) {
     paragraph.appendChild(new XmlElement("endParaRPr", "a"));
     txBody.appendChild(paragraph);
   }
+}
+
+function clonePartName(deck: Presentation, sourceName: string) {
+  const slash = sourceName.lastIndexOf("/");
+  const folder = sourceName.slice(0, slash);
+  const file = sourceName.slice(slash + 1);
+  const extension = file.includes(".") ? file.slice(file.lastIndexOf(".")) : "";
+  const stem = extension ? file.slice(0, -extension.length) : file;
+  const numeric = stem.match(/^(.*?)(\d+)$/);
+  const prefix = numeric?.[1] ?? `${stem}-copy`;
+  let index = numeric ? Number(numeric[2]) + 1 : 1;
+  const used = new Set(deck.office.package.parts().map((part) => part.name.toLowerCase()));
+  let candidate = `${folder}/${prefix}${index}${extension}`;
+  while (used.has(candidate.toLowerCase())) {
+    index += 1;
+    candidate = `${folder}/${prefix}${index}${extension}`;
+  }
+  return candidate;
+}
+
+function isSharedPptxPart(part: OpcPart) {
+  return (
+    /\/ppt\/(?:slideLayouts|slideMasters|theme|media|notesMasters)\//i.test(part.name) ||
+    /image\//i.test(part.contentType)
+  );
+}
+
+async function cloneOwnedPartGraph(
+  deck: Presentation,
+  source: OpcPart,
+  mapping: Map<string, OpcPart>,
+  forcedName?: string,
+): Promise<OpcPart> {
+  const key = source.name.toLowerCase();
+  const existing = mapping.get(key);
+  if (existing) return existing;
+  const copy = deck.office.package.addPart(
+    forcedName ?? clonePartName(deck, source.name),
+    source.contentType,
+    await source.read(),
+  );
+  mapping.set(key, copy);
+  for (const relation of source.relationships().all()) {
+    if (relation.targetMode === "External") {
+      copy.relationships().add({ id: relation.id, type: relation.type, target: relation.target, targetMode: "External" });
+      continue;
+    }
+    const target = deck.office.package.relatedPart(source, relation.id);
+    const mappedTarget = target && mapping.get(target.name.toLowerCase());
+    const shouldClone = Boolean(target && relation.type !== SLIDE_RELATIONSHIP && !isSharedPptxPart(target));
+    const targetPart = mappedTarget ?? (target && shouldClone
+      ? await cloneOwnedPartGraph(deck, target, mapping)
+      : target);
+    copy.relationships().add({
+      id: relation.id,
+      type: relation.type,
+      target: targetPart ? relativePartTarget(copy.name, targetPart.name) : relation.target,
+      ...(relation.targetMode ? { targetMode: relation.targetMode } : {}),
+    });
+  }
+  return copy;
+}
+
+function exclusiveDependencyRoots(deck: Presentation, part: OpcPart) {
+  return part.relationships().all()
+    .filter((relation) => relation.targetMode !== "External" && relation.type !== SLIDE_RELATIONSHIP && relation.type !== NOTES_SLIDE_RELATIONSHIP)
+    .map((relation) => deck.office.package.relatedPart(part, relation.id))
+    .filter((target): target is OpcPart => target !== undefined && !isSharedPptxPart(target));
+}
+
+function releaseUnreferencedOwnedParts(deck: Presentation, roots: OpcPart[]) {
+  const packageParts = () => deck.office.package.parts();
+  const referenced = (name: string) => packageParts().some((part) =>
+    part.name !== name && part.relationships().all().some((relation) =>
+      relation.targetMode !== "External" && resolveRelationshipTarget(part.name, relation.target).toLowerCase() === name.toLowerCase(),
+    ),
+  );
+  const visited = new Set<string>();
+  const visit = (part: OpcPart) => {
+    const key = part.name.toLowerCase();
+    if (visited.has(key) || isSharedPptxPart(part) || referenced(part.name)) return;
+    visited.add(key);
+    const children = exclusiveDependencyRoots(deck, part);
+    deck.office.package.removePart(part.name);
+    children.forEach(visit);
+  };
+  roots.forEach(visit);
 }
 
 function setShapeStyle(shape: XmlElement, style: Record<string, unknown>) {
@@ -1200,6 +1413,40 @@ function formulaCells(formula: string) {
   return refs;
 }
 
+function formulaShape(formula: string) {
+  const match = formula.match(/^(?:'([^']+)'|([^!]+))!\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?$/i);
+  if (!match) return undefined;
+  return {
+    sheet: match[1] ?? match[2],
+    startColumn: match[3]!.toUpperCase(),
+    startRow: Number(match[4]),
+    endColumn: (match[5] ?? match[3]).toUpperCase(),
+    endRow: Number(match[6] ?? match[4]),
+  };
+}
+
+function columnNumber(value: string) {
+  return [...value].reduce((total, char) => total * 26 + char.charCodeAt(0) - 64, 0);
+}
+
+function columnName(value: number) {
+  let output = "";
+  for (let current = value; current > 0; current = Math.floor((current - 1) / 26))
+    output = String.fromCharCode(65 + ((current - 1) % 26)) + output;
+  return output;
+}
+
+function resizedFormula(formula: string | undefined, seriesIndex: number, count: number, columnBySeries: boolean) {
+  const shape = formula && formulaShape(formula);
+  if (!shape) return formula;
+  const shift = columnBySeries ? seriesIndex : 0;
+  const startColumn = columnName(columnNumber(shape.startColumn) + shift);
+  const endColumn = columnName(columnNumber(shape.endColumn) + shift);
+  const endRow = shape.startRow + Math.max(0, count - 1);
+  const prefix = /'/.test(formula.slice(0, formula.indexOf("!"))) ? `'${shape.sheet}'` : shape.sheet;
+  return `${prefix}!$${startColumn}$${shape.startRow}:$${endColumn}$${endRow}`;
+}
+
 async function updateEmbeddedWorkbook(
   deck: Presentation,
   chartPart: OpcPart,
@@ -1217,7 +1464,7 @@ async function updateEmbeddedWorkbook(
   series.forEach((item, index) => {
     const ser = serNodes[index];
     if (!ser) return;
-    const write = (referenceName: "cat" | "val", values: Array<string | number>) => {
+    const write = (referenceName: "tx" | "cat" | "val", values: Array<string | number>) => {
       const reference = descendants(ser).find((node) => node.localName === referenceName && descendants(node).some((child) => child.localName === "f"));
       const formula = reference ? descendants(reference).find((node) => node.localName === "f")?.text() : undefined;
       if (!formula) return;
@@ -1229,6 +1476,7 @@ async function updateEmbeddedWorkbook(
       });
       changed = true;
     };
+    write("tx", [item.name]);
     write("cat", item.categories);
     write("val", item.values);
   });
@@ -1279,7 +1527,7 @@ async function setChartContent(deck: Presentation, slidePartName: string, shapeI
   chartType?: "bar" | "column" | "line" | "pie" | "area";
   title?: string | null;
   categories: string[];
-  series: Array<{ name: string; categories: string[]; values: number[] }>;
+  series: Array<{ id?: string; name: string; categories: string[]; values: number[] }>;
   showLegend?: boolean;
   axisTitle?: string | null;
   valueAxisTitle?: string | null;
@@ -1287,6 +1535,7 @@ async function setChartContent(deck: Presentation, slidePartName: string, shapeI
   sourceChartId?: string;
   sourceRevision?: string;
   sourceKind?: "artifact" | "sheets_range";
+  sourceRange?: string;
   sourceLive?: boolean;
 }) {
   const slidePart = deck.office.package.getPart(slidePartName);
@@ -1305,18 +1554,52 @@ async function setChartContent(deck: Presentation, slidePartName: string, shapeI
       if (chartTitle) chartRoot.removeChild(chartTitle);
     } else chartTextElement(chartTitle ?? ensureChild(chartRoot, chartNamespace, "c", "title"), input.title);
   }
-  const seriesNodes = descendants(root).filter((node) => node.localName === "ser");
+  if (!input.series.length) throw new PptxLensError("PPTX_CHART_EMPTY", "A native PowerPoint chart needs at least one series.");
+  const initialSeriesNodes = descendants(root).filter((node) => node.localName === "ser");
+  const template = initialSeriesNodes[0];
+  const plotChart = template?.parent ?? descendants(root).find((node) => ["barChart", "lineChart", "pieChart", "areaChart"].includes(node.localName));
+  if (!plotChart) throw new PptxLensError("PPTX_CHART_SERIES_MISSING", "The native chart has no editable series container.");
+  const seriesNodes = initialSeriesNodes.slice();
+  while (seriesNodes.length < input.series.length) {
+    const copy = (seriesNodes[seriesNodes.length - 1] ?? template)?.clone();
+    if (!copy) throw new PptxLensError("PPTX_CHART_SERIES_MISSING", "The native chart has no series template for the requested data.");
+    plotChart.appendChild(copy);
+    seriesNodes.push(copy);
+  }
+  const firstTxFormula = template && descendants(template).find((node) => node.localName === "tx")
+    ? descendants(descendants(template).find((node) => node.localName === "tx")!).find((node) => node.localName === "f")?.text()
+    : undefined;
+  const firstCategoryFormula = template && descendants(template).find((node) => node.localName === "cat")
+    ? descendants(descendants(template).find((node) => node.localName === "cat")!).find((node) => node.localName === "f")?.text()
+    : undefined;
+  const firstValueFormula = template && descendants(template).find((node) => node.localName === "val")
+    ? descendants(descendants(template).find((node) => node.localName === "val")!).find((node) => node.localName === "f")?.text()
+    : undefined;
   input.series.forEach((series, index) => {
-    const node = seriesNodes[index];
-    if (!node) return;
+    const node = seriesNodes[index]!;
+    const idx = ensureChild(node, chartNamespace, "c", "idx");
+    const order = ensureChild(node, chartNamespace, "c", "order");
+    idx.setAttribute("val", String(index));
+    order.setAttribute("val", String(index));
     const tx = ensureChild(node, chartNamespace, "c", "tx");
-    const cache = ensureChild(ensureChild(tx, chartNamespace, "c", "strRef"), chartNamespace, "c", "strCache");
-    updateCache(cache, [series.name], false);
+    const txRef = ensureChild(tx, chartNamespace, "c", "strRef");
+    const txFormula = descendants(node).find((candidate) => candidate.localName === "tx") === tx
+      ? descendants(txRef).find((candidate) => candidate.localName === "f")?.text() ?? firstTxFormula
+      : firstTxFormula;
+    const txF = ensureChild(txRef, chartNamespace, "c", "f");
+    setTextElement(txF, resizedFormula(txFormula, index, 1, true) ?? `'Sheet1'!$B$1`);
+    updateCache(ensureChild(txRef, chartNamespace, "c", "strCache"), [series.name], false);
+    const categories = series.categories.length ? series.categories : input.categories;
     const category = ensureChild(ensureChild(node, chartNamespace, "c", "cat"), chartNamespace, "c", "strRef");
-    updateCache(ensureChild(category, chartNamespace, "c", "strCache"), series.categories.length ? series.categories : input.categories, false);
+    const categoryF = ensureChild(category, chartNamespace, "c", "f");
+    setTextElement(categoryF, resizedFormula(descendants(category).find((candidate) => candidate.localName === "f")?.text() ?? firstCategoryFormula, index, categories.length, false) ?? `'Sheet1'!$A$2:$A$${Math.max(2, categories.length + 1)}`);
+    updateCache(ensureChild(category, chartNamespace, "c", "strCache"), categories, false);
     const value = ensureChild(ensureChild(node, chartNamespace, "c", "val"), chartNamespace, "c", "numRef");
+    const valueF = ensureChild(value, chartNamespace, "c", "f");
+    setTextElement(valueF, resizedFormula(descendants(value).find((candidate) => candidate.localName === "f")?.text() ?? firstValueFormula, index, series.values.length, true) ?? `'Sheet1'!$B$2:$B$${Math.max(2, series.values.length + 1)}`);
     updateCache(ensureChild(value, chartNamespace, "c", "numCache"), series.values, true);
   });
+  seriesNodes.slice(input.series.length).forEach((node) => node.parent?.removeChild(node));
   const legend = child(firstDescendant(root, chartNamespace, "chart") ?? root, chartNamespace, "legend");
   if (input.showLegend === false && legend) chartRoot.removeChild(legend);
   if (input.showLegend === true && !legend) chartRoot.appendChild(new XmlElement("legend", "c"));
@@ -1350,12 +1633,12 @@ async function setChartContent(deck: Presentation, slidePartName: string, shapeI
     extension.appendChild(created);
     return created;
   })();
-  for (const [attribute, value] of [["artifactId", input.sourceArtifactId], ["chartId", input.sourceChartId], ["revision", input.sourceRevision], ["kind", input.sourceKind], ["live", input.sourceLive ? "1" : undefined]] as const) {
-    if (value) source.setAttribute(attribute, value);
+  for (const [attribute, value] of [["artifactId", input.sourceArtifactId], ["chartId", input.sourceChartId], ["revision", input.sourceRevision], ["kind", input.sourceKind], ["range", input.sourceRange], ["live", input.sourceLive === undefined ? undefined : input.sourceLive ? "1" : "0"]] as const) {
+    if (value !== undefined) source.setAttribute(attribute, value);
     else source.removeAttribute(attribute);
   }
   // Do not leave stale bridge metadata behind after a chart is unbound.
-  if (!input.sourceArtifactId && !input.sourceChartId && !input.sourceRevision && !input.sourceKind && input.sourceLive === undefined) extension.removeChild(source);
+  if (!input.sourceArtifactId && !input.sourceChartId && !input.sourceRevision && !input.sourceKind && !input.sourceRange && input.sourceLive === undefined) extension.removeChild(source);
   deck.office.markDirty(chartPart.name);
   await updateEmbeddedWorkbook(deck, chartPart, root, input.series);
 }
@@ -1383,12 +1666,16 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       continue;
     }
     if (operation.kind === "remove-slide") {
-      const index = slideFor(deck, resolveSlideId(operation.slideId)).index;
+      const doomed = slideFor(deck, resolveSlideId(operation.slideId));
+      const doomedPart = deck.office.package.getPart(doomed.partName);
+      const ownedDependencies = doomedPart ? exclusiveDependencyRoots(deck, doomedPart) : [];
+      const index = doomed.index;
       if (index < 0) throw new PptxLensError("PPTX_SLIDE_MISSING", "The slide being removed is no longer in this deck.");
       // The library deletes the slide part, its .rels, its content-type
       // override and its own notes page, and leaves shared targets — layouts,
       // masters, media — exactly where they were.
       deck.removeSlide(index);
+      releaseUnreferencedOwnedParts(deck, ownedDependencies);
       continue;
     }
     if (operation.kind === "reorder-slides") {
@@ -1396,7 +1683,16 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       continue;
     }
     const slide = slideFor(deck, resolveSlideId(operation.slideId));
-    if (operation.kind === "group-objects") {
+    if (operation.kind === "add-text-box") {
+      const added = addTextBox(slide.root(), operation.text);
+      const link = normalizePresentationHyperlink(operation.hyperlink);
+      if (link) {
+        const owner = firstDescendant(added, PML_NAMESPACE, "cNvPr");
+        if (owner) setHyperlink(deck, slide.partName, owner, link);
+      }
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "group-objects") {
       addNativeGroup((await deck.office.xml(slide.partName)).root, operation);
       deck.office.markDirty(slide.partName);
     }
@@ -1460,7 +1756,20 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
     else if (operation.kind === "format-rich-text") {
       const shape = shapeIn(slide.root(), operation.shapeId);
       if (!shape) throw new PptxLensError("PPTX_TEXT_MISSING", "The text object being formatted no longer exists on this slide.");
-      setRichText(shape, operation.paragraphs);
+      setRichText(deck, slide.partName, shape, operation.paragraphs, (id) => born.get(id) ?? id);
+      cleanupSlideHyperlinkRelationships(deck, slide.partName, (await deck.office.xml(slide.partName)).root);
+      deck.office.markDirty(slide.partName);
+    }
+    else if (operation.kind === "set-object-link") {
+      const shape = shapeIn(slide.root(), operation.shapeId);
+      const owner = shape && firstDescendant(shape, PML_NAMESPACE, "cNvPr");
+      if (!owner) throw new PptxLensError("PPTX_SHAPE_MISSING", "The object receiving the link no longer exists on this slide.");
+      const requestedLink = normalizePresentationHyperlink(operation.hyperlink);
+      const nativeLink = requestedLink?.kind === "slide"
+        ? { kind: "slide" as const, slideId: born.get(requestedLink.slideId) ?? requestedLink.slideId }
+        : requestedLink;
+      setHyperlink(deck, slide.partName, owner, nativeLink);
+      cleanupSlideHyperlinkRelationships(deck, slide.partName, (await deck.office.xml(slide.partName)).root);
       deck.office.markDirty(slide.partName);
     }
     else if (operation.kind === "set-shape-style") {
@@ -1498,9 +1807,10 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
     }
     else if (operation.kind === "remove-object") {
       removeShape(slide.root(), operation.shapeId);
+      cleanupSlideHyperlinkRelationships(deck, slide.partName, slide.root());
       deck.office.markDirty(slide.partName);
     }
-    else { addTextBox(slide.root(), operation.text); deck.office.markDirty(slide.partName); }
+    else { throw new PptxLensError("PPTX_OPERATION_UNSUPPORTED", `Unsupported PowerPoint operation ${(operation as { kind: string }).kind}.`); }
   }
   return deck.save();
 }
@@ -1513,5 +1823,5 @@ export const pptxLens: SpectraLens<PptxProjection, PptxSemanticDelta> = {
     const operations = pptxOperationsBetween(carry.projection, projection);
     return operations.length ? applyDelta(carry, { kind: "ai-edit", operations }) : carry.payload; },
   async diffExternal(payloadA, payloadB): Promise<LensExternalDiff> { const [before, after, comparison] = await Promise.all([this.open(payloadA), this.open(payloadB), comparePackages(payloadA, payloadB)]); const previous = new Map(before.projection.slides.map((slide) => [slide.id, slide])); const changes: LensExternalDiff["changes"] = []; for (const slide of after.projection.slides) { const old = previous.get(slide.id); previous.delete(slide.id); if (!old) changes.push({ regionId: slide.id, kind: "insert", after: slide }); else if (JSON.stringify(old) !== JSON.stringify(slide)) changes.push({ regionId: slide.id, kind: "update", before: old, after: slide }); } for (const slide of previous.values()) changes.push({ regionId: slide.id, kind: "delete", before: slide }); const changedParts = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`); const semanticParts = ["/ppt/presentation.xml", ...after.projection.slides.flatMap((slide) => [slide.id.replace(/^pptx:slide:/, ""), ...(slide.notesPartName ? [slide.notesPartName] : [])])]; const modeled = new Set([...semanticParts, ...semanticParts.map(relationshipsPartName)]); const preservedPartChanges = changedParts.filter((part) => !modeled.has(part) && !/^\/ppt\/notesMasters\//i.test(part)); return { changes, changedParts, preservedPartChanges }; },
-  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; const hasTransition = fidelityMap.entries.some((entry) => entry.feature === "transition"); return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: hasTransition, reason: hasTransition ? "Only exact PowerPoint transition equivalents may replace the preserved transition." : "No native transition is present." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
+  capabilities(profile, fidelityMap): LensCapabilitySet { const strict = profile === "strict-native"; const hasTransition = fidelityMap.entries.some((entry) => entry.feature === "transition"); return { profile, human: [{ id: "edit-slide-title", available: true }, { id: "edit-slide-text", available: true }, { id: "format-rich-text", available: true }, { id: "set-object-link", available: true }, { id: "format-shape", available: true }, { id: "format-table-cell", available: true }, { id: "edit-native-chart", available: true }, { id: "crop-image", available: true }, { id: "add-basic-text-box", available: true }, { id: "add-slide-on-existing-layout", available: true }, { id: "duplicate-slide", available: true }, { id: "remove-slide", available: true }, { id: "reorder-slides", available: true }, { id: "remove-object", available: true }, { id: "set-slide-hidden", available: true }, { id: "edit-speaker-notes", available: true }, { id: "describe-shape", available: true }, { id: "move-and-resize-shape", available: true }, { id: "edit-native-transition", available: hasTransition, reason: hasTransition ? "Only exact PowerPoint transition equivalents may replace the preserved transition." : "No native transition is present." }, strict ? { id: "apply-spectra-only-transition", available: false, reason: "This transition has no exact PowerPoint representation in strict native mode." } : { id: "apply-spectra-only-transition", available: true }], aiOperations: ["set_slide_title", "set_slide_text", "format_rich_text", "set_object_link", "set_shape_style", "set_table_cell_format", "set_chart", "crop_image", "add_text_box", "write_speaker_notes", "set_slide_hidden", "set_alt_text", "move_object", "resize_object", "add_slide", "duplicate_slide", "delete_slide", "delete_object", "reorder_slides"] }; },
 };

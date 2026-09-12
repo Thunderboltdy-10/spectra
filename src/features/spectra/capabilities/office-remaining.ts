@@ -1864,6 +1864,26 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
     },
   ],
   [
+    "object.setLink",
+    "Set or replace the selected object's external or internal slide hyperlink.",
+    {
+      params: text,
+      delta: "set-object-link",
+      touches: ["hyperlinks"],
+      manifest: "rewrite_object",
+      field: true,
+    },
+  ],
+  [
+    "object.removeLink",
+    "Remove the selected object's native hyperlink.",
+    {
+      delta: "set-object-link",
+      touches: ["hyperlinks"],
+      manifest: "rewrite_object",
+    },
+  ],
+  [
     "format.fill",
     "Set the fill of the selected shape.",
     {

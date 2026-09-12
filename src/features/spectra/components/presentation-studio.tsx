@@ -115,11 +115,11 @@ import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
 import { SelectField } from "@/components/ui/select";
 import {
-  calculateWorkbook,
-  coordinateToAddress,
-  normalizeSheetsContent,
-  parseRange,
-} from "../sheets/model";
+  applyLinkedChartResolution,
+  linkedChartValues,
+  refreshPresentationLinkedCharts,
+  resolveLinkedChart,
+} from "../presentation/linked-chart";
 import { pptxNativeMediaUrl } from "../lenses/office-content";
 
 /**
@@ -449,69 +449,6 @@ function presentationFileStem(value: string) {
   );
 }
 
-function linkedChartValues(
-  object: PresentationObject,
-  artifacts: SpectraArtifact[],
-) {
-  if (object.sourceBinding?.kind !== "sheets_range") return undefined;
-  const source = artifacts.find(
-    (artifact) =>
-      artifact._id === object.sourceBinding?.artifactId &&
-      artifact.blueprintKey === "sheets" &&
-      artifact.status === "active",
-  );
-  if (!source?.content) return null;
-  const objectContent =
-    object.content &&
-    typeof object.content === "object" &&
-    !Array.isArray(object.content)
-      ? (object.content as Record<string, unknown>)
-      : {};
-  if (
-    object.sourceBinding.live === false &&
-    Array.isArray(objectContent.pinnedValues)
-  ) {
-    const pinned = objectContent.pinnedValues.filter(
-      (value): value is number =>
-        typeof value === "number" && Number.isFinite(value),
-    );
-    return pinned.length ? pinned : null;
-  }
-  const workbook = normalizeSheetsContent(source.content);
-  const rangeLabel = object.sourceBinding.range ?? "";
-  const [sheetName, address] = rangeLabel.includes("!")
-    ? [
-        rangeLabel.slice(0, rangeLabel.lastIndexOf("!")),
-        rangeLabel.split("!").at(-1)!,
-      ]
-    : [undefined, rangeLabel];
-  const sheet =
-    workbook.sheets.find((candidate) => candidate.name === sheetName) ??
-    workbook.sheets.find(
-      (candidate) => candidate.id === workbook.activeSheetId,
-    ) ??
-    workbook.sheets[0];
-  const range = parseRange(address);
-  if (!sheet || !range) return null;
-  const calculated = calculateWorkbook(workbook);
-  const values: number[] = [];
-  for (let row = range.start.row; row <= range.end.row; row += 1) {
-    for (
-      let column = range.start.column;
-      column <= range.end.column;
-      column += 1
-    ) {
-      const cellAddress = coordinateToAddress({ row, column });
-      const value =
-        calculated.get(`${sheet.id}:${cellAddress}`)?.value ??
-        sheet.cells[cellAddress]?.value;
-      if (typeof value === "number" && Number.isFinite(value))
-        values.push(value);
-    }
-  }
-  return values.length ? values.slice(0, 200) : null;
-}
-
 function objectStyle(
   object: PresentationObject,
   canvasHeight: number,
@@ -585,6 +522,31 @@ function tableRows(object: PresentationObject): PresentationTableCell[][] {
         Array.isArray(row) ? row.map((cell) => tableCell(cell)) : [],
       )
     : [];
+}
+
+function savedChartValues(object: PresentationObject) {
+  const content = object.content && typeof object.content === "object" && !Array.isArray(object.content)
+    ? object.content as Record<string, unknown>
+    : {};
+  const series = Array.isArray(content.series)
+    ? content.series.flatMap((candidate) => {
+        if (!candidate || typeof candidate !== "object") return [];
+        const values = (candidate as Record<string, unknown>).values;
+        return Array.isArray(values)
+          ? values.filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+          : [];
+      })
+    : [];
+  if (series.length) return series;
+  return Array.isArray(content.values)
+    ? content.values.filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    : [];
+}
+
+function presentationHyperlinkValue(object: PresentationObject) {
+  if (typeof object.hyperlink === "string") return object.hyperlink;
+  if (object.hyperlink?.kind === "slide") return `slide:${object.hyperlink.slideId}`;
+  return object.hyperlink?.url ?? "";
 }
 
 function PresentationObjectView({
@@ -667,12 +629,6 @@ function PresentationObjectView({
   ]);
   if (object.hidden) return null;
   if (object.type === "group" && compact) return null;
-  const content =
-    object.content &&
-    typeof object.content === "object" &&
-    !Array.isArray(object.content)
-      ? (object.content as Record<string, unknown>)
-      : {};
   return (
     <div
       className="presentation-object"
@@ -826,10 +782,7 @@ function PresentationObjectView({
           aria-label={object.altText}
           data-source-unavailable={linkedValues === null || undefined}
         >
-          {(
-            linkedValues ??
-            (Array.isArray(content.values) ? content.values : [62, 84, 48])
-          ).map((value, index) => (
+          {(linkedValues === null ? savedChartValues(object) : linkedValues ?? savedChartValues(object)).map((value, index) => (
             <span
               key={index}
               style={{
@@ -838,7 +791,7 @@ function PresentationObjectView({
             />
           ))}
           {linkedValues === null ? (
-            <em>Linked Sheets range is unavailable</em>
+            <em>Linked Sheets range is unavailable; showing last saved values.</em>
           ) : null}
         </div>
       ) : object.type === "table" ? (
@@ -1224,6 +1177,29 @@ function PresentationObjectInspector({
           />
         </label>
       ) : null}
+      {object.type !== "group" ? (
+        <label>
+          Hyperlink
+          <input
+            type="url"
+            value={presentationHyperlinkValue(object)}
+            disabled={readOnly}
+            placeholder="https://… or slide:slide-id"
+            onChange={(event) =>
+              onUpdate((candidate) => {
+                const value = event.target.value.trim();
+                if (!value) delete candidate.hyperlink;
+                else if (value.startsWith("slide:")) {
+                  candidate.hyperlink = {
+                    kind: "slide",
+                    slideId: value.slice("slide:".length).trim(),
+                  };
+                } else candidate.hyperlink = { kind: "external", url: value };
+              })
+            }
+          />
+        </label>
+      ) : null}
       {object.type === "chart" || object.type === "embed" ? (
         <div className="presentation-source-binding">
           <SelectField
@@ -1237,7 +1213,7 @@ function PresentationObjectInspector({
                 .filter(
                   (artifact) =>
                     artifact._id !== artifactId &&
-                    artifact.status === "active" &&
+                    (artifact.status === "active" || artifact._id === object.sourceBinding?.artifactId) &&
                     (object.type !== "chart" ||
                       artifact.blueprintKey === "sheets"),
                 )
@@ -1289,12 +1265,14 @@ function PresentationObjectInspector({
                 onChange={(event) =>
                   onUpdate((candidate) => {
                     if (candidate.sourceBinding) {
-                      candidate.sourceBinding.live = event.target.checked;
+                      const live = event.target.checked;
+                      const resolution = resolveLinkedChart(candidate, artifacts);
+                      candidate.sourceBinding.live = live;
                       if (!event.target.checked) {
                         const source = artifacts.find(
                           (artifact) =>
                             artifact._id ===
-                            candidate.sourceBinding?.artifactId,
+                          candidate.sourceBinding?.artifactId,
                         );
                         candidate.sourceBinding.versionId =
                           source?.currentVersionId;
@@ -1307,13 +1285,25 @@ function PresentationObjectInspector({
                               : {};
                           candidate.content = {
                             ...current,
-                            pinnedValues:
-                              linkedChartValues(candidate, artifacts) ?? [],
+                            ...(resolution.chart
+                              ? {
+                                  pinnedCategories: resolution.chart.categories,
+                                  pinnedSeries: resolution.chart.series,
+                                  pinnedValues: resolution.chart.series.flatMap((series) => series.values),
+                                }
+                              : {}),
                             pinnedAt: Date.now(),
                           };
                         }
                       } else {
                         delete candidate.sourceBinding.versionId;
+                        if (candidate.type === "chart" && candidate.content && typeof candidate.content === "object" && !Array.isArray(candidate.content)) {
+                          const content = candidate.content as Record<string, unknown>;
+                          delete content.pinnedCategories;
+                          delete content.pinnedSeries;
+                          delete content.pinnedValues;
+                          delete content.pinnedAt;
+                        }
                       }
                     }
                   })
@@ -2739,24 +2729,29 @@ export function PresentationStudio({
     setIoMessage(undefined);
     setIoBusy(`Building ${format.toUpperCase()} export`);
     try {
+      const linked = refreshPresentationLinkedCharts(deck, artifacts);
+      const linkedWarning = linked.unavailable.length
+        ? " One or more linked Sheets sources were unavailable; their last saved chart values were exported."
+        : "";
+      const exportDeck = linked.deck;
       const stem = presentationFileStem(
-        deck.slides[0]?.title ?? "presentation",
+        exportDeck.slides[0]?.title ?? "presentation",
       );
       const blob =
         format === "pptx"
-          ? await buildPresentationPptx(deck, assets)
+          ? await buildPresentationPptx(exportDeck, assets)
           : format === "odp"
-            ? buildPresentationOdp(deck)
+            ? buildPresentationOdp(exportDeck)
             : format === "pdf"
-              ? await buildPresentationPdf(deck, assets)
-              : await buildPresentationPngArchive(deck, assets);
+              ? await buildPresentationPdf(exportDeck, assets)
+              : await buildPresentationPngArchive(exportDeck, assets);
       downloadBlob(blob, `${stem}.${format === "png" ? "slides.zip" : format}`);
       setIoMessage(
-        format === "pptx"
+        `${format === "pptx"
           ? "PowerPoint export preserved editable text, shapes, images, charts, tables, and notes; unsupported live embeds and complex motion remain Spectra-native."
           : format === "odp"
             ? "OpenDocument export contains editable slide text frames; media, live embeds, and advanced motion require the Spectra source for full fidelity."
-            : "Static export completed from the current synchronized scene.",
+            : "Static export completed from the current synchronized scene."}${linkedWarning}`,
       );
     } catch (error) {
       setIoError(
@@ -3355,6 +3350,16 @@ export function PresentationStudio({
       setText: (text) => {
         if (selectedObjectId) updateText(selectedObjectId, text);
       },
+      setLink: (value) =>
+        updateSelected((object) => {
+          if (!value) {
+            delete object.hyperlink;
+            return;
+          }
+          object.hyperlink = value.startsWith("slide:")
+            ? { kind: "slide", slideId: value.slice("slide:".length).trim() }
+            : { kind: "external", url: value.trim() };
+        }),
       applyTextPreset: (preset) =>
         applyTextPreset(preset as "title" | "subtitle" | "body" | "caption"),
       setFill: (color) =>
@@ -3427,14 +3432,23 @@ export function PresentationStudio({
             live: !object.sourceBinding.live,
           };
         }),
-      refreshChart: () =>
+      refreshChart: () => {
+        if (!selectedObject || selectedObject.type !== "chart") return;
+        const resolution = resolveLinkedChart(selectedObject, artifacts);
+        if (resolution.status === "unavailable") {
+          setIoError(resolution.detail ?? "The linked Sheets source is unavailable.");
+          return;
+        }
+        if (resolution.status === "not-linked") return;
         updateSelected((object) => {
-          if (!object.sourceBinding) return;
-          object.sourceBinding = {
-            ...object.sourceBinding,
-            versionId: `refresh-${Date.now().toString(36)}`,
-          };
-        }),
+          const refreshed = applyLinkedChartResolution(object, resolution);
+          object.content = refreshed.content;
+          object.sourceBinding = refreshed.sourceBinding;
+        });
+        setIoMessage(resolution.status === "pinned"
+          ? "The chart is pinned; its saved values are already current."
+          : `Chart refreshed from committed Sheets revision ${resolution.sourceRevision ?? "available"}.`);
+      },
       setAnimation: (kind) =>
         updateSelected((object) => {
           if (kind === "none") {

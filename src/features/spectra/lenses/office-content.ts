@@ -1242,6 +1242,7 @@ export function pptxOperationsBetween(
             kind: "add-text-box",
             slideId: slide.id,
             text: nextText,
+            ...(object.hyperlink ? { hyperlink: object.hyperlink } : {}),
           });
         continue;
       }
@@ -1256,6 +1257,13 @@ export function pptxOperationsBetween(
           text: nextText,
         });
       if (!nativeShapeId) continue;
+      if (equal(object.hyperlink, previousObject.hyperlink) === false)
+        operations.push({
+          kind: "set-object-link",
+          slideId: slide.id,
+          shapeId: nativeShapeId,
+          hyperlink: object.hyperlink ?? null,
+        });
       if ((object.altText ?? "") !== (previousObject.altText ?? ""))
         operations.push({
           kind: "set-alt-text",
@@ -1313,6 +1321,7 @@ export function pptxOperationsBetween(
           ...(object.sourceBinding ? { sourceChartId: typeof value.sourceChartId === "string" ? value.sourceChartId : typeof value.nativeChartPart === "string" ? value.nativeChartPart : undefined } : {}),
           ...(object.sourceBinding?.versionId ? { sourceRevision: object.sourceBinding.versionId } : {}),
           ...(object.sourceBinding?.kind ? { sourceKind: object.sourceBinding.kind } : {}),
+          ...(object.sourceBinding?.range ? { sourceRange: object.sourceBinding.range } : {}),
           ...(object.sourceBinding?.live !== undefined ? { sourceLive: object.sourceBinding.live } : {}),
         });
       } else if (object.type === "table") {

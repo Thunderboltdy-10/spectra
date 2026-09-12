@@ -2,6 +2,7 @@ import { strFromU8, strToU8, zipSync } from "fflate";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import {
   normalizePresentationContent,
+  normalizePresentationHyperlink,
   presentationObjectParagraphs,
   presentationObjectText,
   type PresentationChartContent,
@@ -669,7 +670,23 @@ function chartContent(object: PresentationObject): PresentationChartContent {
   };
 }
 
-function presentationTextRuns(object: PresentationObject, content: PresentationContent) {
+function pptxHyperlink(
+  value: unknown,
+  slideNumbers: ReadonlyMap<string, number>,
+) {
+  const hyperlink = normalizePresentationHyperlink(value);
+  if (!hyperlink) return undefined;
+  if (hyperlink.kind === "external") return { url: hyperlink.url };
+  const slide = slideNumbers.get(hyperlink.slideId);
+  if (!slide) throw new Error(`The internal presentation link target "${hyperlink.slideId}" does not exist.`);
+  return { slide };
+}
+
+function presentationTextRuns(
+  object: PresentationObject,
+  content: PresentationContent,
+  slideNumbers: ReadonlyMap<string, number>,
+) {
   const fallbackFontSize = Number(object.style?.fontSize ?? 28);
   const fallbackFont = presentationNativeFontFamily(
     object.style?.fontFamily,
@@ -688,7 +705,7 @@ function presentationTextRuns(object: PresentationObject, content: PresentationC
       underline?: { style: "sng" };
       strike?: boolean;
       color?: string;
-      hyperlink?: { url: string };
+      hyperlink?: { url?: string; slide?: number };
       breakLine?: boolean;
     };
   }> = [];
@@ -709,7 +726,9 @@ function presentationTextRuns(object: PresentationObject, content: PresentationC
             : undefined,
         strike: run.strike ?? object.style?.textDecoration === "line-through",
         color: hex(run.color ?? object.style?.color, fallbackColor),
-        ...(run.hyperlink ? { hyperlink: { url: run.hyperlink } } : {}),
+        ...(run.hyperlink || object.hyperlink
+          ? { hyperlink: pptxHyperlink(run.hyperlink ?? object.hyperlink, slideNumbers) }
+          : {}),
       };
       if (paragraphIndex > 0 && runs.length) options.breakLine = true;
       runs.push({ text: run.text, options });
@@ -762,6 +781,7 @@ export async function buildPresentationPptx(
   const heightInches = 7.5;
   const canvasHeight = content.settings?.aspectRatio === "4:3" ? 750 : 562.5;
   const byId = assetMap(assets);
+  const slideNumbers = new Map(content.slides.map((slide, index) => [slide.id, index + 1] as const));
   for (const slide of content.slides) {
     const page = pptx.addSlide();
     page.background = {
@@ -781,7 +801,7 @@ export async function buildPresentationPptx(
       const options = { x, y, w, h, rotate: object.rotation };
       if (object.type === "text") {
         const fontSize = Number(object.style?.fontSize ?? 28);
-        const rich = presentationTextRuns(object, content);
+        const rich = presentationTextRuns(object, content, slideNumbers);
         page.addText(rich.runs.length ? rich.runs : presentationObjectText(object), {
           ...options,
           fontFace: presentationNativeFontFamily(
@@ -806,11 +826,13 @@ export async function buildPresentationPptx(
       } else if (object.type === "shape") {
         page.addShape(Number(object.style?.cornerRadius ?? object.style?.radius ?? 8) > 0 ? pptx.ShapeType.roundRect : pptx.ShapeType.rect, {
           ...options,
+          ...(object.hyperlink ? { hyperlink: pptxHyperlink(object.hyperlink, slideNumbers) } : {}),
           fill: { color: hex(object.style?.fill, "E4EEE8"), transparency: Math.round((1 - Number(object.style?.opacity ?? 1)) * 100) },
           line: { color: hex(object.style?.stroke, "8DA99A"), pt: Number(object.style?.strokeWidth ?? 1), transparency: Math.round((1 - Number(object.style?.opacity ?? 1)) * 100) },
         });
-        if (presentationObjectText(object))
-          page.addText(presentationObjectText(object), {
+        if (presentationObjectText(object)) {
+          const rich = presentationTextRuns(object, content, slideNumbers);
+          page.addText(rich.runs.length ? rich.runs : presentationObjectText(object), {
             ...options,
             color: hex(object.style?.color, "23322D"),
             fontSize: Number(object.style?.fontSize ?? 18),
@@ -818,6 +840,7 @@ export async function buildPresentationPptx(
             valign: "mid",
             margin: 0.05,
           });
+        }
       } else if (object.type === "image") {
         const source = (object.content && typeof object.content === "object"
           ? object.content
@@ -827,6 +850,7 @@ export async function buildPresentationPptx(
           page.addImage({
             data: await dataUrl(asset.downloadUrl),
             altText: object.altText,
+            ...(object.hyperlink ? { hyperlink: pptxHyperlink(object.hyperlink, slideNumbers) } : {}),
             ...(object.style?.fit === "cover"
               ? { sizing: { type: "cover" as const, w, h } }
               : {}),

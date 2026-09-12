@@ -231,6 +231,20 @@ function imageOperationsBetween(
   });
 }
 
+function inlineContentForTextOperation(
+  beforeContent: readonly DocxRichInline[],
+  afterContent: readonly DocxRichInline[],
+) {
+  const retainedParts = new Set(
+    beforeContent.flatMap((item) =>
+      item.kind === "image" && item.partName ? [item.partName] : [],
+    ),
+  );
+  return afterContent.filter(
+    (item) => item.kind !== "image" || (item.partName && retainedParts.has(item.partName)),
+  );
+}
+
 export function docxOperationsBetween(
   before: DocxProjection,
   after: DocxProjection,
@@ -306,7 +320,6 @@ export function docxOperationsBetween(
             inlineContent,
             { row: rowIndex, column: columnIndex },
           );
-          operations.push(...imageOperations);
           const visibleText = inlineContent
             ? richTextWithoutImages(inlineContent)
             : text;
@@ -322,15 +335,22 @@ export function docxOperationsBetween(
                 ? richContentWithoutImages(previousInline)
                 : previousInline,
             );
-          if (visibleText !== previousVisibleText || nonImageRichChanged)
+          if (visibleText !== previousVisibleText || nonImageRichChanged) {
+            const textInlineContent = inlineContent
+              ? inlineContentForTextOperation(previousInline, inlineContent)
+              : undefined;
             operations.push({
               kind: "edit-table-cell",
               regionId: block.id,
               row: rowIndex,
               column: columnIndex,
               text,
-              ...(inlineContent ? { inlineContent } : {}),
+              ...(textInlineContent ? { inlineContent: textInlineContent } : {}),
             });
+          }
+          // Apply text before adding/replacing drawings so the text rewrite
+          // never clears a drawing operation that is about to run.
+          operations.push(...imageOperations);
         }),
       );
     } else if (
@@ -341,7 +361,6 @@ export function docxOperationsBetween(
       const previousInline = old.inlineContent ?? [];
       const nextInline = block.inlineContent ?? [];
       const imageOperations = imageOperationsBetween(block.id, previousInline, nextInline);
-      operations.push(...imageOperations);
       const hasImages = previousInline.some((item) => item.kind === "image") ||
         nextInline.some((item) => item.kind === "image");
       const visibleText = hasImages ? richTextWithoutImages(nextInline) : block.text;
@@ -351,13 +370,22 @@ export function docxOperationsBetween(
           JSON.stringify(richContentWithoutImages(previousInline))
         : JSON.stringify(block.inlineContent) !== JSON.stringify(old.inlineContent);
       const richChanged = nonImageRichChanged;
-      if (visibleText === previousVisibleText && !richChanged) return;
+      if (visibleText === previousVisibleText && !richChanged) {
+        operations.push(...imageOperations);
+        return;
+      }
+      const textInlineContent = block.inlineContent
+        ? inlineContentForTextOperation(previousInline, nextInline)
+        : undefined;
       operations.push({
         kind: "replace-paragraph",
         regionId: block.id,
         text: block.text,
-        ...(richChanged && block.inlineContent ? { inlineContent: block.inlineContent } : {}),
+        ...(richChanged && textInlineContent ? { inlineContent: textInlineContent } : {}),
       });
+      // Apply text before adding/replacing drawings so the text rewrite never
+      // clears a drawing operation that is about to run.
+      operations.push(...imageOperations);
     }
   });
   operations.push(

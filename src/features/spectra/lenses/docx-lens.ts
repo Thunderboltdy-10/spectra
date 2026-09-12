@@ -2292,6 +2292,20 @@ function imageOperationsBetween(
   });
 }
 
+function inlineContentForTextOperation(
+  beforeContent: readonly DocxRichInline[],
+  afterContent: readonly DocxRichInline[],
+) {
+  const retainedParts = new Set(
+    beforeContent.flatMap((item) =>
+      item.kind === "image" && item.partName ? [item.partName] : [],
+    ),
+  );
+  return afterContent.filter(
+    (item) => item.kind !== "image" || (item.partName && retainedParts.has(item.partName)),
+  );
+}
+
 function fidelityFeature(
   entries: LensFidelityEntry[],
   feature: string,
@@ -3010,11 +3024,37 @@ function semanticProjectionValue(value: unknown, parentKey?: string): unknown {
   if (!value || typeof value !== "object") return value;
   const source = value as Record<string, unknown>;
   const isImage = source.kind === "image";
+  const hasInlineContent = Array.isArray(source.inlineContent);
   return Object.fromEntries(
     Object.entries(source).flatMap(([key, child]) => {
       if ((parentKey === "image" || isImage) && (key === "partName" || key === "assetId")) return [];
       if (key === "nativePath" || key === "nativeReadOnly" || key === "nativeStyleId") return [];
-      return [[key, semanticProjectionValue(child, key)]];
+      // `attrs.format` is a resolved convenience projection when rich inline
+      // content is present. The inline runs are the authored semantic source;
+      // retaining both makes a sparse editor mark (for example, bold only)
+      // disagree with Word's resolved Calibri/11 and direct-run values.
+      if (key === "attrs" && hasInlineContent && child && typeof child === "object") {
+        const attrs = { ...(child as Record<string, unknown>) };
+        delete attrs.format;
+        return [[key, semanticProjectionValue(attrs, key)]];
+      }
+      if (
+        parentKey === "format" &&
+        ((["bold", "italic", "strike", "underline"].includes(key) && child === false) ||
+          (["color", "highlight", "shading"].includes(key) && child === null) ||
+          (key === "fontFamily" && child === "Calibri") ||
+          (key === "fontSizePoints" && child === 11))
+      ) return [];
+      const normalizedChild = semanticProjectionValue(child, key);
+      if (
+        key === "format" &&
+        normalizedChild &&
+        typeof normalizedChild === "object" &&
+        !Array.isArray(normalizedChild) &&
+        Object.keys(normalizedChild).length === 0
+      )
+        return [];
+      return [[key, normalizedChild]];
     }),
   );
 }
@@ -3323,8 +3363,11 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
           row.forEach((text, columnIndex) => {
             const nextRich = effectiveBlock.richRows?.[rowIndex]?.[columnIndex];
             const previousRich = previous.richRows?.[rowIndex]?.[columnIndex];
-            operations.push(
-              ...imageOperationsBetween(block.id, previousRich, nextRich, { row: rowIndex, column: columnIndex }),
+            const imageOperations = imageOperationsBetween(
+              block.id,
+              previousRich,
+              nextRich,
+              { row: rowIndex, column: columnIndex },
             );
             const hasImages = Boolean(
               nextRich?.some((item) => item.kind === "image") ||
@@ -3342,23 +3385,26 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
                 ) !==
                 JSON.stringify(richContentWithoutImages(previousRich ?? []))
               : JSON.stringify(nextRich) !== JSON.stringify(previousRich);
-            if (visibleText !== previousVisibleText || nonImageRichChanged)
+            if (visibleText !== previousVisibleText || nonImageRichChanged) {
+              const textInlineContent = nextRich
+                ? inlineContentForTextOperation(previousRich ?? [], nextRich)
+                : undefined;
               operations.push({
                 kind: "edit-table-cell",
                 regionId: block.id,
                 row: rowIndex,
                 column: columnIndex,
                 text,
-                ...(nextRich ? { inlineContent: nextRich } : {}),
+                ...(textInlineContent ? { inlineContent: textInlineContent } : {}),
               });
+            }
+            operations.push(...imageOperations);
           }),
         );
       } else if (effectiveBlock.type !== "table" && (effectiveBlock.text !== previous.text || JSON.stringify(effectiveBlock.inlineContent) !== JSON.stringify(previous.inlineContent))) {
         const previousInline = previous.inlineContent ?? [];
         const nextInline = effectiveBlock.inlineContent ?? [];
-        operations.push(
-          ...imageOperationsBetween(block.id, previousInline, nextInline),
-        );
+        const imageOperations = imageOperationsBetween(block.id, previousInline, nextInline);
         const hasImages = previousInline.some((item) => item.kind === "image") ||
           nextInline.some((item) => item.kind === "image");
         const visibleText = hasImages
@@ -3372,13 +3418,20 @@ export const docxLens: SpectraLens<DocxProjection, DocxSemanticDelta> = {
             JSON.stringify(richContentWithoutImages(previousInline))
           : JSON.stringify(effectiveBlock.inlineContent) !==
             JSON.stringify(previous.inlineContent);
-        if (visibleText === previousVisibleText && !richChanged) continue;
+        if (visibleText === previousVisibleText && !richChanged) {
+          operations.push(...imageOperations);
+          continue;
+        }
+        const textInlineContent = effectiveBlock.inlineContent
+          ? inlineContentForTextOperation(previousInline, nextInline)
+          : undefined;
         operations.push({
           kind: "replace-paragraph",
           regionId: block.id,
           text: effectiveBlock.text,
-          ...(richChanged && effectiveBlock.inlineContent ? { inlineContent: effectiveBlock.inlineContent } : {}),
+          ...(richChanged && textInlineContent ? { inlineContent: textInlineContent } : {}),
         });
+        operations.push(...imageOperations);
       }
       const nextStyle = effectiveBlock.attrs?.styleId;
       if (

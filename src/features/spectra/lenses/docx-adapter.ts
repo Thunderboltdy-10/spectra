@@ -92,6 +92,8 @@ function nativeImageToEditable(
       ...(typeof attrs.widthEmu === "number"
         ? { widthPercent: Math.max(1, Math.min(100, (attrs.widthEmu / 914400) / 8.27 * 100)) }
         : {}),
+      ...(typeof attrs.widthEmu === "number" ? { widthEmu: attrs.widthEmu } : {}),
+      ...(typeof attrs.heightEmu === "number" ? { heightEmu: attrs.heightEmu } : {}),
     },
   } satisfies DocumentJsonNode;
 }

@@ -1,29 +1,30 @@
 # Spectra launch roadmap
 
-Updated 2026-09-11 after W6/S6 results and parent source review. WAVE-7.md contains evidence, lineage and architecture decisions. Reports are implementation evidence, not a launch certificate.
+Updated 2026-09-12. WAVE-8.md has complete progress evidence and decisions; RUN-NEXT-W8.md has exact manual prompts.
 
-Already integrated: W4 collaboration/Sheets/sharing/navigation repairs, Clerk factor-state fix, W5 bounded history/results, source retrieval, parser protection and Bridge polling with W6-00 corrections. Most richer Office, AI, ManageBac and K-bar functionality is in private candidates pending specific fixes and combination.
+All W7 product work is now on main, including rich Office/native operations, clarification/stop fixes, retained ownership/deletion, Bridge acknowledgement fencing, shared actions and student class-selection controls. V7 proved an authenticated K-bar and Live Dock settlement journey. The full integrated run reported 1,949 passing tests and a test-runner discovery defect; older capability/fixture failures were resolved.
 
-## Current focused implementation
+The cost implementation is private. Its compact-row measurements are promising fixture proxies, not actual billing savings. Parent found integration defects that W8-01 will repair before landing and migrating the real local deployment.
 
-| Task | Product outcome |
-| --- | --- |
-| W7-01 | Clarification reaches the right new run/target; exact stop and truthful save outcomes |
-| W7-02 | Pinned versions keep their bytes until the last owner; atomic bounded deletion retries |
-| W7-03 | Old native acknowledgements cannot regress newer work; accurate storage transitions |
-| W7-04 | Uploaded/retained Word images and basic page/header/footer editing through actual native routes |
-| W7-05 | Editable mathematical meaning survives matrices, delimiters, scripts and native roundtrip |
-| W7-06 | Independent duplicated PowerPoint charts, real hyperlinks and live/pinned source data |
-| W7-07 | Native Sheets rules and exposed chart types work with structural/formula edits |
-| W7-08 | Off-page K-bar/AI/human actions, usable Bridge handoffs and crowded workspace |
-| W7-09 | Ordinary students complete selection/retention/sync and source-linked personal scheduling |
+## Current two-task batch
 
-These are parallel private Luna xhigh tasks. Repair the findings and everyday functionality with meaningful adjacent tests. Do not replace implementation with capability flags, preservation-only claims or cosmetic work.
+- W8-01, Luna xhigh: repair and integrate compact reads, exact selection identity, transactional card/tab status and bounded migrations; measure two actual local workflows. Sole runtime owner.
+- W8-02, Luna xhigh: private linked Word equation insertion/layout and retained-image removal/undo through real native operations.
 
-## Next, sequentially
+Parent stops after dispatch and waits for Pablo to return; no polling.
 
-Pablo can paste V7-00-integrate-and-local-acceptance.md into Luna xhigh after the batch. It combines scoped deltas, resolves integration, lands them and proves a short authenticated local Convex journey on the one stack. Then paste S7-COST-read-model.md into a stronger task: implement measured compact authoritative reads and bounded migration, with its own small local acceptance. No hosting/storage decision is made.
+## Manual sequence afterward
 
-Parent then uses those outcomes to release a few sequential browser/model/native journeys with fixes and neighbor checks inside each. Likely cases: educational Office creation/edit/reopen, vague AI request/steering/follow, ordinary-user invitation/selected school planning, crowded navigation. Windows Office and friend-Mac build/start/pair/edit/reconnect need real-device evidence. Further scope depends on failures; no giant final audit or predetermined round count.
+1. S8-OFFICE, stronger agent: integrate Word delta and fix native package/schema defects using independent validation and available native applications. Do not trust a writer agreeing with its own parser.
+2. V8-01, Luna xhigh: ordinary-student invitation-return/class selection, selected sync, source-linked personal planning and on-demand resource.
+3. V8-02, Luna xhigh: actual >4MB Word intake/edit/export, pinned image lifetime and real scheduled cleanup.
+4. V8-03, Luna xhigh: useful source-backed educational AI output, vague follow-up, steering/stop and follow/K-bar/crowded /chat.
+5. V8-04, Luna xhigh: native Bridge saves/replay/conflicts/transitions and live versus pinned workbook-to-presentation charts.
 
-Cloud/local choice, native fidelity and cost remain connected: preserve artifact identity and managed-copy isolation, retain bytes while owned and release after the last owner, hydrate rich content only when needed. Keep the existing protocol and single action/authority path. Full Office breadth, live model quality and public Mac distribution remain unproved. They are substantive remaining work; visual perfection is not a launch gate.
+Run one at a time on the same integrated stack. Each task fixes small failures and tests its direct neighbor, then provides actual saved/reopened evidence. Further work depends on exact remaining blockers, not a blanket new audit.
+
+## Remaining launch evidence
+
+Actual Office app rendering/editability, live model usefulness, ordinary-student experience and Mac launch/distribution are not yet broadly proven. Keep advanced preserved-only Office limitations visible in the coverage record; they are not full native editing. Friend-Mac testing remains at the end, without Actions now. Hosting/bucket/self-hosting decisions still require discussion; current cost work stays with existing providers.
+
+Preserve the protocol, cloud/local choice, live authority and artifact identity. Optimize expensive reads rather than force local-only storage. No cosmetic perfection gate, production deployment, original-file mutation or remote school writes.

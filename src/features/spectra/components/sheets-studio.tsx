@@ -1311,7 +1311,7 @@ export const SheetsStudio = memo(function SheetsStudio({
   const [searchCursor, setSearchCursor] = useState(0);
   const [namedRangeDraft, setNamedRangeDraft] = useState("");
   const [validationKind, setValidationKind] = useState<
-    "list" | "number" | "checkbox"
+    "list" | "number" | "date" | "checkbox"
   >("list");
   const [validationDraft, setValidationDraft] = useState("");
   const [conditionalKind, setConditionalKind] = useState<
@@ -2097,21 +2097,46 @@ export const SheetsStudio = memo(function SheetsStudio({
       const scalar = parsed.value ?? null;
       const invalid =
         validation.kind === "list"
-          ? !validation.options.includes(String(scalar ?? ""))
+          ? validation.options.length > 0 &&
+            !validation.options.includes(String(scalar ?? ""))
           : validation.kind === "checkbox"
             ? typeof scalar !== "boolean"
-            : typeof scalar !== "number" ||
-              (typeof validation.minimum === "number" &&
-                scalar < validation.minimum) ||
-              (typeof validation.maximum === "number" &&
-                scalar > validation.maximum);
+            : (validation.kind !== "number" && validation.kind !== "date") ||
+              typeof scalar !== "number" ||
+              (validation.operator === "notBetween"
+                ? typeof validation.minimum === "number" &&
+                  typeof validation.maximum === "number" &&
+                  scalar >= validation.minimum &&
+                  scalar <= validation.maximum
+                : validation.operator === "equal"
+                  ? typeof validation.minimum === "number" &&
+                    scalar !== validation.minimum
+                  : validation.operator === "notEqual"
+                    ? typeof validation.minimum === "number" &&
+                      scalar === validation.minimum
+                    : validation.operator === "greaterThan"
+                      ? typeof validation.minimum === "number" &&
+                        scalar <= validation.minimum
+                      : validation.operator === "lessThan"
+                        ? typeof validation.minimum === "number" &&
+                          scalar >= validation.minimum
+                        : validation.operator === "greaterThanOrEqual"
+                          ? typeof validation.minimum === "number" &&
+                            scalar < validation.minimum
+                          : validation.operator === "lessThanOrEqual"
+                            ? typeof validation.minimum === "number" &&
+                              scalar > validation.minimum
+                            : (typeof validation.minimum === "number" &&
+                                scalar < validation.minimum) ||
+                              (typeof validation.maximum === "number" &&
+                                scalar > validation.maximum));
       if (invalid && validation.rejectInvalid) {
         setImportNotice(
           validation.kind === "list"
             ? `${address} accepts only: ${validation.options.join(", ")}.`
             : validation.kind === "checkbox"
               ? `${address} accepts TRUE or FALSE.`
-              : `${address} is outside its allowed numeric range.`,
+              : `${address} is outside its allowed range.`,
         );
         setEditingAddress(null);
         return;
@@ -5585,11 +5610,14 @@ export const SheetsStudio = memo(function SheetsStudio({
                   size="sm"
                   value={validationKind}
                   onChange={(next) =>
-                    setValidationKind(next as "list" | "number" | "checkbox")
+                    setValidationKind(
+                      next as "list" | "number" | "date" | "checkbox",
+                    )
                   }
                   options={[
                     { value: "list", label: "List of values" },
                     { value: "number", label: "Number range" },
+                    { value: "date", label: "Date range" },
                     { value: "checkbox", label: "Checkbox" },
                   ]}
                 />
@@ -5608,7 +5636,9 @@ export const SheetsStudio = memo(function SheetsStudio({
                       placeholder={
                         validationKind === "list"
                           ? "Draft, Ready, Complete"
-                          : "0, 50"
+                          : validationKind === "date"
+                            ? "45292, 45657"
+                            : "0, 50"
                       }
                       className={PANEL_INPUT}
                     />
@@ -5637,7 +5667,10 @@ export const SheetsStudio = memo(function SheetsStudio({
                           options,
                           rejectInvalid: true,
                         };
-                      } else if (validationKind === "number") {
+                      } else if (
+                        validationKind === "number" ||
+                        validationKind === "date"
+                      ) {
                         const [minimumText, maximumText] =
                           validationDraft.split(",", 2);
                         const minimum = minimumText?.trim()
@@ -5662,7 +5695,7 @@ export const SheetsStudio = memo(function SheetsStudio({
                           return;
                         }
                         validation = {
-                          kind: "number",
+                          kind: validationKind,
                           ...(minimum !== undefined ? { minimum } : {}),
                           ...(maximum !== undefined ? { maximum } : {}),
                           rejectInvalid: true,

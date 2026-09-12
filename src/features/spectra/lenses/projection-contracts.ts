@@ -307,6 +307,9 @@ const xlsxChartSeriesProjectionSchema = z
     name: z.string().optional(),
     categories: z.string().optional(),
     values: z.string().optional(),
+    /** Native combo charts retain the plot family and axis for each series. */
+    chartType: z.enum(["column", "bar", "line", "area", "scatter"]).optional(),
+    axis: z.enum(["primary", "secondary"]).optional(),
   })
   .strict();
 
@@ -396,6 +399,8 @@ export const xlsxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("remove-table"), sheetId: z.string(), tableId: z.string() }).strict(),
   z.object({ kind: z.literal("upsert-chart"), sheetId: z.string(), chart: xlsxChartProjectionSchema }).strict(),
   z.object({ kind: z.literal("remove-chart"), sheetId: z.string(), chartId: z.string() }).strict(),
+  z.object({ kind: z.literal("set-validations"), sheetId: z.string(), validations: z.array(xlsxNativeRuleSchema) }).strict(),
+  z.object({ kind: z.literal("set-conditional-formats"), sheetId: z.string(), conditionalFormats: z.array(xlsxNativeRuleSchema) }).strict(),
 ]);
 export const XLSX_LENS_DELTA_KINDS = xlsxOperationSchema.options.map(
   (operation) => operation.shape.kind.value,

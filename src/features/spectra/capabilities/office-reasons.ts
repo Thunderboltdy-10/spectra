@@ -44,7 +44,7 @@ export const SHEETS_NATIVE_REASONS = {
   dimensions:
     "Spectra writes native row heights, column widths, and hidden row or column state. Excel remains the owner of unsupported advanced layout settings.",
   chart:
-    "Spectra writes native editable Excel chart parts, series references, titles, legends, types, anchors, and cached source values. Complex chart families may be refused safely.",
+    "Spectra writes native editable Excel chart parts, series references, titles, legends, axes, anchors, and cached source values, including combo and histogram charts.",
   chartLinkToDeck:
     "Spectra can edit the native workbook chart, but linking it into a deck is an output action. Add or relink the chart from the presentation surface.",
   table:
@@ -56,9 +56,9 @@ export const SHEETS_NATIVE_REASONS = {
   duplicateRows:
     "Removing duplicate rows can shift formulas and preserved Excel objects without a native row operation. Remove duplicates in Excel.",
   validation:
-    "Spectra preserves Excel data validation but cannot write its native rules. Change validation in Excel.",
+    "Spectra edits common native Excel list, numeric, and date validation rules, including their ranges and error or prompt settings. Unsupported validation extensions remain preserved.",
   conditional:
-    "Spectra preserves Excel conditional formatting but cannot write its native rules. Change conditional formatting in Excel.",
+    "Spectra edits common native Excel cell, text, and two-color-scale conditional rules, including priority and stop-if-true. Unsupported rule families remain preserved.",
   namedRange:
     "Spectra writes modeled Excel defined names and preserves built-in names and unknown workbook extensions.",
   calculation:

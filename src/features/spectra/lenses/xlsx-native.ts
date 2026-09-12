@@ -199,24 +199,36 @@ function worksheetTabColor(sheet: Worksheet) {
     ?? undefined;
 }
 
-function worksheetValidations(root: XmlElement): NativeRule[] {
+function worksheetValidations(root: XmlElement, sheetId: number): NativeRule[] {
   const validations = child(root, SML, "dataValidations");
   return (validations?.elements() ?? [])
     .filter((node) => node.namespaceUri() === SML && node.localName === "dataValidation")
-    .map((node) => ({
+    .map((node, index) => ({
+      id: `xlsx:validation:${sheetId}:${index + 1}`,
       ...Object.fromEntries(node.attributes.filter((attr) => !attr.prefix).map((attr) => [attr.localName, attr.value])),
       ...(child(node, SML, "formula1") ? { formula1: textOf(child(node, SML, "formula1")) } : {}),
       ...(child(node, SML, "formula2") ? { formula2: textOf(child(node, SML, "formula2")) } : {}),
     }));
 }
 
-function worksheetConditionalFormats(root: XmlElement): NativeRule[] {
+function worksheetConditionalFormats(root: XmlElement, sheetId: number): NativeRule[] {
   return (root.elements().filter((node) => node.namespaceUri() === SML && node.localName === "conditionalFormatting"))
-    .map((node) => ({
+    .map((node, groupIndex) => ({
+      id: `xlsx:conditional-group:${sheetId}:${groupIndex + 1}`,
       sqref: node.getAttribute("sqref") ?? "",
-      rules: node.elements().filter((rule) => rule.namespaceUri() === SML && rule.localName === "cfRule").map((rule) => ({
+      rules: node.elements().filter((rule) => rule.namespaceUri() === SML && rule.localName === "cfRule").map((rule, ruleIndex) => ({
+        id: `xlsx:conditional:${sheetId}:${groupIndex + 1}:${ruleIndex + 1}`,
         ...Object.fromEntries(rule.attributes.filter((attr) => !attr.prefix).map((attr) => [attr.localName, attr.value])),
         formulas: rule.elements().filter((formula) => formula.namespaceUri() === SML && formula.localName === "formula").map((formula) => textOf(formula)),
+        ...(child(rule, SML, "colorScale") ? {
+          colorScale: {
+            cfvo: child(rule, SML, "colorScale")!.elements().filter((item) => item.localName === "cfvo").map((item) => ({
+              type: item.getAttribute("type") ?? "min",
+              ...(item.getAttribute("val") !== undefined ? { value: item.getAttribute("val") } : {}),
+            })),
+            colors: child(rule, SML, "colorScale")!.elements().filter((item) => item.localName === "color").map((item) => item.getAttribute("rgb") ?? item.getAttribute("theme") ?? ""),
+          },
+        } : {}),
       })),
     }));
 }
@@ -268,10 +280,26 @@ function chartReference(parent: XmlElement | undefined, localName: "cat" | "val"
 }
 
 function chartSeries(chartType: XmlElement) {
-  return chartType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser").map((series) => ({
+  const chartTypeName = chartType.localName === "barChart"
+    ? (chartType.find(CHART_NS, "barDir")?.getAttribute("val") === "bar" ? "bar" : "column")
+    : chartType.localName === "lineChart"
+      ? "line"
+      : chartType.localName === "areaChart"
+        ? "area"
+        : chartType.localName === "scatterChart"
+          ? "scatter"
+          : undefined;
+  const seriesNodes = chartType.elements().filter((node) =>
+    node.namespaceUri() === CHART_NS &&
+    (node.localName === "ser" || node.localName === "histogramSeries"),
+  );
+  return seriesNodes.map((series) => ({
     name: textOf(firstDescendant(series.find(CHART_NS, "tx") ?? series, CHART_NS, "v")) || undefined,
     categories: chartReference(series, "cat"),
     values: chartReference(series, "val"),
+    ...(chartTypeName ? { chartType: chartTypeName as "column" | "bar" | "line" | "area" | "scatter" } : {}),
+    ...(chartType.localName === "histogramChart" ? { chartType: "column" as const } : {}),
+    ...(chartType.findAll(CHART_NS, "axId").some((axis) => axis.getAttribute("val") === "-1000000002") ? { axis: "secondary" as const } : {}),
   }));
 }
 
@@ -290,15 +318,17 @@ function chartSourceRange(series: Array<{ categories?: string; values?: string }
 
 function chartTypeAndElement(chartRoot: XmlElement) {
   const plot = child(chartRoot, CHART_NS, "chart")?.find(CHART_NS, "plotArea") ?? firstDescendant(chartRoot, CHART_NS, "plotArea");
-  const typeElement = plot?.elements().find((node) => node.namespaceUri() === CHART_NS && /Chart$/.test(node.localName) && node.localName !== "plotArea");
+  const typeElements = plot?.elements().filter((node) => node.namespaceUri() === CHART_NS && /Chart$/.test(node.localName) && node.localName !== "plotArea") ?? [];
+  const typeElement = typeElements[0];
   if (!typeElement) return { type: "line" as const, element: undefined };
+  if (typeElements.length > 1) return { type: "combo" as const, element: typeElement, elements: typeElements };
   if (typeElement.localName === "barChart") return { type: typeElement.find(CHART_NS, "barDir")?.getAttribute("val") === "bar" ? "bar" as const : "column" as const, element: typeElement };
   if (typeElement.localName === "areaChart") return { type: "area" as const, element: typeElement };
   if (typeElement.localName === "pieChart") return { type: "pie" as const, element: typeElement };
   if (typeElement.localName === "scatterChart") return { type: "scatter" as const, element: typeElement };
   if (typeElement.localName === "histogramChart") return { type: "histogram" as const, element: typeElement };
   if (typeElement.localName === "lineChart") return { type: "line" as const, element: typeElement };
-  return { type: "combo" as const, element: typeElement };
+  return { type: "combo" as const, element: typeElement, elements: typeElements };
 }
 
 function anchorPosition(anchor: XmlElement | undefined) {
@@ -342,7 +372,11 @@ async function projectCharts(workbook: Workbook, sheet: Worksheet): Promise<Xlsx
     if (!chartPart) continue;
     const chartRoot = (await workbook.office.xml(chartPart.name)).root;
     const chart = chartTypeAndElement(chartRoot);
-    const series = chart.element ? chartSeries(chart.element) : [];
+    const series = chart.elements
+      ? chart.elements.flatMap((element) => chartSeries(element))
+      : chart.element
+        ? chartSeries(chart.element)
+        : [];
     const sourceRange = chartSourceRange(series, sheet.name) ?? series[0]?.values ?? series[0]?.categories ?? `${sheet.name}!A1`;
     result.push({
       id: `xlsx:chart:${sheet.sheetId}:${chartPart.name}`,
@@ -380,8 +414,8 @@ export async function projectXlsxSheet(workbook: Workbook, sheet: Worksheet): Pr
     ...freeze,
     tables: await projectTables(workbook, sheet),
     charts: await projectCharts(workbook, sheet),
-    validations: worksheetValidations(root),
-    conditionalFormats: worksheetConditionalFormats(root),
+    validations: worksheetValidations(root, sheet.sheetId),
+    conditionalFormats: worksheetConditionalFormats(root, sheet.sheetId),
     partName: sheet.partName,
   };
 }
@@ -745,22 +779,26 @@ function setChartRef(workbook: Workbook, container: XmlElement, formula: string 
 function makeChartPlot(type: XlsxChartProjection["type"], seriesXml: XmlElement[]) {
   const document = parseXml(`<c:plot xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
   const plot = document.root;
-  const elementName = type === "column" || type === "bar" ? "barChart" : type === "area" ? "areaChart" : type === "pie" ? "pieChart" : type === "scatter" ? "scatterChart" : "lineChart";
+  const elementName = type === "column" || type === "bar" ? "barChart" : type === "area" ? "areaChart" : type === "pie" ? "pieChart" : type === "scatter" ? "scatterChart" : type === "histogram" ? "histogramChart" : "lineChart";
   const chart = new XmlElement(elementName, "c");
   if (elementName === "barChart") { const barDir = new XmlElement("barDir", "c"); barDir.setAttribute("val", type === "bar" ? "bar" : "col"); chart.appendChild(barDir); const grouping = new XmlElement("grouping", "c"); grouping.setAttribute("val", "clustered"); chart.appendChild(grouping); }
   if (elementName === "lineChart") { const grouping = new XmlElement("grouping", "c"); grouping.setAttribute("val", "standard"); chart.appendChild(grouping); }
+  if (elementName === "histogramChart") {
+    const binCount = new XmlElement("binCount", "c"); binCount.setAttribute("val", String(Math.max(3, Math.min(30, seriesXml.length || 10)))); chart.appendChild(binCount);
+    const gapWidth = new XmlElement("gapWidth", "c"); gapWidth.setAttribute("val", "20"); chart.appendChild(gapWidth);
+  }
   for (const series of seriesXml) chart.appendChild(series);
   const axId = (value: string) => { const node = new XmlElement("axId", "c"); node.setAttribute("val", value); return node; };
-  if (elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart") { chart.appendChild(axId("-1000000001")); chart.appendChild(axId("1000000001")); }
+  if (elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart" || elementName === "histogramChart") { chart.appendChild(axId("-1000000001")); chart.appendChild(axId("1000000001")); }
   plot.appendChild(chart);
-  if (elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart") {
+  if (elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart" || elementName === "histogramChart") {
     for (const axisName of ["catAx", "valAx"]) {
       const axis = new XmlElement(axisName, "c"); axis.appendChild(axId(axisName === "catAx" ? "-1000000001" : "1000000001")); const scaling = new XmlElement("scaling", "c"); const orientation = new XmlElement("orientation", "c"); orientation.setAttribute("val", "minMax"); scaling.appendChild(orientation); axis.appendChild(scaling); const deleteNode = new XmlElement("delete", "c"); deleteNode.setAttribute("val", "0"); axis.appendChild(deleteNode); const pos = new XmlElement("axPos", "c"); pos.setAttribute("val", axisName === "catAx" ? "b" : "l"); axis.appendChild(pos); plot.appendChild(axis); }
   }
   return plot;
 }
 
-function chartSeriesForSource(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
+function chartSeriesForSource(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string): NonNullable<XlsxChartProjection["series"]> {
   if (chart.series?.length) return chart.series;
   const bang = chart.sourceRange.lastIndexOf("!");
   const sourceSheet = refSheetName(chart.sourceRange, defaultSheet);
@@ -797,9 +835,74 @@ function newChartSeries(workbook: Workbook, chart: XlsxChartProjection, defaultS
   });
 }
 
+function histogramBinCount(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
+  const source = chartSeriesForSource(workbook, chart, defaultSheet)[0]?.values ?? chart.sourceRange;
+  const cached = cacheValues(workbook, source, defaultSheet);
+  const count = cached?.values.filter((value) => typeof value === "number" && Number.isFinite(value)).length ?? 1;
+  return Math.max(3, Math.min(30, Math.ceil(Math.sqrt(Math.max(1, count)))));
+}
+
+function newHistogramSeries(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
+  const source = chartSeriesForSource(workbook, chart, defaultSheet);
+  const series = source[0] ?? { values: chart.sourceRange };
+  const document = parseXml(`<c:histogramSeries xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
+  const node = document.root;
+  const idx = new XmlElement("idx", "c"); idx.setAttribute("val", "0"); node.appendChild(idx);
+  const order = new XmlElement("order", "c"); order.setAttribute("val", "0"); node.appendChild(order);
+  const tx = new XmlElement("tx", "c"); const v = new XmlElement("v", "c"); v.appendChild(new XmlText(series.name ?? "Frequency")); tx.appendChild(v); node.appendChild(tx);
+  const values = new XmlElement("val", "c"); setChartRef(workbook, values, series.values ?? chart.sourceRange, defaultSheet); node.appendChild(values);
+  return node;
+}
+
+function comboChartPlots(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
+  const source = chartSeriesForSource(workbook, chart, defaultSheet);
+  const primary = source.map((series, index) => ({ ...series, chartType: series.chartType ?? (index === 0 ? "column" : "line") }));
+  const barSeries = newChartSeries(workbook, { ...chart, type: "column", series: primary.filter((series) => series.chartType === "column" || series.chartType === "bar") }, defaultSheet);
+  const lineSeries = newChartSeries(workbook, { ...chart, type: "line", series: primary.filter((series) => series.chartType === "line") }, defaultSheet);
+  const plots: XmlElement[] = [];
+  if (barSeries.length) plots.push(makeChartPlot("column", barSeries).elements()[0]!);
+  if (lineSeries.length) plots.push(makeChartPlot("line", lineSeries).elements()[0]!);
+  return plots;
+}
+
 function updateChartSeries(workbook: Workbook, chartRoot: XmlElement, chart: XlsxChartProjection, defaultSheet: string) {
   const plot = child(child(chartRoot, CHART_NS, "chart"), CHART_NS, "plotArea") ?? firstDescendant(chartRoot, CHART_NS, "plotArea");
   const plotTypes = plot?.elements().filter((node) => node.namespaceUri() === CHART_NS && /Chart$/.test(node.localName)) ?? [];
+  if (chart.type === "histogram" || plotTypes.some((candidate) => candidate.localName === "histogramChart")) {
+    const histogram = plotTypes.find((candidate) => candidate.localName === "histogramChart");
+    if (histogram) {
+      const existing = histogram.elements().find((node) => node.namespaceUri() === CHART_NS && node.localName === "histogramSeries");
+      const desired = newHistogramSeries(workbook, chart, defaultSheet);
+      if (existing) histogram.removeChild(existing);
+      histogram.insertBefore(desired, histogram.elements()[0] ?? null);
+      const binCount = child(histogram, CHART_NS, "binCount");
+      if (binCount) binCount.setAttribute("val", String(histogramBinCount(workbook, chart, defaultSheet)));
+    }
+    return;
+  }
+  if (chart.type === "combo" || plotTypes.length > 1) {
+    const requested = chartSeriesForSource(workbook, chart, defaultSheet);
+    const plots = plotTypes.filter((candidate) => candidate.localName === "barChart" || candidate.localName === "lineChart");
+    if (!plots.length) return;
+    plots.forEach((plotType) => {
+      const desiredType = plotType.localName === "barChart" ? "column" : "line";
+      const desired = requested.filter((series, index) => (series.chartType ?? (index === 0 ? "column" : "line")) === desiredType || (desiredType === "column" && series.chartType === "bar"));
+      const current = plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser");
+      for (let index = current.length - 1; index >= desired.length; index -= 1) plotType.removeChild(current[index]!);
+      const next = plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser");
+      for (let index = next.length; index < desired.length; index += 1) plotType.appendChild(newChartSeries(workbook, { ...chart, type: desiredType, series: [desired[index]!] }, defaultSheet)[0]!);
+      plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser").forEach((ser, index) => {
+        const requestedSeries = desired[index]!;
+        const tx = child(ser, CHART_NS, "tx");
+        if (tx && requestedSeries.name) { const value = firstDescendant(tx, CHART_NS, "v"); if (value) setText(value, requestedSeries.name); }
+        const categories = child(ser, CHART_NS, "cat") ?? (() => { const created = new XmlElement("cat", "c"); ser.appendChild(created); return created; })();
+        setChartRef(workbook, categories, requestedSeries.categories, defaultSheet, true);
+        const values = child(ser, CHART_NS, "val") ?? (() => { const created = new XmlElement("val", "c"); ser.appendChild(created); return created; })();
+        setChartRef(workbook, values, requestedSeries.values ?? chart.sourceRange, defaultSheet);
+      });
+    });
+    return;
+  }
   const requested = chartSeriesForSource(workbook, chart, defaultSheet);
   for (const [index, plotType] of plotTypes.entries()) {
     const series = plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser");
@@ -830,13 +933,56 @@ function setChartLegend(chartRoot: XmlElement, visible: boolean) {
 }
 
 function setChartType(chartRoot: XmlElement, type: XlsxChartProjection["type"]) {
-  if (type === "combo" || type === "histogram") throw new Error(`Native Excel chart type ${type} is not supported by the safe writer.`);
-  const current = chartTypeAndElement(chartRoot).element;
+  const info = chartTypeAndElement(chartRoot);
+  const current = info.element;
   if (!current || !current.parent) return;
-  const series = current.elements().filter((node) => node.localName === "ser").map((node) => node.clone());
+  const oldElements = info.elements ?? [current];
+  const series = oldElements.flatMap((element) => element.elements()
+    .filter((node) => node.namespaceUri() === CHART_NS && (node.localName === "ser" || node.localName === "histogramSeries"))
+    .map((node) => node.localName === "ser" ? node.clone() : standardSeriesFromHistogram(node)));
+  const parent = current.parent;
+  for (const element of oldElements) if (element.parent === parent) parent.removeChild(element);
+  if (type === "combo") {
+    const combo = comboChartPlotsFromExisting(series);
+    for (const plot of combo) parent.appendChild(plot);
+    return;
+  }
+  if (type === "histogram") {
+    const histogramSeries = series[0] ? histogramSeriesFromStandard(series[0]) : new XmlElement("histogramSeries", parent.lookupPrefix(CHART_NS) ?? "c");
+    parent.appendChild(makeChartPlot("histogram", [histogramSeries]).elements()[0]!);
+    return;
+  }
   const replacement = makeChartPlot(type, series).elements()[0]!;
-  current.parent.insertBefore(replacement, current);
-  current.parent.removeChild(current);
+  parent.appendChild(replacement);
+}
+
+function standardSeriesFromHistogram(node: XmlElement) {
+  const document = parseXml(`<c:ser xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
+  const result = document.root;
+  for (const childName of ["idx", "order", "tx", "cat", "val"]) {
+    const childNode = child(node, CHART_NS, childName);
+    if (childNode) result.appendChild(childNode.clone());
+  }
+  return result;
+}
+
+function histogramSeriesFromStandard(node: XmlElement) {
+  const document = parseXml(`<c:histogramSeries xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
+  const result = document.root;
+  for (const childName of ["idx", "order", "tx", "val"]) {
+    const childNode = child(node, CHART_NS, childName);
+    if (childNode) result.appendChild(childNode.clone());
+  }
+  return result;
+}
+
+function comboChartPlotsFromExisting(series: XmlElement[]) {
+  const first = series.slice(0, 1);
+  const rest = series.slice(1);
+  const plots: XmlElement[] = [];
+  if (first.length) plots.push(makeChartPlot("column", first).elements()[0]!);
+  if (rest.length) plots.push(makeChartPlot("line", rest).elements()[0]!);
+  return plots;
 }
 
 async function writeExistingChart(workbook: Workbook, sheet: Worksheet, chart: XlsxChartProjection) {
@@ -849,9 +995,9 @@ async function writeExistingChart(workbook: Workbook, sheet: Worksheet, chart: X
     const chartNode = child(root, CHART_NS, "chart");
     if (chartNode) chartNode.insertBefore(chartTitleXml(chart.title), chartNode.elements()[0] ?? null);
   }
-  updateChartSeries(workbook, root, chart, sheet.name);
   if (chart.showLegend !== undefined) setChartLegend(root, chart.showLegend);
   if (chart.type !== chartTypeAndElement(root).type) setChartType(root, chart.type);
+  updateChartSeries(workbook, root, chart, sheet.name);
   await updateChartAnchor(workbook, chart);
   workbook.office.markDirty(chart.partName);
   return true;
@@ -920,7 +1066,6 @@ async function updateChartAnchor(workbook: Workbook, chart: XlsxChartProjection)
 }
 
 async function createNativeChart(workbook: Workbook, sheet: Worksheet, chart: XlsxChartProjection) {
-  if (chart.type === "combo" || chart.type === "histogram") throw new Error(`Native Excel chart type ${chart.type} is not supported by the safe writer.`);
   const packageModel = workbook.office.package;
   const nextPart = (prefix: string, suffix: string) => {
     let index = 1; while (packageModel.getPart(`/xl/${prefix}/${suffix}${index}.xml`)) index += 1; return `/xl/${prefix}/${suffix}${index}.xml`;
@@ -933,7 +1078,16 @@ async function createNativeChart(workbook: Workbook, sheet: Worksheet, chart: Xl
   for (const node of [...plotArea.children]) plotArea.removeChild(node);
   plotArea.appendChild(new XmlElement("layout", "c"));
   if (chart.title) chartNode.insertBefore(chartTitleXml(chart.title), chartNode.elements()[0] ?? null);
-  plotArea.appendChild(makeChartPlot(chart.type, newChartSeries(workbook, chart, sheet.name).map((node) => node.clone())).elements()[0]!);
+  if (chart.type === "combo") {
+    for (const plot of comboChartPlots(workbook, chart, sheet.name)) plotArea.appendChild(plot);
+  } else if (chart.type === "histogram") {
+    const plot = makeChartPlot("histogram", [newHistogramSeries(workbook, chart, sheet.name)]).elements()[0]!;
+    const binCount = child(plot, CHART_NS, "binCount");
+    if (binCount) binCount.setAttribute("val", String(histogramBinCount(workbook, chart, sheet.name)));
+    plotArea.appendChild(plot);
+  } else {
+    plotArea.appendChild(makeChartPlot(chart.type, newChartSeries(workbook, chart, sheet.name).map((node) => node.clone())).elements()[0]!);
+  }
   if (chart.showLegend !== false) setChartLegend(chartRoot, true);
   packageModel.addPart(chartPartName, CT_CHART, serializeXml(chartDocument));
 
@@ -1063,6 +1217,165 @@ async function removeNativeTable(workbook: Workbook, sheet: Worksheet, tableId: 
   workbook.office.package.removePart(table.partName);
 }
 
+function knownValidationType(type: string | undefined) {
+  return type === "list" || type === "whole" || type === "decimal" || type === "date" || type === "time";
+}
+
+function knownConditionalType(type: string | undefined) {
+  return type === "cellIs" || type === "containsText" || type === "colorScale";
+}
+
+function insertWorksheetChild(root: XmlElement, node: XmlElement) {
+  const order = ["conditionalFormatting", "dataValidations", "hyperlinks", "printOptions", "pageMargins", "pageSetup", "drawing", "legacyDrawing", "tableParts", "extLst"];
+  const wanted = order.indexOf(node.localName);
+  const reference = root.elements().find((candidate) => {
+    const index = order.indexOf(candidate.localName);
+    return index >= 0 && index > wanted;
+  });
+  root.insertBefore(node, reference ?? null);
+}
+
+function appendXmlText(parent: XmlElement, localName: string, value: string) {
+  const node = new XmlElement(localName, parent.lookupPrefix(SML) ?? null);
+  node.appendChild(new XmlText(value));
+  parent.appendChild(node);
+  return node;
+}
+
+function ruleAttributes(rule: NativeRule, excluded: Set<string>) {
+  return Object.entries(rule).flatMap(([key, value]) => {
+    if (excluded.has(key) || value === undefined || value === null || typeof value === "object") return [];
+    if (typeof value === "boolean") return [[key, value ? "1" : "0"] as const];
+    return [[key, String(value)] as const];
+  });
+}
+
+function colorRgb(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const hex = value.replace(/^#/, "").trim();
+  if (/^[0-9a-f]{6}$/i.test(hex)) return `FF${hex.toUpperCase()}`;
+  if (/^[0-9a-f]{8}$/i.test(hex)) return hex.toUpperCase();
+  return undefined;
+}
+
+async function ensureDxf(workbook: Workbook, fillColor: unknown, textColor: unknown, existing: unknown) {
+  const existingId = Number(existing);
+  if (Number.isInteger(existingId) && existingId >= 0) return existingId;
+  const stylesPart = workbook.office.package.getPart("/xl/styles.xml");
+  if (!stylesPart) return undefined;
+  const document = await workbook.office.xml(stylesPart.name);
+  const root = document.root;
+  let dxfs = child(root, SML, "dxfs");
+  if (!dxfs) {
+    dxfs = new XmlElement("dxfs", root.lookupPrefix(SML) ?? null);
+    dxfs.setAttribute("count", "0");
+    const reference = root.elements().find((node) => node.localName === "cellStyles");
+    root.insertBefore(dxfs, reference ?? null);
+  }
+  const fill = colorRgb(fillColor);
+  const text = colorRgb(textColor);
+  if (!fill && !text) return undefined;
+  const dxf = new XmlElement("dxf", dxfs.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+  if (text) {
+    const font = new XmlElement("font", dxf.lookupPrefix(SML) ?? null);
+    const color = new XmlElement("color", font.lookupPrefix(SML) ?? null); color.setAttribute("rgb", text); font.appendChild(color); dxf.appendChild(font);
+  }
+  if (fill) {
+    const fillNode = new XmlElement("fill", dxf.lookupPrefix(SML) ?? null);
+    const pattern = new XmlElement("patternFill", fillNode.lookupPrefix(SML) ?? null); pattern.setAttribute("patternType", "solid");
+    const foreground = new XmlElement("fgColor", pattern.lookupPrefix(SML) ?? null); foreground.setAttribute("rgb", fill); pattern.appendChild(foreground);
+    const background = new XmlElement("bgColor", pattern.lookupPrefix(SML) ?? null); background.setAttribute("indexed", "64"); pattern.appendChild(background);
+    fillNode.appendChild(pattern); dxf.appendChild(fillNode);
+  }
+  const index = dxfs.elements().filter((node) => node.localName === "dxf").length;
+  dxfs.appendChild(dxf); dxfs.setAttribute("count", String(index + 1)); workbook.office.markDirty(stylesPart.name);
+  return index;
+}
+
+function addRuleFormulas(parent: XmlElement, rule: NativeRule) {
+  const formulas = Array.isArray(rule.formulas)
+    ? rule.formulas.filter((value): value is string => typeof value === "string")
+    : [];
+  if (typeof rule.formula1 === "string") formulas.push(rule.formula1);
+  if (typeof rule.formula2 === "string") formulas.push(rule.formula2);
+  for (const formula of formulas) appendXmlText(parent, "formula", formula);
+}
+
+async function conditionalRuleXml(workbook: Workbook, rule: NativeRule, priority: number, prefix: string | null) {
+  const node = new XmlElement("cfRule", prefix);
+  const excluded = new Set(["id", "formulas", "colorScale", "fillColor", "textColor", "formula1", "formula2"]);
+  for (const [key, value] of ruleAttributes({ ...rule, priority: rule.priority ?? String(priority) }, excluded)) node.setAttribute(key, value);
+  if (rule.priority === undefined) node.setAttribute("priority", String(priority));
+  if (rule.type === "colorScale" && rule.colorScale && typeof rule.colorScale === "object") {
+    const scale = rule.colorScale as NativeRule;
+    const scaleNode = new XmlElement("colorScale", prefix);
+    for (const candidate of Array.isArray(scale.cfvo) ? scale.cfvo : []) {
+      const value = candidate as NativeRule;
+      const cfvo = new XmlElement("cfvo", prefix);
+      if (typeof value.type === "string") cfvo.setAttribute("type", value.type);
+      if (value.value !== undefined) cfvo.setAttribute("val", String(value.value));
+      scaleNode.appendChild(cfvo);
+    }
+    for (const color of Array.isArray(scale.colors) ? scale.colors : []) {
+      const colorNode = new XmlElement("color", prefix);
+      const rgb = colorRgb(color); if (rgb) colorNode.setAttribute("rgb", rgb); else if (typeof color === "string") colorNode.setAttribute("theme", color);
+      scaleNode.appendChild(colorNode);
+    }
+    node.appendChild(scaleNode);
+  } else if (rule.type === "containsText" && typeof rule.text === "string") {
+    node.setAttribute("operator", "containsText"); node.setAttribute("text", rule.text);
+  }
+  addRuleFormulas(node, rule);
+  const dxfId = await ensureDxf(workbook, rule.fillColor, rule.textColor, rule.dxfId);
+  if (dxfId !== undefined) node.setAttribute("dxfId", String(dxfId));
+  return node;
+}
+
+async function dataValidationXml(rule: NativeRule, prefix: string | null) {
+  const node = new XmlElement("dataValidation", prefix);
+  const excluded = new Set(["id", "formula1", "formula2", "formulas", "source", "kind"]);
+  for (const [key, value] of ruleAttributes(rule, excluded)) node.setAttribute(key, value);
+  if (typeof rule.sqref === "string") node.setAttribute("sqref", rule.sqref);
+  if (typeof rule.formula1 === "string") appendXmlText(node, "formula1", rule.formula1);
+  if (typeof rule.formula2 === "string") appendXmlText(node, "formula2", rule.formula2);
+  return node;
+}
+
+async function writeNativeValidations(workbook: Workbook, sheet: Worksheet, rules: NativeRule[]) {
+  const document = await workbook.office.xml(sheet.partName);
+  const root = document.root;
+  let container = child(root, SML, "dataValidations");
+  const unknown = container?.elements().filter((node) => !knownValidationType(node.getAttribute("type"))) ?? [];
+  const desired = rules.filter((rule) => knownValidationType(typeof rule.type === "string" ? rule.type : undefined));
+  if (!unknown.length && !desired.length) { if (container) root.removeChild(container); workbook.office.markDirty(sheet.partName); return; }
+  if (!container) { container = new XmlElement("dataValidations", root.lookupPrefix(SML) ?? null); insertWorksheetChild(root, container); }
+  for (const node of [...container.elements()]) if (knownValidationType(node.getAttribute("type"))) container.removeChild(node);
+  for (const rule of desired) container.appendChild(await dataValidationXml(rule, container.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null));
+  container.setAttribute("count", String(container.elements().length));
+  workbook.office.markDirty(sheet.partName);
+}
+
+async function writeNativeConditionalFormats(workbook: Workbook, sheet: Worksheet, groups: NativeRule[]) {
+  const document = await workbook.office.xml(sheet.partName);
+  const root = document.root;
+  const existing = root.elements().filter((node) => node.namespaceUri() === SML && node.localName === "conditionalFormatting");
+  for (const group of existing) {
+    for (const rule of [...group.elements()].filter((node) => node.localName === "cfRule" && knownConditionalType(node.getAttribute("type")))) group.removeChild(rule);
+    if (!group.elements().length) root.removeChild(group);
+  }
+  let priority = Math.max(0, ...existing.flatMap((group) => group.elements().flatMap((node) => {
+    const value = Number(node.getAttribute("priority")); return Number.isFinite(value) ? [value] : [];
+  })));
+  for (const group of groups) {
+    const desired = Array.isArray(group.rules) ? group.rules.filter((rule): rule is NativeRule => knownConditionalType(typeof (rule as NativeRule).type === "string" ? String((rule as NativeRule).type) : undefined)) : [];
+    if (!desired.length || typeof group.sqref !== "string") continue;
+    const node = new XmlElement("conditionalFormatting", root.lookupPrefix(SML) ?? null); node.setAttribute("sqref", group.sqref);
+    for (const rule of desired) { priority += 1; node.appendChild(await conditionalRuleXml(workbook, rule, priority, node.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null)); }
+    insertWorksheetChild(root, node);
+  }
+  if (groups.length || existing.length) workbook.office.markDirty(sheet.partName);
+}
+
 export async function updateNativeChartCaches(workbook: Workbook) {
   for (const sheet of workbook.sheets()) {
     for (const chart of await projectCharts(workbook, sheet)) {
@@ -1155,6 +1468,8 @@ export async function applyXlsxNativeOperation(workbook: Workbook, operation: Xl
   if (operation.kind === "set-sheet-properties") { await setXlsxSheetProperties(workbook, sheet, operation.properties); return; }
   if (operation.kind === "upsert-table") { await upsertNativeTable(workbook, sheet, operation.table); return; }
   if (operation.kind === "remove-table") { await removeNativeTable(workbook, sheet, operation.tableId); return; }
+  if (operation.kind === "set-validations") { await writeNativeValidations(workbook, sheet, operation.validations); return; }
+  if (operation.kind === "set-conditional-formats") { await writeNativeConditionalFormats(workbook, sheet, operation.conditionalFormats); return; }
   if (operation.kind === "upsert-chart") {
     if (operation.chart.partName && await writeExistingChart(workbook, sheet, operation.chart)) return;
     await createNativeChart(workbook, sheet, operation.chart); return;

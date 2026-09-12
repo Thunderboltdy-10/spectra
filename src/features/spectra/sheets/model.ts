@@ -18,16 +18,82 @@ export type SheetValidation =
       kind: "list";
       options: string[];
       rejectInvalid: boolean;
+      /** Native list source, retained when the list is backed by a range. */
+      source?: string;
+      allowBlank?: boolean;
+      showDropDown?: boolean;
+      showInputMessage?: boolean;
+      showErrorMessage?: boolean;
+      errorStyle?: "stop" | "warning" | "information";
+      errorTitle?: string;
+      errorMessage?: string;
+      promptTitle?: string;
+      promptMessage?: string;
     }
   | {
       kind: "number";
       minimum?: number;
       maximum?: number;
       rejectInvalid: boolean;
+      operator?:
+        | "between"
+        | "notBetween"
+        | "equal"
+        | "notEqual"
+        | "greaterThan"
+        | "lessThan"
+        | "greaterThanOrEqual"
+        | "lessThanOrEqual";
+      formula1?: string;
+      formula2?: string;
+      allowBlank?: boolean;
+      showDropDown?: boolean;
+      showInputMessage?: boolean;
+      showErrorMessage?: boolean;
+      errorStyle?: "stop" | "warning" | "information";
+      errorTitle?: string;
+      errorMessage?: string;
+      promptTitle?: string;
+      promptMessage?: string;
+    }
+  | {
+      kind: "date";
+      minimum?: number;
+      maximum?: number;
+      rejectInvalid: boolean;
+      operator?:
+        | "between"
+        | "notBetween"
+        | "equal"
+        | "notEqual"
+        | "greaterThan"
+        | "lessThan"
+        | "greaterThanOrEqual"
+        | "lessThanOrEqual";
+      formula1?: string;
+      formula2?: string;
+      allowBlank?: boolean;
+      showDropDown?: boolean;
+      showInputMessage?: boolean;
+      showErrorMessage?: boolean;
+      errorStyle?: "stop" | "warning" | "information";
+      errorTitle?: string;
+      errorMessage?: string;
+      promptTitle?: string;
+      promptMessage?: string;
     }
   | {
       kind: "checkbox";
       rejectInvalid: boolean;
+      allowBlank?: boolean;
+      showDropDown?: boolean;
+      showInputMessage?: boolean;
+      showErrorMessage?: boolean;
+      errorStyle?: "stop" | "warning" | "information";
+      errorTitle?: string;
+      errorMessage?: string;
+      promptTitle?: string;
+      promptMessage?: string;
     };
 
 /**
@@ -155,6 +221,8 @@ export type SheetConditionalFormat =
       kind: "color_scale";
       minimumColor: string;
       maximumColor: string;
+      priority?: number;
+      stopIfTrue?: boolean;
     }
   | {
       id: string;
@@ -173,6 +241,8 @@ export type SheetConditionalFormat =
       secondValue?: number;
       fillColor: string;
       textColor?: string;
+      priority?: number;
+      stopIfTrue?: boolean;
     }
   | {
       id: string;
@@ -181,6 +251,8 @@ export type SheetConditionalFormat =
       text: string;
       fillColor: string;
       textColor?: string;
+      priority?: number;
+      stopIfTrue?: boolean;
     };
 
 export type WorkbookSheet = {
@@ -735,6 +807,12 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                       typeof rule.maximumColor === "string"
                         ? rule.maximumColor
                         : "#78d2ad",
+                    ...(typeof rule.priority === "number"
+                      ? { priority: rule.priority }
+                      : {}),
+                    ...(typeof rule.stopIfTrue === "boolean"
+                      ? { stopIfTrue: rule.stopIfTrue }
+                      : {}),
                   },
                 ];
               if (
@@ -772,6 +850,12 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                       typeof rule.textColor === "string"
                         ? rule.textColor
                         : undefined,
+                    ...(typeof rule.priority === "number"
+                      ? { priority: rule.priority }
+                      : {}),
+                    ...(typeof rule.stopIfTrue === "boolean"
+                      ? { stopIfTrue: rule.stopIfTrue }
+                      : {}),
                   },
                 ];
               if (
@@ -793,6 +877,12 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                       typeof rule.textColor === "string"
                         ? rule.textColor
                         : undefined,
+                    ...(typeof rule.priority === "number"
+                      ? { priority: rule.priority }
+                      : {}),
+                    ...(typeof rule.stopIfTrue === "boolean"
+                      ? { stopIfTrue: rule.stopIfTrue }
+                      : {}),
                   },
                 ];
               return [];

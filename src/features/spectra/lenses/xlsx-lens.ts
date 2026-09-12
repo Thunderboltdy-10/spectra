@@ -296,14 +296,16 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
   const hasSheetStructure = sheets.length > 1 || sheets.some((sheet) => sheet.hidden === true);
   const hasDimensions = sheets.some((sheet) => Object.keys(sheet.columnWidths ?? {}).length || Object.keys(sheet.rowHeights ?? {}).length || sheet.hiddenRows?.length || sheet.hiddenColumns?.length);
   const hasViews = sheets.some((sheet) => sheet.showGridlines !== undefined || sheet.showHeadings !== undefined);
+  const hasEditableValidations = sheets.some((sheet) => (sheet.validations ?? []).some((rule) => ["list", "whole", "decimal", "date", "time"].includes(String(rule.type))));
+  const hasEditableConditionalFormats = sheets.some((sheet) => (sheet.conditionalFormats ?? []).some((group) => Array.isArray(group.rules) && group.rules.some((rule) => (rule.type === "cellIs" && rule.operator !== "notBetween") || rule.type === "containsText" || (rule.type === "colorScale" && Array.isArray((rule.colorScale as Record<string, unknown> | undefined)?.colors) && ((rule.colorScale as Record<string, unknown>).colors as unknown[]).length === 2))));
   const definedNames = workbook.definedNames().map((item) => ({ name: item.name, ref: item.ref, ...(item.sheet ? { sheet: item.sheet } : {}) }));
   const regionEntries: ReadonlyArray<[string, LensFidelityEntry["class"], string?]> = [
     ["cells", "NATIVE"], ["formulas", "NATIVE"], ["styles", "NATIVE"],
     ["numberFormats", "NATIVE"], ["merges", "NATIVE"], ["freezePanes", "NATIVE"],
     ["charts", hasCharts ? "NATIVE" : "PRESERVED", hasCharts ? undefined : "Excel chart parts are preserved until a chart is present for native editing."],
     ["tables", hasTables ? "NATIVE" : "PRESERVED", hasTables ? undefined : "Excel table definitions are preserved until a table is present for native editing."],
-    ["validation", "PRESERVED", "Excel data validation is preserved; native rule authoring remains an Excel-owned operation."],
-    ["conditionalFormat", "PRESERVED", "Excel conditional formatting is preserved; native rule authoring remains an Excel-owned operation."],
+    ["validation", hasEditableValidations ? "NATIVE" : "PRESERVED", hasEditableValidations ? undefined : "Unsupported Excel validation types remain preserved for Excel."],
+    ["conditionalFormat", hasEditableConditionalFormats ? "NATIVE" : "PRESERVED", hasEditableConditionalFormats ? undefined : "Unsupported Excel conditional-format types remain preserved for Excel."],
     ["namedRanges", definedNames.length ? "NATIVE" : "PRESERVED", definedNames.length ? undefined : "Workbook names are preserved until a native name is present."],
     ["pivotTables", "PRESERVED", "Pivot tables remain owned by Excel."],
     ["comments", "PRESERVED", "Cell comments and notes remain owned by Excel."],
@@ -342,10 +344,10 @@ async function projectWorkbook(workbook: Workbook, profile: LensCompatibilityPro
       entries.push({
         regionId: `xlsx:feature:conditional-formatting:${sheet.sheetId}`,
         feature: "conditional-formatting",
-        class: "PRESERVED",
+        class: hasEditableConditionalFormats ? "NATIVE" : "PRESERVED",
         partName: sheet.partName,
         pathPattern: "conditionalFormatting",
-        readOnly: true,
+        ...(hasEditableConditionalFormats ? {} : { readOnly: true }),
       });
     }
   }
@@ -412,6 +414,7 @@ async function applyDelta(carry: LensPreservedCarry<XlsxProjection>, delta: Xlsx
       "add-sheet", "remove-sheet", "rename-sheet", "reorder-sheets",
       "set-defined-names", "set-workbook-properties", "set-sheet-properties",
       "mutate-sheet-axis", "upsert-table", "remove-table", "upsert-chart", "remove-chart",
+      "set-validations", "set-conditional-formats",
     ].includes(operation.kind)) {
       try { await applyXlsxNativeOperation(workbook, operation, aliases); }
       catch (error) { throw new XlsxLensError("XLSX_NATIVE_WRITE_REFUSED", error instanceof Error ? error.message : "The native Excel edit is not safe to apply."); }

@@ -1,5 +1,12 @@
 import { presentationObjectText, type PresentationContent, type PresentationObject, type PresentationParagraph } from "../presentation/model";
-import { type SheetCellFormat, type SheetsContent } from "../sheets/model";
+import {
+  parseRange,
+  rangeAddresses,
+  type SheetCellFormat,
+  type SheetConditionalFormat,
+  type SheetValidation,
+  type SheetsContent,
+} from "../sheets/model";
 import {
   decodeSheetsContentFromStorage,
   encodeArtifactContentForStorage,
@@ -223,6 +230,268 @@ export function sheetFormatsEquivalent(left: unknown, right: unknown) {
   );
 }
 
+type NativeRule = Record<string, unknown>;
+
+function nativeBool(value: unknown) {
+  return value === true || value === "1" || value === "true";
+}
+
+function nativeNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return undefined;
+}
+
+function nativeRanges(value: unknown) {
+  if (typeof value !== "string") return [];
+  return value.split(/\s+/).flatMap((candidate) => {
+    const range = parseRange(candidate.replace(/^.*!/, ""));
+    return range ? [range] : [];
+  });
+}
+
+function nativeFormulaNumber(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const number = Number(value.replace(/^=/, "").trim());
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function nativeRuleMetadata(rule: NativeRule) {
+  const errorStyle = rule.errorStyle === "warning" || rule.errorStyle === "information"
+    ? rule.errorStyle
+    : rule.errorStyle === "stop"
+      ? "stop"
+      : undefined;
+  return {
+    ...(nativeBool(rule.allowBlank) ? { allowBlank: true } : {}),
+    ...(rule.showDropDown !== undefined ? { showDropDown: nativeBool(rule.showDropDown) } : {}),
+    ...(rule.showInputMessage !== undefined ? { showInputMessage: nativeBool(rule.showInputMessage) } : {}),
+    ...(rule.showErrorMessage !== undefined ? { showErrorMessage: nativeBool(rule.showErrorMessage) } : {}),
+    ...(errorStyle ? { errorStyle } : {}),
+    ...(typeof rule.errorTitle === "string" ? { errorTitle: rule.errorTitle } : {}),
+    ...(typeof rule.error === "string" ? { errorMessage: rule.error } : {}),
+    ...(typeof rule.promptTitle === "string" ? { promptTitle: rule.promptTitle } : {}),
+    ...(typeof rule.prompt === "string" ? { promptMessage: rule.prompt } : {}),
+  };
+}
+
+function listOptionsFromNative(
+  formula: string | undefined,
+  projection: XlsxProjection,
+  defaultSheet: string,
+) {
+  if (!formula) return [];
+  const value = formula.replace(/^=/, "").trim();
+  if (value.startsWith('"') && value.endsWith('"'))
+    return value.slice(1, -1).split(",").map((item) => item.trim()).filter(Boolean);
+  const bang = value.lastIndexOf("!");
+  const sheetName = bang >= 0 ? value.slice(0, bang).replace(/^'|'$/g, "").replaceAll("''", "'") : defaultSheet;
+  const range = parseRange((bang >= 0 ? value.slice(bang + 1) : value).replaceAll("$", ""));
+  const source = projection.sheets.find((candidate) => candidate.name === sheetName || candidate.name.toLowerCase() === sheetName.toLowerCase());
+  if (!range || !source) return [];
+  try {
+    const cells = new Map(source.cells.map((cell) => [cell.ref, cell]));
+    return rangeAddresses(range).flatMap((address) => {
+      const cell = cells.get(address);
+      return cell && cell.value !== null && cell.value !== undefined ? [String(cell.value)] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function nativeValidationToEditor(rule: NativeRule, projection: XlsxProjection, defaultSheet: string): SheetValidation | undefined {
+  const type = typeof rule.type === "string" ? rule.type : "";
+  const formula1 = typeof rule.formula1 === "string" ? rule.formula1 : undefined;
+  const formula2 = typeof rule.formula2 === "string" ? rule.formula2 : undefined;
+  const metadata = nativeRuleMetadata(rule);
+  const rejectInvalid = rule.errorStyle !== "warning" && rule.errorStyle !== "information" && rule.showErrorMessage !== "0" && rule.showErrorMessage !== false;
+  if (type === "list") {
+    return {
+      kind: "list",
+      options: listOptionsFromNative(formula1, projection, defaultSheet),
+      ...(formula1 ? { source: formula1 } : {}),
+      rejectInvalid,
+      ...metadata,
+    } as SheetValidation;
+  }
+  if (type !== "whole" && type !== "decimal" && type !== "date" && type !== "time") return undefined;
+  const kind = type === "date" ? "date" : "number";
+  const operator = typeof rule.operator === "string" && [
+    "between", "notBetween", "equal", "notEqual", "greaterThan", "lessThan",
+    "greaterThanOrEqual", "lessThanOrEqual",
+  ].includes(rule.operator)
+    ? rule.operator as "between" | "notBetween" | "equal" | "notEqual" | "greaterThan" | "lessThan" | "greaterThanOrEqual" | "lessThanOrEqual"
+    : undefined;
+  return {
+    kind,
+    ...(nativeFormulaNumber(formula1) !== undefined ? { minimum: nativeFormulaNumber(formula1) } : {}),
+    ...(nativeFormulaNumber(formula2) !== undefined ? { maximum: nativeFormulaNumber(formula2) } : {}),
+    ...(formula1 ? { formula1 } : {}),
+    ...(formula2 ? { formula2 } : {}),
+    ...(operator ? { operator } : {}),
+    rejectInvalid,
+    ...metadata,
+  } as SheetValidation;
+}
+
+function validationMapFromProjection(projection: XlsxProjection, sheet: XlsxProjection["sheets"][number]) {
+  const result = new Map<string, SheetValidation>();
+  for (const rule of sheet.validations ?? []) {
+    const validation = nativeValidationToEditor(rule, projection, sheet.name);
+    if (!validation) continue;
+    for (const range of nativeRanges(rule.sqref)) {
+      try {
+        for (const address of rangeAddresses(range)) result.set(address, validation);
+      } catch {
+        // Whole-column/whole-row rules remain in the native carry when they are
+        // too large to materialize into the sparse editor cell model.
+      }
+    }
+  }
+  return result;
+}
+
+function editorConditionalFormatsFromProjection(sheet: XlsxProjection["sheets"][number]) {
+  const result: Array<SheetConditionalFormat & { nativeRuleId?: string }> = [];
+  for (const group of sheet.conditionalFormats ?? []) {
+    const range = typeof group.sqref === "string" ? group.sqref.split(/\s+/)[0] : undefined;
+    if (!range || !Array.isArray(group.rules)) continue;
+    for (const raw of group.rules) {
+      const rule = raw as NativeRule;
+      const priority = nativeNumber(rule.priority);
+      const stopIfTrue = rule.stopIfTrue !== undefined ? nativeBool(rule.stopIfTrue) : undefined;
+      const type = rule.type;
+      const formulas = Array.isArray(rule.formulas) ? rule.formulas.filter((value): value is string => typeof value === "string") : [];
+      const colorScale = rule.colorScale as NativeRule | undefined;
+      const colors = Array.isArray(colorScale?.colors) ? colorScale.colors.filter((value): value is string => typeof value === "string") : [];
+      if (type === "colorScale" && colors.length === 2) {
+        result.push({
+          id: typeof rule.id === "string" ? rule.id : `conditional-${result.length + 1}`,
+          range,
+          kind: "color_scale",
+          minimumColor: colors[0]!,
+          maximumColor: colors[1]!,
+          ...(priority !== undefined ? { priority } : {}),
+          ...(stopIfTrue !== undefined ? { stopIfTrue } : {}),
+        });
+        continue;
+      }
+      if (type === "cellIs" && typeof rule.operator === "string") {
+        const mapped = {
+          greaterThan: "greater_than",
+          lessThan: "less_than",
+          equal: "equal_to",
+          notEqual: "not_equal_to",
+          greaterThanOrEqual: "greater_equal",
+          lessThanOrEqual: "less_equal",
+          between: "between",
+        }[rule.operator] as
+          | "greater_than"
+          | "less_than"
+          | "equal_to"
+          | "not_equal_to"
+          | "greater_equal"
+          | "less_equal"
+          | "between"
+          | undefined;
+        const value = nativeFormulaNumber(formulas[0]);
+        const secondValue = nativeFormulaNumber(formulas[1]);
+        if (mapped && value !== undefined) {
+          result.push({
+            id: typeof rule.id === "string" ? rule.id : `conditional-${result.length + 1}`,
+            range,
+            kind: "cell_is",
+            operator: mapped,
+            value,
+            ...(secondValue !== undefined ? { secondValue } : {}),
+            fillColor: typeof rule.fillColor === "string" ? rule.fillColor : "#DDF4EA",
+            ...(typeof rule.textColor === "string" ? { textColor: rule.textColor } : {}),
+            ...(priority !== undefined ? { priority } : {}),
+            ...(stopIfTrue !== undefined ? { stopIfTrue } : {}),
+          });
+        }
+        continue;
+      }
+      if (type === "containsText" && typeof rule.text === "string" && rule.text) {
+        result.push({
+          id: typeof rule.id === "string" ? rule.id : `conditional-${result.length + 1}`,
+          range,
+          kind: "text_contains",
+          text: rule.text,
+          fillColor: typeof rule.fillColor === "string" ? rule.fillColor : "#DDF4EA",
+          ...(typeof rule.textColor === "string" ? { textColor: rule.textColor } : {}),
+          ...(priority !== undefined ? { priority } : {}),
+          ...(stopIfTrue !== undefined ? { stopIfTrue } : {}),
+        });
+      }
+    }
+  }
+  return result;
+}
+
+function editorValidationRules(contentSheet: Record<string, unknown>) {
+  const grouped = new Map<string, { validation: SheetValidation; addresses: string[] }>();
+  const cells = record(contentSheet.cells);
+  for (const [address, rawCell] of Object.entries(cells)) {
+    const validation = record(rawCell).validation as SheetValidation | undefined;
+    if (!validation || typeof validation.kind !== "string") continue;
+    const key = JSON.stringify(validation);
+    const existing = grouped.get(key);
+    if (existing) existing.addresses.push(address.toUpperCase());
+    else grouped.set(key, { validation, addresses: [address.toUpperCase()] });
+  }
+  return [...grouped.values()].map(({ validation, addresses }, index) => ({
+    id: `xlsx:validation:editor:${index + 1}`,
+    sqref: addresses.join(" "),
+    type: validation.kind === "list" ? "list" : validation.kind === "date" ? "date" : validation.kind === "checkbox" ? "list" : "decimal",
+    ...(validation.kind === "list"
+      ? { formula1: validation.source ?? `"${validation.options.join(",")}"` }
+      : validation.kind === "checkbox"
+        ? { formula1: '"TRUE,FALSE"' }
+        : {
+            ...(validation.operator ? { operator: validation.operator } : { operator: "between" }),
+            ...(validation.formula1 ?? validation.minimum !== undefined ? { formula1: validation.formula1 ?? String(validation.minimum) } : {}),
+            ...(validation.formula2 ?? validation.maximum !== undefined ? { formula2: validation.formula2 ?? String(validation.maximum) } : {}),
+          }),
+    ...(validation.allowBlank ? { allowBlank: "1" } : {}),
+    ...(validation.showDropDown !== undefined ? { showDropDown: validation.showDropDown ? "1" : "0" } : {}),
+    ...(validation.showInputMessage !== undefined ? { showInputMessage: validation.showInputMessage ? "1" : "0" } : {}),
+    ...(validation.showErrorMessage !== undefined ? { showErrorMessage: validation.showErrorMessage ? "1" : "0" } : {}),
+    ...(validation.errorStyle ? { errorStyle: validation.errorStyle } : {}),
+    ...(validation.errorTitle ? { errorTitle: validation.errorTitle } : {}),
+    ...(validation.errorMessage ? { error: validation.errorMessage } : {}),
+    ...(validation.promptTitle ? { promptTitle: validation.promptTitle } : {}),
+    ...(validation.promptMessage ? { prompt: validation.promptMessage } : {}),
+  }));
+}
+
+function editorConditionalRules(contentSheet: Record<string, unknown>) {
+  const rules = Array.isArray(contentSheet.conditionalFormats) ? contentSheet.conditionalFormats : [];
+  return rules.flatMap((candidate, index) => {
+    const rule = candidate as Record<string, unknown>;
+    if (typeof rule.range !== "string" || typeof rule.kind !== "string") return [];
+    const native: NativeRule = {
+      id: typeof rule.id === "string" ? rule.id : `conditional:editor:${index + 1}`,
+      type: rule.kind === "color_scale" ? "colorScale" : rule.kind === "text_contains" ? "containsText" : "cellIs",
+      ...(typeof rule.priority === "number" ? { priority: String(rule.priority) } : {}),
+      ...(typeof rule.stopIfTrue === "boolean" ? { stopIfTrue: rule.stopIfTrue ? "1" : "0" } : {}),
+      ...(rule.kind === "color_scale" ? {
+        colorScale: { cfvo: [{ type: "min" }, { type: "max" }], colors: [String(rule.minimumColor), String(rule.maximumColor)] },
+      } : rule.kind === "text_contains" ? {
+        text: String(rule.text),
+        formulas: [`NOT(ISERROR(SEARCH("${String(rule.text).replaceAll('"', '""')}",A1)))`],
+      } : {
+        operator: ({ greater_than: "greaterThan", less_than: "lessThan", equal_to: "equal", not_equal_to: "notEqual", greater_equal: "greaterThanOrEqual", less_equal: "lessThanOrEqual", between: "between" } as Record<string, string>)[String(rule.operator)] ?? "equal",
+        formulas: [String(rule.value), ...(typeof rule.secondValue === "number" ? [String(rule.secondValue)] : [])],
+        fillColor: typeof rule.fillColor === "string" ? rule.fillColor : undefined,
+        textColor: typeof rule.textColor === "string" ? rule.textColor : undefined,
+      }),
+    };
+    return [{ id: typeof rule.id === "string" ? rule.id : native.id, sqref: rule.range, rules: [native] }];
+  });
+}
+
 export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
   const date1904 = projection.nativeBinding.date1904 === true;
   return {
@@ -235,10 +504,9 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
       calculationVersion: 1,
       ...(date1904 ? { date1904: true } : {}),
     },
-    sheets: projection.sheets.map((sheet) => ({
-      id: sheet.id,
-      name: sheet.name,
-      cells: Object.fromEntries(
+    sheets: projection.sheets.map((sheet) => {
+      const validationByCell = validationMapFromProjection(projection, sheet);
+      const cells = Object.fromEntries(
         sheet.cells.map((cell) => {
           const value =
             cell.value instanceof Date
@@ -258,10 +526,22 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
               (cell.style ? normalizedCellFormat(cell.style) : undefined))
                 ? { format: cell.format ?? normalizedCellFormat(cell.style) }
                 : {}),
+              ...(validationByCell.has(cell.ref)
+                ? { validation: validationByCell.get(cell.ref) }
+                : {}),
             },
           ];
         }),
-      ),
+      );
+      for (const [address, validation] of validationByCell) {
+        if (cells[address]) continue;
+        cells[address] = { value: null, validation };
+      }
+      const conditionalFormats = editorConditionalFormatsFromProjection(sheet);
+      return {
+      id: sheet.id,
+      name: sheet.name,
+      cells,
       tables: (sheet.tables ?? []).map((table) => ({
         id: table.id,
         name: table.name,
@@ -303,8 +583,9 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
       ...(sheet.showGridlines !== undefined ? { showGridlines: sheet.showGridlines } : {}),
       ...(sheet.showHeadings !== undefined ? { showHeadings: sheet.showHeadings } : {}),
       ...(sheet.tabColor ? { tabColor: sheet.tabColor } : {}),
-      conditionalFormats: (sheet.conditionalFormats ?? []) as unknown as SheetsContent["sheets"][number]["conditionalFormats"],
-    })),
+      conditionalFormats: conditionalFormats as unknown as SheetsContent["sheets"][number]["conditionalFormats"],
+      };
+    }),
     activeSheetId: projection.activeSheetId ?? projection.sheets[0]?.id ?? "",
     nativeBinding: projection.nativeBinding,
   };
@@ -568,6 +849,73 @@ const xlsxEditorContentSchema = z
   })
   .passthrough();
 
+function isEditableNativeValidation(rule: NativeRule) {
+  return ["list", "whole", "decimal", "date", "time"].includes(String(rule.type));
+}
+
+function isEditableNativeConditional(rule: NativeRule) {
+  if (rule.type === "cellIs") return rule.operator !== "notBetween";
+  if (rule.type === "containsText") return true;
+  if (rule.type !== "colorScale") return false;
+  const scale = record(rule.colorScale);
+  return Array.isArray(scale.colors) && scale.colors.length === 2;
+}
+
+function validationMapSignature(map: Map<string, SheetValidation>) {
+  return JSON.stringify([...map.entries()].sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function conditionalModelSignature(value: unknown) {
+  return JSON.stringify(
+    (Array.isArray(value) ? value : [])
+      .map((candidate) => candidate as Record<string, unknown>)
+      .sort((left, right) => String(left.id ?? "").localeCompare(String(right.id ?? ""))),
+  );
+}
+
+function nativeValidationsForContent(
+  contentSheet: Record<string, unknown>,
+  baseProjection: XlsxProjection,
+  baseSheet: XlsxProjection["sheets"][number],
+) {
+  const incoming = editorValidationRules(contentSheet);
+  const baseMap = validationMapFromProjection(baseProjection, baseSheet);
+  const nextMap = new Map<string, SheetValidation>();
+  for (const rule of incoming) {
+    const validation = nativeValidationToEditor(rule, baseProjection, baseSheet.name);
+    if (!validation) continue;
+    for (const range of nativeRanges(rule.sqref)) {
+      try {
+        for (const address of rangeAddresses(range)) nextMap.set(address, validation);
+      } catch {
+        // Retain the native rule below when a whole-column range is too large
+        // for the collaborative sparse-cell model.
+      }
+    }
+  }
+  if (validationMapSignature(baseMap) === validationMapSignature(nextMap)) return baseSheet.validations ?? [];
+  return [
+    ...(baseSheet.validations ?? []).filter((rule) => !isEditableNativeValidation(rule)),
+    ...incoming,
+  ];
+}
+
+function nativeConditionalFormatsForContent(
+  contentSheet: Record<string, unknown>,
+  baseSheet: XlsxProjection["sheets"][number],
+) {
+  const incoming = Array.isArray(contentSheet.conditionalFormats) ? contentSheet.conditionalFormats : [];
+  const baseModel = editorConditionalFormatsFromProjection(baseSheet);
+  if (conditionalModelSignature(baseModel) === conditionalModelSignature(incoming)) return baseSheet.conditionalFormats ?? [];
+  return [
+    ...(baseSheet.conditionalFormats ?? []).map((group) => ({
+      ...group,
+      rules: Array.isArray(group.rules) ? group.rules.filter((rule) => !isEditableNativeConditional(rule as NativeRule)) : [],
+    })).filter((group) => Array.isArray(group.rules) && group.rules.length),
+    ...editorConditionalRules(contentSheet),
+  ];
+}
+
 /** The one Sheets editor-model -> XLSX projection transform. */
 export function xlsxProjectionFromContent(
   content: unknown,
@@ -668,6 +1016,10 @@ export function xlsxProjectionFromContent(
             }];
           })
         : sheet.charts ?? [];
+      const validations = nativeValidationsForContent(nextRecord, base, sheet);
+      const conditionalFormats = Object.prototype.hasOwnProperty.call(nextRecord, "conditionalFormats")
+        ? nativeConditionalFormatsForContent(nextRecord, sheet)
+        : sheet.conditionalFormats ?? [];
       return {
         ...sheet,
         name: typeof nextRecord.name === "string" ? nextRecord.name : sheet.name,
@@ -691,6 +1043,8 @@ export function xlsxProjectionFromContent(
           : {}),
         tables,
         charts,
+        validations,
+        conditionalFormats,
       };
     }),
   });
@@ -730,6 +1084,8 @@ export function xlsxProjectionFromContent(
         const position = record(chart.position);
         return [{ id: typeof chart.id === "string" ? chart.id : `xlsx:chart:${next.id}:new`, type: typeof chart.type === "string" ? chart.type : "line", sourceRange: canonicalChartRange(chart.sourceRange, typeof nextRecord.name === "string" ? nextRecord.name : `Sheet ${index + 1}`), title: typeof chart.title === "string" ? chart.title : "Chart", ...(typeof chart.showLegend === "boolean" ? { showLegend: chart.showLegend } : {}), position: { x: Number(position.x) || 0, y: Number(position.y) || 0, width: Number(position.width) || 760, height: Number(position.height) || 320 } }];
       }) : [],
+      validations: editorValidationRules(nextRecord),
+      conditionalFormats: editorConditionalRules(nextRecord),
     };
   });
   const rawRecord = raw as unknown as Record<string, unknown>;
@@ -944,6 +1300,10 @@ export function xlsxOperationsBetween(
     for (const chart of sheet.charts ?? [])
       if (!oldCharts.has(chart.id) || JSON.stringify(oldCharts.get(chart.id)) !== JSON.stringify(chart))
         operations.push({ kind: "upsert-chart", sheetId: sheet.id, chart });
+    if (JSON.stringify(previous.validations ?? []) !== JSON.stringify(sheet.validations ?? []))
+      operations.push({ kind: "set-validations", sheetId: sheet.id, validations: sheet.validations ?? [] });
+    if (JSON.stringify(previous.conditionalFormats ?? []) !== JSON.stringify(sheet.conditionalFormats ?? []))
+      operations.push({ kind: "set-conditional-formats", sheetId: sheet.id, conditionalFormats: sheet.conditionalFormats ?? [] });
   }
   if (JSON.stringify(before.definedNames) !== JSON.stringify(after.definedNames))
     operations.push({ kind: "set-defined-names", names: after.definedNames });

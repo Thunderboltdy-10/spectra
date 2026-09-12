@@ -1175,6 +1175,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "validation.set",
     "Set data validation on the selection.",
     {
+      delta: "set-validations",
       reason: SHEETS_NATIVE_REASONS.validation,
       touches: ["validation"],
       manifest: "validate_range",
@@ -1184,6 +1185,7 @@ const SHEETS_SPECS: Spec<"sheets">[] = [
     "conditional.apply",
     "Apply conditional formatting to the selection.",
     {
+      delta: "set-conditional-formats",
       reason: SHEETS_NATIVE_REASONS.conditional,
       touches: ["conditionalFormat"],
       manifest: "format_range",

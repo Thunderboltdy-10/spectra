@@ -73,7 +73,7 @@ export function GlobalRouteWorkbench() {
     prompt: string,
     attachments: CommandAttachment[],
     threadId?: string,
-    continuation?: { clarificationId?: string; choiceKey?: string; choiceMessageId?: string; executionId?: string },
+    continuation?: { clarificationId?: string; choiceKey?: string; choiceMessageId?: string; executionId?: string; batchSelections?: Array<{ questionId: string; choiceKey: string; choiceTitle: string }> },
   ) =>
     runEngine.run(
       prompt,

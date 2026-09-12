@@ -27,6 +27,12 @@ export type Body = {
   clarificationId?: string;
   choiceMessageId?: string;
   choiceKey?: string;
+  clarificationExecutionId?: string;
+  batchSelections?: Array<{
+    questionId: string;
+    choiceKey: string;
+    choiceTitle: string;
+  }>;
   revision?: string;
   attachments?: AttachmentInput[];
   focusMode?: EffectiveFocusMode;

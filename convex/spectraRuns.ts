@@ -312,6 +312,86 @@ function recoveryForRun(
   return hasAttachmentInput ? { ...recovery, retryable: false } : recovery;
 }
 
+type ContinuationSelection = { questionId: string; choiceKey: string; choiceTitle: string };
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function assertContinuationSelection(
+  message: Doc<"spectraMessages">,
+  clarificationId: string,
+  clarificationExecutionId: string,
+  choiceKey: string,
+  batchSelections: ContinuationSelection[] | undefined,
+) {
+  const metadata = recordValue(message.metadata);
+  const clarification = recordValue(metadata.clarification);
+  const selection = recordValue(metadata.choiceSelection);
+  if (
+    clarification.id !== clarificationId ||
+    clarification.executionId !== clarificationExecutionId ||
+    selection.clarificationId !== clarificationId ||
+    selection.key !== choiceKey
+  )
+    throw new Error("This clarification belongs to an older run attempt. Start a new request.");
+  const questions = Array.isArray(clarification.questions)
+    ? clarification.questions.map(recordValue)
+    : [];
+  if (questions.length > 0) {
+    if (choiceKey !== "batch" || !batchSelections || batchSelections.length !== questions.length)
+      throw new Error("This batch clarification requires one exact answer per question.");
+    const ids = questions.map((question) => String(question.id ?? ""));
+    if (ids.some((id) => !id) || new Set(ids).size !== ids.length)
+      throw new Error("This clarification has duplicate question ids. Start a new request.");
+    if (
+      new Set(batchSelections.map((row) => row.questionId)).size !== batchSelections.length ||
+      batchSelections.some((row) => !ids.includes(row.questionId))
+    )
+      throw new Error("Each batch answer must belong to its original question.");
+    const canonical = questions.map((question, index) => {
+      const questionId = ids[index]!;
+      const answer = batchSelections.find((row) => row.questionId === questionId);
+      if (!answer) throw new Error("This batch clarification requires one exact answer per question.");
+      if (answer.choiceKey === "skip") {
+        if (answer.choiceTitle.trim() !== "Skipped")
+          throw new Error("Skipped is the only valid skip value.");
+        return { questionId, choiceKey: "skip", choiceTitle: "Skipped" };
+      }
+      const offered = (Array.isArray(question.options) ? question.options : [])
+        .map(recordValue)
+        .find((option) => option.key === answer.choiceKey);
+      if (
+        !offered ||
+        typeof offered.title !== "string" ||
+        offered.title.trim() !== answer.choiceTitle.trim()
+      )
+        throw new Error("That answer was not offered for its question.");
+      return { questionId, choiceKey: answer.choiceKey, choiceTitle: answer.choiceTitle.trim() };
+    });
+    const stored = Array.isArray(selection.selections)
+      ? selection.selections.map(recordValue)
+      : [];
+    if (
+      stored.length !== canonical.length ||
+      canonical.some((row) => {
+        const saved = stored.find((item) => item.questionId === row.questionId);
+        return saved?.choiceKey !== row.choiceKey || saved?.choiceTitle !== row.choiceTitle;
+      })
+    )
+      throw new Error("That batch answer no longer matches the selected options. Start a new request.");
+    return;
+  }
+  if (choiceKey === "skip" && selection.title === "Skipped") return;
+  const offered = (Array.isArray(clarification.options) ? clarification.options : [])
+    .map(recordValue)
+    .find((option) => option.key === choiceKey);
+  if (!offered || offered.title !== selection.title)
+    throw new Error("That choice was not offered for this request. Start a new request.");
+}
+
 export const beginRun = mutation({
   args: {
     sourceSurface: vSurface,
@@ -322,6 +402,15 @@ export const beginRun = mutation({
     artifactId: v.optional(v.id("spectraArtifacts")),
     modelUsed: v.optional(v.string()),
     messageMetadata: v.optional(v.any()),
+    clarificationId: v.optional(v.string()),
+    clarificationMessageId: v.optional(v.id("spectraMessages")),
+    clarificationExecutionId: v.optional(v.string()),
+    choiceKey: v.optional(v.string()),
+    batchSelections: v.optional(v.array(v.object({
+      questionId: v.string(),
+      choiceKey: v.string(),
+      choiceTitle: v.string(),
+    }))),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
@@ -443,13 +532,45 @@ export const beginRun = mutation({
       if (artifact.status === "deleted")
         throw new Error("That artifact is no longer available.");
     }
+    let continuationRun: Doc<"spectraAiRuns"> | null = null;
+    if (args.clarificationId || args.clarificationMessageId || args.clarificationExecutionId || args.choiceKey) {
+      if (
+        !args.clarificationId ||
+        !args.clarificationMessageId ||
+        !args.clarificationExecutionId ||
+        !args.choiceKey ||
+        !thread
+      )
+        throw new Error("This clarification reply is incomplete. Choose one of the current options again.");
+      const message = await ctx.db.get(args.clarificationMessageId);
+      if (!message || message.threadId !== thread._id || message.role !== "assistant" || !message.runId)
+        throw new Error("This clarification is no longer available. Start a new request.");
+      const askingRun = await ctx.db.get(message.runId);
+      if (
+        !askingRun ||
+        askingRun.ownerAccountId !== actor._id ||
+        askingRun.schoolId !== actor.schoolId ||
+        askingRun.threadId !== thread._id ||
+        askingRun.executionId !== args.clarificationExecutionId ||
+        askingRun.status !== "awaiting_resolution"
+      )
+        throw new Error("This clarification is no longer active. Start a new request.");
+      assertContinuationSelection(
+        message,
+        args.clarificationId,
+        args.clarificationExecutionId,
+        args.choiceKey,
+        args.batchSelections,
+      );
+      continuationRun = askingRun;
+    }
     if (thread) {
       const activeRun = (
         await ctx.db
           .query("spectraAiRuns")
           .withIndex("by_thread", (q) => q.eq("threadId", thread!._id))
           .collect()
-      ).find((run) => isActiveRunStatus(run.status));
+      ).find((run) => isActiveRunStatus(run.status) && run._id !== continuationRun?._id);
       if (activeRun)
         throw new Error(
           "This conversation is still responding. Start a new thread to work in parallel, or wait for it to finish.",
@@ -465,6 +586,46 @@ export const beginRun = mutation({
     }
 
     const now = Date.now();
+    if (continuationRun) {
+      const message = await ctx.db.get(args.clarificationMessageId!);
+      if (!message) throw new Error("This clarification is no longer available. Start a new request.");
+      const metadata = recordValue(message.metadata);
+      const clarification = recordValue(metadata.clarification);
+      const consumedClarification = { ...clarification, status: "consumed", consumedAt: now };
+      await ctx.db.patch(message._id, {
+        metadata: {
+          ...metadata,
+          clarification: consumedClarification,
+        },
+      });
+      await ctx.db.patch(continuationRun._id, {
+        status: "completed",
+        phase: "completed",
+        outcome: "answer_only",
+        finalSummary: "Clarification answered; continuing with the selected work.",
+        completedAt: now,
+        workerId: undefined,
+        leaseExpiresAt: undefined,
+        heartbeatAt: now,
+        clarification: { ...continuationRun.clarification!, status: "consumed", consumedAt: now },
+        updatedAt: now,
+      });
+      const priorCards = await ctx.db
+        .query("spectraResultCards")
+        .withIndex("by_run", (q) => q.eq("runId", continuationRun!._id))
+        .collect();
+      await Promise.all(
+        priorCards.map((card) =>
+          ctx.db.patch(card._id, {
+            status: "completed",
+            title: "Continued",
+            summary: "Your selection was accepted; the continuation is running.",
+            actions: [],
+            updatedAt: now,
+          }),
+        ),
+      );
+    }
     // A neutral status label is replaced by the first structured model title.
     // Never fabricate a prompt-truncation title before the model responds.
     const title = "New conversation";
@@ -805,6 +966,7 @@ export const updateStatus = mutation({
         v.literal("proposed"),
         v.literal("awaiting_input"),
         v.literal("executing"),
+        v.literal("answer_only"),
         v.literal("canonical_saved"),
         v.literal("native_pending"),
         v.literal("native_verified"),
@@ -876,6 +1038,14 @@ export const updateStatus = mutation({
           committedArtifactId = candidateId;
       }
     }
+    if (args.status === "completed" && args.outcome === "canonical_saved" && !committedArtifactId) {
+      const operations = await ctx.db
+        .query("spectraOperations")
+        .withIndex("by_run", (q) => q.eq("runId", args.runId))
+        .collect();
+      if (!operations.some((operation) => operation.status === "executed"))
+        throw new Error("A run without a committed operation or artifact version cannot be marked as saved.");
+    }
     await ctx.db.patch(args.runId, {
       status: args.status,
       outcome:
@@ -888,10 +1058,14 @@ export const updateStatus = mutation({
                 ? "proposed"
             : args.status === "cancelled"
               ? "cancelled"
-              : args.status === "failed"
-                ? "failed"
+                : args.status === "failed"
+                  ? "failed"
                 : args.status === "completed"
-                  ? "canonical_saved"
+                  ? (committedArtifactId
+                    ? "canonical_saved"
+                    : run.outcome === "native_pending" || run.outcome === "native_verified"
+                      ? run.outcome
+                      : "answer_only")
                   : run.outcome),
       phase:
         args.phase ??
@@ -1903,6 +2077,7 @@ export const reviseConfirmation = mutation({
     );
     await ctx.db.patch(args.runId, {
       status: "cancelled",
+      outcome: "cancelled",
       phase: "stopped",
       approval: {
         ...run.approval,
@@ -2016,6 +2191,7 @@ export const stopRun = mutation({
     const sequence = (run.eventSequence ?? 0) + 1;
     await ctx.db.patch(args.runId, {
       status: "cancelled",
+      outcome: "cancelled",
       phase: "stopped",
       recoveryState: recovery.recoveryState,
       retryable: recovery.retryable,

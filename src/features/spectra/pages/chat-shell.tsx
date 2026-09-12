@@ -872,6 +872,7 @@ export function ChatShell() {
                 choiceKey: choice.key,
                 choiceMessageId: choice.choiceMessageId,
                 executionId: choice.executionId,
+                batchSelections: choice.batchSelections,
               },
             )
           }

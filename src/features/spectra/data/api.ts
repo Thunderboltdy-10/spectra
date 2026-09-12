@@ -500,7 +500,7 @@ export type SpectraRun = {
   _id: string;
   executionId?: string;
   attemptId?: string;
-  outcome?: "proposed" | "awaiting_input" | "executing" | "canonical_saved" | "native_pending" | "native_verified" | "cancelled" | "failed";
+  outcome?: "proposed" | "awaiting_input" | "executing" | "answer_only" | "canonical_saved" | "native_pending" | "native_verified" | "cancelled" | "failed";
   status:
     | "queued"
     | "running"

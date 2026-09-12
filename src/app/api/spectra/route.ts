@@ -848,6 +848,18 @@ export async function POST(request: NextRequest) {
           ...(optionalString(body.executionId) ? { executionId: optionalString(body.executionId) } : {}),
           choiceKey: requireString(body.choiceKey, "choiceKey"),
           choiceTitle: requireString(body.choiceTitle, "choiceTitle"),
+          ...(Array.isArray(body.batchSelections)
+            ? {
+                batchSelections: body.batchSelections.filter(
+                  (value): value is { questionId: string; choiceKey: string; choiceTitle: string } =>
+                    Boolean(value) &&
+                    typeof value === "object" &&
+                    typeof (value as Record<string, unknown>).questionId === "string" &&
+                    typeof (value as Record<string, unknown>).choiceKey === "string" &&
+                    typeof (value as Record<string, unknown>).choiceTitle === "string",
+                ),
+              }
+            : {}),
         },
       );
       return ok(result);

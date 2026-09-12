@@ -199,7 +199,12 @@ function messageAttachments(message: SpectraThreadDetail["messages"][number]) {
     : [];
 }
 
-export type ConversationChoice = { key?: string; title: string; description?: string | null; clarificationId?: string; executionId?: string; choiceMessageId?: string };
+export type ConversationBatchSelection = {
+  questionId: string;
+  choiceKey: string;
+  choiceTitle: string;
+};
+export type ConversationChoice = { key?: string; title: string; description?: string | null; clarificationId?: string; executionId?: string; choiceMessageId?: string; batchSelections?: ConversationBatchSelection[] };
 
 function messageChoices(
   message: SpectraThreadDetail["messages"][number],
@@ -396,7 +401,7 @@ function BatchedChoiceBlock({
     options: ConversationChoice[];
   }>;
   selectedTitle?: string | null;
-  onSubmit: (answer: string) => Promise<void> | void;
+  onSubmit: (answer: string, selections: ConversationBatchSelection[]) => Promise<void> | void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
@@ -433,27 +438,27 @@ function BatchedChoiceBlock({
             <div className="mt-1 grid gap-1 sm:grid-cols-2">
               {question.options.map((option) => (
                 <button
-                  key={option.title}
+                  key={option.key ?? option.title}
                   type="button"
-                  aria-pressed={answers[question.id] === option.title}
+                  aria-pressed={answers[question.id] === option.key}
                   onClick={() =>
                     setAnswers((current) => ({
                       ...current,
-                      [question.id]: option.title,
+                      [question.id]: option.key ?? "",
                     }))
                   }
-                  className={`rounded-chip border px-2 py-1.5 text-left text-micro font-semibold ${answers[question.id] === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
+                  className={`rounded-chip border px-2 py-1.5 text-left text-micro font-semibold ${answers[question.id] === option.key ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
                 >
                   {option.title}
                 </button>
               ))}
               <button
                 type="button"
-                aria-pressed={answers[question.id] === "Skipped"}
+                aria-pressed={answers[question.id] === "skip"}
                 onClick={() =>
                   setAnswers((current) => ({
                     ...current,
-                    [question.id]: "Skipped",
+                    [question.id]: "skip",
                   }))
                 }
                 className="rounded-chip px-2 py-1.5 text-left text-micro text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
@@ -468,14 +473,20 @@ function BatchedChoiceBlock({
         type="button"
         disabled={!complete || pending}
         onClick={() => {
-          const answer = questions
-            .map(
-              (question, index) =>
-                `${index + 1}) ${answers[question.id] ?? "Skipped"}`,
-            )
+          const selections = questions.map((question) => {
+            const choiceKey = answers[question.id] ?? "skip";
+            const choice = question.options.find((option) => option.key === choiceKey);
+            return {
+              questionId: question.id,
+              choiceKey,
+              choiceTitle: choice?.title ?? "Skipped",
+            };
+          });
+          const answer = selections
+            .map((selection, index) => `${index + 1}) ${selection.choiceTitle}`)
             .join("; ");
           setPending(true);
-          void Promise.resolve(onSubmit(answer)).catch(() => setPending(false));
+          void Promise.resolve(onSubmit(answer, selections)).catch(() => setPending(false));
         }}
         className="mt-3 h-9 w-full rounded-control bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
       >
@@ -2247,6 +2258,7 @@ export function ConversationSurface({
                         const saveAnswer = async (
                           choiceKey: string,
                           choiceTitle: string,
+                          batchSelections?: ConversationBatchSelection[],
                         ) => {
                           await postSpectra({
                             action: "selectMessageChoice",
@@ -2256,6 +2268,7 @@ export function ConversationSurface({
                             choiceMessageId: message._id,
                             choiceKey,
                             choiceTitle,
+                            ...(batchSelections ? { batchSelections } : {}),
                           });
                           spectraBus.emit("threads.changed", {});
                           await onChoice?.({
@@ -2264,6 +2277,7 @@ export function ConversationSurface({
                             choiceMessageId: message._id,
                             ...(typeof clarification.id === "string" ? { clarificationId: clarification.id } : {}),
                             ...(typeof clarification.executionId === "string" ? { executionId: clarification.executionId } : {}),
+                            ...(batchSelections ? { batchSelections } : {}),
                           });
                         };
                         if ("questions" in choices && choices.questions) {
@@ -2271,7 +2285,7 @@ export function ConversationSurface({
                             <BatchedChoiceBlock
                               questions={choices.questions}
                               selectedTitle={choices.selectedTitle}
-                              onSubmit={(answer) => saveAnswer("batch", answer)}
+                              onSubmit={(answer, selections) => saveAnswer("batch", answer, selections)}
                             />
                           );
                         }

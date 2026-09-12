@@ -357,7 +357,7 @@ export type LiveDockProps = {
     threadId: string,
     response: string,
     attachments?: CommandAttachment[],
-    continuation?: { clarificationId?: string; choiceKey?: string; choiceMessageId?: string; executionId?: string },
+    continuation?: { clarificationId?: string; choiceKey?: string; choiceMessageId?: string; executionId?: string; batchSelections?: Array<{ questionId: string; choiceKey: string; choiceTitle: string }> },
   ) => void | Promise<unknown>;
   openThreadId?: string;
   openChat?: { id: string; title: string };
@@ -690,6 +690,7 @@ export function LiveDock({
     tab: SpectraRunTab,
     response: string,
     attachments?: CommandAttachment[],
+    choiceKeyOverride?: string,
   ) {
     if (!onInput) return;
     const model = deriveLiveDockTab(tabSource(tab));
@@ -697,7 +698,18 @@ export function LiveDock({
       ? model.inputRequest.options.findIndex((option) => option.title === response)
       : -1;
     const selectedOptionKey = model.inputRequest?.kind === "choice"
-      ? model.inputRequest.options[selectedOptionIndex]?.key
+      ? choiceKeyOverride ?? model.inputRequest.options[selectedOptionIndex]?.key
+      : undefined;
+    const batchSelections = model.inputRequest?.kind === "choice_batch"
+      ? model.inputRequest.questions.map((question) => {
+          const choiceKey = batchAnswers[tab.runId]?.[question.id] ?? "skip";
+          const option = question.options.find((candidate) => candidate.key === choiceKey);
+          return {
+            questionId: question.id,
+            choiceKey,
+            choiceTitle: option?.title ?? "Skipped",
+          };
+        })
       : undefined;
     if (
       model.inputRequest?.kind === "choice" &&
@@ -729,6 +741,7 @@ export function LiveDock({
                   ? "batch"
                   : selectedOptionKey ?? "",
             choiceTitle: response,
+            ...(batchSelections ? { batchSelections } : {}),
         });
       }
       const accepted = await onInput(
@@ -749,6 +762,7 @@ export function LiveDock({
                 : selectedOptionKey,
               choiceMessageId: model.inputRequest.messageId,
               executionId: model.inputRequest.executionId ?? tab.run.executionId,
+              ...(batchSelections ? { batchSelections } : {}),
             }
           : undefined,
       );
@@ -1196,34 +1210,34 @@ export function LiveDock({
                                   <div className="mt-1 grid gap-1 sm:grid-cols-2">
                                     {question.options.map((option) => (
                                       <button
-                                        key={option.title}
+                                        key={option.key ?? option.title}
                                         type="button"
                                           aria-pressed={
-                                            selected === option.title
+                                          selected === option.key
                                           }
                                         onClick={() =>
                                           setBatchAnswers((current) => ({
                                             ...current,
                                             [tab.runId]: {
                                               ...current[tab.runId],
-                                              [question.id]: option.title,
+                                            [question.id]: option.key ?? "",
                                             },
                                           }))
                                         }
-                                        className={`rounded-chip border px-2 py-1.5 text-left text-micro font-semibold ${selected === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
+                                        className={`rounded-chip border px-2 py-1.5 text-left text-micro font-semibold ${selected === option.key ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
                                       >
                                         {option.title}
                                       </button>
                                     ))}
                                     <button
                                       type="button"
-                                      aria-pressed={selected === "Skipped"}
+                                      aria-pressed={selected === "skip"}
                                       onClick={() =>
                                         setBatchAnswers((current) => ({
                                           ...current,
                                           [tab.runId]: {
                                             ...current[tab.runId],
-                                            [question.id]: "Skipped",
+                                            [question.id]: "skip",
                                           },
                                         }))
                                       }
@@ -1246,10 +1260,11 @@ export function LiveDock({
                               const response =
                                 model.inputRequest?.kind === "choice_batch"
                                   ? model.inputRequest.questions
-                                      .map(
-                                        (question, index) =>
-                                          `${index + 1}) ${batchAnswers[tab.runId]?.[question.id] ?? "Skipped"}`,
-                                      )
+                                      .map((question, index) => {
+                                        const key = batchAnswers[tab.runId]?.[question.id] ?? "skip";
+                                        const option = question.options.find((candidate) => candidate.key === key);
+                                        return `${index + 1}) ${option?.title ?? "Skipped"}`;
+                                      })
                                       .join("; ")
                                   : "";
                                 if (response)
@@ -1265,10 +1280,10 @@ export function LiveDock({
                           <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
                             {model.inputRequest.options.map((option) => (
                               <button
-                                key={option.title}
+                                key={option.key ?? option.title}
                                 type="button"
                                 onClick={() =>
-                                  void respondToInput(tab, option.title)
+                                  void respondToInput(tab, option.title, undefined, option.key)
                                 }
                                 className="rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-2 text-left hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
                               >

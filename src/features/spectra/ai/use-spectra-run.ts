@@ -383,6 +383,10 @@ export function useSpectraRun({
     spectraBus.setQuery("run.active", { runIds: [...activeRunIds.current] });
   }, []);
   const eventCursors = useRef(new Map<string, number>());
+  const displayedRunTabs = useRef(new Map<string, SpectraRunTab>());
+  const displayedRunVersions = useRef(
+    new Map<string, { executionId?: string; attemptId?: string }>(),
+  );
   // A streamed patch can arrive while the user is inside another artifact or
   // a thread panel, before the newly-created shell exists in this view's
   // overview snapshot. Bootstrap that canonical shell once, then serialize
@@ -428,6 +432,11 @@ export function useSpectraRun({
     initialCards.forEach((card) => {
       if (card.run?.userPrompt)
         promptByRun.current.set(card.runId, card.run.userPrompt);
+      if (card.run?.executionId)
+        displayedRunVersions.current.set(card.runId, {
+          executionId: card.run.executionId,
+          attemptId: card.run.attemptId ?? card.run.executionId,
+        });
     });
   }, [initialCards, scopeKey]);
 
@@ -474,6 +483,13 @@ export function useSpectraRun({
         ) {
           const result = await getSpectraRunTabs({ limit: 120 });
           tabSnapshot = result.runTabs;
+          for (const tab of tabSnapshot) {
+            displayedRunTabs.current.set(tab.runId, tab);
+            displayedRunVersions.current.set(tab.runId, {
+              executionId: tab.run.executionId,
+              attemptId: tab.run.attemptId ?? tab.run.executionId,
+            });
+          }
           tabsFetchedAt = Date.now();
         }
         const runTabs = tabSnapshot;
@@ -993,6 +1009,11 @@ export function useSpectraRun({
         choiceKey?: string;
         choiceMessageId?: string;
         executionId?: string;
+        batchSelections?: Array<{
+          questionId: string;
+          choiceKey: string;
+          choiceTitle: string;
+        }>;
       },
     ): Promise<boolean> => {
       const clean = prompt.trim();
@@ -1079,6 +1100,7 @@ export function useSpectraRun({
             choiceKey: options?.choiceKey,
             choiceMessageId: options?.choiceMessageId,
             executionId: options?.executionId,
+            batchSelections: options?.batchSelections,
             focusMode,
             selectedArtifactIds,
             explicitContextObjects,
@@ -1155,8 +1177,7 @@ export function useSpectraRun({
       if (!clean || queuedSteering.current.has(runId)) return false;
       queuedSteering.current.add(runId);
       try {
-        const { runTabs } = await getSpectraRunTabs({ limit: 120, force: true }).catch(() => ({ runTabs: [] as SpectraRunTab[] }));
-        const target = runTabs.find((tab) => tab.runId === runId);
+        const target = displayedRunTabs.current.get(runId);
         if (mode === "cancel_current_action") {
           const response = await fetch("/api/spectra/run", {
             method: "POST",
@@ -1164,7 +1185,12 @@ export function useSpectraRun({
             body: JSON.stringify({
               action: "stop",
               runId,
-              ...(target?.run.executionId ? { executionId: target.run.executionId, attemptId: target.run.attemptId ?? target.run.executionId } : {}),
+              ...(displayedRunVersions.current.get(runId)?.executionId
+                ? {
+                    executionId: displayedRunVersions.current.get(runId)!.executionId,
+                    attemptId: displayedRunVersions.current.get(runId)!.attemptId,
+                  }
+                : {}),
             }),
           });
           if (!response.ok && response.status !== 409)
@@ -1180,12 +1206,12 @@ export function useSpectraRun({
         const stopResponse = await fetch("/api/spectra/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "stop",
-            runId,
-            executionId: target.run.executionId,
-            attemptId: target.run.attemptId ?? target.run.executionId,
-          }),
+            body: JSON.stringify({
+              action: "stop",
+              runId,
+              executionId: displayedRunVersions.current.get(runId)?.executionId,
+              attemptId: displayedRunVersions.current.get(runId)?.attemptId,
+            }),
         });
         if (!stopResponse.ok && stopResponse.status !== 409)
           throw new Error(
@@ -1375,11 +1401,13 @@ export function useSpectraRun({
   );
   const closeDetails = useCallback(() => setSelectedRunId(null), []);
 
+  const liveExchangeId = liveExchange?.id;
+  const liveExchangeRunId = liveExchange?.runId;
   const stop = useCallback(
     async (runId?: string) => {
       const targetRunId =
-        runId ?? liveExchange?.runId ?? observedContinuationRunId;
-      const submissionKey = liveExchange?.id;
+        runId ?? liveExchangeRunId ?? observedContinuationRunId;
+      const submissionKey = liveExchangeId;
       if (!targetRunId && !submissionKey) return;
       setStopSuppressed(true);
 
@@ -1433,19 +1461,24 @@ export function useSpectraRun({
       try {
         let executionId: string | undefined;
         let attemptId: string | undefined;
+        const pendingSubmissionKey =
+          !targetRunId || liveExchangeRunId === targetRunId
+            ? submissionKey
+            : undefined;
         if (targetRunId) {
-          const { runTabs } = await getSpectraRunTabs({ limit: 120, force: true });
-          const target = runTabs.find((tab) => tab.runId === targetRunId);
-          executionId = target?.run.executionId;
-          attemptId = target?.run.attemptId ?? executionId;
+          const displayed = displayedRunVersions.current.get(targetRunId);
+          executionId = displayed?.executionId;
+          attemptId = displayed?.attemptId ?? executionId;
         }
         const response = await fetch("/api/spectra/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "stop",
-            runId: targetRunId,
-            submissionKey,
+            ...(targetRunId && executionId ? { runId: targetRunId } : {}),
+            ...(pendingSubmissionKey
+              ? { submissionKey: pendingSubmissionKey }
+              : {}),
             ...(executionId ? { executionId } : {}),
             ...(attemptId ? { attemptId } : {}),
           }),
@@ -1477,8 +1510,8 @@ export function useSpectraRun({
       }
     },
     [
-      liveExchange?.id,
-      liveExchange?.runId,
+      liveExchangeId,
+      liveExchangeRunId,
       observedContinuationRunId,
       onDataChanged,
       publishActiveRuns,

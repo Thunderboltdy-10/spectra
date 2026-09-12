@@ -639,6 +639,7 @@ function clarificationForTarget(
         ? {
             question,
             options: candidates.map((candidate) => ({
+              key: candidate.id,
               title: candidateChoiceTitle(candidate, candidates),
               description: [
                 candidate.blueprintKey?.replaceAll("_", " "),

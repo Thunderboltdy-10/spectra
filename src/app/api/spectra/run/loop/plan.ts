@@ -894,16 +894,33 @@ export function parseStreamedPlanText(
       !Array.isArray(raw.choices)
     ) {
       const choices = raw.choices as Record<string, unknown>;
-      const choiceKey = (value: unknown, index: number, prefix = "choice") => {
+      const choiceKey = (value: unknown, index: number, prefix: string, usedKeys: Set<string>) => {
         const supplied = typeof value === "string" ? value.trim() : "";
-        if (supplied) return supplied.slice(0, 120);
-        const title = typeof value === "string" ? value : "option";
-        const slug = title.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 72);
-        return `${prefix}:${index}:${slug || "option"}`.slice(0, 120);
+        const slug = (typeof value === "string" ? value : "option")
+          .toLowerCase()
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 72);
+        const base = (supplied || `${prefix}:${index}:${slug || "option"}`).slice(0, 120);
+        if (!usedKeys.has(base)) {
+          usedKeys.add(base);
+          return base;
+        }
+        let suffix = 2;
+        let key = base;
+        while (usedKeys.has(key)) {
+          const suffixText = `:${suffix++}`;
+          key = `${base.slice(0, 120 - suffixText.length)}${suffixText}`;
+        }
+        usedKeys.add(key);
+        return key;
       };
-      const cleanChoiceOptions = (value: unknown) =>
-        Array.isArray(value)
-          ? value.flatMap((option) => {
+      const cleanChoiceOptions = (value: unknown, prefix = "choice") => {
+        const usedKeys = new Set<string>();
+        return Array.isArray(value)
+          ? value.flatMap((option, index) => {
               if (
                 !option ||
                 typeof option !== "object" ||
@@ -916,7 +933,7 @@ export function parseStreamedPlanText(
               return title
                 ? [
                     {
-                      key: choiceKey(row.key ?? title, value.indexOf(option)),
+                      key: choiceKey(row.key, index, prefix, usedKeys),
                       title,
                       description:
                         typeof row.description === "string" &&
@@ -928,6 +945,7 @@ export function parseStreamedPlanText(
                 : [];
             })
           : [];
+      };
       if (Array.isArray(choices.options))
         choices.options = cleanChoiceOptions(choices.options);
       if (Array.isArray(choices.questions))
@@ -941,7 +959,7 @@ export function parseStreamedPlanText(
           const row = question as Record<string, unknown>;
           const prompt =
             typeof row.question === "string" ? row.question.trim() : "";
-          const options = cleanChoiceOptions(row.options);
+          const options = cleanChoiceOptions(row.options, `question-${index + 1}`);
           return prompt && options.length >= 2
           ? [
                 {
@@ -950,7 +968,7 @@ export function parseStreamedPlanText(
                       ? row.id.trim()
                       : `question-${index + 1}`,
                   question: prompt,
-                  options: options.map((option, optionIndex) => ({ ...option, key: choiceKey((option as Record<string, unknown>).key ?? option.title, optionIndex, `question-${index + 1}`) })),
+                  options,
                 },
               ]
             : [];
@@ -4755,6 +4773,7 @@ export async function callModel(
         Array.isArray(parsedInput.options)
           ? (parsedInput.options as Array<Record<string, unknown>>)
           : candidates.map((candidate) => ({
+              key: candidate.id,
               title: candidateTitle(candidate),
               description: [
                 candidate.type,
@@ -4766,6 +4785,7 @@ export async function callModel(
                 .slice(0, 240),
             }))
       ).map((option) => ({
+        ...(typeof option.key === "string" ? { key: option.key } : {}),
         title: String(option.title).slice(0, 80),
         description:
           typeof option.description === "string"

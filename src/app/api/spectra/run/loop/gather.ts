@@ -97,6 +97,8 @@ export async function buildContext(
     | "clarificationId"
     | "choiceMessageId"
     | "choiceKey"
+    | "clarificationExecutionId"
+    | "batchSelections"
     | "executionId"
   >,
   prompt = "",
@@ -124,6 +126,20 @@ export async function buildContext(
       ].filter((id): id is string => typeof id === "string" && id.length > 0),
     ),
   ].slice(0, 24);
+  const continuationChoicePromise =
+    body.clarificationId &&
+    body.choiceMessageId &&
+    body.choiceKey &&
+    body.clarificationExecutionId
+      ? query<unknown & object, unknown>("spectraThreads:getChoiceContinuation", {
+          actorClerkId,
+          messageId: body.choiceMessageId,
+          clarificationId: body.clarificationId,
+          executionId: body.clarificationExecutionId,
+          choiceKey: body.choiceKey,
+          batchSelections: body.batchSelections,
+        }).catch(() => null)
+      : Promise.resolve(null);
   const focusMode =
     body.focusMode ??
     (body.threadId
@@ -172,6 +188,7 @@ export async function buildContext(
     workspace,
     focusedArtifact,
     threadDetail,
+    continuationChoice,
     recentRuns,
     longTermMemory,
     libraryScope,
@@ -229,6 +246,7 @@ export async function buildContext(
           threadId: body.threadId,
         }).catch(() => null)
       : Promise.resolve(null),
+    continuationChoicePromise,
     shouldLoadActivity
       ? query<unknown & object, unknown>("spectraRuns:listRecent", {
           actorClerkId,
@@ -265,8 +283,40 @@ export async function buildContext(
     typeof continuedThreadRecord?.artifactId === "string"
       ? continuedThreadRecord.artifactId
       : undefined;
-  const effectiveArtifactId = body.artifactId;
-  const effectiveFocusedArtifact = focusedArtifact;
+  const continuationRecord =
+    continuationChoice && typeof continuationChoice === "object"
+      ? (continuationChoice as Record<string, unknown>)
+      : null;
+  const continuationClarification =
+    continuationRecord?.clarification && typeof continuationRecord.clarification === "object"
+      ? (continuationRecord.clarification as Record<string, unknown>)
+      : null;
+  const continuationTargetIds = Array.isArray(continuationClarification?.targetIds)
+    ? continuationClarification.targetIds.filter(
+        (id): id is string => typeof id === "string" && id.length > 0,
+      )
+    : [];
+  const continuationSelection =
+    continuationRecord?.selection && typeof continuationRecord.selection === "object"
+      ? (continuationRecord.selection as Record<string, unknown>)
+      : null;
+  const selectedContinuationTargetId =
+    typeof continuationSelection?.key === "string" &&
+    continuationTargetIds.includes(continuationSelection.key)
+      ? continuationSelection.key
+      : undefined;
+  const boundContinuationTargetIds = selectedContinuationTargetId
+    ? [selectedContinuationTargetId]
+    : continuationTargetIds;
+  const continuationArtifactId = boundContinuationTargetIds[0];
+  const effectiveArtifactId = continuationArtifactId ?? body.artifactId;
+  const effectiveFocusedArtifact =
+    continuationArtifactId && continuationArtifactId !== body.artifactId
+      ? await query<unknown & object, unknown>("spectraArtifacts:get", {
+          actorClerkId,
+          artifactId: continuationArtifactId,
+        }).catch(() => null)
+      : focusedArtifact;
   const threadAttachmentArtifact =
     !body.artifactId && continuedArtifactId
       ? await query<unknown & object, unknown>("spectraArtifacts:get", {
@@ -274,8 +324,11 @@ export async function buildContext(
           artifactId: continuedArtifactId,
         }).catch(() => null)
       : null;
+  const durableSelectedArtifactIds = [
+    ...new Set([...selectedArtifactIds, ...boundContinuationTargetIds]),
+  ].slice(0, 24);
   const selectedRows = await Promise.all(
-    selectedArtifactIds.map((artifactId) =>
+    durableSelectedArtifactIds.map((artifactId) =>
       query<unknown & object, unknown>("spectraArtifacts:get", {
         actorClerkId,
         artifactId,
@@ -329,7 +382,7 @@ export async function buildContext(
       typeof artifact._id === "string" ? [artifact._id] : [],
     ),
   );
-  const ownedSelectedArtifactIds = selectedArtifactIds.filter((id) =>
+  const ownedSelectedArtifactIds = durableSelectedArtifactIds.filter((id) =>
     ownedArtifactIdSet.has(id),
   );
   const linkedContextIds = [
@@ -574,15 +627,17 @@ export async function buildContext(
   // A choice is an answer to one specific unresolved request, not a new
   // free-floating instruction. Bind it to the run that asked the question so
   // long, reused threads cannot resurrect an unrelated earlier goal.
-  const selectedClarification = body.clarificationId && body.choiceKey
-    ? [...continuedMessages].reverse().find((message) => {
-        if (message.role !== "assistant" || (body.choiceMessageId && message._id !== body.choiceMessageId) || !message.metadata || typeof message.metadata !== "object") return false;
-        const metadata = message.metadata as Record<string, unknown>;
-        const clarification = metadata.clarification as Record<string, unknown> | undefined;
-        const selection = metadata.choiceSelection as Record<string, unknown> | undefined;
-        return clarification?.id === body.clarificationId && clarification?.executionId === body.executionId && selection?.clarificationId === body.clarificationId && selection?.key === body.choiceKey && Boolean(message.runId);
-      })
-    : undefined;
+  const selectedClarification = continuationRecord?.message && typeof continuationRecord.message === "object"
+    ? (continuationRecord.message as Record<string, unknown>)
+    : body.clarificationId && body.choiceKey
+      ? [...continuedMessages].reverse().find((message) => {
+          if (message.role !== "assistant" || (body.choiceMessageId && message._id !== body.choiceMessageId) || !message.metadata || typeof message.metadata !== "object") return false;
+          const metadata = message.metadata as Record<string, unknown>;
+          const clarification = metadata.clarification as Record<string, unknown> | undefined;
+          const selection = metadata.choiceSelection as Record<string, unknown> | undefined;
+          return clarification?.id === body.clarificationId && clarification?.executionId === body.clarificationExecutionId && selection?.clarificationId === body.clarificationId && selection?.key === body.choiceKey && Boolean(message.runId);
+        })
+      : undefined;
   const clarificationMetadata =
     selectedClarification?.metadata &&
     typeof selectedClarification.metadata === "object"
@@ -599,8 +654,9 @@ export async function buildContext(
         return run?._id === selectedClarification.runId;
       })
     : undefined;
-  const clarificationRun = clarificationTrace?.run as
-    Record<string, unknown> | undefined;
+  const clarificationRun = continuationRecord?.askingRun && typeof continuationRecord.askingRun === "object"
+    ? (continuationRecord.askingRun as Record<string, unknown>)
+    : clarificationTrace?.run as Record<string, unknown> | undefined;
   const activeGoal = selectedClarification
     ? {
         request: clarificationRun?.userPrompt,

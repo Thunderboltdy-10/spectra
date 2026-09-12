@@ -394,6 +394,7 @@ const boundedChoiceQuestionSchema = z
       .array(
         z
           .object({
+            key: z.string().trim().min(1).max(120).optional(),
             title: z.string().trim().min(1).max(80),
             description: z.string().trim().max(240).nullable().optional(),
           })

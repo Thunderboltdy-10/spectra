@@ -128,7 +128,7 @@ describe("Live Dock V2", () => {
     expect(dock).toContain("spectra-live-dock-hover");
     expect(dock).toContain("ProgressTrace");
     expect(dock).toContain("OverflowMenu");
-    expect(dock).toContain("Open conversation");
+    expect(dock).toContain("Open chat for");
     expect(dock).toContain("dock-tab-identity min-w-0 flex-1");
     const css = read("src/styles/spectra-app.css");
     expect(css).toContain("min-width: calc((100% - 12px) / 3)");
@@ -173,9 +173,8 @@ describe("Live Dock V2", () => {
     expect(runs).toContain('.query("spectraMessages")');
     expect(runs).toContain("inputRequest");
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
-    expect(runHook).toContain(
-      'body: JSON.stringify({ action: "stop", runId })',
-    );
+    expect(runHook).toContain("displayedRunVersions");
+    expect(runHook).not.toContain("force: true");
     expect(runHook).toContain("threadId: target.threadId");
     const surface = read(
       "src/features/spectra/components/conversation-surface.tsx",
@@ -189,9 +188,9 @@ describe("Live Dock V2", () => {
 
   it("keeps explicit New thread and touch/keyboard disclosure paths", () => {
     const dock = read("src/features/spectra/components/live-dock.tsx");
-    expect(dock).toContain('aria-label="Start a new thread"');
+    expect(dock).toContain('aria-label="Start a new chat"');
     expect(dock).toContain("> Respond");
-    expect(dock).toContain("visible.length === 0) return null");
+    expect(dock).toContain("visible.length === 0 && !openChat) return null");
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");
     expect(shell).toContain("function startFreshComposerThread() ");
     expect(shell).toContain(
@@ -248,7 +247,7 @@ describe("Live Dock V2", () => {
     expect(dock).toContain("Follow AI");
     expect(dock).toContain("icon: Crosshair");
     expect(dock).toContain("followAiActor(tab.runId)");
-    expect(dock).toContain('aria-label={`Open conversation for ${model.title}`}');
+    expect(dock).toContain('aria-label={`Open chat for ${model.title}`}');
     expect(dock).toContain('title="Stop"');
     expect(dock).toContain("OverflowMenu");
     expect(dock).toContain("Undo this run");
@@ -314,6 +313,6 @@ describe("Live Dock V2", () => {
     expect(shell).toContain('if (artifact.blueprintKey === "thread_reference")');
     expect(shell).toContain("setLiveThread({ id: threadId, title: artifact.title })");
     const panel = read("src/features/spectra/components/live-thread-panel.tsx");
-    expect(panel).toContain("Continue this thread in the Live Dock");
+    expect(panel).toContain("Continue this chat in the Live Dock");
   });
 });

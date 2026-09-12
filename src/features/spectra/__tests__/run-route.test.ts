@@ -6,6 +6,7 @@ afterEach(() => {
   vi.resetModules();
   delete process.env.OPENROUTER_API_KEY;
   delete process.env.SPECTRA_TEST_INLINE_RUNS;
+  delete process.env.SPECTRA_APP_URL;
 });
 
 function deckPlan() {
@@ -107,6 +108,31 @@ function setup(
   const convexQuery = vi.fn(async (name: string, args?: Record<string, unknown>) => {
     if (name.includes("spectraRuns:get")) return { run, cards: [card], operations };
     if (name.includes("spectraRuns:listRunAttachments")) return [];
+    if (name.includes("spectraThreads:getChoiceContinuation")) {
+      return {
+        message: {
+          _id: "message-A",
+          runId: "run-asking",
+          content: "Which Lab notes draft should I revise?",
+          metadata: {
+            clarification: {
+              id: "clarification-A",
+              executionId: "execution-A",
+              targetIds: ["artifact-chemistry"],
+            },
+            choiceSelection: {
+              clarificationId: "clarification-A",
+              executionId: "execution-A",
+              key: "artifact-chemistry",
+              title: "Lab notes",
+            },
+          },
+        },
+        askingRun: { userPrompt: "Revise the selected Lab notes draft", planIntent: { mode: "update" } },
+        clarification: { id: "clarification-A", executionId: "execution-A", targetIds: ["artifact-chemistry"] },
+        selection: { key: "artifact-chemistry", title: "Lab notes" },
+      };
+    }
     if (name.includes("spectraArtifacts:get")) return savedArtifact;
     if (name.includes("spectraArtifacts:listAgentRoutingDescriptors")) return [];
     if (name.includes("spectraArtifacts:list")) return args?.blueprintKey === "agent" ? [] : catalogArtifacts;
@@ -152,8 +178,10 @@ function setup(
       run.sourceSurface = args.sourceSurface as "workspace" | "chat";
       run.workspaceId = args.workspaceId as string | undefined;
       run.userPrompt = args.userPrompt as string;
-      return { runId: "run-real", resultCardId: "card-real", threadId: "thread-real", executionId: "execution-1", created: true };
+      run.executionId = args.clarificationId ? "execution-2" : "execution-1";
+      return { runId: "run-real", resultCardId: "card-real", threadId: "thread-real", executionId: run.executionId, created: true };
     }
+    if (name.includes("spectraRuns:scheduleExecution")) return { scheduled: true };
     if (name.includes("spectraRunJobs:enqueue")) return { jobId: "job-real", created: true };
     if (name.includes("spectraRunJobs:activate")) return { activated: true };
     if (name.includes("spectraRunJobs:cancelForRun")) return { cancelled: true };
@@ -1216,6 +1244,109 @@ describe("Spectra run route", () => {
     expect(JSON.stringify(messageCalls)).not.toContain("Analysing request");
   });
 
+  it("continues an older clarification by its asking execution and selected target", async () => {
+    const continuationPlan = {
+      decision: "operate",
+      intent: {
+        mode: "update",
+        requestedArtifactTypes: ["document"],
+        requestedVisibleArtifactCount: 1,
+        targetArtifactId: "artifact-chemistry",
+        targetWorkspaceId: null,
+      },
+      finalResponse: "Updated the selected chemistry draft.",
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "artifact-chemistry",
+          blueprintKey: "document",
+          title: "Lab notes — revised",
+          summary: "Chemistry draft revised.",
+          content: { blocks: [{ id: "p1", type: "paragraph", text: "Chemistry draft revised" }], outline: [] },
+          tags: ["biology"],
+        },
+      }],
+    };
+    const { convexMutation, fetchMock, getSavedArtifact } = setup(
+      continuationPlan,
+      "queued",
+      {
+        _id: "artifact-chemistry",
+        blueprintKey: "document",
+        title: "Lab notes",
+        summary: "Chemistry draft",
+        content: { blocks: [{ id: "p1", type: "paragraph", text: "Chemistry draft" }], outline: [] },
+      },
+    );
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "run",
+        surface: "chat",
+        threadId: "thread-real",
+        artifactId: "artifact-biology",
+        prompt: "Revise the selected Lab notes draft.",
+        clarificationId: "clarification-A",
+        choiceMessageId: "message-A",
+        choiceKey: "artifact-chemistry",
+        executionId: "execution-A",
+      }),
+    }));
+    await response.text();
+    const begin = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraRuns:beginRun"));
+    expect(begin?.[1]).toMatchObject({
+      clarificationId: "clarification-A",
+      clarificationMessageId: "message-A",
+      clarificationExecutionId: "execution-A",
+      choiceKey: "artifact-chemistry",
+      artifactId: "artifact-biology",
+    });
+    expect(convexMutation.mock.calls.some(([name, args]) =>
+      String(name).includes("spectraArtifacts:update") &&
+      (args as { artifactId?: string }).artifactId === "artifact-chemistry",
+    )).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+    expect(getSavedArtifact()._id).toBe("artifact-chemistry");
+  });
+
+  it("keeps the asking execution in the scheduled continuation payload", async () => {
+    const answerPlan = {
+      decision: "answer",
+      intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null },
+      finalResponse: "The selected draft is ready to review.",
+      operations: [],
+    };
+    const { convexMutation, fetchMock } = setup(answerPlan);
+    delete process.env.SPECTRA_TEST_INLINE_RUNS;
+    process.env.SPECTRA_APP_URL = "https://spectra.example.test";
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "run",
+        surface: "chat",
+        threadId: "thread-real",
+        prompt: "Continue the selected draft.",
+        clarificationId: "clarification-A",
+        choiceMessageId: "message-A",
+        choiceKey: "artifact-chemistry",
+        executionId: "execution-A",
+      }),
+    }));
+    await response.text();
+    const scheduled = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraRuns:scheduleExecution"));
+    expect(scheduled?.[1]).toMatchObject({
+      payload: expect.objectContaining({
+        clarificationId: "clarification-A",
+        choiceMessageId: "message-A",
+        choiceKey: "artifact-chemistry",
+        clarificationExecutionId: "execution-A",
+      }),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("sanitizes invalid operation errors before streaming them to the client", async () => {
     const invalidPlan = {
       decision: "operate",
@@ -1314,8 +1445,8 @@ describe("Spectra run route", () => {
     expect(assistantMessage?.metadata?.choices).toEqual({
       question: "Which respiration document should I change?",
       options: [
-        { title: "Respiration Notes", description: "document · Biology · A focused deck." },
-        { title: "Respiration Analysis", description: "document · Biology · A second respiration document." },
+        { key: "artifact-real", title: "Respiration Notes", description: "document · Biology · A focused deck." },
+        { key: "artifact-other", title: "Respiration Analysis", description: "document · Biology · A second respiration document." },
       ],
     });
     expect(convexMutation.mock.calls.some(([name, args]) =>

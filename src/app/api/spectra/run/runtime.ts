@@ -178,6 +178,8 @@ async function runAttempt(
     clarificationId?: string;
     choiceMessageId?: string;
     choiceKey?: string;
+    clarificationExecutionId?: string;
+    batchSelections?: Body["batchSelections"];
     attachments?: PreparedAttachment[];
     signal?: AbortSignal;
   },
@@ -364,7 +366,10 @@ async function runAttempt(
         runId: params.runId,
         executionId: params.executionId,
         status: immediatePlan.decision === "clarify" ? "awaiting_resolution" : "completed",
-        outcome: immediatePlan.decision === "clarify" ? "awaiting_input" : "canonical_saved",
+        outcome:
+          immediatePlan.decision === "clarify"
+            ? "awaiting_input"
+            : "answer_only",
         decision: immediatePlan.decision,
         planIntent: immediatePlan.intent,
         finalSummary: immediatePlan.finalResponse,
@@ -575,6 +580,8 @@ async function runAttempt(
         clarificationId: params.clarificationId,
         choiceMessageId: params.choiceMessageId,
         choiceKey: params.choiceKey,
+        clarificationExecutionId: params.clarificationExecutionId,
+        batchSelections: params.batchSelections,
         executionId: params.executionId,
       },
       params.prompt,
@@ -702,6 +709,8 @@ async function runAttempt(
         clarificationId: params.clarificationId,
         choiceMessageId: params.choiceMessageId,
         choiceKey: params.choiceKey,
+        clarificationExecutionId: params.clarificationExecutionId,
+        batchSelections: params.batchSelections,
         executionId: params.executionId,
         packetVersion: 2,
         capturedAt: Date.now(),
@@ -1612,7 +1621,8 @@ async function runAttempt(
         runId: params.runId,
         executionId: params.executionId,
         status: plan.decision === "clarify" ? "awaiting_resolution" : "completed",
-        outcome: plan.decision === "clarify" ? "awaiting_input" : "canonical_saved",
+        outcome:
+          plan.decision === "clarify" ? "awaiting_input" : "answer_only",
         decision: plan.decision,
         planIntent: plan.intent,
         finalSummary: plan.finalResponse,
@@ -2367,6 +2377,7 @@ async function runAttempt(
       resultVariant: provenanceArtifactIds.length > 0 ? "artifact" : "status",
       resultActions: actions,
       provenance: mergedProvenance,
+      outcome: "canonical_saved",
       modelUsed: modelResult.model,
       providerUsed: modelResult.provider,
       usage: modelResult.usage,
@@ -3220,6 +3231,7 @@ async function resumeOperationsAttempt(params: {
             ]
           : []),
       ],
+      outcome: "canonical_saved",
     });
     await saveAssistantMessage({
       actorClerkId: params.actorClerkId,
@@ -3408,6 +3420,30 @@ async function executeScheduledRun(body: Body) {
         agentId:
           typeof payload.agentId === "string" ? payload.agentId : undefined,
         disableAgentRouting: payload.disableAgentRouting === true,
+        clarificationId:
+          typeof payload.clarificationId === "string"
+            ? payload.clarificationId
+            : undefined,
+        choiceMessageId:
+          typeof payload.choiceMessageId === "string"
+            ? payload.choiceMessageId
+            : undefined,
+        choiceKey:
+          typeof payload.choiceKey === "string" ? payload.choiceKey : undefined,
+        clarificationExecutionId:
+          typeof payload.clarificationExecutionId === "string"
+            ? payload.clarificationExecutionId
+            : undefined,
+        batchSelections: Array.isArray(payload.batchSelections)
+          ? payload.batchSelections.filter(
+              (value): value is NonNullable<Body["batchSelections"]>[number] =>
+                Boolean(value) &&
+                typeof value === "object" &&
+                typeof (value as Record<string, unknown>).questionId === "string" &&
+                typeof (value as Record<string, unknown>).choiceKey === "string" &&
+                typeof (value as Record<string, unknown>).choiceTitle === "string",
+            )
+          : undefined,
         attachments,
       },
       () => undefined,
@@ -3478,16 +3514,6 @@ export async function handleSpectraRunRequest(request: NextRequest) {
     if (body.clarificationId || body.choiceKey || body.choiceMessageId) {
       if (!body.clarificationId || !body.choiceKey || !body.choiceMessageId || !body.executionId)
         return new Response("This clarification reply is incomplete. Choose one of the current options again.", { status: 409 });
-      try {
-        await query("spectraThreads:validateChoiceContinuation", {
-          messageId: body.choiceMessageId,
-          clarificationId: body.clarificationId,
-          executionId: body.executionId,
-          choiceKey: body.choiceKey,
-        });
-      } catch (error) {
-        return new Response(publicError(error), { status: 409 });
-      }
     }
     const sourceSurface = surface === "artifacts" ? "artifact" : surface;
     let attachments: PreparedAttachment[];
@@ -3521,7 +3547,14 @@ export async function handleSpectraRunRequest(request: NextRequest) {
         actorClerkId: actor.clerkId,
         sourceSurface,
         userPrompt: prompt,
-        submissionKey: body.submissionKey?.trim() || crypto.randomUUID(),
+        // A repeated clarification reply is the same logical continuation,
+        // even when the first response was lost after the durable mutation.
+        submissionKey:
+          body.clarificationId && body.choiceMessageId && body.choiceKey
+            ? `clarification:${createHash("sha256")
+                .update(`${body.choiceMessageId}:${body.clarificationId}:${body.choiceKey}`)
+                .digest("hex")}`
+            : body.submissionKey?.trim() || crypto.randomUUID(),
         threadId: body.threadId?.trim() || undefined,
         workspaceId: placementWorkspaceId,
         artifactId: body.artifactId,
@@ -3536,6 +3569,15 @@ export async function handleSpectraRunRequest(request: NextRequest) {
             }),
           ),
         },
+        ...(body.clarificationId
+          ? {
+              clarificationId: body.clarificationId,
+              clarificationMessageId: body.choiceMessageId,
+              clarificationExecutionId: body.executionId,
+              choiceKey: body.choiceKey,
+              batchSelections: body.batchSelections,
+            }
+          : {}),
       });
     } catch (error) {
       return new Response(publicError(error), { status: 409 });
@@ -3592,6 +3634,8 @@ export async function handleSpectraRunRequest(request: NextRequest) {
             clarificationId: body.clarificationId,
             choiceMessageId: body.choiceMessageId,
             choiceKey: body.choiceKey,
+            clarificationExecutionId: body.executionId,
+            batchSelections: body.batchSelections,
             attachments,
           },
           emit,
@@ -3627,6 +3671,8 @@ export async function handleSpectraRunRequest(request: NextRequest) {
       clarificationId: body.clarificationId,
       choiceMessageId: body.choiceMessageId,
       choiceKey: body.choiceKey,
+      clarificationExecutionId: body.executionId,
+      batchSelections: body.batchSelections,
       attachments: [],
     };
     if (
@@ -3670,6 +3716,8 @@ export async function handleSpectraRunRequest(request: NextRequest) {
   }
 
   let runId = body.runId?.trim();
+  const resolvedPendingSubmission =
+    action === "stop" && !runId && Boolean(body.submissionKey?.trim());
   if (!runId && action === "stop" && body.submissionKey?.trim()) {
     const resolved = await query<
       { submissionKey: string },
@@ -3680,12 +3728,16 @@ export async function handleSpectraRunRequest(request: NextRequest) {
     runId = resolved?.runId;
   }
   if (!runId) return new Response("runId is required", { status: 400 });
-  // Older and compact clients only have a run id. Resolve the current execution
-  // after the ownership check in the run mutation/query instead of making every
-  // stop/confirm control fail before it can act. Callers that do know the
-  // execution id still receive stale-view protection.
+  // A submission key is the supported pre-ack cancellation identity. Once a
+  // versioned run is displayed, controls must carry the execution they showed;
+  // resolving a missing execution from a run id could cancel a newer retry.
   let expectedExecutionId = body.executionId?.trim();
   if (!expectedExecutionId) {
+    if (!resolvedPendingSubmission)
+      return new Response(
+        "This run control is missing the displayed attempt. Refresh it and try again.",
+        { status: 409 },
+      );
     try {
       const detail = await query<unknown & object, RunDetail>(
         "spectraRuns:get",

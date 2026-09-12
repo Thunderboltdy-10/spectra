@@ -7,6 +7,7 @@ import { evaluateAccessForActor } from "./authorityShared";
 import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { requireArtifactCapability } from "./spectraShared";
 import { loadVersionAfter, releaseVersionIfUnpinned } from "./artifactSnapshots";
+import { isSurvivingEmbed } from "./artifactEmbedOwnership";
 import {
   projectArtifactForAccess,
   projectQuizSnapshotForLearner,
@@ -218,6 +219,13 @@ async function projection(
     actorValue,
     embed.sourceArtifactId,
   );
+  const sourceUnavailable = source?.status === "deleted";
+  const retainedPinnedSource = Boolean(
+    sourceUnavailable &&
+      !embed.removedAt &&
+      embed.versionPolicy === "pinned" &&
+      embed.pinnedVersionId,
+  );
   const safe: ArtifactEmbedReference & { canConfigure: boolean } = {
     embedId: embed._id,
     containerType: embed.containerType,
@@ -230,6 +238,7 @@ async function projection(
     pinnedVersionId: embed.pinnedVersionId,
     contextPolicy: embed.contextPolicy,
     displayPreferences: embed.displayPreferences,
+    sourceUnavailable,
     canConfigure,
     state: "ready" as const,
     createdAt: embed.createdAt,
@@ -239,16 +248,16 @@ async function projection(
     return { ...safe, state: "removed" as const };
   }
   if (
-    source &&
-    source.schoolId === actorValue.schoolId &&
-    source.status === "deleted"
+    sourceUnavailable &&
+    !retainedPinnedSource
   ) {
     return { ...safe, state: "deleted" as const };
   }
   if (
-    !source ||
+    (!source ||
     !decision?.allowed ||
-    !decision.capabilities.includes("read")
+    !decision.capabilities.includes("read")) &&
+    !retainedPinnedSource
   ) {
     const requests =
       source && source.schoolId === actorValue.schoolId
@@ -275,9 +284,10 @@ async function projection(
             status: "pending" as const,
             createdAt: pending.createdAt,
           }
-        : undefined,
+      : undefined,
     };
   }
+  if (!source) return { ...safe, state: "no_access" as const };
   let snapshot: unknown = {
     title: source.title,
     summary: source.summary,
@@ -327,13 +337,13 @@ async function projection(
       name: pinned.name,
     };
   }
-  if (source.blueprintKey === "quiz" && decision.level !== "modify") {
+  if (source.blueprintKey === "quiz" && decision?.level !== "modify") {
     snapshot = projectQuizSnapshotForLearner(snapshot);
   } else if (source.blueprintKey === "timetable") {
     snapshot = projectTimetableSnapshot(snapshot);
   }
   const effectiveInteraction =
-    embed.interaction === "edit" && !decision.capabilities.includes("modify")
+    embed.interaction === "edit" && !decision?.capabilities.includes("modify")
       ? "read"
       : embed.interaction;
   let runtimeBuild;
@@ -651,12 +661,11 @@ export const migrateLegacy = mutation({
         candidate.sourceArtifactId === args.sourceArtifactId,
     );
     if (existing) {
-      if (existing.removedAt)
-        await ctx.db.patch(existing._id, {
-          removedAt: undefined,
-          updatedAt: Date.now(),
-        });
-      return { embedId: existing._id, containerRegionId };
+      if (!existing.removedAt)
+        return { embedId: existing._id, containerRegionId };
+      // A removed row is historical evidence, not a reusable insertion
+      // receipt. Create a fresh placement so a failed/provisional removal can
+      // never be resurrected by a legacy migration.
     }
     if (args.versionPolicy === "pinned") {
       if (!args.pinnedVersionId)
@@ -714,7 +723,7 @@ export async function confirmCanonicalPlacements(ctx: MutationCtx, versionId: Id
   const embeds = await ctx.db.query("artifactEmbeds").withIndex("by_placement_operation", (q) => q.eq("containerType", "artifact").eq("containerId", String(version.artifactId))).collect();
   let confirmed = 0;
   for (const embed of embeds) {
-    if (embed.placementState !== "provisional" || !embed.placementOperationId) continue;
+    if (!isSurvivingEmbed(embed) || embed.placementState !== "provisional" || !embed.placementOperationId) continue;
     if (!containsCanonicalPlacement(content, String(embed._id), embed.placementOperationId, embed.containerRegionId)) continue;
     await ctx.db.patch(embed._id, { placementState: "confirmed", placementReceipt: `canonical-version:${String(version._id)}`, placementExpiresAt: undefined, updatedAt: Date.now() });
     confirmed++;
@@ -885,7 +894,7 @@ export const removeMany = mutation({
     const now = Date.now();
     await Promise.all(
       active.map((embed) =>
-        ctx.db.patch(embed._id, { removedAt: now, updatedAt: now }),
+        ctx.db.patch(embed._id, { removedAt: now, placementState: "removed", updatedAt: now }),
       ),
     );
     const pendingRequests = (
@@ -943,8 +952,18 @@ export const restore = mutation({
       throw new Error(
         "EMBED_CYCLE: An artifact cannot embed itself directly or indirectly.",
       );
+    if (embed.versionPolicy === "pinned") {
+      if (!embed.pinnedVersionId) throw new Error("EMBED_PINNED_VERSION_REQUIRED");
+      const version = await ctx.db.get(embed.pinnedVersionId);
+      if (!version || version.artifactId !== embed.sourceArtifactId)
+        throw new Error("EMBED_PINNED_VERSION_UNAVAILABLE");
+      await loadVersionAfter(ctx, version);
+    }
+    const source = await ctx.db.get(embed.sourceArtifactId);
     await ctx.db.patch(embed._id, {
       removedAt: undefined,
+      placementState: embed.placementState === "removed" ? "confirmed" : embed.placementState,
+      sourceUnavailableAt: source?.status === "deleted" ? embed.sourceUnavailableAt ?? Date.now() : undefined,
       updatedAt: Date.now(),
     });
     return { restored: true };

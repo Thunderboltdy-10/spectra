@@ -1,6 +1,6 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { queueDeletionDispatch } from "./artifactDeletionScheduling";
 import {
   FIRST_ORDER_KEY,
   between,
@@ -1421,16 +1421,23 @@ export async function tombstoneArtifactEmbeds(
       )
       .take(40),
   ]);
+  const containerEmbedIds = new Set(containerEmbeds.map((embed) => embed._id));
   const embedRows = [
     ...new Map(
       [...sourceEmbeds, ...containerEmbeds].map((embed) => [embed._id, embed]),
     ).values(),
   ];
   for (const embed of embedRows) {
+    const isContainerRemoval = containerEmbedIds.has(embed._id);
     await ctx.db.patch(embed._id, {
-      removedAt: embed.removedAt ?? now,
+      ...(sourceEmbeds.some((sourceEmbed) => sourceEmbed._id === embed._id)
+        ? { sourceUnavailableAt: embed.sourceUnavailableAt ?? now }
+        : {}),
+      ...(isContainerRemoval
+        ? { removedAt: embed.removedAt ?? now }
+        : {}),
       updatedAt: now,
-      placementState: embed.placementState === "provisional" ? "removed" : embed.placementState,
+      ...(isContainerRemoval ? { placementState: "removed" as const } : {}),
     });
   }
   const pendingEmbedRequests = [] as Array<Doc<"artifactAccessRequests">>;
@@ -1633,16 +1640,7 @@ async function purgeOwnedWorkRecord(
       createdAt: now,
       updatedAt: now,
     });
-    await (ctx.scheduler.runAfter as unknown as (
-      delay: number,
-      fn: unknown,
-      args: unknown,
-    ) => Promise<unknown>)(
-      0,
-      (internal as unknown as { spectraArtifactDeletion: { process: unknown } })
-        .spectraArtifactDeletion.process,
-      { jobId },
-    );
+    await queueDeletionDispatch(ctx, jobId, generation);
   }
 }
 

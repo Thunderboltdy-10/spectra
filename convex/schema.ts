@@ -2913,6 +2913,9 @@ export default defineSchema({
     // clears this when it commits a matching version; a scheduled expiry
     // removes a row whose editor insertion never happened.
     placementExpiresAt: v.optional(v.number()),
+    // Source deletion makes the source unavailable, but does not remove a
+    // surviving placement/container owner of a pinned version.
+    sourceUnavailableAt: v.optional(v.number()),
     placementState: v.optional(v.union(
       v.literal("provisional"),
       v.literal("confirmed"),
@@ -3053,6 +3056,8 @@ export default defineSchema({
     completedAt: v.optional(v.number()),
     nextAttemptAt: v.optional(v.number()),
     lastError: v.optional(v.string()),
+    activeAttemptId: v.optional(v.string()),
+    activeAttemptAt: v.optional(v.number()),
   })
     .index("by_artifact_generation", ["artifactId", "generation"])
     .index("by_owner_updated", ["ownerAccountId", "updatedAt"]),

@@ -2,6 +2,8 @@ import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
+import { ensureArtifactDeletionReconciliation } from "./artifactDeletionScheduling";
 
 export type SnapshotStrategy = "normalized" | "content_addressed" | "yjs_snapshot";
 type SnapshotCtx = QueryCtx | MutationCtx;
@@ -102,11 +104,11 @@ export async function releaseSnapshotObject(ctx: MutationCtx, schoolId: Id<"scho
     ctx.db.query("spectraArtifactVersions").withIndex("by_snapshot_ref", (q) => q.eq("snapshotRef", snapshotRef)).collect(),
     ctx.db.query("spectraArtifactVersions").withIndex("by_before_snapshot_ref", (q) => q.eq("beforeSnapshotRef", snapshotRef)).collect(),
   ]);
-  const refCount = Math.min(object.refCount, after.length + before.length);
+  const refCount = after.length + before.length;
   await ctx.db.patch(object._id, {
     refCount,
     lastReferencedAt: Date.now(),
-    state: refCount === 0 ? "cold" : object.state,
+    state: refCount === 0 ? "cold" : object.state === "cold" ? "hot" : object.state,
   });
 }
 
@@ -122,15 +124,22 @@ export async function releaseVersionIfUnpinned(
 ) {
   const version = await ctx.db.get(versionId);
   if (!version) return false;
-  const pins = await ctx.db.query("artifactEmbeds")
+  const activePin = await ctx.db
+    .query("artifactEmbeds")
     .withIndex("by_pinned_version", (q) => q.eq("pinnedVersionId", versionId))
-    .collect();
-  if (pins.some((pin) => !pin.removedAt && pin._id !== ignoreEmbedId)) return false;
+    .filter((q) =>
+      ignoreEmbedId
+        ? q.and(q.eq(q.field("removedAt"), undefined), q.neq(q.field("_id"), ignoreEmbedId))
+        : q.eq(q.field("removedAt"), undefined),
+    )
+    .first();
+  if (activePin && isSurvivingPinnedEmbed(activePin)) return false;
   const artifact = await ctx.db.get(version.artifactId);
   if (!artifact || artifact.status !== "deleted") return false;
   await ctx.db.delete(version._id);
   if (version.snapshotRef) await releaseSnapshotObject(ctx, version.schoolId, version.snapshotRef);
   if (version.beforeSnapshotRef) await releaseSnapshotObject(ctx, version.schoolId, version.beforeSnapshotRef);
+  await ensureArtifactDeletionReconciliation(ctx, version.artifactId);
   return true;
 }
 

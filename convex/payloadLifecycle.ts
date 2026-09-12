@@ -1,6 +1,7 @@
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { recordMeterEvent } from "./metering";
+import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity";
 
 const LIVE_REQUEST_STATES = ["pending", "claimed"] as const;
 const LIVE_CONFLICT_STATES = ["open", "resolving-spectra"] as const;
@@ -37,6 +38,10 @@ export async function releasePayloadIfUnreferenced(
     ctx.db.query("syncConflicts").withIndex("by_spectra_payload_ref", (q) => q.eq("spectraPayloadRef", payloadRef)).filter((q) => q.or(q.eq(q.field("state"), LIVE_CONFLICT_STATES[0]), q.eq(q.field("state"), LIVE_CONFLICT_STATES[1]))).take(1),
   ]);
   if ([replica, pendingReplica, projectionReplica, pendingWork, writeRefs, fsRefs, localConflicts, spectraConflicts].some((rows) => rows.length > 0)) return 0;
+
+  const metadata = await ctx.db.system.get("_storage", payload.storageId);
+  const storageMatchesPayload = metadata !== null && metadata.size === payload.bytes && normalizeSha256(metadata.sha256) !== null && normalizeSha256(metadata.sha256) === normalizeSha256(payload.hash) && (!metadata.contentType || normalizeMediaType(metadata.contentType) === normalizeMediaType(payload.mediaType));
+  if (!storageMatchesPayload) return 0;
 
   const now = Date.now();
   await ctx.storage.delete(payload.storageId);

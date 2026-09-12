@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -17,6 +18,17 @@ function setupTest() {
   aggregateTest.register(t, "orgNodeCountByWorkspace");
   aggregateTest.register(t, "orgNodeCountByParent");
   return t;
+}
+
+async function drainDeletion(t: ReturnType<typeof convexTest>, jobId: Id<"artifactDeletionJobs">, generation = 1) {
+  const process = (internal as unknown as { spectraArtifactDeletion: { process: unknown } }).spectraArtifactDeletion.process as never;
+  const runInternal = (t as unknown as { mutation: (fn: unknown, args: unknown) => Promise<unknown> }).mutation.bind(t);
+  for (let i = 0; i < 100; i += 1) {
+    const job = await t.run((ctx) => ctx.db.get(jobId));
+    if (!job || job.phase === "complete" || job.phase === "failed") return;
+    await runInternal(process, { jobId, generation });
+  }
+  throw new Error("deletion did not drain");
 }
 
 describe("Spectra embed deletion lifecycle", () => {
@@ -121,9 +133,10 @@ describe("Spectra embed deletion lifecycle", () => {
       return { containerId };
     });
 
-    await t.withIdentity(identity).mutation(api.spectraArtifacts.permanentlyDelete, {
+    const deletion = await t.withIdentity(identity).mutation(api.spectraArtifacts.permanentlyDelete, {
       artifactId: fixture.containerId,
     });
+    await drainDeletion(t, deletion.jobId);
 
     const result = await t.run(async (ctx) => ({
       artifact: await ctx.db.get(fixture.containerId),
@@ -132,7 +145,9 @@ describe("Spectra embed deletion lifecycle", () => {
     }));
     expect(result.artifact).toBeNull();
     expect(result.embeds).toHaveLength(2);
-    expect(result.embeds.every((embed) => embed.removedAt)).toBe(true);
+    expect(result.embeds.find((embed) => embed.containerId === String(fixture.containerId))?.removedAt).toBeDefined();
+    expect(result.embeds.find((embed) => embed.sourceArtifactId === fixture.containerId)?.removedAt).toBeUndefined();
+    expect(result.embeds.find((embed) => embed.sourceArtifactId === fixture.containerId)?.sourceUnavailableAt).toBeDefined();
     expect(result.requests.every((request) => request.status === "cancelled")).toBe(true);
   });
 
@@ -237,11 +252,13 @@ describe("Spectra embed deletion lifecycle", () => {
         createdAt: now,
         updatedAt: now,
       });
-      return { nodeId };
+      return { nodeId, containerId, sourceId };
     });
 
     await t.withIdentity(identity).mutation(api.orgTree.trash, { nodeIds: [fixture.nodeId] });
     await t.withIdentity(identity).mutation(api.orgTree.purge, { nodeIds: [fixture.nodeId] });
+    const job = await t.run(async (ctx) => ctx.db.query("artifactDeletionJobs").first());
+    if (job) await drainDeletion(t, job._id, job.generation);
 
     const result = await t.run(async (ctx) => ({
       node: await ctx.db.get(fixture.nodeId),
@@ -252,7 +269,9 @@ describe("Spectra embed deletion lifecycle", () => {
     expect(result.node).toBeNull();
     expect(result.artifacts).toHaveLength(1);
     expect(result.embeds).toHaveLength(2);
-    expect(result.embeds.every((embed) => embed.removedAt)).toBe(true);
+    expect(result.embeds.find((embed) => embed.containerId === String(fixture.containerId))?.removedAt).toBeDefined();
+    expect(result.embeds.find((embed) => embed.sourceArtifactId === fixture.containerId)?.removedAt).toBeUndefined();
+    expect(result.embeds.find((embed) => embed.sourceArtifactId === fixture.containerId)?.sourceUnavailableAt).toBeDefined();
     expect(result.requests.every((request) => request.status === "cancelled")).toBe(true);
   });
 });

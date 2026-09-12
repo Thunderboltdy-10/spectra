@@ -1,4 +1,3 @@
-import { internal } from "./_generated/api";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -10,9 +9,19 @@ import { releaseSnapshotObject, releaseVersionIfUnpinned } from "./artifactSnaps
 import { releaseArtifactIntakePage } from "./artifactIntakeLifecycle";
 import { releasePayloadIfUnreferenced } from "./payloadLifecycle";
 import { recordMeterEvent } from "./metering";
+import {
+  DELETION_CURSOR_VERSION,
+  DELETION_PAGE_TIMEOUT_MS,
+  queueDeletionDispatch,
+  queueDeletionRecovery,
+} from "./artifactDeletionScheduling";
+import {
+  isSurvivingPinnedEmbed,
+} from "./artifactEmbedOwnership";
+import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity";
 
 const PAGE = 40;
-const CURSOR_VERSION = "w6-02:v2";
+const CURSOR_VERSION = DELETION_CURSOR_VERSION;
 type Job = Doc<"artifactDeletionJobs">;
 type EmbedScope = "source" | "container";
 type LinkDirection = "source" | "target";
@@ -26,6 +35,7 @@ type State = {
   runChild?: RunChild; runRetained?: boolean;
 };
 type PageResult = { state: State; done: boolean; scanned: number; changed: number; retained: number; terminal: number; released: number };
+type PageOptions = { testFailAfter?: number };
 
 function encode(value: State) { return Buffer.from(JSON.stringify(value), "utf8").toString("base64url"); }
 function stateFor(job: Pick<Job, "artifactId" | "generation">, family: string, cursor: string | null, extra: Partial<State> = {}): State {
@@ -46,7 +56,7 @@ function decode(value: string | undefined, job: Job): State {
 function resultBase(state: State, values: Omit<PageResult, "state">): PageResult { return { state, ...values }; }
 
 async function schedule(ctx: MutationCtx, jobId: Id<"artifactDeletionJobs">, generation: number, delay = 0, expected?: { phase: string; cursor?: string }) {
-  await (ctx.scheduler.runAfter as unknown as (delay: number, fn: unknown, args: unknown) => Promise<unknown>)(delay, (internal as unknown as { spectraArtifactDeletion: { process: unknown } }).spectraArtifactDeletion.process, { jobId, generation, ...(expected ? { expectedPhase: expected.phase, expectedCursor: expected.cursor } : {}) });
+  await queueDeletionDispatch(ctx, jobId, generation, delay, expected);
 }
 async function actor(ctx: QueryCtx | MutationCtx) {
   const value = await getAuthenticatedActor(ctx);
@@ -107,7 +117,16 @@ async function processEmbedPage(ctx: MutationCtx, job: Job, state: State): Promi
   const changed = 0;
   if (embed) {
     let embedChanged = 0;
-    if (!embed.removedAt || embed.placementState === "provisional") { await ctx.db.patch(embed._id, { removedAt: embed.removedAt ?? Date.now(), placementState: embed.placementState === "provisional" ? "removed" : embed.placementState, updatedAt: Date.now() }); embedChanged++; }
+    const now = Date.now();
+    if (scope === "source") {
+      if (embed.sourceUnavailableAt === undefined) {
+        await ctx.db.patch(embed._id, { sourceUnavailableAt: now, updatedAt: now });
+        embedChanged++;
+      }
+    } else if (!embed.removedAt || embed.placementState !== "removed") {
+      await ctx.db.patch(embed._id, { removedAt: embed.removedAt ?? now, placementState: "removed", updatedAt: now });
+      embedChanged++;
+    }
     return resultBase(stateFor(job, "embeds", null, { embedScope: scope, embedId: String(embed._id), embedParentCursor: result.continueCursor }), { done: false, scanned: 1, changed: embedChanged, retained: 0, terminal: 0, released: 0 });
   }
   if (!result.isDone) return resultBase(stateFor(job, "embeds", result.continueCursor, { embedScope: scope }), { done: false, scanned: result.page.length, changed, retained: 0, terminal: 0, released: 0 });
@@ -135,8 +154,8 @@ async function processVersionPage(ctx: MutationCtx, job: Job, state: State): Pro
   const rows = await ctx.db.query("spectraArtifactVersions").withIndex("by_artifact_created", (q) => q.eq("artifactId", job.artifactId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null });
   let changed = 0; let retained = 0;
   for (const row of rows.page) {
-    const pinned = await ctx.db.query("artifactEmbeds").withIndex("by_pinned_version", (q) => q.eq("pinnedVersionId", row._id)).first();
-    if (pinned) { retained++; continue; }
+    const pinned = await ctx.db.query("artifactEmbeds").withIndex("by_pinned_version", (q) => q.eq("pinnedVersionId", row._id)).filter((q) => q.eq(q.field("removedAt"), undefined)).first();
+    if (pinned && isSurvivingPinnedEmbed(pinned)) { retained++; continue; }
     await ctx.db.delete(row._id);
     if (row.snapshotRef) await releaseSnapshotObject(ctx, job.schoolId, row.snapshotRef);
     if (row.beforeSnapshotRef) await releaseSnapshotObject(ctx, job.schoolId, row.beforeSnapshotRef);
@@ -147,22 +166,23 @@ async function processVersionPage(ctx: MutationCtx, job: Job, state: State): Pro
 
 async function processRuntimePage(ctx: MutationCtx, job: Job, state: State): Promise<PageResult> {
   const rows = await ctx.db.query("spectraRuntimeBuilds").withIndex("by_artifact_status", (q) => q.eq("artifactId", job.artifactId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null });
-  let released = 0;
+  let released = 0; let changed = 0; let retained = 0;
   for (const row of rows.page) {
-    const pinned = await ctx.db.query("artifactEmbeds").withIndex("by_pinned_version", (q) => q.eq("pinnedVersionId", row.artifactVersionId)).first();
-    if (pinned) continue;
+    const pinned = await ctx.db.query("artifactEmbeds").withIndex("by_pinned_version", (q) => q.eq("pinnedVersionId", row.artifactVersionId)).filter((q) => q.eq(q.field("removedAt"), undefined)).first();
+    if (pinned && isSurvivingPinnedEmbed(pinned)) { retained++; continue; }
     if (row.storageId) {
-      const expectedBytes = row.payloadBytes ?? row.outputBytes ?? row.sourceBytes;
       const metadata = await ctx.db.system.get("_storage", row.storageId);
-      if (!metadata || metadata.size !== expectedBytes) continue;
+      const safe = metadata !== null && row.payloadBytes !== undefined && row.payloadHash !== undefined && metadata.size === row.payloadBytes && normalizeSha256(metadata.sha256) === normalizeSha256(row.payloadHash);
+      if (!safe) { retained++; continue; }
       await ctx.storage.delete(row.storageId);
       const bytes = metadata.size;
       released += bytes;
       if (job.schoolId) await recordMeterEvent(ctx, { schoolId: job.schoolId, accountId: job.ownerAccountId, category: "storage_bytes", quantity: -bytes, sourceType: "runtime_build_release", sourceId: String(row._id), idempotencyKey: `runtime-release:${String(row._id)}`, dimensions: { runtime: row.runtime }, occurredAt: Date.now() });
     }
     await ctx.db.delete(row._id);
+    changed++;
   }
-  return resultBase(stateFor(job, rows.isDone ? "userStates" : "runtime", rows.isDone ? null : rows.continueCursor), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released });
+  return resultBase(stateFor(job, rows.isDone ? "userStates" : "runtime", rows.isDone ? null : rows.continueCursor), { done: false, scanned: rows.page.length, changed, retained, terminal: 0, released });
 }
 
 async function processCommentsPage(ctx: MutationCtx, job: Job, state: State): Promise<PageResult> {
@@ -242,10 +262,10 @@ async function processSyncConflictsPage(ctx: MutationCtx, job: Job, state: State
   return resultBase(stateFor(job, rows.isDone ? "requestsWrite" : "syncConflicts", rows.isDone ? null : rows.continueCursor), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released });
 }
 
-async function processWriteRequestsPage(ctx: MutationCtx, job: Job, state: State, family: "requestsWrite" | "requestsFs"): Promise<PageResult> {
+async function processWriteRequestsPage(ctx: MutationCtx, job: Job, state: State, family: "requestsWrite" | "requestsFs", options: PageOptions): Promise<PageResult> {
   if (family === "requestsWrite") {
     const rows = await ctx.db.query("bridgeWriteRequests").withIndex("by_work_created", (q) => q.eq("workId", job.artifactId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); let changed = 0; let terminal = 0; let released = 0;
-    for (const row of rows.page) { if (["failed", "verified", "conflicted", "ignored"].includes(row.state)) { terminal++; released += await releasePayloadIfUnreferenced(ctx, row.payloadRef, { schoolId: job.schoolId, accountId: job.ownerAccountId, sourceId: String(row._id) }); continue; } await ctx.db.patch(row._id, { state: "failed", errorCode: "work-deleted", errorMessage: "The work was deleted.", retryAt: undefined, updatedAt: Date.now() }); released += await releasePayloadIfUnreferenced(ctx, row.payloadRef, { schoolId: job.schoolId, accountId: job.ownerAccountId, sourceId: String(row._id) }); changed++; }
+    for (const row of rows.page) { if (["failed", "verified", "conflicted", "ignored"].includes(row.state)) { terminal++; released += await releasePayloadIfUnreferenced(ctx, row.payloadRef, { schoolId: job.schoolId, accountId: job.ownerAccountId, sourceId: String(row._id) }); continue; } await ctx.db.patch(row._id, { state: "failed", errorCode: "work-deleted", errorMessage: "The work was deleted.", retryAt: undefined, updatedAt: Date.now() }); changed++; if (options.testFailAfter !== undefined && changed >= options.testFailAfter) throw new Error("DELETION_TEST_PAGE_FAILURE"); released += await releasePayloadIfUnreferenced(ctx, row.payloadRef, { schoolId: job.schoolId, accountId: job.ownerAccountId, sourceId: String(row._id) }); }
     return resultBase(stateFor(job, rows.isDone ? "requestsFs" : family, rows.isDone ? null : rows.continueCursor), { done: false, scanned: rows.page.length, changed, retained: 0, terminal, released });
   }
   const rows = await ctx.db.query("bridgeFsRequests").withIndex("by_work_created", (q) => q.eq("workId", job.artifactId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); let changed = 0; let terminal = 0;
@@ -281,7 +301,7 @@ async function processCollaborationPage(ctx: MutationCtx, job: Job, state: State
 async function processRunPage(ctx: MutationCtx, job: Job, state: State): Promise<PageResult> {
   if (!state.runId || !state.runChild) {
     const rows = await ctx.db.query("spectraAiRuns").withIndex("by_artifact", (q) => q.eq("artifactId", job.artifactId)).paginate({ numItems: 1, cursor: state.cursor ?? null }); const run = rows.page[0];
-    if (!run) return resultBase(stateFor(job, "complete", null), { done: true, scanned: 0, changed: 0, retained: 0, terminal: 0, released: 0 });
+    if (!run) return resultBase(stateFor(job, "artifact", null), { done: false, scanned: 0, changed: 0, retained: 0, terminal: 0, released: 0 });
     return resultBase(stateFor(job, "runChildren", null, { runId: String(run._id), runChild: "cards", runParentCursor: rows.continueCursor, runRetained: false }), { done: false, scanned: 1, changed: 0, retained: 0, terminal: 0, released: 0 });
   }
   const runId = ctx.db.normalizeId("spectraAiRuns", state.runId); if (!runId) throw new Error("DELETION_CURSOR_INVALID");
@@ -295,7 +315,7 @@ async function processRunPage(ctx: MutationCtx, job: Job, state: State): Promise
   const child = state.runChild;
   if (child === "operations") { const rows = await ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id); return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "events" : "operations", runParentCursor: state.runParentCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 }); }
   if (child === "events") { const rows = await ctx.db.query("spectraRunEvents").withIndex("by_run_sequence", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id); return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "attachments" : "events", runParentCursor: state.runParentCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 }); }
-  if (child === "attachments") { const rows = await ctx.db.query("spectraRunAttachments").withIndex("by_run_execution", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); let changed = 0; let retained = state.runRetained ? 1 : 0; let released = 0; for (const row of rows.page) { if (row.storageId) { const metadata = await ctx.db.system.get("_storage", row.storageId); if (!metadata || metadata.size !== row.size) { retained = 1; continue; } await ctx.storage.delete(row.storageId); released += metadata.size; if (job.schoolId) await recordMeterEvent(ctx, { schoolId: job.schoolId, accountId: job.ownerAccountId, category: "storage_bytes", quantity: -metadata.size, sourceType: "run_attachment_release", sourceId: String(row._id), idempotencyKey: `run-attachment-release:${String(row._id)}`, dimensions: { handling: row.handling }, occurredAt: Date.now() }); } await ctx.db.delete(row._id); changed++; } return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "jobs" : "attachments", runParentCursor: state.runParentCursor, runRetained: retained > 0 }), { done: false, scanned: rows.page.length, changed, retained, terminal: 0, released }); }
+  if (child === "attachments") { const rows = await ctx.db.query("spectraRunAttachments").withIndex("by_run_execution", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); let changed = 0; let retained = state.runRetained ? 1 : 0; let released = 0; for (const row of rows.page) { if (row.storageId) { const metadata = await ctx.db.system.get("_storage", row.storageId); const safe = metadata !== null && row.sha256 !== undefined && metadata.size === row.size && normalizeSha256(metadata.sha256) === normalizeSha256(row.sha256) && (!metadata.contentType || normalizeMediaType(metadata.contentType) === normalizeMediaType(row.mimeType)); if (!safe) { retained = 1; continue; } await ctx.storage.delete(row.storageId); released += metadata.size; if (job.schoolId) await recordMeterEvent(ctx, { schoolId: job.schoolId, accountId: job.ownerAccountId, category: "storage_bytes", quantity: -metadata.size, sourceType: "run_attachment_release", sourceId: String(row._id), idempotencyKey: `run-attachment-release:${String(row._id)}`, dimensions: { handling: row.handling }, occurredAt: Date.now() }); } await ctx.db.delete(row._id); changed++; } return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "jobs" : "attachments", runParentCursor: state.runParentCursor, runRetained: retained > 0 }), { done: false, scanned: rows.page.length, changed, retained, terminal: 0, released }); }
   if (child === "jobs") { const rows = await ctx.db.query("spectraRunJobs").withIndex("by_run_execution", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id); return resultBase(stateFor(job, "runChildren", rows.isDone ? null : rows.continueCursor, { runId: state.runId, runChild: rows.isDone ? "tabs" : "jobs", runParentCursor: state.runParentCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 }); }
   const rows = await ctx.db.query("spectraRunTabs").withIndex("by_run", (q) => q.eq("runId", runId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id);
   if (!rows.isDone) return resultBase(stateFor(job, "runChildren", rows.continueCursor, { runId: state.runId, runChild: "tabs", runParentCursor: state.runParentCursor }), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 });
@@ -303,13 +323,27 @@ async function processRunPage(ctx: MutationCtx, job: Job, state: State): Promise
   await ctx.db.delete(runId); return resultBase(stateFor(job, "runs", state.runParentCursor ?? null), { done: false, scanned: rows.page.length + 1, changed: rows.page.length + 1, retained: 0, terminal: 0, released: 0 });
 }
 
-async function page(ctx: MutationCtx, job: Job): Promise<PageResult> {
+async function processArtifactPage(ctx: MutationCtx, job: Job): Promise<PageResult> {
+  const [pinnedEmbed, retainedAsset, retainedImport, retainedRuntime] = await Promise.all([
+    ctx.db.query("artifactEmbeds").withIndex("by_source", (q) => q.eq("sourceArtifactId", job.artifactId)).filter((q) => q.and(q.eq(q.field("removedAt"), undefined), q.neq(q.field("pinnedVersionId"), undefined))).take(1),
+    ctx.db.query("artifactAssets").withIndex("by_artifact_path", (q) => q.eq("artifactId", job.artifactId)).filter((q) => q.eq(q.field("retentionReason"), "legacy-reconciliation-required")).take(1),
+    ctx.db.query("artifactImportJobs").withIndex("by_artifact", (q) => q.eq("artifactId", job.artifactId)).filter((q) => q.eq(q.field("retentionReason"), "legacy-reconciliation-required")).take(1),
+    ctx.db.query("spectraRuntimeBuilds").withIndex("by_artifact_status", (q) => q.eq("artifactId", job.artifactId)).filter((q) => q.neq(q.field("storageId"), undefined)).take(1),
+  ]);
+  if (pinnedEmbed.length > 0 || retainedAsset.length > 0 || retainedImport.length > 0 || retainedRuntime.length > 0) {
+    return resultBase(stateFor(job, "artifact", null), { done: true, scanned: 1, changed: 0, retained: 1, terminal: 0, released: 0 });
+  }
+  await ctx.db.delete(job.artifactId);
+  return resultBase(stateFor(job, "complete", null), { done: true, scanned: 1, changed: 1, retained: 0, terminal: 0, released: 0 });
+}
+
+async function page(ctx: MutationCtx, job: Job, options: PageOptions = {}): Promise<PageResult> {
   const state = decode(job.cursor, job);
   switch (state.family) {
     case "embeds": return processEmbedPage(ctx, job, state);
     case "placements": return processPlacementPage(ctx, job, state);
     case "versions": return processVersionPage(ctx, job, state);
-    case "intake": { const intake = await releaseArtifactIntakePage(ctx, { artifactId: job.artifactId, ownerAccountId: job.ownerAccountId, cursor: state.cursor ?? null }); return resultBase(stateFor(job, intake.done ? "runtime" : "intake", intake.done ? null : intake.cursor), { done: false, scanned: intake.deletedRows, changed: intake.deletedRows, retained: 0, terminal: 0, released: intake.releasedBytes }); }
+    case "intake": { const intake = await releaseArtifactIntakePage(ctx, { artifactId: job.artifactId, ownerAccountId: job.ownerAccountId, cursor: state.cursor ?? null }); return resultBase(stateFor(job, intake.done ? "runtime" : "intake", intake.done ? null : intake.cursor), { done: false, scanned: intake.deletedRows + intake.retainedRows, changed: intake.deletedRows, retained: intake.retainedRows, terminal: 0, released: intake.releasedBytes }); }
     case "runtime": return processRuntimePage(ctx, job, state);
     case "userStates": { const rows = await ctx.db.query("artifactUserStates").withIndex("by_artifact_updated", (q) => q.eq("artifactId", job.artifactId)).paginate({ numItems: PAGE, cursor: state.cursor ?? null }); for (const row of rows.page) await ctx.db.delete(row._id); return resultBase(stateFor(job, rows.isDone ? "comments" : "userStates", rows.isDone ? null : rows.continueCursor), { done: false, scanned: rows.page.length, changed: rows.page.length, retained: 0, terminal: 0, released: 0 }); }
     case "comments": return processCommentsPage(ctx, job, state);
@@ -319,43 +353,105 @@ async function page(ctx: MutationCtx, job: Job): Promise<PageResult> {
     case "replicas": return processReplicasPage(ctx, job, state);
     case "syncOperations": return processSyncOperationsPage(ctx, job, state);
     case "syncConflicts": return processSyncConflictsPage(ctx, job, state);
-    case "requestsWrite": case "requestsFs": return processWriteRequestsPage(ctx, job, state, state.family);
+    case "requestsWrite": case "requestsFs": return processWriteRequestsPage(ctx, job, state, state.family, options);
     case "collaboration": return processCollaborationPage(ctx, job, state);
     case "runs": case "runChildren": return processRunPage(ctx, job, state);
+    case "artifact": return processArtifactPage(ctx, job);
     default: return resultBase(stateFor(job, "complete", null), { done: true, scanned: 0, changed: 0, retained: 0, terminal: 0, released: 0 });
   }
 }
 
-function retryableError(error: unknown) { const message = error instanceof Error ? error.message : String(error); return !["DELETION_CURSOR_INVALID", "INTAKE_CURSOR_INVALID", "INTAKE_RELEASE_OWNER_TOMBSTONE_REQUIRED"].some((code) => message.includes(code)); }
+export const dispatch = internalMutation({
+  args: { jobId: v.id("artifactDeletionJobs"), generation: v.optional(v.number()), expectedPhase: v.optional(v.string()), expectedCursor: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.phase === "complete" || job.phase === "failed") return { started: false, terminal: true };
+    if (args.generation !== undefined && args.generation !== job.generation) return { started: false, stale: true };
+    if (args.expectedPhase !== undefined && args.expectedPhase !== job.phase) return { started: false, stale: true };
+    if (args.expectedCursor !== undefined && args.expectedCursor !== job.cursor) return { started: false, stale: true };
+    const artifact = await ctx.db.get(job.artifactId);
+    if (!artifact || artifact.status !== "deleted" || artifact.deletionGeneration !== job.generation) return { started: false, stale: true };
+    const now = Date.now();
+    if (job.activeAttemptId && job.activeAttemptAt !== undefined && job.activeAttemptAt + DELETION_PAGE_TIMEOUT_MS > now) return { started: false, active: true };
+    if (job.nextAttemptAt && job.nextAttemptAt > now) {
+      await schedule(ctx, job._id, job.generation, job.nextAttemptAt - now, { phase: job.phase, cursor: job.cursor });
+      return { started: false, deferred: true };
+    }
+    const attemptId = crypto.randomUUID();
+    const attemptCount = (job.attemptCount ?? 0) + 1;
+    await ctx.db.patch(job._id, { activeAttemptId: attemptId, activeAttemptAt: now, attemptCount, nextAttemptAt: now + DELETION_PAGE_TIMEOUT_MS, updatedAt: now });
+    await schedule(ctx, job._id, job.generation, 0, { phase: job.phase, cursor: job.cursor });
+    await queueDeletionRecovery(ctx, job._id, job.generation, attemptId, { phase: job.phase, cursor: job.cursor });
+    return { started: true, attemptId };
+  },
+});
 
 export const process = internalMutation({
-  args: { jobId: v.id("artifactDeletionJobs"), generation: v.optional(v.number()), expectedPhase: v.optional(v.string()), expectedCursor: v.optional(v.string()) },
+  args: { jobId: v.id("artifactDeletionJobs"), generation: v.optional(v.number()), expectedPhase: v.optional(v.string()), expectedCursor: v.optional(v.string()), attemptId: v.optional(v.string()), testFailAfter: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job || job.phase === "complete" || job.phase === "failed") return { complete: job?.phase === "complete", phase: job?.phase, terminal: true };
     if (args.generation !== undefined && args.generation !== job.generation) return { complete: false, stale: true };
     if (args.expectedPhase !== undefined && args.expectedPhase !== job.phase) return { complete: false, stale: true };
     if (args.expectedCursor !== undefined && args.expectedCursor !== job.cursor) return { complete: false, stale: true };
+    if (args.attemptId !== undefined && job.activeAttemptId !== args.attemptId) return { complete: false, stale: true };
     const artifact = await ctx.db.get(job.artifactId);
     if (!artifact || artifact.status !== "deleted" || artifact.deletionGeneration !== job.generation) return { complete: false, stale: true };
-    if (job.nextAttemptAt && job.nextAttemptAt > Date.now()) return { complete: false, deferred: true };
-    try {
-      const result = await page(ctx, job); const complete = result.done || result.state.family === "complete"; const now = Date.now(); const nextCursor = complete ? undefined : encode(result.state); const nextPhase = complete ? "complete" : result.state.family === "placements" ? "placements" : result.state.family === "artifact" ? "artifact" : "children";
-      await ctx.db.patch(job._id, { phase: nextPhase, cursor: nextCursor, deletedRows: job.deletedRows + result.changed, releasedBytes: job.releasedBytes + result.released, scannedRows: (job.scannedRows ?? 0) + result.scanned, retainedRows: (job.retainedRows ?? 0) + result.retained, terminalRows: (job.terminalRows ?? 0) + result.terminal, attemptCount: 0, updatedAt: now, completedAt: complete ? now : undefined, nextAttemptAt: undefined, lastError: undefined });
-      if (complete) await syncArtifactSummary(ctx, job.artifactId); else await schedule(ctx, job._id, job.generation, 25, { phase: nextPhase, cursor: nextCursor });
-      return { complete, deletedRows: job.deletedRows + result.changed };
-    } catch (error) {
-      const attempts = (job.attemptCount ?? 0) + 1; const retry = retryableError(error) && attempts < 6; const nextAttemptAt = Date.now() + Math.min(60_000, 1_000 * 2 ** Math.min(attempts, 5));
-      await ctx.db.patch(job._id, { attemptCount: attempts, nextAttemptAt: retry ? nextAttemptAt : undefined, lastError: error instanceof Error ? error.message : String(error), phase: retry ? "children" : "failed", updatedAt: Date.now() });
-      if (retry) await schedule(ctx, job._id, job.generation, Math.max(0, nextAttemptAt - Date.now()), { phase: "children", cursor: job.cursor });
-      return { complete: false, failed: !retry, retryAt: retry ? nextAttemptAt : undefined };
+    if (job.nextAttemptAt && job.nextAttemptAt > Date.now() && args.attemptId === undefined) return { complete: false, deferred: true };
+
+    // This mutation deliberately has no catch block. Convex rolls back every
+    // page write when a child operation fails; recover owns retry accounting.
+    const result = await page(ctx, job, { testFailAfter: args.testFailAfter });
+    const complete = result.done || result.state.family === "complete";
+    const now = Date.now();
+    const nextCursor = complete ? undefined : encode(result.state);
+    const nextPhase = complete ? "complete" : result.state.family === "placements" ? "placements" : result.state.family === "artifact" ? "artifact" : "children";
+    await ctx.db.patch(job._id, {
+      phase: nextPhase,
+      cursor: nextCursor,
+      deletedRows: job.deletedRows + result.changed,
+      releasedBytes: job.releasedBytes + result.released,
+      scannedRows: (job.scannedRows ?? 0) + result.scanned,
+      retainedRows: (job.retainedRows ?? 0) + result.retained,
+      terminalRows: (job.terminalRows ?? 0) + result.terminal,
+      attemptCount: 0,
+      updatedAt: now,
+      completedAt: complete ? now : undefined,
+      nextAttemptAt: undefined,
+      lastError: undefined,
+      ...(args.attemptId !== undefined && job.activeAttemptId === args.attemptId ? { activeAttemptId: undefined, activeAttemptAt: undefined } : {}),
+    });
+    if (complete) await syncArtifactSummary(ctx, job.artifactId); else await schedule(ctx, job._id, job.generation, 25, { phase: nextPhase, cursor: nextCursor });
+    return { complete, deletedRows: job.deletedRows + result.changed };
+  },
+});
+
+export const recover = internalMutation({
+  args: { jobId: v.id("artifactDeletionJobs"), generation: v.optional(v.number()), attemptId: v.string(), expectedPhase: v.optional(v.string()), expectedCursor: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.phase === "complete" || job.phase === "failed") return { recovered: false, terminal: true };
+    if (args.generation !== undefined && args.generation !== job.generation) return { recovered: false, stale: true };
+    if (args.expectedPhase !== undefined && args.expectedPhase !== job.phase) return { recovered: false, stale: true };
+    if (args.expectedCursor !== undefined && args.expectedCursor !== job.cursor) return { recovered: false, stale: true };
+    if (job.activeAttemptId !== args.attemptId) return { recovered: false, stale: true };
+    if (job.activeAttemptAt !== undefined && job.activeAttemptAt + DELETION_PAGE_TIMEOUT_MS > Date.now()) {
+      await queueDeletionRecovery(ctx, job._id, job.generation, args.attemptId, { phase: job.phase, cursor: job.cursor }, job.activeAttemptAt + DELETION_PAGE_TIMEOUT_MS - Date.now() + 1);
+      return { recovered: false, deferred: true };
     }
+    const attempts = job.attemptCount ?? 1;
+    const retry = attempts < 6;
+    const now = Date.now();
+    const nextAttemptAt = retry ? now + Math.min(60_000, 1_000 * 2 ** Math.min(attempts, 5)) : undefined;
+    await ctx.db.patch(job._id, { activeAttemptId: undefined, activeAttemptAt: undefined, attemptCount: attempts, nextAttemptAt, lastError: "Deletion page timed out before commit.", phase: retry ? job.phase : "failed", updatedAt: now });
+    if (retry) await schedule(ctx, job._id, job.generation, Math.max(0, nextAttemptAt! - Date.now()), { phase: job.phase, cursor: job.cursor });
+    return { recovered: true, retry, retryAt: nextAttemptAt };
   },
 });
 
 export const retry = mutation({
   args: { jobId: v.id("artifactDeletionJobs") },
-  handler: async (ctx, args) => { const current = await actor(ctx); const job = await ctx.db.get(args.jobId); if (!job || job.ownerAccountId !== current.accountId || job.schoolId !== current.schoolId) throw new Error("DELETION_NOT_FOUND"); if (job.phase !== "failed") return { scheduled: false, jobId: job._id }; await ctx.db.patch(job._id, { phase: "children", nextAttemptAt: undefined, attemptCount: 0, updatedAt: Date.now() }); await schedule(ctx, job._id, job.generation, 0, { phase: "children", cursor: job.cursor }); return { scheduled: true, jobId: job._id }; },
+  handler: async (ctx, args) => { const current = await actor(ctx); const job = await ctx.db.get(args.jobId); if (!job || job.ownerAccountId !== current.accountId || job.schoolId !== current.schoolId) throw new Error("DELETION_NOT_FOUND"); if (job.phase !== "failed") return { scheduled: false, jobId: job._id }; const phase = job.cursor ? decode(job.cursor, job).family === "placements" ? "placements" : decode(job.cursor, job).family === "artifact" ? "artifact" : "children" : job.phase; await ctx.db.patch(job._id, { phase, nextAttemptAt: undefined, attemptCount: 0, activeAttemptId: undefined, activeAttemptAt: undefined, updatedAt: Date.now() }); await schedule(ctx, job._id, job.generation, 0, { phase, cursor: job.cursor }); return { scheduled: true, jobId: job._id }; },
 });
 
 export const status = query({

@@ -35,17 +35,15 @@ import {
   purgeSourceNodes,
   syncArtifactSummary,
   syncSourceNodes,
-  tombstoneArtifactEmbeds,
   upsertArtifactSummary,
 } from "./orgTreeShared";
 import {
   hydrateVersionSafely,
   loadVersionAfter,
-  releaseSnapshotObject,
   retainSnapshotObject,
   type SnapshotStrategy,
 } from "./artifactSnapshots";
-import { recordMeterEvent } from "./metering";
+import { scheduleDeletion } from "./spectraArtifactDeletion";
 import { writeAuditEvent } from "./auditShared";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { agentDraftHash } from "./agents";
@@ -3339,219 +3337,7 @@ export const permanentlyDelete = mutation({
       artifact.schoolId,
       actor.accountId,
     );
-
-    await tombstoneArtifactEmbeds(ctx, args.artifactId, actor.accountId);
-
-    const purgedPlacements = await purgeSourceNodes(
-      ctx,
-      "work",
-      args.artifactId,
-    );
-    const userStates = await ctx.db
-      .query("artifactUserStates")
-      .withIndex("by_artifact_updated", (q) =>
-        q.eq("artifactId", args.artifactId),
-      )
-      .collect();
-    await Promise.all(userStates.map((state) => ctx.db.delete(state._id)));
-
-    const versions = await ctx.db
-      .query("spectraArtifactVersions")
-      .withIndex("by_artifact_created", (q) =>
-        q.eq("artifactId", args.artifactId),
-      )
-      .collect();
-    const runtimeBuilds = await ctx.db
-      .query("spectraRuntimeBuilds")
-      .withIndex("by_artifact_status", (q) =>
-        q.eq("artifactId", args.artifactId),
-      )
-      .collect();
-    const importJobs = await ctx.db
-      .query("artifactImportJobs")
-      .withIndex("by_artifact", (q) => q.eq("artifactId", args.artifactId))
-      .collect();
-    const artifactAssets = await ctx.db
-      .query("artifactAssets")
-      .withIndex("by_artifact_path", (q) => q.eq("artifactId", args.artifactId))
-      .collect();
-    const [outgoingLinks, incomingLinks] = await Promise.all([
-      ctx.db
-        .query("spectraArtifactLinks")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceArtifactId", args.artifactId),
-        )
-        .collect(),
-      ctx.db
-        .query("spectraArtifactLinks")
-        .withIndex("by_target", (q) =>
-          q.eq("targetArtifactId", args.artifactId),
-        )
-        .collect(),
-    ]);
-    const linkRows = [
-      ...new Map(
-        [...outgoingLinks, ...incomingLinks].map((link) => [link._id, link]),
-      ).values(),
-    ];
-    for (const build of runtimeBuilds) {
-      if (build.storageId) {
-        await ctx.storage.delete(build.storageId);
-        if (build.payloadBytes)
-          await recordMeterEvent(ctx, {
-            schoolId: build.schoolId,
-            accountId: build.createdByAccountId,
-            category: "storage_bytes",
-            quantity: -build.payloadBytes,
-            sourceType: "runtime_build",
-            sourceId: String(build._id),
-            idempotencyKey: `runtime-build:${build._id}:storage:deleted`,
-            dimensions: { runtime: build.runtime, state: "deleted" },
-            occurredAt: Date.now(),
-          });
-      }
-      await ctx.db.delete(build._id);
-    }
-    for (const job of importJobs) {
-      if (job.originalStorageId) {
-        const metadata = await ctx.db.system.get(
-          "_storage",
-          job.originalStorageId,
-        );
-        if (metadata) {
-          await ctx.storage.delete(job.originalStorageId);
-          await recordMeterEvent(ctx, {
-            schoolId: job.schoolId,
-            accountId: job.ownerAccountId,
-            category: "storage_bytes",
-            quantity: -metadata.size,
-            sourceType: "artifact_import_original",
-            sourceId: String(job._id),
-            idempotencyKey: `artifact-import:${job._id}:storage:deleted`,
-            dimensions: {
-              typeKey: job.typeKey,
-              format: job.format,
-              state: "deleted",
-            },
-            occurredAt: Date.now(),
-          });
-        }
-      }
-      await ctx.db.delete(job._id);
-    }
-    for (const asset of artifactAssets) {
-      if (asset.storageId) {
-        const metadata = await ctx.db.system.get("_storage", asset.storageId);
-        if (metadata) {
-          await ctx.storage.delete(asset.storageId);
-          await recordMeterEvent(ctx, {
-            schoolId: asset.schoolId,
-            accountId: asset.uploadedByAccountId,
-            category: "storage_bytes",
-            quantity: -metadata.size,
-            sourceType: "artifact_asset",
-            sourceId: String(asset._id),
-            idempotencyKey: `artifact-asset:${asset._id}:storage:deleted`,
-            dimensions: { mediaType: asset.mediaType, state: "deleted" },
-            occurredAt: Date.now(),
-          });
-        }
-      }
-      await ctx.db.delete(asset._id);
-    }
-    for (const version of versions) {
-      if (version.snapshotRef)
-        await releaseSnapshotObject(ctx, version.schoolId, version.snapshotRef);
-      if (version.beforeSnapshotRef)
-        await releaseSnapshotObject(
-          ctx,
-          version.schoolId,
-          version.beforeSnapshotRef,
-        );
-      await ctx.db.delete(version._id);
-    }
-    await Promise.all(linkRows.map((link) => ctx.db.delete(link._id)));
-
-    const runs = await ctx.db
-      .query("spectraAiRuns")
-      .withIndex("by_artifact", (q) => q.eq("artifactId", args.artifactId))
-      .collect();
-    for (const run of runs) {
-      const [operations, cards] = await Promise.all([
-        ctx.db
-          .query("spectraOperations")
-          .withIndex("by_run", (q) => q.eq("runId", run._id))
-          .collect(),
-        ctx.db
-          .query("spectraResultCards")
-          .withIndex("by_run", (q) => q.eq("runId", run._id))
-          .collect(),
-      ]);
-      await Promise.all([
-        ...operations.map((operation) => ctx.db.delete(operation._id)),
-        ...cards.map((card) => ctx.db.delete(card._id)),
-      ]);
-      await ctx.db.delete(run._id);
-    }
-
-    const [memoryEvidence, scopedMemory] = await Promise.all([
-      ctx.db
-        .query("memoryEvidence")
-        .withIndex("by_source", (q) =>
-          q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
-        )
-        .collect(),
-      ctx.db
-        .query("memoryClaims")
-        .withIndex("by_artifact_status", (q) =>
-          q.eq("artifactId", args.artifactId).eq("status", "active"),
-        )
-        .collect(),
-    ]);
-    const memoryAccountIds = new Set<Id<"accounts">>();
-    const memoryChangedAt = Date.now();
-    for (const evidence of memoryEvidence) {
-      memoryAccountIds.add(evidence.accountId);
-      await ctx.db.patch(evidence._id, {
-        accessStatus: "deleted",
-        excerptPreview: undefined,
-      });
-    }
-    for (const claim of scopedMemory) {
-      memoryAccountIds.add(claim.accountId);
-      await ctx.db.patch(claim._id, {
-        status: "expired",
-        expiresAt: memoryChangedAt,
-        updatedAt: memoryChangedAt,
-      });
-    }
-    for (const accountId of memoryAccountIds) {
-      const capsules = await ctx.db
-        .query("memoryCapsules")
-        .withIndex("by_account_scope", (q) =>
-          q.eq("accountId", accountId).eq("scope", "private_global"),
-        )
-        .collect();
-      const schoolCapsules = await ctx.db
-        .query("memoryCapsules")
-        .withIndex("by_account_scope", (q) =>
-          q.eq("accountId", accountId).eq("scope", "private_school"),
-        )
-        .collect();
-      for (const capsule of [...capsules, ...schoolCapsules])
-        await ctx.db.patch(capsule._id, {
-          stale: true,
-          updatedAt: memoryChangedAt,
-        });
-    }
-
-    await ctx.db.delete(args.artifactId);
-    await syncArtifactSummary(ctx, args.artifactId);
-    return {
-      artifactId: args.artifactId,
-      placementCount: purgedPlacements,
-      runCount: runs.length,
-    };
+    return scheduleDeletion(ctx, args.artifactId, artifact, actor.accountId);
   },
 });
 

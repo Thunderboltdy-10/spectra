@@ -78,6 +78,7 @@ export type ArtifactEmbedReference = {
   pinnedVersionId?: string;
   contextPolicy: ArtifactEmbedContextPolicy;
   displayPreferences?: Record<string, unknown>;
+  sourceUnavailable?: boolean;
   state: ArtifactEmbedState;
   createdAt?: number;
   updatedAt?: number;

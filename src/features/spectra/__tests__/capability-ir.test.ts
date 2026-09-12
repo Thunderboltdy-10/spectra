@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   OFFICE_FORMATTING_CAPABILITIES,
-  PRESENTATION_TEXT_FORMAT_NATIVE_REASON,
   capabilityGhostIssues,
   formattingCapabilitiesFor,
   officeCapabilitiesFor,
@@ -246,10 +245,7 @@ describe("Office formatting capability IR", () => {
       binding,
       0,
     ).availability(ctx);
-    expect(fromDefinition).toEqual({
-      state: "disabled",
-      reason: PRESENTATION_TEXT_FORMAT_NATIVE_REASON,
-    });
+    expect(fromDefinition).toEqual({ state: "enabled" });
     expect(fromCommand).toEqual(fromDefinition);
   });
 

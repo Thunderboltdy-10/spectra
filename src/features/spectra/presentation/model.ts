@@ -1,6 +1,72 @@
 export type PresentationObjectType =
   "text" | "shape" | "image" | "chart" | "table" | "embed" | "video" | "group";
 
+/** A DrawingML run projected into the collaborative presentation model. */
+export type PresentationTextRun = {
+  text: string;
+  fontFamily?: string;
+  fontSizePt?: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  color?: string;
+  hyperlink?: string;
+};
+
+/** One native a:p. Keeping paragraphs separate prevents a line break edit from
+ * flattening bullets, indentation, or run formatting in the neighbouring line. */
+export type PresentationParagraph = {
+  runs: PresentationTextRun[];
+  alignment?: "left" | "center" | "right" | "justify";
+  level?: number;
+  bullet?: "none" | "bullet" | "numbered";
+};
+
+export type PresentationTextContent = {
+  text: string;
+  paragraphs?: PresentationParagraph[];
+  nativeShapeId?: string;
+  nativeParagraphIndex?: number;
+  nativeShapeKind?: "placeholder" | "shape" | "group";
+};
+
+export type PresentationChartSeries = {
+  id?: string;
+  name: string;
+  categories: string[];
+  values: number[];
+};
+
+export type PresentationChartContent = {
+  chartType: "bar" | "column" | "line" | "pie" | "area";
+  title?: string;
+  categories: string[];
+  series: PresentationChartSeries[];
+  showLegend?: boolean;
+  axisTitle?: string;
+  valueAxisTitle?: string;
+  nativeChartPart?: string;
+  sourceArtifactId?: string;
+  sourceChartId?: string;
+  sourceRevision?: string;
+  sourceKind?: "artifact" | "sheets_range";
+  sourceLive?: boolean;
+};
+
+export type PresentationTableCell = {
+  text: string;
+  paragraphs?: PresentationParagraph[];
+  style?: Record<string, unknown>;
+  rowSpan?: number;
+  colSpan?: number;
+};
+
+export type PresentationTableContent = {
+  rows: Array<Array<PresentationTableCell | string>>;
+  nativeTable?: boolean;
+};
+
 export type PresentationObject = {
   id: string;
   type: PresentationObjectType;
@@ -90,6 +156,7 @@ export type PresentationContent = {
     canvasHeightEmu?: number;
     sourceArtifactId?: string;
     sourcePayloadHash?: string;
+    themeFonts?: { heading?: string; body?: string };
   };
 };
 
@@ -151,6 +218,7 @@ export function producePresentationContent(
       ...slide,
       objects: slide.objects.map((object) => ({
         ...object,
+        content: cloneContent(object.content),
         ...(object.style ? { style: { ...object.style } } : {}),
         ...(object.sourceBinding
           ? { sourceBinding: { ...object.sourceBinding } }
@@ -225,6 +293,17 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function cloneContent(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(cloneContent);
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+      key,
+      cloneContent(child),
+    ]),
+  );
+}
+
 function finite(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -257,7 +336,55 @@ function uniqueIdentifier(
 export function presentationObjectText(object: PresentationObject) {
   if (typeof object.content === "string") return object.content;
   const content = record(object.content);
-  return text(content.text, text(content.label, text(content.title)));
+  if (typeof content.text === "string") return content.text;
+  if (Array.isArray(content.paragraphs)) {
+    const paragraphs = content.paragraphs.flatMap((candidate) => {
+      const paragraph = record(candidate);
+      if (!Array.isArray(paragraph.runs)) return [];
+      return [paragraph.runs.map((run) => text(record(run).text)).join("")];
+    });
+    if (paragraphs.length) return paragraphs.join("\n");
+  }
+  return text(content.label, text(content.title));
+}
+
+export function presentationObjectParagraphs(
+  object: PresentationObject,
+): PresentationParagraph[] {
+  const content = record(object.content);
+  if (Array.isArray(content.paragraphs)) {
+    return content.paragraphs.flatMap((candidate) => {
+      const paragraph = record(candidate);
+      if (!Array.isArray(paragraph.runs)) return [];
+      return [{
+        runs: paragraph.runs.flatMap((run) => {
+          const value = record(run);
+          return typeof value.text === "string"
+            ? [{
+                text: value.text,
+                ...(typeof value.fontFamily === "string" ? { fontFamily: value.fontFamily } : {}),
+                ...(typeof value.fontSizePt === "number" ? { fontSizePt: value.fontSizePt } : {}),
+                ...(typeof value.bold === "boolean" ? { bold: value.bold } : {}),
+                ...(typeof value.italic === "boolean" ? { italic: value.italic } : {}),
+                ...(typeof value.underline === "boolean" ? { underline: value.underline } : {}),
+                ...(typeof value.strike === "boolean" ? { strike: value.strike } : {}),
+                ...(typeof value.color === "string" ? { color: value.color } : {}),
+                ...(typeof value.hyperlink === "string" ? { hyperlink: value.hyperlink } : {}),
+              } satisfies PresentationTextRun]
+            : [];
+        }),
+        ...(paragraph.alignment === "left" || paragraph.alignment === "center" || paragraph.alignment === "right" || paragraph.alignment === "justify"
+          ? { alignment: paragraph.alignment }
+          : {}),
+        ...(typeof paragraph.level === "number" ? { level: paragraph.level } : {}),
+        ...(paragraph.bullet === "none" || paragraph.bullet === "bullet" || paragraph.bullet === "numbered"
+          ? { bullet: paragraph.bullet }
+          : {}),
+      } satisfies PresentationParagraph];
+    });
+  }
+  const value = presentationObjectText(object);
+  return value.split(/\r?\n/).map((line) => ({ runs: [{ text: line }] }));
 }
 
 const GENERIC_SLIDE_LABEL =
@@ -288,7 +415,17 @@ export function withPresentationObjectText(
     content:
       typeof object.content === "string"
         ? value
-        : { ...record(object.content), text: value },
+        : {
+            ...record(object.content),
+            text: value,
+            ...(Array.isArray(record(object.content).paragraphs)
+              ? {
+                  paragraphs: value.split(/\r?\n/).map((line) => ({
+                    runs: [{ text: line }],
+                  })),
+                }
+              : {}),
+          },
   };
 }
 
@@ -332,8 +469,14 @@ export function createPresentationObject(
       ...base,
       content: {
         chartType: "bar",
-        labels: ["A", "B", "C"],
-        values: [62, 84, 48],
+        categories: ["A", "B", "C"],
+        series: [
+          {
+            name: "Series 1",
+            categories: ["A", "B", "C"],
+            values: [62, 84, 48],
+          },
+        ],
       },
       altText: "Bar chart with three values",
     };
@@ -698,6 +841,18 @@ export function normalizePresentationContent(
           ...(typeof nativeBindingSource.sourcePayloadHash === "string" &&
           /^[a-f0-9]{64}$/.test(nativeBindingSource.sourcePayloadHash)
             ? { sourcePayloadHash: nativeBindingSource.sourcePayloadHash }
+            : {}),
+          ...(nativeBindingSource.themeFonts && typeof nativeBindingSource.themeFonts === "object"
+            ? {
+                themeFonts: {
+                  ...(typeof record(nativeBindingSource.themeFonts).heading === "string"
+                    ? { heading: String(record(nativeBindingSource.themeFonts).heading) }
+                    : {}),
+                  ...(typeof record(nativeBindingSource.themeFonts).body === "string"
+                    ? { body: String(record(nativeBindingSource.themeFonts).body) }
+                    : {}),
+                },
+              }
             : {}),
         }
       : undefined;

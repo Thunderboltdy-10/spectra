@@ -25,6 +25,7 @@ import {
 } from "@/features/spectra/lenses/native-reconciliation";
 import { mergeThreeWay, type MergeConflict } from "@/features/spectra/lenses/three-way-merge";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
+import { nativeOperationId, type NativeSaveReceipt } from "../../../../../../shared/native-office-contract";
 
 export const runtime = "nodejs";
 
@@ -149,7 +150,25 @@ async function materializeDocxArtifactAttempt(
     ? await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations })
     : payload;
   const hash = await sha256Payload(output);
-  if (hash === truth.hash) return { state: "unchanged" as const, hash };
+  if (hash === truth.hash)
+    return {
+      state: "unchanged" as const,
+      hash,
+      receipt: {
+        kind: "native-office-save" as const,
+        format: "docx" as const,
+        operationId: nativeOperationId(String(workId), truth.revision, hash),
+        artifactId: String(workId),
+        basePayloadHash: truth.hash,
+        resultPayloadHash: hash,
+        baseRevision: truth.revision,
+        resultRevision: hash,
+        targets: { regionIds: [], partNames: [] },
+        semantic: { resultDigest: opened.projection.nativeBinding.semanticDigest, readbackDigest: opened.projection.nativeBinding.semanticDigest },
+        preservedPartNames: [],
+        state: "unchanged" as const,
+      } satisfies NativeSaveReceipt,
+    };
   const [next, comparison] = await Promise.all([
     docxLens.open(output, "strict-native"),
     comparePackages(payload, output),
@@ -159,15 +178,33 @@ async function materializeDocxArtifactAttempt(
     String(workId),
     hash,
   );
+  if (nextProjection.nativeBinding.semanticDigest !== projection.nativeBinding.semanticDigest)
+    throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested semantic equation/text edit.");
   assertPreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts });
-  const stored = await uploadNativePayload(workId, output, hash, truth.nativeFormat);
   const local = workTruth.replicas.find(
     (replica) => replica.kind === "local" && replica.state !== "unavailable",
   );
+  const changedPartNames = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`);
+  const nativeReceipt: NativeSaveReceipt = {
+    kind: "native-office-save",
+    format: "docx",
+    operationId: nativeOperationId(String(workId), truth.revision, hash),
+    artifactId: String(workId),
+    basePayloadHash: truth.hash,
+    resultPayloadHash: hash,
+    baseRevision: truth.revision,
+    resultRevision: hash,
+    targets: { regionIds, partNames: changedPartNames },
+    semantic: { baseDigest: opened.projection.nativeBinding.semanticDigest, resultDigest: projection.nativeBinding.semanticDigest, readbackDigest: nextProjection.nativeBinding.semanticDigest },
+    preservedPartNames: comparison.parts.filter((part) => part.verdict === "identical").map((part) => `/${part.name}`),
+    state: local ? "pending" : "cloud_saved",
+  };
+  const stored = await uploadNativePayload(workId, output, hash, truth.nativeFormat);
   if (!local) {
     return {
       state: "cloud_saved" as const,
       hash,
+      receipt: nativeReceipt,
       status:
         "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
     };
@@ -190,6 +227,7 @@ async function materializeDocxArtifactAttempt(
       projectionContent?: unknown;
       projectionContentHash?: string;
       projectionTextIndex?: string;
+      nativeReceipt?: NativeSaveReceipt;
       promotionMode?: "verified-first";
     },
     { requestId: string; state: string }
@@ -203,6 +241,7 @@ async function materializeDocxArtifactAttempt(
       partNames: comparison.parts
         .filter((part) => part.verdict !== "identical")
         .map((part) => `/${part.name}`),
+      nativeReceipt,
       localReplicaId: local._id as Id<"workReplicas">,
       baseContent: opened.projection,
       baseContentHash: opened.projection.nativeBinding.semanticDigest,
@@ -227,6 +266,7 @@ async function materializeDocxArtifactAttempt(
       return {
         state: "cloud_saved" as const,
         hash,
+        receipt: nativeReceipt,
         status:
           "Spectra saved your edit. Open this file from Library with the Spectra bridge connected to update the Word copy on this computer.",
       };
@@ -237,6 +277,7 @@ async function materializeDocxArtifactAttempt(
     state: queued.state,
     requestId: queued.requestId,
     hash,
+    receipt: nativeReceipt,
     status: "Waiting to save locally",
   };
 }

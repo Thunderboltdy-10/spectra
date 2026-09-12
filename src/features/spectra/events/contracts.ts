@@ -1,6 +1,7 @@
 import type { WorkAnchor } from "../work/registry";
 import type { SpectraPreferences } from "../settings/schema";
 import type { ReferenceNode } from "../references";
+import type { BridgeTrustPreset } from "../../../../shared/bridge-trust";
 
 export type SpectraCommands = {
   "library.organize": {
@@ -61,6 +62,13 @@ export type SpectraCommands = {
       | "timetable"
       | "classes"
       | "cas";
+  };
+  "bridge.setup": {
+    action: "pair" | "select-location" | "retry-connection" | "retry-folder";
+    grantId?: string;
+  };
+  "bridge.policy.change": {
+    preset: BridgeTrustPreset;
   };
 };
 

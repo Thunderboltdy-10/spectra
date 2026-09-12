@@ -57,6 +57,10 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("text"),
       text: z.string().max(2_000_000),
+      /** Resolved native run formatting; omitted when the run uses defaults. */
+      format: docxRunFormatSchema.optional(),
+      /** External hyperlink target for this run, when one is present. */
+      href: z.string().max(4_000).optional(),
     })
     .strict(),
   z
@@ -64,6 +68,10 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
       kind: z.literal("equation"),
       latex: z.string().max(2_000_000),
       display: z.enum(["inline", "block"]),
+      /** Exact OMML is carried for native readback/export. */
+      ommlXml: z.string().max(4_000_000).optional(),
+      /** LaTeX value represented by the retained OMML subtree at open time. */
+      ommlSourceLatex: z.string().max(2_000_000).optional(),
     })
     .strict(),
   z
@@ -75,6 +83,15 @@ export const docxRichInlineSchema = z.discriminatedUnion("kind", [
       widthEmu: z.number().int().positive().optional(),
       heightEmu: z.number().int().positive().optional(),
       placement: z.enum(["inline", "anchored"]),
+      crop: z
+        .object({
+          left: z.number().min(0).max(1).optional(),
+          top: z.number().min(0).max(1).optional(),
+          right: z.number().min(0).max(1).optional(),
+          bottom: z.number().min(0).max(1).optional(),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
 ]);
@@ -146,14 +163,35 @@ export type DocxRunFormat = z.infer<typeof docxRunFormatSchema>;
 export type DocxParagraphFormat = z.infer<typeof docxParagraphFormatSchema>;
 
 export const docxOperationSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("replace-paragraph"), regionId: z.string(), text: z.string() }).strict(),
-  z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string() }).strict(),
-  z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("replace-paragraph"), regionId: z.string(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
+  z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
+  z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("delete-region"), regionId: z.string() }).strict(),
   z.object({ kind: z.literal("reorder-regions"), order: z.array(z.string()) }).strict(),
   z.object({ kind: z.literal("apply-style"), regionId: z.string(), style: z.string() }).strict(),
   z.object({ kind: z.literal("format-runs"), regionId: z.string(), format: docxRunFormatSchema }).strict(),
   z.object({ kind: z.literal("format-paragraph"), regionId: z.string(), format: docxParagraphFormatSchema }).strict(),
+  z.object({ kind: z.literal("insert-table-row"), regionId: z.string(), row: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ kind: z.literal("delete-table-row"), regionId: z.string(), row: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("insert-table-column"), regionId: z.string(), column: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ kind: z.literal("delete-table-column"), regionId: z.string(), column: z.number().int().nonnegative() }).strict(),
+  z.object({
+    kind: z.literal("update-image"),
+    regionId: z.string(),
+    partName: z.string(),
+    altText: z.string().max(4_000).optional(),
+    widthEmu: z.number().int().positive().optional(),
+    heightEmu: z.number().int().positive().optional(),
+    crop: z
+      .object({
+        left: z.number().min(0).max(1).optional(),
+        top: z.number().min(0).max(1).optional(),
+        right: z.number().min(0).max(1).optional(),
+        bottom: z.number().min(0).max(1).optional(),
+      })
+      .strict()
+      .optional(),
+  }).strict(),
 ]);
 export const DOCX_LENS_DELTA_KINDS = docxOperationSchema.options.map(
   (operation) => operation.shape.kind.value,
@@ -179,10 +217,54 @@ export const xlsxCellProjectionSchema = z
     value: xlsxCellValueSchema,
     formula: z.string().optional(),
     formulaSupport: z.enum(["recognized", "cached-only"]).optional(),
+    /** A formula result is either a native cached value or deliberately absent. */
+    formulaCache: z.enum(["present", "absent"]).optional(),
     style: z.record(z.string(), z.unknown()).optional(),
     format: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
+
+export const xlsxTableProjectionSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    range: z.string(),
+    columns: z.array(z.string()),
+    headerRow: z.boolean(),
+    totalsRow: z.boolean(),
+    style: z.string().nullable().optional(),
+    filters: z.array(
+      z.object({ column: z.number().int().nonnegative(), allowedValues: z.array(xlsxCellValueSchema) }).strict(),
+    ).optional(),
+    sort: z.object({ column: z.number().int().nonnegative(), direction: z.enum(["asc", "desc"]) }).strict().optional(),
+    partName: z.string().optional(),
+  })
+  .strict();
+
+const xlsxChartSeriesProjectionSchema = z
+  .object({
+    name: z.string().optional(),
+    categories: z.string().optional(),
+    values: z.string().optional(),
+  })
+  .strict();
+
+export const xlsxChartProjectionSchema = z
+  .object({
+    id: z.string(),
+    type: z.enum(["column", "bar", "line", "area", "pie", "scatter", "combo", "histogram"]),
+    sourceRange: z.string(),
+    title: z.string(),
+    showLegend: z.boolean().optional(),
+    position: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).strict(),
+    series: z.array(xlsxChartSeriesProjectionSchema).optional(),
+    partName: z.string().optional(),
+    drawingPartName: z.string().optional(),
+    anchorId: z.string().optional(),
+  })
+  .strict();
+
+const xlsxNativeRuleSchema = z.record(z.string(), z.unknown());
 export const xlsxSheetProjectionSchema = z
   .object({
     id: z.string(),
@@ -191,6 +273,22 @@ export const xlsxSheetProjectionSchema = z
     merges: z.array(z.string()).readonly(),
     frozenRows: z.number().int().nonnegative().optional(),
     frozenColumns: z.number().int().nonnegative().optional(),
+    rowCount: z.number().int().positive().optional(),
+    columnCount: z.number().int().positive().optional(),
+    hiddenRows: z.array(z.number().int().nonnegative()).optional(),
+    hiddenColumns: z.array(z.number().int().nonnegative()).optional(),
+    columnWidths: z.record(z.string(), z.number()).optional(),
+    rowHeights: z.record(z.string(), z.number()).optional(),
+    hidden: z.boolean().optional(),
+    showGridlines: z.boolean().optional(),
+    showHeadings: z.boolean().optional(),
+    tabColor: z.string().optional(),
+    tables: z.array(xlsxTableProjectionSchema).optional(),
+    charts: z.array(xlsxChartProjectionSchema).optional(),
+    validations: z.array(xlsxNativeRuleSchema).optional(),
+    conditionalFormats: z.array(xlsxNativeRuleSchema).optional(),
+    /** The workbook relationship target, stable across worksheet reorder. */
+    partName: z.string().optional(),
   })
   .strict();
 export const xlsxProjectionSchema = z
@@ -199,6 +297,8 @@ export const xlsxProjectionSchema = z
     definedNames: z.array(
       z.object({ name: z.string(), ref: z.string(), sheet: z.string().optional() }).strict(),
     ),
+    calculationMode: z.enum(["automatic", "manual"]).optional(),
+    activeSheetId: z.string().optional(),
     nativeBinding: z
       .object({
         ...nativeBindingBase,
@@ -210,6 +310,8 @@ export const xlsxProjectionSchema = z
   })
   .strict();
 export type XlsxCellProjection = z.infer<typeof xlsxCellProjectionSchema>;
+export type XlsxTableProjection = z.infer<typeof xlsxTableProjectionSchema>;
+export type XlsxChartProjection = z.infer<typeof xlsxChartProjectionSchema>;
 export type XlsxSheetProjection = z.infer<typeof xlsxSheetProjectionSchema>;
 export type XlsxProjection = z.infer<typeof xlsxProjectionSchema>;
 
@@ -221,6 +323,18 @@ export const xlsxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("merge-cells"), sheetId: z.string(), range: z.string() }).strict(),
   z.object({ kind: z.literal("unmerge-cells"), sheetId: z.string(), range: z.string() }).strict(),
   z.object({ kind: z.literal("set-freeze-panes"), sheetId: z.string(), rows: z.number().int().nonnegative(), columns: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("add-sheet"), sheetId: z.string(), name: z.string(), index: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("remove-sheet"), sheetId: z.string() }).strict(),
+  z.object({ kind: z.literal("rename-sheet"), sheetId: z.string(), name: z.string() }).strict(),
+  z.object({ kind: z.literal("reorder-sheets"), order: z.array(z.string()) }).strict(),
+  z.object({ kind: z.literal("set-sheet-properties"), sheetId: z.string(), properties: z.record(z.string(), z.unknown()) }).strict(),
+  z.object({ kind: z.literal("mutate-sheet-axis"), sheetId: z.string(), axis: z.enum(["row", "column"]), at: z.number().int().nonnegative(), delta: z.number().int().min(-1).max(1) }).strict(),
+  z.object({ kind: z.literal("set-defined-names"), names: z.array(z.object({ name: z.string(), ref: z.string(), sheet: z.string().optional() }).strict()) }).strict(),
+  z.object({ kind: z.literal("set-workbook-properties"), calculationMode: z.enum(["automatic", "manual"]).optional(), activeSheetId: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("upsert-table"), sheetId: z.string(), table: xlsxTableProjectionSchema }).strict(),
+  z.object({ kind: z.literal("remove-table"), sheetId: z.string(), tableId: z.string() }).strict(),
+  z.object({ kind: z.literal("upsert-chart"), sheetId: z.string(), chart: xlsxChartProjectionSchema }).strict(),
+  z.object({ kind: z.literal("remove-chart"), sheetId: z.string(), chartId: z.string() }).strict(),
 ]);
 export const XLSX_LENS_DELTA_KINDS = xlsxOperationSchema.options.map(
   (operation) => operation.shape.kind.value,
@@ -296,6 +410,10 @@ export const pptxProjectionSchema = z
         // duplicating package bytes into artifact content.
         sourceArtifactId: z.string().min(1).optional(),
         sourcePayloadHash: semanticDigestSchema.optional(),
+        themeFonts: z
+          .object({ heading: z.string().optional(), body: z.string().optional() })
+          .strict()
+          .optional(),
       })
       .strict(),
   })
@@ -311,7 +429,19 @@ export const pptxOperationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-slide-hidden"), slideId: z.string(), hidden: z.boolean() }).strict(),
   z.object({ kind: z.literal("set-alt-text"), slideId: z.string(), shapeId: z.string(), text: z.string() }).strict(),
   z.object({ kind: z.literal("set-geometry"), slideId: z.string(), shapeId: z.string(), x: z.number(), y: z.number(), width: z.number(), height: z.number(), rotation: z.number() }).strict(),
-  z.object({ kind: z.literal("add-slide"), slideId: z.string(), layoutPartName: z.string().optional(), title: z.string().optional(), text: z.array(z.string()).optional() }).strict(),
+  z.object({ kind: z.literal("format-rich-text"), slideId: z.string(), shapeId: z.string(), paragraphs: z.array(z.object({ runs: z.array(z.object({ text: z.string(), fontFamily: z.string().optional(), fontSizePt: z.number().positive().optional(), bold: z.boolean().optional(), italic: z.boolean().optional(), underline: z.boolean().optional(), strike: z.boolean().optional(), color: z.string().optional(), hyperlink: z.string().optional() }).strict()), alignment: z.enum(["left", "center", "right", "justify"]).optional(), level: z.number().int().nonnegative().optional(), bullet: z.enum(["none", "bullet", "numbered"]).optional() }).strict()) }).strict(),
+  z.object({ kind: z.literal("format-text"), slideId: z.string(), shapeId: z.string(), format: z.object({ fontFamily: z.string().nullable().optional(), fontSizePt: z.number().positive().nullable().optional(), bold: z.boolean().nullable().optional(), italic: z.boolean().nullable().optional(), underline: z.boolean().nullable().optional(), strike: z.boolean().nullable().optional(), color: z.string().nullable().optional(), align: z.enum(["left", "center", "right", "justify"]).nullable().optional(), level: z.number().int().nonnegative().nullable().optional() }).strict() }).strict(),
+  z.object({ kind: z.literal("set-shape-style"), slideId: z.string(), shapeId: z.string(), style: z.record(z.string(), z.unknown()) }).strict(),
+  z.object({ kind: z.literal("set-image-crop"), slideId: z.string(), shapeId: z.string(), crop: z.object({ left: z.number().min(0).max(100), top: z.number().min(0).max(100), right: z.number().min(0).max(100), bottom: z.number().min(0).max(100) }).strict() }).strict(),
+  z.object({ kind: z.literal("set-table-cell-text"), slideId: z.string(), shapeId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string() }).strict(),
+  z.object({ kind: z.literal("set-table-cell-format"), slideId: z.string(), shapeId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), format: z.record(z.string(), z.unknown()) }).strict(),
+  z.object({ kind: z.literal("set-chart"), slideId: z.string(), shapeId: z.string(), chartType: z.enum(["bar", "column", "line", "pie", "area"]).optional(), title: z.string().nullable().optional(), categories: z.array(z.string()), series: z.array(z.object({ id: z.string().optional(), name: z.string(), categories: z.array(z.string()), values: z.array(z.number()) }).strict()), showLegend: z.boolean().optional(), axisTitle: z.string().nullable().optional(), valueAxisTitle: z.string().nullable().optional(), sourceArtifactId: z.string().optional(), sourceChartId: z.string().optional(), sourceRevision: z.string().optional(), sourceKind: z.enum(["artifact", "sheets_range"]).optional(), sourceLive: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal("group-objects"), slideId: z.string(), groupId: z.string(), childShapeIds: z.array(z.string()).min(2), x: z.number(), y: z.number(), width: z.number(), height: z.number(), rotation: z.number(), readingOrder: z.number().int().nonnegative().optional() }).strict(),
+  z.object({ kind: z.literal("set-object-state"), slideId: z.string(), shapeId: z.string(), hidden: z.boolean().optional(), readingOrder: z.number().int().nonnegative().optional(), parentId: z.string().nullable().optional(), childIds: z.array(z.string()).optional() }).strict(),
+  z.object({ kind: z.literal("remove-object"), slideId: z.string(), shapeId: z.string() }).strict(),
+  z.object({ kind: z.literal("set-theme-fonts"), heading: z.string().optional(), body: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("duplicate-slide"), slideId: z.string(), newSlideId: z.string(), title: z.string().optional() }).strict(),
+  z.object({ kind: z.literal("add-slide"), slideId: z.string(), layoutPartName: z.string().optional(), title: z.string().optional(), text: z.array(z.string()).optional(), objects: z.array(presentationObjectProjectionSchema).optional() }).strict(),
   z.object({ kind: z.literal("remove-slide"), slideId: z.string() }).strict(),
   z.object({ kind: z.literal("reorder-slides"), order: z.array(z.string()) }).strict(),
 ]);

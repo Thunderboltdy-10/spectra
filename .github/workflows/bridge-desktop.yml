@@ -42,6 +42,8 @@ jobs:
           - platform: macos-14
             bundles: app,dmg
             target: aarch64-apple-darwin
+          # GitHub's current Intel macOS label. A Windows build is not evidence
+          # of Mac runtime support.
           - platform: macos-15-intel
             bundles: app,dmg
             target: x86_64-apple-darwin

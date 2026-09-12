@@ -269,6 +269,8 @@ pub struct ClaimedWrite {
     pub target_revision: String,
     pub content_hash: String,
     pub idempotency_key: String,
+    #[serde(default)]
+    pub native_receipt: Option<serde_json::Value>,
     pub payload_url: String,
 }
 

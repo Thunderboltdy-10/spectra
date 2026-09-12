@@ -60,6 +60,7 @@ import {
   type PresentationContent,
   type PresentationObject,
   type PresentationObjectType,
+  type PresentationTableCell,
   type PresentationSlide,
 } from "../presentation/model";
 import {
@@ -547,6 +548,45 @@ function styleValue(
     : fallback;
 }
 
+function tableCell(value: unknown): PresentationTableCell {
+  if (typeof value === "string" || typeof value === "number") {
+    return { text: String(value) };
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const candidate = value as Record<string, unknown>;
+    return {
+      text: typeof candidate.text === "string" ? candidate.text : "",
+      ...(candidate.paragraphs && Array.isArray(candidate.paragraphs)
+        ? { paragraphs: candidate.paragraphs as PresentationTableCell["paragraphs"] }
+        : {}),
+      ...(candidate.style && typeof candidate.style === "object"
+        ? { style: candidate.style as Record<string, unknown> }
+        : {}),
+      ...(typeof candidate.rowSpan === "number"
+        ? { rowSpan: candidate.rowSpan }
+        : {}),
+      ...(typeof candidate.colSpan === "number"
+        ? { colSpan: candidate.colSpan }
+        : {}),
+    };
+  }
+  return { text: "" };
+}
+
+function tableRows(object: PresentationObject): PresentationTableCell[][] {
+  const content =
+    object.content &&
+    typeof object.content === "object" &&
+    !Array.isArray(object.content)
+      ? (object.content as Record<string, unknown>)
+      : {};
+  return Array.isArray(content.rows)
+    ? content.rows.map((row) =>
+        Array.isArray(row) ? row.map((cell) => tableCell(cell)) : [],
+      )
+    : [];
+}
+
 function PresentationObjectView({
   object,
   themeFonts,
@@ -804,15 +844,27 @@ function PresentationObjectView({
       ) : object.type === "table" ? (
         <table className="presentation-table">
           <tbody>
-            {(Array.isArray(content.rows) ? content.rows : []).map(
-              (row, rowIndex) => (
-                <tr key={rowIndex}>
-                  {(Array.isArray(row) ? row : []).map((cell, cellIndex) => (
-                    <td key={cellIndex}>{String(cell)}</td>
-                  ))}
-                </tr>
-              ),
-            )}
+            {tableRows(object).map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((cell, cellIndex) => (
+                  <td
+                    key={cellIndex}
+                    style={{
+                      backgroundColor:
+                        typeof cell.style?.fill === "string"
+                          ? cell.style.fill
+                          : undefined,
+                      color:
+                        typeof cell.style?.color === "string"
+                          ? cell.style.color
+                          : undefined,
+                    }}
+                  >
+                    {cell.text}
+                  </td>
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
       ) : object.type === "embed" ? (
@@ -1334,6 +1386,79 @@ function PresentationObjectInspector({
               </label>
             </div>
           ) : null}
+        </div>
+      ) : null}
+      {object.type === "table" ? (
+        <div className="presentation-source-binding">
+          <strong>Table cells</strong>
+          <div className="grid gap-2">
+            {tableRows(object).map((row, rowIndex) =>
+              row.map((cell, columnIndex) => (
+                <div
+                  key={`${rowIndex}-${columnIndex}`}
+                  className="grid grid-cols-[1fr_auto] gap-2"
+                >
+                  <label>
+                    {rowIndex + 1},{columnIndex + 1}
+                    <input
+                      value={cell.text}
+                      disabled={readOnly}
+                      aria-label={`Table cell ${rowIndex + 1},${columnIndex + 1}`}
+                      onChange={(event) =>
+                        onUpdate((candidate) => {
+                          const rows = tableRows(candidate);
+                          const next = rows[rowIndex]?.[columnIndex];
+                          if (!next) return;
+                          next.text = event.target.value;
+                          candidate.content = {
+                            ...(candidate.content &&
+                            typeof candidate.content === "object" &&
+                            !Array.isArray(candidate.content)
+                              ? candidate.content
+                              : {}),
+                            rows,
+                          };
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Fill
+                    <input
+                      type="color"
+                      value={
+                        typeof cell.style?.fill === "string" &&
+                        /^#[0-9a-f]{6}$/i.test(cell.style.fill)
+                          ? cell.style.fill
+                          : "#ffffff"
+                      }
+                      disabled={readOnly}
+                      aria-label={`Table cell fill ${rowIndex + 1},${columnIndex + 1}`}
+                      onChange={(event) =>
+                        onUpdate((candidate) => {
+                          const rows = tableRows(candidate);
+                          const next = rows[rowIndex]?.[columnIndex];
+                          if (!next) return;
+                          next.style = {
+                            ...next.style,
+                            fill: event.target.value,
+                          };
+                          candidate.content = {
+                            ...(candidate.content &&
+                            typeof candidate.content === "object" &&
+                            !Array.isArray(candidate.content)
+                              ? candidate.content
+                              : {}),
+                            rows,
+                          };
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              )),
+            )}
+          </div>
         </div>
       ) : null}
       <div className="presentation-object-flags">

@@ -67,6 +67,7 @@ export type ArtifactEmbedState = (typeof ARTIFACT_EMBED_STATES)[number];
  */
 export type ArtifactEmbedReference = {
   embedId: string;
+  placementOperationId?: string;
   containerType: ArtifactEmbedContainerType;
   containerId: string;
   containerRegionId: string;

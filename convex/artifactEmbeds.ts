@@ -1,11 +1,12 @@
-import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { requireArtifactCapability } from "./spectraShared";
-import { loadVersionAfter } from "./artifactSnapshots";
+import { loadVersionAfter, releaseVersionIfUnpinned } from "./artifactSnapshots";
 import {
   projectArtifactForAccess,
   projectQuizSnapshotForLearner,
@@ -472,6 +473,7 @@ export const create = mutation({
     pinnedVersionId: v.optional(v.id("spectraArtifactVersions")),
     displayPreferences: v.optional(v.any()),
     contextPolicy: artifactEmbedContextPolicyValidator,
+    placementOperationId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actorValue = await actor(ctx);
@@ -514,6 +516,33 @@ export const create = mutation({
       await loadVersionAfter(ctx, version);
     }
     const now = Date.now();
+    const operationId = args.placementOperationId?.trim().slice(0, 180);
+    const placementFingerprint = operationId
+      ? JSON.stringify({
+          actor: String(actorValue.accountId),
+          containerType: args.containerType,
+          containerId: args.containerId.trim(),
+          region: args.containerRegionId.trim(),
+          source: String(args.sourceArtifactId),
+          versionPolicy: args.versionPolicy,
+          pinnedVersionId: args.pinnedVersionId ? String(args.pinnedVersionId) : null,
+        })
+      : undefined;
+    if (operationId) {
+      const existing = await ctx.db
+        .query("artifactEmbeds")
+        .withIndex("by_placement_operation", (q) =>
+          q.eq("containerType", args.containerType)
+            .eq("containerId", args.containerId.trim())
+            .eq("placementOperationId", operationId),
+        )
+        .first();
+      if (existing && !existing.removedAt) {
+        if (existing.placementFingerprint && existing.placementFingerprint !== placementFingerprint)
+          throw new Error("EMBED_PLACEMENT_OPERATION_CONFLICT");
+        return { embedId: existing._id, idempotent: true };
+      }
+    }
     const embedId = await ctx.db.insert("artifactEmbeds", {
       containerType: args.containerType,
       containerId: args.containerId.trim(),
@@ -530,8 +559,34 @@ export const create = mutation({
       createdByAccountId: actorValue.accountId,
       createdAt: now,
       updatedAt: now,
+      // Artifact writers confirm only after their canonical insertion commits.
+      // Non-editor containers have no second write boundary and are confirmed
+      // at creation time.
+      placementState: operationId ? "provisional" : "confirmed",
+      placementOperationId: operationId,
+      placementFingerprint,
+      placementExpiresAt: operationId ? now + 10 * 60_000 : undefined,
     });
+    if (operationId) {
+      await (ctx.scheduler.runAfter as unknown as (delay: number, fn: unknown, args: unknown) => Promise<unknown>)(
+        10 * 60_000,
+        (internal as unknown as { artifactEmbeds: { expireProvisional: unknown } }).artifactEmbeds.expireProvisional,
+        { embedId, placementOperationId: operationId },
+      );
+    }
     return { embedId };
+  },
+});
+
+/** Remove an editor intent that never became part of a committed version. */
+export const expireProvisional = internalMutation({
+  args: { embedId: v.id("artifactEmbeds"), placementOperationId: v.string() },
+  handler: async (ctx, args) => {
+    const embed = await ctx.db.get(args.embedId);
+    if (!embed || embed.placementOperationId !== args.placementOperationId || embed.placementState !== "provisional") return { expired: false };
+    if (embed.placementExpiresAt && embed.placementExpiresAt > Date.now()) return { expired: false };
+    await ctx.db.delete(embed._id);
+    return { expired: true };
   },
 });
 
@@ -628,8 +683,75 @@ export const migrateLegacy = mutation({
       createdByAccountId: actorValue.accountId,
       createdAt: now,
       updatedAt: now,
+      placementState: "confirmed",
     });
     return { embedId, containerRegionId };
+  },
+});
+
+function containsCanonicalPlacement(value: unknown, embedId: string, operationId: string, regionId: string, depth = 0): boolean {
+  if (depth > 14 || value === null || value === undefined) return false;
+  if (Array.isArray(value)) return value.some((entry) => containsCanonicalPlacement(entry, embedId, operationId, regionId, depth + 1));
+  if (typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  const idMatches = record.embedId === embedId || record.id === embedId;
+  const operationMatches = record.placementOperationId === operationId || record.operationId === operationId;
+  const regionMatches = record.containerRegionId === regionId || record.regionId === regionId;
+  if (idMatches && operationMatches && regionMatches) return true;
+  return Object.values(record).some((entry) => containsCanonicalPlacement(entry, embedId, operationId, regionId, depth + 1));
+}
+
+/**
+ * Called by the canonical change-group writer in the same transaction as the
+ * version insert. This is the only path that turns an editor intent into a
+ * confirmed placement; a local callback or arbitrary receipt string cannot.
+ */
+export async function confirmCanonicalPlacements(ctx: MutationCtx, versionId: Id<"spectraArtifactVersions">) {
+  const version = await ctx.db.get(versionId);
+  if (!version) return 0;
+  const content = await loadVersionAfter(ctx, version).catch(() => undefined);
+  if (content === undefined) return 0;
+  const embeds = await ctx.db.query("artifactEmbeds").withIndex("by_placement_operation", (q) => q.eq("containerType", "artifact").eq("containerId", String(version.artifactId))).collect();
+  let confirmed = 0;
+  for (const embed of embeds) {
+    if (embed.placementState !== "provisional" || !embed.placementOperationId) continue;
+    if (!containsCanonicalPlacement(content, String(embed._id), embed.placementOperationId, embed.containerRegionId)) continue;
+    await ctx.db.patch(embed._id, { placementState: "confirmed", placementReceipt: `canonical-version:${String(version._id)}`, placementExpiresAt: undefined, updatedAt: Date.now() });
+    confirmed++;
+  }
+  return confirmed;
+}
+
+export const confirmPlacement = mutation({
+  args: {
+    embedId: v.id("artifactEmbeds"),
+    placementOperationId: v.string(),
+    canonicalVersionId: v.optional(v.id("spectraArtifactVersions")),
+    canonicalChangeGroupId: v.optional(v.id("changeGroups")),
+    canonicalOperationId: v.optional(v.id("spectraOperations")),
+  },
+  handler: async (ctx, args) => {
+    const actorValue = await actor(ctx);
+    const embed = await ctx.db.get(args.embedId);
+    if (!embed || embed.placementOperationId !== args.placementOperationId.trim()) throw new Error("EMBED_PLACEMENT_NOT_FOUND");
+    await requireContainer(ctx, actorValue, embed.containerType, embed.containerId, "modify");
+    if (embed.removedAt) throw new Error("EMBED_NOT_FOUND");
+    if (embed.placementState === "confirmed") return { embedId: embed._id, confirmed: true, idempotent: true };
+    if (embed.placementState !== "provisional") throw new Error("EMBED_PLACEMENT_NOT_PENDING");
+    const source = await ctx.db.get(embed.sourceArtifactId);
+    if (!source || source.status === "deleted") throw new Error("EMBED_SOURCE_DELETED");
+    const decision = await evaluateAccessForActor(ctx, actorValue, source.blueprintKey === "agent" ? "agent" : "artifact", source._id);
+    if (!decision.allowed || !decision.capabilities.includes("read")) throw new Error("EMBED_SOURCE_ACCESS_REVOKED");
+    if (!args.canonicalVersionId) throw new Error("EMBED_CANONICAL_RECEIPT_REQUIRED");
+    const version = await ctx.db.get(args.canonicalVersionId);
+    if (!version || embed.containerType !== "artifact" || String(version.artifactId) !== embed.containerId || !containsCanonicalPlacement(await loadVersionAfter(ctx, version), String(embed._id), embed.placementOperationId, embed.containerRegionId)) throw new Error("EMBED_CANONICAL_RECEIPT_INVALID");
+    if (args.canonicalChangeGroupId) {
+      const group = await ctx.db.get(args.canonicalChangeGroupId);
+      if (!group || group.versionId !== version._id || group.artifactId !== version.artifactId) throw new Error("EMBED_CANONICAL_RECEIPT_INVALID");
+    }
+    if (args.canonicalOperationId && !version.operationIds?.includes(args.canonicalOperationId)) throw new Error("EMBED_CANONICAL_RECEIPT_INVALID");
+    await ctx.db.patch(embed._id, { placementState: "confirmed", placementReceipt: `canonical-version:${String(version._id)}`, placementExpiresAt: undefined, updatedAt: Date.now() });
+    return { embedId: embed._id, confirmed: true, idempotent: false };
   },
 });
 
@@ -693,6 +815,8 @@ export const update = mutation({
       contextPolicy: args.contextPolicy ?? embed.contextPolicy,
       updatedAt: Date.now(),
     });
+    if (embed.pinnedVersionId && embed.pinnedVersionId !== nextPinnedVersionId)
+      await releaseVersionIfUnpinned(ctx, embed.pinnedVersionId);
     return { embedId: embed._id };
   },
 });
@@ -711,7 +835,11 @@ export const remove = mutation({
       "modify",
     );
     const now = Date.now();
-    await ctx.db.patch(embed._id, { removedAt: now, updatedAt: now });
+    await ctx.db.patch(embed._id, {
+      removedAt: now,
+      placementState: "removed",
+      updatedAt: now,
+    });
     const pendingRequests = await ctx.db
       .query("artifactAccessRequests")
       .withIndex("by_embed_status", (q) =>
@@ -728,6 +856,7 @@ export const remove = mutation({
         }),
       ),
     );
+    if (embed.pinnedVersionId) await releaseVersionIfUnpinned(ctx, embed.pinnedVersionId);
     return { removed: true };
   },
 });
@@ -781,6 +910,7 @@ export const removeMany = mutation({
         }),
       ),
     );
+    for (const embed of active) if (embed.pinnedVersionId) await releaseVersionIfUnpinned(ctx, embed.pinnedVersionId);
     return { removed: active.length };
   },
 });

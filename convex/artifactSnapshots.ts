@@ -94,8 +94,44 @@ export async function hydrateVersionSafely(ctx: SnapshotCtx, version: Doc<"spect
 export async function releaseSnapshotObject(ctx: MutationCtx, schoolId: Id<"schools"> | undefined, snapshotRef: string) {
   const object = await ctx.db.query("artifactSnapshotObjects").withIndex("by_school_hash", (q) => q.eq("schoolId", schoolId).eq("hash", snapshotRef)).unique();
   if (!object || object.state === "deleted") return;
-  const refCount = Math.max(0, object.refCount - 1);
-  await ctx.db.patch(object._id, { refCount, lastReferencedAt: Date.now(), state: refCount === 0 ? "cold" : object.state });
+  // Reconcile from the durable version rows instead of blindly decrementing.
+  // A deletion page can be retried after a row was deleted but before the
+  // release was observed; counting the surviving references makes that retry
+  // idempotent and never double-releases a shared snapshot object.
+  const [after, before] = await Promise.all([
+    ctx.db.query("spectraArtifactVersions").withIndex("by_snapshot_ref", (q) => q.eq("snapshotRef", snapshotRef)).collect(),
+    ctx.db.query("spectraArtifactVersions").withIndex("by_before_snapshot_ref", (q) => q.eq("beforeSnapshotRef", snapshotRef)).collect(),
+  ]);
+  const refCount = Math.min(object.refCount, after.length + before.length);
+  await ctx.db.patch(object._id, {
+    refCount,
+    lastReferencedAt: Date.now(),
+    state: refCount === 0 ? "cold" : object.state,
+  });
+}
+
+/**
+ * A pinned version is retained by the embed row even when source deletion has
+ * tombstoned that row. Once the actual pin is removed, this helper removes the
+ * now-unowned version and reconciles its shared snapshot references.
+ */
+export async function releaseVersionIfUnpinned(
+  ctx: MutationCtx,
+  versionId: Id<"spectraArtifactVersions">,
+  ignoreEmbedId?: Id<"artifactEmbeds">,
+) {
+  const version = await ctx.db.get(versionId);
+  if (!version) return false;
+  const pins = await ctx.db.query("artifactEmbeds")
+    .withIndex("by_pinned_version", (q) => q.eq("pinnedVersionId", versionId))
+    .collect();
+  if (pins.some((pin) => !pin.removedAt && pin._id !== ignoreEmbedId)) return false;
+  const artifact = await ctx.db.get(version.artifactId);
+  if (!artifact || artifact.status !== "deleted") return false;
+  await ctx.db.delete(version._id);
+  if (version.snapshotRef) await releaseSnapshotObject(ctx, version.schoolId, version.snapshotRef);
+  if (version.beforeSnapshotRef) await releaseSnapshotObject(ctx, version.schoolId, version.beforeSnapshotRef);
+  return true;
 }
 
 export const verify = internalMutation({

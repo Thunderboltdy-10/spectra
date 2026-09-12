@@ -9,6 +9,12 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { convexAction } from "@/lib/convex-server";
+import {
+  INTAKE_ATTESTATION_PURPOSE,
+  INTAKE_ATTESTATION_VERSION,
+  canonicalIntakeAttestation,
+  type IntakeAttestation,
+} from "../../shared/intake-attestation";
 
 type Envelope = {
   ciphertext: string;
@@ -41,6 +47,35 @@ function bridgeKey() {
       "SECRET_BRIDGE_CONFIG_MISSING: Configure a strong bridge key.",
     );
   return value;
+}
+
+function intakeAttestationKey() {
+  return createHmac("sha256", bridgeKey())
+    .update(INTAKE_ATTESTATION_PURPOSE)
+    .digest();
+}
+
+export function signTrustedIntakeAttestation(
+  input: Omit<
+    IntakeAttestation,
+    "version" | "purpose" | "issuedAt" | "nonce" | "expiresAt" | "signature"
+  >,
+) {
+  const issuedAt = Date.now();
+  const payload = {
+    ...input,
+    version: INTAKE_ATTESTATION_VERSION,
+    purpose: INTAKE_ATTESTATION_PURPOSE,
+    issuedAt,
+    nonce: randomBytes(24).toString("base64url"),
+    expiresAt: issuedAt + 120_000,
+  } as const;
+  return {
+    ...payload,
+    signature: createHmac("sha256", intakeAttestationKey())
+      .update(canonicalIntakeAttestation(payload))
+      .digest("base64url"),
+  } satisfies IntakeAttestation;
 }
 
 function aad(schoolId: string, purpose: string, keyVersion: number) {

@@ -1355,6 +1355,8 @@ export default defineSchema({
       v.literal("archived"),
       v.literal("deleted"),
     ),
+    deletionGeneration: v.optional(v.number()),
+    deletionRequestedAt: v.optional(v.number()),
     aiState: v.optional(
       v.union(
         v.literal("creating"),
@@ -1651,6 +1653,7 @@ export default defineSchema({
     projectionBaseContentHash: v.optional(v.string()),
     projectionBaseTextIndex: v.optional(v.string()),
     projectionBaseFidelityMap: v.optional(v.any()),
+    nativeReceipt: v.optional(v.any()),
     state: v.union(v.literal("current"), v.literal("ahead"), v.literal("behind"), v.literal("diverged"), v.literal("pending"), v.literal("error"), v.literal("unavailable")),
     lastVerifiedAt: v.optional(v.number()),
     errorCode: v.optional(v.string()),
@@ -1682,6 +1685,7 @@ export default defineSchema({
     state: v.union(v.literal("pending"), v.literal("applied"), v.literal("verified"), v.literal("failed"), v.literal("conflicted")),
     actorKind: v.union(v.literal("user"), v.literal("ai"), v.literal("external-edit"), v.literal("reconciliation"), v.literal("migration"), v.literal("restore")),
     runId: v.optional(v.id("spectraAiRuns")),
+    nativeReceipt: v.optional(v.any()),
     errorCode: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -1746,6 +1750,7 @@ export default defineSchema({
     projectionBaseContentHash: v.optional(v.string()),
     projectionBaseTextIndex: v.optional(v.string()),
     projectionBaseFidelityMap: v.optional(v.any()),
+    nativeReceipt: v.optional(v.any()),
     state: v.union(
       v.literal("pending"),
       v.literal("claimed"),
@@ -2827,12 +2832,25 @@ export default defineSchema({
     displayPreferences: v.optional(v.any()),
     contextPolicy: artifactEmbedContextPolicyValidator,
     createdByAccountId: v.id("accounts"),
+    placementOperationId: v.optional(v.string()),
+    placementFingerprint: v.optional(v.string()),
+    placementReceipt: v.optional(v.string()),
+    // A provisional row is only a short-lived intent. The canonical writer
+    // clears this when it commits a matching version; a scheduled expiry
+    // removes a row whose editor insertion never happened.
+    placementExpiresAt: v.optional(v.number()),
+    placementState: v.optional(v.union(
+      v.literal("provisional"),
+      v.literal("confirmed"),
+      v.literal("removed"),
+    )),
     createdAt: v.number(),
     updatedAt: v.number(),
     removedAt: v.optional(v.number()),
   })
     .index("by_container", ["containerType", "containerId"])
     .index("by_source", ["sourceArtifactId", "createdAt"])
+    .index("by_placement_operation", ["containerType", "containerId", "placementOperationId"])
     .index("by_pinned_version", ["pinnedVersionId"]),
 
   artifactAccessRequests: defineTable({
@@ -2869,6 +2887,15 @@ export default defineSchema({
   artifactImportJobs: defineTable({
     artifactId: v.optional(v.id("spectraArtifacts")),
     artifactVersionId: v.optional(v.id("spectraArtifactVersions")),
+    operationId: v.optional(v.string()),
+    targetVersionId: v.optional(v.id("spectraArtifactVersions")),
+    targetStateVectorHash: v.optional(v.string()),
+    targetRoomId: v.optional(v.id("collaborationRooms")),
+    targetAppendHead: v.optional(v.number()),
+    targetProjectionHead: v.optional(v.number()),
+    baseRevisionCaptured: v.optional(v.boolean()),
+    importedContentHash: v.optional(v.string()),
+    commitReceipt: v.optional(v.string()),
     importedContent: v.optional(v.any()),
     schoolId: v.optional(v.id("schools")),
     ownerAccountId: v.id("accounts"),
@@ -2876,15 +2903,20 @@ export default defineSchema({
     format: v.string(),
     originalAssetRef: v.string(),
     originalStorageId: v.optional(v.id("_storage")),
+    uploadReceipt: v.optional(v.string()),
+    candidateStorageId: v.optional(v.id("_storage")),
     originalName: v.optional(v.string()),
     originalMimeType: v.optional(v.string()),
     originalBytes: v.optional(v.number()),
     originalSha256: v.optional(v.string()),
+    retentionOwnerAccountId: v.optional(v.id("accounts")),
+    retentionReason: v.optional(v.string()),
     status: v.union(
       v.literal("uploading"),
       v.literal("uploaded"),
       v.literal("parsing"),
       v.literal("preview"),
+      v.literal("awaiting_commit"),
       v.literal("imported"),
       v.literal("quarantined"),
       v.literal("failed"),
@@ -2913,11 +2945,57 @@ export default defineSchema({
     .index("by_artifact", ["artifactId"])
     .index("by_school_created", ["schoolId", "createdAt"]),
 
+  artifactIntakeReleaseReceipts: defineTable({
+    artifactId: v.id("spectraArtifacts"),
+    ownerAccountId: v.id("accounts"),
+    storageId: v.id("_storage"),
+    bytes: v.number(),
+    family: v.string(),
+    sourceId: v.string(),
+    releasedAt: v.number(),
+  }).index("by_storage", ["storageId"]).index("by_artifact", ["artifactId", "releasedAt"]),
+
+  artifactDeletionJobs: defineTable({
+    artifactId: v.id("spectraArtifacts"),
+    ownerAccountId: v.id("accounts"),
+    schoolId: v.optional(v.id("schools")),
+    generation: v.number(),
+    phase: v.union(
+      v.literal("placements"),
+      v.literal("children"),
+      v.literal("artifact"),
+      v.literal("complete"),
+      v.literal("failed"),
+    ),
+    cursor: v.optional(v.string()),
+    deletedRows: v.number(),
+    releasedBytes: v.number(),
+    scannedRows: v.optional(v.number()),
+    retainedRows: v.optional(v.number()),
+    terminalRows: v.optional(v.number()),
+    attemptCount: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    nextAttemptAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+  })
+    .index("by_artifact_generation", ["artifactId", "generation"])
+    .index("by_owner_updated", ["ownerAccountId", "updatedAt"]),
+
   artifactAssets: defineTable({
     artifactId: v.id("spectraArtifacts"),
     schoolId: v.optional(v.id("schools")),
     uploadedByAccountId: v.id("accounts"),
     storageId: v.optional(v.id("_storage")),
+    candidateStorageId: v.optional(v.id("_storage")),
+    uploadReceipt: v.optional(v.string()),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+    altText: v.optional(v.string()),
+    sourceRef: v.optional(v.string()),
+    retentionOwnerAccountId: v.optional(v.id("accounts")),
+    retentionReason: v.optional(v.string()),
     path: v.string(),
     name: v.string(),
     mediaType: v.string(),

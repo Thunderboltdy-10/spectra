@@ -182,6 +182,26 @@ const APP_SPECS: readonly AppSpec[] = [
     exposed: false,
   },
   {
+    id: "app.bridge.setup",
+    description:
+      "Continue Bridge setup from the browser: pair the device, choose a location, or retry a truthful recovery step.",
+    risk: "always-confirm",
+    availability: { reason: "Bridge setup is a human browser action." },
+    choreography: { target: "settings-security", region: "bridge-setup" },
+    exposed: false,
+  },
+  {
+    id: "app.bridge.policy.change",
+    description:
+      "Change the Bridge trust preset through the existing account policy path.",
+    risk: "always-confirm",
+    availability: {
+      reason: "Bridge trust changes require an explicit human confirmation.",
+    },
+    choreography: { target: "settings-control", region: "bridge-trust" },
+    exposed: false,
+  },
+  {
     id: "app.security.credentials",
     description: "Credential changes are never available to AI.",
     risk: "destructive",

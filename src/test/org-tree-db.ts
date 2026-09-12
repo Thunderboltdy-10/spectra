@@ -35,6 +35,17 @@ const INDEXES: Record<string, Record<string, string[]>> = {
     by_source: ["sourceArtifactId"],
     by_target: ["targetArtifactId"],
   },
+  artifactEmbeds: {
+    by_source: ["sourceArtifactId", "createdAt"],
+    by_container: ["containerType", "containerId"],
+  },
+  artifactAccessRequests: {
+    by_embed_status: ["embedId", "status", "createdAt"],
+    by_source_status: ["sourceArtifactId", "status", "createdAt"],
+  },
+  artifactDeletionJobs: {
+    by_artifact_generation: ["artifactId", "generation"],
+  },
   spectraMessages: {
     by_thread: ["threadId"],
   },
@@ -246,7 +257,7 @@ class IndexedQuery {
 export function fakeCtx() {
   const db = new FakeDb();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { db, ctx: { db } as any };
+  return { db, ctx: { db, scheduler: { runAfter: async () => undefined } } as any };
 }
 
 /** An account with its General workspace absent: the tree must create it. */

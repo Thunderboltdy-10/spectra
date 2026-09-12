@@ -91,7 +91,10 @@ describe("P3.V1 protocol conformance", () => {
     const canvasReachable: Record<(typeof OFFICE)[number], readonly string[]> = {
       document: ["document.rewrite.paragraph", "document.edit.tableCell"],
       sheets: [],
-      presentation: [],
+      presentation: [
+        "presentation.table.cellText",
+        "presentation.table.cellFormat",
+      ],
     };
 
     const sheetsWithNativeObjects = sheetsCommandBindings(

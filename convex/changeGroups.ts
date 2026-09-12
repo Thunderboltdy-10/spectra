@@ -13,6 +13,7 @@ import {
   retainSnapshotObject,
   type SnapshotStrategy,
 } from "./artifactSnapshots";
+import { confirmCanonicalPlacements } from "./artifactEmbeds";
 
 export const HUMAN_CHANGE_IDLE_MS = 45_000;
 
@@ -79,6 +80,12 @@ async function retainLiveStateAfterRecoveredImport(
   return versionId;
 }
 
+async function importedContentHash(value: unknown) {
+  const encoded = new TextEncoder().encode(JSON.stringify(value));
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 async function commitImportJob(
   ctx: MutationCtx,
   artifact: Doc<"spectraArtifacts">,
@@ -89,13 +96,39 @@ async function commitImportJob(
   if (
     job.artifactId !== artifact._id ||
     job.ownerAccountId !== actorAccountId ||
-    job.status !== "imported"
+    !["imported", "awaiting_commit"].includes(job.status)
   )
     throw new Error("ARTIFACT_IMPORT_VERSION_INVALID");
   if (job.artifactVersionId) {
     if (job.importedContent !== undefined)
       await ctx.db.patch(job._id, { importedContent: undefined });
     return { versionId: job.artifactVersionId, reused: true as const };
+  }
+  if (job.importedContent === undefined)
+    throw new Error("ARTIFACT_IMPORT_CONTENT_MISSING");
+  const computedImportHash = await importedContentHash(job.importedContent);
+  if (job.importedContentHash && computedImportHash !== job.importedContentHash)
+    throw new Error("ARTIFACT_IMPORT_CONTENT_CHANGED");
+  if (artifact.status !== "active") throw new Error("ARTIFACT_IMPORT_REVISION_STALE");
+  if (job.baseRevisionCaptured) {
+    if ((artifact.currentVersionId ?? null) !== (job.targetVersionId ?? null) ||
+        (artifact.liveStateVectorHash ?? null) !== (job.targetStateVectorHash ?? null))
+      throw new Error("ARTIFACT_IMPORT_REVISION_STALE");
+  } else if (job.targetVersionId && artifact.currentVersionId !== job.targetVersionId) {
+    throw new Error("ARTIFACT_IMPORT_REVISION_STALE");
+  }
+  if (job.targetRoomId || job.targetAppendHead !== undefined || job.targetProjectionHead !== undefined) {
+    const room = await ctx.db
+      .query("collaborationRooms")
+      .withIndex("by_artifact_partition", (q) =>
+        q.eq("artifactId", artifact._id).eq("partitionKey", "root"),
+      )
+      .unique();
+    if (
+      (room?._id ?? null) !== (job.targetRoomId ?? null) ||
+      (room ? room.nextSequence - 1 : 0) !== (job.targetAppendHead ?? 0) ||
+      (room?.lastProjectionSequence ?? 0) !== (job.targetProjectionHead ?? 0)
+    ) throw new Error("ARTIFACT_IMPORT_CAUSAL_BASE_STALE");
   }
   const summary = `Imported ${job.originalName || job.format}`.slice(0, 500);
   const groups = await ctx.db
@@ -140,6 +173,8 @@ async function commitImportJob(
       await ctx.db.patch(job._id, {
         artifactVersionId: committed.versionId,
         importedContent: undefined,
+        status: "imported",
+        commitReceipt: job.commitReceipt ?? crypto.randomUUID(),
       });
       if (options.preserveLiveCurrent !== false)
         await retainLiveStateAfterRecoveredImport(
@@ -218,7 +253,10 @@ async function commitImportJob(
   await ctx.db.patch(job._id, {
     artifactVersionId: versionId,
     importedContent: undefined,
+    status: "imported",
+    commitReceipt: job.commitReceipt ?? crypto.randomUUID(),
   });
+  await confirmCanonicalPlacements(ctx, versionId);
   if (options.preserveLiveCurrent !== false)
     await retainLiveStateAfterRecoveredImport(
       ctx,
@@ -321,6 +359,7 @@ export async function commitChangeGroup(
     versionId,
   });
   await ctx.db.patch(artifact._id, { currentVersionId: versionId });
+  await confirmCanonicalPlacements(ctx, versionId);
   return { status: "committed" as const, versionId };
 }
 
@@ -624,7 +663,24 @@ export const commitImport = mutation({
     );
     const job = await ctx.db.get(args.importJobId);
     if (!job) throw new Error("ARTIFACT_IMPORT_VERSION_INVALID");
-    return commitImportJob(ctx, artifact, job, actor.accountId);
+    const result = await commitImportJob(ctx, artifact, job, actor.accountId);
+    const committedJob = await ctx.db.get(job._id);
+    return {
+      ...result,
+      importJobId: job._id,
+      artifactId: artifact._id,
+      commitReceipt: committedJob?.commitReceipt ?? null,
+      receipt: committedJob?.commitReceipt
+        ? {
+            kind: "artifact-import" as const,
+            operationId: committedJob.operationId ?? null,
+            importJobId: job._id,
+            artifactId: artifact._id,
+            versionId: result.versionId,
+            commitReceipt: committedJob.commitReceipt,
+          }
+        : null,
+    };
   },
 });
 
@@ -644,7 +700,7 @@ export const reconcileImports = mutation({
       .filter(
         (job) =>
           job.ownerAccountId === actor.accountId &&
-          job.status === "imported" &&
+          ["imported", "awaiting_commit"].includes(job.status) &&
           !job.artifactVersionId,
       )
       .sort((left, right) => left.createdAt - right.createdAt)

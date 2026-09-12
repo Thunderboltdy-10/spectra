@@ -617,10 +617,6 @@ export function presentationCommandBindings(
       requires: "edit",
       hint: "Copies this slide, its objects and its notes",
       touches: ["slides"],
-      strictNative: {
-        available: false,
-        reason: PRESENTATION_STRICT_REASONS.duplicateSlide,
-      },
       onSelect: () => handlers.slide.duplicate(),
     },
 
@@ -935,7 +931,6 @@ export function presentationCommandBindings(
       hint: "Colour and type for every slide in the deck",
       touches: ["slides"],
       manifestOps: ["apply_theme"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.theme },
       control: {
         kind: "select",
         options: state.themes,
@@ -1156,7 +1151,6 @@ export function presentationCommandBindings(
         ? "Moves and scales these objects as one"
         : "Select two or more objects to group them",
       touches: SHAPES,
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.group },
       onSelect: () => handlers.arrange.group(),
     },
     {
@@ -1671,7 +1665,6 @@ export function presentationCommandBindings(
         ? "Title, subtitle, body or caption, in the deck's own type scale"
         : "Select a text object",
       touches: SHAPES,
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.textStyle },
       control: {
         kind: "select",
         options: PRESENTATION_TEXT_PRESETS,
@@ -1714,7 +1707,6 @@ export function presentationCommandBindings(
       disabled: !shaped,
       hint: shaped ? "The selected shape's fill" : "Select a shape or text box",
       touches: SHAPES,
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.shapeStyle },
       control: {
         kind: "color",
         value: selection.fill ?? undefined,
@@ -1734,7 +1726,6 @@ export function presentationCommandBindings(
       disabled: !shaped,
       hint: shaped ? "A line around the selected shape" : "Select a shape or text box",
       touches: SHAPES,
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.shapeStyle },
       control: {
         kind: "color",
         value: selection.stroke ?? undefined,
@@ -1754,7 +1745,6 @@ export function presentationCommandBindings(
       disabled: !shaped || !selection.stroke,
       hint: selection.stroke ? "Pixels at slide scale" : "Give the shape a border first",
       touches: SHAPES,
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.shapeStyle },
       control: {
         kind: "numeric",
         value: selection.strokeWidth,
@@ -1777,7 +1767,6 @@ export function presentationCommandBindings(
       disabled: !shaped,
       hint: shaped ? "How round the shape's corners are" : "Select a shape or text box",
       touches: SHAPES,
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.shapeStyle },
       control: {
         kind: "numeric",
         value: selection.cornerRadius,
@@ -1800,7 +1789,6 @@ export function presentationCommandBindings(
       disabled: !single,
       hint: single ? "How solid the object is" : "Select an object first",
       touches: SHAPES,
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.shapeStyle },
       control: {
         kind: "numeric",
         value: selection.opacity,
@@ -1855,7 +1843,6 @@ export function presentationCommandBindings(
       disabled: !single,
       active: selection.hidden,
       hint: "Keeps the object on the slide but out of the presented view",
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.objectState },
       onSelect: () => handlers.arrange.toggleHidden(),
     },
     {
@@ -1873,10 +1860,6 @@ export function presentationCommandBindings(
         ? "Removes the selected object from this slide"
         : "Select an object first",
       touches: SHAPES,
-      strictNative: {
-        available: false,
-        reason: PRESENTATION_STRICT_REASONS.deleteObject,
-      },
       onSelect: () => handlers.arrange.remove(),
     },
 
@@ -1939,7 +1922,8 @@ export function presentationCommandBindings(
           ? "Which part of the picture stays visible"
           : "Crop to fill first",
       touches: ["images"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.crop },
+      // Focal-point changes are translated into native a:srcRect crop
+      // percentages by the PPTX projection writer.
       control: {
         kind: "numeric",
         value: selection.focalX,
@@ -1965,7 +1949,6 @@ export function presentationCommandBindings(
           ? "Which part of the picture stays visible top to bottom"
           : "Crop to fill first",
       touches: ["images"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.crop },
       control: {
         kind: "numeric",
         value: selection.focalY,
@@ -2035,7 +2018,6 @@ export function presentationCommandBindings(
         ? "Bind this object to another Spectra work, so the slide follows the numbers"
         : "Charts and linked works carry a source",
       touches: ["charts"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.chartData },
       onSelect: (value) => handlers.object.bindSource(stringParam(value) ?? null),
     },
     {
@@ -2050,7 +2032,6 @@ export function presentationCommandBindings(
       active: selection.sourceLive,
       hint: "A pinned chart keeps the numbers it had when you pinned it",
       touches: ["charts"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.chartData },
       onSelect: () => handlers.object.toggleSourceLive(),
     },
     {
@@ -2067,7 +2048,6 @@ export function presentationCommandBindings(
         : "Charts and linked works carry a source",
       touches: ["charts"],
       manifestOps: ["generate_chart"],
-      strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.chartData },
       onSelect: () => handlers.object.refreshChart(),
     },
 

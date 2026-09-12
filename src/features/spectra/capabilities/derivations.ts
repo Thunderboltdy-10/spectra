@@ -138,7 +138,21 @@ export function projectBindingsFromIr(
       definition.manifestOperation,
       binding.manifestOps,
     );
-    return manifestOps ? { ...projected, manifestOps } : projected;
+    const withManifest = manifestOps ? { ...projected, manifestOps } : projected;
+    // A studio may still apply a contextual, selection-specific refusal (for
+    // example, a protected sheet or a native part with no safe identity). Keep
+    // that presentation override while capability IR owns the default mode.
+    return binding.strictNative
+      ? {
+          ...withManifest,
+          strictNative: {
+            ...binding.strictNative,
+            ...(definition.native?.unavailableReason
+              ? { reason: definition.native.unavailableReason }
+              : {}),
+          },
+        }
+      : withManifest;
   });
 }
 

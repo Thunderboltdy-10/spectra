@@ -166,6 +166,8 @@ export function ArtifactEmbedsPanel({
     }
     setBusy("create");
     let createdEmbedId: string | undefined;
+    const placementOperationId =
+      containerType === "artifact" ? crypto.randomUUID() : undefined;
     try {
       const result = await createReference({
         containerType,
@@ -184,6 +186,7 @@ export function ArtifactEmbedsPanel({
           referenceView || referenceViews[0]
             ? { view: referenceView || referenceViews[0] }
             : undefined,
+        placementOperationId,
       });
       createdEmbedId = result.embedId;
       if (
@@ -195,6 +198,7 @@ export function ArtifactEmbedsPanel({
       ) {
         const reference: ReferenceNode = {
           embedId: result.embedId,
+          placementOperationId,
           containerType,
           containerId,
           containerRegionId,
@@ -211,7 +215,7 @@ export function ArtifactEmbedsPanel({
           state: "ready",
         };
         const definition = getWorkDefinition(selectedArtifact.blueprintKey);
-        await spectraBus.commandAsync("reference.insert", {
+        const listeners = await spectraBus.commandAsync("reference.insert", {
           hostWorkId: containerId,
           reference,
           target: {
@@ -224,6 +228,8 @@ export function ArtifactEmbedsPanel({
             schemaVersion: definition.model.schemaVersion,
           },
         });
+        if (listeners === 0)
+          throw new Error("The document editor is not ready for reference insertion.");
       }
       setCreating(false);
       setSourceArtifactId("");

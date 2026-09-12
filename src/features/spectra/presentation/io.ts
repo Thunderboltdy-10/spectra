@@ -2,7 +2,9 @@ import { strFromU8, strToU8, zipSync } from "fflate";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import {
   normalizePresentationContent,
+  presentationObjectParagraphs,
   presentationObjectText,
+  type PresentationChartContent,
   type PresentationContent,
   type PresentationObject,
   type PresentationSlide,
@@ -610,6 +612,114 @@ function assetMap(assets: SpectraArtifactAsset[]) {
   return new Map(assets.map((asset) => [asset.assetId, asset]));
 }
 
+function chartContent(object: PresentationObject): PresentationChartContent {
+  const source = (object.content && typeof object.content === "object"
+    ? object.content
+    : {}) as Record<string, unknown>;
+  const legacyCategories = Array.isArray(source.labels)
+    ? source.labels.map(String)
+    : [];
+  const legacyValues = Array.isArray(source.values)
+    ? source.values.map(Number)
+    : [];
+  const categories = Array.isArray(source.categories)
+    ? source.categories.map(String)
+    : legacyCategories.length
+      ? legacyCategories
+      : ["A", "B", "C"];
+  const series = Array.isArray(source.series)
+    ? source.series.flatMap((candidate, index) => {
+        if (!candidate || typeof candidate !== "object") return [];
+        const row = candidate as Record<string, unknown>;
+        const values = Array.isArray(row.values)
+          ? row.values.map(Number).filter(Number.isFinite)
+          : [];
+        return [{
+          id: typeof row.id === "string" ? row.id : undefined,
+          name: typeof row.name === "string" ? row.name : `Series ${index + 1}`,
+          categories: Array.isArray(row.categories)
+            ? row.categories.map(String)
+            : categories,
+          values,
+        }];
+      })
+    : [{ name: "Series 1", categories, values: legacyValues }];
+  return {
+    chartType:
+      source.chartType === "column" ||
+      source.chartType === "line" ||
+      source.chartType === "pie" ||
+      source.chartType === "area"
+        ? source.chartType
+        : "bar",
+    ...(typeof source.title === "string" ? { title: source.title } : {}),
+    categories,
+    series: series.length
+      ? series
+      : [{ name: "Series 1", categories, values: [0] }],
+    ...(typeof source.showLegend === "boolean"
+      ? { showLegend: source.showLegend }
+      : {}),
+    ...(typeof source.axisTitle === "string"
+      ? { axisTitle: source.axisTitle }
+      : {}),
+    ...(typeof source.valueAxisTitle === "string"
+      ? { valueAxisTitle: source.valueAxisTitle }
+      : {}),
+  };
+}
+
+function presentationTextRuns(object: PresentationObject, content: PresentationContent) {
+  const fallbackFontSize = Number(object.style?.fontSize ?? 28);
+  const fallbackFont = presentationNativeFontFamily(
+    object.style?.fontFamily,
+    content.theme.fonts,
+    fallbackFontSize,
+  );
+  const fallbackColor = hex(object.style?.color, "23322D");
+  const paragraphs = presentationObjectParagraphs(object);
+  const runs: Array<{
+    text: string;
+    options?: {
+      fontFace?: string;
+      fontSize?: number;
+      bold?: boolean;
+      italic?: boolean;
+      underline?: { style: "sng" };
+      strike?: boolean;
+      color?: string;
+      hyperlink?: { url: string };
+      breakLine?: boolean;
+    };
+  }> = [];
+  paragraphs.forEach((paragraph, paragraphIndex) => {
+    paragraph.runs.forEach((run) => {
+      const options: NonNullable<(typeof runs)[number]["options"]> = {
+        fontFace: presentationNativeFontFamily(
+          run.fontFamily ?? object.style?.fontFamily,
+          content.theme.fonts,
+          run.fontSizePt ?? fallbackFontSize,
+        ),
+        fontSize: run.fontSizePt ?? fallbackFontSize,
+        bold: run.bold ?? Number(object.style?.fontWeight ?? 400) >= 600,
+        italic: run.italic ?? Boolean(object.style?.italic),
+        underline:
+          run.underline ?? Boolean(object.style?.underline)
+            ? { style: "sng" }
+            : undefined,
+        strike: run.strike ?? object.style?.textDecoration === "line-through",
+        color: hex(run.color ?? object.style?.color, fallbackColor),
+        ...(run.hyperlink ? { hyperlink: { url: run.hyperlink } } : {}),
+      };
+      if (paragraphIndex > 0 && runs.length) options.breakLine = true;
+      runs.push({ text: run.text, options });
+    });
+    if (!paragraph.runs.length && paragraphIndex > 0)
+      runs.push({ text: "", options: { breakLine: true } });
+  });
+  return { runs, fallbackFont };
+}
+
 /**
  * Keep the selected object font in the same lane as the theme fallback. The
  * editor, canvas renderer, and PPTX writer all need the same answer or a font
@@ -671,7 +781,8 @@ export async function buildPresentationPptx(
       const options = { x, y, w, h, rotate: object.rotation };
       if (object.type === "text") {
         const fontSize = Number(object.style?.fontSize ?? 28);
-        page.addText(presentationObjectText(object), {
+        const rich = presentationTextRuns(object, content);
+        page.addText(rich.runs.length ? rich.runs : presentationObjectText(object), {
           ...options,
           fontFace: presentationNativeFontFamily(
             object.style?.fontFamily,
@@ -693,11 +804,10 @@ export async function buildPresentationPptx(
           fit: "shrink",
         });
       } else if (object.type === "shape") {
-        page.addShape(pptx.ShapeType.roundRect, {
+        page.addShape(Number(object.style?.cornerRadius ?? object.style?.radius ?? 8) > 0 ? pptx.ShapeType.roundRect : pptx.ShapeType.rect, {
           ...options,
-          fill: { color: hex(object.style?.fill, "E4EEE8") },
-          line: { color: hex(object.style?.stroke, "8DA99A"), pt: 1 },
-          rectRadius: Number(object.style?.radius ?? 8) / 100,
+          fill: { color: hex(object.style?.fill, "E4EEE8"), transparency: Math.round((1 - Number(object.style?.opacity ?? 1)) * 100) },
+          line: { color: hex(object.style?.stroke, "8DA99A"), pt: Number(object.style?.strokeWidth ?? 1), transparency: Math.round((1 - Number(object.style?.opacity ?? 1)) * 100) },
         });
         if (presentationObjectText(object))
           page.addText(presentationObjectText(object), {
@@ -709,14 +819,41 @@ export async function buildPresentationPptx(
             margin: 0.05,
           });
       } else if (object.type === "image") {
-        const source = object.content as { assetId?: string };
+        const source = (object.content && typeof object.content === "object"
+          ? object.content
+          : {}) as { assetId?: string; crop?: { left?: number; top?: number; right?: number; bottom?: number } };
         const asset = source.assetId ? byId.get(source.assetId) : undefined;
         if (asset?.downloadUrl)
-          page.addImage({ data: await dataUrl(asset.downloadUrl), ...options });
+          page.addImage({
+            data: await dataUrl(asset.downloadUrl),
+            altText: object.altText,
+            ...(object.style?.fit === "cover"
+              ? { sizing: { type: "cover" as const, w, h } }
+              : {}),
+            ...options,
+          });
       } else if (object.type === "table") {
-        const rows = (object.content as { rows?: unknown[][] }).rows ?? [];
+        const rows = ((object.content as { rows?: unknown[][] }).rows ?? []).map((row) =>
+          row.map((cell) => {
+            if (!cell || typeof cell !== "object") return { text: String(cell ?? "") };
+            const value = cell as { text?: unknown; style?: Record<string, unknown>; rowSpan?: number; colSpan?: number };
+            const style = value.style ?? {};
+            return {
+              text: String(value.text ?? ""),
+              options: {
+                ...(typeof style.fill === "string" ? { fill: { color: hex(style.fill, "F7F8F5") } } : {}),
+                ...(typeof style.color === "string" ? { color: hex(style.color, "23322D") } : {}),
+                ...(typeof style.fontSizePt === "number" ? { fontSize: style.fontSizePt } : {}),
+                ...(typeof style.bold === "boolean" ? { bold: style.bold } : {}),
+                ...(typeof style.italic === "boolean" ? { italic: style.italic } : {}),
+                ...(typeof value.rowSpan === "number" && value.rowSpan > 1 ? { rowspan: value.rowSpan } : {}),
+                ...(typeof value.colSpan === "number" && value.colSpan > 1 ? { colspan: value.colSpan } : {}),
+              },
+            };
+          }),
+        );
         page.addTable(
-          rows.map((row) => row.map((cell) => String(cell ?? ""))),
+          rows,
           {
             ...options,
             border: { color: "BAC5BF", pt: 0.7 },
@@ -727,24 +864,36 @@ export async function buildPresentationPptx(
           },
         );
       } else if (object.type === "chart") {
-        const values = Array.isArray(
-          (object.content as { values?: unknown[] }).values,
-        )
-          ? (object.content as { values: unknown[] }).values.map(Number)
-          : [62, 84, 48];
-        const maximum = Math.max(1, ...values);
-        values.forEach((value, index) => {
-          const barWidth = w / Math.max(values.length * 1.6, 1);
-          const barHeight = (Math.max(0, value) / maximum) * h;
-          page.addShape(pptx.ShapeType.rect, {
-            x: x + (index + 0.3) * (w / values.length),
-            y: y + h - barHeight,
-            w: barWidth,
-            h: barHeight,
-            fill: { color: hex(content.theme.tokens?.accent, "2F9A72") },
-            line: { color: hex(content.theme.tokens?.accent, "2F9A72"), pt: 0 },
-          });
-        });
+        const chart = chartContent(object);
+        const type = chart.chartType === "line"
+          ? pptx.ChartType.line
+          : chart.chartType === "pie"
+            ? pptx.ChartType.pie
+            : chart.chartType === "area"
+              ? pptx.ChartType.area
+              : pptx.ChartType.bar;
+        page.addChart(
+          type,
+          chart.series.map((series) => ({
+            name: series.name,
+            labels: series.categories.length ? series.categories : chart.categories,
+            values: series.values,
+          })),
+          {
+            ...options,
+            showLegend: chart.showLegend !== false,
+            showTitle: Boolean(chart.title),
+            ...(chart.title ? { title: chart.title } : {}),
+            ...(chart.chartType === "column" ? { barDir: "col" } : {}),
+            ...(chart.axisTitle
+              ? { catAxisTitle: chart.axisTitle, showCatAxisTitle: true }
+              : {}),
+            ...(chart.valueAxisTitle
+              ? { valAxisTitle: chart.valueAxisTitle, showValAxisTitle: true }
+              : {}),
+            chartColors: [hex(content.theme.tokens?.accent, "2F9A72")],
+          },
+        );
       }
     }
     if (slide.speakerNotes) page.addNotes(slide.speakerNotes);
@@ -752,7 +901,34 @@ export async function buildPresentationPptx(
   const bytes = (await pptx.write({
     outputType: "arraybuffer",
   })) as ArrayBuffer;
-  return new Blob([bytes], {
+  // PptxGenJS can reuse the same cNvPr id for sibling objects when several
+  // object families are emitted on one slide. PowerPoint shape identity is
+  // slide-scoped, so repair only duplicate ids before exposing the package to
+  // the native lens. This keeps later edits pointed at the intended object.
+  const { Presentation } = await import("@ariadng/office/pptx");
+  const nativeDeck = await Presentation.open(new Uint8Array(bytes));
+  for (const slide of nativeDeck.slides()) {
+    const nodes: Array<{ getAttribute(name: string): string | undefined; setAttribute(name: string, value: string): void; namespaceUri(): string | null; localName: string }> = [];
+    const pending = [...slide.root().elements()];
+    while (pending.length) {
+      const node = pending.pop()!;
+      if (node.namespaceUri() === "http://schemas.openxmlformats.org/presentationml/2006/main" && node.localName === "cNvPr") nodes.push(node);
+      pending.push(...node.elements());
+    }
+    const ids = nodes.map((node) => Number(node.getAttribute("id") ?? 0)).filter(Number.isFinite);
+    const used = new Set<number>();
+    let next = Math.max(1, ...ids) + 1;
+    for (const node of nodes) {
+      const id = Number(node.getAttribute("id") ?? 0);
+      if (used.has(id)) {
+        node.setAttribute("id", String(next));
+        next += 1;
+        nativeDeck.office.markDirty(slide.partName);
+      } else used.add(id);
+    }
+  }
+  const nativeBytes = await nativeDeck.save();
+  return new Blob([nativeBytes.buffer as ArrayBuffer], {
     type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   });
 }

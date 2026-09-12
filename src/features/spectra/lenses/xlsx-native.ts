@@ -1,0 +1,1167 @@
+import {
+  Workbook,
+  parseRangeRef,
+  type Worksheet,
+} from "@ariadng/office/xlsx";
+import {
+  parseXml,
+  serializeXml,
+  XmlElement,
+  XmlText,
+} from "@ariadng/office/xml";
+import type {
+  XlsxChartProjection,
+  XlsxOperation,
+  XlsxSheetProjection,
+  XlsxTableProjection,
+} from "./projection-contracts";
+import { dateToSerial } from "../sheets/excel-serial";
+import {
+  columnIndex,
+  columnName,
+} from "../sheets/model";
+import {
+  quoteSheetPrefix,
+  rewriteSheetNameInFormula,
+  rewriteStructuralReferences,
+} from "../sheets/formula-refs";
+
+export const SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+export const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+export const DRAWING_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+export const CHART_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart";
+export const TABLE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
+export const DRAWING_NS = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing";
+export const CHART_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+export const A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main";
+export const CT_DRAWING = "application/vnd.openxmlformats-officedocument.drawing+xml";
+export const CT_CHART = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+
+type NativeRule = Record<string, unknown>;
+
+function descendants(root: XmlElement): XmlElement[] {
+  const result: XmlElement[] = [];
+  const stack = [...root.elements()].reverse();
+  while (stack.length) {
+    const node = stack.pop()!;
+    result.push(node);
+    for (const child of [...node.elements()].reverse()) stack.push(child);
+  }
+  return result;
+}
+
+function firstDescendant(root: XmlElement, namespace: string | null, localName: string) {
+  return descendants(root).find(
+    (node) => node.localName === localName && (namespace === null || node.namespaceUri() === namespace),
+  );
+}
+
+function allDescendants(root: XmlElement, namespace: string | null, localName: string) {
+  return descendants(root).filter(
+    (node) => node.localName === localName && (namespace === null || node.namespaceUri() === namespace),
+  );
+}
+
+function child(root: XmlElement | undefined, namespace: string | null, localName: string) {
+  return root?.find(namespace, localName);
+}
+
+function textOf(node: XmlElement | undefined) {
+  return node?.text() ?? "";
+}
+
+function setText(node: XmlElement, value: string) {
+  for (const child of [...node.children]) node.removeChild(child);
+  node.appendChild(new XmlText(value));
+}
+
+function boolAttribute(value: string | undefined) {
+  return value === "1" || value === "true";
+}
+
+function numericAttribute(value: string | undefined, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function sheetElement(sheet: Worksheet) {
+  return sheet._internal().sheetEl;
+}
+
+function sheetPart(workbook: Workbook, sheet: Worksheet) {
+  return workbook.office.package.getPart(sheet.partName);
+}
+
+function rangePart(value: string) {
+  const local = value.split("!").at(-1)?.replaceAll("$", "") ?? value;
+  try {
+    return parseRangeRef(local);
+  } catch {
+    return null;
+  }
+}
+
+function rangeFromDimension(ref: string | undefined) {
+  const range = ref ? rangePart(ref) : null;
+  return range ?? { start: { row: 1, col: 1 }, end: { row: 1, col: 1 } };
+}
+
+function fullRange(ref: string) {
+  const range = rangePart(ref);
+  if (!range) return ref;
+  const start = `${columnName(range.start.col - 1)}${range.start.row}`;
+  const end = `${columnName(range.end.col - 1)}${range.end.row}`;
+  return `${start}:${end}`;
+}
+
+function absoluteRange(ref: string, defaultSheet: string) {
+  const bang = ref.lastIndexOf("!");
+  const rawSheet = bang >= 0 ? ref.slice(0, bang) : defaultSheet;
+  const local = bang >= 0 ? ref.slice(bang + 1) : ref;
+  const range = rangePart(local);
+  if (!range) return ref;
+  const prefix = rawSheet ? quoteSheetPrefix(rawSheet.replace(/^'|'$/g, "")) : "";
+  const start = `$${columnName(range.start.col - 1)}$${range.start.row}`;
+  const end = `$${columnName(range.end.col - 1)}$${range.end.row}`;
+  return `${prefix}${start}:${end}`;
+}
+
+function refSheetName(ref: string, fallback: string) {
+  const bang = ref.lastIndexOf("!");
+  if (bang < 0) return fallback;
+  return ref.slice(0, bang).replace(/^'|'$/g, "").replaceAll("''", "'");
+}
+
+function formulaElement(node: XmlElement) {
+  return node.localName === "f" && (node.namespaceUri() === SML || node.namespaceUri() === CHART_NS);
+}
+
+function mapFormulaElements(root: XmlElement, mapper: (formula: string) => string) {
+  let changed = false;
+  for (const node of allDescendants(root, null, "f")) {
+    if (!formulaElement(node)) continue;
+    const before = node.text();
+    const after = mapper(before);
+    if (before !== after) {
+      setText(node, after);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function worksheetRowsAndColumns(root: XmlElement) {
+  const rowData = child(root, SML, "sheetData");
+  const rows = rowData?.elements().filter((node) => node.namespaceUri() === SML && node.localName === "row") ?? [];
+  const hiddenRows: number[] = [];
+  const rowHeights: Record<string, number> = {};
+  for (const row of rows) {
+    const index = Math.max(1, Math.round(numericAttribute(row.getAttribute("r"), 1)));
+    if (boolAttribute(row.getAttribute("hidden"))) hiddenRows.push(index - 1);
+    if (row.getAttribute("ht") !== undefined) rowHeights[String(index - 1)] = numericAttribute(row.getAttribute("ht"));
+  }
+  const hiddenColumns: number[] = [];
+  const columnWidths: Record<string, number> = {};
+  const cols = child(root, SML, "cols");
+  for (const col of cols?.elements().filter((node) => node.namespaceUri() === SML && node.localName === "col") ?? []) {
+    const min = Math.max(1, Math.round(numericAttribute(col.getAttribute("min"), 1)));
+    const max = Math.max(min, Math.round(numericAttribute(col.getAttribute("max"), min)));
+    for (let index = min; index <= max; index += 1) {
+      if (boolAttribute(col.getAttribute("hidden"))) hiddenColumns.push(index - 1);
+      if (col.getAttribute("width") !== undefined) columnWidths[String(index - 1)] = numericAttribute(col.getAttribute("width"));
+    }
+  }
+  return {
+    hiddenRows: [...new Set(hiddenRows)].sort((a, b) => a - b),
+    hiddenColumns: [...new Set(hiddenColumns)].sort((a, b) => a - b),
+    rowHeights,
+    columnWidths,
+  };
+}
+
+function worksheetDimension(root: XmlElement) {
+  const dimension = child(root, SML, "dimension");
+  const range = rangeFromDimension(dimension?.getAttribute("ref"));
+  return { rows: Math.max(1, range.end.row), columns: Math.max(1, range.end.col) };
+}
+
+function worksheetView(root: XmlElement) {
+  const view = child(child(root, SML, "sheetViews"), SML, "sheetView");
+  return {
+    showGridlines: view?.getAttribute("showGridLines") === undefined ? undefined : boolAttribute(view.getAttribute("showGridLines")),
+    showHeadings: view?.getAttribute("showRowColHeaders") === undefined ? undefined : boolAttribute(view.getAttribute("showRowColHeaders")),
+  };
+}
+
+function worksheetTabColor(sheet: Worksheet) {
+  return child(sheetElement(sheet), SML, "sheetPr")?.find(SML, "tabColor")?.getAttribute("rgb")?.replace(/^FF/i, "#")
+    ?? child(sheetElement(sheet), SML, "sheetPr")?.find(SML, "tabColor")?.getAttribute("indexed")
+    ?? undefined;
+}
+
+function worksheetValidations(root: XmlElement): NativeRule[] {
+  const validations = child(root, SML, "dataValidations");
+  return (validations?.elements() ?? [])
+    .filter((node) => node.namespaceUri() === SML && node.localName === "dataValidation")
+    .map((node) => ({
+      ...Object.fromEntries(node.attributes.filter((attr) => !attr.prefix).map((attr) => [attr.localName, attr.value])),
+      ...(child(node, SML, "formula1") ? { formula1: textOf(child(node, SML, "formula1")) } : {}),
+      ...(child(node, SML, "formula2") ? { formula2: textOf(child(node, SML, "formula2")) } : {}),
+    }));
+}
+
+function worksheetConditionalFormats(root: XmlElement): NativeRule[] {
+  return (root.elements().filter((node) => node.namespaceUri() === SML && node.localName === "conditionalFormatting"))
+    .map((node) => ({
+      sqref: node.getAttribute("sqref") ?? "",
+      rules: node.elements().filter((rule) => rule.namespaceUri() === SML && rule.localName === "cfRule").map((rule) => ({
+        ...Object.fromEntries(rule.attributes.filter((attr) => !attr.prefix).map((attr) => [attr.localName, attr.value])),
+        formulas: rule.elements().filter((formula) => formula.namespaceUri() === SML && formula.localName === "formula").map((formula) => textOf(formula)),
+      })),
+    }));
+}
+
+function tableFilters(tableRoot: XmlElement) {
+  const autoFilter = child(tableRoot, SML, "autoFilter");
+  return (autoFilter?.findAll(SML, "filterColumn") ?? []).flatMap((column) => {
+    const values = child(child(column, SML, "filters"), SML, "filter")
+      ? (child(column, SML, "filters")?.elements() ?? []).filter((node) => node.localName === "filter").map((node) => node.getAttribute("val") ?? "")
+      : [];
+    return values.length ? [{ column: numericAttribute(column.getAttribute("colId")), allowedValues: values }] : [];
+  });
+}
+
+async function projectTables(workbook: Workbook, sheet: Worksheet): Promise<XlsxTableProjection[]> {
+  const result: XlsxTableProjection[] = [];
+  for (const table of await sheet.tables()) {
+    const tablePart = workbook.office.package.getPart(table.partName);
+    const tableRoot = tablePart ? (await workbook.office.xml(table.partName)).root : undefined;
+    const style = tableRoot?.find(SML, "tableStyleInfo")?.getAttribute("name") ?? table.style;
+    const sort = tableRoot?.find(SML, "autoFilter")?.find(SML, "sortState");
+    result.push({
+      id: `xlsx:table:${table.partName}`,
+      name: table.name,
+      range: table.range,
+      columns: [...table.columns],
+      headerRow: table.headerRow,
+      totalsRow: table.totalsRow,
+      style,
+      filters: tableRoot ? tableFilters(tableRoot) : [],
+      ...(sort?.getAttribute("column") !== undefined
+        ? { sort: { column: numericAttribute(sort.getAttribute("column")), direction: sort.getAttribute("descending") === "1" ? "desc" as const : "asc" as const } }
+        : {}),
+      partName: table.partName,
+    });
+  }
+  return result;
+}
+
+function chartText(chartRoot: XmlElement) {
+  const title = firstDescendant(child(chartRoot, CHART_NS, "title") ?? chartRoot, A_NS, "t");
+  return textOf(title);
+}
+
+function chartReference(parent: XmlElement | undefined, localName: "cat" | "val") {
+  const container = parent?.find(CHART_NS, localName);
+  const ref = container ? firstDescendant(container, CHART_NS, "numRef") ?? firstDescendant(container, CHART_NS, "strRef") : undefined;
+  return ref ? textOf(ref.find(CHART_NS, "f")) : undefined;
+}
+
+function chartSeries(chartType: XmlElement) {
+  return chartType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser").map((series) => ({
+    name: textOf(firstDescendant(series.find(CHART_NS, "tx") ?? series, CHART_NS, "v")) || undefined,
+    categories: chartReference(series, "cat"),
+    values: chartReference(series, "val"),
+  }));
+}
+
+function chartSourceRange(series: Array<{ categories?: string; values?: string }>, defaultSheet: string) {
+  const references = series.flatMap((item) => [item.categories, item.values].filter((value): value is string => Boolean(value)));
+  const parsed = references.map((reference) => ({ reference, range: rangePart(reference), sheet: refSheetName(reference, defaultSheet) }));
+  if (!parsed.length || parsed.some((item) => !item.range || item.sheet !== parsed[0]!.sheet)) return undefined;
+  const ranges = parsed.flatMap((item) => item.range ? [item.range] : []);
+  if (!ranges.length) return undefined;
+  const startCol = Math.min(...ranges.map((range) => range.start.col));
+  const endCol = Math.max(...ranges.map((range) => range.end.col));
+  const startRow = Math.max(1, Math.min(...ranges.map((range) => range.start.row)) - (series.every((item) => item.categories) ? 1 : 0));
+  const endRow = Math.max(...ranges.map((range) => range.end.row));
+  return absoluteRange(`${quoteSheetPrefix(parsed[0]!.sheet)}$${columnName(startCol - 1)}$${startRow}:$${columnName(endCol - 1)}$${endRow}`, defaultSheet);
+}
+
+function chartTypeAndElement(chartRoot: XmlElement) {
+  const plot = child(chartRoot, CHART_NS, "chart")?.find(CHART_NS, "plotArea") ?? firstDescendant(chartRoot, CHART_NS, "plotArea");
+  const typeElement = plot?.elements().find((node) => node.namespaceUri() === CHART_NS && /Chart$/.test(node.localName) && node.localName !== "plotArea");
+  if (!typeElement) return { type: "line" as const, element: undefined };
+  if (typeElement.localName === "barChart") return { type: typeElement.find(CHART_NS, "barDir")?.getAttribute("val") === "bar" ? "bar" as const : "column" as const, element: typeElement };
+  if (typeElement.localName === "areaChart") return { type: "area" as const, element: typeElement };
+  if (typeElement.localName === "pieChart") return { type: "pie" as const, element: typeElement };
+  if (typeElement.localName === "scatterChart") return { type: "scatter" as const, element: typeElement };
+  if (typeElement.localName === "histogramChart") return { type: "histogram" as const, element: typeElement };
+  if (typeElement.localName === "lineChart") return { type: "line" as const, element: typeElement };
+  return { type: "combo" as const, element: typeElement };
+}
+
+function anchorPosition(anchor: XmlElement | undefined) {
+  if (!anchor) return { x: 0, y: 0, width: 760, height: 320 };
+  const from = child(anchor, DRAWING_NS, "from");
+  const to = child(anchor, DRAWING_NS, "to");
+  const ext = child(anchor, DRAWING_NS, "ext");
+  const col = numericAttribute(textOf(child(from, DRAWING_NS, "col")));
+  const row = numericAttribute(textOf(child(from, DRAWING_NS, "row")));
+  const colOff = numericAttribute(textOf(child(from, DRAWING_NS, "colOff")));
+  const rowOff = numericAttribute(textOf(child(from, DRAWING_NS, "rowOff")));
+  const toCol = numericAttribute(textOf(child(to, DRAWING_NS, "col")), col + 8);
+  const toRow = numericAttribute(textOf(child(to, DRAWING_NS, "row")), row + 16);
+  const toColOff = numericAttribute(textOf(child(to, DRAWING_NS, "colOff")));
+  const toRowOff = numericAttribute(textOf(child(to, DRAWING_NS, "rowOff")));
+  const width = ext ? numericAttribute(ext.getAttribute("cx"), 7_200_000) / 9525 : Math.max(240, (toCol - col) * 64 + (toColOff - colOff) / 9525);
+  const height = ext ? numericAttribute(ext.getAttribute("cy"), 3_000_000) / 9525 : Math.max(180, (toRow - row) * 20 + (toRowOff - rowOff) / 9525);
+  return {
+    x: col * 64 + colOff / 9525,
+    y: row * 20 + rowOff / 9525,
+    width,
+    height,
+  };
+}
+
+async function projectCharts(workbook: Workbook, sheet: Worksheet): Promise<XlsxChartProjection[]> {
+  const part = sheetPart(workbook, sheet);
+  if (!part) return [];
+  const worksheetRoot = (await workbook.office.xml(sheet.partName)).root;
+  const drawingRef = child(worksheetRoot, SML, "drawing")?.getAttribute("r:id");
+  if (!drawingRef) return [];
+  const drawingPart = workbook.office.package.relatedPart(part, drawingRef);
+  if (!drawingPart) return [];
+  const drawingRoot = (await workbook.office.xml(drawingPart.name)).root;
+  const result: XlsxChartProjection[] = [];
+  for (const anchor of drawingRoot.elements().filter((node) => node.namespaceUri() === DRAWING_NS && (node.localName === "twoCellAnchor" || node.localName === "oneCellAnchor"))) {
+    const frame = firstDescendant(anchor, DRAWING_NS, "graphicFrame");
+    const chartRef = firstDescendant(frame ?? anchor, CHART_NS, "chart")?.getAttribute("r:id");
+    if (!chartRef) continue;
+    const chartPart = workbook.office.package.relatedPart(drawingPart, chartRef);
+    if (!chartPart) continue;
+    const chartRoot = (await workbook.office.xml(chartPart.name)).root;
+    const chart = chartTypeAndElement(chartRoot);
+    const series = chart.element ? chartSeries(chart.element) : [];
+    const sourceRange = chartSourceRange(series, sheet.name) ?? series[0]?.values ?? series[0]?.categories ?? `${sheet.name}!A1`;
+    result.push({
+      id: `xlsx:chart:${sheet.sheetId}:${chartPart.name}`,
+      type: chart.type,
+      sourceRange,
+      title: chartText(chartRoot),
+      ...(child(child(chartRoot, CHART_NS, "chart"), CHART_NS, "legend") ? {} : { showLegend: false }),
+      position: anchorPosition(anchor),
+      ...(series.length ? { series } : {}),
+      partName: chartPart.name,
+      drawingPartName: drawingPart.name,
+      anchorId: chartRef,
+    });
+  }
+  return result;
+}
+
+export async function projectXlsxSheet(workbook: Workbook, sheet: Worksheet): Promise<Omit<XlsxSheetProjection, "id" | "name" | "cells" | "merges" | "frozenRows" | "frozenColumns">> {
+  const root = (await workbook.office.xml(sheet.partName)).root;
+  const dimension = worksheetDimension(root);
+  const axis = worksheetRowsAndColumns(root);
+  const view = worksheetView(root);
+  const freezePane = child(child(root, SML, "sheetViews"), SML, "sheetView")?.find(SML, "pane");
+  const freeze = freezePane && ["frozen", "frozenSplit"].includes(freezePane.getAttribute("state") ?? "")
+    ? { frozenRows: Math.max(0, Math.round(numericAttribute(freezePane.getAttribute("ySplit")))), frozenColumns: Math.max(0, Math.round(numericAttribute(freezePane.getAttribute("xSplit")))) }
+    : { frozenRows: 0, frozenColumns: 0 };
+  return {
+    rowCount: Math.max(100, dimension.rows),
+    columnCount: Math.max(26, dimension.columns),
+    ...axis,
+    ...(sheetElement(sheet).getAttribute("state") && sheetElement(sheet).getAttribute("state") !== "visible" ? { hidden: true } : {}),
+    ...(view.showGridlines !== undefined ? { showGridlines: view.showGridlines } : {}),
+    ...(view.showHeadings !== undefined ? { showHeadings: view.showHeadings } : {}),
+    ...(worksheetTabColor(sheet) ? { tabColor: worksheetTabColor(sheet) } : {}),
+    ...freeze,
+    tables: await projectTables(workbook, sheet),
+    charts: await projectCharts(workbook, sheet),
+    validations: worksheetValidations(root),
+    conditionalFormats: worksheetConditionalFormats(root),
+    partName: sheet.partName,
+  };
+}
+
+export function nativeSheetById(workbook: Workbook, sheetId: string, aliases = new Map<string, number>()) {
+  const alias = aliases.get(sheetId);
+  const id = alias ?? Number(sheetId.replace(/^xlsx:sheet:/, ""));
+  const sheet = workbook.sheets().find((candidate) => candidate.sheetId === id);
+  if (!sheet) throw new Error("The target Excel sheet no longer exists.");
+  return sheet;
+}
+
+function workbookRoot(workbook: Workbook) {
+  return workbook._internal().workbook.doc.root;
+}
+
+function workbookSheetsElement(workbook: Workbook) {
+  const sheets = workbookRoot(workbook).find(SML, "sheets");
+  if (!sheets) throw new Error("The Excel workbook has no worksheet list.");
+  return sheets;
+}
+
+function nativeSheetKey(sheet: Worksheet) {
+  return `xlsx:sheet:${sheet.sheetId}`;
+}
+
+function reorderNativeSheets(workbook: Workbook, order: string[], aliases: Map<string, number>) {
+  const sheetsParent = workbookSheetsElement(workbook);
+  const native = workbook.sheets();
+  const byId = new Map(native.map((sheet) => [nativeSheetKey(sheet), sheetElement(sheet)]));
+  const resolved = order.map((id) => {
+    const alias = aliases.get(id);
+    return byId.get(alias === undefined ? id : `xlsx:sheet:${alias}`);
+  }).filter((node): node is XmlElement => Boolean(node));
+  const seen = new Set(resolved);
+  for (const sheet of native) {
+    const node = sheetElement(sheet);
+    if (!seen.has(node)) resolved.push(node);
+  }
+  for (const node of sheetsParent.elements().filter((candidate) => candidate.localName === "sheet"))
+    sheetsParent.removeChild(node);
+  for (const node of resolved) sheetsParent.appendChild(node);
+  workbook._internal().markDirty(workbook._internal().workbook);
+}
+
+function formulaReferencesSheet(formula: string, sheetName: string) {
+  const escaped = sheetName.replaceAll("'", "''").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^A-Za-z0-9_])(?:'${escaped}'|${escaped})!`, "i").test(formula);
+}
+
+async function hasNativeReferencesToSheet(workbook: Workbook, sheetName: string) {
+  const roots: XmlElement[] = workbook.sheets().map((sheet) => sheet._internal().pd.doc.root);
+  roots.push(workbookRoot(workbook));
+  for (const part of workbook.office.package.parts().filter((candidate) => /\/(?:charts|tables)\/.*\.xml$/i.test(candidate.name)))
+    roots.push((await workbook.office.xml(part.name)).root);
+  const definedNames = workbookRoot(workbook).find(SML, "definedNames")?.elements() ?? [];
+  return roots.some((root) => allDescendants(root, null, "f").some((node) => formulaReferencesSheet(textOf(node), sheetName)))
+    || definedNames.some((node) => node.localName === "definedName" && formulaReferencesSheet(textOf(node), sheetName))
+    || roots.some((root) => allDescendants(root, null, "formula1").some((node) => formulaReferencesSheet(textOf(node), sheetName)));
+}
+
+async function rewriteWorkbookFormulas(workbook: Workbook, mapper: (formula: string, containingSheetName?: string) => string) {
+  let changed = false;
+  for (const sheet of workbook.sheets()) {
+    const root = sheet._internal().pd.doc.root;
+    if (mapFormulaElements(root, (formula) => mapper(formula, sheet.name))) {
+      workbook.office.markDirty(sheet.partName);
+      changed = true;
+    }
+  }
+  const root = workbookRoot(workbook);
+  const names = root.find(SML, "definedNames");
+  if (names) {
+    for (const name of names.elements().filter((node) => node.namespaceUri() === SML && node.localName === "definedName")) {
+      const before = name.text();
+      const after = mapper(before);
+      if (before !== after) {
+        setText(name, after);
+        changed = true;
+      }
+    }
+    if (changed) workbook.office.markDirty(workbook.office.mainPart.name);
+  }
+  for (const part of workbook.office.package.parts().filter((candidate) => /\/charts\/.*\.xml$/i.test(candidate.name))) {
+    const document = await workbook.office.xml(part.name);
+    if (mapFormulaElements(document.root, (formula) => mapper(formula))) {
+      workbook.office.markDirty(part.name);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+async function rewriteNativeRanges(workbook: Workbook, sheet: Worksheet, axis: "row" | "column", at: number, delta: 1 | -1) {
+  const rewrite = (value: string) => rewriteStructuralReferences(`=${value}`, axis, at, delta, { sheetName: sheet.name, unqualified: true }).replace(/^=/, "");
+  const document = await workbook.office.xml(sheet.partName);
+  const root = document.root;
+  let changed = false;
+  for (const merge of allDescendants(root, SML, "mergeCell")) {
+    const ref = merge.getAttribute("ref");
+    if (ref) { const next = rewrite(ref); if (next !== ref) { merge.setAttribute("ref", next); changed = true; } }
+  }
+  for (const node of allDescendants(root, SML, "conditionalFormatting")) {
+    const ref = node.getAttribute("sqref");
+    if (ref) { const next = ref.split(/\s+/).map(rewrite).join(" "); if (next !== ref) { node.setAttribute("sqref", next); changed = true; } }
+  }
+  for (const node of allDescendants(root, SML, "dataValidation")) {
+    const ref = node.getAttribute("sqref");
+    if (ref) { const next = ref.split(/\s+/).map(rewrite).join(" "); if (next !== ref) { node.setAttribute("sqref", next); changed = true; } }
+  }
+  if (changed) workbook.office.markDirty(sheet.partName);
+  for (const table of await projectTables(workbook, sheet)) {
+    if (!table.partName) continue;
+    const tableDocument = await workbook.office.xml(table.partName);
+    const tableRoot = tableDocument.root;
+    let tableChanged = false;
+    for (const node of [tableRoot, child(tableRoot, SML, "autoFilter")].filter((node): node is XmlElement => Boolean(node))) {
+      const ref = node.getAttribute("ref");
+      if (!ref) continue;
+      const next = rewrite(ref);
+      if (next !== ref) { node.setAttribute("ref", next); tableChanged = true; }
+    }
+    if (tableChanged) workbook.office.markDirty(table.partName);
+  }
+}
+
+function directRows(root: XmlElement) {
+  return child(root, SML, "sheetData")?.elements().filter((node) => node.namespaceUri() === SML && node.localName === "row") ?? [];
+}
+
+function directCells(row: XmlElement) {
+  return row.elements().filter((node) => node.namespaceUri() === SML && node.localName === "c");
+}
+
+function rowNumber(row: XmlElement) { return Math.max(1, Math.round(numericAttribute(row.getAttribute("r"), 1))); }
+
+function cellRefParts(ref: string) {
+  const match = /^\$?([A-Z]{1,3})\$?([1-9][0-9]*)$/i.exec(ref);
+  if (!match) return null;
+  return { col: columnIndex(match[1]!.toUpperCase()) + 1, row: Number(match[2]) };
+}
+
+function shiftNativeSheetCells(workbook: Workbook, sheet: Worksheet, axis: "row" | "column", at: number, delta: 1 | -1) {
+  const root = sheet._internal().pd.doc.root;
+  const data = child(root, SML, "sheetData");
+  if (!data) return;
+  const target = at + 1;
+  for (const row of [...directRows(root)]) {
+    const currentRow = rowNumber(row);
+    if (axis === "row") {
+      if (delta === -1 && currentRow === target) { data.removeChild(row); continue; }
+      if (currentRow >= target) row.setAttribute("r", String(currentRow + delta));
+    }
+    for (const cell of [...directCells(row)]) {
+      const ref = cellRefParts(cell.getAttribute("r") ?? "");
+      if (!ref) continue;
+      if (axis === "column") {
+        if (delta === -1 && ref.col === target) { row.removeChild(cell); continue; }
+        if (ref.col >= target) ref.col += delta;
+      }
+      if (axis === "row") {
+        const effectiveRow = currentRow >= target ? currentRow + delta : currentRow;
+        ref.row = effectiveRow;
+      }
+      cell.setAttribute("r", `${columnName(ref.col - 1)}${ref.row}`);
+    }
+  }
+  if (axis === "column") {
+    const cols = child(root, SML, "cols");
+    for (const col of [...(cols?.elements().filter((node) => node.localName === "col") ?? [])]) {
+      let min = Math.max(1, Math.round(numericAttribute(col.getAttribute("min"), 1)));
+      let max = Math.max(min, Math.round(numericAttribute(col.getAttribute("max"), min)));
+      const target = at + 1;
+      if (delta === 1) {
+        if (min >= target) { min += 1; max += 1; }
+        else if (max >= target) max += 1;
+      } else if (max < target) {
+        // The span is entirely before the removed column.
+      } else if (min > target) { min -= 1; max -= 1; }
+      else if (min === max) { cols?.removeChild(col); continue; }
+      else if (min === target) min += 1;
+      else max -= 1;
+      col.setAttribute("min", String(min)); col.setAttribute("max", String(max));
+    }
+    if (cols && !cols.elements().length) root.removeChild(cols);
+  }
+  workbook.office.markDirty(sheet.partName);
+}
+
+function setWorksheetRange(root: XmlElement, ref: string) {
+  let dimension = child(root, SML, "dimension");
+  if (!dimension) {
+    dimension = new XmlElement("dimension", root.lookupPrefix(SML) ?? null);
+    root.insertBefore(dimension, root.elements()[0] ?? null);
+  }
+  dimension.setAttribute("ref", fullRange(ref));
+}
+
+function setHiddenRows(root: XmlElement, hiddenRows: number[]) {
+  const wanted = new Set(hiddenRows.map((row) => Math.max(0, Math.round(row)) + 1));
+  const data = child(root, SML, "sheetData");
+  if (!data) return;
+  const existing = new Set<number>();
+  for (const row of directRows(root)) {
+    const index = rowNumber(row);
+    existing.add(index);
+    if (wanted.has(index)) row.setAttribute("hidden", "1"); else row.removeAttribute("hidden");
+  }
+  for (const index of wanted) {
+    if (existing.has(index)) continue;
+    const row = new XmlElement("row", data.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+    row.setAttribute("r", String(index)); row.setAttribute("hidden", "1"); data.appendChild(row);
+  }
+  const rows = directRows(root).sort((left, right) => rowNumber(left) - rowNumber(right));
+  for (const row of rows) { data.removeChild(row); data.appendChild(row); }
+}
+
+function setHiddenColumns(root: XmlElement, hiddenColumns: number[], widths: Record<string, number>) {
+  const wanted = new Set(hiddenColumns.map((column) => Math.max(0, Math.round(column)) + 1));
+  const values = new Map<number, { width?: number; hidden: boolean; template?: XmlElement }>();
+  const existingCols = child(root, SML, "cols")?.elements().filter((node) => node.localName === "col") ?? [];
+  for (const old of existingCols) {
+    const min = Math.max(1, Math.round(numericAttribute(old.getAttribute("min"), 1)));
+    const max = Math.max(min, Math.round(numericAttribute(old.getAttribute("max"), min)));
+    for (let index = min; index <= max; index += 1)
+      values.set(index, {
+        ...(old.getAttribute("width") !== undefined ? { width: numericAttribute(old.getAttribute("width")) } : {}),
+        hidden: boolAttribute(old.getAttribute("hidden")),
+        template: old,
+      });
+  }
+  for (const [key, width] of Object.entries(widths)) {
+    const index = Number(key) + 1;
+    if (Number.isInteger(index) && index > 0) values.set(index, { ...values.get(index), width, hidden: wanted.has(index) || values.get(index)?.hidden === true });
+  }
+  for (const index of wanted) values.set(index, { ...values.get(index), hidden: true });
+  let cols = child(root, SML, "cols");
+  if (!cols && values.size) {
+    cols = new XmlElement("cols", root.lookupPrefix(SML) ?? null);
+    const reference = root.elements().find((node) => ["sheetData", "sheetCalcPr", "sheetProtection"].includes(node.localName));
+    root.insertBefore(cols, reference ?? null);
+  }
+  if (!cols) return;
+  for (const old of [...cols.elements()].filter((node) => node.localName === "col")) cols.removeChild(old);
+  for (const [index, value] of [...values.entries()].sort((a, b) => a[0] - b[0])) {
+    const col = value.template?.clone() ?? new XmlElement("col", cols.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+    for (const attribute of [...col.attributes]) {
+      if (["min", "max", "width", "hidden", "customWidth"].includes(attribute.localName)) col.removeAttribute(attribute.localName);
+    }
+    col.setAttribute("min", String(index)); col.setAttribute("max", String(index));
+    if (value.width !== undefined) col.setAttribute("width", String(value.width));
+    if (value.hidden) col.setAttribute("hidden", "1");
+    if (value.width !== undefined) col.setAttribute("customWidth", "1");
+    cols.appendChild(col);
+  }
+  if (!cols.elements().length) root.removeChild(cols);
+}
+
+export async function setXlsxSheetProperties(workbook: Workbook, sheet: Worksheet, properties: Record<string, unknown>) {
+  const root = (await workbook.office.xml(sheet.partName)).root;
+  const sheetMeta = sheetElement(sheet);
+  if (typeof properties.hidden === "boolean") {
+    if (properties.hidden) sheetMeta.setAttribute("state", "hidden"); else sheetMeta.removeAttribute("state");
+  }
+  const view = child(child(root, SML, "sheetViews"), SML, "sheetView");
+  if (typeof properties.showGridlines === "boolean" || typeof properties.showHeadings === "boolean") {
+    const views = child(root, SML, "sheetViews") ?? (() => {
+      const created = new XmlElement("sheetViews", root.lookupPrefix(SML) ?? null);
+      root.insertBefore(created, root.elements().find((node) => node.localName === "sheetFormatPr") ?? null);
+      return created;
+    })();
+    const current = view ?? (() => { const created = new XmlElement("sheetView", views.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null); created.setAttribute("workbookViewId", "0"); views.appendChild(created); return created; })();
+    if (typeof properties.showGridlines === "boolean") current.setAttribute("showGridLines", properties.showGridlines ? "1" : "0");
+    if (typeof properties.showHeadings === "boolean") current.setAttribute("showRowColHeaders", properties.showHeadings ? "1" : "0");
+  }
+  if (typeof properties.tabColor === "string" || properties.tabColor === null) {
+    let sheetPr = child(root, SML, "sheetPr");
+    if (!sheetPr) { sheetPr = new XmlElement("sheetPr", root.lookupPrefix(SML) ?? null); root.insertBefore(sheetPr, root.elements()[0] ?? null); }
+    const current = child(sheetPr, SML, "tabColor");
+    if (properties.tabColor === null || properties.tabColor === "") { if (current) sheetPr.removeChild(current); }
+    else { const color = current ?? new XmlElement("tabColor", sheetPr.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null); color.setAttribute("rgb", String(properties.tabColor).replace(/^#/, "FF")); if (!current) sheetPr.appendChild(color); }
+  }
+  if (Array.isArray(properties.hiddenRows)) setHiddenRows(root, properties.hiddenRows.filter((value): value is number => typeof value === "number"));
+  if (Array.isArray(properties.hiddenColumns)) setHiddenColumns(root, properties.hiddenColumns.filter((value): value is number => typeof value === "number"), typeof properties.columnWidths === "object" && properties.columnWidths ? properties.columnWidths as Record<string, number> : {});
+  if (properties.columnWidths && typeof properties.columnWidths === "object") setHiddenColumns(root, Array.isArray(properties.hiddenColumns) ? properties.hiddenColumns.filter((value): value is number => typeof value === "number") : [], properties.columnWidths as Record<string, number>);
+  if (properties.rowHeights && typeof properties.rowHeights === "object") {
+    const heights = properties.rowHeights as Record<string, unknown>;
+    for (const row of directRows(root)) {
+      const key = String(rowNumber(row) - 1);
+      const height = heights[key];
+      if (typeof height === "number") { row.setAttribute("ht", String(height)); row.setAttribute("customHeight", "1"); }
+      else if (!Object.prototype.hasOwnProperty.call(heights, key)) { row.removeAttribute("ht"); row.removeAttribute("customHeight"); }
+    }
+    for (const [key, height] of Object.entries(heights)) {
+      const row = sheet._internal().findRow(Number(key) + 1);
+      if (row && typeof height === "number") { row.setAttribute("ht", String(height)); row.setAttribute("customHeight", "1"); }
+    }
+  }
+  if (typeof properties.rowCount === "number" || typeof properties.columnCount === "number") {
+    const current = worksheetDimension(root);
+    const rows = typeof properties.rowCount === "number" ? Math.max(1, Math.round(properties.rowCount)) : current.rows;
+    const columns = typeof properties.columnCount === "number" ? Math.max(1, Math.round(properties.columnCount)) : current.columns;
+    setWorksheetRange(root, `A1:${columnName(columns - 1)}${rows}`);
+  }
+  workbook.office.markDirty(sheet.partName);
+}
+
+function chartTitleXml(title: string) {
+  const document = parseXml(`<c:title xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="1100"/><a:t/></a:r></a:p></c:rich></c:tx><c:layout/><c:overlay val="0"/></c:title>`);
+  const text = firstDescendant(document.root, A_NS, "t");
+  if (text) setText(text, title);
+  return document.root;
+}
+
+function chartCacheXml(kind: "numCache" | "strCache", values: Array<string | number>) {
+  const cache = new XmlElement(kind, "c");
+  if (kind === "numCache") { const formatCode = new XmlElement("formatCode", "c"); formatCode.appendChild(new XmlText("General")); cache.appendChild(formatCode); }
+  const count = new XmlElement("ptCount", "c"); count.setAttribute("val", String(values.length)); cache.appendChild(count);
+  values.forEach((value, index) => {
+    const point = new XmlElement("pt", "c"); point.setAttribute("idx", String(index));
+    const valueElement = new XmlElement("v", "c"); valueElement.appendChild(new XmlText(String(value))); point.appendChild(valueElement); cache.appendChild(point);
+  });
+  return cache;
+}
+
+function cacheValues(workbook: Workbook, formula: string, defaultSheet: string) {
+  const sheetName = refSheetName(formula, defaultSheet);
+  const sheet = workbook.sheet(sheetName);
+  if (!sheet) return null;
+  const local = formula.slice(formula.lastIndexOf("!") + 1);
+  const range = rangePart(local);
+  if (!range) return null;
+  const result: Array<string | number> = [];
+  let kind: "numCache" | "strCache" = "numCache";
+  for (let row = range.start.row; row <= range.end.row; row += 1) for (let col = range.start.col; col <= range.end.col; col += 1) {
+    const value = sheet.getCell({ row, col });
+    if (value instanceof Date) result.push(dateToSerial(value, workbook._date1904()));
+    else if (typeof value === "number") result.push(value);
+    else if (typeof value === "boolean") result.push(value ? 1 : 0);
+    else { result.push(value ?? ""); kind = "strCache"; }
+  }
+  return { values: result, kind };
+}
+
+function removeCache(ref: XmlElement) {
+  for (const node of [...ref.elements()].filter((candidate) => candidate.localName === "numCache" || candidate.localName === "strCache")) ref.removeChild(node);
+}
+
+function setChartRef(workbook: Workbook, container: XmlElement, formula: string | undefined, defaultSheet: string, preferStrings = false) {
+  if (!formula) return;
+  const existing = firstDescendant(container, CHART_NS, "numRef") ?? firstDescendant(container, CHART_NS, "strRef");
+  let ref = existing;
+  if (!ref) { ref = new XmlElement(preferStrings ? "strRef" : "numRef", "c"); container.appendChild(ref); }
+  const f = child(ref, CHART_NS, "f") ?? (() => { const created = new XmlElement("f", "c"); ref!.insertBefore(created, ref!.elements()[0] ?? null); return created; })();
+  setText(f, absoluteRange(formula, defaultSheet));
+  removeCache(ref);
+  const cache = cacheValues(workbook, formula, defaultSheet);
+  if (cache) ref.appendChild(chartCacheXml(cache.kind, cache.values));
+}
+
+function makeChartPlot(type: XlsxChartProjection["type"], seriesXml: XmlElement[]) {
+  const document = parseXml(`<c:plot xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
+  const plot = document.root;
+  const elementName = type === "column" || type === "bar" ? "barChart" : type === "area" ? "areaChart" : type === "pie" ? "pieChart" : type === "scatter" ? "scatterChart" : "lineChart";
+  const chart = new XmlElement(elementName, "c");
+  if (elementName === "barChart") { const barDir = new XmlElement("barDir", "c"); barDir.setAttribute("val", type === "bar" ? "bar" : "col"); chart.appendChild(barDir); const grouping = new XmlElement("grouping", "c"); grouping.setAttribute("val", "clustered"); chart.appendChild(grouping); }
+  if (elementName === "lineChart") { const grouping = new XmlElement("grouping", "c"); grouping.setAttribute("val", "standard"); chart.appendChild(grouping); }
+  for (const series of seriesXml) chart.appendChild(series);
+  const axId = (value: string) => { const node = new XmlElement("axId", "c"); node.setAttribute("val", value); return node; };
+  if (elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart") { chart.appendChild(axId("-1000000001")); chart.appendChild(axId("1000000001")); }
+  plot.appendChild(chart);
+  if (elementName === "barChart" || elementName === "areaChart" || elementName === "lineChart") {
+    for (const axisName of ["catAx", "valAx"]) {
+      const axis = new XmlElement(axisName, "c"); axis.appendChild(axId(axisName === "catAx" ? "-1000000001" : "1000000001")); const scaling = new XmlElement("scaling", "c"); const orientation = new XmlElement("orientation", "c"); orientation.setAttribute("val", "minMax"); scaling.appendChild(orientation); axis.appendChild(scaling); const deleteNode = new XmlElement("delete", "c"); deleteNode.setAttribute("val", "0"); axis.appendChild(deleteNode); const pos = new XmlElement("axPos", "c"); pos.setAttribute("val", axisName === "catAx" ? "b" : "l"); axis.appendChild(pos); plot.appendChild(axis); }
+  }
+  return plot;
+}
+
+function chartSeriesForSource(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
+  if (chart.series?.length) return chart.series;
+  const bang = chart.sourceRange.lastIndexOf("!");
+  const sourceSheet = refSheetName(chart.sourceRange, defaultSheet);
+  const local = bang >= 0 ? chart.sourceRange.slice(bang + 1) : chart.sourceRange;
+  const range = rangePart(local);
+  if (!range || range.start.col >= range.end.col || range.start.row >= range.end.row)
+    return [{ values: chart.sourceRange }];
+  const prefix = quoteSheetPrefix(sourceSheet);
+  const categoryStart = range.start.row + 1;
+  const categoryRange = `${prefix}$${columnName(range.start.col - 1)}$${categoryStart}:$${columnName(range.start.col - 1)}$${range.end.row}`;
+  const source = workbook.sheet(sourceSheet);
+  return Array.from({ length: range.end.col - range.start.col }, (_, index) => {
+    const column = range.start.col + index + 1;
+    const header = source?.getCell({ row: range.start.row, col: column });
+    return {
+      ...(typeof header === "string" && header ? { name: header } : {}),
+      categories: categoryRange,
+      values: `${prefix}$${columnName(column - 1)}$${categoryStart}:$${columnName(column - 1)}$${range.end.row}`,
+    };
+  });
+}
+
+function newChartSeries(workbook: Workbook, chart: XlsxChartProjection, defaultSheet: string) {
+  const source = chartSeriesForSource(workbook, chart, defaultSheet);
+  return source.map((series, index) => {
+    const document = parseXml(`<c:ser xmlns:c="${CHART_NS}" xmlns:a="${A_NS}"/>`);
+    const ser = document.root;
+    const idx = new XmlElement("idx", "c"); idx.setAttribute("val", String(index)); ser.appendChild(idx);
+    const order = new XmlElement("order", "c"); order.setAttribute("val", String(index)); ser.appendChild(order);
+    const tx = new XmlElement("tx", "c"); const v = new XmlElement("v", "c"); v.appendChild(new XmlText(series.name ?? `Series ${index + 1}`)); tx.appendChild(v); ser.appendChild(tx);
+    if (series.categories) { const cat = new XmlElement("cat", "c"); setChartRef(workbook, cat, series.categories, defaultSheet, true); ser.appendChild(cat); }
+    if (series.values || chart.sourceRange) { const val = new XmlElement("val", "c"); setChartRef(workbook, val, series.values ?? chart.sourceRange, defaultSheet); ser.appendChild(val); }
+    return ser;
+  });
+}
+
+function updateChartSeries(workbook: Workbook, chartRoot: XmlElement, chart: XlsxChartProjection, defaultSheet: string) {
+  const plot = child(child(chartRoot, CHART_NS, "chart"), CHART_NS, "plotArea") ?? firstDescendant(chartRoot, CHART_NS, "plotArea");
+  const plotTypes = plot?.elements().filter((node) => node.namespaceUri() === CHART_NS && /Chart$/.test(node.localName)) ?? [];
+  const requested = chartSeriesForSource(workbook, chart, defaultSheet);
+  for (const [index, plotType] of plotTypes.entries()) {
+    const series = plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser");
+    for (let index = series.length - 1; index >= requested.length; index -= 1) plotType.removeChild(series[index]!);
+    for (let index = series.length; index < requested.length; index += 1) plotType.appendChild(newChartSeries(workbook, { ...chart, series: [requested[index]!] }, defaultSheet)[0]!);
+    const current = plotType.elements().filter((node) => node.namespaceUri() === CHART_NS && node.localName === "ser");
+    current.forEach((ser, seriesIndex) => {
+      const requestedSeries = requested[seriesIndex] ?? requested[0]!;
+      const tx = child(ser, CHART_NS, "tx");
+      if (tx && requestedSeries.name) { const value = firstDescendant(tx, CHART_NS, "v"); if (value) setText(value, requestedSeries.name); }
+      const categories = child(ser, CHART_NS, "cat");
+      if (requestedSeries.categories) { const target = categories ?? (() => { const created = new XmlElement("cat", "c"); ser.appendChild(created); return created; })(); setChartRef(workbook, target, requestedSeries.categories, defaultSheet, true); }
+      const values = child(ser, CHART_NS, "val") ?? (() => { const created = new XmlElement("val", "c"); ser.appendChild(created); return created; })();
+      setChartRef(workbook, values, requestedSeries.values ?? chart.sourceRange, defaultSheet);
+    });
+    if (index > 0) break;
+  }
+}
+
+function setChartLegend(chartRoot: XmlElement, visible: boolean) {
+  const chart = child(chartRoot, CHART_NS, "chart");
+  if (!chart) return;
+  const existing = child(chart, CHART_NS, "legend");
+  if (!visible) { if (existing) chart.removeChild(existing); return; }
+  if (existing) return;
+  const document = parseXml(`<c:legend xmlns:c="${CHART_NS}"><c:legendPos val="r"/><c:layout/><c:overlay val="0"/></c:legend>`);
+  chart.appendChild(document.root);
+}
+
+function setChartType(chartRoot: XmlElement, type: XlsxChartProjection["type"]) {
+  if (type === "combo" || type === "histogram") throw new Error(`Native Excel chart type ${type} is not supported by the safe writer.`);
+  const current = chartTypeAndElement(chartRoot).element;
+  if (!current || !current.parent) return;
+  const series = current.elements().filter((node) => node.localName === "ser").map((node) => node.clone());
+  const replacement = makeChartPlot(type, series).elements()[0]!;
+  current.parent.insertBefore(replacement, current);
+  current.parent.removeChild(current);
+}
+
+async function writeExistingChart(workbook: Workbook, sheet: Worksheet, chart: XlsxChartProjection) {
+  if (!chart.partName) return false;
+  const document = await workbook.office.xml(chart.partName);
+  const root = document.root;
+  const title = firstDescendant(root, CHART_NS, "title");
+  if (title?.parent) title.parent.removeChild(title);
+  if (chart.title) {
+    const chartNode = child(root, CHART_NS, "chart");
+    if (chartNode) chartNode.insertBefore(chartTitleXml(chart.title), chartNode.elements()[0] ?? null);
+  }
+  updateChartSeries(workbook, root, chart, sheet.name);
+  if (chart.showLegend !== undefined) setChartLegend(root, chart.showLegend);
+  if (chart.type !== chartTypeAndElement(root).type) setChartType(root, chart.type);
+  await updateChartAnchor(workbook, chart);
+  workbook.office.markDirty(chart.partName);
+  return true;
+}
+
+function drawingAnchorXml(chartRelId: string, chart: XlsxChartProjection) {
+  const right = chart.position.x + chart.position.width;
+  const bottom = chart.position.y + chart.position.height;
+  const x = Math.max(0, Math.floor(chart.position.x / 64));
+  const y = Math.max(0, Math.floor(chart.position.y / 20));
+  const toX = Math.max(x + 1, Math.floor(right / 64));
+  const toY = Math.max(y + 1, Math.floor(bottom / 20));
+  const document = parseXml(`<xdr:twoCellAnchor xmlns:xdr="${DRAWING_NS}" xmlns:a="${A_NS}" xmlns:c="${CHART_NS}" xmlns:r="${REL}"><xdr:from><xdr:col>${x}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${y}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>${toX}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${toY}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Chart"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm/><a:graphic><a:graphicData uri="${CHART_NS}"><c:chart r:id="${chartRelId}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>`);
+  const anchor = document.root;
+  const from = child(anchor, DRAWING_NS, "from");
+  const to = child(anchor, DRAWING_NS, "to");
+  setDrawingChildText(from, "colOff", (chart.position.x - x * 64) * 9525);
+  setDrawingChildText(from, "rowOff", (chart.position.y - y * 20) * 9525);
+  setDrawingChildText(to, "colOff", (right - toX * 64) * 9525);
+  setDrawingChildText(to, "rowOff", (bottom - toY * 20) * 9525);
+  return document.root;
+}
+
+function setDrawingChildText(parent: XmlElement | undefined, name: string, value: number) {
+  const node = child(parent, DRAWING_NS, name);
+  if (!node) return false;
+  setText(node, String(Math.max(0, Math.round(value))));
+  return true;
+}
+
+async function updateChartAnchor(workbook: Workbook, chart: XlsxChartProjection) {
+  if (!chart.drawingPartName || !chart.anchorId) return;
+  const document = await workbook.office.xml(chart.drawingPartName);
+  const anchor = document.root.elements().find((candidate) =>
+    (candidate.localName === "twoCellAnchor" || candidate.localName === "oneCellAnchor")
+      && firstDescendant(candidate, CHART_NS, "chart")?.getAttribute("r:id") === chart.anchorId,
+  );
+  if (!anchor) return;
+  const right = chart.position.x + chart.position.width;
+  const bottom = chart.position.y + chart.position.height;
+  const x = Math.max(0, Math.floor(chart.position.x / 64));
+  const y = Math.max(0, Math.floor(chart.position.y / 20));
+  const toX = Math.max(x + 1, Math.floor(right / 64));
+  const toY = Math.max(y + 1, Math.floor(bottom / 20));
+  const from = child(anchor, DRAWING_NS, "from");
+  let changed = false;
+  changed = setDrawingChildText(from, "col", x) || changed;
+  changed = setDrawingChildText(from, "row", y) || changed;
+  changed = setDrawingChildText(from, "colOff", (chart.position.x - x * 64) * 9525) || changed;
+  changed = setDrawingChildText(from, "rowOff", (chart.position.y - y * 20) * 9525) || changed;
+  if (anchor.localName === "twoCellAnchor") {
+    const to = child(anchor, DRAWING_NS, "to");
+    changed = setDrawingChildText(to, "col", toX) || changed;
+    changed = setDrawingChildText(to, "row", toY) || changed;
+    changed = setDrawingChildText(to, "colOff", (right - toX * 64) * 9525) || changed;
+    changed = setDrawingChildText(to, "rowOff", (bottom - toY * 20) * 9525) || changed;
+  } else {
+    const ext = child(anchor, DRAWING_NS, "ext");
+    if (ext) {
+      ext.setAttribute("cx", String(Math.max(1, Math.round(chart.position.width * 9525))));
+      ext.setAttribute("cy", String(Math.max(1, Math.round(chart.position.height * 9525))));
+      changed = true;
+    }
+  }
+  if (changed) workbook.office.markDirty(chart.drawingPartName);
+}
+
+async function createNativeChart(workbook: Workbook, sheet: Worksheet, chart: XlsxChartProjection) {
+  if (chart.type === "combo" || chart.type === "histogram") throw new Error(`Native Excel chart type ${chart.type} is not supported by the safe writer.`);
+  const packageModel = workbook.office.package;
+  const nextPart = (prefix: string, suffix: string) => {
+    let index = 1; while (packageModel.getPart(`/xl/${prefix}/${suffix}${index}.xml`)) index += 1; return `/xl/${prefix}/${suffix}${index}.xml`;
+  };
+  const chartPartName = nextPart("charts", "chart");
+  const chartDocument = parseXml(`<c:chartSpace xmlns:c="${CHART_NS}" xmlns:a="${A_NS}" xmlns:r="${REL}"><c:chart><c:autoTitleDeleted val="0"/><c:plotArea><c:layout/></c:plotArea><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart></c:chartSpace>`);
+  const chartRoot = chartDocument.root;
+  const chartNode = child(chartRoot, CHART_NS, "chart")!;
+  const plotArea = child(chartNode, CHART_NS, "plotArea")!;
+  for (const node of [...plotArea.children]) plotArea.removeChild(node);
+  plotArea.appendChild(new XmlElement("layout", "c"));
+  if (chart.title) chartNode.insertBefore(chartTitleXml(chart.title), chartNode.elements()[0] ?? null);
+  plotArea.appendChild(makeChartPlot(chart.type, newChartSeries(workbook, chart, sheet.name).map((node) => node.clone())).elements()[0]!);
+  if (chart.showLegend !== false) setChartLegend(chartRoot, true);
+  packageModel.addPart(chartPartName, CT_CHART, serializeXml(chartDocument));
+
+  let drawingPartName: string;
+  let drawingPart: ReturnType<typeof packageModel.getPart>;
+  let drawingRoot: XmlElement;
+  const worksheetDocument = await workbook.office.xml(sheet.partName);
+  const worksheetRoot = worksheetDocument.root;
+  const drawingElement = child(worksheetRoot, SML, "drawing");
+  if (drawingElement?.getAttribute("r:id")) {
+    const existing = packageModel.relatedPart(sheetPart(workbook, sheet)!, drawingElement.getAttribute("r:id")!);
+    if (!existing) throw new Error("The worksheet drawing relationship is broken.");
+    drawingPart = existing; drawingPartName = existing.name; drawingRoot = (await workbook.office.xml(existing.name)).root;
+  } else {
+    drawingPartName = nextPart("drawings", "drawing");
+    const drawingDocument = parseXml(`<xdr:wsDr xmlns:xdr="${DRAWING_NS}" xmlns:a="${A_NS}" xmlns:c="${CHART_NS}" xmlns:r="${REL}"/>`);
+    drawingPart = packageModel.addPart(drawingPartName, CT_DRAWING, serializeXml(drawingDocument));
+    drawingRoot = (await workbook.office.xml(drawingPartName)).root;
+    const rel = sheetPart(workbook, sheet)!.relationships().add({ type: DRAWING_REL, target: relativeTarget(sheet.partName, drawingPartName) });
+    const element = new XmlElement("drawing", worksheetRoot.lookupPrefix(SML) ?? null); element.setAttribute("r:id", rel.id); worksheetRoot.appendChild(element); workbook.office.markDirty(sheet.partName);
+  }
+  const relation = drawingPart!.relationships().add({ type: CHART_REL, target: relativeTarget(drawingPartName, chartPartName) });
+  drawingRoot.appendChild(drawingAnchorXml(relation.id, chart));
+  workbook.office.markDirty(drawingPartName);
+  return { chartPartName, drawingPartName };
+}
+
+function relativeTarget(source: string, target: string) {
+  const sourceParts = source.slice(1).split("/"); sourceParts.pop();
+  const targetParts = target.slice(1).split("/");
+  while (sourceParts.length && targetParts.length && sourceParts[0] === targetParts[0]) { sourceParts.shift(); targetParts.shift(); }
+  return `${"../".repeat(sourceParts.length)}${targetParts.join("/")}`;
+}
+
+async function removeNativeChart(workbook: Workbook, sheet: Worksheet, chartId: string) {
+  const charts = await projectCharts(workbook, sheet);
+  const chart = charts.find((candidate) => candidate.id === chartId || candidate.partName === chartId);
+  if (!chart?.partName || !chart.drawingPartName) return;
+  const drawingDocument = await workbook.office.xml(chart.drawingPartName);
+  const drawingRoot = drawingDocument.root;
+  const drawingPart = workbook.office.package.getPart(chart.drawingPartName);
+  const relation = drawingPart?.relationships().all().find((candidate) => candidate.type === CHART_REL && workbook.office.package.relatedPart(drawingPart, candidate.id)?.name === chart.partName);
+  const anchor = drawingRoot.elements().find((candidate) => firstDescendant(candidate, CHART_NS, "chart")?.getAttribute("r:id") === relation?.id);
+  if (anchor) drawingRoot.removeChild(anchor);
+  if (relation) drawingPart?.relationships().remove(relation.id);
+  if (drawingPart) workbook.office.markDirty(drawingPart.name);
+  workbook.office.package.removePart(chart.partName);
+}
+
+async function upsertNativeTable(workbook: Workbook, sheet: Worksheet, table: XlsxTableProjection) {
+  const current = (await projectTables(workbook, sheet)).find((candidate) => candidate.id === table.id || candidate.partName === table.partName || candidate.name === table.name);
+  if (!current) {
+    const style = table.style?.startsWith("TableStyle") ? table.style : table.style === "accent" ? "TableStyleMedium4" : table.style === "striped" ? "TableStyleMedium2" : null;
+    const created = await sheet.addTable(table.range, {
+      name: table.name,
+      ...(table.columns.length ? { headers: table.columns } : {}),
+      style,
+    });
+    await upsertNativeTable(workbook, sheet, {
+      ...table,
+      id: `xlsx:table:${created.partName}`,
+      partName: created.partName,
+    });
+    return;
+  }
+  if (!current.partName) throw new Error("The Excel table has no stable native part identity.");
+  const document = await workbook.office.xml(current.partName);
+  const root = document.root;
+  root.setAttribute("ref", fullRange(table.range));
+  root.setAttribute("name", table.name); root.setAttribute("displayName", table.name);
+  root.setAttribute("totalsRowCount", table.totalsRow ? "1" : "0"); root.setAttribute("headerRowCount", table.headerRow ? "1" : "0");
+  if (table.columns.length) {
+    let columns = child(root, SML, "tableColumns");
+    if (!columns) { columns = new XmlElement("tableColumns", root.lookupPrefix(SML) ?? null); root.appendChild(columns); }
+    for (const old of [...columns.elements()].filter((node) => node.localName === "tableColumn")) columns.removeChild(old);
+    columns.setAttribute("count", String(table.columns.length));
+    table.columns.forEach((column, index) => {
+      const item = new XmlElement("tableColumn", columns!.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+      item.setAttribute("id", String(index + 1)); item.setAttribute("name", column); columns!.appendChild(item);
+    });
+  }
+  const styleName = table.style === "plain" ? null : table.style === "striped" ? "TableStyleMedium2" : table.style === "accent" ? "TableStyleMedium4" : table.style ?? null;
+  const style = child(root, SML, "tableStyleInfo");
+  if (!styleName && style) root.removeChild(style);
+  else if (styleName) { const currentStyle = style ?? new XmlElement("tableStyleInfo", root.lookupPrefix(SML) ?? null); currentStyle.setAttribute("name", styleName); currentStyle.setAttribute("showFirstColumn", "0"); currentStyle.setAttribute("showLastColumn", "0"); currentStyle.setAttribute("showRowStripes", "1"); currentStyle.setAttribute("showColumnStripes", "0"); if (!style) root.appendChild(currentStyle); }
+  let autoFilter = child(root, SML, "autoFilter");
+  if (!autoFilter && (table.filters?.length || table.sort)) {
+    autoFilter = new XmlElement("autoFilter", root.lookupPrefix(SML) ?? null);
+    root.appendChild(autoFilter);
+  }
+  if (autoFilter) {
+    autoFilter.setAttribute("ref", fullRange(table.range));
+    for (const old of autoFilter.elements().filter((node) => node.localName === "filterColumn" || node.localName === "sortState")) autoFilter.removeChild(old);
+    for (const filter of table.filters ?? []) {
+      const filterColumn = new XmlElement("filterColumn", autoFilter.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+      filterColumn.setAttribute("colId", String(filter.column));
+      const filters = new XmlElement("filters", filterColumn.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+      for (const value of filter.allowedValues) {
+        const item = new XmlElement("filter", filters.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+        item.setAttribute("val", value instanceof Date ? value.toISOString() : value === null ? "" : String(value));
+        filters.appendChild(item);
+      }
+      filterColumn.appendChild(filters); autoFilter.appendChild(filterColumn);
+    }
+    if (table.sort) {
+      const sortState = new XmlElement("sortState", autoFilter.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+      sortState.setAttribute("column", String(table.sort.column));
+      sortState.setAttribute("descending", table.sort.direction === "desc" ? "1" : "0");
+      autoFilter.appendChild(sortState);
+    }
+  }
+  workbook.office.markDirty(current.partName);
+}
+
+async function removeNativeTable(workbook: Workbook, sheet: Worksheet, tableId: string) {
+  const table = (await projectTables(workbook, sheet)).find((candidate) => candidate.id === tableId || candidate.partName === tableId || candidate.name === tableId);
+  if (!table?.partName) return;
+  const sheetPartValue = sheetPart(workbook, sheet); if (!sheetPartValue) return;
+  const root = (await workbook.office.xml(sheet.partName)).root;
+  const tableParts = child(root, SML, "tableParts");
+  const rel = sheetPartValue.relationships().all().find((candidate) => candidate.type === TABLE_REL && workbook.office.package.relatedPart(sheetPartValue, candidate.id)?.name === table.partName);
+  const entry = tableParts?.elements().find((candidate) => candidate.getAttribute("r:id") === rel?.id);
+  if (entry && tableParts) tableParts.removeChild(entry);
+  if (rel) sheetPartValue.relationships().remove(rel.id);
+  if (tableParts && !tableParts.elements().length) root.removeChild(tableParts);
+  workbook.office.markDirty(sheet.partName);
+  workbook.office.package.removePart(table.partName);
+}
+
+export async function updateNativeChartCaches(workbook: Workbook) {
+  for (const sheet of workbook.sheets()) {
+    for (const chart of await projectCharts(workbook, sheet)) {
+      if (!chart.partName) continue;
+      const document = await workbook.office.xml(chart.partName);
+      updateChartSeries(workbook, document.root, chart, sheet.name);
+      workbook.office.markDirty(chart.partName);
+    }
+  }
+}
+
+export async function applyXlsxNativeOperation(workbook: Workbook, operation: XlsxOperation, aliases = new Map<string, number>()) {
+  if (operation.kind === "add-sheet") {
+    const sheet = workbook.addSheet(operation.name);
+    aliases.set(operation.sheetId, sheet.sheetId);
+    const order = workbook.sheets().map(nativeSheetKey).filter((id) => id !== nativeSheetKey(sheet));
+    order.splice(Math.max(0, Math.min(operation.index, order.length)), 0, operation.sheetId);
+    reorderNativeSheets(workbook, order, aliases);
+    return;
+  }
+  if (operation.kind === "remove-sheet") {
+    const sheet = nativeSheetById(workbook, operation.sheetId, aliases);
+    if (workbook.sheets().length <= 1) throw new Error("An Excel workbook must keep at least one worksheet.");
+    if (await hasNativeReferencesToSheet(workbook, sheet.name))
+      throw new Error(`The worksheet ${sheet.name} is referenced by a formula or chart and cannot be removed safely.`);
+    const tables = await projectTables(workbook, sheet);
+    const charts = await projectCharts(workbook, sheet);
+    const drawingParts = new Set(charts.flatMap((chart) => chart.drawingPartName ? [chart.drawingPartName] : []));
+    for (const table of tables) if (table.partName) workbook.office.package.removePart(table.partName);
+    for (const chart of charts) if (chart.partName) workbook.office.package.removePart(chart.partName);
+    for (const drawing of drawingParts) workbook.office.package.removePart(drawing);
+    const sheetEntry = sheetElement(sheet); const sheets = workbookSheetsElement(workbook);
+    sheets.removeChild(sheetEntry); workbook._internal().markDirty(workbook._internal().workbook);
+    const part = sheetPart(workbook, sheet); if (part) { const rel = workbook._internal().workbook.part.relationships().byId(sheet.rId); if (rel) workbook._internal().workbook.part.relationships().remove(rel.id); workbook.office.package.removePart(part.name); }
+    return;
+  }
+  if (operation.kind === "reorder-sheets") {
+    reorderNativeSheets(workbook, operation.order, aliases);
+    return;
+  }
+  if (operation.kind === "set-defined-names") {
+    const root = workbookRoot(workbook); let names = root.find(SML, "definedNames");
+    if (!names) { names = new XmlElement("definedNames", root.lookupPrefix(SML) ?? null); root.appendChild(names); }
+    const existing = names.elements().filter((node) => node.localName === "definedName");
+    const desired = new Map<string, (typeof operation.names)[number]>(operation.names.map((item) => {
+      const sheet = item.sheet ? workbook.sheet(item.sheet) : undefined;
+      return [`${item.name}\u0000${sheet ? nativeSheetIndex(workbook, sheet) : ""}`, item] as const;
+    }));
+    for (const old of [...existing]) {
+      const oldName = old.getAttribute("name") ?? "";
+      if (oldName.startsWith("_xlnm.") || oldName.startsWith("_FilterDatabase")) continue;
+      const key = `${oldName}\u0000${old.getAttribute("localSheetId") ?? ""}`;
+      const item = desired.get(key);
+      if (!item) { names.removeChild(old); continue; }
+      setText(old, item.ref.replace(/^=/, ""));
+      desired.delete(key);
+    }
+    for (const item of desired.values()) {
+      const name = new XmlElement("definedName", names.lookupPrefix(SML) ?? root.lookupPrefix(SML) ?? null);
+      name.setAttribute("name", item.name);
+      if (item.sheet) { const sheet = workbook.sheet(item.sheet); if (sheet) name.setAttribute("localSheetId", String(nativeSheetIndex(workbook, sheet))); }
+      name.appendChild(new XmlText(item.ref.replace(/^=/, ""))); names.appendChild(name);
+    }
+    workbook._internal().markDirty(workbook._internal().workbook); return;
+  }
+  if (operation.kind === "set-workbook-properties") {
+    const root = workbookRoot(workbook); let calc = root.find(SML, "calcPr");
+    if (operation.calculationMode) { calc ??= new XmlElement("calcPr", root.lookupPrefix(SML) ?? null); if (!calc.parent) root.appendChild(calc); calc.setAttribute("calcMode", operation.calculationMode === "manual" ? "manual" : "auto"); }
+    if (operation.activeSheetId) { const sheet = nativeSheetById(workbook, operation.activeSheetId, aliases); const index = nativeSheetIndex(workbook, sheet); for (const view of root.find(SML, "bookViews")?.elements().filter((node) => node.localName === "workbookView") ?? []) view.setAttribute("activeTab", String(index)); }
+    workbook._internal().markDirty(workbook._internal().workbook); return;
+  }
+  const sheet = nativeSheetById(workbook, "sheetId" in operation ? operation.sheetId : "", aliases);
+  if (operation.kind === "rename-sheet") {
+    const oldName = sheet.name; sheetElement(sheet).setAttribute("name", operation.name);
+    await rewriteWorkbookFormulas(workbook, (formula) => rewriteSheetNameInFormula(formula, oldName, operation.name));
+    workbook._internal().markDirty(workbook._internal().workbook); return;
+  }
+  if (operation.kind === "mutate-sheet-axis") {
+    if (operation.delta !== 1 && operation.delta !== -1) throw new Error("Excel row and column changes must be one line at a time.");
+    const structuralDelta = operation.delta as 1 | -1;
+    shiftNativeSheetCells(workbook, sheet, operation.axis, operation.at, structuralDelta);
+    const dimensionDocument = await workbook.office.xml(sheet.partName);
+    const dimension = worksheetDimension(dimensionDocument.root);
+    setWorksheetRange(dimensionDocument.root, `A1:${columnName(Math.max(1, dimension.columns + (operation.axis === "column" ? structuralDelta : 0)) - 1)}${Math.max(1, dimension.rows + (operation.axis === "row" ? structuralDelta : 0))}`);
+    workbook.office.markDirty(sheet.partName);
+    await rewriteNativeRanges(workbook, sheet, operation.axis, operation.at, structuralDelta);
+    await rewriteWorkbookFormulas(workbook, (formula, containingSheetName) => rewriteStructuralReferences(formula, operation.axis, operation.at, structuralDelta, { sheetName: sheet.name, unqualified: containingSheetName === sheet.name }));
+    return;
+  }
+  if (operation.kind === "set-sheet-properties") { await setXlsxSheetProperties(workbook, sheet, operation.properties); return; }
+  if (operation.kind === "upsert-table") { await upsertNativeTable(workbook, sheet, operation.table); return; }
+  if (operation.kind === "remove-table") { await removeNativeTable(workbook, sheet, operation.tableId); return; }
+  if (operation.kind === "upsert-chart") {
+    if (operation.chart.partName && await writeExistingChart(workbook, sheet, operation.chart)) return;
+    await createNativeChart(workbook, sheet, operation.chart); return;
+  }
+  if (operation.kind === "remove-chart") { await removeNativeChart(workbook, sheet, operation.chartId); return; }
+}
+
+function nativeSheetIndex(workbook: Workbook, sheet: Worksheet) {
+  return workbook._internal().sheetNames().findIndex((name) => name === sheet.name);
+}

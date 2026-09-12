@@ -1,95 +1,41 @@
-import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { requireActor } from "@/lib/auth-server";
-import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { signTrustedIntakeAttestation } from "@/lib/server-secrets";
+import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import { MAX_ASSET_BYTES } from "../../../../../shared/intake-limits";
+import { normalizeMediaType } from "../../../../../shared/intake-integrity";
+import { createHash } from "crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Integrity ceiling only. Product usage limits remain disabled and metered.
-const MAX_ASSET_BYTES = 100_000_000;
+
+function boundedBody(body: ReadableStream<Uint8Array>, limit: number) {
+  const reader = body.getReader();
+  let seen = 0;
+  const hash = createHash("sha256");
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await reader.read();
+      if (next.done) return controller.close();
+      seen += next.value.byteLength;
+      if (seen > limit) {
+        await reader.cancel("asset byte limit reached");
+        return controller.error(new Error("ASSET_SIZE_INVALID"));
+      }
+      hash.update(next.value);
+      controller.enqueue(next.value);
+    },
+    async cancel(reason) { await reader.cancel(reason); },
+  });
+  return { stream, stats: () => ({ bytes: seen, sha256: hash.copy().digest("hex") }) };
+}
 
 function required(value: unknown, code: string) {
   if (typeof value !== "string" || !value.trim()) throw new Error(code);
   return value.trim();
-}
-
-function hasPrefix(bytes: Buffer, prefix: readonly number[], offset = 0) {
-  return prefix.every((value, index) => bytes[offset + index] === value);
-}
-
-function hasAscii(bytes: Buffer, value: string, offset = 0) {
-  return (
-    bytes.subarray(offset, offset + value.length).toString("ascii") === value
-  );
-}
-
-function verifyAssetBytes(mediaType: string, bytes: Buffer) {
-  const isZip =
-    hasPrefix(bytes, [0x50, 0x4b, 0x03, 0x04]) ||
-    hasPrefix(bytes, [0x50, 0x4b, 0x05, 0x06]) ||
-    hasPrefix(bytes, [0x50, 0x4b, 0x07, 0x08]);
-  const isSafeText =
-    !bytes.includes(0) &&
-    bytes.subarray(0, Math.min(bytes.length, 64 * 1024)).toString("utf8")
-      .length > 0;
-  const valid =
-    (mediaType === "image/png" &&
-      hasPrefix(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ||
-    (mediaType === "image/jpeg" && hasPrefix(bytes, [0xff, 0xd8, 0xff])) ||
-    (mediaType === "image/gif" &&
-      (hasAscii(bytes, "GIF87a") || hasAscii(bytes, "GIF89a"))) ||
-    (mediaType === "image/webp" &&
-      hasAscii(bytes, "RIFF") &&
-      hasAscii(bytes, "WEBP", 8)) ||
-    (mediaType === "image/avif" &&
-      hasAscii(bytes, "ftyp", 4) &&
-      ["avif", "avis"].includes(bytes.subarray(8, 12).toString("ascii"))) ||
-    (mediaType === "audio/wav" &&
-      hasAscii(bytes, "RIFF") &&
-      hasAscii(bytes, "WAVE", 8)) ||
-    (mediaType === "audio/ogg" && hasAscii(bytes, "OggS")) ||
-    (mediaType === "audio/mpeg" &&
-      (hasAscii(bytes, "ID3") ||
-        (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0))) ||
-    (mediaType === "video/mp4" && hasAscii(bytes, "ftyp", 4)) ||
-    (mediaType === "video/webm" &&
-      hasPrefix(bytes, [0x1a, 0x45, 0xdf, 0xa3])) ||
-    ((mediaType === "font/woff" || mediaType === "application/font-woff") &&
-      hasAscii(bytes, "wOFF")) ||
-    (mediaType === "font/woff2" && hasAscii(bytes, "wOF2")) ||
-    (mediaType === "font/ttf" && hasPrefix(bytes, [0x00, 0x01, 0x00, 0x00])) ||
-    (mediaType === "font/otf" && hasAscii(bytes, "OTTO"));
-  const documentValid =
-    (mediaType === "application/pdf" && hasAscii(bytes, "%PDF-")) ||
-    ([
-      "text/plain",
-      "text/csv",
-      "text/markdown",
-      "text/tab-separated-values",
-    ].includes(mediaType) &&
-      isSafeText) ||
-    (mediaType === "application/json" &&
-      isSafeText &&
-      (() => {
-        try {
-          JSON.parse(bytes.toString("utf8"));
-          return true;
-        } catch {
-          return false;
-        }
-      })()) ||
-    ([
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      "application/vnd.oasis.opendocument.text",
-      "application/vnd.oasis.opendocument.spreadsheet",
-      "application/vnd.oasis.opendocument.presentation",
-    ].includes(mediaType) &&
-      isZip);
-  if (!valid && !documentValid) throw new Error("ASSET_CONTENT_MISMATCH");
 }
 
 export async function GET(request: NextRequest) {
@@ -124,7 +70,7 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    await requireActor();
+    const actor = await requireActor({ fresh: true });
     const artifactId = required(
       request.nextUrl.searchParams.get("artifactId"),
       "ASSET_ARTIFACT_ID_REQUIRED",
@@ -144,70 +90,46 @@ export async function PUT(request: NextRequest) {
     const expectedDigest = required(
       request.headers.get("x-spectra-sha256"),
       "ASSET_DIGEST_REQUIRED",
-    ).toLowerCase();
-    if (!/^[a-f0-9]{64}$/.test(expectedDigest))
-      throw new Error("ASSET_DIGEST_INVALID");
-    const bytes = Buffer.from(await request.arrayBuffer());
-    if (bytes.byteLength < 1 || bytes.byteLength > MAX_ASSET_BYTES)
+    );
+    const declaredBytes = Number(request.headers.get("content-length") ?? request.headers.get("x-spectra-bytes"));
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 1 || declaredBytes > MAX_ASSET_BYTES)
       throw new Error("ASSET_SIZE_INVALID");
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    if (digest !== expectedDigest) throw new Error("ASSET_DIGEST_MISMATCH");
-    verifyAssetBytes(mediaType, bytes);
+    const retryReceipt = request.nextUrl.searchParams.get("uploadReceipt") ?? request.headers.get("x-spectra-upload-receipt") ?? undefined;
     const beginning = await convexMutation<
-      {
-        artifactId: string;
-        path: string;
-        name: string;
-        mediaType: string;
-        bytes: number;
-        sha256: string;
-      },
-      | { assetId: string; reused: true }
-      | { assetId: string; reused: false; uploadUrl: string }
-    >("artifactAssets:beginUpload", {
-      artifactId,
-      path,
-      name,
-      mediaType,
-      bytes: bytes.byteLength,
-      sha256: digest,
+      { artifactId: string; path: string; name: string; mediaType: string; bytes: number; sha256: string; uploadReceipt?: string },
+      { assetId: string; reused: boolean; status?: string; storageId?: string; uploadReceipt?: string; uploadUrl?: string }
+    >("artifactAssets:beginUpload", { artifactId, path, name, mediaType, bytes: declaredBytes, sha256: expectedDigest, ...(retryReceipt ? { uploadReceipt: retryReceipt } : {}) });
+    if (beginning.reused && beginning.status !== "uploading") return NextResponse.json({ ok: true, assetId: beginning.assetId, reused: true, status: beginning.status, storageId: beginning.storageId });
+    if (!beginning.uploadUrl || !beginning.uploadReceipt) throw new Error("ASSET_UPLOAD_INTENT_MISSING");
+    if (!request.body) throw new Error("ASSET_BODY_REQUIRED");
+    const requestBody = boundedBody(request.body, declaredBytes);
+    const uploaded = await fetch(beginning.uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": mediaType },
+      body: requestBody.stream,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    if (!uploaded.ok) throw new Error("ASSET_STORAGE_UPLOAD_FAILED");
+    const payload = (await uploaded.json()) as { storageId?: string };
+    if (!payload.storageId) throw new Error("ASSET_STORAGE_ID_MISSING");
+    const stats = requestBody.stats();
+    const attestation = signTrustedIntakeAttestation({
+      kind: "asset",
+      actorClerkId: actor.clerkId,
+      actorAccountId: actor.accountId,
+      targetId: beginning.assetId,
+      attemptId: beginning.uploadReceipt!,
+      storageId: payload.storageId,
+      bytes: stats.bytes,
+      sha256: stats.sha256,
+      mediaType: normalizeMediaType(mediaType),
     });
-    if (beginning.reused) return NextResponse.json({ ok: true, ...beginning });
-    let storageId: string | undefined;
-    try {
-      const upload = await fetch(beginning.uploadUrl, {
-        method: "POST",
-        headers: { "Content-Type": mediaType },
-        body: bytes,
-      });
-      const stored = (await upload.json().catch(() => null)) as {
-        storageId?: string;
-      } | null;
-      storageId = stored?.storageId;
-      if (!upload.ok || !storageId) throw new Error("ASSET_STORAGE_FAILED");
-      await convexMutation<
-        { assetId: string; storageId: string },
-        { assetId: string; status: "active" }
-      >("artifactAssets:finalizeUpload", {
-        assetId: beginning.assetId,
-        storageId,
-      });
-      return NextResponse.json({
-        ok: true,
-        assetId: beginning.assetId,
-        reused: false,
-      });
-    } catch (error) {
-      await convexMutation<
-        { assetId: string; reason: string; storageId?: string },
-        { failed: boolean }
-      >("artifactAssets:failUpload", {
-        assetId: beginning.assetId,
-        reason: error instanceof Error ? error.message : "Asset upload failed.",
-        ...(storageId ? { storageId } : {}),
-      }).catch(() => undefined);
-      throw error;
-    }
+    const stored = await convexAction<
+      { assetId: string; storageId: string; uploadReceipt: string; attestation: typeof attestation },
+      { assetId: string; status?: string; reused?: boolean; errorCode?: string; storageId?: string }
+    >("artifactIntakeActions:verifyUploadedStorage", { assetId: beginning.assetId, storageId: payload.storageId, uploadReceipt: beginning.uploadReceipt!, attestation });
+    if (stored.status && stored.status !== "active") throw new Error(stored.errorCode || "ASSET_UPLOAD_INTEGRITY_FAILED");
+    return NextResponse.json({ ok: true, assetId: stored.assetId, reused: Boolean(stored.reused), uploadReceipt: beginning.uploadReceipt, status: stored.status });
   }, request);
 }
 

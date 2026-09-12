@@ -100,7 +100,7 @@ import { SHEETS_EXPORT_COPIES, projectBindingsFromIr } from "../../capabilities"
  *   past the registry into their own mutation helpers.
  *   No ghosts. A binding exists only when the studio supplied a handler that
  *   can honestly perform it. Where Spectra can *see* a native feature but not
- *   author it — pivot tables, native chart parts, dynamic arrays — the command
+ *   author it — pivot tables, comments, complex validation, and dynamic arrays — the command
  *   ships disabled with the region named, because a missing button teaches a
  *   person nothing and a lying button teaches them the wrong thing.
  *   Native regions are declared, never guessed. `touches` drives the shared
@@ -393,6 +393,7 @@ export type SheetsDataHandlers = {
   filterActive?: boolean;
   openFilter: () => void;
   createTable: () => void;
+  deleteTable: () => void;
   tableStyle?: ValueFacet<string>;
   toggleTotals?: SheetsToggle;
   hasTable?: boolean;
@@ -437,7 +438,7 @@ export type SheetsChartHandlers = {
   toggleLegend?: SheetsToggle;
   remove: () => void;
   linkToDeck?: () => void;
-  /** Set when the selected chart is a preserved native Excel chart part. */
+  /** Optional note for a native chart family the safe writer cannot edit. */
   nativeChartNote?: string;
 };
 
@@ -594,6 +595,7 @@ export function sheetsStubHandlers(): SheetsCommandHandlers {
       toggleFilter: noop,
       openFilter: noop,
       createTable: noop,
+      deleteTable: noop,
       tableStyle: { value: "striped", set: noop },
       toggleTotals: toggle(),
       openValidation: noop,
@@ -1664,6 +1666,21 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
       manifestOps: ["create_table"],
       onSelect: () => data.createTable(),
     },
+    {
+      id: "table.delete",
+      label: "Remove table",
+      icon: Trash2,
+      tab: "Data",
+      group: "Tables",
+      priority: "advanced",
+      requires: "edit",
+      disabled: disabled || data.hasTable === false || undefined,
+      hint: data.hasTable === false ? "Select a table first" : "Remove the table; its cells stay",
+      touches: ["tables"],
+      risk: "destructive",
+      manifestOps: ["delete_table"],
+      onSelect: () => data.deleteTable(),
+    },
   );
 
   if (data.tableStyle) {
@@ -2059,8 +2076,8 @@ export function sheetsCommandBindings(handlers: SheetsCommandHandlers): CommandB
   }
 
   if (chart.nativeChartNote) {
-    // A native Excel chart part. Spectra shows it and keeps its bytes; saying so
-    // in a disabled command is more use than a button that would flatten it.
+    // A native chart family outside the safe writer's supported subset. Spectra
+    // shows it and keeps its bytes instead of flattening it.
     bindings.push({
       id: "chart.native",
       label: "Excel chart",

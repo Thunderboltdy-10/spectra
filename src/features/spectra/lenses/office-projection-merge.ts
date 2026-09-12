@@ -98,6 +98,29 @@ function xlsxCellsEquivalent(
   );
 }
 
+function xlsxSheetMetadata(sheet: XlsxSheetProjection) {
+  return {
+    id: `${sheet.id}:structure`,
+    name: sheet.name,
+    merges: sheet.merges,
+    rowCount: sheet.rowCount,
+    columnCount: sheet.columnCount,
+    hiddenRows: sheet.hiddenRows,
+    hiddenColumns: sheet.hiddenColumns,
+    columnWidths: sheet.columnWidths,
+    rowHeights: sheet.rowHeights,
+    hidden: sheet.hidden,
+    showGridlines: sheet.showGridlines,
+    showHeadings: sheet.showHeadings,
+    tabColor: sheet.tabColor,
+    tables: sheet.tables,
+    charts: sheet.charts,
+    validations: sheet.validations,
+    conditionalFormats: sheet.conditionalFormats,
+    partName: sheet.partName,
+  };
+}
+
 export function xlsxChangedRegions(before: XlsxProjection, after: XlsxProjection) {
   const regions: string[] = [];
   const priorSheets = new Map(before.sheets.map((sheet) => [sheet.id, sheet]));
@@ -109,8 +132,7 @@ export function xlsxChangedRegions(before: XlsxProjection, after: XlsxProjection
       continue;
     }
     if (
-      old.name !== sheet.name ||
-      !equal(old.merges, sheet.merges) ||
+      !equal(xlsxSheetMetadata(old), xlsxSheetMetadata(sheet)) ||
       (old.frozenRows ?? 0) !== (sheet.frozenRows ?? 0) ||
       (old.frozenColumns ?? 0) !== (sheet.frozenColumns ?? 0)
     )
@@ -136,9 +158,9 @@ function mergeSheet(
   resolution?: "spectra" | "external",
 ) {
   const metadata = mergeThreeWay({
-    base: [{ id: `${base.id}:structure`, name: base.name, merges: base.merges }],
-    ours: [{ id: `${ours.id}:structure`, name: ours.name, merges: ours.merges }],
-    theirs: [{ id: `${theirs.id}:structure`, name: theirs.name, merges: theirs.merges }],
+    base: [xlsxSheetMetadata(base)],
+    ours: [xlsxSheetMetadata(ours)],
+    theirs: [xlsxSheetMetadata(theirs)],
     id: (value) => value.id,
     mergeOrder: false,
     conflictResolution: resolution === "spectra" ? "ours" : resolution === "external" ? "theirs" : undefined,
@@ -151,7 +173,8 @@ function mergeSheet(
     mergeOrder: false,
     conflictResolution: resolution === "spectra" ? "ours" : resolution === "external" ? "theirs" : undefined,
   });
-  const structure = metadata.value[0] ?? { name: theirs.name, merges: theirs.merges };
+  const structure = metadata.value[0] ?? xlsxSheetMetadata(theirs);
+  const { id: _structureId, ...structureFields } = structure;
   const frozenRows = resolveWhole(
     `${base.id}:freezeRows`,
     base.frozenRows ?? 0,
@@ -173,8 +196,7 @@ function mergeSheet(
   return {
     sheet: {
       ...theirs,
-      name: structure.name,
-      merges: structure.merges,
+      ...structureFields,
       frozenRows: frozenRows.value ?? 0,
       frozenColumns: frozenColumns.value ?? 0,
       cells: cells.value,
@@ -209,6 +231,10 @@ export function mergeXlsxProjections(
     assertUnique(projection.sheets, (sheet) => sheet.id, "An Excel worksheet");
     for (const sheet of projection.sheets)
       assertUnique(sheet.cells, (cell) => cellId(sheet.id, cell.ref), `Worksheet ${sheet.name}`);
+    for (const sheet of projection.sheets) {
+      assertUnique(sheet.tables ?? [], (table) => table.id, `Worksheet ${sheet.name} table`);
+      assertUnique(sheet.charts ?? [], (chart) => chart.id, `Worksheet ${sheet.name} chart`);
+    }
   }
   const baseById = new Map(base.sheets.map((sheet) => [sheet.id, sheet]));
   const oursById = new Map(ours.sheets.map((sheet) => [sheet.id, sheet]));

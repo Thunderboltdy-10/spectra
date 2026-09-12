@@ -1,5 +1,6 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import {
   FIRST_ORDER_KEY,
   between,
@@ -1412,45 +1413,42 @@ export async function tombstoneArtifactEmbeds(
     ctx.db
       .query("artifactEmbeds")
       .withIndex("by_source", (q) => q.eq("sourceArtifactId", artifactId))
-      .collect(),
+      .take(40),
     ctx.db
       .query("artifactEmbeds")
       .withIndex("by_container", (q) =>
         q.eq("containerType", "artifact").eq("containerId", String(artifactId)),
       )
-      .collect(),
+      .take(40),
   ]);
   const embedRows = [
     ...new Map(
       [...sourceEmbeds, ...containerEmbeds].map((embed) => [embed._id, embed]),
     ).values(),
   ];
-  await Promise.all(
-    embedRows.map((embed) =>
-      ctx.db.patch(embed._id, {
-        removedAt: embed.removedAt ?? now,
-        updatedAt: now,
-      }),
-    ),
-  );
-  const pendingEmbedRequests = (
-    await Promise.all(
-      embedRows.map((embed) =>
-        ctx.db
-          .query("artifactAccessRequests")
-          .withIndex("by_embed_status", (q) =>
-            q.eq("embedId", embed._id).eq("status", "pending"),
-          )
-          .collect(),
-      ),
-    )
-  ).flat();
+  for (const embed of embedRows) {
+    await ctx.db.patch(embed._id, {
+      removedAt: embed.removedAt ?? now,
+      updatedAt: now,
+      placementState: embed.placementState === "provisional" ? "removed" : embed.placementState,
+    });
+  }
+  const pendingEmbedRequests = [] as Array<Doc<"artifactAccessRequests">>;
+  for (const embed of embedRows) {
+    const rows = await ctx.db
+      .query("artifactAccessRequests")
+      .withIndex("by_embed_status", (q) =>
+        q.eq("embedId", embed._id).eq("status", "pending"),
+      )
+      .take(40);
+    pendingEmbedRequests.push(...rows);
+  }
   const pendingSourceRequests = await ctx.db
     .query("artifactAccessRequests")
     .withIndex("by_source_status", (q) =>
       q.eq("sourceArtifactId", artifactId).eq("status", "pending"),
     )
-    .collect();
+    .take(40);
   const requests = [
     ...new Map(
       [...pendingEmbedRequests, ...pendingSourceRequests].map((request) => [
@@ -1459,16 +1457,14 @@ export async function tombstoneArtifactEmbeds(
       ]),
     ).values(),
   ];
-  await Promise.all(
-    requests.map((request) =>
-      ctx.db.patch(request._id, {
-        status: "cancelled",
-        updatedAt: now,
-        resolvedAt: now,
-        resolvedByAccountId,
-      }),
-    ),
-  );
+  for (const request of requests) {
+    await ctx.db.patch(request._id, {
+      status: "cancelled",
+      updatedAt: now,
+      resolvedAt: now,
+      resolvedByAccountId,
+    });
+  }
   return { embedCount: embedRows.length, requestCount: requests.length };
 }
 
@@ -1601,36 +1597,53 @@ async function purgeOwnedWorkRecord(
   ctx: OrgWriteCtx,
   artifact: Doc<"spectraArtifacts">,
 ) {
-  await tombstoneArtifactEmbeds(ctx, artifact._id, artifact.ownerAccountId);
-  await purgeSourceNodes(ctx, "work", artifact._id);
-  await drainIndexPage(
-    () =>
-      ctx.db
-        .query("artifactUserStates")
-        .withIndex("by_artifact_updated", (q) =>
-          q.eq("artifactId", artifact._id),
-        )
-        .take(INDEX_DRAIN_PAGE),
-    (row) => ctx.db.delete(row._id),
-  );
-  await drainIndexPage(
-    () =>
-      ctx.db
-        .query("spectraArtifactLinks")
-        .withIndex("by_source", (q) => q.eq("sourceArtifactId", artifact._id))
-        .take(INDEX_DRAIN_PAGE),
-    (row) => ctx.db.delete(row._id),
-  );
-  await drainIndexPage(
-    () =>
-      ctx.db
-        .query("spectraArtifactLinks")
-        .withIndex("by_target", (q) => q.eq("targetArtifactId", artifact._id))
-        .take(INDEX_DRAIN_PAGE),
-    (row) => ctx.db.delete(row._id),
-  );
-  if (await ctx.db.get(artifact._id)) await ctx.db.delete(artifact._id);
-  await syncArtifactSummary(ctx, artifact._id);
+  const now = Date.now();
+  // The deletion coordinator owns tombstoning, placement traversal, and all
+  // descendants. Trash purge must enqueue the same durable job rather than
+  // draining source nodes synchronously in this front-door mutation.
+  if (artifact.status !== "deleted")
+    await ctx.db.patch(artifact._id, {
+      status: "deleted",
+      // The coordinator assigns the generation together with its job. Do not
+      // advance the tombstone here or the older Trash path creates a job whose
+      // generation can never pass the worker's claim check.
+      deletionRequestedAt: now,
+      updatedAt: now,
+    });
+  await tombstoneArtifactEmbeds(ctx, artifact._id, artifact.ownerAccountId, now);
+  // Keep the deleted owner row as the durable authorization/retry anchor.
+  // The coordinator removes descendants and releases bytes only after proof.
+  const existing = await ctx.db
+    .query("artifactDeletionJobs")
+    .withIndex("by_artifact_generation", (q) => q.eq("artifactId", artifact._id))
+    .order("desc")
+    .first();
+  if (!existing || existing.phase === "complete" || existing.phase === "failed") {
+    const generation = Math.max(existing?.generation ?? 0, artifact.deletionGeneration ?? 0) + 1;
+    await ctx.db.patch(artifact._id, { deletionGeneration: generation, updatedAt: now });
+    const jobId = await ctx.db.insert("artifactDeletionJobs", {
+      artifactId: artifact._id,
+      ownerAccountId: artifact.ownerAccountId,
+      schoolId: artifact.schoolId,
+      generation,
+      phase: "placements",
+      cursor: undefined,
+      deletedRows: 0,
+      releasedBytes: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await (ctx.scheduler.runAfter as unknown as (
+      delay: number,
+      fn: unknown,
+      args: unknown,
+    ) => Promise<unknown>)(
+      0,
+      (internal as unknown as { spectraArtifactDeletion: { process: unknown } })
+        .spectraArtifactDeletion.process,
+      { jobId },
+    );
+  }
 }
 
 /**
@@ -1707,7 +1720,13 @@ export async function purgeTrashedNodes(
   }
 
   for (const node of items) {
-    if (node.kind === "work" || node.kind === "thread" || node.kind === "workspace")
+    if (node.kind === "work") {
+      // A peer's placement is removed here; the owner coordinator separately
+      // traverses every placement for the tombstoned artifact.
+      await deleteTrashedOrgNode(ctx, node);
+      continue;
+    }
+    if (node.kind === "thread" || node.kind === "workspace")
       continue;
     await deleteTrashedOrgNode(ctx, node);
   }

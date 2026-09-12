@@ -21,6 +21,12 @@ import {
   folderChipLabel,
 } from "./client";
 import { StorageToggleGroup } from "./storage-toggle-group";
+import { BridgeTrustPresets } from "./bridge-trust-presets";
+import {
+  bridgeTrustPresetForPolicy,
+  type BridgeTrustPreset,
+} from "../../../../shared/bridge-trust";
+import { spectraBus } from "../events";
 import {
   formatMountProgress,
   isProtectedOriginalPreset,
@@ -29,10 +35,7 @@ import {
   storageChoiceFromPreset,
   type StorageChoice,
 } from "./sync-toggles";
-import {
-  humanizePublicFailure,
-  isCloudDiscoveryFailure,
-} from "./humanize";
+import { humanizePublicFailure, isCloudDiscoveryFailure } from "./humanize";
 
 function stripProviderJargon(detail: string) {
   return detail
@@ -69,9 +72,20 @@ export function BridgeSettings() {
   const [folderBusy, setFolderBusy] = useState<string | null>(null);
   const [error, setError] = useState<string>();
   const [updateNote, setUpdateNote] = useState<string>();
+  const [trustNote, setTrustNote] = useState<string>();
+  const [pendingTrustPreset, setPendingTrustPreset] =
+    useState<BridgeTrustPreset | null>(null);
+  const [policyBusy, setPolicyBusy] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const pairingTimer = useRef<number | null>(null);
   const pairingExpiry = useRef<number | null>(null);
+  const bridgeActionHandlers = useRef<{
+    setup: (input: {
+      action: "pair" | "select-location" | "retry-connection" | "retry-folder";
+      grantId?: string;
+    }) => Promise<void>;
+    policy: (input: { preset: BridgeTrustPreset }) => Promise<void>;
+  } | null>(null);
   const stopPairingPoll = useCallback(() => {
     if (pairingTimer.current !== null)
       window.clearInterval(pairingTimer.current);
@@ -83,6 +97,7 @@ export function BridgeSettings() {
   useEffect(() => stopPairingPoll, [stopPairingPoll]);
   const storageChoice = storageChoiceFromPreset(effectivePolicy?.preset);
   const protectedOriginal = isProtectedOriginalPreset(effectivePolicy?.preset);
+  const trustPreset = bridgeTrustPresetForPolicy(effectivePolicy);
   const connected = local.state === "connected";
   const reachability = local.reachability;
   const discovery = local.discovery;
@@ -119,11 +134,14 @@ export function BridgeSettings() {
           await local.refresh();
         }
       }, 1_000);
-      pairingExpiry.current = window.setTimeout(() => {
-        stopPairingPoll();
-        setPairing(null);
-        setPairingExpired(true);
-      }, Math.max(0, result.expiresAt - Date.now()));
+      pairingExpiry.current = window.setTimeout(
+        () => {
+          stopPairingPoll();
+          setPairing(null);
+          setPairingExpired(true);
+        },
+        Math.max(0, result.expiresAt - Date.now()),
+      );
     } catch (reason) {
       const found = await discoverBridge().catch(() => discovery);
       setError(pairingFailureMessage(reason, found, local.online));
@@ -163,9 +181,7 @@ export function BridgeSettings() {
         const cleaned = stripProviderJargon(live.detail);
         return {
           ...live,
-          detail: humanizePublicFailure(
-            cleaned || "Selected on this device",
-          ),
+          detail: humanizePublicFailure(cleaned || "Selected on this device"),
           state: discoveryFailed ? "waiting" : live.state,
           discoveryFailed,
         };
@@ -188,8 +204,7 @@ export function BridgeSettings() {
           : rememberedFolderDetail(reachability),
         synced: live?.synced ?? 0,
         total: live?.total || cloud?.fileCount || 0,
-        doubleSyncRisk:
-          live?.doubleSyncRisk ?? cloud?.doubleSyncRisk ?? false,
+        doubleSyncRisk: live?.doubleSyncRisk ?? cloud?.doubleSyncRisk ?? false,
         discoveryFailed: isCloudDiscoveryFailure(live?.detail ?? ""),
       };
     });
@@ -217,15 +232,59 @@ export function BridgeSettings() {
       setDisconnecting(false);
     }
   }
+  async function applyPolicyPreset(
+    preset: "spectra" | "device" | "both" | "linked",
+  ) {
+    setPolicyBusy(true);
+    setError(undefined);
+    try {
+      await overridePolicy({
+        values: POLICY_PRESETS[preset],
+        idempotencyKey: `account:${preset}:${Date.now()}`,
+      });
+      setPendingTrustPreset(null);
+      setTrustNote(
+        preset === "both"
+          ? "Native write & sync is enabled for the account default. Existing folders stay where they are; review each existing item before changing its storage strategy."
+          : "Managed-copy protection is now the account default. Existing folders stay where they are.",
+      );
+    } catch (reason) {
+      setError(humanizePublicFailure(reason));
+    } finally {
+      setPolicyBusy(false);
+    }
+  }
+  async function selectTrustPreset(preset: BridgeTrustPreset) {
+    if (preset === "advanced") {
+      setPendingTrustPreset(null);
+      setTrustNote(
+        "Advanced controls are visible below. Your detailed policy remains in force until you explicitly change a field.",
+      );
+      return;
+    }
+    const target = preset === "managed-copy" ? "spectra" : "both";
+    if (target === "both" && effectivePolicy?.preset !== "both") {
+      setPendingTrustPreset(preset);
+      setTrustNote(
+        "This choice can write approved linked files on this PC. Apply it explicitly after reviewing the local and cloud preview.",
+      );
+      return;
+    }
+    await applyPolicyPreset(target);
+  }
   async function setStorageChoice(
     choice: StorageChoice,
     protectedFlag = protectedOriginal,
   ) {
     const preset = policyPresetFromToggles(choice, protectedFlag);
-    await overridePolicy({
-      values: POLICY_PRESETS[preset],
-      idempotencyKey: `account:${preset}:${Date.now()}`,
-    });
+    if (preset === "both" && effectivePolicy?.preset !== "both") {
+      setPendingTrustPreset("native-sync");
+      setTrustNote(
+        "Native write & sync needs an explicit confirmation. Review the preview above, then apply it below.",
+      );
+      return;
+    }
+    await applyPolicyPreset(preset);
   }
   const reachabilityCopy = bridgeReachabilityCopy(reachability);
   const stateLabel = reachabilityCopy.label;
@@ -233,6 +292,31 @@ export function BridgeSettings() {
     reachability === "connected" && !local.status?.cloudConnected
       ? "The Bridge is running. Spectra Cloud has not been reached recently. Changes remain queued safely."
       : reachabilityCopy.detail;
+  bridgeActionHandlers.current = {
+    setup: async ({ action, grantId }) => {
+      if (action === "pair") return beginPairing();
+      if (action === "select-location")
+        return folderAction("select", selectBridgeFolder);
+      if (action === "retry-folder" && grantId)
+        return folderAction(`retry:${grantId}`, () =>
+          retryBridgeFolder(grantId),
+        );
+      await local.refresh();
+    },
+    policy: ({ preset }) => selectTrustPreset(preset),
+  };
+  useEffect(() => {
+    const removeSetup = spectraBus.handle("bridge.setup", (input) =>
+      bridgeActionHandlers.current?.setup(input),
+    );
+    const removePolicy = spectraBus.handle("bridge.policy.change", (input) =>
+      bridgeActionHandlers.current?.policy(input),
+    );
+    return () => {
+      removeSetup();
+      removePolicy();
+    };
+  }, []);
   return (
     <div className="grid gap-8">
       <section className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10">
@@ -311,7 +395,10 @@ export function BridgeSettings() {
             </div>
           ) : null}
           {updateNote ? (
-            <p className="mt-3 text-micro text-[var(--text-secondary)]" role="status">
+            <p
+              className="mt-3 text-micro text-[var(--text-secondary)]"
+              role="status"
+            >
               {updateNote}
             </p>
           ) : null}
@@ -319,6 +406,62 @@ export function BridgeSettings() {
             <p className="mt-3 text-micro leading-5 text-[var(--text-secondary)]">
               Disconnecting stops queued file writes for this PC. Files on disk
               stay.
+            </p>
+          ) : null}
+        </div>
+      </section>
+      <section className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10">
+        <header className="pt-2">
+          <h2 className="font-display text-subhead font-semibold text-[var(--text-primary)]">
+            Trust for linked files
+          </h2>
+          <p className="mt-1 text-caption leading-5 text-[var(--text-secondary)]">
+            Start isolated. Native write is always an explicit opt-in, and the
+            account choice does not silently move existing folders.
+          </p>
+        </header>
+        <div className="grid gap-3">
+          <BridgeTrustPresets
+            value={trustPreset}
+            pending={pendingTrustPreset}
+            disabled={!cloudEnabled || !effectivePolicy || policyBusy}
+            onSelect={(preset) => void selectTrustPreset(preset)}
+          />
+          {pendingTrustPreset === "native-sync" ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-[var(--warning)]/45 bg-[var(--bg-secondary)] p-3">
+              <p className="max-w-2xl text-micro leading-5 text-[var(--text-secondary)]">
+                Apply this only if you want Spectra to write approved linked
+                files. Existing pending changes remain pending until each item
+                completes its own verified storage transition.
+              </p>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  size="sm"
+                  disabled={policyBusy}
+                  onClick={() => void applyPolicyPreset("both")}
+                >
+                  {policyBusy ? "Applying…" : "Enable native sync"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={policyBusy}
+                  onClick={() => {
+                    setPendingTrustPreset(null);
+                    setTrustNote("No trust change was applied.");
+                  }}
+                >
+                  Keep managed copy
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {trustNote ? (
+            <p
+              className="text-micro leading-5 text-[var(--text-secondary)]"
+              role="status"
+            >
+              {trustNote}
             </p>
           ) : null}
         </div>
@@ -337,7 +480,9 @@ export function BridgeSettings() {
           onChange={(choice) => void setStorageChoice(choice)}
           showProtected
           protectedOriginal={protectedOriginal}
-          onProtectedChange={(next) => void setStorageChoice(storageChoice, next)}
+          onProtectedChange={(next) =>
+            void setStorageChoice(storageChoice, next)
+          }
         />
       </section>
       <section className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10">
@@ -404,12 +549,12 @@ export function BridgeSettings() {
                       mount.discoveryFailed
                         ? "attention"
                         : mount.state === "error"
-                        ? "failure"
-                        : connected &&
-                            (mount.state === "selected" ||
-                              mount.state === "active")
-                          ? "healthy"
-                          : "attention"
+                          ? "failure"
+                          : connected &&
+                              (mount.state === "selected" ||
+                                mount.state === "active")
+                            ? "healthy"
+                            : "attention"
                     }
                   >
                     {folderChipLabel({

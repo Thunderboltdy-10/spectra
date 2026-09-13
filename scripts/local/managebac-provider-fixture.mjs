@@ -116,7 +116,10 @@ export function createManageBacProviderFixture({
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     requests.push({ method: request.method ?? "GET", path: url.pathname, query: Object.fromEntries(url.searchParams) });
-    if (request.headers["x-api-key"] !== token)
+    if (
+      request.headers["x-api-key"] !== token &&
+      request.headers["auth-token"] !== token
+    )
       return send(response, 401, { error: "fixture credential rejected" });
     if (request.method !== "GET")
       return send(response, 405, { error: "fixture is read-only" });

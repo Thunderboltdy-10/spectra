@@ -4261,6 +4261,7 @@ export function SpectraShell({
                 />
               ) : studio.mode === "tab" && studio.activeArtifact ? (
                 <ArtifactStudio
+                  key={studio.activeArtifact._id}
                   mode="tab"
                   artifact={studio.activeArtifact}
                   artifacts={allArtifacts}
@@ -4440,6 +4441,7 @@ export function SpectraShell({
                     ) : null}
                     {studio.mode === "tab" && studio.activeArtifact ? (
                       <ArtifactStudio
+                        key={studio.activeArtifact._id}
                         mode="tab"
                         artifact={studio.activeArtifact}
                         artifacts={allArtifacts}
@@ -4468,6 +4470,7 @@ export function SpectraShell({
                     ) : null}
                     {studio.mode === "split" && studio.activeArtifact ? (
                       <ArtifactStudio
+                        key={studio.activeArtifact._id}
                         mode="split"
                         artifact={studio.activeArtifact}
                         artifacts={allArtifacts}

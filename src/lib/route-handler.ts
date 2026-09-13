@@ -26,7 +26,10 @@ function normalizeErrorStatus(message: string) {
   if (message.startsWith("INVITATION_EMAIL_FAILED")) return 502;
   if (
     message.startsWith("INTEGRATION_NOT_READY") ||
-    message.startsWith("INTEGRATION_CAPABILITY_REQUIRED")
+    message.startsWith("INTEGRATION_CAPABILITY_REQUIRED") ||
+    message.startsWith("INTEGRATION_SYNC_BUSY") ||
+    message.startsWith("INTEGRATION_SYNC_FENCED") ||
+    message.startsWith("INTEGRATION_SELECTION_CHANGED")
   )
     return 409;
   if (lower.includes("unauthorized") || lower.includes("sign in")) return 401;

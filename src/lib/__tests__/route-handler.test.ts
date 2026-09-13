@@ -100,6 +100,30 @@ describe("withRouteErrorHandling", () => {
     expect(payload.error?.message).not.toBe(PUBLIC_SERVER_FAILURE);
   });
 
+  it("maps fenced and busy integration work to recoverable 409 responses", async () => {
+    for (const code of [
+      "INTEGRATION_SYNC_BUSY",
+      "INTEGRATION_SYNC_FENCED",
+      "INTEGRATION_SELECTION_CHANGED",
+    ]) {
+      const response = await withRouteErrorHandling(async () => {
+        throw new Error(`${code}: Retry with the current integration state.`);
+      });
+      const payload = (await response.json()) as {
+        error?: { code?: string; message?: string; status?: number };
+      };
+
+      expect(response.status).toBe(409);
+      expect(payload.error).toEqual(
+        expect.objectContaining({
+          code,
+          status: 409,
+          message: "Retry with the current integration state.",
+        }),
+      );
+    }
+  });
+
   it("unwraps Convex Request ID stacks into the named AUTH code", async () => {
     const response = await withRouteErrorHandling(async () => {
       throw new Error(

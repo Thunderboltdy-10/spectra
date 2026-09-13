@@ -111,12 +111,15 @@ export function createManageBacProviderFixture({
   token = DEFAULT_TOKEN,
   initialRevision = 1,
   noMatch = false,
+  delayMs = 0,
 } = {}) {
   const requests = [];
   let revision = initialRevision;
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     requests.push({ method: request.method ?? "GET", path: url.pathname, query: Object.fromEntries(url.searchParams) });
+    if (Number.isFinite(delayMs) && delayMs > 0)
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     if (
       request.headers["x-api-key"] !== token &&
       request.headers["auth-token"] !== token

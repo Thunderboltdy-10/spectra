@@ -101,6 +101,7 @@ async function assertCurrentSyncLease(
   ctx: MutationCtx,
   syncRun: Doc<"externalSyncRuns">,
   leaseToken?: string,
+  options: { allowSelectionChange?: boolean } = {},
 ) {
   if (syncRun.status === "completed" || syncRun.status === "failed" || syncRun.status === "cancelled")
     throw new Error("INTEGRATION_SYNC_FENCED: This sync is no longer current.");
@@ -110,7 +111,10 @@ async function assertCurrentSyncLease(
     throw new Error("INTEGRATION_SYNC_FENCED: The sync lease expired.");
   if (syncRun.accountId && syncRun.selectionRevision !== undefined) {
     const current = await selectionSnapshot(ctx, syncRun.integrationId, syncRun.accountId);
-    if (current.revision !== syncRun.selectionRevision)
+    if (
+      current.revision !== syncRun.selectionRevision &&
+      !options.allowSelectionChange
+    )
       throw new Error("INTEGRATION_SELECTION_CHANGED: Class selection changed while this sync was running.");
   }
 }
@@ -134,6 +138,20 @@ async function activeRunForScope(
     )
   ).flat();
   for (const row of rows) {
+    if (row.accountId && row.selectionRevision !== undefined) {
+      const current = await selectionSnapshot(ctx, integrationId, row.accountId);
+      if (current.revision !== row.selectionRevision) {
+        await ctx.db.patch(row._id, {
+          status: "failed",
+          stage: "selection_changed",
+          errorCode: "INTEGRATION_SELECTION_CHANGED",
+          errorSummary: "This sync no longer owns the selected classes.",
+          completedAt: now,
+          updatedAt: now,
+        });
+        continue;
+      }
+    }
     if (row.leaseExpiresAt && row.leaseExpiresAt > now) return row;
     // Rows written before scoped leases were introduced cannot safely accept
     // a late response, so close them before allowing a replacement claim.
@@ -3160,7 +3178,10 @@ export const failSync = mutation({
         actor.schoolRole !== "school_admin")
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Sync run mismatch.");
-    await assertCurrentSyncLease(ctx, syncRun, args.leaseToken);
+    const selectionChanged = args.errorCode === "INTEGRATION_SELECTION_CHANGED";
+    await assertCurrentSyncLease(ctx, syncRun, args.leaseToken, {
+      allowSelectionChange: selectionChanged,
+    });
     const expectedDigest = await exactDigest({
       errorCode: args.errorCode,
       errorSummary: args.errorSummary,
@@ -3191,25 +3212,27 @@ export const failSync = mutation({
         syncRun.counts.updated +
         syncRun.counts.unchanged >
       0;
-    const sources = await ctx.db
-      .query("externalRecords")
-      .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
-      .take(5_000);
-    const scopedSources = sources.filter(
-      (item) =>
-        item.integrationId === integration._id &&
-        !item.tombstone &&
-        (syncRun.accountId
-          ? item.mappedAccountId === syncRun.accountId
-          : item.mappedAccountId === undefined),
-    );
-    for (const source of scopedSources)
-      await ctx.db.patch(source._id, {
-        sourceState: "temporarily_unavailable",
-        sourceStateAt: now,
-        sourceStateReason: text(args.errorSummary, 500),
-        updatedAt: now,
-      });
+    if (!selectionChanged) {
+      const sources = await ctx.db
+        .query("externalRecords")
+        .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
+        .take(5_000);
+      const scopedSources = sources.filter(
+        (item) =>
+          item.integrationId === integration._id &&
+          !item.tombstone &&
+          (syncRun.accountId
+            ? item.mappedAccountId === syncRun.accountId
+            : item.mappedAccountId === undefined),
+      );
+      for (const source of scopedSources)
+        await ctx.db.patch(source._id, {
+          sourceState: "temporarily_unavailable",
+          sourceStateAt: now,
+          sourceStateReason: text(args.errorSummary, 500),
+          updatedAt: now,
+        });
+    }
     const capabilityRuns = await ctx.db
       .query("externalSyncCapabilityRuns")
       .withIndex("by_sync_run", (q) => q.eq("syncRunId", syncRun._id))
@@ -3227,7 +3250,7 @@ export const failSync = mutation({
       });
     await ctx.db.patch(syncRun._id, {
       status: partial ? "partial" : "failed",
-      stage: "failed",
+      stage: selectionChanged ? "selection_changed" : "failed",
       errorCode: text(args.errorCode, 200),
       errorSummary: text(args.errorSummary, 500),
       nextAttemptAt: retryAt,
@@ -3236,23 +3259,25 @@ export const failSync = mutation({
       completedAt: now,
       updatedAt: now,
     });
-    await ctx.db.patch(integration._id, {
-      status:
-        args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
-          ? "blocked"
-          : "degraded",
-      blockedReason:
-        args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
-          ? "The stored read-only credential was rejected by ManageBac."
-          : undefined,
-      nextSyncAt:
-        args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
-          ? undefined
-          : retryAt,
-      updatedAt: now,
-    });
-    if (args.errorCode !== "INTEGRATION_CREDENTIAL_REJECTED")
-      await scheduleSync(ctx, integration._id, retryAt);
+    if (!selectionChanged) {
+      await ctx.db.patch(integration._id, {
+        status:
+          args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
+            ? "blocked"
+            : "degraded",
+        blockedReason:
+          args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
+            ? "The stored read-only credential was rejected by ManageBac."
+            : undefined,
+        nextSyncAt:
+          args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
+            ? undefined
+            : retryAt,
+        updatedAt: now,
+      });
+      if (args.errorCode !== "INTEGRATION_CREDENTIAL_REJECTED")
+        await scheduleSync(ctx, integration._id, retryAt);
+    }
     return { failed: true, partial };
   },
 });

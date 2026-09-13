@@ -569,6 +569,17 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
         title: chart.title,
         ...(chart.showLegend === false ? { showLegend: false } : {}),
         position: chart.position,
+        ...(chart.series?.length
+          ? {
+              series: chart.series.map((series) => ({
+                ...(series.name !== undefined ? { name: series.name } : {}),
+                ...(series.categories !== undefined ? { categories: series.categories } : {}),
+                ...(series.values !== undefined ? { values: series.values } : {}),
+                ...(series.chartType !== undefined ? { chartType: series.chartType } : {}),
+                ...(series.axis !== undefined ? { axis: series.axis } : {}),
+              })),
+            }
+          : {}),
       })),
       mergedRanges: [...sheet.merges],
       frozenRows: sheet.frozenRows,
@@ -1013,6 +1024,20 @@ export function xlsxProjectionFromContent(
               ...(typeof chart.title === "string" ? { title: chart.title } : {}),
               ...(typeof chart.showLegend === "boolean" ? { showLegend: chart.showLegend } : {}),
               ...(Object.keys(position).length ? { position: { x: Number(position.x) || 0, y: Number(position.y) || 0, width: Number(position.width) || 760, height: Number(position.height) || 320 } } : {}),
+              ...(Array.isArray(chart.series)
+                ? {
+                    series: chart.series.flatMap((candidate) => {
+                      const series = record(candidate);
+                      return [{
+                        ...(typeof series.name === "string" ? { name: series.name } : {}),
+                        ...(typeof series.categories === "string" ? { categories: series.categories } : {}),
+                        ...(typeof series.values === "string" ? { values: series.values } : {}),
+                        ...(typeof series.chartType === "string" ? { chartType: series.chartType } : {}),
+                        ...(typeof series.axis === "string" ? { axis: series.axis } : {}),
+                      }];
+                    }),
+                  }
+                : {}),
             }];
           })
         : sheet.charts ?? [];
@@ -1082,7 +1107,7 @@ export function xlsxProjectionFromContent(
         const chart = record(candidate);
         if (typeof chart.sourceRange !== "string") return [];
         const position = record(chart.position);
-        return [{ id: typeof chart.id === "string" ? chart.id : `xlsx:chart:${next.id}:new`, type: typeof chart.type === "string" ? chart.type : "line", sourceRange: canonicalChartRange(chart.sourceRange, typeof nextRecord.name === "string" ? nextRecord.name : `Sheet ${index + 1}`), title: typeof chart.title === "string" ? chart.title : "Chart", ...(typeof chart.showLegend === "boolean" ? { showLegend: chart.showLegend } : {}), position: { x: Number(position.x) || 0, y: Number(position.y) || 0, width: Number(position.width) || 760, height: Number(position.height) || 320 } }];
+        return [{ id: typeof chart.id === "string" ? chart.id : `xlsx:chart:${next.id}:new`, type: typeof chart.type === "string" ? chart.type : "line", sourceRange: canonicalChartRange(chart.sourceRange, typeof nextRecord.name === "string" ? nextRecord.name : `Sheet ${index + 1}`), title: typeof chart.title === "string" ? chart.title : "Chart", ...(typeof chart.showLegend === "boolean" ? { showLegend: chart.showLegend } : {}), position: { x: Number(position.x) || 0, y: Number(position.y) || 0, width: Number(position.width) || 760, height: Number(position.height) || 320 }, ...(Array.isArray(chart.series) ? { series: chart.series.flatMap((candidate) => { const series = record(candidate); return [{ ...(typeof series.name === "string" ? { name: series.name } : {}), ...(typeof series.categories === "string" ? { categories: series.categories } : {}), ...(typeof series.values === "string" ? { values: series.values } : {}), ...(typeof series.chartType === "string" ? { chartType: series.chartType } : {}), ...(typeof series.axis === "string" ? { axis: series.axis } : {}) }]; }) } : {}) }];
       }) : [],
       validations: editorValidationRules(nextRecord),
       conditionalFormats: editorConditionalRules(nextRecord),

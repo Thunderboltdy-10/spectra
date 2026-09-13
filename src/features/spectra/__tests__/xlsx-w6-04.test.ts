@@ -225,6 +225,10 @@ describe("W6-04 native XLSX structure and chart convergence", () => {
         sourceRange: "Sheet1!A1:C5",
         title: "Revenue and margin",
         position: { x: 40, y: 40, width: 520, height: 280 },
+        series: [
+          { name: "Revenue", categories: "Sheet1!A2:A5", values: "Sheet1!B2:B5", chartType: "column" },
+          { name: "Margin", categories: "Sheet1!A2:A5", values: "Sheet1!C2:C5", chartType: "line", axis: "secondary" },
+        ],
       },
       {
         id: "histogram-created",
@@ -238,12 +242,20 @@ describe("W6-04 native XLSX structure and chart convergence", () => {
       projection: xlsxProjectionFromContent(content, opened.projection),
       carry: opened.preservedCarry,
     });
-    const chartParts = Object.keys(unzipSync(saved)).filter((name) => /^xl\/charts\/chart\d+\.xml$/.test(name));
+    const chartParts = Object.keys(unzipSync(saved)).filter((name) => /^xl\/charts\/(?:chart\d+|chartEx\d+)\.xml$/.test(name));
     expect(chartParts).toHaveLength(2);
     const chartXml = chartParts.map((part) => packageText(saved, part));
     expect(chartXml.some((xml) => xml.includes("barChart") && xml.includes("lineChart"))).toBe(true);
-    expect(chartXml.some((xml) => xml.includes("histogramChart") && xml.includes("histogramSeries") && xml.includes("binCount"))).toBe(true);
-    expect(chartXml.every((xml) => xml.includes("Sheet1") && xml.includes("numCache"))).toBe(true);
+    const comboXml = chartXml.find((xml) => xml.includes("barChart") && xml.includes("lineChart"))!;
+    expect(comboXml).toContain('axId val="100000004"');
+    expect(comboXml).toContain('<c:valAx><c:axId val="100000004"');
+    const histogramPart = chartParts.find((part) => part.includes("chartEx"));
+    expect(histogramPart).toBeTruthy();
+    expect(packageText(saved, histogramPart!)).toContain("binning");
+    expect(packageText(saved, histogramPart!)).toContain("dataId");
+    expect(packageText(saved, histogramPart!)).toContain("clusteredColumn");
+    expect(packageText(saved, "xl/workbook.xml")).toContain("_xlchart.v1.1");
+    expect(chartXml.filter((xml) => xml.includes("Sheet1") && xml.includes("numCache"))).toHaveLength(1);
     const reopened = await xlsxLens.open(saved, "enhanced");
     const charts = reopened.projection.sheets[0]!.charts ?? [];
     expect(charts.map((chart) => chart.type)).toEqual(expect.arrayContaining(["combo", "histogram"]));

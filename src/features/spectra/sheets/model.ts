@@ -176,6 +176,14 @@ export type SheetCell = {
   provenance?: { source?: string; importedAt?: number };
 };
 
+export type SheetChartSeries = {
+  name?: string;
+  categories?: string;
+  values?: string;
+  chartType?: "column" | "bar" | "line" | "area" | "scatter";
+  axis?: "primary" | "secondary";
+};
+
 export type SheetChart = {
   id: string;
   type:
@@ -191,6 +199,8 @@ export type SheetChart = {
   title: string;
   /** Off hides the key; a one-series chart rarely needs one. */
   showLegend?: boolean;
+  /** Native combo chart series retain their plot family and axis assignment. */
+  series?: SheetChartSeries[];
   position: { x: number; y: number; width: number; height: number };
 };
 
@@ -466,6 +476,27 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function normalizeChartSeries(value: unknown): SheetChartSeries[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const chartTypes = new Set(["column", "bar", "line", "area", "scatter"]);
+  return value.flatMap((candidate) => {
+    const series = record(candidate);
+    const chartType = chartTypes.has(String(series.chartType))
+      ? (String(series.chartType) as NonNullable<SheetChart["series"]>[number]["chartType"])
+      : undefined;
+    const entry = {
+      ...(typeof series.name === "string" ? { name: series.name.slice(0, 300) } : {}),
+      ...(typeof series.categories === "string" ? { categories: series.categories } : {}),
+      ...(typeof series.values === "string" ? { values: series.values } : {}),
+      ...(chartType ? { chartType } : {}),
+      ...(series.axis === "primary" || series.axis === "secondary"
+        ? { axis: series.axis as SheetChartSeries["axis"] }
+        : {}),
+    };
+    return Object.keys(entry).length ? [entry] : [];
+  });
+}
+
 function stringMap(value: unknown): Record<string, string> {
   return Object.fromEntries(
     Object.entries(record(value)).flatMap(([key, entry]) =>
@@ -716,6 +747,7 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
         ? sheet.charts.flatMap((candidate, chartIndex): SheetChart[] => {
             const chart = record(candidate);
             const position = record(chart.position);
+            const series = normalizeChartSeries(chart.series);
             if (
               typeof chart.sourceRange !== "string" ||
               !parseRange(chart.sourceRange.split("!").at(-1) ?? "")
@@ -746,6 +778,7 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                     ? chart.title.slice(0, 300)
                     : `Chart ${chartIndex + 1}`,
                 ...(chart.showLegend === false ? { showLegend: false } : {}),
+                ...(series ? { series } : {}),
                 position: {
                   x: Number(position.x) || 0,
                   y: Number(position.y) || 0,

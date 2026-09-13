@@ -140,7 +140,11 @@ function stableHex(value: string) {
     hash ^= value.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
-  return (hash >>> 0).toString(16).padStart(8, "0").toUpperCase();
+  // w14:paraId is an unsigned 31-bit value in the Word schema even though
+  // it is serialized as eight hexadecimal digits. Keeping the sign bit clear
+  // prevents the Open XML SDK (and Word's repair pass) from rejecting native
+  // paragraphs whose deterministic identity happens to hash above 0x7fffffff.
+  return ((hash >>> 0) & 0x7fffffff).toString(16).padStart(8, "0").toUpperCase();
 }
 
 function prospectiveParagraphId(paragraph: Paragraph, path: string) {

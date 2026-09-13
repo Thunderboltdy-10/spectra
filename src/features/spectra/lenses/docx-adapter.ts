@@ -228,7 +228,9 @@ function stableParaId(value: string) {
     hash ^= character.codePointAt(0) ?? 0;
     hash = Math.imul(hash, 0x01000193);
   }
-  return (hash >>> 0).toString(16).padStart(8, "0").toUpperCase();
+  // Word's w14:paraId lexical value is constrained to an unsigned 31-bit
+  // range; reserve the high bit while retaining an eight-digit identity.
+  return ((hash >>> 0) & 0x7fffffff).toString(16).padStart(8, "0").toUpperCase();
 }
 
 function safeHref(value: string) {

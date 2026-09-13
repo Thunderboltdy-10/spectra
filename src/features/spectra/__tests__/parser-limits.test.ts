@@ -87,6 +87,15 @@ describe("bounded parser intake", () => {
     ).toBe(true);
   });
 
+  it("accepts transparent zero padding around a fixed-size Office transport", async () => {
+    const packageBytes = zipSync({ "word/document.xml": strToU8("<w:document />") });
+    const padded = new Uint8Array(packageBytes.byteLength + 80_000);
+    padded.set(packageBytes);
+    const bounded = await readBoundedArchive(padded, OFFICE_ARCHIVE_LIMITS);
+    expect(bounded.entries["word/document.xml"]).toBeDefined();
+    expect(bounded.bytes.byteLength).toBeLessThan(padded.byteLength);
+  });
+
   it("extracts text from a small generated PDF within the input guard", async () => {
     const { jsPDF } = await import("jspdf");
     const pdf = new jsPDF();

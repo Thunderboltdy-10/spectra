@@ -65,6 +65,40 @@ function parserError(code: string, detail?: unknown) {
   return new Error(`${code}${suffix}`);
 }
 
+/**
+ * Some local Office fixtures are fixed-size transport files: the complete ZIP
+ * package is followed by zero bytes. Accept only that transparent padding and
+ * leave the original upload untouched; downstream readers receive the
+ * canonical package emitted by this bounded parser.
+ */
+function trimTransparentZipPadding(input: Uint8Array) {
+  // Scan the bounded input rather than only the usual 65,557-byte ZIP suffix:
+  // fixed-size transport padding can be much larger than ZIP's comment limit.
+  for (let offset = input.byteLength - 22; offset >= 0; offset -= 1) {
+    if (
+      input[offset] !== 0x50 ||
+      input[offset + 1] !== 0x4b ||
+      input[offset + 2] !== 0x05 ||
+      input[offset + 3] !== 0x06
+    )
+      continue;
+    const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
+    const commentLength = view.getUint16(offset + 20, true);
+    const packageEnd = offset + 22 + commentLength;
+    if (packageEnd > input.byteLength) continue;
+    let transparent = true;
+    for (let index = packageEnd; index < input.byteLength; index += 1) {
+      if (input[index] !== 0) {
+        transparent = false;
+        break;
+      }
+    }
+    if (transparent) return input.slice(0, packageEnd);
+    break;
+  }
+  return input;
+}
+
 /** Reject non-canonical spellings instead of normalizing them into collisions. */
 export function canonicalArchivePath(name: string) {
   if (!name || name.includes("\u0000")) throw parserError("ARCHIVE_PATH_INVALID");
@@ -167,7 +201,7 @@ export async function readBoundedArchive(
     throw parserError("ARCHIVE_INPUT_TOO_LARGE");
   let reader: ZipReader;
   try {
-    reader = await ZipReader.open(input, {
+    reader = await ZipReader.open(trimTransparentZipPadding(input), {
       maxCompressionRatio: limits.maxCompressionRatio,
       maxTotalUncompressedSize: limits.maxExpandedBytes,
     });

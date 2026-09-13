@@ -110,6 +110,7 @@ function resourcePayload(classId, revision) {
 export function createManageBacProviderFixture({
   token = DEFAULT_TOKEN,
   initialRevision = 1,
+  noMatch = false,
 } = {}) {
   const requests = [];
   let revision = initialRevision;
@@ -125,16 +126,18 @@ export function createManageBacProviderFixture({
       return send(response, 405, { error: "fixture is read-only" });
     if (url.pathname === "/v2p2/students")
       return send(response, 200, {
-        students: [
-          {
-            id: 9001,
-            email: url.searchParams.get("q") ?? "student@example.test",
-            first_name: "Fixture",
-            last_name: "Student",
-            role: "student",
-            year_group_id: 12,
-          },
-        ],
+        students: noMatch
+          ? []
+          : [
+              {
+                id: 9001,
+                email: url.searchParams.get("q") ?? "student@example.test",
+                first_name: "Fixture",
+                last_name: "Student",
+                role: "student",
+                year_group_id: 12,
+              },
+            ],
       });
     if (url.pathname === "/v2p2/memberships")
       return send(response, 200, {

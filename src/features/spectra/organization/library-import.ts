@@ -3,6 +3,7 @@ import type { ArtifactTypeKey } from "../artifacts/types";
 import { bytesToArrayBuffer, enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import { uploadArtifactAsset } from "../data/api";
 import { artifactBlobSha256 } from "../components/artifact-studio-file-utils";
+import { documentContentFromJson } from "../components/artifact-studio";
 import { importDocxPayload } from "../lenses/docx-adapter";
 
 function imagePixelDimensions(
@@ -101,7 +102,8 @@ export async function projectDocxImportWithDurableImages(file: File, artifactId:
     OFFICE_ARCHIVE_LIMITS,
   );
   const imported = await importDocxPayload(checked.bytes);
-  return materializeJsonImages(imported.json as JSONContent, artifactId);
+  const durableJson = await materializeJsonImages(imported.json as JSONContent, artifactId);
+  return documentContentFromJson(durableJson, imported.projection);
 }
 
 export const LIBRARY_IMPORT_ACCEPT = [

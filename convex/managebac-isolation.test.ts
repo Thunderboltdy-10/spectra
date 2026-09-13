@@ -417,6 +417,89 @@ describe("ManageBac account isolation", () => {
     delete process.env.SPECTRA_CONNECTOR_BRIDGE_KEY;
   });
 
+  it("reclaims an expired account sync and fences its late provider response", async () => {
+    const t = setupTest();
+    const fixture = await seedFixture(t);
+    const oldRun = await t.run(async (ctx) => {
+      const now = Date.now();
+      const syncRunId = await ctx.db.insert("externalSyncRuns", {
+        integrationId: fixture.integrationId,
+        schoolId: fixture.schoolId,
+        accountId: fixture.aliceId,
+        kind: "manual",
+        status: "queued",
+        trigger: "user",
+        stage: "queued",
+        capabilityIds: [fixture.capabilityId],
+        counts: { ...emptyCounts },
+        leaseOwner: "old-worker",
+        leaseToken: "old-lease",
+        leaseExpiresAt: now - 1,
+        selectionRevision: 0,
+        attemptCount: 1,
+        nextAttemptAt: now,
+        createdAt: now - 1_000,
+        updatedAt: now - 1_000,
+      });
+      await ctx.db.insert("externalSyncCapabilityRuns", {
+        syncRunId,
+        integrationId: fixture.integrationId,
+        capabilityId: fixture.capabilityId,
+        status: "queued",
+        pageCount: 0,
+        recordCount: 0,
+        createdAt: now - 1_000,
+        updatedAt: now - 1_000,
+      });
+      return syncRunId;
+    });
+
+    const replacement = await t.withIdentity(alice).mutation(
+      api.managebac.beginSync,
+      { kind: "manual" },
+    );
+    expect(replacement.syncRunId).not.toBe(oldRun);
+
+    const reclaimed = await t.run((ctx) => ctx.db.get(oldRun));
+    expect(reclaimed).toMatchObject({
+      status: "failed",
+      stage: "lease_expired",
+      errorCode: "INTEGRATION_WORKER_LEASE_EXPIRED",
+    });
+
+    const timestamp = Date.now();
+    const payloadDigest = digest({
+      capabilityId: fixture.capabilityId,
+      records: [],
+      pageNumber: 1,
+      leaseToken: "old-lease",
+      selectionRevision: 0,
+    });
+    await expect(
+      t.withIdentity(alice).mutation(api.managebac.commitNormalizedPage, {
+        integrationId: fixture.integrationId,
+        syncRunId: oldRun,
+        capabilityId: fixture.capabilityId,
+        records: [],
+        pageNumber: 1,
+        leaseToken: "old-lease",
+        selectionRevision: 0,
+        payloadDigest,
+        timestamp,
+        nonce: "old-response",
+        signature: signature(
+          "sync-page",
+          alice,
+          fixture.integrationId,
+          oldRun,
+          timestamp,
+          "old-response",
+          payloadDigest,
+        ),
+      }),
+    ).rejects.toThrow("INTEGRATION_SYNC_FENCED");
+  });
+
   it("keeps two mapped accounts' ingestion and projections separate", async () => {
     const t = setupTest();
     const fixture = await seedFixture(t);

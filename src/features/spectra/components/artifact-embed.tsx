@@ -95,6 +95,32 @@ function textFrom(value: unknown, limit = 360): string {
     : String(value).slice(0, limit);
 }
 
+function firstDocumentImage(value: unknown, depth = 0): Record<string, unknown> | undefined {
+  if (depth > 12 || value === null || value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const image = firstDocumentImage(child, depth + 1);
+      if (image) return image;
+    }
+    return undefined;
+  }
+  if (typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  const attrs = record(candidate.attrs);
+  if (
+    candidate.kind === "image" &&
+    typeof candidate.assetId === "string"
+  )
+    return candidate;
+  if (candidate.type === "image" && typeof attrs.assetId === "string")
+    return { ...attrs, altText: attrs.alt ?? "" };
+  for (const child of Object.values(candidate)) {
+    const image = firstDocumentImage(child, depth + 1);
+    if (image) return image;
+  }
+  return undefined;
+}
+
 function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   const source = embed.source;
   const type = source?.blueprintKey;
@@ -123,6 +149,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
       0,
       embed.mode === "compact" ? 2 : 8,
     );
+    const image = firstDocumentImage(content);
     return (
       <div className="space-y-2.5">
         {blocks.map((block, index) => (
@@ -137,6 +164,17 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
             {textFrom(block.text ?? block.content) || "Empty block"}
           </p>
         ))}
+        {image ? (
+          <figure className="overflow-hidden rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2">
+            <img
+              src={`/api/spectra/assets/content?assetId=${encodeURIComponent(String(image.assetId))}`}
+              alt={textFrom(image.altText) || "Document image"}
+              loading="lazy"
+              className="max-h-72 max-w-full rounded object-contain object-top"
+            />
+            <figcaption className="sr-only">Document image preview</figcaption>
+          </figure>
+        ) : null}
         {blocks.length === 0 ? (
           <p className="text-micro text-[var(--text-tertiary)]">
             Empty document
@@ -535,6 +573,24 @@ export function ArtifactEmbed({
   const meta = embed.source ? workTypeMeta[embed.source.blueprintKey] : null;
   const Icon = meta?.icon ?? FileQuestion;
   const interaction = embed.effectiveInteraction ?? embed.interaction;
+  const referenceState = [
+    embed.mode === "compact" ? "Compact preview" : "Expanded preview",
+    embed.versionPolicy === "pinned" ? "Pinned version" : "Live version",
+    typeof embed.displayPreferences?.view === "string"
+      ? embed.displayPreferences.view.replaceAll("_", " ")
+      : undefined,
+    embed.state === "archived" ? "Archived" : undefined,
+    embed.sourceUnavailable ? "Source unavailable" : undefined,
+    interaction === "read"
+      ? "Read-only"
+      : interaction === "interact"
+        ? "Interactive"
+        : interaction === "edit"
+          ? "Editable"
+          : undefined,
+  ]
+    .filter(Boolean)
+    .join(", ");
   const status =
     embed.state === "no_access" && embed.accessRequest
       ? {
@@ -748,37 +804,21 @@ export function ArtifactEmbed({
           <div className="truncate text-caption font-semibold text-[var(--text-primary)]">
             {embed.source.title}
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
-            <span>{meta.label}</span>
-            <span>·</span>
-            <span>{embed.mode === "compact" ? "Compact" : "Expanded"}</span>
-            <span>·</span>
-            <span>{embed.versionPolicy === "pinned" ? "Pinned" : "Live"}</span>
-            {typeof embed.displayPreferences?.view === "string" ? (
-              <>
-                <span>·</span>
-                <span>
-                  {embed.displayPreferences.view.replaceAll("_", " ")}
-                </span>
-              </>
-            ) : null}
-            {embed.state === "archived" ? (
-              <>
-                <span>·</span>
-                <span className="text-[var(--warning)]">Archived</span>
-              </>
-            ) : null}
-            {interaction ? (
-              <>
-                <span>·</span>
-                <span>
-                  {interaction === "read"
-                    ? "Read-only"
-                    : interaction === "interact"
-                      ? "Interactive"
-                      : "Editable"}
-                </span>
-              </>
+          <div
+            className="mt-0.5 flex items-center gap-2 text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]"
+            aria-label={`${meta?.label ?? "Reference"} reference: ${referenceState}`}
+            role="group"
+            title={referenceState}
+          >
+            {embed.sourceUnavailable ? (
+              <span
+                className="inline-flex items-center gap-1 text-[var(--warning)]"
+                aria-label="Source unavailable"
+                role="img"
+              >
+                <AlertCircle className="h-3 w-3" aria-hidden="true" />
+                Unavailable
+              </span>
             ) : null}
           </div>
         </div>

@@ -13,6 +13,8 @@ import { recordMeterEvent } from "./metering";
 import {
   DELETION_CURSOR_VERSION,
   DELETION_PAGE_TIMEOUT_MS,
+  decodeBase64Url,
+  encodeBase64Url,
   queueDeletionDispatch,
   queueDeletionProcess,
   queueDeletionRecovery,
@@ -39,14 +41,14 @@ type State = {
 type PageResult = { state: State; done: boolean; scanned: number; changed: number; retained: number; terminal: number; released: number };
 type PageOptions = { testFailAfter?: number };
 
-function encode(value: State) { return Buffer.from(JSON.stringify(value), "utf8").toString("base64url"); }
+function encode(value: State) { return encodeBase64Url(JSON.stringify(value)); }
 function stateFor(job: Pick<Job, "artifactId" | "generation">, family: string, cursor: string | null, extra: Partial<State> = {}): State {
   return { version: CURSOR_VERSION, artifactId: String(job.artifactId), generation: job.generation, family, cursor, ...extra };
 }
 function decode(value: string | undefined, job: Job): State {
   if (!value) return stateFor(job, "embeds", null, { embedScope: "source" });
   try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as State;
+    const parsed = JSON.parse(decodeBase64Url(value)) as State;
     if (!parsed.version && parsed.family === "requests") return stateFor(job, "requestsWrite", null);
     if (parsed.version !== CURSOR_VERSION || parsed.artifactId !== String(job.artifactId) || parsed.generation !== job.generation || typeof parsed.family !== "string" || (parsed.cursor !== undefined && parsed.cursor !== null && typeof parsed.cursor !== "string")) throw new Error("DELETION_CURSOR_INVALID");
     return parsed;
@@ -122,7 +124,7 @@ async function processEmbedPage(ctx: MutationCtx, job: Job, state: State): Promi
     const now = Date.now();
     if (scope === "source") {
       if (embed.sourceUnavailableAt === undefined) {
-        await ctx.db.patch(embed._id, { sourceUnavailableAt: now, updatedAt: now });
+        await ctx.db.patch(embed._id, { sourceUnavailableAt: now, placementExpiresAt: undefined, updatedAt: now });
         embedChanged++;
       }
     } else if (!embed.removedAt || embed.placementState !== "removed") {

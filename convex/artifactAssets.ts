@@ -4,10 +4,14 @@ import { api, internal } from "./_generated/api";
 import { writeAuditEvent } from "./auditShared";
 import { recordMeterEvent } from "./metering";
 import { requireArtifactCapability } from "./spectraShared";
-import { getAuthenticatedActor } from "./identityShared";
+import { getAuthenticatedActor, type AuthenticatedActor } from "./identityShared";
+import { evaluateAccessForActor } from "./authorityShared";
+import { loadVersionAfter } from "./artifactSnapshots";
+import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
 import { validateIntakeAttestation, vIntakeAttestation } from "./intakeAttestation";
 import type { IntakeAttestation } from "../shared/intake-attestation";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
 import { MAX_ASSET_BYTES } from "../shared/intake-limits";
 import {
   normalizeMediaType,
@@ -19,6 +23,76 @@ import {
 // Technical abuse/integrity ceilings, not commercial product quotas. Metering and
 // future school policies remain authoritative for any later enforceable limits.
 const MAX_RETAINED_ASSET_BYTES = 2_000_000_000;
+
+function snapshotContainsAsset(value: unknown, assetId: string, depth = 0): boolean {
+  if (depth > 14 || value === null || value === undefined) return false;
+  if (Array.isArray(value))
+    return value.some((child) => snapshotContainsAsset(child, assetId, depth + 1));
+  if (typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.assetId === assetId) return true;
+  return Object.values(candidate).some((child) =>
+    snapshotContainsAsset(child, assetId, depth + 1),
+  );
+}
+
+/**
+ * A pinned document owns its durable image after the source is tombstoned.
+ * Keep the asset URL usable for readers of that surviving container, while
+ * requiring both a live pinned snapshot reference and container authorization.
+ */
+async function canReadRetainedPinnedAsset(
+  ctx: QueryCtx,
+  actor: AuthenticatedActor,
+  asset: Doc<"artifactAssets">,
+) {
+  const embeds = await ctx.db
+    .query("artifactEmbeds")
+    .withIndex("by_source", (q) => q.eq("sourceArtifactId", asset.artifactId))
+    .collect();
+  for (const embed of embeds) {
+    if (!isSurvivingPinnedEmbed(embed) || embed.schoolId !== actor.schoolId)
+      continue;
+    const version = await ctx.db.get(embed.pinnedVersionId!);
+    if (!version || version.artifactId !== asset.artifactId) continue;
+    let snapshot: unknown;
+    try {
+      snapshot = await loadVersionAfter(ctx, version);
+    } catch {
+      continue;
+    }
+    if (!snapshotContainsAsset(snapshot, String(asset._id))) continue;
+
+    if (embed.containerType === "thread") {
+      const threadId = ctx.db.normalizeId("spectraThreads", embed.containerId);
+      const thread = threadId ? await ctx.db.get(threadId) : null;
+      if (
+        thread &&
+        thread.status !== "deleted" &&
+        thread.ownerAccountId === actor.accountId &&
+        thread.schoolId === actor.schoolId
+      )
+        return true;
+      continue;
+    }
+
+    const containerId = ctx.db.normalizeId(
+      "spectraArtifacts",
+      embed.containerId,
+    );
+    const container = containerId ? await ctx.db.get(containerId) : null;
+    if (!container || container.status !== "active" || container.schoolId !== actor.schoolId)
+      continue;
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      container.blueprintKey === "agent" ? "agent" : "artifact",
+      container._id,
+    );
+    if (decision.allowed && decision.capabilities.includes("read")) return true;
+  }
+  return false;
+}
 
 function cleanPath(value: string) {
   const normalized = value.trim().replaceAll("\\", "/").replace(/^\/+/, "");
@@ -458,7 +532,13 @@ export const getContent = query({
   handler: async (ctx, args) => {
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("ASSET_NOT_FOUND");
-    await requireArtifactCapability(ctx, asset.artifactId, "read");
+    try {
+      await requireArtifactCapability(ctx, asset.artifactId, "read");
+    } catch (error) {
+      const actor = await getAuthenticatedActor(ctx);
+      if (!actor || !(await canReadRetainedPinnedAsset(ctx, actor, asset)))
+        throw error;
+    }
     if (asset.status !== "active" || !asset.storageId) throw new Error("ASSET_NOT_AVAILABLE");
     return { url: await ctx.storage.getUrl(asset.storageId), mediaType: asset.mediaType, name: asset.name, bytes: asset.bytes, sha256: asset.sha256, assetId: asset._id };
   },

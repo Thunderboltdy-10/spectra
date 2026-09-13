@@ -595,6 +595,8 @@ export const expireProvisional = internalMutation({
     const embed = await ctx.db.get(args.embedId);
     if (!embed || embed.placementOperationId !== args.placementOperationId || embed.placementState !== "provisional") return { expired: false };
     if (embed.placementExpiresAt && embed.placementExpiresAt > Date.now()) return { expired: false };
+    const source = await ctx.db.get(embed.sourceArtifactId);
+    if (source?.status === "deleted" && embed.versionPolicy === "pinned" && embed.pinnedVersionId) return { expired: false };
     await ctx.db.delete(embed._id);
     return { expired: true };
   },
@@ -1011,7 +1013,10 @@ export const getProjection = query({
   handler: async (ctx, args) => {
     const actorValue = await actor(ctx);
     const embed = await ctx.db.get(args.embedId);
-    if (!embed) throw new Error("EMBED_NOT_FOUND");
+    // A reference node can outlive a legacy embed row (for example after an
+    // older cleanup job).  Missing reference metadata is a normal unavailable
+    // state for the reader, not a reason to take down the whole document.
+    if (!embed) return null;
     const container = await requireContainer(
       ctx,
       actorValue,

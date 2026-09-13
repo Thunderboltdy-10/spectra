@@ -37,17 +37,28 @@ export function ArtifactEmbedById({
 }) {
   const embed = useQuery(api.artifactEmbeds.getProjection, {
     embedId: embedId as Id<"artifactEmbeds">,
-  }) as SpectraArtifactEmbed | undefined;
+  }) as SpectraArtifactEmbed | null | undefined;
   const update = useMutation(api.artifactEmbeds.update);
   const remove = useMutation(api.artifactEmbeds.remove);
   const [busy, setBusy] = useState(false);
 
-  if (!embed)
+  if (embed === undefined)
     return (
       <div
         className={`min-h-24 animate-pulse rounded-card border border-[var(--border-subtle)] bg-[var(--bg-secondary)] motion-reduce:animate-none ${className ?? ""}`}
         aria-label="Loading live reference"
       />
+    );
+
+  if (embed === null)
+    return (
+      <div
+        className={`rounded-card border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 py-3 text-micro text-[var(--text-secondary)] ${className ?? ""}`}
+        role="status"
+        aria-label="Reference unavailable"
+      >
+        This pinned reference is no longer available.
+      </div>
     );
 
   return (

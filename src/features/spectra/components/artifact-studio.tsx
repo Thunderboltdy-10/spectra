@@ -3455,11 +3455,25 @@ function ArtifactStudioEditor({
           live.flushSnapshot?.() ?? live.model?.getSnapshot().value;
         if (acknowledgedValue) {
           nativeFallbackEditedRef.current = false;
+          const acknowledgedContent =
+            nativeBodyBinding && artifact.blueprintKey === "document"
+              ? {
+                  ...record(acknowledgedValue.content),
+                  // The Word body is already authoritative in Yjs. Page
+                  // chrome lives beside that body, though, and a metadata-only
+                  // collaboration save otherwise reuses the previous
+                  // pageSetup and silently drops a freshly edited header or
+                  // footer before native materialization.
+                  ...(record(snapshot.content).pageSetup !== undefined
+                    ? { pageSetup: record(snapshot.content).pageSetup }
+                    : {}),
+                }
+              : acknowledgedValue.content;
           const acknowledged = {
             title: acknowledgedValue.title,
             summary: acknowledgedValue.summary ?? "",
             tagDraft: acknowledgedValue.tags.join(", "),
-            content: acknowledgedValue.content,
+            content: acknowledgedContent,
           };
           localSyncKeysRef.current.add(snapshotKey(acknowledged));
           // Region decomposition may normalize IDs/defaults while applying an
@@ -5290,16 +5304,19 @@ function ArtifactStudioEditor({
     [hideInspector, openInspector, showInspector],
   );
 
-  const markLocalCollaborativeDocumentChange = useCallback(() => {
-    if (readOnly || artifact.blueprintKey !== "document") return;
-    // A native save and incoming Yjs hydration are not typing. Clearing the
-    // reconciling guard here re-dirtied the studio and nested React updates.
-    if (reconcilingRemoteRef.current) return;
-    userHasEditedRef.current = true;
-    writeStudioDirty(dirtyRef, setDirty, true);
-    bumpLocalDraft();
-    setActivePresence("artifact:structure", { mode: "typing" });
-  }, [artifact.blueprintKey, bumpLocalDraft, readOnly, setActivePresence]);
+  const markLocalCollaborativeDocumentChange = useCallback(
+    (userInitiated = false) => {
+      if (readOnly || artifact.blueprintKey !== "document") return;
+      // A native save and incoming Yjs hydration are not typing. Clearing the
+      // reconciling guard here re-dirtied the studio and nested React updates.
+      if (!userInitiated && reconcilingRemoteRef.current) return;
+      userHasEditedRef.current = true;
+      writeStudioDirty(dirtyRef, setDirty, true);
+      bumpLocalDraft();
+      setActivePresence("artifact:structure", { mode: "typing" });
+    },
+    [artifact.blueprintKey, bumpLocalDraft, readOnly, setActivePresence],
+  );
 
   /**
    * The live fidelity map every command in the bar is gated by.

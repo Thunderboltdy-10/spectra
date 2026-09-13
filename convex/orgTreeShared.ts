@@ -1540,7 +1540,14 @@ export async function tombstoneArtifactEmbeds(
     const isContainerRemoval = containerEmbedIds.has(embed._id);
     await ctx.db.patch(embed._id, {
       ...(sourceEmbeds.some((sourceEmbed) => sourceEmbed._id === embed._id)
-        ? { sourceUnavailableAt: embed.sourceUnavailableAt ?? now }
+        ? {
+            sourceUnavailableAt: embed.sourceUnavailableAt ?? now,
+            // A persisted pinned placement remains the owner of its version
+            // even when the source is deleted before the editor's canonical
+            // confirmation arrives. Do not let the old provisional-expiry
+            // timer erase that lifetime anchor.
+            placementExpiresAt: undefined,
+          }
         : {}),
       ...(isContainerRemoval
         ? { removedAt: embed.removedAt ?? now }

@@ -929,6 +929,57 @@ describe("native fine-grained Yjs models", () => {
     ydoc.destroy();
   });
 
+  it("persists document page chrome through metadata-only collaboration saves", async () => {
+    const adapter = documentYjsAdapter;
+    const ydoc = adapter.createDocument({
+      blocks: [{ id: "intro", type: "paragraph", text: "Body" }],
+      pageSetup: { header: "", footer: "" },
+    });
+    const liveMeta = ydoc.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+    liveMeta.set("title", "V8-02-rich.docx");
+    liveMeta.set("summary", "");
+    liveMeta.set("tags", []);
+    const model = new NativeArtifactYjsModel("document", {
+      clientId: "docx-page-chrome-client",
+      document: ydoc,
+      getSnapshot: () => ({
+        state: "synchronized" as const,
+        level: "modify" as const,
+        accountId: "account-1",
+        displayName: "Pablo",
+        unsynchronizedChanges: 0,
+        presence: [],
+      }),
+    } as unknown as ConstructorParameters<typeof NativeArtifactYjsModel>[1]);
+
+    await model.replaceMetadataSnapshot(
+      {
+        title: "V8-02-rich.docx",
+        tags: [],
+        content: {
+          ...(model.getSnapshot().value?.content as Record<string, unknown>),
+          pageSetup: { header: "V8-02 Rich Word Acceptance", footer: "" },
+        },
+      },
+      {
+        editMany: async (
+          _regions: Array<{ regionId: string; overlapDomains: string[] }>,
+          change: () => void,
+        ) => {
+          ydoc.transact(change);
+          return { applied: true as const, claims: [] };
+        },
+      } as unknown as Parameters<typeof model.replaceMetadataSnapshot>[1],
+    );
+
+    expect(
+      (model.getSnapshot().value?.content as Record<string, unknown>)
+        .pageSetup,
+    ).toEqual({ header: "V8-02 Rich Word Acceptance", footer: "" });
+    model.destroy();
+    ydoc.destroy();
+  });
+
   it("projects a dense live model once and reuses its semantic descriptor index", () => {
     const adapter = workYjsAdapter("sheets");
     const document = adapter.createDocument(denseWorkbook());

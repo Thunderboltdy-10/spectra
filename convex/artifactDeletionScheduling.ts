@@ -7,6 +7,25 @@ export const DELETION_PAGE_TIMEOUT_MS = 60_000;
 
 type ExpectedCursor = { phase: string; cursor?: string };
 
+export function encodeBase64Url(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+}
+
+export function decodeBase64Url(value: string) {
+  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  return new TextDecoder().decode(
+    Uint8Array.from(binary, (character) => character.charCodeAt(0)),
+  );
+}
+
 function internalDeletionFunction(name: "dispatch" | "process" | "recover") {
   return (internal as unknown as {
     spectraArtifactDeletion: Record<string, unknown>;
@@ -17,7 +36,7 @@ export function initialDeletionCursor(
   artifactId: Id<"spectraArtifacts">,
   generation: number,
 ) {
-  return Buffer.from(
+  return encodeBase64Url(
     JSON.stringify({
       version: DELETION_CURSOR_VERSION,
       artifactId: String(artifactId),
@@ -26,8 +45,7 @@ export function initialDeletionCursor(
       cursor: null,
       embedScope: "source",
     }),
-    "utf8",
-  ).toString("base64url");
+  );
 }
 
 export async function queueDeletionProcess(

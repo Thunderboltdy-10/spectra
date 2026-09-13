@@ -308,6 +308,7 @@ describe("W7-02 retained lifetime and deletion coordinator", () => {
     expect(retained.mixedRun).toBeDefined();
     expect(retained.mixedCard).toBeDefined();
     await expect(t.withIdentity(owner).query(api.artifactEmbeds.getProjection, { embedId: fixture.firstEmbedId })).resolves.toMatchObject({ state: "ready", sourceUnavailable: true, source: { snapshot: { blocks: [{ type: "image", attrs: { assetId: String(fixture.assetId) } }] } } });
+    await expect(t.withIdentity(owner).query(api.artifactAssets.getContent, { assetId: fixture.assetId })).resolves.toMatchObject({ assetId: fixture.assetId, mediaType: "image/png", bytes: 12 });
 
     await t.withIdentity(owner).mutation(api.artifactEmbeds.remove, {
       embedId: fixture.firstEmbedId,

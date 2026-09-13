@@ -13,7 +13,7 @@ import {
 import { documentContentToProseMirrorJson } from "../../../lenses/document-projection";
 import { shouldRejectHollowStudioIncoming } from "../../../components/artifact-studio-value-utils";
 import { workYjsAdapter } from "./registry";
-import { workMeta } from "./shared";
+import { plainToY, workMeta, workRoot, yToPlain } from "./shared";
 import { workYjsOrigins } from "./origins";
 import type { WorkActorIdentity, WorkYjsAdapter } from "./contracts";
 import { describeSheetsCellRegion } from "../../../artifacts/registry";
@@ -39,6 +39,12 @@ function valueAtPath(value: unknown, path: readonly (string | number)[]) {
     current = (current as Record<string | number, unknown>)[segment];
   }
   return current;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function replaceAtPath(
@@ -260,6 +266,25 @@ export class NativeArtifactYjsModel {
       currentTags.some((tag, index) => tag !== value.tags[index])
     )
       this.liveMeta.set("tags", [...value.tags]);
+
+    // Native document bodies live in the XML fragment, but page chrome is an
+    // adapter extra beside that fragment. Keep it in the same durable Yjs
+    // transaction as the title/summary/tags metadata so a header or footer
+    // cannot disappear on the metadata-only save path.
+    if (this.typeKey === "document") {
+      const root = workRoot(this.transport.document);
+      const currentExtras = record(yToPlain(root.get("extras")));
+      const nextPageSetup = record(value.content).pageSetup;
+      if (
+        nextPageSetup !== undefined &&
+        JSON.stringify(currentExtras.pageSetup) !== JSON.stringify(nextPageSetup)
+      ) {
+        root.set(
+          "extras",
+          plainToY({ ...currentExtras, pageSetup: nextPageSetup }),
+        );
+      }
+    }
   }
 
   async initialize(
@@ -359,6 +384,16 @@ export class NativeArtifactYjsModel {
         : []),
       ...(JSON.stringify(current?.tags ?? []) !== JSON.stringify(value.tags)
         ? [{ regionId: "metadata:tags", overlapDomains: ["metadata:tags"] }]
+        : []),
+      ...(this.typeKey === "document" &&
+      JSON.stringify(record(current?.content).pageSetup) !==
+        JSON.stringify(record(value.content).pageSetup)
+        ? [
+            {
+              regionId: "document:page-setup",
+              overlapDomains: ["document:page-setup"],
+            },
+          ]
         : []),
     ];
     if (!claims.length) {

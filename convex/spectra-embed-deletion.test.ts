@@ -95,6 +95,133 @@ describe("Spectra embed deletion lifecycle", () => {
     }
   });
 
+  it("keeps a pinned provisional placement alive when its source is deleted", async () => {
+    const t = setupTest();
+    const fixture = await t.run(async (ctx) => {
+      const now = Date.now();
+      const schoolId = await ctx.db.insert("schools", {
+        name: "Pinned provisional school",
+        slug: `pinned-provisional-${crypto.randomUUID()}`,
+        verifiedDomains: [],
+        status: "active",
+        timezone: "Europe/Madrid",
+        policyVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: identity.subject,
+        email: identity.email,
+        emailVerified: true,
+        name: "Pinned provisional owner",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("schoolMemberships", {
+        accountId,
+        schoolId,
+        role: "school_admin",
+        status: "active",
+        joinedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const sourceArtifactId = await ctx.db.insert("spectraArtifacts", {
+        ownerAccountId: accountId,
+        schoolId,
+        blueprintKey: "document",
+        schemaVersion: 2,
+        title: "Pinned source",
+        content: { blocks: [] },
+        textIndex: "Pinned source",
+        tags: [],
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const containerArtifactId = await ctx.db.insert("spectraArtifacts", {
+        ownerAccountId: accountId,
+        schoolId,
+        blueprintKey: "document",
+        schemaVersion: 2,
+        title: "Pinned container",
+        content: { blocks: [] },
+        textIndex: "Pinned container",
+        tags: [],
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const pinnedVersionId = await ctx.db.insert("spectraArtifactVersions", {
+        artifactId: sourceArtifactId,
+        ownerAccountId: accountId,
+        schoolId,
+        source: "import",
+        schemaVersion: 2,
+        after: { blocks: [{ type: "paragraph", text: "Pinned" }] },
+        createdAt: now,
+      });
+      const embedId = await ctx.db.insert("artifactEmbeds", {
+        containerType: "artifact",
+        containerId: String(containerArtifactId),
+        containerRegionId: "document:reference:pinned-provisional",
+        sourceArtifactId,
+        schoolId,
+        mode: "compact",
+        interaction: "read",
+        versionPolicy: "pinned",
+        pinnedVersionId,
+        contextPolicy: "summary",
+        createdByAccountId: accountId,
+        placementOperationId: "pinned-provisional-operation",
+        placementState: "provisional",
+        placementExpiresAt: now - 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { sourceArtifactId, embedId };
+    });
+
+    const deletion = await t.withIdentity(identity).mutation(
+      api.spectraArtifacts.permanentlyDelete,
+      { artifactId: fixture.sourceArtifactId },
+    );
+    const afterTombstone = await t.run((ctx) => ctx.db.get(fixture.embedId));
+    expect(afterTombstone).toMatchObject({
+      sourceUnavailableAt: expect.any(Number),
+      placementState: "provisional",
+    });
+    expect(afterTombstone?.placementExpiresAt).toBeUndefined();
+
+    const expire = (internal as unknown as {
+      artifactEmbeds: { expireProvisional: unknown };
+    }).artifactEmbeds.expireProvisional as never;
+    const runInternal = (
+      t as unknown as {
+        mutation: (fn: unknown, args: unknown) => Promise<unknown>;
+      }
+    ).mutation.bind(t);
+    await expect(
+      runInternal(expire, {
+        embedId: fixture.embedId,
+        placementOperationId: "pinned-provisional-operation",
+      }),
+    ).resolves.toMatchObject({ expired: false });
+
+    await drainDeletion(t, deletion.jobId);
+    const result = await t.run(async (ctx) => ({
+      artifact: await ctx.db.get(fixture.sourceArtifactId),
+      embed: await ctx.db.get(fixture.embedId),
+    }));
+    expect(result.artifact).toBeDefined();
+    expect(result.embed).toMatchObject({
+      sourceUnavailableAt: expect.any(Number),
+      pinnedVersionId: expect.any(String),
+    });
+    expect(result.embed?.removedAt).toBeUndefined();
+  });
+
   it("tombstones embeds in both directions and cancels their pending requests", async () => {
     const t = setupTest();
     const fixture = await t.run(async (ctx) => {

@@ -665,7 +665,7 @@ export function DocumentStudio({
   readOnly?: boolean;
   nativeReadOnlyRegionIds?: string[];
   collaborationDocument?: Y.Doc;
-  onLocalCollaborativeChange?: () => void;
+  onLocalCollaborativeChange?: (userInitiated?: boolean) => void;
   header: ReactNode;
   mode?: "split" | "tab";
 }) {
@@ -2078,6 +2078,11 @@ export function DocumentStudio({
   const patchContent = useCallback(
     (patch: Record<string, unknown>) => {
       onChange({ ...record(content), ...patch });
+      // Layout chrome is still a user edit. Notify the collaborative parent
+      // just like the ProseMirror update path; a direct onChange here made
+      // headers/footers look saved in the panel while never scheduling a
+      // durable synchronization.
+      onLocalCollaborativeChangeRef.current?.(true);
     },
     [content, onChange],
   );

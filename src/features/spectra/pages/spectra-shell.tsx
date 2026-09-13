@@ -3674,9 +3674,17 @@ export function SpectraShell({
         importJobId: beginning.jobId,
       });
       const refreshed = await loadOverview(selectedWorkspaceId, true);
-      const imported = refreshed?.artifacts.find(
-        (work) => work._id === created.artifactId,
-      );
+      // The overview is intentionally summary-only and does not carry the
+      // document body. Hydrate the committed artifact before mounting the
+      // collaborative editor, otherwise its empty/default document can be
+      // checkpointed over the just-imported rich snapshot.
+      const imported = await getSpectraArtifact(created.artifactId)
+        .then((result) => result.artifact)
+        .catch(() =>
+          refreshed?.artifacts.find(
+            (work) => work._id === created.artifactId,
+          ),
+        );
       if (imported) openArtifactPanel(imported);
       toast.success(
         selectedWorkspaceId

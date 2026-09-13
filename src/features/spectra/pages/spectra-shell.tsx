@@ -1119,6 +1119,10 @@ export function SpectraShell({
   const [hydratedArtifacts, setHydratedArtifacts] = useState<
     Record<string, SpectraArtifact>
   >({});
+  const [pendingHydratedOpen, setPendingHydratedOpen] = useState<{
+    artifactId: string;
+    historyMode: "push" | "replace" | "none";
+  } | null>(null);
   const [overviewLoadState, setOverviewLoadState] = useState<OverviewLoadState>(
     { status: "loading" },
   );
@@ -1688,8 +1692,9 @@ export function SpectraShell({
     setViewMode("list");
   }, [firstRun]);
   const allArtifacts = useMemo(
-    () =>
-      snapshotArtifacts.map((artifact) => {
+    () => {
+      const listedIds = new Set(snapshotArtifacts.map((artifact) => artifact._id));
+      const listed = snapshotArtifacts.map((artifact) => {
         const hydrated = hydratedArtifacts[artifact._id];
         const base = hydrated ?? artifact;
         const live = liveIdentityByKey.get(`work:${artifact._id}`);
@@ -1717,7 +1722,14 @@ export function SpectraShell({
             ? ("workspace" as const)
             : base.placementStatus,
         };
-      }),
+      });
+      return [
+        ...listed,
+        ...Object.values(hydratedArtifacts).filter(
+          (artifact) => !listedIds.has(artifact._id),
+        ),
+      ];
+    },
     [hydratedArtifacts, liveIdentityByKey, snapshotArtifacts],
   );
   useEffect(() => {
@@ -3145,7 +3157,10 @@ export function SpectraShell({
             ...current,
             [hydrated._id]: hydrated,
           }));
-          openArtifactPanel(hydrated, historyMode);
+          setPendingHydratedOpen({
+            artifactId: hydrated._id,
+            historyMode,
+          });
         })
         .catch(() => toast.error("That work could not be opened."));
       return;
@@ -3183,6 +3198,17 @@ export function SpectraShell({
       historyMode,
     );
   }
+
+  useEffect(() => {
+    if (!pendingHydratedOpen) return;
+    const artifact = allArtifacts.find(
+      (candidate) => candidate._id === pendingHydratedOpen.artifactId,
+    );
+    if (!artifact || artifact.content === undefined) return;
+    const { historyMode } = pendingHydratedOpen;
+    setPendingHydratedOpen(null);
+    openArtifactPanel(artifact, historyMode);
+  }, [allArtifacts, pendingHydratedOpen]);
 
   function openArtifactTab(artifact: SpectraArtifact) {
     openedDeepLinkRef.current = artifact._id;
@@ -3710,7 +3736,10 @@ export function SpectraShell({
           ...current,
           [imported._id]: imported,
         }));
-        openArtifactPanel(imported);
+        setPendingHydratedOpen({
+          artifactId: imported._id,
+          historyMode: "push",
+        });
       }
       toast.success(
         selectedWorkspaceId

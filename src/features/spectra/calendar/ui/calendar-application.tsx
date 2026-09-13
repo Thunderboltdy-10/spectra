@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import {
   ChevronLeft,
   ChevronRight,
+  CheckCircle2,
   ExternalLink,
   Layers3,
   Link2,
@@ -1697,6 +1698,23 @@ function CalendarItemPanel({
             </button>
           </div>
         </section>
+      ) : null}
+      {item.kind === "scheduled_work_block" ? (
+        <button
+          type="button"
+          onClick={() =>
+            void onCommit({
+              action: "completeWorkBlock",
+              itemId: item.id,
+              expectedRevision: item.revision,
+            })
+          }
+          disabled={item.status === "completed"}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--text-primary)] px-3 py-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:cursor-default disabled:opacity-60"
+        >
+          <CheckCircle2 className="size-3.5" />
+          {item.status === "completed" ? "Completed" : "Mark complete"}
+        </button>
       ) : null}
       {item.linkedWorkIds.length ? (
         <section className="mt-5">

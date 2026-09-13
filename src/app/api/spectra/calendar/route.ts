@@ -113,6 +113,17 @@ export async function POST(request: NextRequest) {
         }),
       });
     }
+    if (action === "completeWorkBlock") {
+      const expectedRevision = finite(body.expectedRevision);
+      if (expectedRevision === undefined)
+        return badRequest("Completing a work block requires its current revision.");
+      return ok({
+        data: await convexMutation("calendar:completeWorkBlock", {
+          itemId: text(body.itemId, 180),
+          expectedRevision,
+        }),
+      });
+    }
     if (action === "removePersonalItem")
       return ok({
         data: await convexMutation("calendar:removePersonalItem", {

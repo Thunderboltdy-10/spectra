@@ -1,30 +1,29 @@
 # Spectra launch roadmap
 
-Updated 2026-09-12. WAVE-8.md has complete progress evidence and decisions; RUN-NEXT-W8.md has exact manual prompts.
+Updated 2026-09-14. WAVE-9.md contains the parent source review; RUN-NEXT-W9.md contains exact manual prompts.
 
-All W7 product work is now on main, including rich Office/native operations, clarification/stop fixes, retained ownership/deletion, Bridge acknowledgement fencing, shared actions and student class-selection controls. V7 proved an authenticated K-bar and Live Dock settlement journey. The full integrated run reported 1,949 passing tests and a test-runner discovery defect; older capability/fixture failures were resolved.
+## Current parallel Luna batch
 
-The cost implementation is private. Its compact-row measurements are promising fixture proxies, not actual billing savings. Parent found integration defects that W8-01 will repair before landing and migrating the real local deployment.
+| Task | Result required | Runtime |
+|---|---|---|
+| W9-00 | Consolidate missing S8 and complete V8 source/tests; fix Word compaction-induced no-op edits | Sole primary mutator |
+| W9-01 | On-demand school resource import shared by student UI/K-bar/AI; reversible local student rehearsal | Private implementation |
+| W9-02 | Bounded Calendar reads and no unnecessary heartbeat tab/card work; measured database operations | Private implementation |
 
-## Current two-task batch
+Parent stops after dispatch. Housekeeping cleanup is separate.
 
-- W8-01, Luna xhigh: repair and integrate compact reads, exact selection identity, transactional card/tab status and bounded migrations; measure two actual local workflows. Sole runtime owner.
-- W8-02, Luna xhigh: private linked Word equation insertion/layout and retained-image removal/undo through real native operations.
+## Manual sequence after the batch
 
-Parent stops after dispatch and waits for Pablo to return; no polling.
+1. V9-00, Luna xhigh: integrate school/cost changes, migrate local state, complete ordinary-student resource/planning/invitation return and live cost-path evidence.
+2. S9-DURABLE, stronger: repair large-file persistence across import, collaboration, checkpoint, replay and native saving; verify dense workbook and formal paper.
+3. S9-OFFICE, stronger: implement both user-selected academic Word families in the existing protocol, verifying notes/citations/bibliography/comments/tracked changes slice by slice.
+4. S9-AI, stronger: complete mixed user requests, preserve source/target/destination intent, unify actions/acknowledgements/recovery and produce source-backed educational output with real editable charts.
+5. V9-NATIVE, Luna xhigh: finish actual browser Word download and live Sheets-to-PowerPoint refresh/pin/revoke/cleanup. A finite acceptance task, not a global audit.
 
-## Manual sequence afterward
+No private-code localhost proof and no accepted label for an incomplete prerequisite. Each task checks its changed boundary and direct neighbors; another full suite needs an integration or failure reason.
 
-1. S8-OFFICE, stronger agent: integrate Word delta and fix native package/schema defects using independent validation and available native applications. Do not trust a writer agreeing with its own parser.
-2. V8-01, Luna xhigh: ordinary-student invitation-return/class selection, selected sync, source-linked personal planning and on-demand resource.
-3. V8-02, Luna xhigh: actual >4MB Word intake/edit/export, pinned image lifetime and real scheduled cleanup.
-4. V8-03, Luna xhigh: useful source-backed educational AI output, vague follow-up, steering/stop and follow/K-bar/crowded /chat.
-5. V8-04, Luna xhigh: native Bridge saves/replay/conflicts/transitions and live versus pinned workbook-to-presentation charts.
+## Release decisions after evidence
 
-Run one at a time on the same integrated stack. Each task fixes small failures and tests its direct neighbor, then provides actual saved/reopened evidence. Further work depends on exact remaining blockers, not a blanket new audit.
+Friend-Mac installation, pairing, edit/reconnect and native Office checks remain required. Public distribution/signing and hosted configuration need a concrete release decision. Actual database I/O, storage and egress evidence must guide the separate hosting/bucket/self-hosting discussion; provider changes remain unapproved.
 
-## Remaining launch evidence
-
-Actual Office app rendering/editability, live model usefulness, ordinary-student experience and Mac launch/distribution are not yet broadly proven. Keep advanced preserved-only Office limitations visible in the coverage record; they are not full native editing. Friend-Mac testing remains at the end, without Actions now. Hosting/bucket/self-hosting decisions still require discussion; current cost work stays with existing providers.
-
-Preserve the protocol, cloud/local choice, live authority and artifact identity. Optimize expensive reads rather than force local-only storage. No cosmetic perfection gate, production deployment, original-file mutation or remote school writes.
+Progress is substantial and remaining work is concentrated, but large-file durability, academic Word and AI completion are still real implementation. Do not promise all Office functionality or a final wave before those results exist. No cosmetic perfection gate, landing-page/admin redesign or Notion work.
